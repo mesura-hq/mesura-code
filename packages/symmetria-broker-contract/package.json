@@ -34,6 +34,10 @@
     "./draft": {
       "types": "./src/draft.ts",
       "import": "./src/draft.ts"
+    },
+    "./stream": {
+      "types": "./src/stream.ts",
+      "import": "./src/stream.ts"
     }
   },
   "scripts": {
