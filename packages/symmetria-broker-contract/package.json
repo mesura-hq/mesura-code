@@ -18,6 +18,14 @@
     "./upstreamLock": {
       "types": "./src/upstreamLock.ts",
       "import": "./src/upstreamLock.ts"
+    },
+    "./threadSummary": {
+      "types": "./src/threadSummary.ts",
+      "import": "./src/threadSummary.ts"
+    },
+    "./surfacePresence": {
+      "types": "./src/surfacePresence.ts",
+      "import": "./src/surfacePresence.ts"
     }
   },
   "scripts": {

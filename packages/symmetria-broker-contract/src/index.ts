@@ -1,3 +1,5 @@
 export * from "./primitives.ts";
+export * from "./surfacePresence.ts";
+export * from "./threadSummary.ts";
 export * from "./upstreamLock.ts";
 export * from "./version.ts";
