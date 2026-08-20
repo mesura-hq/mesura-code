@@ -1,4 +1,5 @@
 export * from "./command.ts";
+export * from "./draft.ts";
 export * from "./primitives.ts";
 export * from "./surfacePresence.ts";
 export * from "./threadSummary.ts";

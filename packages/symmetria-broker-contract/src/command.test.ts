@@ -2,7 +2,7 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
-import { expectGoldenRoundTrip, readGoldenFixture } from "../test/goldenFixture.ts";
+import { expectGoldenRoundTrip, readGoldenFixture, without } from "../test/goldenFixture.ts";
 import {
   SYMMETRIA_COMMAND_TYPES,
   SymmetriaCommandEnvelope,
@@ -23,10 +23,6 @@ const decode = Schema.decodeUnknownResult(SymmetriaCommandEnvelope);
 const decodeOrThrow = Schema.decodeUnknownSync(SymmetriaCommandEnvelope);
 const decodeReceipt = Schema.decodeUnknownSync(SymmetriaCommandReceipt);
 const decodeRefused = Schema.decodeUnknownResult(SymmetriaCommandRefusedReceipt);
-
-/** One payload short of a key, which is how every refusal case here is built. */
-const without = (value: Record<string, unknown>, key: string): Record<string, unknown> =>
-  Object.fromEntries(Object.entries(value).filter(([candidate]) => candidate !== key));
 
 const readDuplicateReceipts = () => {
   const fixture = readGoldenFixture(DUPLICATE);

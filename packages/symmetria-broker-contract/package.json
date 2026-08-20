@@ -30,6 +30,10 @@
     "./command": {
       "types": "./src/command.ts",
       "import": "./src/command.ts"
+    },
+    "./draft": {
+      "types": "./src/draft.ts",
+      "import": "./src/draft.ts"
     }
   },
   "scripts": {

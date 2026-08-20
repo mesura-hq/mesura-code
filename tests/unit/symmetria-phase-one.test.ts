@@ -1,13 +1,20 @@
 // @effect-diagnostics nodeBuiltinImport:off - drives repository tools and temporary compiler fixtures.
-import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import * as NodeURL from "node:url";
 
 import { describe, expect, it } from "vite-plus/test";
 
 import { BORROWED_RUNTIME_VOCABULARIES } from "../../packages/symmetria-broker-contract/src/upstreamLock.ts";
+import {
+  commandOutput,
+  contractPackageRoot,
+  expectSuccessfulCommand,
+  repositoryRoot,
+  run,
+  tsgoPath,
+  vitePlusPath,
+} from "./contractHarness.ts";
 
 // ⚠ NO MOVER ESTE ARCHIVO DENTRO DE packages/symmetria-broker-contract.
 //
@@ -21,28 +28,7 @@ import { BORROWED_RUNTIME_VOCABULARIES } from "../../packages/symmetria-broker-c
 // conocido es que `vp run -r test` no lo recolecta, porque tests/ no es un
 // paquete del workspace; la salida correcta es darle a tests/ su propio
 // package.json y declararlo en pnpm-workspace.yaml, no mudar el archivo.
-const repositoryRoot = NodeURL.fileURLToPath(new URL("../..", import.meta.url));
 const acceptanceTestsRoot = NodePath.join(repositoryRoot, "tests");
-const contractPackageRoot = NodePath.join(repositoryRoot, "packages/symmetria-broker-contract");
-const vitePlusPath = NodePath.join(repositoryRoot, "node_modules/.bin/vp");
-const tsgoPath = NodePath.join(repositoryRoot, "node_modules/.bin/tsgo");
-
-const run = (command: string, args: ReadonlyArray<string>, cwd = repositoryRoot) =>
-  NodeChildProcess.spawnSync(command, args, {
-    cwd,
-    encoding: "utf8",
-    env: process.env,
-  });
-
-const commandOutput = (result: NodeChildProcess.SpawnSyncReturns<string>) =>
-  `${result.stdout ?? ""}${result.stderr ?? ""}`;
-
-const expectSuccessfulCommand = (result: NodeChildProcess.SpawnSyncReturns<string>) => {
-  if (result.status !== 0) {
-    throw new Error(`command exited with ${String(result.status)}\n${commandOutput(result)}`);
-  }
-};
-
 type RuntimeVocabularyName = keyof typeof BORROWED_RUNTIME_VOCABULARIES;
 
 const writeContractTypeShim = (

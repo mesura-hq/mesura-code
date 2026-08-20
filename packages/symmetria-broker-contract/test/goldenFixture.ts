@@ -29,6 +29,14 @@ export const readGoldenFixture = (name: string): Record<string, unknown> =>
 export const formatGoldenDocument = (value: unknown): string =>
   `${JSON.stringify(value, null, 2)}\n`;
 
+/**
+ * One payload short of a key, which is how every "this field is required" case
+ * in this package is built. Shared here beside the fixture readers it is always
+ * used with, so a later phase asserting a missing key copies nothing.
+ */
+export const without = (value: Record<string, unknown>, key: string): Record<string, unknown> =>
+  Object.fromEntries(Object.entries(value).filter(([candidate]) => candidate !== key));
+
 // The `as never` casts follow `ForwardCompatibleArray` in
 // `packages/contracts/src/baseSchemas.ts`: a helper generic over `Schema.Top`
 // cannot prove to the codec that the schema needs no decoding or encoding

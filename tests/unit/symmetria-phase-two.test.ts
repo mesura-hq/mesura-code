@@ -1,38 +1,20 @@
 // @effect-diagnostics nodeBuiltinImport:off - runs the package as an external consumer.
-import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
-import * as NodeURL from "node:url";
 
 import { describe, expect, it } from "vite-plus/test";
 
-const repositoryRoot = NodeURL.fileURLToPath(new URL("../..", import.meta.url));
-const contractPackageRoot = NodePath.join(repositoryRoot, "packages/symmetria-broker-contract");
-const contractSourceRoot = NodePath.join(contractPackageRoot, "src");
-const contractFixtureRoot = NodePath.join(contractPackageRoot, "test/fixtures");
-const vitePlusPath = NodePath.join(repositoryRoot, "node_modules/.bin/vp");
-const tsgoPath = NodePath.join(repositoryRoot, "node_modules/.bin/tsgo");
-
-const run = (command: string, args: ReadonlyArray<string>, cwd = repositoryRoot) =>
-  NodeChildProcess.spawnSync(command, args, {
-    cwd,
-    encoding: "utf8",
-    env: process.env,
-  });
-
-const commandOutput = (result: NodeChildProcess.SpawnSyncReturns<string>) =>
-  `${result.stdout ?? ""}${result.stderr ?? ""}`;
-
-const expectSuccessfulCommand = (result: NodeChildProcess.SpawnSyncReturns<string>) => {
-  if (result.status !== 0) {
-    throw new Error(`command exited with ${String(result.status)}\n${commandOutput(result)}`);
-  }
-};
-
-const runContractScript = (source: string) =>
-  run(process.execPath, ["--input-type=module", "--eval", source], contractPackageRoot);
-
-const fixturePath = (name: string) => NodePath.join(contractFixtureRoot, name);
+import {
+  commandOutput,
+  contractPackageRoot,
+  contractSourceRoot,
+  expectSuccessfulCommand,
+  fixturePath,
+  run,
+  runContractScript,
+  tsgoPath,
+  vitePlusPath,
+} from "./contractHarness.ts";
 
 const goldenRoundTripScript = (options: {
   readonly exportName: string;
