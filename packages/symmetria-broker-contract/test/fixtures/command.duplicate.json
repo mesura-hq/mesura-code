@@ -1,0 +1,26 @@
+{
+  "first": {
+    "outcome": "applied",
+    "commandId": "cmd_6f0a3d91",
+    "threadId": "thr_9f3c1a7e",
+    "application": "first",
+    "effect": {
+      "turnId": "trn_4b21d0c8",
+      "draftVersion": null,
+      "activatedSurfaceId": null
+    },
+    "sequence": 4821
+  },
+  "replay": {
+    "outcome": "applied",
+    "commandId": "cmd_6f0a3d91",
+    "threadId": "thr_9f3c1a7e",
+    "application": "replay",
+    "effect": {
+      "turnId": "trn_4b21d0c8",
+      "draftVersion": null,
+      "activatedSurfaceId": null
+    },
+    "sequence": 4821
+  }
+}

@@ -26,6 +26,10 @@
     "./surfacePresence": {
       "types": "./src/surfacePresence.ts",
       "import": "./src/surfacePresence.ts"
+    },
+    "./command": {
+      "types": "./src/command.ts",
+      "import": "./src/command.ts"
     }
   },
   "scripts": {

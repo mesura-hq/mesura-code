@@ -1,0 +1,12 @@
+{
+  "type": "thread.draft.set",
+  "commandId": "cmd_c02f9a68",
+  "threadId": "thr_2c88be40",
+  "protocolVersion": {
+    "major": 1,
+    "minor": 0
+  },
+  "createdAt": "2026-08-20T09:14:11.005Z",
+  "text": "check the checkpoint diff before we revert",
+  "expectedVersion": 7
+}

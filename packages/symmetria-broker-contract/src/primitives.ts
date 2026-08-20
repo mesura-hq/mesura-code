@@ -28,6 +28,30 @@ export { CommandId, EnvironmentId, ProjectId, ThreadId, TurnId } from "@t3tools/
 export const NonNegativeInteger = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
 /**
+ * The one non-empty string every Symmetria text field builds on, and the string
+ * counterpart of `NonNegativeInteger` above.
+ *
+ * `TrimmedNonEmptyString` cannot serve here. Its check is applied after a
+ * transformation, so the emitted JSON Schema is a bare `{"type":"string"}` with
+ * no constraint at all, and a consumer that is not TypeScript would be told a
+ * whitespace-only dictation is valid and then have the decoder refuse it. Both
+ * checks here sit directly on the string, so both reach the artifact:
+ * `{"type":"string","allOf":[{"minLength":1},{"pattern":"\\S"}]}`.
+ *
+ * The pattern is what carries the *non-blank* half of the rule that trimming
+ * used to carry. A JSON Schema `pattern` is an unanchored search, so `\S` says
+ * "holds at least one character that is not whitespace" — the same values
+ * `TrimmedNonEmptyString` refuses, refused for the same reason and in both
+ * consumer kinds.
+ *
+ * It does not trim, and that is the second reason to prefer it. A trimming
+ * codec is not the identity on the wire: a document with padded text decodes
+ * and re-encodes to a different document, which is exactly what a golden
+ * fixture exists to catch. What crosses the wire is what the producer wrote.
+ */
+export const NonEmptyText = Schema.String.check(Schema.isMinLength(1), Schema.isPattern(/\S/));
+
+/**
  * The version of a thread's composer draft. Monotonic, and the value a
  * compare-and-set update states it expects.
  */

@@ -1,0 +1,11 @@
+{
+  "type": "thread.activate",
+  "commandId": "cmd_1b7c4e02",
+  "threadId": "thr_2c88be40",
+  "protocolVersion": {
+    "major": 1,
+    "minor": 0
+  },
+  "createdAt": "2026-08-20T09:14:04.310Z",
+  "targetSurfaceId": "clt_desktop_7a1e"
+}

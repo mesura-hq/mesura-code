@@ -1,0 +1,11 @@
+{
+  "type": "thread.turn.start",
+  "commandId": "cmd_6f0a3d91",
+  "threadId": "thr_9f3c1a7e",
+  "protocolVersion": {
+    "major": 1,
+    "minor": 0
+  },
+  "createdAt": "2026-08-20T09:14:01.900Z",
+  "text": "run the migration against the staging database"
+}
