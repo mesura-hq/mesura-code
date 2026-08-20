@@ -4,6 +4,14 @@ packages:
   - oxlint-plugin-t3code
   - packages/*
   - scripts
+  # Symmetria: acceptance tests that exercise a package from outside it, by
+  # spawning that package's own test command as a subprocess. They cannot live
+  # inside the package they test: there the command collects them, they relaunch
+  # the command, and the fan-out exhausts memory. This entry is what makes
+  # `vp run -r test` and `vp run -r typecheck` reach them; without it they run by
+  # hand only. It follows the precedent of `scripts` and `oxlint-plugin-t3code`,
+  # and it is the one upstream line this work touches.
+  - tests
 
 # Successor to onlyBuiltDependencies/ignoredBuiltDependencies (pnpm 11).
 # true = allowed to run build scripts; false mirrors the pnpm 10 behavior
