@@ -114,7 +114,12 @@ export const DEFAULT_TERMINAL_FONT_SIZE: TerminalFontSize = 12;
 
 export const EnvironmentIdentificationMode = Schema.Literals(["artwork", "pill", "none"]);
 export type EnvironmentIdentificationMode = typeof EnvironmentIdentificationMode.Type;
-export const DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE: EnvironmentIdentificationMode = "artwork";
+// Upstream defaults to "artwork", which paints a blue blueprint scene behind the
+// sidebar header on dev and nightly builds. Mesura Code defaults to "none": the
+// header stays plain so the wordmark sits on the app's own surface. All three
+// modes remain available in Settings, so the artwork is a choice rather than a
+// removal.
+export const DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE: EnvironmentIdentificationMode = "none";
 
 /**
  * A user-chosen font family (a single name or a comma-separated list). Empty
