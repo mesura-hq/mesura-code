@@ -1,36 +1,57 @@
-# T3 Code
+# Mesura Code
 
-T3 Code is a minimal GUI for coding agents. A Node WebSocket server wraps provider CLIs (Codex, Claude Code, Cursor, Grok, OpenCode) and serves web, desktop, and mobile clients.
+Mesura Code is a private fork of **T3 Code**, maintained by one developer for one developer's workflow. Upstream lives at https://github.com/pingdotgg/t3code and is worth reading directly.
 
-You can think of T3 Code as an open source "bring-your-own-subscription" alternative to apps like Claude Desktop, Codex App, Cursor Glass and Conductor.
+The product is a minimal GUI for coding agents. A Node WebSocket server wraps provider CLIs (Codex, Claude Code, Cursor, Grok, OpenCode) and serves web, desktop, and mobile clients. T3 Code is an open source "bring-your-own-subscription" alternative to apps like Claude Desktop, Codex App, Cursor Glass and Conductor; this fork inherits all of that and changes very little of it.
 
-## What makes T3 Code special?
+## What this fork is, and is not
 
-We have over 100,000 users who love T3 Code. It's important we maintain the things they love as we continue to iterate on the product. Here's a brief list of the things we can never compromise on.
+Be accurate about the difference, because most of this repository's engineering judgement follows from it.
 
-### 1. Open at the core
+**T3 Code** is a large open source project: Theo, Julius and a substantial community build it, it has over 100,000 users, its roadmap and code are public, and many of those users run forks of their own.
 
-T3 Code is truly open. We share our roadmap, we share how we think about things, and of course we share all our code. A large number of our users run forks. We work in the open, and should strive to stay that way.
+**Mesura Code** has none of that. It is a single person's fork, private, with no users but its author. It exists to fit one specific workflow, not to compete with upstream and not to diverge from it. Nothing in this repository should claim otherwise — no user counts, no community, no openness we do not have.
+
+Four things follow. The first is this fork's own; the other three are upstream's standards, inherited and worth keeping.
+
+### 1. Upstream keeps moving, and we keep pulling
+
+This is the fork's first constraint and it outranks local tidiness.
+
+Every week we fetch `upstream/main`, read what T3 shipped, and merge what is useful — security fixes especially, then bug fixes, then features. That only stays affordable while our own diff stays small and shallow.
+
+What follows from it, in order of how often it bites:
+
+- **A line changed inside an upstream file is a merge conflict every week, forever.** A new file of our own is free. Prefer adding beside upstream code over editing it.
+- **Disabling beats deleting.** When a feature is one we will not use, turn it off through a setting or a default it already has, rather than removing its code. Deletion is the change most likely to conflict and hardest to undo at merge time.
+- **A refactor that is locally tidier but touches more upstream lines is usually the wrong call here.** That includes changes this repository would otherwise want, such as extracting a repeated literal into a shared constant.
+- **Before restructuring upstream code, say what it costs at the next merge.** If the answer is unknown, measure it: `git log --oneline --since="3 months ago" upstream/main -- <path>` tells you how often that file moves.
+- **Do not break things that will hurt later.** A change that works today but sits across a file upstream rewrites often is a recurring cost, not a one-time one.
+
+Where this fork already differs from upstream is listed in `.factory/` and in the commits with a `mesura` scope. Keep that list short.
 
 ### 2. Performance without compromise
 
-Lots of apps have gotten bogged down with bad tech decisions and "slop". We have not, and we're proud of the performance of T3 Code. We regularly audit for performance regressions, often caused by sending too much data over websockets, css animations causing gpu spikes, lists being hard to render, and more. Make sure all changes are considerate of performance impact.
+Upstream avoided the bad tech decisions and "slop" that bog comparable apps down, and its performance is a standard this fork inherits rather than one it earned. Regressions usually come from sending too much data over websockets, css animations causing gpu spikes, and lists that are hard to render. Make sure all changes are considerate of performance impact.
 
 ### 3. Remote ready
 
-The architecture of T3 Code's websocket layer (npx t3) enables a lot of awesome remote features. These have become core to the product. Whether users are connecting directly over their local network, using Tailscale, or leaning in fully with T3 Connect (our tunnel solution, also in this repo), we need to make sure new features are properly supported.
+The websocket layer (`npx t3`) is what enables the remote features, and they are core to the product. Connecting over a local network and connecting over Tailscale both need to keep working. T3 Connect — upstream's tunnel solution, whose code is also in this repo — is operated by T3, not by us: we do not run that service, and nothing here should imply we do.
 
-### 4. Multi-surface
+### 4. Surfaces, and which two matter here
 
-T3 Code has 3 key app surfaces: **web**, **desktop**, and **mobile**.
+The product has three surfaces: **web**, **desktop**, and **mobile**. Upstream weights them differently than this fork does.
 
-**Web** is kind of two surfaces, as we have the public facing "app.t3.codes" as well as locally hosting the web app through the `npx t3` command. Both need to be supported by all new features where reasonable.
+**Two are the ones this fork is actually used on**, and they are where a change has to be correct:
 
-**Desktop** is the main surface most users install first. It's a full Electron app that bundles the server runner as well. The desktop app can also be used as the host server, allowing remote connections from app.t3.codes or the mobile app.
+- **Desktop on Linux.** A full Electron app that bundles the server runner. It is also the host server, so the other surfaces connect to it.
+- **Mobile on Android.** A React Native app, used to drive work remotely against that desktop host.
 
-**Mobile** is a React Native app for both iOS and Android, available on the App Store and Google Play. The mobile app allows for connecting to any T3 Code server to control work remotely.
+**The rest stay supported, not prioritised**: the web app in both its forms — served locally by `npx t3`, and built for a hosted deployment, which upstream runs at `app.t3.codes` and this fork does not run at all — plus desktop on macOS and Windows, and mobile on iOS. Do not break them, do not remove them, and keep contracts honest across all of them. They simply do not earn the same verification effort, and a change does not need a pass on them before it ships here.
 
 ## A note from Theo
+
+Kept verbatim from upstream. Theo is T3 Code's original creator; this is his note, not ours, and it is here because it is good advice rather than because we wrote it.
 
 I like ambitious ideas, simple systems, and software that feels obvious. Do not preserve complexity just because it already exists. Do not introduce machinery because it looks architecturally impressive. Understand the real constraint, then fight for the smallest model that makes the correct behavior unsurprising.
 
@@ -38,28 +59,29 @@ Channel both "measure twice, cut once" and "yagni". Fight scope creep. Try to ho
 
 The rest of this document is meant to help you navigate the codebase and make changes effectively. Think of these instructions less as "hard rules", more as "good defaults". The developer's preferences should be able to override anything here.
 
-Of note: Most T3 Code contributions will come from T3 Code itself, often controlled remotely. This means you should be careful about accessing data, killing dev servers, and other things that may damage the T3 Code instance that the contributor is using.
+Of note: Most Mesura Code contributions will come from Mesura Code itself, often controlled remotely. This means you should be careful about accessing data, killing dev servers, and other things that may damage the Mesura Code instance that the contributor is using.
 
 ## A small glossary
 
 We need to be on the same page with terminology. When communicating, use this language:
 
-- **you** means the agent reading this file and changing T3 Code.
-- **we, us, and maintainers** mean Theo, Julius and the people building T3 Code. These are who you are talking to now.
-- **user** means the person using T3 Code to direct coding agents.
-- **agent** means the coding agent a user runs inside T3 Code. Depending on context, that may also include you.
-- **provider** means the agent runtime or harness T3 Code talks to, such as Codex, Claude, Cursor, or OpenCode.
+- **you** means the agent reading this file and changing Mesura Code.
+- **we, us, and the developer** mean the one person who maintains this fork. That is who you are talking to now. There is no team and no other maintainer.
+- **upstream** means T3 Code, the project this is forked from, and by extension its maintainers. Upstream is not "us": when a decision, a file, or a piece of copy belongs to them, say so.
+- **user** means the person using Mesura Code to direct coding agents. Here that is the same person as the developer.
+- **agent** means the coding agent a user runs inside Mesura Code. Depending on context, that may also include you.
+- **provider** means the agent runtime or harness Mesura Code talks to, such as Codex, Claude, Cursor, or OpenCode.
 - **client** means the web, desktop, or mobile UI.
-- **environment** means one running T3 server and the machine, filesystem, provider credentials, and state it owns.
+- **environment** means one running server and the machine, filesystem, provider credentials, and state it owns.
 - **project** means an environment-local workspace record rooted at a directory.
 - **thread** means the durable conversation and work history for a project.
 - **turn** means one user-to-agent cycle, including follow-up work such as checkpointing.
-- **T3 home** means the base data directory. Runtime state normally lives below its userdata directory.
+- **the home** means the base data directory, `~/.mesura-code`. Runtime state normally lives below its `userdata` directory. `T3CODE_HOME` still names the environment variable that overrides it; the variable kept upstream's name deliberately, because renaming it would touch five upstream files to no user-visible benefit.
 
 ## The three ways to hurt yourself
 
 1. **Killing by pattern.** Never `pkill -f`, `pgrep | kill`, or `kill` a PID you found by matching a name, path, or worktree string. Your own agent process has this worktree's path in its argv, and this machine runs several other dev servers at once. Kill only a PID you captured at spawn, or the owner of your port from `ss -H -ltnp` after confirming `/proc/<pid>/cwd` is your worktree.
-2. **Writing to the live install.** `~/.t3/userdata` is the developer's real T3 Code database, in use while you work. Reading it and copying from it are fine, and a good way to get real test data (see Test data). Never start a server against it, never open it read-write, never clean it up.
+2. **Writing to a live install.** There are **two** on this machine, and neither is yours. `~/.mesura-code/userdata` is this fork's real database. `~/.t3/userdata` belongs to the **installed T3 Code**, a separate application the developer also runs daily — it is not a stale copy of ours and it is not ours to touch at all. Reading either and copying from it is fine, and is a good way to get real test data (see Test data). Never start a server against either, never open either read-write, never clean either up. The default home moved to `~/.mesura-code` precisely so this fork cannot reach the other one by accident; do not undo that by pointing a command at `~/.t3`.
 3. **Baking in origins.** Never set `VITE_HTTP_URL` or `VITE_WS_URL` for dev. Dev is single-origin and Vite proxies `/api`, `/ws`, `/oauth`, and `/.well-known`. Setting them bakes localhost into the bundle and silently breaks every remote browser.
 
 ## Hit every surface
@@ -87,13 +109,13 @@ The most common defect in this repo is a change that works on the path you teste
 
 An empty database is a bad test. Seed your worktree's `.t3` with a copy of real data instead of pointing at live state:
 
-- Copy from `~/.t3/userdata` (the developer's real data, the most realistic test set) or `~/.t3/dev`. Worktree state lives at `<worktree>/.t3/userdata`.
+- Copy from `~/.mesura-code/userdata` (the developer's real data for this fork, the most realistic test set) or `~/.mesura-code/dev`. Worktree state lives at `<worktree>/.t3/userdata` — that path keeps upstream's name on purpose, because a worktree-local directory cannot collide with anything.
 - Snapshot the database with `VACUUM INTO`, which is safe even while a server has the source open and yields one consistent file:
 
   ```bash
   mkdir -p .t3/userdata
   rm -f .t3/userdata/state.sqlite*  # VACUUM INTO refuses to overwrite
-  bun -e "new (require('bun:sqlite').Database)(process.env.HOME + '/.t3/userdata/state.sqlite', { readonly: true }).run(\"VACUUM INTO '.t3/userdata/state.sqlite'\")"
+  bun -e "new (require('bun:sqlite').Database)(process.env.HOME + '/.mesura-code/userdata/state.sqlite', { readonly: true }).run(\"VACUUM INTO '.t3/userdata/state.sqlite'\")"
   ```
 
   A plain `cp` is only safe when no server has the source open, and must bring the `-wal` and `-shm` siblings along. A live file copy is a corrupt copy.
@@ -105,6 +127,7 @@ An empty database is a bad test. Seed your worktree's `.t3` with a copy of real 
 
 - Smallest proof that the change works. `vp test run <files>` for the tests you touched, targeted lint and typecheck for the scope you changed.
 - **Do not run repo-wide checks.** No `vp check`, no `vp run -r test`, no `vp run -r typecheck` unless I ask. CI owns the full suite.
+- **`pnpm test` can take the machine down, and this is measured, not theoretical.** The root config's `test.maxWorkers` reaches only `apps/server`, because it is the one package that composes the root config; `apps/web`, `apps/mobile`, `apps/desktop` and `infra/relay` each open their own default-sized pool. A full run reached load 38 with swap fully exhausted and had to be killed. If a full run is genuinely asked for, run it package by package with an explicit bound — `vp test run --max-workers=3` from inside each package — and never in parallel with another. Tracked as issue #3.
 - Backend behavior changes ship with focused tests for that behavior.
 - The server is event-sourced and its async flows emit typed receipts. Wait on receipts and worker drains, never on sleeps or polling. A test that needs a timeout to pass is wrong.
 - Upon request, user-visible frontend changes should get one integrated pass in a real client: `test-t3-app` for web, `test-t3-mobile` for mobile. The primary agent does this once after integrating. Subagents do not launch their own dev servers. Ask permission before doing computer use or spinning up browsers.
@@ -127,7 +150,9 @@ Full glossary with file links: `docs/internals/glossary.md`
 ## Where code lives
 
 - `apps/server` - WebSocket, orchestration, providers, checkpointing. Effect-heavy: read `.repos/effect-smol/LLMS.md` before writing Effect code.
-- `apps/web` - React/Vite UI. `apps/desktop` wraps it, `apps/mobile` is React Native, `apps/marketing` is the site.
+- `apps/web` - React/Vite UI. `apps/desktop` wraps it, `apps/mobile` is React Native.
+- `apps/marketing` - **upstream's** public site, including the Terms of Service, Privacy Policy and Security Policy of T3 Tools, Inc. This fork does not publish any of it. Never rebrand these pages: a privacy policy carrying our name would be a legal document we never wrote, describing services we do not operate.
+- `infra/relay` - **upstream's** T3 Connect relay, which T3 operates and we do not. Same rule as above.
 - `packages/contracts` - Effect/Schema contracts plus small derived helpers. No heavy runtime logic.
 - `packages/shared` - shared runtime utils, subpath exports, no barrel.
 - `packages/client-runtime` - client code shared by web and mobile.
@@ -138,7 +163,7 @@ Full glossary with file links: `docs/internals/glossary.md`
 - Complexity belongs at the adapter boundary. Orchestration stays pure, UI stays dumb.
 - Inferred types over annotations. `any` is the enemy.
 - Comments describe how a thing is used, and move when the code moves. To be used mostly to describe functions, not to annotate every line of behavior.
-- Our users drive agents all day and notice a dropped frame, a lying spinner, and a stale label. No continuously repainting animations; they peg the GPU on high-refresh displays.
+- This is driven all day, and a dropped frame, a lying spinner and a stale label all get noticed. One user rather than a hundred thousand does not lower the bar — it removes the excuse that someone else would have reported it. No continuously repainting animations; they peg the GPU on high-refresh displays.
 - If a rule here fights the task in front of you, say so loudly and get a human sign-off before breaking it.
 
 ## Additional tips
