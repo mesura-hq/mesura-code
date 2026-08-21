@@ -74,3 +74,50 @@ it("leaves no prose naming T3 Code's home where the default already moved", () =
   assert.isAtMost(found.status ?? 2, 1, commandOutput(found));
   assert.equal((found.stdout ?? "").trim(), "");
 });
+
+// ⚠ The rename sweep searched for `T3 Code`, with a space, and that alphabet is
+// not the only one the name appears in. `packages/client-runtime` builds an
+// OAuth token-exchange body, so its expected fixture carries the name
+// FORM-ENCODED — `client_label=T3+Code+Mobile`, where the space is a `+`. The
+// sweep renamed the label that FEEDS that request and could not see the
+// expectation it had to match, because no search for `T3 Code` reaches
+// `T3+Code`. It sat broken from 992a7122b until the first upstream sync ran the
+// package, five days later.
+//
+// Two things hid it for that long, and both are fixed elsewhere: CI had never
+// run on this fork (#8), and the verification sweep covered ten of sixteen
+// packages. This guard is the third defence, and the only one that is specific
+// to the failure rather than to the process around it.
+//
+// Encodings, not spellings. `T3-Code` is deliberately ABSENT from this list:
+// it is the packaging artifact name (`T3-Code-0.0.4-x64.dmg`), which the
+// approved plan defers along with the rest of the packaging identity. Adding it
+// here would fail on work that was scoped out on purpose.
+const ENCODED_PRODUCT_NAMES = [
+  "T3+Code", // application/x-www-form-urlencoded — the one that actually broke
+  "T3%20Code", // percent-encoded space, in a URL path or query
+  "T3%2BCode", // a percent-encoded plus, i.e. double encoding
+  "T3\\u0020Code", // a JSON/JS unicode escape
+];
+
+it.each(ENCODED_PRODUCT_NAMES)(
+  "leaves no product code naming T3 Code through the encoding %s",
+  (encoded) => {
+    const found = run("git", [
+      "grep",
+      "--files-with-matches",
+      "--fixed-strings",
+      encoded,
+      "--",
+      // Upstream's own product surfaces keep their own name, exactly as the
+      // plain-text scans exclude them.
+      ":(exclude)apps/marketing",
+      ":(exclude)infra/relay",
+      ":(exclude)docs/",
+      ":(exclude)tests/",
+    ]);
+
+    assert.isAtMost(found.status ?? 2, 1, commandOutput(found));
+    assert.equal((found.stdout ?? "").trim(), "", commandOutput(found));
+  },
+);
