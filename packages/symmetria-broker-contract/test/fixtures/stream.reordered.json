@@ -1,0 +1,54 @@
+{
+  "items": [
+    {
+      "type": "snapshot",
+      "protocolVersion": {
+        "major": 1,
+        "minor": 0
+      },
+      "revision": 412,
+      "threads": [],
+      "surfaces": [],
+      "drafts": []
+    },
+    {
+      "type": "delta",
+      "sequence": 414,
+      "change": {
+        "entity": "thread",
+        "thread": {
+          "threadId": "thr_9f3c1a7e",
+          "projectId": "prj_symmetria_shell",
+          "title": "Wire dictation to one exact thread",
+          "branch": "symmetria/broker-contract",
+          "worktreePath": "/home/dev/worktrees/symmetria-broker-contract",
+          "latestTurn": {
+            "turnId": "trn_4b21d0c8",
+            "state": "running",
+            "requestedAt": "2026-08-20T09:14:02.000Z",
+            "startedAt": "2026-08-20T09:14:02.480Z",
+            "completedAt": null
+          },
+          "session": {
+            "status": "running",
+            "activeTurnId": "trn_4b21d0c8"
+          },
+          "tokenUsage": {
+            "usedTokens": 48213,
+            "maxTokens": 200000,
+            "inputTokens": 41002,
+            "outputTokens": 7211,
+            "toolUses": 19
+          },
+          "createdAt": "2026-08-19T16:02:11.000Z",
+          "updatedAt": "2026-08-20T09:14:02.480Z",
+          "archivedAt": null,
+          "settledAt": null,
+          "snoozedUntil": null,
+          "pinnedAt": "2026-08-20T08:00:00.000Z",
+          "deletedAt": null
+        }
+      }
+    }
+  ]
+}

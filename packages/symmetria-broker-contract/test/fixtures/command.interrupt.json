@@ -1,0 +1,11 @@
+{
+  "type": "thread.turn.interrupt",
+  "commandId": "cmd_84be0d5c",
+  "threadId": "thr_9f3c1a7e",
+  "protocolVersion": {
+    "major": 1,
+    "minor": 0
+  },
+  "createdAt": "2026-08-20T09:14:07.640Z",
+  "turnId": "trn_4b21d0c8"
+}

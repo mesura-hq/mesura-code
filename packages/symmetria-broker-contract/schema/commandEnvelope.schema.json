@@ -1,0 +1,197 @@
+{
+  "$comment": "Generated from SymmetriaCommandEnvelope by scripts/emit-json-schema.ts. Do not hand-edit.",
+  "$defs": {
+    "Objects_": {
+      "additionalProperties": true,
+      "properties": {
+        "major": {
+          "enum": [
+            1
+          ],
+          "type": "number"
+        },
+        "minor": {
+          "allOf": [
+            {
+              "minimum": 0
+            }
+          ],
+          "type": "integer"
+        }
+      },
+      "required": [
+        "major",
+        "minor"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "commandEnvelope.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "additionalProperties": true,
+      "properties": {
+        "commandId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "protocolVersion": {
+          "$ref": "#/$defs/Objects_"
+        },
+        "text": {
+          "allOf": [
+            {
+              "minLength": 1
+            },
+            {
+              "pattern": "\\S"
+            }
+          ],
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "thread.turn.start"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "commandId",
+        "threadId",
+        "protocolVersion",
+        "createdAt",
+        "text"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "commandId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "protocolVersion": {
+          "$ref": "#/$defs/Objects_"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "enum": [
+            "thread.turn.interrupt"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "commandId",
+        "threadId",
+        "protocolVersion",
+        "createdAt",
+        "turnId"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "commandId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "expectedVersion": {
+          "allOf": [
+            {
+              "minimum": 0
+            }
+          ],
+          "type": "integer"
+        },
+        "protocolVersion": {
+          "$ref": "#/$defs/Objects_"
+        },
+        "text": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "thread.draft.set"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "commandId",
+        "threadId",
+        "protocolVersion",
+        "createdAt",
+        "text",
+        "expectedVersion"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "commandId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "protocolVersion": {
+          "$ref": "#/$defs/Objects_"
+        },
+        "targetSurfaceId": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "thread.activate"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "commandId",
+        "threadId",
+        "protocolVersion",
+        "createdAt"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "SymmetriaCommandEnvelope"
+}

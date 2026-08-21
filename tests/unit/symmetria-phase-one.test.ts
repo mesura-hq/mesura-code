@@ -1,0 +1,397 @@
+// @effect-diagnostics nodeBuiltinImport:off - drives repository tools and temporary compiler fixtures.
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+
+import { describe, expect, it } from "vite-plus/test";
+
+import { BORROWED_RUNTIME_VOCABULARIES } from "../../packages/symmetria-broker-contract/src/upstreamLock.ts";
+import {
+  commandOutput,
+  contractPackageRoot,
+  expectSuccessfulCommand,
+  repositoryRoot,
+  run,
+  tsgoPath,
+  vitePlusPath,
+} from "./contractHarness.ts";
+
+// ⚠ NO MOVER ESTE ARCHIVO DENTRO DE packages/symmetria-broker-contract.
+//
+// Abajo, este test lanza `vp test run` CONTRA ESE PAQUETE como subproceso, para
+// comprobar desde afuera que su suite pasa. Si el archivo vive dentro del
+// paquete, el comando lo recolecta, él relanza el comando, y eso lo recolecta de
+// nuevo: recursión con abanico de procesos que agota la RAM. Probado el
+// 2026-08-20 — el intento colgó 600 s y no emitió una sola línea.
+//
+// Su ubicación fuera del paquete es load-bearing, no un descuido. El costo
+// conocido es que `vp run -r test` no lo recolecta, porque tests/ no es un
+// paquete del workspace; la salida correcta es darle a tests/ su propio
+// package.json y declararlo en pnpm-workspace.yaml, no mudar el archivo.
+const acceptanceTestsRoot = NodePath.join(repositoryRoot, "tests");
+type RuntimeVocabularyName = keyof typeof BORROWED_RUNTIME_VOCABULARIES;
+
+const writeContractTypeShim = (
+  directory: string,
+  changedVocabulary?: {
+    readonly name: RuntimeVocabularyName;
+    readonly values: ReadonlyArray<string>;
+  },
+) => {
+  const source = Object.entries(BORROWED_RUNTIME_VOCABULARIES)
+    .map(([name, canonicalValues]) => {
+      const values = changedVocabulary?.name === name ? changedVocabulary.values : canonicalValues;
+      return `export type ${name} = ${values.map((value) => JSON.stringify(value)).join(" | ")};`;
+    })
+    .join("\n");
+  const shimPath = NodePath.join(directory, "contracts-shim.ts");
+  NodeFS.writeFileSync(shimPath, `${source}\n`);
+  return shimPath;
+};
+
+const compileUpstreamLock = (
+  directory: string,
+  changedVocabulary?: {
+    readonly name: RuntimeVocabularyName;
+    readonly values: ReadonlyArray<string>;
+  },
+) => {
+  const shimPath = writeContractTypeShim(directory, changedVocabulary);
+  const configPath = NodePath.join(directory, "tsconfig.json");
+  NodeFS.writeFileSync(
+    configPath,
+    `${JSON.stringify(
+      {
+        extends: NodePath.join(repositoryRoot, "tsconfig.base.json"),
+        compilerOptions: {
+          noEmit: true,
+          paths: {
+            "@t3tools/contracts": [shimPath],
+          },
+        },
+        files: [NodePath.join(contractPackageRoot, "src/upstreamLock.ts")],
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  return run(tsgoPath, ["-p", configPath]);
+};
+
+// The phase implementation is present in this working tree. These checks are
+// post-implementation regression guards, so each one must pass in this tree.
+describe("Symmetria broker contract phase-one regression guards", () => {
+  it("keeps the acceptance tests collected and typechecked as a workspace project", () => {
+    const manifest = JSON.parse(
+      NodeFS.readFileSync(NodePath.join(acceptanceTestsRoot, "package.json"), "utf8"),
+    ) as {
+      readonly name?: string;
+      readonly scripts?: Readonly<Record<string, string>>;
+    };
+    const workspaceSource = NodeFS.readFileSync(
+      NodePath.join(repositoryRoot, "pnpm-workspace.yaml"),
+      "utf8",
+    );
+
+    expect(manifest.name).toBe("@symmetria/acceptance-tests");
+    expect(manifest.scripts?.test).toBe("vp test run");
+    expect(manifest.scripts?.typecheck).toBe("tsgo --noEmit");
+    expect(workspaceSource).toMatch(/^\s*- tests\s*$/m);
+    expectSuccessfulCommand(run(tsgoPath, ["--noEmit"], acceptanceTestsRoot));
+  });
+
+  it("keeps the fork-owned package typecheck green with tsgo --noEmit", () => {
+    expect(NodeFS.existsSync(contractPackageRoot)).toBe(true);
+    expectSuccessfulCommand(run(tsgoPath, ["--noEmit"], contractPackageRoot));
+  });
+
+  it("keeps the package repair guards in its normal test suite", () => {
+    expect(NodeFS.existsSync(contractPackageRoot)).toBe(true);
+    const result = run(vitePlusPath, ["test", "run", "--reporter=verbose"], contractPackageRoot);
+    expectSuccessfulCommand(result);
+    const output = commandOutput(result);
+    expect(output).toContain("src/upstreamLockFiring.test.ts");
+    expect(output).toContain("fails when upstream adds or removes a literal");
+    expect(output).toContain("src/primitives.test.ts");
+    expect(output).toContain("refuses a fractional value");
+  });
+
+  it("keeps all 19 contract test files and 257 contract tests green", () => {
+    const result = run(
+      vitePlusPath,
+      ["test", "run", "--reporter=dot"],
+      NodePath.join(repositoryRoot, "packages/contracts"),
+    );
+    expectSuccessfulCommand(result);
+    const output = commandOutput(result);
+    expect(output).toMatch(/Test Files\s+19 passed \(19\)/);
+    expect(output).toMatch(/Tests\s+257 passed \(257\)/);
+  }, 30_000);
+
+  it("keeps every borrowed runtime vocabulary locked in both assignability directions", () => {
+    expect(NodeFS.existsSync(NodePath.join(contractPackageRoot, "src/upstreamLock.ts"))).toBe(true);
+    const temporaryDirectory = NodeFS.mkdtempSync(
+      NodePath.join(NodeOS.tmpdir(), "symmetria-upstream-lock-"),
+    );
+    try {
+      const matchingResult = compileUpstreamLock(temporaryDirectory);
+      expectSuccessfulCommand(matchingResult);
+
+      for (const [name, canonicalValues] of Object.entries(BORROWED_RUNTIME_VOCABULARIES) as Array<
+        [RuntimeVocabularyName, ReadonlyArray<string>]
+      >) {
+        const expandedResult = compileUpstreamLock(temporaryDirectory, {
+          name,
+          values: [...canonicalValues, "future_upstream_literal"],
+        });
+        expect(expandedResult.status, `${name} accepted an upstream addition`).not.toBe(0);
+
+        const reducedResult = compileUpstreamLock(temporaryDirectory, {
+          name,
+          values: canonicalValues.slice(1),
+        });
+        expect(reducedResult.status, `${name} accepted an upstream removal`).not.toBe(0);
+      }
+    } finally {
+      NodeFS.rmSync(temporaryDirectory, { force: true, recursive: true });
+    }
+  }, 60_000);
+
+  it("keeps exact and one-directional vocabulary locks distinct", () => {
+    const temporaryDirectory = NodeFS.mkdtempSync(
+      NodePath.join(NodeOS.tmpdir(), "symmetria-lock-helper-"),
+    );
+    try {
+      const fixturePath = NodePath.join(temporaryDirectory, "lock-helper.fixture.ts");
+      const upstreamLockPath = NodePath.join(contractPackageRoot, "src/upstreamLock.ts");
+      const upstreamLockImport = NodePath.relative(temporaryDirectory, upstreamLockPath);
+      NodeFS.writeFileSync(
+        fixturePath,
+        [
+          `import type { Covers, MutuallyAssignable } from ${JSON.stringify(upstreamLockImport)};`,
+          'const exact: MutuallyAssignable<"active" | "unknown", "unknown" | "active"> = true;',
+          'const widened: Covers<"active" | "unknown", "active"> = true;',
+          "// @ts-expect-error an exact lock must reject a Symmetria-only fallback literal",
+          'const exactAcceptedWidening: MutuallyAssignable<"active" | "unknown", "active"> = true;',
+          "// @ts-expect-error a coverage lock must reject a missing upstream literal",
+          'const coverageAcceptedNarrowing: Covers<"active", "active" | "idle"> = true;',
+          "void exact;",
+          "void widened;",
+          "void exactAcceptedWidening;",
+          "void coverageAcceptedNarrowing;",
+        ].join("\n"),
+      );
+      const configPath = NodePath.join(temporaryDirectory, "tsconfig.json");
+      NodeFS.writeFileSync(
+        configPath,
+        `${JSON.stringify(
+          {
+            extends: NodePath.join(repositoryRoot, "tsconfig.base.json"),
+            compilerOptions: { noEmit: true },
+            files: [fixturePath],
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      expectSuccessfulCommand(run(tsgoPath, ["-p", configPath]));
+    } finally {
+      NodeFS.rmSync(temporaryDirectory, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps a stale vocabulary proof under an active @ts-expect-error", () => {
+    const proofPath = NodePath.join(contractPackageRoot, "src/upstreamLock.test.ts");
+    expect(NodeFS.existsSync(proofPath)).toBe(true);
+    const source = NodeFS.readFileSync(proofPath, "utf8");
+    expect(source).toContain("@ts-expect-error");
+    expect(source).toMatch(/stale/i);
+    expectSuccessfulCommand(run(tsgoPath, ["--noEmit"], contractPackageRoot));
+  });
+
+  it("keeps the supported Symmetria protocol major version decodable", () => {
+    const versionModulePath = NodePath.join(contractPackageRoot, "src/version.ts");
+    expect(NodeFS.existsSync(versionModulePath)).toBe(true);
+    const script = [
+      'import * as Schema from "effect/Schema";',
+      'import { SymmetriaProtocolVersion } from "./src/version.ts";',
+      "const result = Schema.decodeUnknownResult(SymmetriaProtocolVersion)({ major: 1, minor: 0 });",
+      'if (result._tag !== "Success") throw new Error(String(result.failure));',
+    ].join("\n");
+    expectSuccessfulCommand(
+      run(process.execPath, ["--input-type=module", "--eval", script], contractPackageRoot),
+    );
+  });
+
+  it("keeps a typed decode failure for an unsupported protocol major version", () => {
+    const versionModulePath = NodePath.join(contractPackageRoot, "src/version.ts");
+    expect(NodeFS.existsSync(versionModulePath)).toBe(true);
+    const script = [
+      'import * as Schema from "effect/Schema";',
+      'import { decodeSymmetriaProtocolVersion, SymmetriaProtocolVersion } from "./src/version.ts";',
+      "const schemaResult = Schema.decodeUnknownResult(SymmetriaProtocolVersion)({ major: 2, minor: 0 });",
+      'if (schemaResult._tag !== "Failure") throw new Error("unsupported major decoded successfully");',
+      "const result = decodeSymmetriaProtocolVersion({ major: 2, minor: 0 });",
+      'if (result._tag !== "Failure") throw new Error("unsupported major passed the version gate");',
+      'if (result.failure._tag !== "SymmetriaProtocolVersionMismatch") throw new Error("wrong rejection tag");',
+      'if (result.failure.supportedMajor !== 1) throw new Error("wrong supported major");',
+      'if (result.failure.receivedMajor !== 2) throw new Error("wrong received major");',
+    ].join("\n");
+    expectSuccessfulCommand(
+      run(process.execPath, ["--input-type=module", "--eval", script], contractPackageRoot),
+    );
+  });
+
+  it("keeps the public entry point composed from upstream schema values", () => {
+    const script = [
+      'import * as Schema from "effect/Schema";',
+      'import * as BrokerContract from "@symmetria/broker-contract";',
+      'import * as UpstreamContract from "@t3tools/contracts";',
+      "const sharedSchemas = ['CommandId', 'EnvironmentId', 'ProjectId', 'ThreadId', 'TurnId'];",
+      "for (const name of sharedSchemas) {",
+      "  if (BrokerContract[name] !== UpstreamContract[name]) {",
+      "    throw new Error(`${name} is not the upstream schema value`);",
+      "  }",
+      "}",
+      "if ('RuntimeTurnState' in BrokerContract.BORROWED_RUNTIME_VOCABULARIES) {",
+      '  throw new Error("RuntimeTurnState was copied instead of composed from ProviderRuntimeTurnStatus");',
+      "}",
+      "const turnStateSchema = Schema.toJsonSchemaDocument(UpstreamContract.ProviderRuntimeTurnStatus).schema;",
+      "if (!Array.isArray(turnStateSchema.enum) || turnStateSchema.enum.length === 0) {",
+      '  throw new Error("ProviderRuntimeTurnStatus is not usable as the upstream schema value");',
+      "}",
+    ].join("\n");
+    expectSuccessfulCommand(
+      run(process.execPath, ["--input-type=module", "--eval", script], contractPackageRoot),
+    );
+  });
+
+  it("keeps every non-negative field aligned in generated JSON Schema", () => {
+    const script = [
+      'import * as Schema from "effect/Schema";',
+      'import { AnnouncedProtocolVersion, NonNegativeInteger, SymmetriaDraftVersion, SymmetriaProtocolVersion, SymmetriaSnapshotRevision } from "@symmetria/broker-contract";',
+      "const schemaOf = (schema) => {",
+      "  const document = Schema.toJsonSchemaDocument(schema);",
+      "  const reference = document.schema.$ref;",
+      "  if (typeof reference !== 'string') return document.schema;",
+      "  const prefix = '#/$defs/';",
+      "  if (!reference.startsWith(prefix)) throw new Error(`external schema reference: ${reference}`);",
+      "  const resolved = document.definitions?.[reference.slice(prefix.length)];",
+      "  if (resolved === undefined) throw new Error(`unresolved schema reference: ${reference}`);",
+      "  return resolved;",
+      "};",
+      "console.log(JSON.stringify({",
+      "  base: schemaOf(NonNegativeInteger),",
+      "  draftVersion: schemaOf(SymmetriaDraftVersion),",
+      "  snapshotRevision: schemaOf(SymmetriaSnapshotRevision),",
+      "  announcedVersion: schemaOf(AnnouncedProtocolVersion),",
+      "  supportedVersion: schemaOf(SymmetriaProtocolVersion),",
+      "}));",
+    ].join("\n");
+    const result = run(
+      process.execPath,
+      ["--input-type=module", "--eval", script],
+      contractPackageRoot,
+    );
+    expectSuccessfulCommand(result);
+    const documents = JSON.parse(result.stdout) as {
+      readonly base: unknown;
+      readonly draftVersion: unknown;
+      readonly snapshotRevision: unknown;
+      readonly announcedVersion: {
+        readonly properties: { readonly major: unknown; readonly minor: unknown };
+      };
+      readonly supportedVersion: {
+        readonly properties: { readonly minor: unknown };
+      };
+    };
+
+    expect(documents.base).toEqual({
+      type: "integer",
+      allOf: [{ minimum: 0 }],
+    });
+    expect(documents.draftVersion).toEqual(documents.base);
+    expect(documents.snapshotRevision).toEqual(documents.base);
+    expect(documents.announcedVersion.properties.major).toEqual(documents.base);
+    expect(documents.announcedVersion.properties.minor).toEqual(documents.base);
+    expect(documents.supportedVersion.properties.minor).toEqual(documents.base);
+  });
+
+  it("keeps a pnpm lockfile importer aligned with the Symmetria package manifest", () => {
+    const packageManifest = JSON.parse(
+      NodeFS.readFileSync(NodePath.join(contractPackageRoot, "package.json"), "utf8"),
+    ) as {
+      readonly dependencies: Readonly<Record<string, string>>;
+      readonly devDependencies: Readonly<Record<string, string>>;
+    };
+    const workspaceSource = NodeFS.readFileSync(
+      NodePath.join(repositoryRoot, "pnpm-workspace.yaml"),
+      "utf8",
+    );
+    const lockfileSource = NodeFS.readFileSync(
+      NodePath.join(repositoryRoot, "pnpm-lock.yaml"),
+      "utf8",
+    );
+    const importerMatch = lockfileSource.match(
+      /^  packages\/symmetria-broker-contract:\n(?<body>(?: {4,}.*\n|\n)*)/m,
+    );
+    expect(lockfileSource.match(/^  packages\/symmetria-broker-contract:$/gm)).toHaveLength(1);
+    expect(importerMatch?.groups?.body).toBeDefined();
+    const importerBody = importerMatch?.groups?.body ?? "";
+
+    const expectedSections = {
+      dependencies: packageManifest.dependencies,
+      devDependencies: packageManifest.devDependencies,
+    } as const;
+    for (const [sectionName, dependencies] of Object.entries(expectedSections)) {
+      const sectionMatch = importerBody.match(
+        new RegExp(`^    ${sectionName}:\\n(?<body>(?: {6,}.*\\n|\\n)*)`, "m"),
+      );
+      expect(sectionMatch?.groups?.body, `missing ${sectionName}`).toBeDefined();
+      const sectionBody = sectionMatch?.groups?.body ?? "";
+      const lockedNames = [...sectionBody.matchAll(/^      ['"]?([^'":]+)['"]?:$/gm)].map(
+        ([, name]) => name,
+      );
+      expect(lockedNames.sort()).toEqual(Object.keys(dependencies).sort());
+
+      for (const [dependencyName, manifestSpecifier] of Object.entries(dependencies)) {
+        const escapedName = dependencyName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const dependencyMatch = sectionBody.match(
+          new RegExp(`^      ['"]?${escapedName}['"]?:\\n        specifier: (.+)$`, "m"),
+        );
+        expect(dependencyMatch?.[1], `missing ${dependencyName}`).toBeDefined();
+        const catalogMatch = manifestSpecifier.match(/^catalog:(.*)$/);
+        const catalogName = catalogMatch?.[1] || dependencyName;
+        const escapedCatalogName = catalogName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const catalogSpecifier = workspaceSource.match(
+          new RegExp(`^  ["']?${escapedCatalogName}["']?: (.+)$`, "m"),
+        )?.[1];
+        const lockedSpecifier = dependencyMatch?.[1]?.replace(/^['"]|['"]$/g, "");
+        if (catalogMatch) {
+          expect([manifestSpecifier, catalogSpecifier]).toContain(lockedSpecifier);
+        } else {
+          expect(lockedSpecifier).toBe(manifestSpecifier);
+        }
+      }
+    }
+  });
+
+  // NO REPONER: acá vivía "keeps unrelated registry metadata out of the
+  // phase-one lockfile change", que leía pnpm-lock.yaml y exigía que los bloques
+  // de @xmldom/xmldom no tuvieran una línea `deprecated:`.
+  //
+  // Era imposible de pasar por construcción. pnpm reescribe esa metadata cada vez
+  // que resuelve contra el registro, y eso ocurre en la cadena `prepare` de la
+  // raíz — que dispara el propio `pnpm test`. Medido el 2026-08-20: el lockfile
+  // pasaba de 25 a 27 inserciones durante la misma corrida que lo verificaba, así
+  // que ejecutar el test era lo que lo rompía.
+  //
+  // La premisa también era equivocada. Esas líneas no son contaminación: son
+  // hechos del registro que pnpm mantiene al día. Se las trató como basura porque
+  // aparecieron por primera vez en un diff junto a un cambio ajeno, y de ahí salió
+  // un guardián permanente contra el comportamiento normal de la herramienta.
+  //
+  // Si alguna vez hace falta proteger el lockfile, hay que afirmar sobre el diff
+  // COMMITEADO, no sobre el árbol de trabajo que las herramientas del proyecto
+  // reescriben mientras el test corre.
+});

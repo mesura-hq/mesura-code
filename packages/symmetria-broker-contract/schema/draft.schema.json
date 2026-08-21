@@ -1,0 +1,38 @@
+{
+  "$comment": "Generated from SymmetriaDraft by scripts/emit-json-schema.ts. Do not hand-edit.",
+  "$defs": {
+    "SymmetriaDraft": {
+      "additionalProperties": true,
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "version": {
+          "allOf": [
+            {
+              "minimum": 0
+            }
+          ],
+          "type": "integer"
+        }
+      },
+      "required": [
+        "threadId",
+        "version",
+        "updatedAt",
+        "text"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "draft.schema.json",
+  "$ref": "#/$defs/SymmetriaDraft",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SymmetriaDraft"
+}

@@ -1,0 +1,65 @@
+{
+  "name": "@symmetria/broker-contract",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    },
+    "./version": {
+      "types": "./src/version.ts",
+      "import": "./src/version.ts"
+    },
+    "./primitives": {
+      "types": "./src/primitives.ts",
+      "import": "./src/primitives.ts"
+    },
+    "./upstreamLock": {
+      "types": "./src/upstreamLock.ts",
+      "import": "./src/upstreamLock.ts"
+    },
+    "./threadSummary": {
+      "types": "./src/threadSummary.ts",
+      "import": "./src/threadSummary.ts"
+    },
+    "./surfacePresence": {
+      "types": "./src/surfacePresence.ts",
+      "import": "./src/surfacePresence.ts"
+    },
+    "./command": {
+      "types": "./src/command.ts",
+      "import": "./src/command.ts"
+    },
+    "./draft": {
+      "types": "./src/draft.ts",
+      "import": "./src/draft.ts"
+    },
+    "./stream": {
+      "types": "./src/stream.ts",
+      "import": "./src/stream.ts"
+    },
+    "./jsonSchema": {
+      "types": "./src/jsonSchema.ts",
+      "import": "./src/jsonSchema.ts"
+    },
+    "./checksum": {
+      "types": "./src/checksum.ts",
+      "import": "./src/checksum.ts"
+    },
+    "./schema/*": "./schema/*"
+  },
+  "scripts": {
+    "generate": "node scripts/emit-json-schema.ts",
+    "typecheck": "tsgo --noEmit",
+    "test": "vp test run"
+  },
+  "dependencies": {
+    "@t3tools/contracts": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

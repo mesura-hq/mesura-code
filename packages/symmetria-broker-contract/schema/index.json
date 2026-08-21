@@ -1,0 +1,47 @@
+{
+  "checksum": "cda23d05107f654b95d78d2d01e153649db0a0847d55855b961ed4929a9e9981",
+  "contractVersion": "1.0.0",
+  "schemas": [
+    {
+      "file": "commandEnvelope.schema.json",
+      "root": "SymmetriaCommandEnvelope",
+      "summary": "Any of the four commands a consumer sends, with its command identifier."
+    },
+    {
+      "file": "commandReceipt.schema.json",
+      "root": "SymmetriaCommandReceipt",
+      "summary": "The answer to one command, whether it applied, replayed or was refused."
+    },
+    {
+      "file": "draft.schema.json",
+      "root": "SymmetriaDraft",
+      "summary": "The versioned composer draft of one thread."
+    },
+    {
+      "file": "draftUpdate.schema.json",
+      "root": "SymmetriaDraftUpdate",
+      "summary": "A compare-and-set write of a draft, stating the version it expects."
+    },
+    {
+      "file": "draftUpdateResult.schema.json",
+      "root": "SymmetriaDraftUpdateResult",
+      "summary": "The outcome of a draft update, applied or refused as a conflict."
+    },
+    {
+      "file": "streamItem.schema.json",
+      "root": "SymmetriaStreamItem",
+      "summary": "One item of the stream, either a full snapshot or a delta."
+    },
+    {
+      "file": "surfacePresence.schema.json",
+      "root": "SymmetriaSurfacePresence",
+      "summary": "Which surfaces attend one thread, and how attentive each one is."
+    },
+    {
+      "file": "threadSummary.schema.json",
+      "root": "SymmetriaThreadSummary",
+      "summary": "The narrow read projection of one agent thread."
+    }
+  ],
+  "sourceChecksum": "a2d05200e4697fe2e390d71e88a7fa2af0c367bf5789562cc5a3058e85b00465"
+}

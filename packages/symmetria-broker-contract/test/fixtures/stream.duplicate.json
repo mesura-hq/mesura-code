@@ -1,0 +1,41 @@
+{
+  "items": [
+    {
+      "type": "snapshot",
+      "protocolVersion": {
+        "major": 1,
+        "minor": 0
+      },
+      "revision": 412,
+      "threads": [],
+      "surfaces": [],
+      "drafts": []
+    },
+    {
+      "type": "delta",
+      "sequence": 413,
+      "change": {
+        "entity": "draft",
+        "draft": {
+          "threadId": "thr_2c88be40",
+          "version": 8,
+          "updatedAt": "2026-08-20T09:13:58.412Z",
+          "text": "revert the checkpoint, then rerun the suite"
+        }
+      }
+    },
+    {
+      "type": "delta",
+      "sequence": 413,
+      "change": {
+        "entity": "draft",
+        "draft": {
+          "threadId": "thr_2c88be40",
+          "version": 8,
+          "updatedAt": "2026-08-20T09:13:58.412Z",
+          "text": "revert the checkpoint, then rerun the suite"
+        }
+      }
+    }
+  ]
+}
