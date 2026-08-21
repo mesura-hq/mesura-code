@@ -8,7 +8,7 @@ The product is a minimal GUI for coding agents. A Node WebSocket server wraps pr
 
 Be accurate about the difference, because most of this repository's engineering judgement follows from it.
 
-**T3 Code** is a large open source project: Theo, Julius and a substantial community build it, it has over 100,000 users, its roadmap and code are public, and many of those users run forks of their own.
+**T3 Code** is a large open source project: Theo, Julius and a substantial community build it, it has over 200,000 users, its roadmap and code are public, and many of those users run forks of their own.
 
 **Mesura Code** has none of that. It is a single person's fork, private, with no users but its author. It exists to fit one specific workflow, not to compete with upstream and not to diverge from it. Nothing in this repository should claim otherwise — no user counts, no community, no openness we do not have.
 
@@ -140,6 +140,13 @@ An empty database is a bad test. Seed your worktree's `.t3` with a copy of real 
 - UI changes need before/after images. Motion or timing needs a short video.
 - One concern per PR. If the description says "also", split it.
 - When babysitting: poll checks and comments newer than the last push, verify each bot finding against the source, fix real ones, dismiss false positives with a written reason. Stay quiet when nothing is new. Stop when the bots are green on the latest commit.
+
+## Plans and work artifacts
+
+- Do not commit implementation plans, research notes, or agent scratch files. Keep temporary working material outside the worktree. `.plans/` is gitignored only as a safety net for legacy tooling. This fork keeps its own working material in `.factory/`, gitignored for the same reason.
+- Track active work in the GitHub issue that owns it, on this fork's own repository. Upstream's contributor process in `CONTRIBUTING.md` describes T3 Code, not this fork.
+- Put durable architecture, constraints, and decisions in `docs/internals/`. Update those docs when the product changes so agents find current facts instead of abandoned intentions.
+- A merged PR is the implementation record. Close or update its tracking item when the work lands; do not preserve a second checklist in the repository.
 
 ## How it works
 
