@@ -132,29 +132,57 @@ describe("Symmetria broker contract phase-one regression guards", () => {
   // upstream por crecer.
   const CONTRACT_SUITE_FLOOR = { files: 19, tests: 257 } as const;
 
+  // ⚠ JSON, NUNCA la salida de texto del reporter. La segunda versión de este
+  // guard leía `--reporter=dot` y buscaba `Test Files 19 passed (19)` con una
+  // expresión regular. Pasaba en la laptop y fallaba en el runner de CI, con la
+  // suite de contracts en verde en las dos: el subproceso salía con código 0,
+  // imprimía sus puntos, y la cadena `Test Files` no aparecía NI UNA VEZ en el
+  // log del worker.
+  //
+  // Nunca averigüé qué la sacaba, y esa es justamente la razón del cambio. Esa
+  // línea es salida de PRESENTACIÓN: se mueve con la versión de vitest, con el
+  // reporter, con si hay TTY, con el ancho de la terminal y con lo que sea que
+  // haya hecho el runner. Un guard que exige entender el entorno para saber si
+  // va a andar está midiendo el entorno, no el código.
+  //
+  // El reporter JSON sí es un contrato. `--outputFile` además evita depender de
+  // que el resumen llegue por stdout, que es precisamente lo que se rompió.
+  //
+  // Tercera versión de este guard, y las tres fallas fueron la misma: atarse a
+  // un valor que no nos pertenece. Primero el conteo exacto de upstream, después
+  // el formato de salida de vitest. Lo que sí es nuestro es que la suite esté
+  // verde y no se encoja.
   it("keeps upstream's contract suite green and not shrinking", () => {
+    const reportPath = NodePath.join(
+      NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "symmetria-contract-report-")),
+      "report.json",
+    );
+
     const result = run(
       vitePlusPath,
-      ["test", "run", "--reporter=dot"],
+      ["test", "run", "--reporter=json", `--outputFile=${reportPath}`],
       NodePath.join(repositoryRoot, "packages/contracts"),
     );
     expectSuccessfulCommand(result);
-    const output = commandOutput(result);
 
-    const files = /Test Files\s+(\d+) passed \((\d+)\)/.exec(output);
-    const tests = /Tests\s+(\d+) passed \((\d+)\)/.exec(output);
-    expect(files, output).not.toBeNull();
-    expect(tests, output).not.toBeNull();
+    expect(NodeFS.existsSync(reportPath), commandOutput(result)).toBe(true);
+    const report = JSON.parse(NodeFS.readFileSync(reportPath, "utf8")) as {
+      readonly success: boolean;
+      readonly numFailedTests: number;
+      readonly numFailedTestSuites: number;
+      readonly numPassedTests: number;
+      readonly testResults: ReadonlyArray<unknown>;
+    };
 
-    // Cada archivo y cada test recolectado tiene que haber pasado: el segundo
-    // número del reporter es el total, así que igualarlo al primero descarta
-    // fallas y saltados sin depender de cuántos sean.
-    expect(files?.[1]).toBe(files?.[2]);
-    expect(tests?.[1]).toBe(tests?.[2]);
+    // Verde: nada falló. Independiente de cuántos tests haya.
+    expect(report.success).toBe(true);
+    expect(report.numFailedTests).toBe(0);
+    expect(report.numFailedTestSuites).toBe(0);
 
-    expect(Number(files?.[2]), output).toBeGreaterThanOrEqual(CONTRACT_SUITE_FLOOR.files);
-    expect(Number(tests?.[2]), output).toBeGreaterThanOrEqual(CONTRACT_SUITE_FLOOR.tests);
-  }, 30_000);
+    // No se encogió. Upstream puede crecer libremente; encogerse en silencio no.
+    expect(report.testResults.length).toBeGreaterThanOrEqual(CONTRACT_SUITE_FLOOR.files);
+    expect(report.numPassedTests).toBeGreaterThanOrEqual(CONTRACT_SUITE_FLOOR.tests);
+  }, 60_000);
 
   it("keeps every borrowed runtime vocabulary locked in both assignability directions", () => {
     expect(NodeFS.existsSync(NodePath.join(contractPackageRoot, "src/upstreamLock.ts"))).toBe(true);
