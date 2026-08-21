@@ -1,5 +1,7 @@
 {
   "id": "/",
+  "name": "Mesura Code",
+  "short_name": "Mesura",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
