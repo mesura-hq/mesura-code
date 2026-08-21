@@ -218,6 +218,17 @@ function getWindowTitleBarOptions(
     };
   }
 
+  // Linux runs under a compositor that already owns close, minimise, maximise
+  // and move, so the overlay's buttons duplicate a control the window manager
+  // provides — and this fork is driven on Hyprland, where they are never used.
+  // Withholding `titleBarOverlay` is what turns them off: the constants and the
+  // Windows path below stay intact, and `navigator.windowControlsOverlay` then
+  // reports invisible, so the web side drops its `wco` class and stops reserving
+  // the strip on the right. Ctrl+Q still quits through the application menu.
+  if (platform === "linux") {
+    return { titleBarStyle: "hidden" };
+  }
+
   return {
     titleBarStyle: "hidden",
     titleBarOverlay: {
@@ -745,7 +756,12 @@ export const make = Effect.gen(function* () {
     });
 
     loadApplication();
-    if (environment.isDevelopment) {
+    // Upstream opens DevTools on every development launch. Here development mode
+    // is also the daily driver, so that costs two things every start: the
+    // detached window claims a whole tile on a tiling compositor, and DevTools
+    // paints its viewport-size badge over the app on every resize. Opt in for a
+    // session with MESURA_DEV_TOOLS=1 instead of paying for it by default.
+    if (environment.isDevelopment && process.env.MESURA_DEV_TOOLS === "1") {
       window.webContents.openDevTools({ mode: "detach" });
     }
 
