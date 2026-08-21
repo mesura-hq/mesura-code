@@ -116,7 +116,23 @@ describe("Symmetria broker contract phase-one regression guards", () => {
     expect(output).toContain("refuses a fractional value");
   });
 
-  it("keeps all 19 contract test files and 257 contract tests green", () => {
+  // Este guard comprueba que el paquete que agregamos no rompe la suite de
+  // contracts de UPSTREAM. Eso es lo que afirma, y nada más.
+  //
+  // ⚠ NO VOLVER A FIJAR EL CONTEO EXACTO. La primera versión afirmaba
+  // `Tests 257 passed (257)`. El primer merge con upstream lo rompió: el commit
+  // fe8750208 ("fix(contracts): reconcile provider default tests") agregó UN
+  // test, la suite pasó 257 → 258, y este guard falló con todo en verde. La
+  // igualdad no medía nuestra regresión, medía el ritmo de desarrollo de
+  // upstream, que sube cada semana y no es asunto nuestro.
+  //
+  // El piso sí es nuestro. El riesgo real es que la suite se ENCOJA — que un
+  // cambio del fork haga que dejen de recolectarse archivos, que es la forma en
+  // que "todo verde" puede mentir. Un piso lo detecta y no le cobra nada a
+  // upstream por crecer.
+  const CONTRACT_SUITE_FLOOR = { files: 19, tests: 257 } as const;
+
+  it("keeps upstream's contract suite green and not shrinking", () => {
     const result = run(
       vitePlusPath,
       ["test", "run", "--reporter=dot"],
@@ -124,8 +140,20 @@ describe("Symmetria broker contract phase-one regression guards", () => {
     );
     expectSuccessfulCommand(result);
     const output = commandOutput(result);
-    expect(output).toMatch(/Test Files\s+19 passed \(19\)/);
-    expect(output).toMatch(/Tests\s+257 passed \(257\)/);
+
+    const files = /Test Files\s+(\d+) passed \((\d+)\)/.exec(output);
+    const tests = /Tests\s+(\d+) passed \((\d+)\)/.exec(output);
+    expect(files, output).not.toBeNull();
+    expect(tests, output).not.toBeNull();
+
+    // Cada archivo y cada test recolectado tiene que haber pasado: el segundo
+    // número del reporter es el total, así que igualarlo al primero descarta
+    // fallas y saltados sin depender de cuántos sean.
+    expect(files?.[1]).toBe(files?.[2]);
+    expect(tests?.[1]).toBe(tests?.[2]);
+
+    expect(Number(files?.[2]), output).toBeGreaterThanOrEqual(CONTRACT_SUITE_FLOOR.files);
+    expect(Number(tests?.[2]), output).toBeGreaterThanOrEqual(CONTRACT_SUITE_FLOOR.tests);
   }, 30_000);
 
   it("keeps every borrowed runtime vocabulary locked in both assignability directions", () => {

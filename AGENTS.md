@@ -8,7 +8,7 @@ The product is a minimal GUI for coding agents. A Node WebSocket server wraps pr
 
 Be accurate about the difference, because most of this repository's engineering judgement follows from it.
 
-**T3 Code** is a large open source project: Theo, Julius and a substantial community build it, it has over 100,000 users, its roadmap and code are public, and many of those users run forks of their own.
+**T3 Code** is a large open source project: Theo, Julius and a substantial community build it, it has over 200,000 users, its roadmap and code are public, and many of those users run forks of their own.
 
 **Mesura Code** has none of that. It is a single person's fork, private, with no users but its author. It exists to fit one specific workflow, not to compete with upstream and not to diverge from it. Nothing in this repository should claim otherwise — no user counts, no community, no openness we do not have.
 
@@ -29,6 +29,17 @@ What follows from it, in order of how often it bites:
 - **Do not break things that will hurt later.** A change that works today but sits across a file upstream rewrites often is a recurring cost, not a one-time one.
 
 Where this fork already differs from upstream is listed in `.factory/` and in the commits with a `mesura` scope. Keep that list short.
+
+**Running the sync.** The full procedure is in `.factory/mesura-code-identity-plan.md`. Four things about it are not guessable, and each one failed silently the first time — none of them announced itself as an error:
+
+- **Read the conflict surface before merging**, as the intersection of what upstream touched and what we touched: `git diff --name-only <last-sha>..upstream/main` against `…<last-sha>..HEAD`, then `comm -12`. It is far smaller than either side. The first sync had 104 upstream files and 240 of ours, 11 in common, and one real conflict.
+- **Use Node 24 via nvm, never the system's Node 26.** Node 26 breaks `extract-zip` in electron's postinstall and exits 0 having written 548 KB of a 310 MB archive. Skip `pnpm install` entirely when the lockfile did not change.
+- **Never run bare `pnpm test`** — it exhausts the machine's RAM. Run per package, serially, with `--max-workers`. Watch the path depth: `apps/*` and `packages/*` need `../../node_modules`, but `tests/` and `scripts/` need `../node_modules`. With the wrong depth the command prints nothing and reads as a pass.
+- **gitleaks does not scan merge commits.** Pointing it at one reports `0 commits scanned` and `no leaks found`, which reads as a pass. Scan the upstream range instead, which is where the content came from.
+
+**Pin upstream's facts, do not delete them.** Where our own text has to restate something upstream asserts — a user count, a supported platform, a version — attribute it to T3 rather than dropping it. Then upstream changing that fact is a one-line conflict that shows up, instead of a stale claim that never does. This is how the first sync caught the user count moving from 100,000 to 200,000.
+
+**A guard may not pin a number that is upstream's to change.** Assert a floor and assert that the suite is green; never an exact count. The first sync broke a guard that pinned upstream's contract-test total at 257 when upstream added one test — everything was green and the guard still failed. See `tests/unit/symmetria-phase-one.test.ts`.
 
 ### 2. Performance without compromise
 
@@ -140,6 +151,13 @@ An empty database is a bad test. Seed your worktree's `.t3` with a copy of real 
 - UI changes need before/after images. Motion or timing needs a short video.
 - One concern per PR. If the description says "also", split it.
 - When babysitting: poll checks and comments newer than the last push, verify each bot finding against the source, fix real ones, dismiss false positives with a written reason. Stay quiet when nothing is new. Stop when the bots are green on the latest commit.
+
+## Plans and work artifacts
+
+- Do not commit implementation plans, research notes, or agent scratch files. Keep temporary working material outside the worktree. `.plans/` is gitignored only as a safety net for legacy tooling. This fork keeps its own working material in `.factory/`, gitignored for the same reason.
+- Track active work in the GitHub issue that owns it, on this fork's own repository. Upstream's contributor process in `CONTRIBUTING.md` describes T3 Code, not this fork.
+- Put durable architecture, constraints, and decisions in `docs/internals/`. Update those docs when the product changes so agents find current facts instead of abandoned intentions.
+- A merged PR is the implementation record. Close or update its tracking item when the work lands; do not preserve a second checklist in the repository.
 
 ## How it works
 
