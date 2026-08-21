@@ -460,7 +460,10 @@ describe("DesktopWindow", () => {
         assert.isFalse(createdWindowOptions[0]?.webPreferences?.backgroundThrottling);
         assert.deepEqual(fakeWindow.setAutoHideCursor.mock.calls, [[false]]);
         assert.deepEqual(fakeWindow.loadURL.mock.calls[0], ["t3code-dev://app/"]);
-        assert.equal(fakeWindow.openDevTools.mock.calls.length, 1);
+        // Upstream opened DevTools on every development launch; this fork gates
+        // it behind MESURA_DEV_TOOLS=1, which is unset here. See the comment at
+        // the call site in DesktopWindow.ts for what it costs by default.
+        assert.equal(fakeWindow.openDevTools.mock.calls.length, 0);
       }).pipe(Effect.provide(layer));
     }),
   );
