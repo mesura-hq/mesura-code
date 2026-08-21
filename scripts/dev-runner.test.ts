@@ -20,6 +20,7 @@ import * as Stream from "effect/Stream";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import {
+  DEFAULT_T3_HOME,
   checkPortAvailabilityOnHosts,
   createDevRunnerEnv,
   devPortProbeHosts,
@@ -74,6 +75,16 @@ const devServerInput = {
 } as const;
 
 it.layer(NodeServices.layer)("dev-runner", (it) => {
+  it.effect("defaults the dev-runner base directory to Mesura Code's own home", () =>
+    Effect.gen(function* () {
+      const { join } = yield* Path.Path;
+
+      const resolved = yield* DEFAULT_T3_HOME;
+
+      assert.equal(resolved, join(NodeOS.homedir(), ".mesura-code"));
+    }),
+  );
+
   describe("getDevRunnerModeArgs", () => {
     it.effect("lets Vite+ honor the desktop dev task graph", () =>
       Effect.sync(() => {
