@@ -19,6 +19,7 @@ export function MesuraWordmark() {
     <svg
       aria-label="Mesura"
       className="h-3 w-auto shrink-0"
+      role="img"
       viewBox="70 118 874 126"
       xmlns="http://www.w3.org/2000/svg"
     >
