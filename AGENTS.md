@@ -30,6 +30,17 @@ What follows from it, in order of how often it bites:
 
 Where this fork already differs from upstream is listed in `.factory/` and in the commits with a `mesura` scope. Keep that list short.
 
+**Running the sync.** The full procedure is in `.factory/mesura-code-identity-plan.md`. Four things about it are not guessable, and each one failed silently the first time — none of them announced itself as an error:
+
+- **Read the conflict surface before merging**, as the intersection of what upstream touched and what we touched: `git diff --name-only <last-sha>..upstream/main` against `…<last-sha>..HEAD`, then `comm -12`. It is far smaller than either side. The first sync had 104 upstream files and 240 of ours, 11 in common, and one real conflict.
+- **Use Node 24 via nvm, never the system's Node 26.** Node 26 breaks `extract-zip` in electron's postinstall and exits 0 having written 548 KB of a 310 MB archive. Skip `pnpm install` entirely when the lockfile did not change.
+- **Never run bare `pnpm test`** — it exhausts the machine's RAM. Run per package, serially, with `--max-workers`. Watch the path depth: `apps/*` and `packages/*` need `../../node_modules`, but `tests/` and `scripts/` need `../node_modules`. With the wrong depth the command prints nothing and reads as a pass.
+- **gitleaks does not scan merge commits.** Pointing it at one reports `0 commits scanned` and `no leaks found`, which reads as a pass. Scan the upstream range instead, which is where the content came from.
+
+**Pin upstream's facts, do not delete them.** Where our own text has to restate something upstream asserts — a user count, a supported platform, a version — attribute it to T3 rather than dropping it. Then upstream changing that fact is a one-line conflict that shows up, instead of a stale claim that never does. This is how the first sync caught the user count moving from 100,000 to 200,000.
+
+**A guard may not pin a number that is upstream's to change.** Assert a floor and assert that the suite is green; never an exact count. The first sync broke a guard that pinned upstream's contract-test total at 257 when upstream added one test — everything was green and the guard still failed. See `tests/unit/symmetria-phase-one.test.ts`.
+
 ### 2. Performance without compromise
 
 Upstream avoided the bad tech decisions and "slop" that bog comparable apps down, and its performance is a standard this fork inherits rather than one it earned. Regressions usually come from sending too much data over websockets, css animations causing gpu spikes, and lists that are hard to render. Make sure all changes are considerate of performance impact.
