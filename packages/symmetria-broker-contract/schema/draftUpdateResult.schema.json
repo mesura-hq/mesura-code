@@ -1,0 +1,86 @@
+{
+  "$comment": "Generated from SymmetriaDraftUpdateResult by scripts/emit-json-schema.ts. Do not hand-edit.",
+  "$defs": {
+    "SymmetriaDraft": {
+      "additionalProperties": true,
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "version": {
+          "allOf": [
+            {
+              "minimum": 0
+            }
+          ],
+          "type": "integer"
+        }
+      },
+      "required": [
+        "threadId",
+        "version",
+        "updatedAt",
+        "text"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "draftUpdateResult.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "additionalProperties": true,
+      "properties": {
+        "draft": {
+          "$ref": "#/$defs/SymmetriaDraft"
+        },
+        "outcome": {
+          "enum": [
+            "applied"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "draft"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "currentDraft": {
+          "$ref": "#/$defs/SymmetriaDraft"
+        },
+        "currentVersion": {
+          "allOf": [
+            {
+              "minimum": 0
+            }
+          ],
+          "type": "integer"
+        },
+        "outcome": {
+          "enum": [
+            "conflict"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "currentVersion",
+        "currentDraft"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "SymmetriaDraftUpdateResult"
+}

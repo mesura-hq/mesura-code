@@ -97,7 +97,9 @@ export const SymmetriaSurfacePresence = Schema.Struct({
   threadIds: Schema.Array(ThreadId),
   updatedAt: IsoDateTime,
   expiresAt: IsoDateTime,
-});
+  // See `SymmetriaThreadSummary`: the identifier names this struct in the
+  // emitted `$defs` instead of leaving it at a positional `Objects_1`.
+}).annotate({ identifier: "SymmetriaSurfacePresence" });
 export type SymmetriaSurfacePresence = typeof SymmetriaSurfacePresence.Type;
 
 /**

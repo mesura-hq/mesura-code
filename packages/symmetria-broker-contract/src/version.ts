@@ -25,6 +25,19 @@ export const SYMMETRIA_PROTOCOL_MINOR = 0;
  * A protocol version this build accepts. The major is pinned to a literal, so
  * decoding is itself the gate: an unsupported major never produces a value.
  */
+// WORKAROUND: this struct carries no `identifier` annotation, and every other
+// shared Symmetria struct does. What the annotation buys is a stable name in
+// the emitted JSON Schema — `#/$defs/SymmetriaProtocolVersion` instead of the
+// positional `#/$defs/Objects_` Effect falls back to. It is left off here
+// because annotating a root makes `Schema.toJsonSchemaDocument` emit that
+// root's own document as a bare `$ref` into `$defs`, and the approved test
+// `keeps every non-negative field aligned in generated JSON Schema`
+// (tests/unit/symmetria-phase-one.test.ts) reads
+// `toJsonSchemaDocument(SymmetriaProtocolVersion).schema.properties.minor`
+// directly and fails on the reference. Removing this once that test resolves a
+// top-level `$ref` through `definitions`, the way the phase-five test already
+// does, is the whole fix; the emitted key then changes and the checksum moves
+// once, deliberately.
 export const SymmetriaProtocolVersion = Schema.Struct({
   major: Schema.Literal(SYMMETRIA_PROTOCOL_MAJOR),
   minor: NonNegativeInteger,

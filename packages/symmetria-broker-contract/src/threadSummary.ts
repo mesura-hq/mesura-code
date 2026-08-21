@@ -112,7 +112,13 @@ export const SymmetriaThreadSummary = Schema.Struct({
   snoozedUntil: Schema.NullOr(IsoDateTime),
   pinnedAt: Schema.NullOr(IsoDateTime),
   deletedAt: Schema.NullOr(IsoDateTime),
-});
+  // The identifier is what a shared struct is called in the emitted JSON
+  // Schema. Without it Effect names a reused definition `Objects_`, `Objects_1`
+  // and so on, numbered by the order it met them, so inserting one struct
+  // renumbers the rest and `#/$defs/Objects_1` silently comes to mean a
+  // different shape in the next release. A consumer that pins a pointer into
+  // `$defs` needs the name to be the schema's, not its position.
+}).annotate({ identifier: "SymmetriaThreadSummary" });
 export type SymmetriaThreadSummary = typeof SymmetriaThreadSummary.Type;
 
 /**

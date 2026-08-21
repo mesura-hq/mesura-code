@@ -1,0 +1,440 @@
+{
+  "$comment": "Generated from SymmetriaThreadSummary by scripts/emit-json-schema.ts. Do not hand-edit.",
+  "$defs": {
+    "SymmetriaThreadSummary": {
+      "additionalProperties": true,
+      "properties": {
+        "archivedAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "branch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "deletedAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "latestTurn": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "properties": {
+                "completedAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "requestedAt": {
+                  "type": "string"
+                },
+                "startedAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "state": {
+                  "enum": [
+                    "running",
+                    "interrupted",
+                    "completed",
+                    "error"
+                  ],
+                  "type": "string"
+                },
+                "turnId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "turnId",
+                "state",
+                "requestedAt",
+                "startedAt",
+                "completedAt"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pinnedAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "session": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "properties": {
+                "activeTurnId": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "status": {
+                  "enum": [
+                    "idle",
+                    "starting",
+                    "running",
+                    "ready",
+                    "interrupted",
+                    "stopped",
+                    "error"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "status",
+                "activeTurnId"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "settledAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snoozedUntil": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "tokenUsage": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "properties": {
+                "cachedInputTokens": {
+                  "anyOf": [
+                    {
+                      "allOf": [
+                        {
+                          "minimum": 0
+                        }
+                      ],
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "compactsAutomatically": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "durationMs": {
+                  "anyOf": [
+                    {
+                      "allOf": [
+                        {
+                          "minimum": 0
+                        }
+                      ],
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "inputTokens": {
+                  "anyOf": [
+                    {
+                      "allOf": [
+                        {
+                          "minimum": 0
+                        }
+                      ],
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "lastCachedInputTokens": {
+                  "anyOf": [
+                    {
+                      "allOf": [
+                        {
+                          "minimum": 0
+                        }
+                      ],
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "lastInputTokens": {
+                  "anyOf": [
+                    {
+                      "allOf": [
+                        {
+                          "minimum": 0
+                        }
+                      ],
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "lastOutputTokens": {
+                  "anyOf": [
+                    {
+                      "allOf": [
+                        {
+                          "minimum": 0
+                        }
+                      ],
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "lastReasoningOutputTokens": {
+                  "anyOf": [
+                    {
+                      "allOf": [
+                        {
+                          "minimum": 0
+                        }
+                      ],
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "lastUsedTokens": {
+                  "anyOf": [
+                    {
+                      "allOf": [
+                        {
+                          "minimum": 0
+                        }
+                      ],
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "maxTokens": {
+                  "anyOf": [
+                    {
+                      "allOf": [
+                        {
+                          "minimum": 1
+                        }
+                      ],
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "outputTokens": {
+                  "anyOf": [
+                    {
+                      "allOf": [
+                        {
+                          "minimum": 0
+                        }
+                      ],
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "reasoningOutputTokens": {
+                  "anyOf": [
+                    {
+                      "allOf": [
+                        {
+                          "minimum": 0
+                        }
+                      ],
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "toolUses": {
+                  "anyOf": [
+                    {
+                      "allOf": [
+                        {
+                          "minimum": 0
+                        }
+                      ],
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "totalProcessedTokens": {
+                  "anyOf": [
+                    {
+                      "allOf": [
+                        {
+                          "minimum": 0
+                        }
+                      ],
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "usedTokens": {
+                  "allOf": [
+                    {
+                      "minimum": 0
+                    }
+                  ],
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "usedTokens"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "worktreePath": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "threadId",
+        "projectId",
+        "title",
+        "branch",
+        "worktreePath",
+        "latestTurn",
+        "session",
+        "tokenUsage",
+        "createdAt",
+        "updatedAt",
+        "archivedAt",
+        "settledAt",
+        "snoozedUntil",
+        "pinnedAt",
+        "deletedAt"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "threadSummary.schema.json",
+  "$ref": "#/$defs/SymmetriaThreadSummary",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SymmetriaThreadSummary"
+}

@@ -1,0 +1,167 @@
+{
+  "$comment": "Generated from SymmetriaCommandReceipt by scripts/emit-json-schema.ts. Do not hand-edit.",
+  "$id": "commandReceipt.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "additionalProperties": true,
+      "properties": {
+        "application": {
+          "enum": [
+            "first",
+            "replay"
+          ],
+          "type": "string"
+        },
+        "commandId": {
+          "type": "string"
+        },
+        "effect": {
+          "additionalProperties": true,
+          "properties": {
+            "activatedSurfaceId": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "draftVersion": {
+              "anyOf": [
+                {
+                  "allOf": [
+                    {
+                      "minimum": 0
+                    }
+                  ],
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "turnId": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "turnId",
+            "draftVersion",
+            "activatedSurfaceId"
+          ],
+          "type": "object"
+        },
+        "outcome": {
+          "enum": [
+            "applied"
+          ],
+          "type": "string"
+        },
+        "sequence": {
+          "allOf": [
+            {
+              "minimum": 0
+            }
+          ],
+          "type": "integer"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "commandId",
+        "threadId",
+        "application",
+        "effect",
+        "sequence"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "application": {
+          "enum": [
+            "first",
+            "replay"
+          ],
+          "type": "string"
+        },
+        "commandId": {
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "refused"
+          ],
+          "type": "string"
+        },
+        "rejection": {
+          "additionalProperties": true,
+          "properties": {
+            "code": {
+              "enum": [
+                "unknown_thread",
+                "thread_deleted",
+                "no_turn_running",
+                "draft_version_conflict",
+                "surface_not_attached",
+                "no_surface_available",
+                "command_not_supported"
+              ],
+              "type": "string"
+            },
+            "detail": {
+              "anyOf": [
+                {
+                  "allOf": [
+                    {
+                      "minLength": 1
+                    },
+                    {
+                      "pattern": "\\S"
+                    }
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "code",
+            "detail"
+          ],
+          "type": "object"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "commandId",
+        "threadId",
+        "application",
+        "rejection"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "SymmetriaCommandReceipt"
+}

@@ -71,6 +71,11 @@ export default defineConfig({
       // collapses short arrays onto one line, which would rewrite a pin the
       // suite then reports as a contract change.
       "packages/symmetria-broker-contract/test/fixtures/**",
+      // Generated JSON Schema artifacts, written in that same serialization and
+      // hashed byte for byte into the contract checksum a second repository
+      // pins. `vp run generate` owns these bytes; a formatter pass would move
+      // the checksum without any schema having changed.
+      "packages/symmetria-broker-contract/schema/**",
     ],
     sortPackageJson: {},
     overrides: [

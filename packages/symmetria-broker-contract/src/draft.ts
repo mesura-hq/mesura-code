@@ -62,7 +62,9 @@ export const SymmetriaDraft = Schema.Struct({
   version: SymmetriaDraftVersion,
   updatedAt: IsoDateTime,
   text: Schema.String,
-});
+  // See `SymmetriaThreadSummary`: the identifier names this struct in the
+  // emitted `$defs` instead of leaving it at a positional `Objects_3`.
+}).annotate({ identifier: "SymmetriaDraft" });
 export type SymmetriaDraft = typeof SymmetriaDraft.Type;
 
 /**

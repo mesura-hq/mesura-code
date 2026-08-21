@@ -1,0 +1,52 @@
+{
+  "$comment": "Generated from SymmetriaSurfacePresence by scripts/emit-json-schema.ts. Do not hand-edit.",
+  "$defs": {
+    "SymmetriaSurfacePresence": {
+      "additionalProperties": true,
+      "properties": {
+        "clientId": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "focused": {
+          "type": "boolean"
+        },
+        "recentlyInteracted": {
+          "type": "boolean"
+        },
+        "surfaceKind": {
+          "type": "string"
+        },
+        "threadIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "visible": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "clientId",
+        "surfaceKind",
+        "visible",
+        "focused",
+        "recentlyInteracted",
+        "threadIds",
+        "updatedAt",
+        "expiresAt"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "surfacePresence.schema.json",
+  "$ref": "#/$defs/SymmetriaSurfacePresence",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SymmetriaSurfacePresence"
+}

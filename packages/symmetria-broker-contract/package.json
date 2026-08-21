@@ -38,9 +38,19 @@
     "./stream": {
       "types": "./src/stream.ts",
       "import": "./src/stream.ts"
-    }
+    },
+    "./jsonSchema": {
+      "types": "./src/jsonSchema.ts",
+      "import": "./src/jsonSchema.ts"
+    },
+    "./checksum": {
+      "types": "./src/checksum.ts",
+      "import": "./src/checksum.ts"
+    },
+    "./schema/*": "./schema/*"
   },
   "scripts": {
+    "generate": "node scripts/emit-json-schema.ts",
     "typecheck": "tsgo --noEmit",
     "test": "vp test run"
   },
