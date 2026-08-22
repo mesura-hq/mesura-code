@@ -6,6 +6,7 @@ import {
   type ServerProviderSlashCommand,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -18,6 +19,7 @@ import {
   getProviderOptionCurrentValue,
   getProviderOptionDescriptors,
 } from "@t3tools/shared/model";
+import { parseCliArgs } from "@t3tools/shared/cliArgs";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { compareSemverVersions } from "@t3tools/shared/semver";
 import {
@@ -28,6 +30,7 @@ import {
   type SettingSource,
 } from "@anthropic-ai/claude-agent-sdk";
 
+import { ProviderAdapterRequestError } from "../Errors.ts";
 import {
   buildBooleanOptionDescriptor,
   buildSelectOptionDescriptor,
@@ -787,6 +790,91 @@ const probeClaudeCapabilities = (
     }),
   );
 };
+
+interface ClaudeAccountLimitsQuery {
+  readonly initializationResult: () => Promise<unknown>;
+  readonly usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: () => Promise<unknown>;
+}
+
+type ClaudeAccountLimitsQueryFactory = (
+  input: Parameters<typeof claudeQuery>[0],
+) => ClaudeAccountLimitsQuery;
+
+/** Read structured `/usage` data through a no-prompt SDK control session. */
+export function readClaudeAccountLimitsWithQuery(input: {
+  readonly executablePath: string;
+  readonly environment: NodeJS.ProcessEnv;
+  readonly cwd?: string;
+  readonly timeout?: Duration.Input;
+  readonly extraArgs?: Record<string, string | null>;
+  readonly queryFactory?: ClaudeAccountLimitsQueryFactory;
+}): Effect.Effect<unknown, ProviderAdapterRequestError> {
+  const abort = new AbortController();
+  const queryFactory = input.queryFactory ?? claudeQuery;
+  return Effect.tryPromise({
+    try: async () => {
+      const query = queryFactory({
+        // Never yield: account-limit reads must not send a user prompt.
+        // oxlint-disable-next-line require-yield
+        prompt: (async function* (): AsyncGenerator<SDKUserMessage> {
+          await waitForAbortSignal(abort.signal);
+        })(),
+        options: {
+          ...buildClaudeCapabilitiesProbeQueryOptions({
+            executablePath: input.executablePath,
+            abortController: abort,
+            environment: input.environment,
+            cwd: input.cwd,
+          }),
+          ...(input.extraArgs ? { extraArgs: input.extraArgs } : {}),
+        },
+      });
+      await query.initializationResult();
+      return await query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET();
+    },
+    catch: (cause) =>
+      new ProviderAdapterRequestError({
+        provider: "claudeAgent",
+        method: "accountLimits/read",
+        detail: "Claude account-limit control request failed.",
+        cause,
+      }),
+  }).pipe(
+    Effect.timeout(input.timeout ?? CAPABILITIES_PROBE_TIMEOUT_MS),
+    Effect.mapError(
+      (cause) =>
+        new ProviderAdapterRequestError({
+          provider: "claudeAgent",
+          method: "accountLimits/read",
+          detail: "Claude account-limit control request failed or timed out.",
+          cause,
+        }),
+    ),
+    Effect.ensuring(
+      Effect.sync(() => {
+        if (!abort.signal.aborted) abort.abort();
+      }),
+    ),
+  );
+}
+
+export const readClaudeAccountLimits = Effect.fn("readClaudeAccountLimits")(function* (
+  claudeSettings: ClaudeSettings,
+  environment?: NodeJS.ProcessEnv,
+  cwd?: string,
+) {
+  const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
+  const executablePath = yield* resolveClaudeSdkExecutablePath(
+    claudeSettings.binaryPath,
+    claudeEnvironment,
+  );
+  return yield* readClaudeAccountLimitsWithQuery({
+    executablePath,
+    environment: claudeEnvironment,
+    ...(cwd ? { cwd } : {}),
+    extraArgs: parseCliArgs(claudeSettings.launchArgs).flags,
+  });
+});
 
 const runClaudeCommand = Effect.fn("runClaudeCommand")(function* (
   claudeSettings: ClaudeSettings,
