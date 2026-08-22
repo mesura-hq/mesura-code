@@ -546,6 +546,7 @@ describe("ProviderCommandReactor", () => {
         type: "thread.context.compact",
         commandId: CommandId.make("cmd-context-compact-failure"),
         threadId: ThreadId.make("thread-1"),
+        messageId: asMessageId("message-context-compact-failure"),
         createdAt: now,
       }),
     );

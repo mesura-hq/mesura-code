@@ -2,7 +2,7 @@
 
 ## Compact a long chat
 
-In an existing Codex thread, type `/compact` by itself in the message composer and send it. Mesura Code asks Codex to summarize older context without adding the command to the conversation as a user message.
+In an existing Codex thread, type `/compact` by itself in the message composer and send it. Mesura Code keeps the command in the chat, asks Codex to summarize older context, and shows `Context compacted` when the operation finishes.
 
 Wait for the current turn to finish before compacting. Prompts that include other text or attachments continue through the normal message path.
 

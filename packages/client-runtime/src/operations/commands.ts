@@ -1,5 +1,6 @@
 import {
   CommandId,
+  MessageId,
   ORCHESTRATION_WS_METHODS,
   type ClientOrchestrationCommand,
 } from "@t3tools/contracts";
@@ -47,7 +48,12 @@ export type SetThreadRuntimeModeInput = CommandInput<"thread.runtime-mode.set">;
 export type SetThreadInteractionModeInput = CommandInput<"thread.interaction-mode.set">;
 export type StartThreadTurnInput = CommandInput<"thread.turn.start">;
 export type InterruptThreadTurnInput = CommandInput<"thread.turn.interrupt">;
-export type CompactThreadContextInput = CommandInput<"thread.context.compact">;
+export type CompactThreadContextInput = Omit<
+  CommandInput<"thread.context.compact">,
+  "messageId"
+> & {
+  readonly messageId?: MessageId;
+};
 export type RespondToThreadApprovalInput = CommandInput<"thread.approval.respond">;
 export type RespondToThreadUserInputInput = CommandInput<"thread.user-input.respond">;
 export type RevertThreadCheckpointInput = CommandInput<"thread.checkpoint.revert">;
@@ -296,6 +302,7 @@ export const compactThreadContext: (input: CompactThreadContextInput) => Command
     ...input,
     type: "thread.context.compact",
     commandId: metadata.commandId,
+    messageId: input.messageId ?? MessageId.make(metadata.commandId),
     createdAt: metadata.createdAt,
   });
 });

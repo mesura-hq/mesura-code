@@ -77,11 +77,13 @@ it.effect("decodes a native thread context compaction command", () =>
       type: "thread.context.compact",
       commandId: "compact-command",
       threadId: "thread-1",
+      messageId: "compact-message",
       createdAt: "2026-08-22T00:00:00.000Z",
     });
 
     assert.strictEqual(command.type, "thread.context.compact");
     assert.strictEqual(command.threadId, "thread-1");
+    assert.strictEqual(command.messageId, "compact-message");
   }),
 );
 

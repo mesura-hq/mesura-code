@@ -8,6 +8,7 @@ import type {
   UserInputQuestion,
 } from "@t3tools/contracts";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
+import { activityRemainsVisibleOutsideTurnFold } from "@t3tools/shared/timelineActivity";
 
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
@@ -54,6 +55,7 @@ export interface ThreadFeedActivity {
     | "zap";
   readonly toolLike: boolean;
   readonly status: "success" | "failure" | "neutral" | null;
+  readonly sourceActivityKind?: OrchestrationThreadActivity["kind"];
 }
 
 const MAX_VISIBLE_WORK_LOG_ENTRIES = 1;
@@ -1196,7 +1198,16 @@ function deriveThreadFeedTurnFolds(
 
     const terminalAssistantMessageId = terminalAssistantMessageIdByTurn.get(turnId);
     const hiddenEntryIds = new Set(
-      entries.filter((entry) => entry.id !== terminalAssistantMessageId).map((entry) => entry.id),
+      entries
+        .filter((entry) => entry.id !== terminalAssistantMessageId)
+        .filter(
+          (entry) =>
+            entry.type !== "activity-group" ||
+            !entry.activities.some((activity) =>
+              activityRemainsVisibleOutsideTurnFold(activity.sourceActivityKind),
+            ),
+        )
+        .map((entry) => entry.id),
     );
     if (hiddenEntryIds.size === 0) {
       continue;
@@ -1566,6 +1577,7 @@ export function buildThreadFeed(
               icon: workEntryIcon(entry),
               toolLike: workLogEntryIsToolLike(entry),
               status: workEntryStatus(entry),
+              sourceActivityKind: entry.activityKind,
             },
           };
         }),

@@ -874,6 +874,7 @@ export const ThreadContextCompactCommand = Schema.Struct({
   type: Schema.Literal("thread.context.compact"),
   commandId: CommandId,
   threadId: ThreadId,
+  messageId: MessageId,
   createdAt: IsoDateTime,
 });
 

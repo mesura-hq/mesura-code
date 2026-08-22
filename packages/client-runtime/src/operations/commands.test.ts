@@ -122,7 +122,7 @@ describe("environment commands", () => {
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
   );
 
-  it.effect("dispatches context compaction without a user message", () =>
+  it.effect("dispatches context compaction with a stable local message id", () =>
     Effect.gen(function* () {
       const dispatched: ClientOrchestrationCommand[] = [];
       const supervisor = yield* makeSupervisor(dispatched);
@@ -138,6 +138,7 @@ describe("environment commands", () => {
           type: "thread.context.compact",
           commandId: "compact-command",
           threadId: "thread-1",
+          messageId: "compact-command",
           createdAt: "2026-06-06T00:02:00.000Z",
         },
       ]);
