@@ -8,7 +8,6 @@ import { projectReadModel, type ProjectableReadModel } from "./threadProjection.
 const decodeStreamItem = Schema.decodeUnknownResult(SymmetriaStreamItem);
 
 const READ_MODEL: ProjectableReadModel = {
-  snapshotSequence: 412,
   projects: [
     { id: "prj_vigilia", title: "vigilia" },
     { id: "prj_kosmos", title: "kosmos-app" },
@@ -60,40 +59,43 @@ describe("projectReadModel", () => {
     // The decoder is the arbiter, not a hand-written shape assertion. A
     // producer that satisfies a local expectation and not the contract is
     // exactly the failure this projection exists to make impossible.
-    const decoded = decodeStreamItem(projectReadModel(READ_MODEL));
+    const decoded = decodeStreamItem(projectReadModel(READ_MODEL, 1));
     if (Result.isFailure(decoded)) {
       throw new Error(`snapshot did not decode: ${JSON.stringify(decoded.failure)}`);
     }
     expect(decoded.success.type).toBe("snapshot");
   });
 
-  it("carries the upstream sequence as the snapshot revision", () => {
-    // Borrowed rather than counted locally: `snapshotSequence` is already the
-    // position the fork's own read model reflects, and a second numbering
-    // would make a consumer's gap detection mean something else.
-    expect(projectReadModel(READ_MODEL).revision).toBe(412);
+  it("takes the revision from its caller rather than from the read model", () => {
+    // ⚠ This assertion replaces one that required the opposite. The first
+    // version borrowed upstream's `snapshotSequence`, on the contract's own
+    // reasoning — and the measurement in `threadFeed.ts`'s module note showed
+    // that field advances on every transcript event, so deltas numbered with
+    // it would read as gaps. The publisher owns the numbering now.
+    expect(projectReadModel(READ_MODEL, 412).revision).toBe(412);
+    expect(projectReadModel(READ_MODEL, 7).revision).toBe(7);
   });
 
   it("gives every project a non-empty name taken from the source", () => {
-    expect(projectReadModel(READ_MODEL).projects).toEqual([
+    expect(projectReadModel(READ_MODEL, 1).projects).toEqual([
       { projectId: "prj_vigilia", name: "vigilia" },
       { projectId: "prj_kosmos", name: "kosmos-app" },
     ]);
   });
 
   it("says a running session is running", () => {
-    const [running] = projectReadModel(READ_MODEL).threads;
+    const [running] = projectReadModel(READ_MODEL, 1).threads;
     expect(running?.session).toEqual({ status: "running", activeTurnId: "trn_1" });
   });
 
   it("reports a thread with no session as null rather than inventing one", () => {
-    const idle = projectReadModel(READ_MODEL).threads[1];
+    const idle = projectReadModel(READ_MODEL, 1).threads[1];
     expect(idle?.session).toBeNull();
     expect(idle?.latestTurn).toBeNull();
   });
 
   it("renames the thread identity the way the contract addresses it", () => {
-    const [first] = projectReadModel(READ_MODEL).threads;
+    const [first] = projectReadModel(READ_MODEL, 1).threads;
     expect(first?.threadId).toBe("thr_running");
     expect(first).not.toHaveProperty("id");
   });
@@ -102,7 +104,7 @@ describe("projectReadModel", () => {
     // Both are in the contract and neither is produced here. Empty rather than
     // absent, because the snapshot requires them and a consumer reading an
     // empty list learns the true thing: nobody is publishing them.
-    const snapshot = projectReadModel(READ_MODEL);
+    const snapshot = projectReadModel(READ_MODEL, 1);
     expect(snapshot.surfaces).toEqual([]);
     expect(snapshot.drafts).toEqual([]);
   });
@@ -117,7 +119,7 @@ describe("projectReadModel", () => {
       ...READ_MODEL,
       threads: [{ ...READ_MODEL.threads[0]!, title: "   " }],
     };
-    const snapshot = projectReadModel(withBlank);
+    const snapshot = projectReadModel(withBlank, 1);
     expect(snapshot.threads).toEqual([]);
     expect(Result.isFailure(decodeStreamItem(snapshot))).toBe(false);
   });
@@ -127,7 +129,7 @@ describe("projectReadModel", () => {
       ...READ_MODEL,
       projects: [{ id: "prj_x", title: "" }],
     };
-    expect(projectReadModel(withBlank).projects).toEqual([]);
+    expect(projectReadModel(withBlank, 1).projects).toEqual([]);
   });
 
   it("carries none of the transcript, the activity feed or the project configuration", () => {
@@ -147,7 +149,7 @@ describe("projectReadModel", () => {
         },
       ],
     } as unknown as ProjectableReadModel;
-    const serialised = JSON.stringify(projectReadModel(noisy));
+    const serialised = JSON.stringify(projectReadModel(noisy, 1));
     for (const forbidden of [
       "messages",
       "activities",

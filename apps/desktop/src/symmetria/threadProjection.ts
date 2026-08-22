@@ -80,7 +80,6 @@ export type ProjectableProject = {
 };
 
 export type ProjectableReadModel = {
-  readonly snapshotSequence: number;
   readonly projects: ReadonlyArray<ProjectableProject>;
   readonly threads: ReadonlyArray<ProjectableThread>;
 };
@@ -94,8 +93,29 @@ export type ProjectableReadModel = {
  * the snapshot: one thread missing from the bar costs the user far less than
  * every thread missing, and a snapshot that fails to decode takes the whole
  * stream down for as long as the bad row survives upstream.
+ *
+ * ⚠ It takes `unknown` rather than `string`, and that is the repair of a real
+ * crash rather than defensive habit. The value reaches here from an IPC
+ * payload, so the TYPE is a claim about what the sender should have sent, not
+ * about what arrived. Review reproduced it: a push whose project carried no
+ * `title` reached `value.trim()` and threw inside the `Effect.sync` of the IPC
+ * handler — becoming a defect that rejects the invoke, which is precisely what
+ * that handler's own comment says must never happen.
+ *
+ * ⚠ **Be exact about what this buys, because the first version of this note
+ * was not.** `projectReadModel` is total against a malformed ROW — a missing
+ * field, a wrong type, a nested null. It is NOT total against a malformed
+ * TOP-LEVEL shape: `threads` that is not an array, a null entry inside one, an
+ * empty `readModel`. Verification measured that distinction after the repair
+ * claimed more than it delivered.
+ *
+ * That is a deliberate two-layer arrangement rather than a remaining hole:
+ * `parseFeedPush` rejects every one of those shapes before this function is
+ * reached, and it is the only caller on the IPC path. A future caller reaching
+ * this directly is the case to be careful about.
  */
-const isPublishableText = (value: string): boolean => value.trim().length > 0;
+const isPublishableText = (value: unknown): value is string =>
+  typeof value === "string" && value.trim().length > 0;
 
 /**
  * Nullable free text, refused when present and blank.
@@ -105,16 +125,37 @@ const isPublishableText = (value: string): boolean => value.trim().length > 0;
  * thing and keeps the thread.
  */
 const publishableOrNull = (value: string | null): string | null =>
-  value !== null && isPublishableText(value) ? value : null;
+  isPublishableText(value) ? value : null;
+
+/**
+ * Whether a row carries everything the wire requires of it.
+ *
+ * `title`, `createdAt` and `updatedAt` are required strings on the wire, so a
+ * row missing any of them cannot be published — and substituting null would be
+ * WORSE than dropping it, because the consumer's decode would then reject the
+ * whole snapshot over one bad row. That was the first repair attempted here
+ * and it traded a crash for an invalid payload; the same reasoning as the
+ * blank title, applied to the fields with no nullable form to fall back on.
+ */
+const isPublishableThread = (thread: ProjectableThread): boolean =>
+  isPublishableText(thread.title) &&
+  isPublishableText(thread.createdAt) &&
+  isPublishableText(thread.updatedAt);
 
 const projectThread = (thread: ProjectableThread): WireThread => ({
   threadId: thread.id,
   projectId: thread.projectId,
   title: thread.title,
-  branch: publishableOrNull(thread.branch),
-  worktreePath: publishableOrNull(thread.worktreePath),
+  branch: publishableOrNull(thread.branch ?? null),
+  worktreePath: publishableOrNull(thread.worktreePath ?? null),
+  // ⚠ Nullish rather than `=== null`, and the two are not interchangeable
+  // here. The value arrives across an IPC boundary where a field can be
+  // ABSENT, and `undefined === null` is false — so a strict check falls
+  // through to the branch that dereferences it. Review found the same shape in
+  // `isPublishableText`; this is its sibling, caught by the test written for
+  // that one.
   latestTurn:
-    thread.latestTurn === null
+    thread.latestTurn == null
       ? null
       : {
           turnId: thread.latestTurn.turnId,
@@ -124,9 +165,9 @@ const projectThread = (thread: ProjectableThread): WireThread => ({
           completedAt: thread.latestTurn.completedAt,
         },
   session:
-    thread.session === null
+    thread.session == null
       ? null
-      : { status: thread.session.status, activeTurnId: thread.session.activeTurnId },
+      : { status: thread.session.status, activeTurnId: thread.session.activeTurnId ?? null },
   // Token cost is `ThreadTokenUsageSnapshot` and reaches a producer separately
   // from the thread, so there is nothing here to project. Null rather than
   // omitted, because the field is required on the wire and a consumer reading
@@ -134,28 +175,34 @@ const projectThread = (thread: ProjectableThread): WireThread => ({
   tokenUsage: null,
   createdAt: thread.createdAt,
   updatedAt: thread.updatedAt,
-  archivedAt: thread.archivedAt,
-  settledAt: thread.settledAt,
+  archivedAt: thread.archivedAt ?? null,
+  settledAt: thread.settledAt ?? null,
   // Optional upstream, required on the wire: absent and null mean one thing to
   // a consumer, and making it tell them apart buys nothing.
   snoozedUntil: thread.snoozedUntil ?? null,
   pinnedAt: thread.pinnedAt ?? null,
-  deletedAt: thread.deletedAt,
+  deletedAt: thread.deletedAt ?? null,
 });
 
-/** The whole projected world at one revision, ready to be written to a peer. */
-export function projectReadModel(readModel: ProjectableReadModel): WireSnapshot {
+/**
+ * The whole projected world at one revision, ready to be written to a peer.
+ *
+ * ⚠ `revision` is supplied by the CALLER and is not read from the read model,
+ * which reverses this function's first version. It used to take upstream's
+ * `snapshotSequence`, on the contract's own reasoning that the field already
+ * means "the position a snapshot reflects". Measured afterwards:
+ * `projector.ts:203` sets that field from `event.sequence`, so it advances on
+ * every orchestration event including the transcript ones this projection
+ * drops — numbering deltas with it would make a consumer read a gap on nearly
+ * every update. `threadFeed.ts` owns the numbering instead, and its module
+ * note carries the full argument.
+ */
+export function projectReadModel(readModel: ProjectableReadModel, revision: number): WireSnapshot {
   return {
     type: "snapshot",
     protocolVersion: { major: SYMMETRIA_PROTOCOL_MAJOR, minor: SYMMETRIA_PROTOCOL_MINOR },
-    // Borrowed, never counted here. `snapshotSequence` already means "the
-    // position in the event sequence this state reflects", which is exactly
-    // what a consumer compares its deltas against; a second numbering would
-    // make gap detection mean something else on each side.
-    revision: readModel.snapshotSequence,
-    threads: readModel.threads
-      .filter((thread) => isPublishableText(thread.title))
-      .map(projectThread),
+    revision,
+    threads: readModel.threads.filter(isPublishableThread).map(projectThread),
     // Neither is produced by this publisher. Empty rather than absent: the
     // snapshot requires them, and an empty list tells a consumer the truth.
     surfaces: [],

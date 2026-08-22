@@ -189,7 +189,11 @@ describe("createThreadStreamServer", () => {
     stalled.on("close", () => {
       closed = true;
     });
-    for (let attempt = 0; attempt < 200 && !closed; attempt += 1) {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      // `closed` is set from the socket's own event handler, not from this
+      // body, so it is read at the top rather than in the loop condition —
+      // where the linter reads an unmodified condition and says so.
+      if (closed) break;
       server.broadcast(fat);
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
