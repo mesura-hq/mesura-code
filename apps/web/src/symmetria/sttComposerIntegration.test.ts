@@ -62,7 +62,12 @@ it("does not reach a conversation it was not addressed to", async () => {
   assert.isUndefined(promptAt(other));
 });
 
-it("replaces whatever the composer already held", async () => {
+// ⚠ This covers the FALLBACK writer — a direct store write, used only when no
+// composer is mounted. Production goes through the composer handle's
+// `insertTextAtEnd`, which APPENDS: dictating on top of text the user already
+// typed adds to it rather than destroying it. The store path cannot append,
+// so its behaviour is replacement and that is what this pins.
+it("replaces what was there, on the store fallback path", async () => {
   const target = scopeThreadRef(ENVIRONMENT_ID, THREAD_ID);
   useComposerDraftStore.getState().setPrompt(target, "lo que habia antes");
 

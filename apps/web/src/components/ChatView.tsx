@@ -5521,8 +5521,27 @@ function ChatViewContent(props: ChatViewProps) {
   });
   const sttWriter = useMemo(
     () => ({
-      placePrompt: (text: string) =>
-        useComposerDraftStore.getState().setPrompt(composerDraftTarget, text),
+      placePrompt: (text: string) => {
+        // Go through the composer's own handle, not a store write.
+        //
+        // Measured live on 2026-08-22: writing the store put the text on
+        // screen but left the caret at position 0, and — worse — `onSend`
+        // reads `promptRef`, which the composer maintains through its own
+        // change path and a store write never reaches. So a dictation with
+        // submit enabled hit `!hasSendableContent`, returned through a bare
+        // guard, and was reported to the shell as sent. `insertTextAtEnd` is
+        // the same entry point the composer's own typeahead uses.
+        //
+        // It APPENDS rather than replaces, which is the better behaviour
+        // anyway: dictating on top of text the user already typed should add
+        // to it, not destroy it.
+        const composer = composerRef.current;
+        if (composer?.insertTextAtEnd(text, { ensureLeadingBoundary: true })) return;
+        // No composer mounted — fall back to the store so the words are at
+        // least recoverable, even though the caret and `promptRef` will not
+        // agree with it.
+        useComposerDraftStore.getState().setPrompt(composerDraftTarget, text);
+      },
       // ⚠ What `true` means here, exactly: the send was DISPATCHED without
       // throwing. It does not mean the turn started.
       //
@@ -5540,6 +5559,25 @@ function ChatViewContent(props: ChatViewProps) {
       // and the widening is the only reason it compiled — typed honestly, the
       // compiler rejects it with TS2367. Do not widen it back.
       submit: async (text: string) => {
+        // Wait for the composer to actually hold the text before sending.
+        // `onSend` reads `promptRef`, which the composer updates through its
+        // own change path — a render after the insert. Submitting immediately
+        // read an empty prompt, bailed on `!hasSendableContent`, and reported
+        // success. Waiting on the composer's own snapshot rather than on a
+        // guessed delay is what makes this observable instead of a race.
+        const composer = composerRef.current;
+        if (composer) {
+          let seen = false;
+          for (let attempt = 0; attempt < 30 && !seen; attempt += 1) {
+            seen = composer.getSendContext().prompt.includes(text);
+            if (!seen) await new Promise((resolve) => requestAnimationFrame(resolve));
+          }
+          // Never send a turn the composer cannot see. The words are in it —
+          // `placePrompt` ran — so this is `placed-not-submitted`, which is
+          // exactly what the shell needs to hear.
+          if (!seen) return false;
+        }
+
         let sending: ReturnType<typeof onSend> | undefined;
         const { didDispatch } = submitComposerDraft({
           prompt: text,
