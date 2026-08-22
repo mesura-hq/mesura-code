@@ -1,4 +1,8 @@
 export const BRAND_ASSET_PATHS = {
+  monochromeSourceSvg: "assets/mesura-code/monochrome.svg",
+  mobileAndroidMonochromeIconPng: "apps/mobile/assets/android-icon-mark.png",
+  mobileAndroidNotificationIconPng: "apps/mobile/assets/android-notification-icon.png",
+  mobileWidgetMarkSvg: "apps/mobile/assets/widget/T3Mark.svg",
   developmentMasterPng: "assets/mesura-code/development-master.png",
   developmentIconComposerProject: "assets/dev/app-icon.icon",
   developmentIosIconPng: "assets/dev/blueprint-ios-1024.png",

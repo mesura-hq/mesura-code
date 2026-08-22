@@ -16,6 +16,8 @@ import sharp from "sharp";
 import { BRAND_ASSET_PATHS, DEVELOPMENT_PUBLIC_ICON_OVERRIDES } from "./lib/brand-assets.ts";
 import { encodePngIco, readPngDimensions, WINDOWS_ICON_SIZES } from "./lib/icon-export.ts";
 
+export const PINNED_LIBVIPS_VERSION = "8.18.3";
+
 export interface VariantOutputs {
   readonly ios: string;
   readonly macos: string;
@@ -174,6 +176,14 @@ export async function renderRasterIcon(sourcePath: string, size: number): Promis
   return contents;
 }
 
+export function assertPinnedImageRenderer(): void {
+  if (sharp.versions.vips !== PINNED_LIBVIPS_VERSION) {
+    throw new Error(
+      `Icon export requires bundled libvips ${PINNED_LIBVIPS_VERSION}, but Sharp loaded ${sharp.versions.vips}.`,
+    );
+  }
+}
+
 export async function renderBrandIconVariant(
   repositoryRoot: string,
   variant: IconVariant,
@@ -205,6 +215,55 @@ export async function renderBrandIconVariant(
     [variant.outputs.faviconIco, ico],
     [variant.outputs.windowsIco, ico],
   ]);
+}
+
+export async function renderMobileSystemAssets(
+  repositoryRoot: string,
+): Promise<Map<string, Buffer>> {
+  const monochromeSource = await NodeFSP.readFile(
+    NodePath.join(repositoryRoot, BRAND_ASSET_PATHS.monochromeSourceSvg),
+  );
+  const whiteTemplateSource = monochromeSource
+    .toString("utf8")
+    .replaceAll("currentColor", "#ffffff");
+  const renderTemplate = (size: number) =>
+    sharp(Buffer.from(whiteTemplateSource))
+      .resize(size, size, { fit: "fill", kernel: sharp.kernel.lanczos3 })
+      .png({ adaptiveFiltering: true, compressionLevel: 9 })
+      .toBuffer();
+
+  return new Map<string, Buffer>([
+    [BRAND_ASSET_PATHS.mobileAndroidMonochromeIconPng, await renderTemplate(432)],
+    [BRAND_ASSET_PATHS.mobileAndroidNotificationIconPng, await renderTemplate(96)],
+    [BRAND_ASSET_PATHS.mobileWidgetMarkSvg, monochromeSource],
+  ]);
+}
+
+export async function collectGeneratedBrandAssets(
+  repositoryRoot: string,
+): Promise<Map<string, Buffer>> {
+  assertPinnedImageRenderer();
+  const generated = new Map<string, Buffer>();
+  for (const variant of ICON_VARIANTS) {
+    const variantAssets = await renderBrandIconVariant(repositoryRoot, variant);
+    for (const [relativePath, contents] of variantAssets) {
+      generated.set(relativePath, contents);
+    }
+  }
+
+  for (const override of DEVELOPMENT_PUBLIC_ICON_OVERRIDES) {
+    const sourceContents = generated.get(override.sourceRelativePath);
+    if (sourceContents === undefined) {
+      throw new Error(`Generated development web icon is missing: ${override.sourceRelativePath}`);
+    }
+    generated.set(override.targetRelativePath, sourceContents);
+  }
+
+  const mobileSystemAssets = await renderMobileSystemAssets(repositoryRoot);
+  for (const [relativePath, contents] of mobileSystemAssets) {
+    generated.set(relativePath, contents);
+  }
+  return generated;
 }
 
 export async function findStaleGeneratedAssetPaths(
@@ -322,33 +381,19 @@ export const exportBrandIcons = Effect.fn("exportBrandIcons")(function* (checkOn
   const repositoryRoot = yield* RepositoryRoot;
   yield* Console.log("Exporting icons from Mesura Code raster masters.");
 
-  const generated = new Map<string, Buffer>();
   for (const variant of ICON_VARIANTS) {
     yield* Console.log(`Rendering ${variant.label} from ${variant.master}...`);
-    const variantAssets = yield* Effect.tryPromise({
-      try: () => renderBrandIconVariant(repositoryRoot, variant),
-      catch: (cause) =>
-        new IconExportRenditionError({
-          sourcePath: variant.master,
-          outputPath: "generated icon family",
-          expectedSize: 1024,
-          cause,
-        }),
-    });
-    for (const [relativePath, contents] of variantAssets) {
-      generated.set(relativePath, contents);
-    }
   }
-
-  for (const override of DEVELOPMENT_PUBLIC_ICON_OVERRIDES) {
-    const sourceContents = generated.get(override.sourceRelativePath);
-    if (sourceContents === undefined) {
-      return yield* Effect.die(
-        new Error(`Generated development web icon is missing: ${override.sourceRelativePath}`),
-      );
-    }
-    generated.set(override.targetRelativePath, sourceContents);
-  }
+  const generated = yield* Effect.tryPromise({
+    try: () => collectGeneratedBrandAssets(repositoryRoot),
+    catch: (cause) =>
+      new IconExportRenditionError({
+        sourcePath: "Mesura Code icon sources",
+        outputPath: "generated icon family",
+        expectedSize: 1024,
+        cause,
+      }),
+  });
 
   if (checkOnly) {
     const stalePaths = yield* Effect.tryPromise({
