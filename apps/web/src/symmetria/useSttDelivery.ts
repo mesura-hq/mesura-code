@@ -25,8 +25,15 @@ export function useSttDelivery(writer: ComposerWriter | null): void {
     if (typeof subscribe !== "function" || typeof answer !== "function") return;
 
     return subscribe((delivery) => {
-      const outcome = deliverDictation(writer, { text: delivery.text, submit: delivery.submit });
-      answer(delivery.requestId, outcome.kind);
+      void deliverDictation(writer, { text: delivery.text, submit: delivery.submit }).then(
+        (outcome) => answer(delivery.requestId, outcome.kind),
+        // A rejection here means delivery itself blew up, which includes the
+        // placement. Answering `placed-not-submitted` would be worse than
+        // saying nothing: its receipt claims the text is in the composer, and
+        // on this path it is not. The socket would answer on its own deadline
+        // anyway, but a silent swallow costs the operator five seconds.
+        () => answer(delivery.requestId, "no-conversation"),
+      );
     });
   }, [writer]);
 }

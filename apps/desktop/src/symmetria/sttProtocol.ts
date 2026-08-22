@@ -30,6 +30,8 @@ export type SttParseResult =
  */
 export type SttOutcome =
   | { readonly kind: "placed" }
+  | { readonly kind: "placed-and-submitted" }
+  | { readonly kind: "placed-not-submitted" }
   | { readonly kind: "no-conversation" }
   | { readonly kind: "error"; readonly code: SttErrorCode; readonly detail: string };
 
@@ -72,10 +74,44 @@ export function parseSttRequest(line: string): SttParseResult {
   return { ok: true, request: { text, submit: decoded["submit"] === true } };
 }
 
+/**
+ * The window's answer, coming back over IPC. Lives here rather than beside the
+ * Electron wiring so the accepted set is testable without importing Electron —
+ * it grew from two values to four and a typo in one of them would otherwise
+ * fall through to `null` with nothing to catch it.
+ */
+export function parseRendererOutcome(
+  raw: unknown,
+): { readonly requestId: string; readonly outcome: SttOutcome } | null {
+  if (!isRecord(raw)) return null;
+  const { requestId, outcome } = raw;
+  if (typeof requestId !== "string") return null;
+  if (
+    outcome === "placed" ||
+    outcome === "placed-and-submitted" ||
+    outcome === "placed-not-submitted" ||
+    outcome === "no-conversation"
+  ) {
+    return { requestId, outcome: { kind: outcome } };
+  }
+  return null;
+}
+
 export function formatReceipt(outcome: SttOutcome): string {
   switch (outcome.kind) {
     case "placed":
       return JSON.stringify({ ok: true, outcome: "placed" });
+    case "placed-and-submitted":
+      return JSON.stringify({ ok: true, outcome: "placed-and-submitted" });
+    case "placed-not-submitted":
+      // Not `ok`: the send the request asked for did not happen. The detail
+      // says where the words went, because the shell keeps no clipboard copy
+      // in socket mode and the operator would otherwise think they were lost.
+      return JSON.stringify({
+        ok: false,
+        outcome: "placed-not-submitted",
+        detail: "the text is in the composer but the turn did not start",
+      });
     case "no-conversation":
       return JSON.stringify({ ok: false, outcome: "no-conversation" });
     case "error":

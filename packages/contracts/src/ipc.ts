@@ -1138,7 +1138,10 @@ export interface DesktopBridge {
   onSttDelivery?: (
     listener: (delivery: { requestId: string; text: string; submit: boolean }) => void,
   ) => () => void;
-  resolveSttDelivery?: (requestId: string, outcome: "placed" | "no-conversation") => void;
+  resolveSttDelivery?: (
+    requestId: string,
+    outcome: "placed" | "placed-and-submitted" | "placed-not-submitted" | "no-conversation",
+  ) => void;
   /**
    * Hold-to-quit hint pushes: "down" when the quit shortcut is first pressed,
    * "up" when it is released before the hold completes. Optional: older

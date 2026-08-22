@@ -23,6 +23,7 @@ import { RESOLVE_STT_DELIVER_CHANNEL, STT_DELIVER_CHANNEL } from "../ipc/channel
 import * as DesktopIpc from "../ipc/DesktopIpc.ts";
 import { createSttBridge } from "./sttBridge.ts";
 import { closeServer, createSttServer, listenOnPath } from "./SttSocket.ts";
+import { parseRendererOutcome } from "./sttProtocol.ts";
 import type { SttOutcome } from "./sttProtocol.ts";
 import {
   prepareSocketPath,
@@ -65,15 +66,6 @@ export class SttDelivery extends Context.Service<
   }
 >()("@t3tools/desktop/symmetria/SttDelivery") {}
 
-const readOutcome = (raw: unknown): { requestId: string; outcome: SttOutcome } | null => {
-  if (typeof raw !== "object" || raw === null) return null;
-  const { requestId, outcome } = raw as Record<string, unknown>;
-  if (typeof requestId !== "string") return null;
-  if (outcome === "placed") return { requestId, outcome: { kind: "placed" } };
-  if (outcome === "no-conversation") return { requestId, outcome: { kind: "no-conversation" } };
-  return null;
-};
-
 export const make = Effect.gen(function* () {
   const electronWindow = yield* ElectronWindow.ElectronWindow;
   const ipc = yield* DesktopIpc.DesktopIpc;
@@ -102,7 +94,7 @@ export const make = Effect.gen(function* () {
     channel: RESOLVE_STT_DELIVER_CHANNEL,
     handler: (raw: unknown) =>
       Effect.sync(() => {
-        const answer = readOutcome(raw);
+        const answer = parseRendererOutcome(raw);
         // An unrecognised shape is dropped rather than thrown: the deadline
         // still answers the shell, and a throw inside an IPC handler costs
         // more than this feature.
