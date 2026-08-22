@@ -60,6 +60,35 @@ The product has three surfaces: **web**, **desktop**, and **mobile**. Upstream w
 
 **The rest stay supported, not prioritised**: the web app in both its forms — served locally by `npx t3`, and built for a hosted deployment, which upstream runs at `app.t3.codes` and this fork does not run at all — plus desktop on macOS and Windows, and mobile on iOS. Do not break them, do not remove them, and keep contracts honest across all of them. They simply do not earn the same verification effort, and a change does not need a pass on them before it ships here.
 
+## Quality decides, merge cost informs
+
+What this fork wants is the best code it can carry. It is driven every day by
+the person who maintains it, so a shortcut here is not paid once at review — it
+is paid every day, by the only user, forever.
+
+Principle 1 above is real and every design has to price it. It is an **input to
+the decision, not the decision.**
+
+- **Never choose a hacky design because it conflicts less.** "It touches no
+  upstream file" is an argument, not a verdict. A design that is worse to use or
+  worse to maintain does not become right by being cheap at merge time.
+- **When the better design costs more upstream, take it and say what it costs.**
+  Name the files, give their commit rate, and record the trade in the decision —
+  an accepted cost and an overlooked one look identical six months later.
+- **Where a cheap variant is genuinely as good, it wins on the merge cost.** The
+  constraint is a tiebreaker between comparable designs, and it decides many of
+  them. It just does not get to break a tie it should have lost.
+
+The failure this prevents is specific and it is easy to walk into: enumerating
+the conflict surface of each option, then picking the lowest number. That
+comparison reads as rigour, because the numbers are real and measured. It is
+still the wrong question whenever the options are not equally good.
+
+Decisions recorded under this rule live in `docs/mesura/adr-*.md`. The current
+one on windowing is `adr-002-one-window-many-projects.md`; `adr-001` is kept
+superseded because _why_ it was wrong is the reusable part — it compared two
+candidates against each other and never against the architecture already running.
+
 ## A note from Theo
 
 Kept verbatim from upstream. Theo is T3 Code's original creator; this is his note, not ours, and it is here because it is good advice rather than because we wrote it.

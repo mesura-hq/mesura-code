@@ -1130,6 +1130,19 @@ export interface DesktopBridge {
   probeRemoteEditors?: () => Promise<readonly EditorId[]>;
   onMenuAction: (listener: (action: string) => void) => () => void;
   /**
+   * Dictation pushed in from Symmetria Shell through the main process. The
+   * listener answers with `resolveSttDelivery`, because the shell blocks on a
+   * receipt that must not be written before the text has actually landed.
+   * Optional: only the Mesura desktop build emits it.
+   */
+  onSttDelivery?: (
+    listener: (delivery: { requestId: string; text: string; submit: boolean }) => void,
+  ) => () => void;
+  resolveSttDelivery?: (
+    requestId: string,
+    outcome: "placed" | "placed-and-submitted" | "placed-not-submitted" | "no-conversation",
+  ) => void;
+  /**
    * Hold-to-quit hint pushes: "down" when the quit shortcut is first pressed,
    * "up" when it is released before the hold completes. Optional: older
    * desktop builds never emit it.
