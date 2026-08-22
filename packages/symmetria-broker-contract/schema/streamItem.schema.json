@@ -54,6 +54,30 @@
       ],
       "type": "object"
     },
+    "SymmetriaProjectSummary": {
+      "additionalProperties": true,
+      "properties": {
+        "name": {
+          "allOf": [
+            {
+              "minLength": 1
+            },
+            {
+              "pattern": "\\S"
+            }
+          ],
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId",
+        "name"
+      ],
+      "type": "object"
+    },
     "SymmetriaSurfacePresence": {
       "additionalProperties": true,
       "properties": {
@@ -565,6 +589,12 @@
           },
           "type": "array"
         },
+        "projects": {
+          "items": {
+            "$ref": "#/$defs/SymmetriaProjectSummary"
+          },
+          "type": "array"
+        },
         "protocolVersion": {
           "$ref": "#/$defs/Objects_"
         },
@@ -601,7 +631,8 @@
         "revision",
         "threads",
         "surfaces",
-        "drafts"
+        "drafts",
+        "projects"
       ],
       "type": "object"
     },
@@ -664,6 +695,25 @@
               "required": [
                 "entity",
                 "draft"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": true,
+              "properties": {
+                "entity": {
+                  "enum": [
+                    "project"
+                  ],
+                  "type": "string"
+                },
+                "project": {
+                  "$ref": "#/$defs/SymmetriaProjectSummary"
+                }
+              },
+              "required": [
+                "entity",
+                "project"
               ],
               "type": "object"
             },

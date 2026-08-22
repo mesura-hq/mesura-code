@@ -49,7 +49,7 @@ const openedFrom = (name: string): SymmetriaStreamState => {
 const goldenSnapshot = () => decodeStreamItemOrThrow(readGoldenFixture(GOLDEN));
 
 /** The first entry of one of the golden snapshot's entity lists, as it sits on disk. */
-const goldenEntity = (list: "threads" | "surfaces" | "drafts"): unknown =>
+const goldenEntity = (list: "threads" | "surfaces" | "drafts" | "projects"): unknown =>
   (readGoldenFixture(GOLDEN)[list] as ReadonlyArray<unknown>)[0];
 
 describe("SymmetriaStreamItem", () => {
@@ -90,7 +90,11 @@ describe("SymmetriaStreamItem", () => {
       thread: { entity: "thread", thread: goldenEntity("threads") },
       surface: { entity: "surface", surface: goldenEntity("surfaces") },
       draft: { entity: "draft", draft: goldenEntity("drafts") },
-      unknown: { entity: "project", project: { id: "prj_symmetria_shell" } },
+      project: { entity: "project", project: goldenEntity("projects") },
+      // Was `project` until that entity became real in the 1.1 addition. Any
+      // name this build does not publish serves; what is being exercised is
+      // the fallback member, not this particular word.
+      unknown: { entity: "sprocket", sprocket: { id: "spr_1" } },
     };
 
     expect(SymmetriaStreamChange.members).toHaveLength(SYMMETRIA_STREAM_CHANGE_ENTITIES.length);
@@ -122,11 +126,11 @@ describe("SymmetriaUnknownChange", () => {
     const item = decodeStreamItemOrThrow({
       type: "delta",
       sequence: 413,
-      change: { entity: "project", project: { id: "prj_symmetria_shell" } },
+      change: { entity: "sprocket", sprocket: { id: "spr_1" } },
     });
     if (item.type !== "delta") throw new Error("probe did not decode as a delta");
     expect(item.change.entity).toBe("unknown");
-    expect(Object.hasOwn(item.change, "project")).toBe(false);
+    expect(Object.hasOwn(item.change, "sprocket")).toBe(false);
   });
 
   it("still refuses a known entity whose body does not match it", () => {
@@ -150,7 +154,7 @@ describe("SymmetriaUnknownChange", () => {
       decodeStreamItemOrThrow({
         type: "delta",
         sequence: state.sequence + 1,
-        change: { entity: "project", project: { id: "prj_symmetria_shell" } },
+        change: { entity: "sprocket", sprocket: { id: "spr_1" } },
       }) as SymmetriaStreamDelta,
     );
 
@@ -171,6 +175,7 @@ describe("openSymmetriaStream", () => {
     expect(state.threads).toHaveLength(1);
     expect(state.surfaces).toHaveLength(1);
     expect(state.drafts).toHaveLength(1);
+    expect(state.projects).toHaveLength(1);
   });
 
   it("refuses a delta as the first item and names the position it saw", () => {
