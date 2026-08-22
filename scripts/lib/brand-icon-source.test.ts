@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - Source integrity tests inspect exact repository bytes without an Effect runtime.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeURL from "node:url";
