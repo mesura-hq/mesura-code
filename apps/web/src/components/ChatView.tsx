@@ -1262,6 +1262,9 @@ function ChatViewContent(props: ChatViewProps) {
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, {
     reportFailure: false,
   });
+  const compactThreadContext = useAtomCommand(threadEnvironment.compactContext, {
+    reportFailure: false,
+  });
   const respondToThreadApproval = useAtomCommand(threadEnvironment.respondToApproval, {
     reportFailure: false,
   });
@@ -5504,6 +5507,33 @@ function ChatViewContent(props: ChatViewProps) {
     }
   };
 
+  const onCompactContext = useCallback(async (): Promise<boolean> => {
+    if (!activeThread || activeEnvironmentUnavailable || isConnecting) return false;
+    const result = await compactThreadContext({
+      environmentId,
+      input: { threadId: activeThread.id },
+    });
+    if (result._tag === "Failure") {
+      if (!isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          activeThread.id,
+          error instanceof Error ? error.message : "Failed to compact thread context.",
+        );
+      }
+      return false;
+    }
+    setThreadError(activeThread.id, null);
+    return true;
+  }, [
+    activeEnvironmentUnavailable,
+    activeThread,
+    compactThreadContext,
+    environmentId,
+    isConnecting,
+    setThreadError,
+  ]);
+
   // Dictation from Symmetria Shell. It lives here rather than beside
   // `composerDraftTarget` because it needs `onSend`, which is defined above.
   //
@@ -6692,6 +6722,7 @@ function ChatViewContent(props: ChatViewProps) {
                             composerTerminalContextsRef={composerTerminalContextsRef}
                             composerElementContextsRef={composerElementContextsRef}
                             onSend={onSend}
+                            onCompactContext={onCompactContext}
                             onInterrupt={onInterrupt}
                             onImplementPlanInNewThread={onImplementPlanInNewThread}
                             onRespondToApproval={onRespondToApproval}

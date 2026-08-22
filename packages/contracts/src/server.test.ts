@@ -26,6 +26,15 @@ const baseProviderSnapshot = {
 };
 
 describe("ServerProvider", () => {
+  it("decodes native context compaction capability", () => {
+    const parsed = decodeServerProvider({
+      ...baseProviderSnapshot,
+      nativeContextCompaction: true,
+    });
+
+    expect(parsed.nativeContextCompaction).toBe(true);
+  });
+
   it("defaults capability arrays when decoding provider snapshots", () => {
     const parsed = decodeServerProvider({
       instanceId: "codex",

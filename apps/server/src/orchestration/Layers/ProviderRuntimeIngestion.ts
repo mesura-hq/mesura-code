@@ -369,6 +369,9 @@ export function runtimeEventToActivities(
       ? { sequence: eventWithSequence.sessionSequence }
       : {};
   })();
+  const contextCompactionActivityId = EventId.make(
+    `context-compaction:${event.threadId}:${event.turnId ?? "thread"}`,
+  );
   switch (event.type) {
     case "request.opened": {
       if (event.payload.requestType === "tool_user_input") {
@@ -748,7 +751,7 @@ export function runtimeEventToActivities(
 
       return [
         {
-          id: event.eventId,
+          id: contextCompactionActivityId,
           createdAt: event.createdAt,
           tone: "info",
           kind: "context-compaction",
@@ -819,6 +822,23 @@ export function runtimeEventToActivities(
     }
 
     case "item.completed": {
+      if (event.payload.itemType === "context_compaction") {
+        return [
+          {
+            id: contextCompactionActivityId,
+            createdAt: event.createdAt,
+            tone: "info",
+            kind: "context-compaction",
+            summary: "Context compacted",
+            payload: {
+              status: "completed",
+              ...(event.itemId !== undefined ? { itemId: event.itemId } : {}),
+            },
+            turnId: toTurnId(event.turnId) ?? null,
+            ...maybeSequence,
+          },
+        ];
+      }
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
       }
@@ -847,6 +867,23 @@ export function runtimeEventToActivities(
     }
 
     case "item.started": {
+      if (event.payload.itemType === "context_compaction") {
+        return [
+          {
+            id: contextCompactionActivityId,
+            createdAt: event.createdAt,
+            tone: "info",
+            kind: "context-compaction",
+            summary: "Compacting context",
+            payload: {
+              status: "started",
+              ...(event.itemId !== undefined ? { itemId: event.itemId } : {}),
+            },
+            turnId: toTurnId(event.turnId) ?? null,
+            ...maybeSequence,
+          },
+        ];
+      }
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
       }

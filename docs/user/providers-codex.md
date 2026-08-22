@@ -1,5 +1,11 @@
 # Codex
 
+## Compact a long chat
+
+In an existing Codex thread, type `/compact` by itself in the message composer and send it. Mesura Code asks Codex to summarize older context without adding the command to the conversation as a user message.
+
+Wait for the current turn to finish before compacting. Prompts that include other text or attachments continue through the normal message path.
+
 This guide is for people who want to use more than one Codex account in T3 Code. For Claude, see
 [Claude](./providers-claude.md). For first-time setup, see [Install T3 Code](./install.md).
 
