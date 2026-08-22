@@ -45,7 +45,16 @@ export default defineConfig({
       entry: ["src/main.ts"],
       clean: true,
       deps: {
-        alwaysBundle: (id) => id.startsWith("@t3tools/"),
+        // `@symmetria/` alongside `@t3tools/`, and the reason is the same for
+        // both: these workspace packages export TypeScript SOURCE
+        // (`"import": "./src/index.ts"`) with no built artifact and no
+        // `require` condition, so leaving one external produces a packed
+        // bundle that resolves fine at typecheck and at test time — vitest
+        // reads the source directly — and then throws
+        // ERR_PACKAGE_PATH_NOT_EXPORTED the moment Electron actually starts.
+        // Found by launching the application, which is the only thing that
+        // exercises this path.
+        alwaysBundle: (id) => id.startsWith("@t3tools/") || id.startsWith("@symmetria/"),
       },
       ...(shouldLaunchElectronAfterPack ? { onSuccess: "node scripts/dev-electron.mjs" } : {}),
     },

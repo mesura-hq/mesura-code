@@ -4,12 +4,18 @@
       "type": "snapshot",
       "protocolVersion": {
         "major": 1,
-        "minor": 0
+        "minor": 1
       },
       "revision": 412,
       "threads": [],
       "surfaces": [],
-      "drafts": []
+      "drafts": [],
+      "projects": [
+        {
+          "projectId": "prj_symmetria_shell",
+          "name": "symmetria-shell"
+        }
+      ]
     },
     {
       "type": "delta",
