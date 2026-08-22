@@ -217,6 +217,7 @@ import {
   useComposerDraftStore,
   type DraftId,
 } from "../composerDraftStore";
+import { useSttDelivery } from "../symmetria/useSttDelivery";
 import {
   appendTerminalContextsToPrompt,
   formatTerminalContextLabel,
@@ -1280,6 +1281,20 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const composerDraftTarget: ScopedThreadRef | DraftId =
     routeKind === "server" ? routeThreadRef : props.draftId;
+  // Dictation from Symmetria Shell lands in the conversation this view is
+  // rendering. It has to use `composerDraftTarget` and not `routeThreadRef`:
+  // on a draft route those are different keys, and writing to the second one
+  // puts the text where the composer does not read it. Submitting is phase 2,
+  // so the writer's submit is deliberately a no-op.
+  const sttWriter = useMemo(
+    () => ({
+      placePrompt: (text: string) =>
+        useComposerDraftStore.getState().setPrompt(composerDraftTarget, text),
+      submit: () => {},
+    }),
+    [composerDraftTarget],
+  );
+  useSttDelivery(sttWriter);
   const draftThread = useComposerDraftStore((store) =>
     routeKind === "server"
       ? store.getDraftSessionByRef(routeThreadRef)
