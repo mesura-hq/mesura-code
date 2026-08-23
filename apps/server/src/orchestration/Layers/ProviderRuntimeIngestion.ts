@@ -8,6 +8,7 @@ import {
   type OrchestrationProposedPlanId,
   CheckpointRef,
   classifyTaskAgentKind,
+  defaultInstanceIdForDriver,
   EventId,
   isToolLifecycleItemType,
   ThreadId,
@@ -45,6 +46,7 @@ import { projectActivityPayload } from "../ActivityPayloadProjection.ts";
 import { forkParked } from "../../serverActivation.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { canReplaceThreadTitle } from "../threadTitles.ts";
+import { AccountLimitsService } from "../../usage/AccountLimitsService.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerTaskKey = (threadId: ThreadId, taskId: string) => `${threadId}:${taskId}`;
@@ -890,6 +892,7 @@ const make = Effect.gen(function* () {
   const providerService = yield* ProviderService;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
+  const accountLimits = yield* AccountLimitsService;
   const providerCommandId = (event: ProviderRuntimeEvent, tag: string) =>
     crypto.randomUUIDv4.pipe(
       Effect.map((uuid) => CommandId.make(`provider:${event.eventId}:${tag}:${uuid}`)),
@@ -1489,6 +1492,26 @@ const make = Effect.gen(function* () {
 
   const processRuntimeEvent = (event: ProviderRuntimeEvent) =>
     Effect.gen(function* () {
+      if (event.type === "account.rate-limits.updated") {
+        const providerInstanceId =
+          event.providerInstanceId ?? defaultInstanceIdForDriver(event.provider);
+        yield* accountLimits
+          .ingest({
+            providerInstanceId,
+            driver: event.provider,
+            payload: event.payload.rateLimits,
+            createdAt: event.createdAt,
+          })
+          .pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("failed to ingest provider account limits", {
+                providerInstanceId,
+                cause: Cause.pretty(cause),
+              }),
+            ),
+          );
+      }
+
       const thread = yield* resolveThreadShell(event.threadId);
       if (!thread) return;
 

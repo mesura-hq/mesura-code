@@ -55,6 +55,11 @@ import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts"
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { ACCOUNT_LIMITS_CONTRACT_VERSION, type AccountLimitsSummary } from "@t3tools/contracts";
+import {
+  AccountLimitsService,
+  type AccountLimitsIngestInput,
+} from "../../usage/AccountLimitsService.ts";
 
 function makeTestServerSettingsLayer(overrides: Partial<ServerSettings> = {}) {
   return ServerSettingsService.layerTest(overrides);
@@ -225,6 +230,7 @@ describe("ProviderRuntimeIngestion", () => {
   async function createHarness(options?: {
     serverSettings?: Partial<ServerSettings>;
     threadTitle?: string;
+    accountLimitsIngest?: (input: AccountLimitsIngestInput) => Effect.Effect<void>;
   }) {
     const workspaceRoot = makeTempDir("t3-provider-project-");
     NodeFS.mkdirSync(NodePath.join(workspaceRoot, ".git"));
@@ -251,6 +257,22 @@ describe("ProviderRuntimeIngestion", () => {
       Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
       Layer.provideMerge(makeTestServerSettingsLayer(options?.serverSettings)),
+      Layer.provideMerge(
+        Layer.succeed(
+          AccountLimitsService,
+          AccountLimitsService.of({
+            readSummary: () =>
+              Effect.succeed({
+                contractVersion: ACCOUNT_LIMITS_CONTRACT_VERSION,
+                readAt: "1970-01-01T00:00:00.000Z",
+                snapshots: [],
+              } satisfies AccountLimitsSummary),
+            ingest: options?.accountLimitsIngest ?? (() => Effect.void),
+            refreshStale: Effect.void,
+            run: Effect.never,
+          }),
+        ),
+      ),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
       Layer.provideMerge(NodeServices.layer),
     );
@@ -325,6 +347,54 @@ describe("ProviderRuntimeIngestion", () => {
       drain,
     };
   }
+
+  it("forwards account-limit events to the owning provider instance", async () => {
+    const observed: AccountLimitsIngestInput[] = [];
+    const harness = await createHarness({
+      accountLimitsIngest: (input) => Effect.sync(() => observed.push(input)).pipe(Effect.asVoid),
+    });
+
+    harness.emit({
+      type: "account.rate-limits.updated",
+      eventId: asEventId("evt-account-limits"),
+      provider: ProviderDriverKind.make("codex"),
+      providerInstanceId: ProviderInstanceId.make("codex_work"),
+      threadId: asThreadId("missing-thread"),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      payload: {
+        rateLimits: { primary: { usedPercent: 25 } },
+      },
+    });
+    await harness.drain();
+
+    expect(observed).toEqual([
+      {
+        providerInstanceId: "codex_work",
+        driver: "codex",
+        payload: { primary: { usedPercent: 25 } },
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("uses the default instance for a legacy account-limit event", async () => {
+    const observed: AccountLimitsIngestInput[] = [];
+    const harness = await createHarness({
+      accountLimitsIngest: (input) => Effect.sync(() => observed.push(input)).pipe(Effect.asVoid),
+    });
+
+    harness.emit({
+      type: "account.rate-limits.updated",
+      eventId: asEventId("evt-account-limits-legacy"),
+      provider: ProviderDriverKind.make("claudeAgent"),
+      threadId: asThreadId("missing-thread"),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      payload: { rateLimits: { rate_limit_info: { utilization: 20 } } },
+    });
+    await harness.drain();
+
+    expect(observed[0]?.providerInstanceId).toBe("claudeAgent");
+  });
 
   it("maps turn started/completed events into thread session updates", async () => {
     const harness = await createHarness();
