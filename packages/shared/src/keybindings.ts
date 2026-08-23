@@ -26,7 +26,12 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+d", command: "terminal.splitVertical", when: "terminalFocus" },
   { key: "mod+n", command: "terminal.new", when: "terminalFocus" },
   { key: "mod+w", command: "terminal.close", when: "terminalFocus" },
-  { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
+  // Moved off mod+d so the reading scroll can take the vim pair mod+u/mod+d.
+  // The startup backfill in apps/server/src/keybindings.ts only adds defaults
+  // for commands a config does not mention, so a config written before this
+  // change keeps diff.toggle on mod+d and shadows the scroll shortcut. That
+  // move has to be made by hand in the user config; it cannot be shipped.
+  { key: "mod+shift+d", command: "diff.toggle", when: "!terminalFocus" },
   { key: "mod+shift+j", command: "preview.toggle" },
   { key: "mod+r", command: "preview.refresh", when: "previewFocus" },
   { key: "mod+l", command: "preview.focusUrl", when: "previewFocus" },
@@ -43,6 +48,9 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+n", command: "chat.newLocal", when: "!terminalFocus" },
   { key: "mod+shift+m", command: "modelPicker.toggle", when: "!terminalFocus" },
+  { key: "alt+e", command: "traitsPicker.toggle", when: "!terminalFocus" },
+  { key: "mod+u", command: "chat.scrollHalfPageUp", when: "!terminalFocus" },
+  { key: "mod+d", command: "chat.scrollHalfPageDown", when: "!terminalFocus" },
   { key: "mod+o", command: "editor.openFavorite" },
   { key: "mod+shift+[", command: "thread.previous" },
   { key: "mod+shift+]", command: "thread.next" },

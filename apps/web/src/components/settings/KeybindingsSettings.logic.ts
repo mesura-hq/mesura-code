@@ -313,6 +313,38 @@ export function normalizeShortcutKeyToken(key: string): string | null {
   return null;
 }
 
+export type KeybindingCaptureOutcome =
+  /** Let the browser handle the key. Bare Tab still has to move focus. */
+  | { readonly kind: "passthrough" }
+  /** Stop recording and restore whatever the field held before. */
+  | { readonly kind: "cancel" }
+  /** Nothing recordable, such as a lone modifier being held down. */
+  | { readonly kind: "ignore" }
+  | { readonly kind: "record"; readonly key: string };
+
+/**
+ * Decide what one keydown means while a shortcut field is recording.
+ *
+ * Tab is the awkward case. The field is an input, so a bare Tab has to keep
+ * moving focus or the recorder traps the keyboard. A Tab pressed with a
+ * modifier is a shortcut a user may legitimately want, so only the bare one
+ * passes through.
+ */
+export function resolveKeybindingCapture(
+  event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">,
+  platform: string,
+): KeybindingCaptureOutcome {
+  const hasModifier = event.metaKey || event.ctrlKey || event.altKey;
+  if (event.key === "Tab" && !hasModifier) {
+    return { kind: "passthrough" };
+  }
+  if (event.key === "Escape") {
+    return { kind: "cancel" };
+  }
+  const key = keybindingFromKeyboardEvent(event, platform);
+  return key ? { kind: "record", key } : { kind: "ignore" };
+}
+
 export function keybindingFromKeyboardEvent(
   event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">,
   platform: string,

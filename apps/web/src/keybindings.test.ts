@@ -6,6 +6,7 @@ import {
   type KeybindingWhenNode,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import {
   formatShortcutLabel,
   isChatNewShortcut,
@@ -910,5 +911,60 @@ describe("plus key parsing", () => {
         platform: "Linux",
       }),
     );
+  });
+});
+
+// The suite above resolves against a hand-written mirror of the defaults. This
+// block resolves against the real DEFAULT_RESOLVED_KEYBINDINGS, so it also
+// catches a default that parses fine but is shadowed by a later rule. Shipped
+// order matters: the resolver scans from the end and the last match wins.
+describe("shipped defaults on Linux", () => {
+  const press = (
+    key: string,
+    modifiers: Partial<Pick<ShortcutEventLike, "ctrlKey" | "shiftKey" | "altKey" | "metaKey">> = {},
+  ): ShortcutEventLike => ({
+    key,
+    ctrlKey: false,
+    shiftKey: false,
+    altKey: false,
+    metaKey: false,
+    ...modifiers,
+  });
+  const resolve = (shortcutEvent: ShortcutEventLike, terminalFocus = false) =>
+    resolveShortcutCommand(shortcutEvent, DEFAULT_RESOLVED_KEYBINDINGS, {
+      platform: "Linux",
+      context: { terminalFocus },
+    });
+
+  it("scrolls the timeline with Ctrl+U and Ctrl+D outside the terminal", () => {
+    assert.strictEqual(resolve(press("u", { ctrlKey: true })), "chat.scrollHalfPageUp");
+    assert.strictEqual(resolve(press("d", { ctrlKey: true })), "chat.scrollHalfPageDown");
+  });
+
+  it("gives Ctrl+D back to the terminal when the terminal has focus", () => {
+    // terminal.split owns mod+d under terminalFocus. The scroll binding is
+    // later in the array but its !terminalFocus clause has to keep it out.
+    assert.strictEqual(resolve(press("d", { ctrlKey: true }), true), "terminal.split");
+  });
+
+  it("moved diff.toggle to Ctrl+Shift+D without colliding with the terminal split", () => {
+    assert.strictEqual(resolve(press("d", { ctrlKey: true, shiftKey: true })), "diff.toggle");
+    assert.strictEqual(
+      resolve(press("d", { ctrlKey: true, shiftKey: true }), true),
+      "terminal.splitVertical",
+    );
+  });
+
+  it("opens the composer pickers", () => {
+    assert.strictEqual(resolve(press("e", { altKey: true })), "traitsPicker.toggle");
+    assert.strictEqual(
+      resolve(press("m", { ctrlKey: true, shiftKey: true })),
+      "modelPicker.toggle",
+    );
+  });
+
+  it("leaves every new binding inert while the terminal has focus", () => {
+    assert.strictEqual(resolve(press("u", { ctrlKey: true }), true), null);
+    assert.strictEqual(resolve(press("e", { altKey: true }), true), null);
   });
 });

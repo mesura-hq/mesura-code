@@ -61,8 +61,8 @@ import {
   DEFAULT_WHEN_VARIABLE,
   isKnownWhenVariable,
   keybindingConflictLabels,
-  keybindingFromKeyboardEvent,
   parseWhenExpressionDraft,
+  resolveKeybindingCapture,
   type KeybindingCommandOption,
   type KeybindingRow,
   type WhenVariableOption,
@@ -775,15 +775,14 @@ function KeybindingTableRow({
   };
 
   const captureKeybinding = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Tab") return;
+    const outcome = resolveKeybindingCapture(event.nativeEvent, navigator.platform);
+    if (outcome.kind === "passthrough") return;
     event.preventDefault();
-    if (event.key === "Escape") {
-      setDraft({ keyDraft: row.key, isRecording: false });
-      return;
-    }
-    const next = keybindingFromKeyboardEvent(event.nativeEvent, navigator.platform);
-    if (!next) return;
-    setDraft({ keyDraft: next, isRecording: false });
+    if (outcome.kind === "ignore") return;
+    setDraft({
+      keyDraft: outcome.kind === "cancel" ? row.key : outcome.key,
+      isRecording: false,
+    });
   };
 
   return (
@@ -946,15 +945,14 @@ function NewKeybindingTableRow({
   };
 
   const captureKeybinding = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Tab") return;
+    const outcome = resolveKeybindingCapture(event.nativeEvent, navigator.platform);
+    if (outcome.kind === "passthrough") return;
     event.preventDefault();
-    if (event.key === "Escape") {
-      setDraft({ keyDraft: "", isRecording: false });
-      return;
-    }
-    const next = keybindingFromKeyboardEvent(event.nativeEvent, navigator.platform);
-    if (!next) return;
-    setDraft({ keyDraft: next, isRecording: false });
+    if (outcome.kind === "ignore") return;
+    setDraft({
+      keyDraft: outcome.kind === "cancel" ? "" : outcome.key,
+      isRecording: false,
+    });
   };
 
   return (

@@ -207,6 +207,13 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.equal(defaultsByCommand.get("terminal.splitVertical"), "mod+shift+d");
       assert.equal(defaultsByCommand.get("modelPicker.jump.1"), "mod+1");
       assert.equal(defaultsByCommand.get("modelPicker.jump.9"), "mod+9");
+      assert.equal(defaultsByCommand.get("traitsPicker.toggle"), "alt+e");
+      assert.equal(defaultsByCommand.get("chat.scrollHalfPageUp"), "mod+u");
+      assert.equal(defaultsByCommand.get("chat.scrollHalfPageDown"), "mod+d");
+      // diff.toggle gave mod+d up to the reading scroll. terminal.splitVertical
+      // also sits on mod+shift+d, but only while the terminal has focus, so the
+      // two never resolve at the same time.
+      assert.equal(defaultsByCommand.get("diff.toggle"), "mod+shift+d");
     }),
   );
 

@@ -14,7 +14,7 @@ import {
   getProviderOptionDescriptors,
   isClaudeUltrathinkPrompt,
 } from "@t3tools/shared/model";
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
 import { ZapIcon } from "lucide-react";
 import { buttonVariants } from "../ui/button";
@@ -32,6 +32,7 @@ import { getProviderModelCapabilities } from "../../providerModels";
 import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
 import { ComposerControl, ComposerControlChevron, ComposerControlIcon } from "./ComposerControl";
+import { subscribeTraitsPickerToggle } from "./traitsPickerActionBus";
 
 type ProviderOptions = ReadonlyArray<ProviderOptionSelection>;
 
@@ -449,6 +450,15 @@ export function buildTraitsTriggerDisplay(input: {
   return { label: labels.join(" · "), showFastModeIcon: fastModeEnabled };
 }
 
+export interface TraitsPickerProps extends TraitsMenuContentProps {
+  /**
+   * Opt this picker into the `traitsPicker.toggle` keybinding. Only the
+   * composer sets it: the same component renders inside settings panels, and
+   * those must not open from a chat shortcut.
+   */
+  respondsToShortcut?: boolean;
+}
+
 export const TraitsPicker = memo(function TraitsPicker({
   provider,
   instanceId,
@@ -461,9 +471,18 @@ export const TraitsPicker = memo(function TraitsPicker({
   planModeEnabled,
   triggerVariant,
   triggerClassName,
+  respondsToShortcut = false,
   ...persistence
-}: TraitsMenuContentProps & TraitsPersistence) {
+}: TraitsPickerProps & TraitsPersistence) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  // Subscribed above the early return below, which the visibility check can
+  // take on any render when the selected provider exposes no traits.
+  useEffect(() => {
+    if (!respondsToShortcut) return;
+    return subscribeTraitsPickerToggle(() => {
+      setIsMenuOpen((open) => !open);
+    });
+  }, [respondsToShortcut]);
   const { descriptors, primarySelectDescriptor, ultrathinkPromptControlled } =
     getTraitsSectionVisibility({
       provider,

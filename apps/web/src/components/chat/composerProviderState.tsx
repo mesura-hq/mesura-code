@@ -89,10 +89,12 @@ export function getComposerProviderState(input: ComposerProviderStateInput): Com
   };
 }
 
-function renderTraitsControl(
-  Component: typeof TraitsMenuContent | typeof TraitsPicker,
-  input: TraitsRenderInput,
-): ReactNode {
+/**
+ * Shared props for both traits renderings, or null when the control has
+ * nothing to show. The two exported renderers differ by one prop, so they
+ * build their own element off this rather than share a component parameter.
+ */
+function resolveTraitsControlProps(input: TraitsRenderInput) {
   const {
     provider,
     instanceId,
@@ -119,26 +121,27 @@ function renderTraitsControl(
   ) {
     return null;
   }
-  return (
-    <Component
-      provider={provider}
-      {...(instanceId ? { instanceId } : {})}
-      models={models}
-      {...(threadRef ? { threadRef } : {})}
-      {...(draftId ? { draftId } : {})}
-      model={model}
-      modelOptions={modelOptions}
-      prompt={prompt}
-      onPromptChange={onPromptChange}
-      planModeEnabled={planModeEnabled}
-    />
-  );
+  return {
+    provider,
+    ...(instanceId ? { instanceId } : {}),
+    models,
+    ...(threadRef ? { threadRef } : {}),
+    ...(draftId ? { draftId } : {}),
+    model,
+    modelOptions,
+    prompt,
+    onPromptChange,
+    planModeEnabled,
+  };
 }
 
 export function renderProviderTraitsMenuContent(input: TraitsRenderInput): ReactNode {
-  return renderTraitsControl(TraitsMenuContent, input);
+  const props = resolveTraitsControlProps(input);
+  return props ? <TraitsMenuContent {...props} /> : null;
 }
 
 export function renderProviderTraitsPicker(input: TraitsRenderInput): ReactNode {
-  return renderTraitsControl(TraitsPicker, input);
+  const props = resolveTraitsControlProps(input);
+  // The composer's picker is the only one a keybinding may open.
+  return props ? <TraitsPicker {...props} respondsToShortcut /> : null;
 }

@@ -165,6 +165,13 @@ import {
 import { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
 import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
+import {
+  READING_SCROLL_DURATION_MS,
+  type ReadingScrollDirection,
+  readingScrollPositionAt,
+  resolveReadingScrollTarget,
+} from "../lib/chatReadingScroll";
+import { dispatchTraitsPickerToggle } from "./chat/traitsPickerActionBus";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
   AlarmClockIcon,
@@ -3855,6 +3862,79 @@ function ChatViewContent(props: ChatViewProps) {
       void legendListRef.current?.scrollToEnd?.({ animated });
     });
   }, []);
+  // Reading scroll for chat.scrollHalfPageUp / chat.scrollHalfPageDown. See
+  // lib/chatReadingScroll.ts for why it moves half a viewport and why the
+  // animation is as short as it is.
+  const readingScrollFrameRef = useRef<number | null>(null);
+  const readingScrollTargetRef = useRef<number | null>(null);
+  const scrollTimelineForReading = useCallback(
+    (direction: ReadingScrollDirection) => {
+      const scrollNode = legendListRef.current?.getScrollableNode();
+      if (!(scrollNode instanceof HTMLElement)) return;
+
+      const target = resolveReadingScrollTarget(
+        {
+          scrollTop: scrollNode.scrollTop,
+          visibleHeight: Math.max(0, scrollNode.clientHeight - composerOverlayHeight),
+          maxScrollTop: scrollNode.scrollHeight - scrollNode.clientHeight,
+        },
+        direction,
+        // Re-target off the pending destination, not off the position the
+        // animation is passing through, so repeated presses keep travelling
+        // instead of each one re-measuring a viewport barely underway.
+        readingScrollTargetRef.current ?? undefined,
+      );
+      if (Math.abs(target - scrollNode.scrollTop) < 1) {
+        readingScrollTargetRef.current = null;
+        return;
+      }
+
+      // A programmatic scroll fires no wheel or pointer event, so the
+      // live-follow opt-out listeners on the scroll node never observe it.
+      // Break follow here, or the next stream chunk yanks the reader back to
+      // the live edge mid-sentence. Scrolling down needs no break, for the
+      // same reason a downward wheel does not: it moves toward the end.
+      if (direction === "up") {
+        cancelTimelineLiveFollowForUserNavigationRef.current();
+      }
+
+      if (readingScrollFrameRef.current !== null) {
+        cancelAnimationFrame(readingScrollFrameRef.current);
+        readingScrollFrameRef.current = null;
+      }
+      readingScrollTargetRef.current = target;
+
+      if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+        scrollNode.scrollTop = target;
+        readingScrollTargetRef.current = null;
+        return;
+      }
+
+      const from = scrollNode.scrollTop;
+      const startedAt = performance.now();
+      const step = () => {
+        const elapsed = performance.now() - startedAt;
+        if (elapsed >= READING_SCROLL_DURATION_MS) {
+          scrollNode.scrollTop = target;
+          readingScrollFrameRef.current = null;
+          readingScrollTargetRef.current = null;
+          return;
+        }
+        scrollNode.scrollTop = readingScrollPositionAt(from, target, elapsed);
+        readingScrollFrameRef.current = requestAnimationFrame(step);
+      };
+      readingScrollFrameRef.current = requestAnimationFrame(step);
+    },
+    [composerOverlayHeight],
+  );
+  useEffect(
+    () => () => {
+      if (readingScrollFrameRef.current !== null) {
+        cancelAnimationFrame(readingScrollFrameRef.current);
+      }
+    },
+    [],
+  );
   useEffect(() => {
     let removeListeners: (() => void) | null = null;
     let frame: number | null = null;
@@ -4931,6 +5011,22 @@ function ChatViewContent(props: ChatViewProps) {
         return;
       }
 
+      if (command === "traitsPicker.toggle") {
+        event.preventDefault();
+        event.stopPropagation();
+        // No-op when the composer is in its compact layout or the selected
+        // provider exposes no traits: neither renders the picker at all.
+        dispatchTraitsPickerToggle();
+        return;
+      }
+
+      if (command === "chat.scrollHalfPageUp" || command === "chat.scrollHalfPageDown") {
+        event.preventDefault();
+        event.stopPropagation();
+        scrollTimelineForReading(command === "chat.scrollHalfPageUp" ? "up" : "down");
+        return;
+      }
+
       const scriptId = projectScriptIdFromCommand(command);
       if (!scriptId || !activeProject) return;
       const script = activeProject.scripts.find((entry) => entry.id === scriptId);
@@ -4961,6 +5057,7 @@ function ChatViewContent(props: ChatViewProps) {
     toggleRightPanelMaximized,
     toggleTerminalVisibility,
     composerRef,
+    scrollTimelineForReading,
   ]);
 
   const onRevertToTurnCount = useCallback(

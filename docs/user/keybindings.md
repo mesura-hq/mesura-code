@@ -3,10 +3,16 @@
 Edit keybindings from **Settings** → **Keybindings**. That page lists every command, its current
 shortcut, whether it is a default or your own, and warns about conflicts.
 
-The same configuration lives in `~/.t3/userdata/keybindings.json` on the machine running the
-server, if you prefer editing it directly. T3 Code writes the built-in defaults into that file on
-first run, and adds any new defaults on later startups unless a rule of yours already claims the
-command or the shortcut.
+The same configuration lives in `~/.mesura-code/userdata/keybindings.json` on the machine running
+the server, if you prefer editing it directly. Mesura Code writes the built-in defaults into that
+file on first run, and adds any new defaults on later startups unless a rule of yours already
+claims the command or the shortcut.
+
+That last condition has a consequence worth knowing. Startup only backfills defaults for commands
+your file does not mention. When a release _moves_ a default onto a different key, and your file
+already has a rule for that command, the move does not reach you: your old rule stays and keeps
+the old key. Nothing warns you, and the shortcut that was supposed to take the key over looks
+broken instead. If a documented default does not work, compare it against your file first.
 
 The file is a JSON array of rules.
 
@@ -32,6 +38,14 @@ Modifiers: `mod` (`cmd` on macOS, `ctrl` elsewhere), `cmd` / `meta`, `ctrl` / `c
 
 Examples: `mod+j`, `mod+shift+d`, `ctrl+l`, `cmd+k`.
 
+`tab` is usable as a key, but only with a modifier. The recorder in **Settings** → **Keybindings**
+passes a bare `Tab` and `Shift+Tab` through so they keep moving focus; a `Tab` held with Ctrl, Alt,
+or Cmd records normally.
+
+Shortcuts on `tab` reach the desktop app but not the web app. Browsers keep `Ctrl+Tab` and
+`Ctrl+Shift+Tab` for switching their own tabs and never deliver them to a page, so a rule using
+them works in the desktop app and stays silent in a browser.
+
 ## Commands
 
 Commands are IDs like `terminal.toggle`, `commandPalette.toggle`, `preview.refresh`, and
@@ -51,6 +65,41 @@ successful pick; its hover glow and badge preview the element and color family t
 
 `rightPanel.toggleMaximized` maximizes or restores the open right panel. It has no default shortcut,
 so add one in **Settings** → **Keybindings** if you want to use it.
+
+### Composer pickers
+
+`modelPicker.toggle` opens the model picker from the composer and defaults to `mod+shift+m`. While
+it is open, `mod+1` through `mod+9` select a model directly.
+
+`traitsPicker.toggle` opens the composer control that holds reasoning effort, thinking, fast mode,
+context window, and agent. It defaults to `alt+e`. Two cases make it do nothing, both by design:
+a provider that exposes none of those traits does not render the control at all, and a narrow
+composer folds the traits into its compact controls menu, which has no separate picker to open.
+
+### Reading a long thread
+
+`chat.scrollHalfPageUp` and `chat.scrollHalfPageDown` scroll the message timeline and default to
+`mod+u` and `mod+d`. Each press travels half the readable height rather than a whole screen, so
+half of what you were reading stays visible and you keep your place. The move is animated over
+about a fifth of a second and slows as it lands; with the system set to reduce motion, it jumps
+instead. Holding a key keeps travelling, because each press aims from where the previous one was
+going rather than from the position the animation is passing through.
+
+Scrolling up also stops the timeline following the live edge, the same as scrolling with the
+wheel. Without that, the next chunk of a streaming reply would pull you back to the bottom.
+
+`diff.toggle` moved off `mod+d` to `mod+shift+d` to make room for that pair. If your keybindings
+file predates the move, see the warning above about defaults that cannot be backfilled.
+
+### `mod+w` no longer closes the desktop app
+
+`terminal.close` is bound to `mod+w` while the terminal has focus. On Linux and Windows the
+desktop window is the whole application, and its native Window menu also claimed `Ctrl+W` to close
+that window. A press aimed at a terminal that had just lost focus therefore quit Mesura Code.
+
+The Window menu no longer claims that key on those platforms, so `Ctrl+W` closes a terminal and
+does nothing otherwise. Quit from **File** → **Quit**, the titlebar, or your window manager.
+On macOS nothing changed: `Cmd+W` closes a window there without quitting the app.
 
 The command palette searches active thread titles, projects, branches, user messages, and final
 agent responses across connected environments. Message matches show one labeled excerpt while
