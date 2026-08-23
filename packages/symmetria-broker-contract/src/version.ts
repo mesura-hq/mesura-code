@@ -6,6 +6,24 @@
  * a minor bump is additive by definition and a consumer that ignores unknown
  * fields keeps working across one. Phase five wires this gate into the stream
  * framing; here it only states the rule.
+ *
+ * ⚠ **The minor promise runs in one direction, and the 1.1 addition is what
+ * made that worth saying out loud.** A NEWER producer talking to an OLDER
+ * consumer is the case the rule describes and the case the contract handles:
+ * unknown fields are dropped and an unknown stream entity degrades rather than
+ * failing the payload. The reverse is not promised. `SymmetriaStreamSnapshot`
+ * gained a required `projects` array in 1.1, so a snapshot from a genuine 1.0
+ * producer now announces a minor this gate accepts and then fails to decode on
+ * the missing key.
+ *
+ * That was a deliberate choice rather than an oversight, and it rests on a fact
+ * about this deployment rather than on the shape of the contract: there is
+ * exactly one producer, it ships in the same repository as its schema, and no
+ * older one exists anywhere. An optional key would have bought nothing real and
+ * cost every consumer a `?? []` at the point where it needs a project's name.
+ * If a second producer ever appears — a phone, a server, anything that upgrades
+ * on its own schedule — this is the decision to revisit FIRST, because the
+ * failure mode is a stream that opens and then refuses its own opening item.
  */
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
@@ -13,13 +31,13 @@ import * as Schema from "effect/Schema";
 import { NonNegativeInteger } from "./primitives.ts";
 
 /** Semantic version of the whole contract surface, pinned by consumers. */
-export const SYMMETRIA_CONTRACT_VERSION = "1.0.0";
+export const SYMMETRIA_CONTRACT_VERSION = "1.1.0";
 
 /** The single major version this build of the contract speaks. */
 export const SYMMETRIA_PROTOCOL_MAJOR = 1;
 
 /** The highest minor version this build of the contract speaks. */
-export const SYMMETRIA_PROTOCOL_MINOR = 0;
+export const SYMMETRIA_PROTOCOL_MINOR = 1;
 
 /**
  * A protocol version this build accepts. The major is pinned to a literal, so

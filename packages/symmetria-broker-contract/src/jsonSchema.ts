@@ -15,6 +15,7 @@
 import * as Schema from "effect/Schema";
 
 import { SymmetriaCommandEnvelope, SymmetriaCommandReceipt } from "./command.ts";
+import { SymmetriaProjectSummary } from "./projectSummary.ts";
 import { SymmetriaDraft, SymmetriaDraftUpdate, SymmetriaDraftUpdateResult } from "./draft.ts";
 import { SymmetriaStreamItem } from "./stream.ts";
 import { SymmetriaSurfacePresence } from "./surfacePresence.ts";
@@ -93,6 +94,12 @@ export const SYMMETRIA_SCHEMA_ROOTS: ReadonlyArray<SymmetriaSchemaRoot> = [
     file: "draftUpdateResult.schema.json",
     summary: "The outcome of a draft update, applied or refused as a conflict.",
     schema: SymmetriaDraftUpdateResult,
+  },
+  {
+    root: "SymmetriaProjectSummary",
+    file: "projectSummary.schema.json",
+    summary: "One project's identity: what a consumer prints above the threads it groups.",
+    schema: SymmetriaProjectSummary,
   },
   {
     root: "SymmetriaStreamItem",

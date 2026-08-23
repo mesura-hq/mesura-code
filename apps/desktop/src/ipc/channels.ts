@@ -10,6 +10,11 @@ export const MENU_ACTION_CHANNEL = "desktop:menu-action";
 // placed the text — same round-trip shape as the ssh password prompt below.
 export const STT_DELIVER_CHANNEL = "desktop:stt-deliver";
 export const RESOLVE_STT_DELIVER_CHANNEL = "desktop:resolve-stt-deliver";
+// The renderer forwards its projected thread list here, and the main process
+// republishes it on the Symmetria socket. Renderer→main, unlike the dictation
+// pair above: the renderer already holds the read model, so a second
+// subscription in the main process would be a duplicate with its own auth.
+export const PUBLISH_THREADS_CHANNEL = "desktop:publish-threads";
 export const QUIT_SHORTCUT_CHANNEL = "desktop:quit-shortcut";
 export const GET_WINDOW_FULLSCREEN_STATE_CHANNEL = "desktop:get-window-fullscreen-state";
 export const WINDOW_FULLSCREEN_STATE_CHANNEL = "desktop:window-fullscreen-state";

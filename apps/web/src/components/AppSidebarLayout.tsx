@@ -23,7 +23,8 @@ import {
   resolveSidebarStageFocusRingOffsetClass,
   useSidebarStageBackdropVariant,
 } from "./SidebarStageBackdrop";
-import { useProjects } from "../state/entities";
+import { useProjects, useThreadShells } from "../state/entities";
+import { useThreadFeed } from "../symmetria/useThreadFeed";
 import {
   resolveInitialThreadSidebarWidth,
   resolveThreadSidebarMaximumWidth,
@@ -136,6 +137,16 @@ function ProjectProjectionRetention() {
   return null;
 }
 
+// Forwards the same lightweight projection to the main process, which
+// republishes it for Symmetria Shell's bar. Mounted here rather than inside a
+// sidebar because the bar must keep reporting while the user is on settings or
+// anywhere else — the two projections are the same subscription, so this costs
+// nothing beyond the comparison inside the hook.
+function SymmetriaThreadFeedRetention() {
+  useThreadFeed({ projects: useProjects(), threads: useThreadShells() });
+  return null;
+}
+
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const legacySidebarEnabled = useLegacySidebarEnabled();
@@ -211,6 +222,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   return (
     <SidebarProvider className="h-dvh! min-h-0!" defaultOpen style={sidebarProviderStyle}>
       <ProjectProjectionRetention />
+      <SymmetriaThreadFeedRetention />
       <Sidebar
         side="left"
         collapsible="offcanvas"

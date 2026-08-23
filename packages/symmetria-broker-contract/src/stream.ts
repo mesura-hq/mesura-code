@@ -36,6 +36,7 @@ import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 
 import { SymmetriaDraft } from "./draft.ts";
+import { SymmetriaProjectSummary } from "./projectSummary.ts";
 import { NonNegativeInteger, SymmetriaSnapshotRevision } from "./primitives.ts";
 import { SymmetriaSurfacePresence } from "./surfacePresence.ts";
 import { SymmetriaThreadSummary } from "./threadSummary.ts";
@@ -92,6 +93,22 @@ export const SymmetriaDraftChange = Schema.Struct({
 export type SymmetriaDraftChange = typeof SymmetriaDraftChange.Type;
 
 /**
+ * One project's identity, so a consumer grouping threads has a word to print.
+ *
+ * It has no removal member either, and unlike a thread it carries no field that
+ * could stand in for one — a project has no `deletedAt` on this wire. That is
+ * deliberate rather than an oversight: a project is only ever interesting here
+ * because threads point at it, so one that no thread references is one a
+ * consumer stops rendering by itself. Adding a tombstone would create a second
+ * way for a project to leave, and the two could disagree.
+ */
+export const SymmetriaProjectChange = Schema.Struct({
+  entity: Schema.Literal("project"),
+  project: SymmetriaProjectSummary,
+});
+export type SymmetriaProjectChange = typeof SymmetriaProjectChange.Type;
+
+/**
  * A change this build cannot read, kept rather than refused.
  *
  * A minor bump is additive by definition, so a 1.1 producer may name an entity
@@ -107,7 +124,7 @@ export type SymmetriaDraftChange = typeof SymmetriaDraftChange.Type;
  * A payload naming a *known* entity with a body that does not match it fails the
  * check, so it never reaches this member and is still reported as malformed. The
  * name itself is not carried: `entity` decodes to `unknown`, so a consumer
- * branching on the tag has four cases and not an open string, and re-encoding
+ * branching on the tag has five cases and not an open string, and re-encoding
  * such a change writes `unknown` rather than the name it arrived under.
  *
  * Measured limit, the same class as the conflict filter in `draft.ts:110`: a
@@ -117,7 +134,12 @@ export type SymmetriaDraftChange = typeof SymmetriaDraftChange.Type;
  * can tell those apart, and it errs toward accepting rather than dropping, which
  * is the same direction `additionalProperties: true` errs in.
  */
-const KNOWN_CHANGE_ENTITIES: ReadonlySet<string> = new Set(["thread", "surface", "draft"]);
+const KNOWN_CHANGE_ENTITIES: ReadonlySet<string> = new Set([
+  "thread",
+  "surface",
+  "draft",
+  "project",
+]);
 
 const UnrecognizedChangeEntity = Schema.String.check(
   Schema.makeFilter(
@@ -141,13 +163,20 @@ export const SymmetriaUnknownChange = Schema.Struct({
 export type SymmetriaUnknownChange = typeof SymmetriaUnknownChange.Type;
 
 /** Every entity a delta can carry, as a value so a consumer branches on a list. */
-export const SYMMETRIA_STREAM_CHANGE_ENTITIES = ["thread", "surface", "draft", "unknown"] as const;
+export const SYMMETRIA_STREAM_CHANGE_ENTITIES = [
+  "thread",
+  "surface",
+  "draft",
+  "project",
+  "unknown",
+] as const;
 export type SymmetriaStreamChangeEntity = (typeof SYMMETRIA_STREAM_CHANGE_ENTITIES)[number];
 
 export const SymmetriaStreamChange = Schema.Union([
   SymmetriaThreadChange,
   SymmetriaSurfaceChange,
   SymmetriaDraftChange,
+  SymmetriaProjectChange,
   SymmetriaUnknownChange,
 ]);
 export type SymmetriaStreamChange = typeof SymmetriaStreamChange.Type;
@@ -175,6 +204,7 @@ export const SymmetriaStreamSnapshot = Schema.Struct({
   threads: Schema.Array(SymmetriaThreadSummary),
   surfaces: Schema.Array(SymmetriaSurfacePresence),
   drafts: Schema.Array(SymmetriaDraft),
+  projects: Schema.Array(SymmetriaProjectSummary),
 });
 export type SymmetriaStreamSnapshot = typeof SymmetriaStreamSnapshot.Type;
 
@@ -281,6 +311,7 @@ export type SymmetriaStreamState = {
   readonly threads: ReadonlyArray<SymmetriaThreadSummary>;
   readonly surfaces: ReadonlyArray<SymmetriaSurfacePresence>;
   readonly drafts: ReadonlyArray<SymmetriaDraft>;
+  readonly projects: ReadonlyArray<SymmetriaProjectSummary>;
 };
 
 /** A stream that began with something other than a full snapshot. */
@@ -308,6 +339,7 @@ export const openSymmetriaStream = (
         threads: item.threads,
         surfaces: item.surfaces,
         drafts: item.drafts,
+        projects: item.projects,
       })
     : Result.fail({
         _tag: "SymmetriaStreamNotOpened",
@@ -349,10 +381,11 @@ export type SymmetriaStreamDeltaResult =
   | SymmetriaStreamDeltaGap;
 
 /**
- * Replaces the entry that matches, or appends when nothing does. Shared by all
- * three entity kinds so an upsert cannot mean one thing for a thread and another
- * for a surface, and order-preserving so folding a stream twice produces the
- * same document twice.
+ * Replaces the entry that matches, or appends when nothing does. Every entity
+ * kind routes through it — threads, surfaces and projects directly, drafts via
+ * `upsertNewerDraft` — so an upsert cannot mean one thing for a thread and
+ * another for a surface, and order-preserving so folding a stream twice
+ * produces the same document twice.
  */
 const upsertBy = <A>(
   items: ReadonlyArray<A>,
@@ -412,6 +445,15 @@ const withChange = (
       return {
         ...state,
         drafts: upsertNewerDraft(state.drafts, change.draft),
+      };
+    case "project":
+      return {
+        ...state,
+        projects: upsertBy(
+          state.projects,
+          change.project,
+          (candidate) => candidate.projectId === change.project.projectId,
+        ),
       };
     case "unknown":
       // A change this build cannot read leaves every list as it was. The

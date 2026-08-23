@@ -17,6 +17,14 @@
         "branch": {
           "anyOf": [
             {
+              "allOf": [
+                {
+                  "minLength": 1
+                },
+                {
+                  "pattern": "\\S"
+                }
+              ],
               "type": "string"
             },
             {
@@ -168,6 +176,14 @@
           "type": "string"
         },
         "title": {
+          "allOf": [
+            {
+              "minLength": 1
+            },
+            {
+              "pattern": "\\S"
+            }
+          ],
           "type": "string"
         },
         "tokenUsage": {
@@ -405,6 +421,14 @@
         "worktreePath": {
           "anyOf": [
             {
+              "allOf": [
+                {
+                  "minLength": 1
+                },
+                {
+                  "pattern": "\\S"
+                }
+              ],
               "type": "string"
             },
             {

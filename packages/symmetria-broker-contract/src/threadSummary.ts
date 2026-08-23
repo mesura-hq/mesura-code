@@ -33,10 +33,11 @@ import {
   ProjectId,
   ThreadId,
   ThreadTokenUsageSnapshot,
-  TrimmedNonEmptyString,
   TurnId,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
+
+import { NonEmptyText } from "./primitives.ts";
 
 /**
  * What the thread's provider session is doing, without saying anything about
@@ -95,13 +96,26 @@ export type SymmetriaThreadLatestTurn = typeof SymmetriaThreadLatestTurn.Type;
 export const SymmetriaThreadSummary = Schema.Struct({
   threadId: ThreadId,
   projectId: ProjectId,
-  title: TrimmedNonEmptyString,
-  branch: Schema.NullOr(TrimmedNonEmptyString),
+  // `title`, `branch` and `worktreePath` are declared on the Symmetria-owned
+  // `NonEmptyText` rather than on upstream's `TrimmedNonEmptyString`, which is
+  // the one place this projection deliberately does NOT borrow. Upstream's
+  // check sits after a transformation, so Effect drops it on emission and the
+  // artifact promised a consumer that `""` was a valid title while the decoder
+  // refused it. Issue #2, and the reason the borrow-rather-than-restate rule
+  // has an exception here: a rule that produces a document which lies to the
+  // only consumer that reads documents is not worth keeping intact.
+  //
+  // The cost is real and accepted: these fields lose their TypeScript brand,
+  // so a producer may now pass an untrimmed string. `NonEmptyText` does not
+  // trim, on purpose — see its docstring; what crosses the wire is what the
+  // producer wrote.
+  title: NonEmptyText,
+  branch: Schema.NullOr(NonEmptyText),
   // `worktreePath` is the name the tree already uses — `OrchestrationThread`
   // (orchestration.ts:388), `TerminalSessionSnapshot` (terminal.ts:100) and
   // `git.ts:82` all agree on it. Nullable because a thread need not run in a
   // worktree.
-  worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  worktreePath: Schema.NullOr(NonEmptyText),
   latestTurn: Schema.NullOr(SymmetriaThreadLatestTurn),
   session: Schema.NullOr(SymmetriaThreadLiveness),
   tokenUsage: Schema.NullOr(ThreadTokenUsageSnapshot),
