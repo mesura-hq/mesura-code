@@ -136,6 +136,8 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
     return Effect.promise(() => this.interruptTurnImpl(turnId));
   }
 
+  compactContext = Effect.void;
+
   readThread = Effect.promise(() => this.readThreadImpl());
 
   rollbackThread(numTurns: number) {

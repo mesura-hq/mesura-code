@@ -21,6 +21,10 @@ import {
 } from "@t3tools/contracts";
 import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
+import {
+  buildNativeComposerControlCommands,
+  classifyComposerControlSubmission,
+} from "@t3tools/shared/composerControlCommand";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import {
   memo,
@@ -605,6 +609,7 @@ export interface ChatComposerProps {
 
   // Callbacks
   onSend: (e?: { preventDefault: () => void }) => void;
+  onCompactContext: () => Promise<boolean>;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
   onRespondToApproval: (
@@ -1105,6 +1110,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               },
             ] as const)
           : []),
+        ...buildNativeComposerControlCommands({
+          nativeContextCompaction: selectedProviderStatus?.nativeContextCompaction,
+          hasExistingSession: activeThread?.session !== null && activeThread?.session !== undefined,
+        }).map((item) => ({
+          id: `slash:${item.command}`,
+          type: "slash-command" as const,
+          command: item.command,
+          label: item.label,
+          description: item.description,
+        })),
       ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
       const providerSlashCommandItems = (selectedProviderStatus?.slashCommands ?? []).map(
         (command) => ({
@@ -1154,6 +1169,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     return [];
   }, [
+    activeThread?.session,
     composerTrigger,
     planModeUiEnabled,
     selectedProvider,
@@ -1768,6 +1784,22 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           }
           return;
         }
+        if (item.command === "compact") {
+          const replacement = "/compact ";
+          const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+            snapshot.value,
+            trigger.rangeEnd,
+            replacement,
+          );
+          const applied = applyPromptReplacement(
+            trigger.rangeStart,
+            replacementRangeEnd,
+            replacement,
+            { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+          );
+          if (applied) setComposerHighlightedItemId(null);
+          return;
+        }
         void handleInteractionModeChange(item.command === "plan" ? "plan" : "default");
         const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
           expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
@@ -1904,6 +1936,39 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         });
         return;
       }
+      const controlCommand = classifyComposerControlSubmission({
+        text: promptRef.current,
+        attachmentCount: composerImagesRef.current.length,
+        hasSupplementalContext:
+          composerTerminalContextsRef.current.length > 0 ||
+          composerElementContextsRef.current.length > 0,
+      });
+      if (
+        controlCommand === "compact-context" &&
+        selectedProviderStatus?.nativeContextCompaction === true
+      ) {
+        event?.preventDefault();
+        if (phase === "running") {
+          toastManager.add({
+            type: "info",
+            title: "Finish the current turn before compacting context.",
+          });
+          return;
+        }
+        if (!activeThread?.session) {
+          toastManager.add({
+            type: "info",
+            title: "Start this thread before compacting context.",
+          });
+          return;
+        }
+        const snapshot = readComposerSnapshot();
+        void props.onCompactContext().then((accepted) => {
+          if (!accepted) return;
+          applyPromptReplacement(0, snapshot.value.length, "", { expectedText: snapshot.value });
+        });
+        return;
+      }
       const submission = submitComposerDraft({
         prompt: promptRef.current,
         submissionTarget: activePendingProgress ? "pending-user-input" : "provider-turn",
@@ -1924,12 +1989,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     },
     [
       activeThreadId,
+      activeThread?.session,
       activePendingProgress,
       blurMobileComposerAfterSend,
       isSendDisabled,
       noProviderAvailable,
       onSend,
+      props.onCompactContext,
       promptRef,
+      readComposerSnapshot,
+      selectedProviderStatus?.nativeContextCompaction,
       shouldBlurMobileComposerOnSubmit,
     ],
   );

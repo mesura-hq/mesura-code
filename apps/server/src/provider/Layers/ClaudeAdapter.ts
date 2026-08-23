@@ -272,6 +272,7 @@ interface ClaudeSessionContext {
   readonly workflowMemberFingerprints: Map<string, string>;
   /** Task ids that have started and not yet reached a terminal state. */
   readonly liveTaskIds: Set<string>;
+  readonly pendingCompactionSummaryRef: Ref.Ref<string | undefined>;
   turnState: ClaudeTurnState | undefined;
   lastKnownContextWindow: number | undefined;
   lastKnownTokenUsage: ThreadTokenUsageSnapshot | undefined;
@@ -3123,6 +3124,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         });
         return;
       case "compact_boundary":
+        const compactSummary = yield* Ref.getAndSet(context.pendingCompactionSummaryRef, undefined);
         yield* emitThreadTokenUsage(
           context,
           compactBoundaryTokenUsageSnapshot(
@@ -3140,7 +3142,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           type: "thread.state.changed",
           payload: {
             state: "compacted",
-            detail: message,
+            detail: {
+              ...message,
+              ...(compactSummary ? { compact_summary: compactSummary } : {}),
+            },
           },
         });
         return;
@@ -3807,6 +3812,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const liveTaskIds = new Set<string>();
 
       const contextRef = yield* Ref.make<ClaudeSessionContext | undefined>(undefined);
+      const pendingCompactionSummaryRef = yield* Ref.make<string | undefined>(undefined);
 
       /**
        * Handle AskUserQuestion tool calls by emitting a `user-input.requested`
@@ -4172,6 +4178,29 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(existingResumeSessionId ? { resume: existingResumeSessionId } : {}),
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
+        hooks: {
+          PostCompact: [
+            {
+              hooks: [
+                async (hookInput) => {
+                  if (
+                    hookInput.hook_event_name === "PostCompact" &&
+                    hookInput.agent_id === undefined
+                  ) {
+                    const summary = hookInput.compact_summary.trim();
+                    await runPromise(
+                      Ref.set(
+                        pendingCompactionSummaryRef,
+                        summary.length > 0 ? summary : undefined,
+                      ),
+                    );
+                  }
+                  return { continue: true };
+                },
+              ],
+            },
+          ],
+        },
         canUseTool,
         env: claudeEnvironment,
         additionalDirectories,
@@ -4268,6 +4297,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         taskAgents,
         workflowMemberFingerprints,
         liveTaskIds,
+        pendingCompactionSummaryRef,
         turnState: undefined,
         lastKnownContextWindow: initialContextWindow,
         lastKnownTokenUsage: undefined,

@@ -23,6 +23,7 @@ import serverPackageJson from "../apps/server/package.json" with { type: "json" 
 import { applyWebBrandAssets } from "./apply-web-brand-assets.ts";
 import {
   BRAND_ASSET_PATHS,
+  DESKTOP_LINUX_IDENTITY,
   resolveWebAssetBrandForChannel,
   type WebAssetBrand,
 } from "./lib/brand-assets.ts";
@@ -2036,7 +2037,10 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   const buildConfig: Record<string, unknown> = {
     appId: DESKTOP_APP_ID,
     productName: resolveDesktopProductName(version),
-    artifactName: "T3-Code-${version}-${arch}.${ext}",
+    artifactName:
+      platform === "linux"
+        ? "Mesura-Code-${version}-${arch}.${ext}"
+        : "T3-Code-${version}-${arch}.${ext}",
     electronLanguages: [...DESKTOP_ELECTRON_LANGUAGES],
     files: [...DESKTOP_FILE_EXCLUSIONS],
     directories: {
@@ -2108,9 +2112,10 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   }
 
   if (platform === "linux") {
+    const linuxIdentity = DESKTOP_LINUX_IDENTITY.production;
     buildConfig.linux = {
       target: [target],
-      executableName: "t3code",
+      executableName: linuxIdentity.executableName,
       icon: "icons",
       category: "Development",
       // electron-builder turns these into MimeType=x-scheme-handler/<scheme>;
@@ -2124,7 +2129,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       ],
       desktop: {
         entry: {
-          StartupWMClass: "t3code",
+          StartupWMClass: linuxIdentity.wmClass,
         },
       },
     };

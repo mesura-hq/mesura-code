@@ -1,0 +1,33 @@
+{
+  "$comment": "Generated from SymmetriaProjectSummary by scripts/emit-json-schema.ts. Do not hand-edit.",
+  "$defs": {
+    "SymmetriaProjectSummary": {
+      "additionalProperties": true,
+      "properties": {
+        "name": {
+          "allOf": [
+            {
+              "minLength": 1
+            },
+            {
+              "pattern": "\\S"
+            }
+          ],
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId",
+        "name"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "projectSummary.schema.json",
+  "$ref": "#/$defs/SymmetriaProjectSummary",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SymmetriaProjectSummary"
+}

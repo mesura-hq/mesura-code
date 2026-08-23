@@ -1,18 +1,27 @@
 export const BRAND_ASSET_PATHS = {
+  monochromeSourceSvg: "assets/mesura-code/monochrome.svg",
+  mobileAndroidMonochromeIconPng: "apps/mobile/assets/android-icon-mark.png",
+  mobileAndroidNotificationIconPng: "apps/mobile/assets/android-notification-icon.png",
+  mobileWidgetMarkSvg: "apps/mobile/assets/widget/T3Mark.svg",
+  desktopMasterPng: "assets/mesura-code/desktop-master.png",
+  developmentMasterPng: "assets/mesura-code/development-master.png",
   developmentIconComposerProject: "assets/dev/app-icon.icon",
   developmentIosIconPng: "assets/dev/blueprint-ios-1024.png",
   developmentUniversalIconPng: "assets/dev/blueprint-universal-1024.png",
 
+  productionMasterPng: "assets/mesura-code/production-master.png",
   productionIconComposerProject: "assets/prod/app-icon.icon",
   productionIosIconPng: "assets/prod/black-ios-1024.png",
   productionMacIconPng: "assets/prod/black-macos-1024.png",
-  productionLinuxIconPng: "assets/prod/black-universal-1024.png",
+  productionLinuxIconPng: "assets/prod/black-linux-1024.png",
+  productionUniversalIconPng: "assets/prod/black-universal-1024.png",
   productionWindowsIconIco: "assets/prod/t3-black-windows.ico",
   productionWebFaviconIco: "assets/prod/t3-black-web-favicon.ico",
   productionWebFavicon16Png: "assets/prod/t3-black-web-favicon-16x16.png",
   productionWebFavicon32Png: "assets/prod/t3-black-web-favicon-32x32.png",
   productionWebAppleTouchIconPng: "assets/prod/t3-black-web-apple-touch-180.png",
 
+  nightlyMasterPng: "assets/mesura-code/nightly-master.png",
   nightlyIconComposerProject: "assets/nightly/app-icon.icon",
   nightlyIosIconPng: "assets/nightly/nightly-ios-1024.png",
   nightlyMacIconPng: "assets/nightly/nightly-macos-1024.png",
@@ -30,6 +39,23 @@ export const BRAND_ASSET_PATHS = {
   developmentWebFavicon32Png: "assets/dev/blueprint-web-favicon-32x32.png",
   developmentWebAppleTouchIconPng: "assets/dev/blueprint-web-apple-touch-180.png",
 } as const;
+
+export const DESKTOP_LINUX_IDENTITY = {
+  development: {
+    desktopEntryName: "mesura-code-dev.desktop",
+    executableName: "mesura-code-dev",
+    wmClass: "mesura-code-dev",
+  },
+  production: {
+    desktopEntryName: "mesura-code.desktop",
+    executableName: "mesura-code",
+    wmClass: "mesura-code",
+  },
+} as const;
+
+export function resolveDesktopLinuxIdentity(isDevelopment: boolean) {
+  return isDevelopment ? DESKTOP_LINUX_IDENTITY.development : DESKTOP_LINUX_IDENTITY.production;
+}
 
 export type WebAssetBrand = "development" | "nightly" | "production";
 

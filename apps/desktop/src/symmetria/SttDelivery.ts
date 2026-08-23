@@ -2,13 +2,11 @@
  * Wires the dictation socket to the window.
  *
  * A thin shell on purpose: parsing lives in `sttProtocol.ts`, the connection in
- * `SttSocket.ts`, the filesystem in `sttSocketFiles.ts` and the request
+ * `SttSocket.ts`, the filesystem in `socketFiles.ts` and the request
  * correlation in `sttBridge.ts` — each testable in its own idiom. This module
  * only supplies the three things that need the application: where the socket
  * goes, how to reach the window, and how the window answers back.
  */
-import * as NodeOS from "node:os";
-
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -22,15 +20,17 @@ import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import { RESOLVE_STT_DELIVER_CHANNEL, STT_DELIVER_CHANNEL } from "../ipc/channels.ts";
 import * as DesktopIpc from "../ipc/DesktopIpc.ts";
 import { createSttBridge } from "./sttBridge.ts";
-import { closeServer, createSttServer, listenOnPath } from "./SttSocket.ts";
+import { createSttServer } from "./SttSocket.ts";
 import { parseRendererOutcome } from "./sttProtocol.ts";
 import type { SttOutcome } from "./sttProtocol.ts";
 import {
+  defaultRuntimeDir,
   prepareSocketPath,
   removeSocketPath,
   restrictSocketPath,
-  sttSocketPath,
-} from "./sttSocketFiles.ts";
+} from "./socketFiles.ts";
+import { sttSocketPath } from "./sttSocketFiles.ts";
+import { closeServer, listenOnPath } from "./unixSocket.ts";
 
 const { logInfo, logWarning } = makeComponentLogger("symmetria-stt-delivery");
 
@@ -41,22 +41,6 @@ const { logInfo, logWarning } = makeComponentLogger("symmetria-stt-delivery");
  * clipboard copy either way.
  */
 const WINDOW_DEADLINE = Duration.seconds(5);
-
-/**
- * `$XDG_RUNTIME_DIR` is already `drwx------`, so the socket's own mode is a
- * second lock rather than the only one. The fallback is not: `os.tmpdir()` is
- * world-writable, and a predictable name there invites another local user to
- * pre-place a symlink between our unlink and our bind. So the fallback gets a
- * per-user directory of its own, which `prepareSocketPath` creates owner-only.
- */
-export function defaultRuntimeDir(
-  env: NodeJS.ProcessEnv = process.env,
-  uid: number | undefined = process.getuid?.(),
-): string {
-  const xdg = env["XDG_RUNTIME_DIR"];
-  if (typeof xdg === "string" && xdg.length > 0) return xdg;
-  return `${NodeOS.tmpdir()}/symmetria-mesura-${uid ?? "nouid"}`;
-}
 
 export class SttDelivery extends Context.Service<
   SttDelivery,

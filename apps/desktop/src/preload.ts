@@ -134,6 +134,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.removeListener(IpcChannels.STT_DELIVER_CHANNEL, wrappedListener);
     };
   },
+  publishThreads: (payload) => ipcRenderer.invoke(IpcChannels.PUBLISH_THREADS_CHANNEL, payload),
   resolveSttDelivery: (requestId, outcome) => {
     // invoke rather than send: DesktopIpc exposes `handle` and `handleSync` and
     // no plain listener, so the request/response channel is the one that needs

@@ -8,6 +8,10 @@ import type {
   UserInputQuestion,
 } from "@t3tools/contracts";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
+import {
+  activityRemainsVisibleOutsideTurnFold,
+  contextCompactionActivityDetailFromHistory,
+} from "@t3tools/shared/timelineActivity";
 
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
@@ -54,6 +58,7 @@ export interface ThreadFeedActivity {
     | "zap";
   readonly toolLike: boolean;
   readonly status: "success" | "failure" | "neutral" | null;
+  readonly sourceActivityKind?: OrchestrationThreadActivity["kind"];
 }
 
 const MAX_VISIBLE_WORK_LOG_ENTRIES = 1;
@@ -327,7 +332,7 @@ function deriveWorkLogEntries(
     if (activity.summary === "Checkpoint captured") continue;
     if (isPlanBoundaryToolActivity(activity)) continue;
     if (isAgentInternalActivity(activity)) continue;
-    entries.push(toDerivedWorkLogEntry(activity));
+    entries.push(toDerivedWorkLogEntry(activity, ordered));
   }
   return collapseDerivedWorkLogEntries(entries);
 }
@@ -344,7 +349,10 @@ function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): bool
   return typeof payload?.detail === "string" && payload.detail.startsWith("ExitPlanMode:");
 }
 
-function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWorkLogEntry {
+function toDerivedWorkLogEntry(
+  activity: OrchestrationThreadActivity,
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): DerivedWorkLogEntry {
   const payload =
     activity.payload && typeof activity.payload === "object"
       ? (activity.payload as Record<string, unknown>)
@@ -391,13 +399,9 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   };
   const itemType = extractWorkLogItemType(payload);
   const requestKind = extractWorkLogRequestKind(payload);
-  if (
-    !taskDetailAsLabel &&
-    payload &&
-    typeof payload.detail === "string" &&
-    payload.detail.length > 0
-  ) {
-    const detail = stripTrailingExitCode(payload.detail).output;
+  const activityDetail = contextCompactionActivityDetailFromHistory(activity, activities);
+  if (!taskDetailAsLabel && (activityDetail || typeof payload?.detail === "string")) {
+    const detail = stripTrailingExitCode(activityDetail ?? String(payload?.detail)).output;
     if (detail) {
       entry.detail = detail;
     }
@@ -1196,7 +1200,16 @@ function deriveThreadFeedTurnFolds(
 
     const terminalAssistantMessageId = terminalAssistantMessageIdByTurn.get(turnId);
     const hiddenEntryIds = new Set(
-      entries.filter((entry) => entry.id !== terminalAssistantMessageId).map((entry) => entry.id),
+      entries
+        .filter((entry) => entry.id !== terminalAssistantMessageId)
+        .filter(
+          (entry) =>
+            entry.type !== "activity-group" ||
+            !entry.activities.some((activity) =>
+              activityRemainsVisibleOutsideTurnFold(activity.sourceActivityKind),
+            ),
+        )
+        .map((entry) => entry.id),
     );
     if (hiddenEntryIds.size === 0) {
       continue;
@@ -1566,6 +1579,7 @@ export function buildThreadFeed(
               icon: workEntryIcon(entry),
               toolLike: workLogEntryIsToolLike(entry),
               status: workEntryStatus(entry),
+              sourceActivityKind: entry.activityKind,
             },
           };
         }),

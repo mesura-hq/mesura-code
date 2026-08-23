@@ -150,6 +150,7 @@ describe("ProviderCommandReactor", () => {
     readonly requiresNewThreadForModelChange?: boolean;
     readonly titleRegenerationCompletionDispatchFailures?: number;
     readonly titleRegenerationBeforeStart?: "one" | "two";
+    readonly compactContextEffect?: Effect.Effect<void>;
     readonly startSessionEffect?: (
       session: ProviderSession,
     ) => Effect.Effect<ProviderSession, ProviderAdapterRequestError>;
@@ -236,6 +237,7 @@ describe("ProviderCommandReactor", () => {
       }),
     );
     const interruptTurn = vi.fn((_: unknown) => Effect.void);
+    const compactContext = vi.fn((_: unknown) => input?.compactContextEffect ?? Effect.void);
     const respondToRequest = vi.fn<ProviderServiceShape["respondToRequest"]>(() => Effect.void);
     const respondToUserInput = vi.fn<ProviderServiceShape["respondToUserInput"]>(() => Effect.void);
     const stopSession = vi.fn((input: unknown) =>
@@ -312,6 +314,7 @@ describe("ProviderCommandReactor", () => {
       startSession: startSession as ProviderServiceShape["startSession"],
       sendTurn: sendTurn as ProviderServiceShape["sendTurn"],
       interruptTurn: interruptTurn as ProviderServiceShape["interruptTurn"],
+      compactContext: compactContext as NonNullable<ProviderServiceShape["compactContext"]>,
       respondToRequest: respondToRequest as ProviderServiceShape["respondToRequest"],
       respondToUserInput: respondToUserInput as ProviderServiceShape["respondToUserInput"],
       stopSession: stopSession as ProviderServiceShape["stopSession"],
@@ -319,6 +322,7 @@ describe("ProviderCommandReactor", () => {
       getCapabilities: (_provider) =>
         Effect.succeed({
           sessionModelSwitch: input?.sessionModelSwitch ?? "in-session",
+          nativeContextCompaction: true,
         }),
       getInstanceInfo: (instanceId) => {
         const raw = String(instanceId);
@@ -495,6 +499,7 @@ describe("ProviderCommandReactor", () => {
       startSession,
       sendTurn,
       interruptTurn,
+      compactContext,
       respondToRequest,
       respondToUserInput,
       stopSession,
@@ -511,6 +516,56 @@ describe("ProviderCommandReactor", () => {
       },
     };
   }
+
+  it("records a visible failure when native context compaction fails asynchronously", async () => {
+    const harness = await createHarness({
+      compactContextEffect: Effect.die(new Error("native compaction unavailable")),
+    });
+    const now = "2026-01-01T00:00:00.000Z";
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-context-compact-primer"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-context-compact-primer"),
+          role: "user",
+          text: "prime the provider session",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.context.compact",
+        commandId: CommandId.make("cmd-context-compact-failure"),
+        threadId: ThreadId.make("thread-1"),
+        messageId: asMessageId("message-context-compact-failure"),
+        createdAt: now,
+      }),
+    );
+    await harness.drain();
+
+    expect(harness.compactContext).toHaveBeenCalledWith({
+      threadId: ThreadId.make("thread-1"),
+    });
+    const readModel = await harness.readModel();
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(
+      thread?.activities.find((activity) => activity.kind === "provider.context.compact.failed"),
+    ).toMatchObject({
+      summary: "Context compaction failed",
+      payload: {
+        detail: expect.stringContaining("native compaction unavailable"),
+      },
+    });
+  });
 
   it("reacts to thread.turn.start by ensuring session and sending provider turn", async () => {
     const harness = await createHarness();

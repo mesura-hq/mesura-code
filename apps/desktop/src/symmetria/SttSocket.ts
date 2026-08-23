@@ -7,8 +7,10 @@
  * socket mode it keeps no clipboard copy, so a receipt written before the
  * attempt is a lie it has no way to detect.
  *
- * Only `node:net` here. The filesystem side lives in `sttSocketFiles.ts`, which
- * uses Effect's own APIs as the repository requires.
+ * Only `node:net` here. The filesystem side lives in `socketFiles.ts`, which
+ * uses Effect's own APIs as the repository requires, and binding lives in
+ * `unixSocket.ts` — both shared with the thread publisher's socket. What stays
+ * here is the shape that is dictation's alone: one line in, one line out.
  */
 import * as NodeNet from "node:net";
 
@@ -57,25 +59,5 @@ export function createSttServer(options: SttServerOptions): NodeNet.Server {
         answer({ kind: "error", code: "invalid-request", detail: error.message });
       });
     });
-  });
-}
-
-export function listenOnPath(server: NodeNet.Server, socketPath: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const onError = (error: Error): void => {
-      server.off("error", onError);
-      reject(error);
-    };
-    server.on("error", onError);
-    server.listen(socketPath, () => {
-      server.off("error", onError);
-      resolve();
-    });
-  });
-}
-
-export function closeServer(server: NodeNet.Server): Promise<void> {
-  return new Promise((resolve) => {
-    server.close(() => resolve());
   });
 }

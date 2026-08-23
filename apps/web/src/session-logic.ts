@@ -13,6 +13,7 @@ import {
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
+import { contextCompactionActivityDetailFromHistory } from "@t3tools/shared/timelineActivity";
 
 import type {
   ChatMessage,
@@ -852,7 +853,7 @@ export function deriveWorkLogEntries(
     if (activity.summary === "Checkpoint captured") continue;
     if (isPlanBoundaryToolActivity(activity)) continue;
     if (isAgentInternalActivity(activity)) continue;
-    entries.push(toDerivedWorkLogEntry(activity));
+    entries.push(toDerivedWorkLogEntry(activity, ordered));
   }
   return collapseDerivedWorkLogEntries(entries).map((entry) => {
     const { activityKind, collapseKey: _collapseKey, ...rest } = entry;
@@ -891,7 +892,10 @@ function extractWorkLogToolLifecycleStatus(
   return undefined;
 }
 
-function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWorkLogEntry {
+function toDerivedWorkLogEntry(
+  activity: OrchestrationThreadActivity,
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): DerivedWorkLogEntry {
   const payload =
     activity.payload && typeof activity.payload === "object"
       ? (activity.payload as Record<string, unknown>)
@@ -915,7 +919,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       ? payload.detail
       : null;
   const taskLabel = taskSummary || taskDetailAsLabel;
-  const detail = isTaskActivity
+  const derivedDetail = isTaskActivity
     ? !taskDetailAsLabel &&
       payload &&
       typeof payload.detail === "string" &&
@@ -923,6 +927,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       ? stripTrailingExitCode(payload.detail).output
       : null
     : extractToolDetail(payload, title ?? activity.summary);
+  const detail = contextCompactionActivityDetailFromHistory(activity, activities) ?? derivedDetail;
   const toolCallId = isTaskActivity ? null : extractToolCallId(payload);
   const entry: DerivedWorkLogEntry = {
     id: activity.id,

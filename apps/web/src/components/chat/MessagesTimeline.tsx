@@ -2613,7 +2613,10 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   const showFailedIndicator = workEntryDisplayIndicatesToolFailure(workEntry);
   const entryIconName =
     showWarningIndicator || showFailedIndicator ? "x" : workEntryIconName(workEntry);
-  const displayText = workEntryPreview(workEntry, workspaceRoot) ?? toolWorkEntryHeading(workEntry);
+  const displayText =
+    workEntry.sourceActivityKind === "context-compaction"
+      ? toolWorkEntryHeading(workEntry)
+      : (workEntryPreview(workEntry, workspaceRoot) ?? toolWorkEntryHeading(workEntry));
   const expandedBody = buildToolCallExpandedBody(workEntry, workspaceRoot);
   const canExpand = expandedBody !== null;
   const showDestructiveRowStyle =

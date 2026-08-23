@@ -29,6 +29,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { formatContextCompactionDetailFromPayload } from "@t3tools/shared/timelineActivity";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
@@ -118,8 +119,40 @@ type RuntimeIngestionInput =
       event: TurnStartRequestedDomainEvent;
     };
 
+interface ContextCompactionMetrics {
+  readonly preTokens?: number;
+  readonly postTokens?: number;
+  readonly durationMs?: number;
+}
+
 function toTurnId(value: TurnId | string | undefined): TurnId | undefined {
   return value === undefined ? undefined : TurnId.make(String(value));
+}
+
+function finiteCompactionMetric(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.round(value)
+    : undefined;
+}
+
+function compactionDetailRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+export function formatContextCompactionActivityDetail(input: {
+  readonly provider: ProviderRuntimeEvent["provider"];
+  readonly detail?: unknown;
+  readonly metrics?: ContextCompactionMetrics;
+}): string {
+  return formatContextCompactionDetailFromPayload({
+    provider: input.provider,
+    ...(input.detail !== undefined ? { detail: input.detail } : {}),
+    ...(input.metrics?.preTokens !== undefined ? { preTokens: input.metrics.preTokens } : {}),
+    ...(input.metrics?.postTokens !== undefined ? { postTokens: input.metrics.postTokens } : {}),
+    ...(input.metrics?.durationMs !== undefined ? { durationMs: input.metrics.durationMs } : {}),
+  });
 }
 
 function toApprovalRequestId(value: string | undefined): ApprovalRequestId | undefined {
@@ -364,6 +397,7 @@ function taskLinkageActivityFields(payload: Record<string, unknown>): Record<str
 export function runtimeEventToActivities(
   event: ProviderRuntimeEvent,
   taskTitle?: string,
+  contextCompactionMetrics?: ContextCompactionMetrics,
 ): ReadonlyArray<OrchestrationThreadActivity> {
   const maybeSequence = (() => {
     const eventWithSequence = event as ProviderRuntimeEvent & { sessionSequence?: number };
@@ -371,6 +405,9 @@ export function runtimeEventToActivities(
       ? { sequence: eventWithSequence.sessionSequence }
       : {};
   })();
+  const contextCompactionActivityId = EventId.make(
+    `context-compaction:${event.threadId}:${event.turnId ?? "thread"}`,
+  );
   switch (event.type) {
     case "request.opened": {
       if (event.payload.requestType === "tool_user_input") {
@@ -750,14 +787,19 @@ export function runtimeEventToActivities(
 
       return [
         {
-          id: event.eventId,
+          id: contextCompactionActivityId,
           createdAt: event.createdAt,
           tone: "info",
           kind: "context-compaction",
           summary: "Context compacted",
           payload: {
             state: event.payload.state,
-            ...(event.payload.detail !== undefined ? { detail: event.payload.detail } : {}),
+            provider: event.provider,
+            detail: formatContextCompactionActivityDetail({
+              provider: event.provider,
+              detail: event.payload.detail,
+              ...(contextCompactionMetrics ? { metrics: contextCompactionMetrics } : {}),
+            }),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -821,6 +863,28 @@ export function runtimeEventToActivities(
     }
 
     case "item.completed": {
+      if (event.payload.itemType === "context_compaction") {
+        return [
+          {
+            id: contextCompactionActivityId,
+            createdAt: event.createdAt,
+            tone: "info",
+            kind: "context-compaction",
+            summary: "Context compacted",
+            payload: {
+              status: "completed",
+              provider: event.provider,
+              detail: formatContextCompactionActivityDetail({
+                provider: event.provider,
+                ...(contextCompactionMetrics ? { metrics: contextCompactionMetrics } : {}),
+              }),
+              ...(event.itemId !== undefined ? { itemId: event.itemId } : {}),
+            },
+            turnId: toTurnId(event.turnId) ?? null,
+            ...maybeSequence,
+          },
+        ];
+      }
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
       }
@@ -849,6 +913,28 @@ export function runtimeEventToActivities(
     }
 
     case "item.started": {
+      if (event.payload.itemType === "context_compaction") {
+        return [
+          {
+            id: contextCompactionActivityId,
+            createdAt: event.createdAt,
+            tone: "info",
+            kind: "context-compaction",
+            summary: "Compacting context",
+            payload: {
+              status: "started",
+              provider: event.provider,
+              detail: formatContextCompactionActivityDetail({
+                provider: event.provider,
+                ...(contextCompactionMetrics ? { metrics: contextCompactionMetrics } : {}),
+              }),
+              ...(event.itemId !== undefined ? { itemId: event.itemId } : {}),
+            },
+            turnId: toTurnId(event.turnId) ?? null,
+            ...maybeSequence,
+          },
+        ];
+      }
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
       }
@@ -932,6 +1018,28 @@ const make = Effect.gen(function* () {
     timeToLive: TASK_DESCRIPTION_BY_TASK_TTL,
     lookup: () => Effect.succeed(""),
   });
+
+  const latestContextTokensByThread = new Map<ThreadId, number>();
+  const contextCompactionMetricsByTurn = new Map<
+    string,
+    ContextCompactionMetrics & { readonly startedAt: string }
+  >();
+  const compactionTurnKey = (event: ProviderRuntimeEvent) =>
+    `${event.threadId}:${event.turnId ?? event.itemId ?? "thread"}`;
+
+  const latestContextTokensFromActivities = (
+    activities: ReadonlyArray<OrchestrationThreadActivity>,
+  ): number | undefined => {
+    for (let index = activities.length - 1; index >= 0; index -= 1) {
+      const activity = activities[index];
+      if (activity?.kind !== "context-window.updated") continue;
+      const usedTokens = finiteCompactionMetric(
+        compactionDetailRecord(activity.payload)?.usedTokens,
+      );
+      if (usedTokens !== undefined) return usedTokens;
+    }
+    return undefined;
+  };
 
   const rememberTaskDescription = (threadId: ThreadId, taskId: string, description: string) =>
     Cache.set(taskDescriptionByTaskKey, providerTaskKey(threadId, taskId), description);
@@ -1527,6 +1635,45 @@ const make = Effect.gen(function* () {
 
       const now = event.createdAt;
       const eventTurnId = toTurnId(event.turnId);
+      let contextCompactionMetrics: ContextCompactionMetrics | undefined;
+      if (event.type === "thread.token-usage.updated") {
+        const usedTokens = finiteCompactionMetric(event.payload.usage.usedTokens);
+        if (usedTokens !== undefined) {
+          latestContextTokensByThread.set(thread.id, usedTokens);
+        }
+      } else if (event.type === "item.started" && event.payload.itemType === "context_compaction") {
+        let preTokens = latestContextTokensByThread.get(thread.id);
+        if (preTokens === undefined) {
+          const threadDetail = yield* getLoadedThreadDetail();
+          preTokens = latestContextTokensFromActivities(threadDetail?.activities ?? []);
+        }
+        const metrics = {
+          ...(preTokens !== undefined ? { preTokens } : {}),
+          startedAt: event.createdAt,
+        };
+        contextCompactionMetricsByTurn.set(compactionTurnKey(event), metrics);
+        contextCompactionMetrics = metrics;
+      } else if (
+        event.type === "item.completed" &&
+        event.payload.itemType === "context_compaction"
+      ) {
+        const existingMetrics = contextCompactionMetricsByTurn.get(compactionTurnKey(event));
+        const postTokens = latestContextTokensByThread.get(thread.id);
+        const startedAtMs = existingMetrics ? Date.parse(existingMetrics.startedAt) : Number.NaN;
+        const completedAtMs = Date.parse(event.createdAt);
+        const metrics = {
+          ...existingMetrics,
+          ...(postTokens !== undefined ? { postTokens } : {}),
+          ...(Number.isFinite(startedAtMs) && Number.isFinite(completedAtMs)
+            ? { durationMs: Math.max(0, completedAtMs - startedAtMs) }
+            : {}),
+          startedAt: existingMetrics?.startedAt ?? event.createdAt,
+        };
+        contextCompactionMetricsByTurn.set(compactionTurnKey(event), metrics);
+        contextCompactionMetrics = metrics;
+      } else if (event.type === "thread.state.changed" && event.payload.state === "compacted") {
+        contextCompactionMetrics = contextCompactionMetricsByTurn.get(compactionTurnKey(event));
+      }
       const activeTurnId = thread.session?.activeTurnId ?? null;
       const pendingTurnStart = yield* projectionTurnRepository.getPendingTurnStartByThreadId({
         threadId: thread.id,
@@ -2044,7 +2191,7 @@ const make = Effect.gen(function* () {
         }
       }
 
-      const activities = runtimeEventToActivities(event, taskTitle);
+      const activities = runtimeEventToActivities(event, taskTitle, contextCompactionMetrics);
       yield* Effect.forEach(activities, (activity) =>
         providerCommandId(event, "thread-activity-append").pipe(
           Effect.flatMap((commandId) =>
@@ -2058,6 +2205,16 @@ const make = Effect.gen(function* () {
           ),
         ),
       ).pipe(Effect.asVoid);
+
+      if (event.type === "turn.completed" || event.type === "turn.aborted") {
+        contextCompactionMetricsByTurn.delete(compactionTurnKey(event));
+      } else if (event.type === "session.exited") {
+        latestContextTokensByThread.delete(thread.id);
+        const keyPrefix = `${thread.id}:`;
+        for (const key of contextCompactionMetricsByTurn.keys()) {
+          if (key.startsWith(keyPrefix)) contextCompactionMetricsByTurn.delete(key);
+        }
+      }
     });
 
   const processDomainEvent = (_event: TurnStartRequestedDomainEvent) => Effect.void;

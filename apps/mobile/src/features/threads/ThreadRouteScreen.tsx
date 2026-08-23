@@ -214,6 +214,10 @@ function ThreadRouteContent(
   const gitActions = useSelectedThreadGitActions();
   const requests = useSelectedThreadRequests();
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, "thread interrupt");
+  const compactThreadContext = useAtomCommand(
+    threadEnvironment.compactContext,
+    "thread context compaction",
+  );
   const navigation = useNavigation();
   const params = props.route.params;
   const environmentIdRaw = firstRouteParam(params.environmentId);
@@ -295,6 +299,14 @@ function ThreadRouteContent(
         : null,
     [composer.interactionMode, composer.modelSelection, composer.runtimeMode, selectedThread],
   );
+  const handleCompactContext = useCallback(async (): Promise<boolean> => {
+    if (!selectedThread) return false;
+    const result = await compactThreadContext({
+      environmentId: selectedThread.environmentId,
+      input: { threadId: selectedThread.id },
+    });
+    return result._tag === "Success";
+  }, [compactThreadContext, selectedThread]);
 
   /* ─── Native header theming ──────────────────────────────────────── */
   const usesNativeHeaderGlass = NATIVE_LIQUID_GLASS_SUPPORTED;
@@ -799,6 +811,7 @@ function ThreadRouteContent(
           serverConfig={serverConfig}
           onStopThread={handleStopThread}
           onSendMessage={composer.onSendMessage}
+          onCompactContext={handleCompactContext}
           onReconnectEnvironment={handleReconnectEnvironment}
           onUpdateThreadModelSelection={composer.onUpdateModelSelection}
           onUpdateThreadRuntimeMode={composer.onUpdateRuntimeMode}

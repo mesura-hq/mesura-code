@@ -171,6 +171,10 @@
       "types": "./src/composerTrigger.ts",
       "import": "./src/composerTrigger.ts"
     },
+    "./composerControlCommand": {
+      "types": "./src/composerControlCommand.ts",
+      "import": "./src/composerControlCommand.ts"
+    },
     "./composerInlineTokens": {
       "types": "./src/composerInlineTokens.ts",
       "import": "./src/composerInlineTokens.ts"
@@ -226,6 +230,10 @@
     "./usageFormat": {
       "types": "./src/usageFormat.ts",
       "import": "./src/usageFormat.ts"
+    },
+    "./timelineActivity": {
+      "types": "./src/timelineActivity.ts",
+      "import": "./src/timelineActivity.ts"
     }
   },
   "scripts": {
