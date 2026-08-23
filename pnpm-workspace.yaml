@@ -147,6 +147,9 @@ patchedDependencies:
   react-native-keyboard-controller@1.21.13: patches/react-native-keyboard-controller@1.21.13.patch
   react-native-nitro-modules@0.35.9: patches/react-native-nitro-modules@0.35.9.patch
   react-native-screens@4.25.2: patches/react-native-screens@4.25.2.patch
+  # WORKAROUND: Sharp 0.35.0 omits its declaration from package exports.
+  # Remove this patch when a later Sharp release exports ./lib/index.d.ts.
+  sharp@0.35.0: patches/sharp@0.35.0.patch
 
 peerDependencyRules:
   allowAny:

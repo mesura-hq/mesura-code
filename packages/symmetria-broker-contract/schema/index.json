@@ -1,6 +1,6 @@
 {
-  "checksum": "cda23d05107f654b95d78d2d01e153649db0a0847d55855b961ed4929a9e9981",
-  "contractVersion": "1.0.0",
+  "checksum": "528b440a65d3818f7e8ceb4cacfd16679fcff9dff90c3a644ec3930c5d8bb76c",
+  "contractVersion": "1.1.0",
   "schemas": [
     {
       "file": "commandEnvelope.schema.json",
@@ -28,6 +28,11 @@
       "summary": "The outcome of a draft update, applied or refused as a conflict."
     },
     {
+      "file": "projectSummary.schema.json",
+      "root": "SymmetriaProjectSummary",
+      "summary": "One project's identity: what a consumer prints above the threads it groups."
+    },
+    {
       "file": "streamItem.schema.json",
       "root": "SymmetriaStreamItem",
       "summary": "One item of the stream, either a full snapshot or a delta."
@@ -43,5 +48,5 @@
       "summary": "The narrow read projection of one agent thread."
     }
   ],
-  "sourceChecksum": "a2d05200e4697fe2e390d71e88a7fa2af0c367bf5789562cc5a3058e85b00465"
+  "sourceChecksum": "82ad0e34cac763cd42a23c2313332acf344b1dd90f9502f9080e3ce473d85bc0"
 }

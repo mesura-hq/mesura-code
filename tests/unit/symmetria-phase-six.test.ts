@@ -169,9 +169,9 @@ describe("Symmetria broker contract phase-six guards", () => {
     const script = [
       'import * as NodeFS from "node:fs";',
       'import * as Schema from "effect/Schema";',
-      'import { SymmetriaCommandEnvelope, SymmetriaCommandReceipt, SymmetriaDraft, SymmetriaDraftUpdate, SymmetriaDraftUpdateResult, SymmetriaStreamItem, SymmetriaSurfacePresence, SymmetriaThreadSummary } from "@symmetria/broker-contract";',
+      'import { SymmetriaCommandEnvelope, SymmetriaCommandReceipt, SymmetriaDraft, SymmetriaDraftUpdate, SymmetriaDraftUpdateResult, SymmetriaProjectSummary, SymmetriaStreamItem, SymmetriaSurfacePresence, SymmetriaThreadSummary } from "@symmetria/broker-contract";',
       `const paths = ${JSON.stringify(documentPaths)};`,
-      "const roots = { SymmetriaThreadSummary, SymmetriaSurfacePresence, SymmetriaCommandEnvelope, SymmetriaCommandReceipt, SymmetriaDraft, SymmetriaDraftUpdate, SymmetriaDraftUpdateResult, SymmetriaStreamItem };",
+      "const roots = { SymmetriaThreadSummary, SymmetriaSurfacePresence, SymmetriaProjectSummary, SymmetriaCommandEnvelope, SymmetriaCommandReceipt, SymmetriaDraft, SymmetriaDraftUpdate, SymmetriaDraftUpdateResult, SymmetriaStreamItem };",
       "const canonical = (value) => {",
       "  if (Array.isArray(value)) return value.map(canonical);",
       '  if (value === null || typeof value !== "object") return value;',
@@ -224,7 +224,7 @@ describe("Symmetria broker contract phase-six guards", () => {
   it("indexes every emitted document with the contract version and checksum", () => {
     expect(NodeFS.existsSync(schemaIndexPath)).toBe(true);
     const index = readSchemaIndex();
-    expect(index.contractVersion).toBe("1.0.0");
+    expect(index.contractVersion).toBe("1.1.0");
     expect(index.checksum).toMatch(/^[a-f0-9]{64}$/);
     expect(index.sourceChecksum).toMatch(/^[a-f0-9]{64}$/);
 
@@ -293,13 +293,26 @@ describe("Symmetria broker contract phase-six guards", () => {
         NodePath.join(temporaryPackageRoot, "schema/index.json"),
       );
 
+      // ⚠ The mutation target moved, and the reason is the point of the test.
+      // It used to be `title: TrimmedNonEmptyString`, chosen because JSON
+      // Schema could not express the difference between that and a bare
+      // string — the check sits after a transformation and is dropped on
+      // emission. Issue #2 fixed exactly that for `title`, which now carries
+      // `minLength` and a pattern into the artifact, so mutating it would move
+      // BOTH checksums and prove nothing.
+      //
+      // `threadId` is the same case untouched: `ThreadId` is
+      // `TrimmedNonEmptyString.pipe(Schema.brand(...))`, so it still emits a
+      // bare string and its difference from `Schema.String` is still
+      // inexpressible. The assertion below is unchanged — only the field it
+      // reaches for.
       const threadSummaryPath = NodePath.join(temporaryPackageRoot, "src/threadSummary.ts");
       const source = NodeFS.readFileSync(threadSummaryPath, "utf8");
-      const checkedTitle = "  title: TrimmedNonEmptyString,";
-      expect(source).toContain(checkedTitle);
+      const checkedIdentity = "  threadId: ThreadId,";
+      expect(source).toContain(checkedIdentity);
       NodeFS.writeFileSync(
         threadSummaryPath,
-        source.replace(checkedTitle, "  title: Schema.String,"),
+        source.replace(checkedIdentity, "  threadId: Schema.String,"),
       );
 
       expectSuccessfulCommand(run(process.execPath, [generatorPath], temporaryPackageRoot));

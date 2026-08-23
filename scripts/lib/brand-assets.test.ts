@@ -2,11 +2,13 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   BRAND_ASSET_PATHS,
+  DESKTOP_LINUX_IDENTITY,
   DEVELOPMENT_ICON_OVERRIDES,
   DEVELOPMENT_PUBLIC_ICON_OVERRIDES,
   resolveWebAssetBrandForChannel,
   resolveWebAssetBrandForPackageVersion,
   resolveWebIconOverrides,
+  resolveDesktopLinuxIdentity,
 } from "./brand-assets.ts";
 
 describe("brand-assets", () => {
@@ -83,6 +85,23 @@ describe("brand-assets", () => {
     expect(resolveWebAssetBrandForPackageVersion("0.0.29-nightly.20260723.882")).toBe("nightly");
   });
 
+  it("keeps the Mesura desktop Linux identity separate from installed T3 Code", () => {
+    expect(resolveDesktopLinuxIdentity(true)).toBe(DESKTOP_LINUX_IDENTITY.development);
+    expect(resolveDesktopLinuxIdentity(false)).toBe(DESKTOP_LINUX_IDENTITY.production);
+    expect(DESKTOP_LINUX_IDENTITY).toEqual({
+      development: {
+        desktopEntryName: "mesura-code-dev.desktop",
+        executableName: "mesura-code-dev",
+        wmClass: "mesura-code-dev",
+      },
+      production: {
+        desktopEntryName: "mesura-code.desktop",
+        executableName: "mesura-code",
+        wmClass: "mesura-code",
+      },
+    });
+  });
+
   it("keeps development, nightly, and production icon families separate", () => {
     expect([
       BRAND_ASSET_PATHS.developmentIconComposerProject,
@@ -96,5 +115,10 @@ describe("brand-assets", () => {
     expect(BRAND_ASSET_PATHS.developmentDesktopIconPng).toMatch(/^assets\/dev\/blueprint-/);
     expect(BRAND_ASSET_PATHS.nightlyMacIconPng).toMatch(/^assets\/nightly\/nightly-/);
     expect(BRAND_ASSET_PATHS.productionMacIconPng).toMatch(/^assets\/prod\/black-/);
+    expect(BRAND_ASSET_PATHS.desktopMasterPng).toBe("assets/mesura-code/desktop-master.png");
+    expect(BRAND_ASSET_PATHS.productionLinuxIconPng).toBe("assets/prod/black-linux-1024.png");
+    expect(BRAND_ASSET_PATHS.productionUniversalIconPng).toBe(
+      "assets/prod/black-universal-1024.png",
+    );
   });
 });

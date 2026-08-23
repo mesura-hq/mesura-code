@@ -10,9 +10,31 @@
  * the transformation inside `TrimmedString` is dropped when the schema is
  * turned into JSON Schema, so a borrowed string identifier emits a bare
  * `{"type":"string"}` and a non-TypeScript consumer loses the constraint. A
- * plain checked value keeps its constraint through `Schema.brand`. Upstream
- * fields this projection composes keep whatever upstream chose — the loss only
- * matters for identifiers Symmetria defines.
+ * plain checked value keeps its constraint through `Schema.brand`.
+ *
+ * ⚠ The scope of that mitigation was widened on 2026-08-22, and the sentence
+ * this replaces said the opposite: it claimed upstream fields this projection
+ * composes keep whatever upstream chose, because the loss only mattered for
+ * identifiers Symmetria defines. That held while nothing outside TypeScript
+ * read the artifacts. Symmetria Shell now does, and the field it renders is
+ * `SymmetriaThreadSummary.title`, so the three free-text fields of the thread
+ * summary are declared on `NonEmptyText` instead — see the comment at their
+ * declaration. Issue #2.
+ *
+ * Two things deliberately did NOT move with them, and the reasons are separate:
+ *
+ * - **Timestamps.** Measured the same day: `IsoDateTime`
+ *   (`packages/contracts/src/baseSchemas.ts:21`) is `Schema.String` with no
+ *   check at all. A bare `{"type":"string"}` for a timestamp is therefore a
+ *   faithful emission, not a dropped constraint, and there is nothing to
+ *   restore. Inventing one would make this projection refuse timestamps the
+ *   fork itself accepts. `upstreamDerivedConstraints.test.ts` guards against
+ *   that edit; issue #2's body assumes the opposite and is wrong on this point.
+ * - **The re-exported entity identifiers.** `ThreadId`, `ProjectId`, `TurnId`
+ *   and `CommandId` are `TrimmedNonEmptyString` underneath, so they emit bare
+ *   too. Declaring Symmetria copies of them would cost the brand and the
+ *   by-construction agreement with fork payloads, which is a larger trade than
+ *   a rendered label is worth. Recorded on issue #2 as what stays open.
  */
 import * as Schema from "effect/Schema";
 

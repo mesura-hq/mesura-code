@@ -2,13 +2,14 @@ import * as NodeNet from "node:net";
 import * as NodeOS from "node:os";
 import { assert, it } from "vite-plus/test";
 
-import { closeServer, createSttServer, listenOnPath } from "./SttSocket.ts";
+import { createSttServer } from "./SttSocket.ts";
+import { closeServer, listenOnPath } from "./unixSocket.ts";
 import type { SttOutcome, SttRequest } from "./sttProtocol.ts";
 
 // os.tmpdir() exists, so binding straight into it needs no directory work —
 // which keeps this file to `node:net` and `node:os`, the two builtins the
 // repository does not route through Effect. The filesystem criteria live in
-// sttSocketFiles.test.ts.
+// socketFiles.test.ts.
 let counter = 0;
 const tempSocketPath = (): string =>
   `${NodeOS.tmpdir()}/stt-socket-${process.pid}-${(counter += 1)}.sock`;

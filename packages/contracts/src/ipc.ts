@@ -1143,6 +1143,26 @@ export interface DesktopBridge {
     outcome: "placed" | "placed-and-submitted" | "placed-not-submitted" | "no-conversation",
   ) => void;
   /**
+   * ⚠ This member, and the two `stt*` ones above it, are FORK ADDITIONS to an
+   * upstream-owned interface, and each one is a merge conflict at every weekly
+   * upstream synchronization. The cost was accepted deliberately rather than
+   * overlooked — and there is a cheaper shape, because `DesktopBridge` is an
+   * `interface` and TypeScript declaration merging would let the fork add
+   * members without this file being touched at all. Moving all three is one
+   * piece of work (both app projects have to see the augmentation) and is
+   * tracked as issue #16. Do not add a fourth member here without reading it.
+   *
+   * The renderer's projected thread list, forwarded to the main process so it
+   * can republish it on the Symmetria socket. Fire-and-forget from the
+   * renderer's side: the answer carries nothing, and a build without the
+   * publisher simply has no method here. Optional: only the Mesura desktop
+   * build exposes it.
+   */
+  publishThreads?: (payload: {
+    generation: string;
+    readModel: { projects: readonly unknown[]; threads: readonly unknown[] };
+  }) => Promise<void>;
+  /**
    * Hold-to-quit hint pushes: "down" when the quit shortcut is first pressed,
    * "up" when it is released before the hold completes. Optional: older
    * desktop builds never emit it.

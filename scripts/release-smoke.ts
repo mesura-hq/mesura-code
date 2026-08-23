@@ -31,6 +31,10 @@ const workspaceFiles = [
   "packages/tailscale/package.json",
   "packages/effect-acp/package.json",
   "packages/effect-codex-app-server/package.json",
+  // Fork-owned, and required here because `apps/desktop` depends on it: this
+  // fixture copies MANIFESTS ONLY, so a workspace dependency whose manifest is
+  // absent makes the regenerated lockfile fail to resolve.
+  "packages/symmetria-broker-contract/package.json",
   "scripts/package.json",
 ] as const;
 
