@@ -23,6 +23,7 @@ import { serverEnvironment } from "./server";
 const ACCOUNT_LIMITS_STALE_AFTER_MS = 5 * 60 * 1000;
 const SPARK_METER_IDS = new Set(["codex_bengalfox", "codex_spark"]);
 const SPARK_METER_LABEL = "GPT-5.3-Codex-Spark";
+const HIDDEN_CLAUDE_PLACEHOLDER_METER_IDS = new Set(["nimbus_quill"]);
 
 export interface EnvironmentAccountLimitsInput {
   readonly environmentId: EnvironmentId;
@@ -186,7 +187,9 @@ export function selectVisibleAccountLimitWindows(
 ): ReadonlyArray<AccountLimitsWindow> {
   return windows.filter(
     (window) =>
-      !SPARK_METER_IDS.has(window.meter?.id ?? "") && window.meter?.label !== SPARK_METER_LABEL,
+      !SPARK_METER_IDS.has(window.meter?.id ?? "") &&
+      !HIDDEN_CLAUDE_PLACEHOLDER_METER_IDS.has(window.meter?.id ?? "") &&
+      window.meter?.label !== SPARK_METER_LABEL,
   );
 }
 

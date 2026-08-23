@@ -67,6 +67,14 @@ function view(): AccountLimitsView {
                 windowMinutes: 10_080,
                 meter: { id: "codex_spark", label: "GPT-5.3-Codex-Spark" },
               },
+              {
+                id: "nimbus_quill",
+                label: "Nimbus quill",
+                usedPercent: 0,
+                resetsAt: null,
+                windowMinutes: null,
+                meter: { id: "nimbus_quill", label: "Nimbus quill" },
+              },
             ],
           },
           lastAttempt: {
@@ -107,6 +115,7 @@ describe("AccountLimitsPanelContent", () => {
     expect(markup).toContain("Resets in 5h");
     expect(markup).toContain("1m ago");
     expect(markup).not.toContain("Spark");
+    expect(markup).not.toContain("Nimbus");
   });
 
   it("renders a quiet missing-reading state", () => {

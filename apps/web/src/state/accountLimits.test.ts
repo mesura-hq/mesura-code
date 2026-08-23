@@ -356,9 +356,17 @@ describe("selectVisibleAccountLimitWindows", () => {
         windowMinutes: 300,
         meter: { id: "codex_spark", label: "GPT-5.3-Codex-Spark" },
       },
+      {
+        id: "nimbus_quill",
+        label: "Nimbus quill",
+        usedPercent: 0,
+        resetsAt: null,
+        windowMinutes: null,
+        meter: { id: "nimbus_quill", label: "Nimbus quill" },
+      },
     ] as const;
 
     expect(selectVisibleAccountLimitWindows(windows)).toEqual([windows[0]]);
-    expect(windows).toHaveLength(3);
+    expect(windows).toHaveLength(4);
   });
 });
