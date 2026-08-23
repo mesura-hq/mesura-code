@@ -21,7 +21,8 @@ import { environmentPresentations } from "./presentation";
 import { serverEnvironment } from "./server";
 
 const ACCOUNT_LIMITS_STALE_AFTER_MS = 5 * 60 * 1000;
-const SPARK_METER_ID = "codex_bengalfox";
+const SPARK_METER_IDS = new Set(["codex_bengalfox", "codex_spark"]);
+const SPARK_METER_LABEL = "GPT-5.3-Codex-Spark";
 
 export interface EnvironmentAccountLimitsInput {
   readonly environmentId: EnvironmentId;
@@ -61,6 +62,8 @@ export interface AccountLimitsRow {
   readonly accentColor?: string | undefined;
   readonly snapshot: AccountLimitsSnapshot | null;
   readonly state: AccountLimitsRowState;
+  readonly environmentNowMs: number | null;
+  readonly readingAgeMs: number | null;
 }
 
 export interface AccountLimitsProjection {
@@ -125,6 +128,15 @@ function environmentNowMs(environment: EnvironmentAccountLimitsInput, clientNowM
   return readAt + Math.max(0, clientNowMs - environment.receivedAtMs);
 }
 
+function readingAgeMs(snapshot: AccountLimitsSnapshot | null, currentEnvironmentTime: number) {
+  if (snapshot?.observation === null || snapshot === null) return null;
+  const observedAt = timestampMillis(snapshot.observation.observedAt);
+  if (!Number.isFinite(currentEnvironmentTime) || observedAt === Number.NEGATIVE_INFINITY) {
+    return null;
+  }
+  return Math.max(0, currentEnvironmentTime - observedAt);
+}
+
 function isSupportedDriver(driver: ProviderDriverKind): boolean {
   return driver === "claudeAgent" || driver === "codex";
 }
@@ -153,6 +165,8 @@ export function projectAccountLimits(
         accentColor: entry.accentColor,
         snapshot,
         state: rowState(snapshot, currentEnvironmentTime),
+        environmentNowMs: Number.isFinite(currentEnvironmentTime) ? currentEnvironmentTime : null,
+        readingAgeMs: readingAgeMs(snapshot, currentEnvironmentTime),
       });
     }
   }
@@ -170,7 +184,10 @@ export function projectAccountLimits(
 export function selectVisibleAccountLimitWindows(
   windows: ReadonlyArray<AccountLimitsWindow>,
 ): ReadonlyArray<AccountLimitsWindow> {
-  return windows.filter((window) => window.meter?.id !== SPARK_METER_ID);
+  return windows.filter(
+    (window) =>
+      !SPARK_METER_IDS.has(window.meter?.id ?? "") && window.meter?.label !== SPARK_METER_LABEL,
+  );
 }
 
 const accountLimitsReceiptTimes = new WeakMap<AccountLimitsSummary, number>();

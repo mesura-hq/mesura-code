@@ -348,9 +348,17 @@ describe("selectVisibleAccountLimitWindows", () => {
         windowMinutes: 10_080,
         meter: { id: "codex_bengalfox", label: "GPT-5.3-Codex-Spark" },
       },
+      {
+        id: "five_hour",
+        label: "5h Spark",
+        usedPercent: 8,
+        resetsAt: null,
+        windowMinutes: 300,
+        meter: { id: "codex_spark", label: "GPT-5.3-Codex-Spark" },
+      },
     ] as const;
 
     expect(selectVisibleAccountLimitWindows(windows)).toEqual([windows[0]]);
-    expect(windows).toHaveLength(2);
+    expect(windows).toHaveLength(3);
   });
 });
