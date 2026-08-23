@@ -8,7 +8,10 @@ import type {
   UserInputQuestion,
 } from "@t3tools/contracts";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
-import { activityRemainsVisibleOutsideTurnFold } from "@t3tools/shared/timelineActivity";
+import {
+  activityRemainsVisibleOutsideTurnFold,
+  contextCompactionActivityDetail,
+} from "@t3tools/shared/timelineActivity";
 
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
@@ -393,13 +396,9 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   };
   const itemType = extractWorkLogItemType(payload);
   const requestKind = extractWorkLogRequestKind(payload);
-  if (
-    !taskDetailAsLabel &&
-    payload &&
-    typeof payload.detail === "string" &&
-    payload.detail.length > 0
-  ) {
-    const detail = stripTrailingExitCode(payload.detail).output;
+  const activityDetail = contextCompactionActivityDetail(activity.kind, payload?.detail);
+  if (!taskDetailAsLabel && (activityDetail || typeof payload?.detail === "string")) {
+    const detail = stripTrailingExitCode(activityDetail ?? String(payload?.detail)).output;
     if (detail) {
       entry.detail = detail;
     }

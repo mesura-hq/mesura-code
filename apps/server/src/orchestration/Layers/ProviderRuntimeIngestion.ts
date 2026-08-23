@@ -28,6 +28,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
@@ -118,6 +119,61 @@ type RuntimeIngestionInput =
 
 function toTurnId(value: TurnId | string | undefined): TurnId | undefined {
   return value === undefined ? undefined : TurnId.make(String(value));
+}
+
+function finiteCompactionMetric(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.round(value)
+    : undefined;
+}
+
+function compactionDetailRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function formatTokenCount(value: number): string {
+  return new Intl.NumberFormat("en-US").format(value);
+}
+
+export function formatContextCompactionActivityDetail(input: {
+  readonly provider: ProviderRuntimeEvent["provider"];
+  readonly detail?: unknown;
+}): string {
+  const detail = compactionDetailRecord(input.detail);
+  const compactMetadata = compactionDetailRecord(detail?.compact_metadata);
+  const compactSummary =
+    typeof detail?.compact_summary === "string" && detail.compact_summary.trim().length > 0
+      ? detail.compact_summary.trim()
+      : undefined;
+  const preTokens = finiteCompactionMetric(compactMetadata?.pre_tokens);
+  const postTokens = finiteCompactionMetric(compactMetadata?.post_tokens);
+  const durationMs = finiteCompactionMetric(compactMetadata?.duration_ms);
+  const trigger = compactMetadata?.trigger;
+
+  const summarySection = compactSummary
+    ? `Summary\n${compactSummary}`
+    : input.provider === "codex"
+      ? "Codex does not expose the compaction summary."
+      : "Claude Code did not provide a compaction summary for this event.";
+
+  const metrics: string[] = [];
+  if (preTokens !== undefined) metrics.push(`Before: ${formatTokenCount(preTokens)} tokens`);
+  if (postTokens !== undefined) metrics.push(`After: ${formatTokenCount(postTokens)} tokens`);
+  if (preTokens !== undefined && postTokens !== undefined && preTokens >= postTokens) {
+    const reduction = preTokens - postTokens;
+    const percentage = preTokens > 0 ? Math.round((reduction / preTokens) * 100) : 0;
+    metrics.push(`Reduced: ${formatTokenCount(reduction)} tokens (${percentage}%)`);
+  }
+  if (durationMs !== undefined) metrics.push(`Duration: ${formatDuration(durationMs)}`);
+  if (trigger === "manual" || trigger === "auto") {
+    metrics.push(`Trigger: ${trigger}`);
+  }
+
+  return metrics.length > 0
+    ? `${summarySection}\n\nCompaction details\n${metrics.join("\n")}`
+    : summarySection;
 }
 
 function toApprovalRequestId(value: string | undefined): ApprovalRequestId | undefined {
@@ -758,7 +814,11 @@ export function runtimeEventToActivities(
           summary: "Context compacted",
           payload: {
             state: event.payload.state,
-            ...(event.payload.detail !== undefined ? { detail: event.payload.detail } : {}),
+            provider: event.provider,
+            detail: formatContextCompactionActivityDetail({
+              provider: event.provider,
+              detail: event.payload.detail,
+            }),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -832,6 +892,8 @@ export function runtimeEventToActivities(
             summary: "Context compacted",
             payload: {
               status: "completed",
+              provider: event.provider,
+              detail: formatContextCompactionActivityDetail({ provider: event.provider }),
               ...(event.itemId !== undefined ? { itemId: event.itemId } : {}),
             },
             turnId: toTurnId(event.turnId) ?? null,
@@ -877,6 +939,8 @@ export function runtimeEventToActivities(
             summary: "Compacting context",
             payload: {
               status: "started",
+              provider: event.provider,
+              detail: formatContextCompactionActivityDetail({ provider: event.provider }),
               ...(event.itemId !== undefined ? { itemId: event.itemId } : {}),
             },
             turnId: toTurnId(event.turnId) ?? null,

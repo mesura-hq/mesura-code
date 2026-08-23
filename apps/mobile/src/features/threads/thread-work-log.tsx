@@ -153,7 +153,12 @@ export function ThreadWorkLog(props: {
           const expanded = props.expandedRows[row.id] ?? false;
           const canExpand = row.canExpand;
           const fullDetail = expanded ? row.getFullDetail() : null;
-          const displayText = row.detail ? `${row.summary} ${row.detail}` : row.summary;
+          const displayText =
+            row.sourceActivityKind === "context-compaction"
+              ? row.summary
+              : row.detail
+                ? `${row.summary} ${row.detail}`
+                : row.summary;
           const iconIsDestructive = row.icon === "alert" || row.icon === "warning";
 
           return (

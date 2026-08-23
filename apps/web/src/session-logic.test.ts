@@ -1863,11 +1863,15 @@ describe("deriveWorkLogEntries context window handling", () => {
         kind: "context-compaction",
         summary: "Context compacted",
         tone: "info",
+        payload: {
+          detail: "Summary\nKeep the implementation state and verification results.",
+        },
       }),
     ]);
 
     expect(entries).toHaveLength(1);
     expect(entries[0]?.label).toBe("Context compacted");
+    expect(entries[0]?.detail).toContain("Keep the implementation state");
   });
 });
 

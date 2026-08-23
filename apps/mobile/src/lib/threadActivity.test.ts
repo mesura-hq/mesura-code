@@ -473,6 +473,9 @@ describe("buildThreadFeed", () => {
           summary: "Context compacted",
           createdAt: "2026-04-01T00:00:04.000Z",
           turnId,
+          payload: {
+            detail: "Summary\nKeep the implementation state and verification results.",
+          },
         }),
       ],
     });
@@ -482,6 +485,10 @@ describe("buildThreadFeed", () => {
 
     expect(rows.map((entry) => entry.id)).toEqual(["compact-message", "compaction-activity"]);
     expect(rows.some((entry) => entry.type === "turn-fold")).toBe(false);
+    expect(rows[1]).toMatchObject({
+      type: "activity-group",
+      activities: [{ canExpand: true }],
+    });
   });
 
   it("measures a steer-superseded turn from its user boundary through trailing work", () => {

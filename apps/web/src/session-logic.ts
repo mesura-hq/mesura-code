@@ -13,6 +13,7 @@ import {
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
+import { contextCompactionActivityDetail } from "@t3tools/shared/timelineActivity";
 
 import type {
   ChatMessage,
@@ -915,7 +916,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       ? payload.detail
       : null;
   const taskLabel = taskSummary || taskDetailAsLabel;
-  const detail = isTaskActivity
+  const derivedDetail = isTaskActivity
     ? !taskDetailAsLabel &&
       payload &&
       typeof payload.detail === "string" &&
@@ -923,6 +924,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       ? stripTrailingExitCode(payload.detail).output
       : null
     : extractToolDetail(payload, title ?? activity.summary);
+  const detail = contextCompactionActivityDetail(activity.kind, payload?.detail) ?? derivedDetail;
   const toolCallId = isTaskActivity ? null : extractToolCallId(payload);
   const entry: DerivedWorkLogEntry = {
     id: activity.id,

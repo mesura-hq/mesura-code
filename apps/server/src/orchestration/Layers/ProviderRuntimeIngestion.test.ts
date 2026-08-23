@@ -3212,6 +3212,55 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(activity?.summary).toBe("Context compacted");
     expect(activity?.tone).toBe("info");
+    expect(activity?.payload).toMatchObject({
+      provider: "codex",
+      detail: "Codex does not expose the compaction summary.",
+    });
+  });
+
+  it("projects the Claude compaction summary and metrics into expandable detail", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "thread.state.changed",
+      eventId: asEventId("evt-claude-thread-compacted"),
+      provider: ProviderDriverKind.make("claudeAgent"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-1"),
+      payload: {
+        state: "compacted",
+        detail: {
+          compact_summary: "The implementation is complete and the focused tests pass.",
+          compact_metadata: {
+            trigger: "manual",
+            pre_tokens: 26_826,
+            post_tokens: 4_707,
+            duration_ms: 4_558,
+          },
+        },
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.kind === "context-compaction",
+      ),
+    );
+    const activity = thread.activities.find(
+      (candidate: ProviderRuntimeTestActivity) => candidate.kind === "context-compaction",
+    );
+
+    expect(activity?.payload).toMatchObject({
+      provider: "claudeAgent",
+      detail: expect.stringContaining(
+        "Summary\nThe implementation is complete and the focused tests pass.",
+      ),
+    });
+    expect((activity?.payload as { detail?: string } | undefined)?.detail).toContain(
+      "Before: 26,826 tokens\nAfter: 4,707 tokens\nReduced: 22,119 tokens (82%)\nDuration: 4.6s\nTrigger: manual",
+    );
   });
 
   it("projects context compaction items once when the legacy notification also arrives", async () => {
