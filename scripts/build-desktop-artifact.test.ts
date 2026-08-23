@@ -481,6 +481,13 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.deepStrictEqual((linux.linux as Record<string, unknown>).protocols, [
         { name: "Mesura Code", schemes: ["t3code", "t3code-dev"] },
       ]);
+      assert.equal((linux.linux as Record<string, unknown>).executableName, "mesura-code");
+      assert.equal(linux.artifactName, "Mesura-Code-${version}-${arch}.${ext}");
+      assert.equal(mac.artifactName, "T3-Code-${version}-${arch}.${ext}");
+      assert.equal(win.artifactName, "T3-Code-${version}-${arch}.${ext}");
+      assert.deepStrictEqual((linux.linux as Record<string, unknown>).desktop, {
+        entry: { StartupWMClass: "mesura-code" },
+      });
       for (const config of [mac, linux, win]) {
         assert.deepStrictEqual(config.electronLanguages, DESKTOP_ELECTRON_LANGUAGES);
         assert.deepStrictEqual(config.files, DESKTOP_FILE_EXCLUSIONS);
