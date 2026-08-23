@@ -10,6 +10,7 @@ import {
 } from "../../session-logic";
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
 import { type MessageId, type OrchestrationLatestTurn, type TurnId } from "@t3tools/contracts";
+import { activityRemainsVisibleOutsideTurnFold } from "@t3tools/shared/timelineActivity";
 
 export const MAX_VISIBLE_WORK_LOG_ENTRIES = 1;
 export const TIMELINE_MINIMAP_ITEM_SPACING = 8;
@@ -602,6 +603,15 @@ function deriveTurnFolds(input: {
       // turn (dynamic spawns, background execution), and folding the CTA
       // when the turn settles makes a still-running fleet invisible.
       if (entry.kind === "work" && entry.entry.agentSpawn !== undefined) {
+        continue;
+      }
+      // Context compaction is a durable user-visible boundary. Hiding its
+      // completion behind the generic turn fold makes a successful `/compact`
+      // indistinguishable from an ordinary empty turn.
+      if (
+        entry.kind === "work" &&
+        activityRemainsVisibleOutsideTurnFold(entry.entry.sourceActivityKind)
+      ) {
         continue;
       }
       hiddenEntryIds.add(entry.id);

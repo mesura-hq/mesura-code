@@ -3212,6 +3212,175 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(activity?.summary).toBe("Context compacted");
     expect(activity?.tone).toBe("info");
+    expect(activity?.payload).toMatchObject({
+      provider: "codex",
+      detail: "Codex does not expose the compaction summary.",
+    });
+  });
+
+  it("projects the Claude compaction summary and metrics into expandable detail", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "thread.state.changed",
+      eventId: asEventId("evt-claude-thread-compacted"),
+      provider: ProviderDriverKind.make("claudeAgent"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-1"),
+      payload: {
+        state: "compacted",
+        detail: {
+          compact_summary: "The implementation is complete and the focused tests pass.",
+          compact_metadata: {
+            trigger: "manual",
+            pre_tokens: 26_826,
+            post_tokens: 4_707,
+            duration_ms: 4_558,
+          },
+        },
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.kind === "context-compaction",
+      ),
+    );
+    const activity = thread.activities.find(
+      (candidate: ProviderRuntimeTestActivity) => candidate.kind === "context-compaction",
+    );
+
+    expect(activity?.payload).toMatchObject({
+      provider: "claudeAgent",
+      detail: expect.stringContaining(
+        "Summary\nThe implementation is complete and the focused tests pass.",
+      ),
+    });
+    expect((activity?.payload as { detail?: string } | undefined)?.detail).toContain(
+      "Before: 26,826 tokens\nAfter: 4,707 tokens\nReduced: 22,119 tokens (82%)\nDuration: 4.6s\nTrigger: manual",
+    );
+  });
+
+  it("projects context compaction items once when the legacy notification also arrives", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+    const threadId = asThreadId("thread-1");
+    const turnId = asTurnId("turn-1");
+
+    harness.emit({
+      type: "thread.token-usage.updated",
+      eventId: asEventId("evt-context-before"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId,
+      turnId,
+      payload: {
+        usage: {
+          usedTokens: 26_826,
+          maxTokens: 516_800,
+          lastUsedTokens: 26_826,
+          compactsAutomatically: true,
+        },
+      },
+    });
+    harness.emit({
+      type: "item.started",
+      eventId: asEventId("evt-context-compaction-started"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:01.000Z",
+      threadId,
+      turnId,
+      itemId: "context-compaction-1",
+      payload: {
+        itemType: "context_compaction",
+        status: "inProgress",
+        title: "Compacting context",
+      },
+    });
+    harness.emit({
+      type: "thread.token-usage.updated",
+      eventId: asEventId("evt-context-after"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:05.557Z",
+      threadId,
+      turnId,
+      payload: {
+        usage: {
+          usedTokens: 4_707,
+          totalProcessedTokens: 26_826,
+          maxTokens: 516_800,
+          lastUsedTokens: 4_707,
+          compactsAutomatically: true,
+        },
+      },
+    });
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-context-compaction-item"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:05.558Z",
+      threadId,
+      turnId,
+      itemId: "context-compaction-1",
+      payload: {
+        itemType: "context_compaction",
+        status: "completed",
+        title: "Context compacted",
+      },
+    });
+    const itemThread = await waitForThread(
+      harness.readModel,
+      (entry) =>
+        entry.activities.filter(
+          (activity: ProviderRuntimeTestActivity) => activity.kind === "context-compaction",
+        ).length > 0,
+    );
+
+    expect(
+      itemThread.activities.filter(
+        (activity: ProviderRuntimeTestActivity) => activity.kind === "context-compaction",
+      ),
+    ).toHaveLength(1);
+    expect(
+      (
+        itemThread.activities.find(
+          (activity: ProviderRuntimeTestActivity) => activity.kind === "context-compaction",
+        )?.payload as { detail?: string } | undefined
+      )?.detail,
+    ).toContain(
+      "Before: 26,826 tokens\nAfter: 4,707 tokens\nReduced: 22,119 tokens (82%)\nDuration: 4.6s",
+    );
+
+    harness.emit({
+      type: "thread.state.changed",
+      eventId: asEventId("evt-context-compaction-legacy"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId,
+      turnId,
+      payload: { state: "compacted" },
+    });
+
+    await harness.drain();
+    const snapshot = await harness.readModel();
+    const thread = snapshot.threads.find((entry) => entry.id === threadId);
+    expect(thread).toBeDefined();
+
+    expect(
+      thread!.activities.filter(
+        (activity: ProviderRuntimeTestActivity) => activity.kind === "context-compaction",
+      ),
+    ).toHaveLength(1);
+    expect(
+      (
+        thread!.activities.find(
+          (activity: ProviderRuntimeTestActivity) => activity.kind === "context-compaction",
+        )?.payload as { detail?: string } | undefined
+      )?.detail,
+    ).toContain("Before: 26,826 tokens");
   });
 
   it("projects Codex task lifecycle chunks into thread activities", async () => {

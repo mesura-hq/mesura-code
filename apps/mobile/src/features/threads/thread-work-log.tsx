@@ -9,6 +9,7 @@ import type { ThreadFeedActivity } from "../../lib/threadActivity";
 import { MOBILE_TYPOGRAPHY } from "../../lib/typography";
 import { useThemeColor } from "../../lib/useThemeColor";
 import Animated, { FadeIn } from "react-native-reanimated";
+import { workLogRowDetailPresentation } from "./thread-work-log-presentation";
 
 const WORK_LOG_LAYOUT_ANIMATION = {
   duration: 180,
@@ -152,8 +153,8 @@ export function ThreadWorkLog(props: {
         {rows.map((row) => {
           const expanded = props.expandedRows[row.id] ?? false;
           const canExpand = row.canExpand;
-          const fullDetail = expanded ? row.getFullDetail() : null;
-          const displayText = row.detail ? `${row.summary} ${row.detail}` : row.summary;
+          const { collapsedDetail, expandedDetail } = workLogRowDetailPresentation(row, expanded);
+          const displayText = collapsedDetail ? `${row.summary} ${collapsedDetail}` : row.summary;
           const iconIsDestructive = row.icon === "alert" || row.icon === "warning";
 
           return (
@@ -203,8 +204,8 @@ export function ThreadWorkLog(props: {
                     >
                       {row.summary}
                     </Text>
-                    {row.detail ? (
-                      <Text className="text-foreground-muted opacity-60"> {row.detail}</Text>
+                    {collapsedDetail ? (
+                      <Text className="text-foreground-muted opacity-60"> {collapsedDetail}</Text>
                     ) : null}
                   </Text>
 
@@ -248,7 +249,7 @@ export function ThreadWorkLog(props: {
                 </View>
               </Pressable>
 
-              {fullDetail ? (
+              {expandedDetail ? (
                 <View className="ml-7 border-l border-neutral-300/60 pb-1 pl-3 pt-0.5 dark:border-white/[0.12]">
                   <ScrollView
                     nestedScrollEnabled
@@ -261,7 +262,7 @@ export function ThreadWorkLog(props: {
                       selectable
                       className="font-mono text-2xs leading-normal text-foreground-muted"
                     >
-                      {fullDetail}
+                      {expandedDetail}
                     </Text>
                   </ScrollView>
                 </View>

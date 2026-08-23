@@ -440,6 +440,80 @@ describe("buildThreadFeed", () => {
     ]);
   });
 
+  it("keeps completed context compaction visible outside the turn fold", () => {
+    const turnId = TurnId.make("turn-compact");
+    const thread = makeThread({
+      id: ThreadId.make("thread-compact"),
+      projectId: ProjectId.make("project-1"),
+      title: "Compact context",
+      latestTurn: {
+        turnId,
+        state: "completed",
+        requestedAt: "2026-04-01T00:00:00.000Z",
+        startedAt: "2026-04-01T00:00:00.000Z",
+        completedAt: "2026-04-01T00:00:04.000Z",
+        assistantMessageId: null,
+      },
+      messages: [
+        {
+          id: MessageId.make("compact-message"),
+          role: "user",
+          text: "/compact",
+          turnId: null,
+          streaming: false,
+          createdAt: "2026-04-01T00:00:00.000Z",
+          updatedAt: "2026-04-01T00:00:00.000Z",
+        },
+      ],
+      activities: [
+        makeActivity({
+          id: EventId.make("context-before"),
+          sequence: 1,
+          kind: "context-window.updated",
+          tone: "info",
+          summary: "Context window updated",
+          createdAt: "2026-04-01T00:00:00.000Z",
+          payload: { usedTokens: 26_826 },
+        }),
+        makeActivity({
+          id: EventId.make("context-after"),
+          sequence: 2,
+          kind: "context-window.updated",
+          tone: "info",
+          summary: "Context window updated",
+          createdAt: "2026-04-01T00:00:03.999Z",
+          payload: { usedTokens: 4_707 },
+        }),
+        makeActivity({
+          id: EventId.make("compaction-activity"),
+          sequence: 3,
+          kind: "context-compaction",
+          tone: "info",
+          summary: "Context compacted",
+          createdAt: "2026-04-01T00:00:04.000Z",
+          turnId,
+          payload: {
+            detail: "Summary\nKeep the implementation state and verification results.",
+          },
+        }),
+      ],
+    });
+
+    const feed = buildThreadFeed(thread);
+    const rows = deriveThreadFeedPresentation(feed, thread.latestTurn, new Set());
+
+    expect(rows.map((entry) => entry.id)).toEqual(["compact-message", "compaction-activity"]);
+    expect(rows.some((entry) => entry.type === "turn-fold")).toBe(false);
+    expect(rows[1]).toMatchObject({
+      type: "activity-group",
+      activities: [{ canExpand: true }],
+    });
+    if (rows[1]?.type === "activity-group") {
+      expect(rows[1].activities[0]?.getFullDetail()).toContain("Before: 26,826 tokens");
+      expect(rows[1].activities[0]?.getFullDetail()).toContain("Reduced: 22,119 tokens (82%)");
+    }
+  });
+
   it("measures a steer-superseded turn from its user boundary through trailing work", () => {
     const firstTurnId = TurnId.make("turn-1");
     const secondTurnId = TurnId.make("turn-2");

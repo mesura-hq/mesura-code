@@ -6,6 +6,7 @@ import * as Schema from "effect/Schema";
 import { describe } from "vite-plus/test";
 import { DEFAULT_MODEL, ThreadId } from "@t3tools/contracts";
 import * as CodexErrors from "effect-codex-app-server/errors";
+import * as CodexClient from "effect-codex-app-server/client";
 import * as CodexRpc from "effect-codex-app-server/rpc";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
@@ -21,6 +22,8 @@ import {
   isRecoverableThreadResumeError,
   makeMemoryConsolidationNotificationFilter,
   openCodexThread,
+  readCodexNotificationRouteFields,
+  requestCodexContextCompaction,
 } from "./CodexSessionRuntime.ts";
 const isCodexAppServerRequestError = Schema.is(CodexErrors.CodexAppServerRequestError);
 
@@ -37,6 +40,51 @@ describe("CodexSessionRuntimeIdentifierGenerationError", () => {
     NodeAssert.equal(
       error.message,
       "Failed to generate Codex App Server identifier for provider-event.",
+    );
+  });
+});
+
+describe("requestCodexContextCompaction", () => {
+  it.effect("uses the native app-server compaction method", () =>
+    Effect.gen(function* () {
+      const requests: Array<{ method: string; params: unknown }> = [];
+      const client = {
+        request: (method: string, params: unknown) =>
+          Effect.sync(() => {
+            requests.push({ method, params });
+            return {};
+          }),
+      };
+
+      yield* requestCodexContextCompaction(
+        client as unknown as Pick<CodexClient.CodexAppServerClient["Service"], "request">,
+        "provider-thread-1",
+      );
+
+      NodeAssert.deepStrictEqual(requests, [
+        {
+          method: "thread/compact/start",
+          params: { threadId: "provider-thread-1" },
+        },
+      ]);
+    }),
+  );
+});
+
+describe("readCodexNotificationRouteFields", () => {
+  it("keeps the compaction turn on deprecated thread notifications", () => {
+    NodeAssert.deepStrictEqual(
+      readCodexNotificationRouteFields({
+        method: "thread/compacted",
+        params: {
+          threadId: "provider-thread-1",
+          turnId: "provider-turn-1",
+        },
+      }),
+      {
+        turnId: "provider-turn-1",
+        itemId: undefined,
+      },
     );
   });
 });

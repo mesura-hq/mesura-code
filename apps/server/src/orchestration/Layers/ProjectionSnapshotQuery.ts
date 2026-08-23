@@ -26,6 +26,7 @@ import {
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
+import { contextCompactionActivityDetailFromHistory } from "@t3tools/shared/timelineActivity";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -293,6 +294,21 @@ function mapTitleRegeneration(row: Schema.Schema.Type<typeof ProjectionThreadDbR
         startedAt: row.titleRegenerationStartedAt,
       }
     : null;
+}
+
+export function enrichContextCompactionActivityDetails(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): ReadonlyArray<OrchestrationThreadActivity> {
+  return activities.map((activity) => {
+    const detail = contextCompactionActivityDetailFromHistory(activity, activities);
+    if (!detail) return activity;
+    const payload =
+      activity.payload !== null && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : {};
+    if (payload.detail === detail) return activity;
+    return { ...activity, payload: { ...payload, detail } };
+  });
 }
 
 function mapSessionRow(
@@ -1708,7 +1724,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 deletedAt: row.deletedAt,
                 messages: messagesByThread.get(row.threadId) ?? [],
                 proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
-                activities: activitiesByThread.get(row.threadId) ?? [],
+                activities: enrichContextCompactionActivityDetails(
+                  activitiesByThread.get(row.threadId) ?? [],
+                ),
                 checkpoints: checkpointsByThread.get(row.threadId) ?? [],
                 session: sessionsByThread.get(row.threadId) ?? null,
               }));
@@ -2630,21 +2648,23 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           return message;
         }),
         proposedPlans: proposedPlanRows.map(mapProposedPlanRow),
-        activities: selectedActivityRows.map((row) => {
-          const activity = {
-            id: row.activityId,
-            tone: row.tone,
-            kind: row.kind,
-            summary: row.summary,
-            payload: row.payload,
-            turnId: row.turnId,
-            createdAt: row.createdAt,
-          };
-          if (row.sequence !== null) {
-            return Object.assign(activity, { sequence: row.sequence });
-          }
-          return activity;
-        }),
+        activities: enrichContextCompactionActivityDetails(
+          selectedActivityRows.map((row) => {
+            const activity = {
+              id: row.activityId,
+              tone: row.tone,
+              kind: row.kind,
+              summary: row.summary,
+              payload: row.payload,
+              turnId: row.turnId,
+              createdAt: row.createdAt,
+            };
+            if (row.sequence !== null) {
+              return Object.assign(activity, { sequence: row.sequence });
+            }
+            return activity;
+          }),
+        ),
         checkpoints: checkpointRows.map((row) => ({
           turnId: row.turnId,
           checkpointTurnCount: row.checkpointTurnCount,
