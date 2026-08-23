@@ -202,6 +202,10 @@ export const ChatHeader = memo(function ChatHeader({
     [commitRename],
   );
   return (
+    // Nothing here reads @container/header-actions anymore, but the removed
+    // controls still carry @3xl/header-actions: classes. Dropping the context
+    // would break their layout the day one comes back, and nothing would fail
+    // at build time to say so.
     <div
       className="@container/header-actions flex min-w-0 flex-1 items-center gap-2 sm:gap-3"
       onContextMenu={handleHeaderContextMenu}
