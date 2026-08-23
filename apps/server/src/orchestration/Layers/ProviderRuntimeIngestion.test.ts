@@ -3270,10 +3270,58 @@ describe("ProviderRuntimeIngestion", () => {
     const turnId = asTurnId("turn-1");
 
     harness.emit({
+      type: "thread.token-usage.updated",
+      eventId: asEventId("evt-context-before"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId,
+      turnId,
+      payload: {
+        usage: {
+          usedTokens: 26_826,
+          maxTokens: 516_800,
+          lastUsedTokens: 26_826,
+          compactsAutomatically: true,
+        },
+      },
+    });
+    harness.emit({
+      type: "item.started",
+      eventId: asEventId("evt-context-compaction-started"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:01.000Z",
+      threadId,
+      turnId,
+      itemId: "context-compaction-1",
+      payload: {
+        itemType: "context_compaction",
+        status: "inProgress",
+        title: "Compacting context",
+      },
+    });
+    harness.emit({
+      type: "thread.token-usage.updated",
+      eventId: asEventId("evt-context-after"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:05.557Z",
+      threadId,
+      turnId,
+      payload: {
+        usage: {
+          usedTokens: 4_707,
+          totalProcessedTokens: 26_826,
+          maxTokens: 516_800,
+          lastUsedTokens: 4_707,
+          compactsAutomatically: true,
+        },
+      },
+    });
+
+    harness.emit({
       type: "item.completed",
       eventId: asEventId("evt-context-compaction-item"),
       provider: ProviderDriverKind.make("codex"),
-      createdAt: now,
+      createdAt: "2026-01-01T00:00:05.558Z",
       threadId,
       turnId,
       itemId: "context-compaction-1",
@@ -3296,6 +3344,15 @@ describe("ProviderRuntimeIngestion", () => {
         (activity: ProviderRuntimeTestActivity) => activity.kind === "context-compaction",
       ),
     ).toHaveLength(1);
+    expect(
+      (
+        itemThread.activities.find(
+          (activity: ProviderRuntimeTestActivity) => activity.kind === "context-compaction",
+        )?.payload as { detail?: string } | undefined
+      )?.detail,
+    ).toContain(
+      "Before: 26,826 tokens\nAfter: 4,707 tokens\nReduced: 22,119 tokens (82%)\nDuration: 4.6s",
+    );
 
     harness.emit({
       type: "thread.state.changed",
@@ -3317,6 +3374,13 @@ describe("ProviderRuntimeIngestion", () => {
         (activity: ProviderRuntimeTestActivity) => activity.kind === "context-compaction",
       ),
     ).toHaveLength(1);
+    expect(
+      (
+        thread!.activities.find(
+          (activity: ProviderRuntimeTestActivity) => activity.kind === "context-compaction",
+        )?.payload as { detail?: string } | undefined
+      )?.detail,
+    ).toContain("Before: 26,826 tokens");
   });
 
   it("projects Codex task lifecycle chunks into thread activities", async () => {

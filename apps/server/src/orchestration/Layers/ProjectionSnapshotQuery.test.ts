@@ -6,6 +6,7 @@ import {
   ThreadId,
   TurnId,
   ProviderInstanceId,
+  type OrchestrationThreadActivity,
 } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -16,7 +17,10 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
-import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
+import {
+  enrichContextCompactionActivityDetails,
+  OrchestrationProjectionSnapshotQueryLive,
+} from "./ProjectionSnapshotQuery.ts";
 import * as ThreadBackgroundLiveness from "../ThreadBackgroundLiveness.ts";
 import * as ThreadPlanProgress from "../ThreadPlanProgress.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
@@ -27,6 +31,35 @@ const asTurnId = (value: string): TurnId => TurnId.make(value);
 const asMessageId = (value: string): MessageId => MessageId.make(value);
 const asEventId = (value: string): EventId => EventId.make(value);
 const asCheckpointRef = (value: string): CheckpointRef => CheckpointRef.make(value);
+
+it("enriches historical compaction rows from persisted context snapshots", () => {
+  const activities = [
+    {
+      id: "context-before",
+      kind: "context-window.updated",
+      createdAt: "2026-08-22T17:44:27.990Z",
+      payload: { usedTokens: 26_826 },
+    },
+    {
+      id: "context-after",
+      kind: "context-window.updated",
+      createdAt: "2026-08-22T17:44:43.614Z",
+      payload: { usedTokens: 4_707 },
+    },
+    {
+      id: "context-compaction",
+      kind: "context-compaction",
+      createdAt: "2026-08-22T17:44:43.615Z",
+      payload: {},
+    },
+  ] as unknown as OrchestrationThreadActivity[];
+
+  const enriched = enrichContextCompactionActivityDetails(activities);
+  assert.include(
+    String((enriched[2]?.payload as { detail?: string } | undefined)?.detail),
+    "Before: 26,826 tokens",
+  );
+});
 
 const projectionSnapshotLayer = it.layer(
   OrchestrationProjectionSnapshotQueryLive.pipe(

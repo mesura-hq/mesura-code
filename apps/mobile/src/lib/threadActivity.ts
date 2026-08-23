@@ -10,7 +10,7 @@ import type {
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 import {
   activityRemainsVisibleOutsideTurnFold,
-  contextCompactionActivityDetail,
+  contextCompactionActivityDetailFromHistory,
 } from "@t3tools/shared/timelineActivity";
 
 import * as Arr from "effect/Array";
@@ -332,7 +332,7 @@ function deriveWorkLogEntries(
     if (activity.summary === "Checkpoint captured") continue;
     if (isPlanBoundaryToolActivity(activity)) continue;
     if (isAgentInternalActivity(activity)) continue;
-    entries.push(toDerivedWorkLogEntry(activity));
+    entries.push(toDerivedWorkLogEntry(activity, ordered));
   }
   return collapseDerivedWorkLogEntries(entries);
 }
@@ -349,7 +349,10 @@ function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): bool
   return typeof payload?.detail === "string" && payload.detail.startsWith("ExitPlanMode:");
 }
 
-function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWorkLogEntry {
+function toDerivedWorkLogEntry(
+  activity: OrchestrationThreadActivity,
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): DerivedWorkLogEntry {
   const payload =
     activity.payload && typeof activity.payload === "object"
       ? (activity.payload as Record<string, unknown>)
@@ -396,7 +399,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   };
   const itemType = extractWorkLogItemType(payload);
   const requestKind = extractWorkLogRequestKind(payload);
-  const activityDetail = contextCompactionActivityDetail(activity.kind, payload?.detail);
+  const activityDetail = contextCompactionActivityDetailFromHistory(activity, activities);
   if (!taskDetailAsLabel && (activityDetail || typeof payload?.detail === "string")) {
     const detail = stripTrailingExitCode(activityDetail ?? String(payload?.detail)).output;
     if (detail) {

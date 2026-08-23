@@ -1858,7 +1858,24 @@ describe("deriveWorkLogEntries context window handling", () => {
   it("keeps context compaction activities as normal work log entries", () => {
     const entries = deriveWorkLogEntries([
       makeActivity({
+        id: "context-before",
+        sequence: 1,
+        kind: "context-window.updated",
+        summary: "Context window updated",
+        tone: "info",
+        payload: { usedTokens: 26_826 },
+      }),
+      makeActivity({
+        id: "context-after",
+        sequence: 2,
+        kind: "context-window.updated",
+        summary: "Context window updated",
+        tone: "info",
+        payload: { usedTokens: 4_707 },
+      }),
+      makeActivity({
         id: "compaction-1",
+        sequence: 3,
         turnId: "turn-1",
         kind: "context-compaction",
         summary: "Context compacted",
@@ -1872,6 +1889,8 @@ describe("deriveWorkLogEntries context window handling", () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]?.label).toBe("Context compacted");
     expect(entries[0]?.detail).toContain("Keep the implementation state");
+    expect(entries[0]?.detail).toContain("Before: 26,826 tokens");
+    expect(entries[0]?.detail).toContain("Reduced: 22,119 tokens (82%)");
   });
 });
 
