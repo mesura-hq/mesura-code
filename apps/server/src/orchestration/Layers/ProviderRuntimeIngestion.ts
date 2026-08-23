@@ -28,7 +28,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
-import { formatContextCompactionDetail } from "@t3tools/shared/timelineActivity";
+import { formatContextCompactionDetailFromPayload } from "@t3tools/shared/timelineActivity";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
@@ -144,28 +144,12 @@ export function formatContextCompactionActivityDetail(input: {
   readonly detail?: unknown;
   readonly metrics?: ContextCompactionMetrics;
 }): string {
-  const detail = compactionDetailRecord(input.detail);
-  const compactMetadata = compactionDetailRecord(detail?.compact_metadata);
-  const compactSummary =
-    typeof detail?.compact_summary === "string" && detail.compact_summary.trim().length > 0
-      ? detail.compact_summary.trim()
-      : undefined;
-  const preTokens = finiteCompactionMetric(compactMetadata?.pre_tokens ?? input.metrics?.preTokens);
-  const postTokens = finiteCompactionMetric(
-    compactMetadata?.post_tokens ?? input.metrics?.postTokens,
-  );
-  const durationMs = finiteCompactionMetric(
-    compactMetadata?.duration_ms ?? input.metrics?.durationMs,
-  );
-  const trigger = compactMetadata?.trigger;
-
-  return formatContextCompactionDetail({
+  return formatContextCompactionDetailFromPayload({
     provider: input.provider,
-    ...(compactSummary ? { summary: compactSummary } : {}),
-    ...(preTokens !== undefined ? { preTokens } : {}),
-    ...(postTokens !== undefined ? { postTokens } : {}),
-    ...(durationMs !== undefined ? { durationMs } : {}),
-    ...(trigger === "manual" || trigger === "auto" ? { trigger } : {}),
+    ...(input.detail !== undefined ? { detail: input.detail } : {}),
+    ...(input.metrics?.preTokens !== undefined ? { preTokens: input.metrics.preTokens } : {}),
+    ...(input.metrics?.postTokens !== undefined ? { postTokens: input.metrics.postTokens } : {}),
+    ...(input.metrics?.durationMs !== undefined ? { durationMs: input.metrics.durationMs } : {}),
   });
 }
 

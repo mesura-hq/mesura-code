@@ -807,6 +807,73 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("ignores PostCompact summaries emitted by subagents", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const compactedEventFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter(
+          (event) => event.type === "thread.state.changed" && event.payload.state === "compacted",
+        ),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      const postCompactHook =
+        harness.getLastCreateQueryInput()?.options.hooks?.PostCompact?.[0]?.hooks[0];
+      assert.isDefined(postCompactHook);
+      yield* Effect.promise(() =>
+        postCompactHook!(
+          {
+            hook_event_name: "PostCompact",
+            compact_summary: "This summary belongs to a subagent.",
+            trigger: "auto",
+            agent_id: "subagent-1",
+            session_id: "sdk-session-1",
+            transcript_path: "/tmp/claude-subagent-session.jsonl",
+            cwd: "/tmp/claude-adapter-test",
+            permission_mode: "bypassPermissions",
+          } as never,
+          undefined,
+          { signal: new AbortController().signal },
+        ),
+      );
+
+      harness.query.emit({
+        type: "system",
+        subtype: "compact_boundary",
+        compact_metadata: {
+          trigger: "manual",
+          pre_tokens: 20_000,
+          post_tokens: 4_000,
+          duration_ms: 1_500,
+        },
+        uuid: "00000000-0000-4000-8000-000000000002",
+        session_id: "sdk-session-1",
+      } as SDKMessage);
+
+      const events = Array.from(yield* Fiber.join(compactedEventFiber));
+      const compactedEvent = events[0];
+      assert.equal(compactedEvent?.type, "thread.state.changed");
+      if (compactedEvent?.type === "thread.state.changed") {
+        assert.notProperty(
+          compactedEvent.payload.detail as Record<string, unknown>,
+          "compact_summary",
+        );
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("embeds image attachments in Claude user messages", () => {
     const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "claude-attachments-"));
     const harness = makeHarness({

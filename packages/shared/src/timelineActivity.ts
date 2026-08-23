@@ -15,6 +15,12 @@ function activityPayload(activity: OrchestrationThreadActivity): Record<string, 
     : {};
 }
 
+function detailRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
 function formatTokenCount(value: number): string {
   return new Intl.NumberFormat("en-US").format(value);
 }
@@ -56,6 +62,36 @@ export function formatContextCompactionDetail(input: {
     : summarySection;
 }
 
+export function formatContextCompactionDetailFromPayload(input: {
+  readonly provider?: string;
+  readonly detail?: unknown;
+  readonly fallbackDetail?: string;
+  readonly preTokens?: number;
+  readonly postTokens?: number;
+  readonly durationMs?: number;
+}): string {
+  const detail = detailRecord(input.detail);
+  const compactMetadata = detailRecord(detail?.compact_metadata);
+  const compactSummary =
+    typeof detail?.compact_summary === "string" && detail.compact_summary.trim().length > 0
+      ? detail.compact_summary.trim()
+      : undefined;
+  const preTokens = finiteCompactionMetric(compactMetadata?.pre_tokens ?? input.preTokens);
+  const postTokens = finiteCompactionMetric(compactMetadata?.post_tokens ?? input.postTokens);
+  const durationMs = finiteCompactionMetric(compactMetadata?.duration_ms ?? input.durationMs);
+  const trigger = compactMetadata?.trigger;
+
+  return formatContextCompactionDetail({
+    ...(input.provider ? { provider: input.provider } : {}),
+    ...(compactSummary ? { summary: compactSummary } : {}),
+    ...(input.fallbackDetail ? { fallbackDetail: input.fallbackDetail } : {}),
+    ...(preTokens !== undefined ? { preTokens } : {}),
+    ...(postTokens !== undefined ? { postTokens } : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
+    ...(trigger === "manual" || trigger === "auto" ? { trigger } : {}),
+  });
+}
+
 export function activityRemainsVisibleOutsideTurnFold(
   kind: OrchestrationThreadActivity["kind"] | undefined,
 ): boolean {
@@ -79,30 +115,29 @@ export function contextCompactionActivityDetailFromHistory(
   activity: OrchestrationThreadActivity,
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): string | undefined {
-  const fallbackDetail = contextCompactionActivityDetail(
-    activity.kind,
-    activityPayload(activity).detail,
-  );
+  const payload = activityPayload(activity);
+  const rawDetail = payload.detail;
+  const provider = typeof payload.provider === "string" ? payload.provider : undefined;
+  const fallbackDetail = contextCompactionActivityDetail(activity.kind, rawDetail);
   if (
     activity.kind !== "context-compaction" ||
-    fallbackDetail?.includes(COMPACTION_DETAILS_MARKER)
+    (typeof rawDetail === "string" && fallbackDetail?.includes(COMPACTION_DETAILS_MARKER))
   ) {
     return fallbackDetail;
   }
 
-  const compactionSequence = activity.sequence ?? Number.MAX_SAFE_INTEGER;
   const contextSnapshots = activities
     .filter(
       (candidate) =>
         candidate.kind === "context-window.updated" &&
-        (candidate.sequence === undefined
-          ? candidate.createdAt <= activity.createdAt
-          : candidate.sequence <= compactionSequence),
+        (candidate.sequence !== undefined && activity.sequence !== undefined
+          ? candidate.sequence <= activity.sequence
+          : candidate.createdAt <= activity.createdAt),
     )
-    .toSorted(
-      (left, right) =>
-        (left.sequence ?? Number.MAX_SAFE_INTEGER) - (right.sequence ?? Number.MAX_SAFE_INTEGER) ||
-        left.createdAt.localeCompare(right.createdAt),
+    .toSorted((left, right) =>
+      left.sequence !== undefined && right.sequence !== undefined
+        ? left.sequence - right.sequence
+        : left.createdAt.localeCompare(right.createdAt),
     );
   const postSnapshot = contextSnapshots.at(-1);
   const preSnapshot = contextSnapshots.at(-2);
@@ -115,9 +150,9 @@ export function contextCompactionActivityDetailFromHistory(
   const hasCompactionReduction =
     preTokens !== undefined && postTokens !== undefined && preTokens > postTokens;
 
-  const provider = activityPayload(activity).provider;
-  return formatContextCompactionDetail({
-    ...(typeof provider === "string" ? { provider } : {}),
+  return formatContextCompactionDetailFromPayload({
+    ...(provider ? { provider } : {}),
+    ...(rawDetail !== undefined ? { detail: rawDetail } : {}),
     ...(fallbackDetail ? { fallbackDetail } : {}),
     ...(hasCompactionReduction ? { preTokens, postTokens } : {}),
   });

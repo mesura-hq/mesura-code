@@ -4183,7 +4183,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             {
               hooks: [
                 async (hookInput) => {
-                  if (hookInput.hook_event_name === "PostCompact") {
+                  if (
+                    hookInput.hook_event_name === "PostCompact" &&
+                    hookInput.agent_id === undefined
+                  ) {
                     const summary = hookInput.compact_summary.trim();
                     await runPromise(
                       Ref.set(
