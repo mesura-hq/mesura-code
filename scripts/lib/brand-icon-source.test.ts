@@ -10,6 +10,7 @@ const REPOSITORY_ROOT = NodeURL.fileURLToPath(new URL("../../", import.meta.url)
 const APPROVED_PRODUCTION_SHA256 =
   "122d1c2349cf004c0d38e6d4a5b1b2f21783b25cf459af91b66ce9561a0f40d4";
 const APPROVED_LOGO_128_SHA256 = "80d36634edb03a42044cc5a6199467c2a0764d5060dc6015ea64af304bffac00";
+const APPROVED_DESKTOP_SHA256 = "b16b7c50c80d41571e35f7e6b18b698baa06c6f3f33f9682bc65f8b6d81c405f";
 const EXPECTED_RASTER_SIZE = 1254;
 
 const sourcePath = (relativePath: string) => `${REPOSITORY_ROOT}/${relativePath}`;
@@ -111,6 +112,19 @@ describe("Mesura Code icon sources", () => {
     );
   });
 
+  it("keeps the approved rounded desktop icon exact", () => {
+    const desktopMaster = readSource("assets/mesura-code/desktop-master.png");
+    const png = PNG.sync.read(desktopMaster);
+
+    expect(NodeCrypto.createHash("sha256").update(desktopMaster).digest("hex")).toBe(
+      APPROVED_DESKTOP_SHA256,
+    );
+    expect({ width: png.width, height: png.height }).toEqual({ width: 1024, height: 1024 });
+    expect(rgbaAt(png, 0, 0)[3]).toBe(0);
+    expect(rgbaAt(png, 512, 64)).toEqual([37, 37, 39, 255]);
+    expect(rgbaAt(png, 512, 512)[3]).toBe(255);
+  });
+
   it("defines a transparent single-color template mark", () => {
     const monochrome = readSvg("assets/mesura-code/monochrome.svg");
 
@@ -149,11 +163,15 @@ describe("Mesura Code icon sources", () => {
       "assets/mesura-code/production-master.png",
       "assets/mesura-code/development-master.png",
       "assets/mesura-code/nightly-master.png",
+      "assets/mesura-code/desktop-master.png",
     ]) {
       const png = readPng(relativePath);
+      const expectedSize = relativePath.endsWith("desktop-master.png")
+        ? 1024
+        : EXPECTED_RASTER_SIZE;
       expect({ width: png.width, height: png.height }).toEqual({
-        width: EXPECTED_RASTER_SIZE,
-        height: EXPECTED_RASTER_SIZE,
+        width: expectedSize,
+        height: expectedSize,
       });
     }
 

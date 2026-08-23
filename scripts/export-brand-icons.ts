@@ -132,7 +132,7 @@ export const ICON_VARIANTS = [
     outputs: {
       ios: BRAND_ASSET_PATHS.productionIosIconPng,
       macos: BRAND_ASSET_PATHS.productionMacIconPng,
-      universal: BRAND_ASSET_PATHS.productionLinuxIconPng,
+      universal: BRAND_ASSET_PATHS.productionUniversalIconPng,
       appleTouch: BRAND_ASSET_PATHS.productionWebAppleTouchIconPng,
       favicon16: BRAND_ASSET_PATHS.productionWebFavicon16Png,
       favicon32: BRAND_ASSET_PATHS.productionWebFavicon32Png,
@@ -263,6 +263,11 @@ export async function collectGeneratedBrandAssets(
   for (const [relativePath, contents] of mobileSystemAssets) {
     generated.set(relativePath, contents);
   }
+
+  generated.set(
+    BRAND_ASSET_PATHS.productionLinuxIconPng,
+    await renderRasterIcon(NodePath.join(repositoryRoot, BRAND_ASSET_PATHS.desktopMasterPng), 1024),
+  );
   return generated;
 }
 

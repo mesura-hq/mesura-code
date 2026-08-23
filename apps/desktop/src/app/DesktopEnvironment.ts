@@ -15,6 +15,7 @@ import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
 import { resolveDesktopBaseDir, resolveDesktopStateDir } from "./DesktopStatePaths.ts";
 import { isNightlyDesktopVersion } from "../updates/updateChannels.ts";
+import { resolveDesktopLinuxIdentity } from "../../../../scripts/lib/brand-assets.ts";
 
 export interface MakeDesktopEnvironmentInput {
   readonly dirname: string;
@@ -172,6 +173,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
     appVersion: input.appVersion,
   });
   const displayName = branding.displayName;
+  const linuxIdentity = resolveDesktopLinuxIdentity(isDevelopment);
   const stateDir = resolveDesktopStateDir({
     baseDir,
     isDevelopment,
@@ -226,8 +228,8 @@ const make = Effect.fn("desktop.environment.make")(function* (
     appUserModelId: Option.getOrElse(config.appUserModelIdOverride, () =>
       isDevelopment ? "com.t3tools.t3code.dev" : "com.t3tools.t3code",
     ),
-    linuxDesktopEntryName: isDevelopment ? "t3code-dev.desktop" : "t3code.desktop",
-    linuxWmClass: isDevelopment ? "t3code-dev" : "t3code",
+    linuxDesktopEntryName: linuxIdentity.desktopEntryName,
+    linuxWmClass: linuxIdentity.wmClass,
     linuxApplicationsDir,
     appImagePath: config.appImagePath,
     userDataDirName,

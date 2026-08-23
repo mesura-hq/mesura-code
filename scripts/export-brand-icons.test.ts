@@ -98,7 +98,7 @@ describe("cross-platform brand icon export", () => {
       BRAND_ASSET_PATHS.mobileAndroidNotificationIconPng,
       BRAND_ASSET_PATHS.mobileWidgetMarkSvg,
     ];
-    expect([...generated.keys()]).toHaveLength(31);
+    expect([...generated.keys()]).toHaveLength(32);
     expect(mobilePaths.every((relativePath) => generated.has(relativePath))).toBe(true);
 
     const temporaryRoot = NodeFS.mkdtempSync(
@@ -111,6 +111,19 @@ describe("cross-platform brand icon export", () => {
     } finally {
       NodeFS.rmSync(temporaryRoot, { recursive: true, force: true });
     }
+  });
+
+  it("renders the approved rounded master only for the production Linux desktop", async () => {
+    const generated = await collectGeneratedBrandAssets(REPOSITORY_ROOT);
+    const expected = await renderRasterIcon(
+      NodePath.join(REPOSITORY_ROOT, BRAND_ASSET_PATHS.desktopMasterPng),
+      1024,
+    );
+
+    expect(generated.get(BRAND_ASSET_PATHS.productionLinuxIconPng)).toEqual(expected);
+    expect(BRAND_ASSET_PATHS.productionLinuxIconPng).not.toBe(
+      BRAND_ASSET_PATHS.productionUniversalIconPng,
+    );
   });
 
   it("uses direct realistic renders for favicon sizes", async () => {
