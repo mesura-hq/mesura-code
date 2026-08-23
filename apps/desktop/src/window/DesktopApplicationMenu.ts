@@ -137,6 +137,27 @@ export const make = Effect.gen(function* () {
     const zoomClick = (direction: DesktopWindow.MainWindowZoomDirection) => () => {
       runMenuEffect(`zoom-${direction}`, zoomMainWindow(direction));
     };
+    // Electron's windowMenu role carries a Close item bound to CmdOrCtrl+W.
+    // On Linux and Windows that window is the whole application, so the
+    // accelerator quit Mesura Code outright, and it fired exactly when the
+    // press was aimed at the focused terminal's terminal.close binding and the
+    // terminal had just lost focus. Drop the item on those platforms: the File
+    // menu below already offers Quit, the titlebar and the window manager
+    // still close the window, and the renderer keeps receiving Ctrl+W, so
+    // terminal.close is unaffected.
+    //
+    // This cannot be fixed in the before-input-event handler in
+    // DesktopWindow.ts. Its preventDefault suppresses the page keydown as well
+    // as the menu accelerator, so blocking the close there would take
+    // terminal.close away with it. That handler rejects only auto-repeats for
+    // the same reason.
+    //
+    // macOS keeps the stock menu: there Cmd+W closes a window without quitting
+    // the app, and the File menu already owns the close role.
+    const windowMenuItem: Electron.MenuItemConstructorOptions =
+      environment.platform === "darwin"
+        ? { role: "windowMenu" }
+        : { label: "Window", submenu: [{ role: "minimize" }, { role: "zoom" }] };
     const template: Electron.MenuItemConstructorOptions[] = [];
 
     if (environment.platform === "darwin") {
@@ -210,7 +231,7 @@ export const make = Effect.gen(function* () {
           { role: "togglefullscreen" },
         ],
       },
-      { role: "windowMenu" },
+      windowMenuItem,
       {
         role: "help",
         submenu: [

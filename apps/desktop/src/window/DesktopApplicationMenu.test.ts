@@ -180,4 +180,58 @@ describe("DesktopApplicationMenu", () => {
       assert.equal(yield* Deferred.await(selectedAction), "zoom-in");
     }),
   );
+
+  // Electron's windowMenu role puts Close on CmdOrCtrl+W. Off macOS that
+  // window is the whole app, so the accelerator quit Mesura Code — most often
+  // when the press was meant for terminal.close and the terminal had just lost
+  // focus. Restoring the role here would bring the accelerator back silently.
+  it.effect("keeps CmdOrCtrl+W out of the Window menu away from macOS", () =>
+    Effect.gen(function* () {
+      const selectedAction = yield* Deferred.make<string>();
+      const applicationMenuTemplate =
+        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+
+      yield* configureMenu(selectedAction, applicationMenuTemplate);
+
+      const template = yield* Deferred.await(applicationMenuTemplate);
+      assert.isUndefined(
+        template.find((item) => item.role === "windowMenu"),
+        "windowMenu role reintroduces the CmdOrCtrl+W close accelerator",
+      );
+
+      const windowMenu = template.find((item) => item.label === "Window");
+      assert.isDefined(windowMenu);
+      if (!Array.isArray(windowMenu.submenu)) {
+        throw new Error("Expected Window menu submenu to be an array.");
+      }
+      assert.deepEqual(
+        windowMenu.submenu.map((item) => item.role),
+        ["minimize", "zoom"],
+      );
+      assert.isUndefined(windowMenu.submenu.find((item) => item.role === "close"));
+      assert.isUndefined(
+        windowMenu.submenu.find((item) => item.accelerator?.toLowerCase().endsWith("+w")),
+      );
+    }),
+  );
+
+  // Quit stays reachable: removing the close item must not leave the menu
+  // without any way out of the app.
+  it.effect("still offers Quit in the File menu", () =>
+    Effect.gen(function* () {
+      const selectedAction = yield* Deferred.make<string>();
+      const applicationMenuTemplate =
+        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+
+      yield* configureMenu(selectedAction, applicationMenuTemplate);
+
+      const template = yield* Deferred.await(applicationMenuTemplate);
+      const fileMenu = template.find((item) => item.label === "File");
+      assert.isDefined(fileMenu);
+      if (!Array.isArray(fileMenu.submenu)) {
+        throw new Error("Expected File menu submenu to be an array.");
+      }
+      assert.isDefined(fileMenu.submenu.find((item) => item.role === "quit"));
+    }),
+  );
 });
