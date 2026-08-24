@@ -105,11 +105,15 @@ Two things follow from the fold: the number keys that pick an option are off whi
 folded, because the numbers they name are not on screen, and the card unfolds by itself when the
 prompt moves to its next question.
 
+Two situations make the shortcut do nothing. No question is waiting, so there is nothing to fold.
+Or an approval prompt has taken the same panel, and approvals are answered rather than folded. Like
+the other `Alt` defaults, it is also off while the terminal has focus.
+
 Six defaults sit on `Alt` with a letter: `alt+e`, `alt+w`, `alt+b`, `alt+m`, `alt+q`, and `alt+u`.
 The app claims those chords before the character reaches the composer, which matters on two
-platforms. On macOS `Option` composes characters — `Option+E` starts an acute accent, and the
-others type symbols like `∑` and `µ` — so a default may be swallowed or may suppress a character
-you wanted. Firefox uses `Alt` with a letter for menu access keys. Rebind any of them in
+platforms. On macOS `Option` composes characters — `Option+E` starts an acute accent, `Option+Q`
+types `œ`, and the others type symbols like `∑` and `µ` — so a default may be swallowed or may
+suppress a character you wanted. Firefox uses `Alt` with a letter for menu access keys. Rebind any of them in
 **Settings** → **Keybindings**.
 
 On a Latin American layout, `AltGr+Q` types `@`. That is a different chord — the app sees `AltGr`

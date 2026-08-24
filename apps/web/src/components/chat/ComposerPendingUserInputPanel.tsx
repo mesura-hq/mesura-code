@@ -81,8 +81,10 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     onAdvanceRef.current = onAdvance;
   }, [onAdvance]);
 
-  // The `question.toggleCollapse` keybinding reaches the header trigger from
-  // ChatView's window-level handler. It stays live while a response is in
+  // The `question.toggleCollapse` keybinding, dispatched from ChatView's
+  // window-level handler, sets the collapsed state directly rather than
+  // clicking the header. `Collapsible` is controlled through `open`, so both
+  // paths converge on the same state. It stays live while a response is in
   // flight, unlike the number keys below: folding changes what is on screen,
   // never what gets answered. Keyed on the question id rather than the object,
   // which `derivePendingUserInputProgress` rebuilds every render.

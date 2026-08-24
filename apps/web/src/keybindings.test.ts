@@ -963,7 +963,9 @@ describe("plus key parsing", () => {
 describe("shipped defaults on Linux", () => {
   const press = (
     key: string,
-    modifiers: Partial<Pick<ShortcutEventLike, "ctrlKey" | "shiftKey" | "altKey" | "metaKey">> = {},
+    modifiers: Partial<
+      Pick<ShortcutEventLike, "ctrlKey" | "shiftKey" | "altKey" | "metaKey" | "code">
+    > = {},
   ): ShortcutEventLike => ({
     key,
     ctrlKey: false,
@@ -1015,7 +1017,21 @@ describe("shipped defaults on Linux", () => {
     // Chromium on Linux reports AltGr as ctrl+alt, and a Latin American layout
     // types "@" there. Matching on alt alone would eat that keystroke while
     // the user writes their own answer in the composer.
-    assert.strictEqual(resolve(press("@", { ctrlKey: true, altKey: true })), null);
+    //
+    // `code` has to be set for this to test anything. resolveEventKeys falls
+    // back to the physical letter whenever event.key is not a Latin letter, so
+    // "@" alone would resolve against no shortcut for a reason that has nothing
+    // to do with the modifiers this guards.
+    assert.strictEqual(resolve(press("@", { ctrlKey: true, altKey: true, code: "KeyQ" })), null);
+  });
+
+  it("still folds on Option+Q, where macOS types a ligature instead of a letter", () => {
+    // The other half of the same fallback: no ctrl, so this is a real alt+q
+    // that happens to produce "œ". The physical KeyQ has to carry it through.
+    assert.strictEqual(
+      resolve(press("œ", { altKey: true, code: "KeyQ" })),
+      "question.toggleCollapse",
+    );
   });
 
   it("navigates threads with the desktop-only tab pair as well as the brackets", () => {

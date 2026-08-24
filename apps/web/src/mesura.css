@@ -26,15 +26,25 @@
  *
  * Scoped by `:has()` to the drawer that actually holds a question. The same
  * drawer serves the plan follow-up banner under the same `info` variant, and
- * that one is a notice, so it keeps the tint.
+ * that one is a notice, so it keeps the tint. Matching the drawer itself rather
+ * than its content would strip the tint from that banner too, which is the one
+ * case this scoping exists to protect. The known cost of scoping this way: the
+ * drawer's own visibility is gated on a pending prompt existing, while the
+ * panel renders nothing until a question is active, so in that window the strip
+ * is empty, matches nothing here, and is briefly blue. Widening the selector is
+ * the wrong fix for it; gating the drawer upstream is the right one.
  *
  * The hook is upstream's `data-pending-user-input-toggle`, which upstream's own
  * test asserts on, so it cannot be renamed there without that test failing.
  * Were it renamed anyway, this override stops matching and the card returns to
  * upstream's blue — a look we do not want, not a broken layout.
  *
- * `:has()` raises specificity above the variant rule, so neither the order of
- * the stylesheets nor a future move of the variant block decides the winner.
+ * Two things make this win, and the weaker one is the one people notice.
+ * `:has()` raises specificity to (0,3,0) against the variant rule's (0,2,0), so
+ * stylesheet order does not decide it. The stronger one: upstream's block sits
+ * in `@layer components` and this file is unlayered, and an unlayered rule
+ * outranks any layered one whatever its specificity. Never wrap this file in a
+ * `@layer` — that hands the decision back to specificity alone.
  */
 .chat-composer-top-drawer[data-variant="info"]:has([data-pending-user-input-toggle]) {
   --chat-composer-attached-outline: var(

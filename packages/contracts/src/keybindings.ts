@@ -93,6 +93,12 @@ export const STATIC_KEYBINDING_COMMANDS = [
   // is readable while the answer is still being composed. Reachable by click
   // from that header too; the shortcut exists because the question arrives
   // while the hands are on the keyboard.
+  //
+  // Never rename this id. It is written verbatim into every user's
+  // keybindings.json on first startup, and RETIRED_KEYBINDING_DEFAULTS migrates
+  // a rule's key only — it matches on the command, so it cannot carry a command
+  // to a new name. A rename orphans the rule in every config that already has
+  // it, silently.
   "question.toggleCollapse",
   ...CHAT_SCROLL_KEYBINDING_COMMANDS,
   ...MODEL_PICKER_KEYBINDING_COMMANDS,

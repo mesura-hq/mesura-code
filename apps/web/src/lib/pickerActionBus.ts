@@ -20,6 +20,9 @@
  * workspace control locked once the thread owns a worktree, a thread with no
  * question waiting — must not subscribe. Otherwise a press while it is hidden
  * still flips its state and it opens by itself once the target returns.
+ *
+ * "Picker" in the exported names is historical: every target was one when the
+ * bus was written. Read it as "a chat control a keybinding has to reach".
  */
 export type PickerAction = "traits" | "workspace" | "branch" | "question";
 
