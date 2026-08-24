@@ -71,6 +71,15 @@ describe("DesktopEnvironment", () => {
       assert.equal(environment.appUserModelId, "com.t3tools.t3code.dev");
       assert.equal(environment.linuxDesktopEntryName, "mesura-code-dev.desktop");
       assert.equal(environment.linuxWmClass, "mesura-code-dev");
+      // Keep these literals. Electron scopes its single-instance lock to the
+      // userData directory, so upstream's `t3code` lets the separately
+      // installed T3 Code hold the lock and Mesura Code quits without a
+      // window. These two assertions are what fails if a weekly merge resolves
+      // this file in upstream's favor. Do not rewrite them through
+      // resolveDesktopUserDataIdentity — that reads the fork-owned constant a
+      // reverting merge never touches, so it would pass while the app breaks.
+      assert.equal(environment.userDataDirName, "mesura-code-dev");
+      assert.equal(environment.legacyUserDataDirName, "mesura-code-dev");
       assert.deepEqual(
         Option.map(environment.devServerUrl, (url) => url.href),
         Option.some("http://localhost:5173/"),
@@ -99,6 +108,9 @@ describe("DesktopEnvironment", () => {
       assert.equal(environment.serverSettingsPath, "/tmp/t3/userdata/settings.json");
       assert.equal(environment.linuxDesktopEntryName, "mesura-code.desktop");
       assert.equal(environment.linuxWmClass, "mesura-code");
+      // Literals on purpose — see the development case above.
+      assert.equal(environment.userDataDirName, "mesura-code");
+      assert.equal(environment.legacyUserDataDirName, "mesura-code");
     }),
   );
 

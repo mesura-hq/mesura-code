@@ -57,6 +57,45 @@ export function resolveDesktopLinuxIdentity(isDevelopment: boolean) {
   return isDevelopment ? DESKTOP_LINUX_IDENTITY.development : DESKTOP_LINUX_IDENTITY.production;
 }
 
+/**
+ * Electron scopes its single-instance lock to the userData directory. Upstream
+ * names that directory `t3code`, which the separately installed T3 Code claims
+ * too, so whichever application started second read itself as a secondary
+ * instance and quit before opening a window — silently, because
+ * `DesktopClerk.configure` exits through `Effect.interrupt` on that path.
+ *
+ * `legacyUserDataDirName` repeats `userDataDirName` on purpose, and
+ * `resolveUserDataPath` adopts the legacy directory whenever it exists. Mesura
+ * Code shared `t3code` with the installed T3 Code rather than owning a
+ * directory of its own, so there is nothing to migrate: the old Chromium
+ * profile stays with T3 Code and Mesura Code starts a fresh one, which costs a
+ * one-time renderer-state reset. Pointing the field at `t3code`, or at
+ * upstream's older `T3 Code (Alpha)`, would hand both applications the same
+ * directory again and restore the collision this exists to remove.
+ *
+ * Equal names leave `resolveUserDataPath` probing a directory it returns
+ * either way. The probe cannot change the result, but it can still fail: an
+ * unreadable userData directory surfaces as a boot-time
+ * `DesktopUserDataPathResolutionError` rather than a window. That trade keeps
+ * the upstream resolver untouched, and the error names the real problem.
+ */
+export const DESKTOP_USER_DATA_IDENTITY = {
+  development: {
+    userDataDirName: "mesura-code-dev",
+    legacyUserDataDirName: "mesura-code-dev",
+  },
+  production: {
+    userDataDirName: "mesura-code",
+    legacyUserDataDirName: "mesura-code",
+  },
+} as const;
+
+export function resolveDesktopUserDataIdentity(isDevelopment: boolean) {
+  return isDevelopment
+    ? DESKTOP_USER_DATA_IDENTITY.development
+    : DESKTOP_USER_DATA_IDENTITY.production;
+}
+
 export type WebAssetBrand = "development" | "nightly" | "production";
 
 export const WEB_ASSET_CHANNELS = ["latest", "nightly"] as const;
