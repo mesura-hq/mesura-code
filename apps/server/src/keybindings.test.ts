@@ -208,6 +208,8 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.equal(defaultsByCommand.get("modelPicker.jump.1"), "mod+1");
       assert.equal(defaultsByCommand.get("modelPicker.jump.9"), "mod+9");
       assert.equal(defaultsByCommand.get("traitsPicker.toggle"), "alt+e");
+      assert.equal(defaultsByCommand.get("workspacePicker.toggle"), "alt+w");
+      assert.equal(defaultsByCommand.get("branchPicker.toggle"), "alt+b");
       assert.equal(defaultsByCommand.get("chat.scrollHalfPageUp"), "mod+u");
       assert.equal(defaultsByCommand.get("chat.scrollHalfPageDown"), "mod+d");
       // diff.toggle gave mod+d up to the reading scroll. terminal.splitVertical

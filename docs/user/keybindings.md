@@ -87,6 +87,25 @@ On macOS, `Option+E` is the dead key that starts an acute accent, so that defaul
 before the app sees it. Rebind the command in **Settings** → **Keybindings** if you type accented
 characters.
 
+### Branch toolbar
+
+`branchPicker.toggle` opens the branch menu above the composer and defaults to `alt+b`. Note that
+`mod+alt+b` is a different shortcut: it toggles the right panel.
+
+`workspacePicker.toggle` opens the workspace control beside it — the one choosing between the
+current checkout and a new worktree — and defaults to `alt+w`. It only does something while that
+choice can still change. Once a thread owns a worktree the control becomes plain text, because
+moving an existing thread between workspaces is not something the app offers.
+
+New threads pick their workspace from a setting rather than from the last thread. The resolution
+order is the project's own setting, then a `defaultThreadEnvMode` entry in the project's `t3.json`,
+then the global default in **Settings**, which ships as the current checkout. Setting it per
+project is usually what you want: a repository where every thread is real work benefits from
+starting in a worktree, while somewhere you mostly ask questions does not, since each worktree is a
+fresh directory that needs its own dependency install. Note also that new worktrees start from
+`origin` by default, so a thread opened that way will not see uncommitted work sitting in your
+checkout.
+
 ### Reading a long thread
 
 `chat.scrollHalfPageUp` and `chat.scrollHalfPageDown` scroll the message timeline and default to

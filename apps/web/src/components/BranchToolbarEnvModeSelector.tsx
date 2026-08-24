@@ -1,5 +1,5 @@
 import { FolderGit2Icon, FolderGitIcon, FolderIcon, HistoryIcon } from "lucide-react";
-import { memo, useMemo } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 
 import {
   resolveCurrentWorkspaceLabel,
@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
+import { subscribePickerAction } from "../lib/pickerActionBus";
 
 export const PREVIOUS_WORKTREE_SELECT_VALUE = "previous-worktree";
 
@@ -36,6 +37,20 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
   previousWorktreeLabel,
   onUsePreviousWorktree,
 }: BranchToolbarEnvModeSelectorProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  // Gated on the same condition as the early return below: while the workspace
+  // is locked this control renders as plain text with no trigger, and a press
+  // that flipped the state anyway would open the menu by itself the moment a
+  // new thread made the control editable again.
+  useEffect(() => {
+    if (envLocked) {
+      setIsOpen(false);
+      return;
+    }
+    return subscribePickerAction("workspace", () => {
+      setIsOpen((open) => !open);
+    });
+  }, [envLocked]);
   const showPreviousWorktree = Boolean(previousWorktreeLabel && onUsePreviousWorktree);
   const envModeItems = useMemo(
     () => [
@@ -72,6 +87,8 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
   return (
     <Select
       modal={false}
+      open={isOpen}
+      onOpenChange={setIsOpen}
       value={effectiveEnvMode}
       onValueChange={(value: string | null) => {
         if (value === PREVIOUS_WORKTREE_SELECT_VALUE) {

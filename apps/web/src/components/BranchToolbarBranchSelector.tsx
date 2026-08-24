@@ -32,6 +32,7 @@ import { threadEnvironment } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
 import { vcsEnvironment } from "../state/vcs";
 import { cn } from "../lib/utils";
+import { subscribePickerAction } from "../lib/pickerActionBus";
 import { parsePullRequestReference } from "../pullRequestReference";
 import { getSourceControlPresentation } from "../sourceControlPresentation";
 import {
@@ -208,6 +209,15 @@ export function BranchToolbarBranchSelector({
   // Git ref queries
   // ---------------------------------------------------------------------------
   const [isBranchMenuOpen, setIsBranchMenuOpen] = useState(false);
+  // The branch control is always editable, so unlike the workspace selector
+  // beside it this subscription needs no visibility gate.
+  useEffect(
+    () =>
+      subscribePickerAction("branch", () => {
+        setIsBranchMenuOpen((open) => !open);
+      }),
+    [],
+  );
   const [branchQuery, setBranchQuery] = useState("");
   const deferredBranchQuery = useDeferredValue(branchQuery);
 

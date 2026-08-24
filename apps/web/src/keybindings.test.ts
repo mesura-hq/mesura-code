@@ -955,6 +955,15 @@ describe("shipped defaults on Linux", () => {
     );
   });
 
+  it("opens the branch-toolbar pickers", () => {
+    assert.strictEqual(resolve(press("w", { altKey: true })), "workspacePicker.toggle");
+    assert.strictEqual(resolve(press("b", { altKey: true })), "branchPicker.toggle");
+  });
+
+  it("keeps alt+b clear of the right-panel toggle on mod+alt+b", () => {
+    assert.strictEqual(resolve(press("b", { ctrlKey: true, altKey: true })), "rightPanel.toggle");
+  });
+
   it("opens the composer pickers", () => {
     assert.strictEqual(resolve(press("e", { altKey: true })), "traitsPicker.toggle");
     assert.strictEqual(
@@ -966,5 +975,7 @@ describe("shipped defaults on Linux", () => {
   it("leaves every new binding inert while the terminal has focus", () => {
     assert.strictEqual(resolve(press("u", { ctrlKey: true }), true), null);
     assert.strictEqual(resolve(press("e", { altKey: true }), true), null);
+    assert.strictEqual(resolve(press("w", { altKey: true }), true), null);
+    assert.strictEqual(resolve(press("b", { altKey: true }), true), null);
   });
 });

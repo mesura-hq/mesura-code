@@ -83,6 +83,11 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "chat.newLocal",
   "editor.openFavorite",
   "traitsPicker.toggle",
+  // Both open a branch-toolbar control. The workspace one exists only while
+  // the thread can still change workspace, which is why it has no counterpart
+  // once a thread owns a worktree.
+  "workspacePicker.toggle",
+  "branchPicker.toggle",
   ...CHAT_SCROLL_KEYBINDING_COMMANDS,
   ...MODEL_PICKER_KEYBINDING_COMMANDS,
   ...THREAD_KEYBINDING_COMMANDS,

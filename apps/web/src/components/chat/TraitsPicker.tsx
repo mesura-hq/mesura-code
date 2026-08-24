@@ -32,7 +32,7 @@ import { getProviderModelCapabilities } from "../../providerModels";
 import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
 import { ComposerControl, ComposerControlChevron, ComposerControlIcon } from "./ComposerControl";
-import { subscribeTraitsPickerToggle } from "./traitsPickerActionBus";
+import { subscribePickerAction } from "../../lib/pickerActionBus";
 
 type ProviderOptions = ReadonlyArray<ProviderOptionSelection>;
 
@@ -497,7 +497,7 @@ export const TraitsPicker = memo(function TraitsPicker({
       setIsMenuOpen(false);
       return;
     }
-    return subscribeTraitsPickerToggle(() => {
+    return subscribePickerAction("traits", () => {
       setIsMenuOpen((open) => !open);
     });
   }, [respondsToShortcut, canRenderTraits]);

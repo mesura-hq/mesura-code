@@ -49,6 +49,8 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+n", command: "chat.newLocal", when: "!terminalFocus" },
   { key: "mod+shift+m", command: "modelPicker.toggle", when: "!terminalFocus" },
   { key: "alt+e", command: "traitsPicker.toggle", when: "!terminalFocus" },
+  { key: "alt+w", command: "workspacePicker.toggle", when: "!terminalFocus" },
+  { key: "alt+b", command: "branchPicker.toggle", when: "!terminalFocus" },
   { key: "mod+u", command: "chat.scrollHalfPageUp", when: "!terminalFocus" },
   { key: "mod+d", command: "chat.scrollHalfPageDown", when: "!terminalFocus" },
   { key: "mod+o", command: "editor.openFavorite" },

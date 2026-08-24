@@ -166,7 +166,7 @@ import { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
 import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import { useChatReadingScroll } from "../lib/useChatReadingScroll";
-import { dispatchTraitsPickerToggle } from "./chat/traitsPickerActionBus";
+import { dispatchPickerAction } from "../lib/pickerActionBus";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
   AlarmClockIcon,
@@ -4949,7 +4949,23 @@ function ChatViewContent(props: ChatViewProps) {
         event.stopPropagation();
         // No-op when the composer is in its compact layout or the selected
         // provider exposes no traits: neither renders the picker at all.
-        dispatchTraitsPickerToggle();
+        dispatchPickerAction("traits");
+        return;
+      }
+
+      if (command === "workspacePicker.toggle") {
+        event.preventDefault();
+        event.stopPropagation();
+        // No-op once the thread owns a worktree: the workspace control renders
+        // as plain text from then on, because the choice can no longer change.
+        dispatchPickerAction("workspace");
+        return;
+      }
+
+      if (command === "branchPicker.toggle") {
+        event.preventDefault();
+        event.stopPropagation();
+        dispatchPickerAction("branch");
         return;
       }
 
