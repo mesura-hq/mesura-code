@@ -14,7 +14,7 @@ import {
   getProviderOptionDescriptors,
   isClaudeUltrathinkPrompt,
 } from "@t3tools/shared/model";
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
 import { ZapIcon } from "lucide-react";
 import { buttonVariants } from "../ui/button";
@@ -32,6 +32,7 @@ import { getProviderModelCapabilities } from "../../providerModels";
 import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
 import { ComposerControl, ComposerControlChevron, ComposerControlIcon } from "./ComposerControl";
+import { subscribePickerAction } from "../../lib/pickerActionBus";
 
 type ProviderOptions = ReadonlyArray<ProviderOptionSelection>;
 
@@ -449,6 +450,15 @@ export function buildTraitsTriggerDisplay(input: {
   return { label: labels.join(" · "), showFastModeIcon: fastModeEnabled };
 }
 
+export interface TraitsPickerProps extends TraitsMenuContentProps {
+  /**
+   * Opt this picker into the `traitsPicker.toggle` keybinding. Only the
+   * composer sets it: the same component renders inside settings panels, and
+   * those must not open from a chat shortcut.
+   */
+  respondsToShortcut?: boolean;
+}
+
 export const TraitsPicker = memo(function TraitsPicker({
   provider,
   instanceId,
@@ -461,30 +471,37 @@ export const TraitsPicker = memo(function TraitsPicker({
   planModeEnabled,
   triggerVariant,
   triggerClassName,
+  respondsToShortcut = false,
   ...persistence
-}: TraitsMenuContentProps & TraitsPersistence) {
+}: TraitsPickerProps & TraitsPersistence) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const traitsVisibilityInput = {
+    provider,
+    models,
+    model,
+    prompt,
+    modelOptions,
+    allowPromptInjectedEffort,
+    planModeEnabled,
+  };
   const { descriptors, primarySelectDescriptor, ultrathinkPromptControlled } =
-    getTraitsSectionVisibility({
-      provider,
-      models,
-      model,
-      prompt,
-      modelOptions,
-      allowPromptInjectedEffort,
-      planModeEnabled,
+    getTraitsSectionVisibility(traitsVisibilityInput);
+  const canRenderTraits = shouldRenderTraitsControls(traitsVisibilityInput);
+  // Hooks must run before the early return below, so the subscription is gated
+  // on the same visibility check rather than sitting above it. Without the
+  // gate a press while the provider exposes no traits still flips the state,
+  // and the menu then opens on its own the moment the user selects a provider
+  // that does. Closing on the way out keeps that state from surviving either.
+  useEffect(() => {
+    if (!respondsToShortcut || !canRenderTraits) {
+      setIsMenuOpen(false);
+      return;
+    }
+    return subscribePickerAction("traits", () => {
+      setIsMenuOpen((open) => !open);
     });
-  if (
-    !shouldRenderTraitsControls({
-      provider,
-      models,
-      model,
-      prompt,
-      modelOptions,
-      allowPromptInjectedEffort,
-      planModeEnabled,
-    })
-  ) {
+  }, [respondsToShortcut, canRenderTraits]);
+  if (!canRenderTraits) {
     return null;
   }
 

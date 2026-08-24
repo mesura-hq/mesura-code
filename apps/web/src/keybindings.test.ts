@@ -6,6 +6,7 @@ import {
   type KeybindingWhenNode,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import {
   formatShortcutLabel,
   findEffectiveShortcutForCommand,
@@ -952,5 +953,105 @@ describe("plus key parsing", () => {
         platform: "Linux",
       }),
     );
+  });
+});
+
+// The suite above resolves against a hand-written mirror of the defaults. This
+// block resolves against the real DEFAULT_RESOLVED_KEYBINDINGS, so it also
+// catches a default that parses fine but is shadowed by a later rule. Shipped
+// order matters: the resolver scans from the end and the last match wins.
+describe("shipped defaults on Linux", () => {
+  const press = (
+    key: string,
+    modifiers: Partial<Pick<ShortcutEventLike, "ctrlKey" | "shiftKey" | "altKey" | "metaKey">> = {},
+  ): ShortcutEventLike => ({
+    key,
+    ctrlKey: false,
+    shiftKey: false,
+    altKey: false,
+    metaKey: false,
+    ...modifiers,
+  });
+  const resolve = (shortcutEvent: ShortcutEventLike, terminalFocus = false) =>
+    resolveShortcutCommand(shortcutEvent, DEFAULT_RESOLVED_KEYBINDINGS, {
+      platform: "Linux",
+      context: { terminalFocus },
+    });
+
+  it("scrolls the timeline with Ctrl+U and Ctrl+D outside the terminal", () => {
+    assert.strictEqual(resolve(press("u", { ctrlKey: true })), "chat.scrollHalfPageUp");
+    assert.strictEqual(resolve(press("d", { ctrlKey: true })), "chat.scrollHalfPageDown");
+  });
+
+  it("gives Ctrl+D back to the terminal when the terminal has focus", () => {
+    // terminal.split owns mod+d under terminalFocus. The scroll binding is
+    // later in the array but its !terminalFocus clause has to keep it out.
+    assert.strictEqual(resolve(press("d", { ctrlKey: true }), true), "terminal.split");
+  });
+
+  it("moved diff.toggle to Ctrl+Shift+D without colliding with the terminal split", () => {
+    assert.strictEqual(resolve(press("d", { ctrlKey: true, shiftKey: true })), "diff.toggle");
+    assert.strictEqual(
+      resolve(press("d", { ctrlKey: true, shiftKey: true }), true),
+      "terminal.splitVertical",
+    );
+  });
+
+  it("opens the branch-toolbar pickers", () => {
+    assert.strictEqual(resolve(press("w", { altKey: true })), "workspacePicker.toggle");
+    assert.strictEqual(resolve(press("b", { altKey: true })), "branchPicker.toggle");
+  });
+
+  it("keeps alt+b clear of the right-panel toggle on mod+alt+b", () => {
+    assert.strictEqual(resolve(press("b", { ctrlKey: true, altKey: true })), "rightPanel.toggle");
+  });
+
+  it("navigates threads with the desktop-only tab pair as well as the brackets", () => {
+    assert.strictEqual(resolve(press("Tab", { ctrlKey: true })), "thread.next");
+    assert.strictEqual(resolve(press("Tab", { ctrlKey: true, shiftKey: true })), "thread.previous");
+    assert.strictEqual(resolve(press("]", { ctrlKey: true, shiftKey: true })), "thread.next");
+    assert.strictEqual(resolve(press("[", { ctrlKey: true, shiftKey: true })), "thread.previous");
+  });
+
+  it("reports the everywhere-works chord as the shortcut label", () => {
+    // The resolver returns the binding that wins, which is the last match.
+    // Naming ctrl+tab here would be wrong on every surface that never
+    // receives it, so the bracket pair has to be ordered last in the defaults.
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "thread.next", "Linux"),
+      "Ctrl+Shift+]",
+    );
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "modelPicker.toggle", "Linux"),
+      "Ctrl+Shift+M",
+    );
+  });
+
+  it("opens the model picker from either of its two defaults", () => {
+    assert.strictEqual(resolve(press("m", { altKey: true })), "modelPicker.toggle");
+    assert.strictEqual(
+      resolve(press("m", { ctrlKey: true, shiftKey: true })),
+      "modelPicker.toggle",
+    );
+  });
+
+  it("opens the composer pickers", () => {
+    assert.strictEqual(resolve(press("e", { altKey: true })), "traitsPicker.toggle");
+    assert.strictEqual(
+      resolve(press("m", { ctrlKey: true, shiftKey: true })),
+      "modelPicker.toggle",
+    );
+  });
+
+  it("leaves every new binding inert while the terminal has focus", () => {
+    assert.strictEqual(resolve(press("u", { ctrlKey: true }), true), null);
+    assert.strictEqual(resolve(press("e", { altKey: true }), true), null);
+    assert.strictEqual(resolve(press("w", { altKey: true }), true), null);
+    assert.strictEqual(resolve(press("b", { altKey: true }), true), null);
+    // Ghostty encodes ctrl+tab, so an ungated binding would traverse threads
+    // and write the key into the shell at the same time. The bracket pair is
+    // deliberately not gated, matching the behaviour it already had.
+    assert.strictEqual(resolve(press("Tab", { ctrlKey: true }), true), null);
+    assert.strictEqual(resolve(press("]", { ctrlKey: true, shiftKey: true }), true), "thread.next");
   });
 });

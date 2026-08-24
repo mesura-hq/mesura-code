@@ -3,10 +3,26 @@
 Edit keybindings from **Settings** → **Keybindings**. That page lists every command, its current
 shortcut, whether it is a default or your own, and warns about conflicts.
 
-The same configuration lives in `~/.t3/userdata/keybindings.json` on the machine running the
-server, if you prefer editing it directly. T3 Code writes the built-in defaults into that file on
-first run, and adds any new defaults on later startups unless a rule of yours already claims the
-command or the shortcut.
+The same configuration lives in `~/.mesura-code/userdata/keybindings.json` on the machine running
+the server, if you prefer editing it directly. Mesura Code writes the built-in defaults into that
+file on first run, and adds any new defaults on later startups unless a rule of yours already
+claims the command or the shortcut.
+
+New defaults reach an existing file two ways, and both run once.
+
+A release that _moves_ a default onto a different key rewrites the old rule, but only when it still
+matches the retired default exactly, key and command and `when` together. A rule you changed
+yourself is never touched.
+
+A release that gives an already-bound command a _second_ default adds that rule the first time you
+start the new build. Offering it once is the whole contract: delete the shortcut afterwards and it
+stays deleted, because startup records what it has already offered in a `keybindings.applied.json`
+beside your config. An old default you removed is never resurrected — only defaults introduced
+after your file was written are offered at all.
+
+Either way, when the key involved already belongs to a rule of yours, nothing is changed: stacking
+two commands on one chord would quietly disable one of them, so the server leaves your rule alone
+and logs a warning instead.
 
 The file is a JSON array of rules.
 
@@ -32,6 +48,14 @@ Modifiers: `mod` (`cmd` on macOS, `ctrl` elsewhere), `cmd` / `meta`, `ctrl` / `c
 
 Examples: `mod+j`, `mod+shift+d`, `ctrl+l`, `cmd+k`.
 
+`tab` is usable as a key, but only with a modifier. The recorder in **Settings** → **Keybindings**
+passes a bare `Tab` and `Shift+Tab` through so they keep moving focus; a `Tab` held with Ctrl, Alt,
+or Cmd records normally.
+
+Shortcuts on `tab` reach the desktop app but not the web app. Browsers keep `Ctrl+Tab` and
+`Ctrl+Shift+Tab` for switching their own tabs and never deliver them to a page, so a rule using
+them works in the desktop app and stays silent in a browser.
+
 ## Commands
 
 Commands are IDs like `terminal.toggle`, `commandPalette.toggle`, `preview.refresh`, and
@@ -55,10 +79,100 @@ so add one in **Settings** → **Keybindings** if you want to use it.
 `usage.peek` shows the subscription-limit panel while you hold its shortcut. It defaults to
 `alt+u`. Releasing the main key or a required modifier closes the panel.
 
+### Command palette
+
 The command palette searches active thread titles, projects, branches, user messages, and final
 agent responses across connected environments. Message matches show one labeled excerpt while
 keeping the thread's project, branch, and machine context visible. Message search begins after two
 characters and uses SQLite's ASCII case-insensitive matching.
+
+### Composer pickers
+
+`modelPicker.toggle` opens the model picker from the composer and defaults to `mod+shift+m`, and
+additionally to `alt+m`. While it is open, `mod+1` through `mod+9` select a model directly.
+
+`traitsPicker.toggle` opens the composer control that holds reasoning effort, thinking, fast mode,
+context window, and agent. It defaults to `alt+e`. Two cases make it do nothing, both by design:
+a provider that exposes none of those traits does not render the control at all, and a narrow
+composer folds the traits into its compact controls menu, which has no separate picker to open.
+
+Five defaults sit on `Alt` with a letter: `alt+e`, `alt+w`, `alt+b`, `alt+m`, and `alt+u`. The app
+claims those chords before the character reaches the composer, which matters on two platforms. On
+macOS `Option` composes characters — `Option+E` starts an acute accent, and the others type symbols
+like `∑` and `µ` — so a default may be swallowed or may suppress a character you wanted. Firefox
+uses `Alt` with a letter for menu access keys. Rebind any of them in **Settings** →
+**Keybindings**.
+
+### Branch toolbar
+
+`branchPicker.toggle` opens the branch menu above the composer and defaults to `alt+b`. Note that
+`mod+alt+b` is a different shortcut: it toggles the right panel.
+
+`workspacePicker.toggle` opens the workspace control beside it — the one choosing between the
+current checkout and a new worktree — and defaults to `alt+w`. Three situations make it do nothing.
+The choice can no longer change, because the thread already owns a worktree and the control has
+become plain text; the project exposes no git controls at all; or the window is narrow enough that
+the toolbar collapses into its compact layout, which uses a different control the shortcut does not
+reach.
+
+New threads pick their workspace from a setting rather than from the last thread. The resolution
+order is the project's own setting, then a `defaultThreadEnvMode` entry in the project's `t3.json`,
+then the global default in **Settings**, which ships as the current checkout. Setting it per
+project is usually what you want: a repository where every thread is real work benefits from
+starting in a worktree, while somewhere you mostly ask questions does not, since each worktree is a
+fresh directory that needs its own dependency install. Note also that new worktrees start from
+`origin` by default, so a thread opened that way will not see uncommitted work sitting in your
+checkout.
+
+### Reading a long thread
+
+`chat.scrollHalfPageUp` and `chat.scrollHalfPageDown` scroll the message timeline and default to
+`mod+u` and `mod+d`. Each press travels half the readable height rather than a whole screen, so
+half of what you were reading stays visible and you keep your place. The move is animated over
+about a fifth of a second and slows as it lands; with the system set to reduce motion, it jumps
+instead. Holding a key keeps travelling, because each press aims from where the previous one was
+going rather than from the position the animation is passing through. A scroll gesture arriving
+mid-animation wins: the wheel, a drag, or a touch stops the move where it is.
+
+Both shortcuts work while the composer has focus, since that is where the cursor usually sits
+while you read. They therefore take `mod+u` away from the readline-style "delete to line start"
+some text fields offer.
+
+Scrolling up also stops the timeline following the live edge, the same as scrolling with the
+wheel. Without that, the next chunk of a streaming reply would pull you back to the bottom.
+
+`diff.toggle` defaults to `mod+shift+d`, which leaves `mod+d` to the pair above.
+
+### Moving between threads
+
+`thread.next` and `thread.previous` default to `mod+shift+]` and `mod+shift+[`, and additionally to
+`ctrl+tab` and `ctrl+shift+tab`. The bracket pair works everywhere and is the one the app reports as
+the shortcut. The tab pair is desktop-only, because browsers keep those two chords for their own tab
+strip; it is also inactive while the terminal has focus, since the terminal encodes `ctrl+tab`
+itself. `mod+1` through `mod+9` jump straight to a thread by position.
+
+### Closing terminals and windows
+
+`terminal.close` defaults to `mod+w` while the terminal has focus. Anywhere else that key does
+nothing on Linux and Windows: the desktop window there is the whole application, so closing it
+would quit Mesura Code. Quit from **File** → **Quit**, the titlebar, or your window manager
+instead. On macOS `Cmd+W` closes a window without quitting the app, as it does everywhere else on
+that platform.
+
+### If you upgraded from an older build
+
+Everything below reaches you with nothing to do by hand.
+
+`diff.toggle` used to default to `mod+d`. Its rule is rewritten to `mod+shift+d` on the next start,
+which is also what frees `mod+d` for the reading scroll in the same run.
+
+`Ctrl+W` used to close the desktop window, and off macOS that quit the whole application. That one
+is a change to the native menu rather than to a keybinding, so it needs nothing from your config:
+the key now closes a focused terminal and does nothing otherwise.
+
+`alt+m` for the model picker and the `ctrl+tab` pair for thread navigation are second defaults for
+commands your file already binds, so they are added once on that same start. If any of those keys
+is already yours, that one is skipped and your rule stands.
 
 The full command list and the current defaults are shown in **Settings** → **Keybindings**, which
 always matches the build you are running. Use that rather than a copied list.

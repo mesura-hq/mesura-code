@@ -1,5 +1,5 @@
 import { FolderGit2Icon, FolderGitIcon, FolderIcon, HistoryIcon } from "lucide-react";
-import { memo, useMemo } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 
 import {
   resolveCurrentWorkspaceLabel,
@@ -16,11 +16,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
+import { subscribePickerAction } from "../lib/pickerActionBus";
 
 export const PREVIOUS_WORKTREE_SELECT_VALUE = "previous-worktree";
 
 interface BranchToolbarEnvModeSelectorProps {
-  envLocked: boolean;
+  envModeLocked: boolean;
   effectiveEnvMode: EnvMode;
   activeWorktreePath: string | null;
   onEnvModeChange: (mode: EnvMode) => void;
@@ -29,13 +30,27 @@ interface BranchToolbarEnvModeSelectorProps {
 }
 
 export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSelector({
-  envLocked,
+  envModeLocked,
   effectiveEnvMode,
   activeWorktreePath,
   onEnvModeChange,
   previousWorktreeLabel,
   onUsePreviousWorktree,
 }: BranchToolbarEnvModeSelectorProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  // Gated on the same condition as the early return below: while the workspace
+  // is locked this control renders as plain text with no trigger, and a press
+  // that flipped the state anyway would open the menu by itself the moment a
+  // new thread made the control editable again.
+  useEffect(() => {
+    if (envModeLocked) {
+      setIsOpen(false);
+      return;
+    }
+    return subscribePickerAction("workspace", () => {
+      setIsOpen((open) => !open);
+    });
+  }, [envModeLocked]);
   const showPreviousWorktree = Boolean(previousWorktreeLabel && onUsePreviousWorktree);
   const envModeItems = useMemo(
     () => [
@@ -48,7 +63,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
     [activeWorktreePath, previousWorktreeLabel, showPreviousWorktree],
   );
 
-  if (envLocked) {
+  if (envModeLocked) {
     return (
       <span
         className="inline-flex h-7 shrink-0 items-center gap-1 border border-transparent px-[calc(--spacing(3)-1px)] text-sm font-medium text-muted-foreground/70 sm:h-6 sm:text-xs"
@@ -72,6 +87,8 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
   return (
     <Select
       modal={false}
+      open={isOpen}
+      onOpenChange={setIsOpen}
       value={effectiveEnvMode}
       onValueChange={(value: string | null) => {
         if (value === PREVIOUS_WORKTREE_SELECT_VALUE) {

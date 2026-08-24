@@ -46,15 +46,23 @@ import { fromJsonStringPretty, fromLenientJson } from "@t3tools/shared/schemaJso
 import {
   DEFAULT_KEYBINDINGS,
   DEFAULT_RESOLVED_KEYBINDINGS,
+  ADDED_KEYBINDING_DEFAULTS,
+  RETIRED_KEYBINDING_DEFAULTS,
+  addIntroducedKeybindingDefaults,
   compileResolvedKeybindingRule,
   compileResolvedKeybindingsConfig,
+  isSameKeybindingRule,
+  migrateRetiredKeybindingDefaults,
   parseKeybindingShortcut,
 } from "@t3tools/shared/keybindings";
 
 export {
+  ADDED_KEYBINDING_DEFAULTS,
   DEFAULT_KEYBINDINGS,
+  RETIRED_KEYBINDING_DEFAULTS,
   compileResolvedKeybindingRule,
   compileResolvedKeybindingsConfig,
+  isSameKeybindingRule,
   parseKeybindingShortcut,
 };
 
@@ -99,14 +107,6 @@ export const ResolvedKeybindingFromConfig = KeybindingRule.pipe(
 export const ResolvedKeybindingsFromConfig = Schema.Array(ResolvedKeybindingFromConfig).check(
   Schema.isMaxLength(MAX_KEYBINDINGS_COUNT),
 );
-
-function isSameKeybindingRule(left: KeybindingRule, right: KeybindingRule): boolean {
-  return (
-    left.command === right.command &&
-    left.key === right.key &&
-    (left.when ?? undefined) === (right.when ?? undefined)
-  );
-}
 
 function keybindingShortcutContext(rule: KeybindingRule): string | null {
   const parsed = parseKeybindingShortcut(rule.key);
@@ -169,6 +169,9 @@ function encodeWhenAst(node: KeybindingWhenNode): string {
 }
 
 const RawKeybindingsEntries = fromLenientJson(Schema.Array(Schema.Unknown));
+const AppliedAdditionIdsJson = fromJsonStringPretty(Schema.Array(Schema.String));
+const decodeAppliedAdditionIdsExit = Schema.decodeUnknownExit(AppliedAdditionIdsJson);
+const encodeAppliedAdditionIdsJson = Schema.encodeEffect(AppliedAdditionIdsJson);
 const KeybindingsConfigPrettyJson = fromJsonStringPretty(KeybindingsConfig);
 const decodeKeybindingRuleExit = Schema.decodeUnknownExit(KeybindingRule);
 const decodeResolvedKeybindingFromConfigExit = Schema.decodeExit(ResolvedKeybindingFromConfig);
@@ -287,7 +290,7 @@ export class Keybindings extends Context.Service<
 >()("t3/keybindings") {}
 
 const make = Effect.gen(function* () {
-  const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+  const { keybindingsConfigPath, keybindingsAppliedPath } = yield* ServerConfig.ServerConfig;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const upsertSemaphore = yield* Semaphore.make(1);
@@ -422,6 +425,48 @@ const make = Effect.gen(function* () {
     return { keybindings, issues };
   });
 
+  const allIntroducedIds = () => new Set(ADDED_KEYBINDING_DEFAULTS.map((entry) => entry.id));
+
+  const readAppliedAdditionIds = Effect.gen(function* () {
+    const exists = yield* fs.exists(keybindingsAppliedPath).pipe(Effect.orElseSucceed(() => false));
+    // No file is the first run, and every addition is genuinely unoffered.
+    if (!exists) return new Set<string>();
+
+    const raw = yield* fs.readFileString(keybindingsAppliedPath).pipe(Effect.option);
+    const decoded = raw._tag === "Some" ? decodeAppliedAdditionIdsExit(raw.value) : undefined;
+    if (decoded && decoded._tag === "Success") return new Set(decoded.value);
+
+    // A ledger that exists but cannot be read fails closed. The documented
+    // contract is the deletion guarantee, not the delivery one: treating it as
+    // empty would re-offer every addition and undo a shortcut the user removed,
+    // while treating it as complete only costs an offer they can make by hand.
+    yield* Effect.logWarning("keybinding offer ledger is unreadable; offering nothing this run", {
+      path: keybindingsAppliedPath,
+    });
+    return allIntroducedIds();
+  });
+
+  const writeAppliedAdditionIds = (ids: ReadonlySet<string>) =>
+    encodeAppliedAdditionIdsJson([...ids].toSorted()).pipe(
+      Effect.map((encoded) => `${encoded}\n`),
+      Effect.flatMap((contents) =>
+        writeFileStringAtomically({ filePath: keybindingsAppliedPath, contents }).pipe(
+          Effect.provideService(FileSystem.FileSystem, fs),
+          Effect.provideService(Path.Path, path),
+        ),
+      ),
+      // A lost ledger write leaves the config ahead of the record: the
+      // addition is in the file, but nothing remembers offering it. Delete the
+      // shortcut before the next start and it comes back once. Startup must
+      // not fail over bookkeeping, so this is logged rather than raised.
+      Effect.tapCause(() =>
+        Effect.logWarning("could not record keybinding offers; they may be offered again", {
+          path: keybindingsAppliedPath,
+        }),
+      ),
+      Effect.ignoreCause({ log: true }),
+    );
+
   const writeConfigAtomically = (rules: readonly KeybindingRule[]) => {
     return encodeKeybindingsConfigPrettyJson(rules).pipe(
       Effect.map((encoded) => `${encoded}\n`),
@@ -476,6 +521,10 @@ const make = Effect.gen(function* () {
       const configExists = yield* readConfigExists;
       if (!configExists) {
         yield* writeConfigAtomically(DEFAULT_KEYBINDINGS);
+        // The defaults already contain every introduced addition, so record
+        // them as offered. Without this the next start reports each one as
+        // "already present" and rewrites the file for no change.
+        yield* writeAppliedAdditionIds(allIntroducedIds());
         yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
         return;
       }
@@ -492,8 +541,71 @@ const make = Effect.gen(function* () {
         yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
         return;
       }
-      const customConfig = runtimeConfig.keybindings;
-      const existingCommands = new Set(customConfig.map((entry) => entry.command));
+      // Retired defaults are rewritten before the conflict scan below, so a
+      // default whose key was freed by the rewrite is no longer seen as taken
+      // and gets backfilled in the same startup rather than a later one.
+      const migration = migrateRetiredKeybindingDefaults(runtimeConfig.keybindings);
+      // Introduced defaults run after the rewrite so an addition can land on a
+      // key the rewrite just freed.
+      const appliedAdditionIds = yield* readAppliedAdditionIds;
+      const additions = addIntroducedKeybindingDefaults({
+        config: migration.config,
+        appliedIds: appliedAdditionIds,
+        capacity: MAX_KEYBINDINGS_COUNT,
+        claimsShortcutContext: hasSameShortcutContext,
+      });
+      const customConfig = additions.config;
+      for (const rewrite of migration.rewrites) {
+        // Info rather than warning: the rewrite is expected and self-healing,
+        // and it runs at most once per retired default.
+        yield* Effect.logInfo("moved a retired default keybinding to its current key", {
+          path: keybindingsConfigPath,
+          command: rewrite.command,
+          from: rewrite.fromKey,
+          to: rewrite.toKey,
+        });
+      }
+      for (const addition of additions.results) {
+        switch (addition.outcome) {
+          case "applied":
+            yield* Effect.logInfo("added a keybinding default introduced in this release", {
+              path: keybindingsConfigPath,
+              command: addition.rule.command,
+              key: addition.rule.key,
+            });
+            break;
+          case "context-claimed":
+            yield* Effect.logWarning("skipped an introduced keybinding default: its key is taken", {
+              path: keybindingsConfigPath,
+              command: addition.rule.command,
+              key: addition.rule.key,
+            });
+            break;
+          case "already-present":
+            break;
+        }
+      }
+      if (additions.deferred.length > 0) {
+        // Not recorded, so these are offered again once the user frees space.
+        yield* Effect.logWarning("deferring introduced keybinding defaults at max entries", {
+          path: keybindingsConfigPath,
+          maxEntries: MAX_KEYBINDINGS_COUNT,
+          commands: additions.deferred.map((entry) => entry.rule.command),
+        });
+      }
+      for (const rewrite of migration.blocked) {
+        yield* Effect.logWarning("kept a retired default keybinding: its new key is taken", {
+          path: keybindingsConfigPath,
+          command: rewrite.command,
+          key: rewrite.fromKey,
+          blockedBy: rewrite.toKey,
+          reason: rewrite.reason,
+        });
+      }
+      // Deliberately the pre-additions config. An addition is not evidence the
+      // user has that command bound, and treating it as such would make the
+      // backfill skip that command's other shipped defaults.
+      const existingCommands = new Set(migration.config.map((entry) => entry.command));
       const missingDefaults: KeybindingRule[] = [];
       const shortcutConflictWarnings: Array<{
         defaultCommand: KeybindingRule["command"];
@@ -503,6 +615,13 @@ const make = Effect.gen(function* () {
       }> = [];
       for (const defaultRule of DEFAULT_KEYBINDINGS) {
         if (existingCommands.has(defaultRule.command)) {
+          continue;
+        }
+        if (
+          additions.results.some(
+            (entry) => entry.outcome === "applied" && isSameKeybindingRule(entry.rule, defaultRule),
+          )
+        ) {
           continue;
         }
         const conflictingEntry = customConfig.find((entry) =>
@@ -529,11 +648,6 @@ const make = Effect.gen(function* () {
           reason: "shortcut context already used by existing rule",
         });
       }
-      if (missingDefaults.length === 0) {
-        yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
-        return;
-      }
-
       const matchingDefaults = Array.filterMap(DEFAULT_KEYBINDINGS, (defaultRule) =>
         customConfig.some((entry) => isSameKeybindingRule(entry, defaultRule))
           ? Result.succeed(defaultRule.command)
@@ -558,12 +672,22 @@ const make = Effect.gen(function* () {
           commands: skippedDefaults.map((rule) => rule.command),
         });
       }
-      if (defaultsToAppend.length === 0) {
-        yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
-        return;
-      }
 
-      yield* writeConfigAtomically([...customConfig, ...defaultsToAppend]);
+      // One write site on purpose. A rewrite or an introduced default has to
+      // reach disk even when there is nothing to append, or it is offered again
+      // on the next startup; an early return added above this line would lose
+      // it silently.
+      const additionsChangedConfig = additions.results.some((entry) => entry.outcome === "applied");
+      if (migration.rewrites.length > 0 || additionsChangedConfig || defaultsToAppend.length > 0) {
+        yield* writeConfigAtomically([...customConfig, ...defaultsToAppend]);
+      }
+      // Record offers whether or not they landed. A skipped addition was
+      // considered and declined; retrying it every boot would only re-log.
+      if (additions.results.length > 0) {
+        yield* writeAppliedAdditionIds(
+          new Set([...appliedAdditionIds, ...additions.results.map((entry) => entry.id)]),
+        );
+      }
       yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
     }),
   );

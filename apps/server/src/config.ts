@@ -29,6 +29,11 @@ export interface ServerDerivedPaths {
   readonly stateDir: string;
   readonly dbPath: string;
   readonly keybindingsConfigPath: string;
+  /**
+   * Bookkeeping beside the config: which introduced keybinding defaults this
+   * installation has already been offered. Not user configuration.
+   */
+  readonly keybindingsAppliedPath: string;
   readonly settingsPath: string;
   readonly providerStatusCacheDir: string;
   readonly worktreesDir: string;
@@ -115,6 +120,7 @@ export const deriveServerPaths = Effect.fn(function* (
     stateDir,
     dbPath,
     keybindingsConfigPath: join(stateDir, "keybindings.json"),
+    keybindingsAppliedPath: join(stateDir, "keybindings.applied.json"),
     settingsPath: join(stateDir, "settings.json"),
     providerStatusCacheDir,
     worktreesDir: join(baseDir, "worktrees"),

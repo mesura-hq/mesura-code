@@ -165,6 +165,8 @@ import {
 import { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
 import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
+import { useChatReadingScroll } from "../lib/useChatReadingScroll";
+import { dispatchPickerAction } from "../lib/pickerActionBus";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
   AlarmClockIcon,
@@ -3858,6 +3860,17 @@ function ChatViewContent(props: ChatViewProps) {
       void legendListRef.current?.scrollToEnd?.({ animated });
     });
   }, []);
+  // Reading scroll for chat.scrollHalfPageUp / chat.scrollHalfPageDown. The
+  // machinery lives in lib/useChatReadingScroll.ts, which also explains why
+  // the move covers half a viewport and why the animation is as short as it is.
+  const scrollTimelineForReading = useChatReadingScroll({
+    getScrollNode: () => {
+      const node = legendListRef.current?.getScrollableNode();
+      return node instanceof HTMLElement ? node : null;
+    },
+    composerOverlayHeight,
+    onBreakLiveFollow: () => cancelTimelineLiveFollowForUserNavigationRef.current(),
+  });
   useEffect(() => {
     let removeListeners: (() => void) | null = null;
     let frame: number | null = null;
@@ -4934,6 +4947,38 @@ function ChatViewContent(props: ChatViewProps) {
         return;
       }
 
+      if (command === "traitsPicker.toggle") {
+        event.preventDefault();
+        event.stopPropagation();
+        // No-op when the composer is in its compact layout or the selected
+        // provider exposes no traits: neither renders the picker at all.
+        dispatchPickerAction("traits");
+        return;
+      }
+
+      if (command === "workspacePicker.toggle") {
+        event.preventDefault();
+        event.stopPropagation();
+        // No-op once the thread owns a worktree: the workspace control renders
+        // as plain text from then on, because the choice can no longer change.
+        dispatchPickerAction("workspace");
+        return;
+      }
+
+      if (command === "branchPicker.toggle") {
+        event.preventDefault();
+        event.stopPropagation();
+        dispatchPickerAction("branch");
+        return;
+      }
+
+      if (command === "chat.scrollHalfPageUp" || command === "chat.scrollHalfPageDown") {
+        event.preventDefault();
+        event.stopPropagation();
+        scrollTimelineForReading(command === "chat.scrollHalfPageUp" ? "up" : "down");
+        return;
+      }
+
       const scriptId = projectScriptIdFromCommand(command);
       if (!scriptId || !activeProject) return;
       const script = activeProject.scripts.find((entry) => entry.id === scriptId);
@@ -4964,6 +5009,7 @@ function ChatViewContent(props: ChatViewProps) {
     toggleRightPanelMaximized,
     toggleTerminalVisibility,
     composerRef,
+    scrollTimelineForReading,
   ]);
 
   const onRevertToTurnCount = useCallback(

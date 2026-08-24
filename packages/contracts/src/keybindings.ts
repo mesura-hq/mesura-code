@@ -47,6 +47,17 @@ export const MODEL_PICKER_KEYBINDING_COMMANDS = [
 ] as const;
 export type ModelPickerKeybindingCommand = (typeof MODEL_PICKER_KEYBINDING_COMMANDS)[number];
 
+/**
+ * Half-viewport reading scroll over the chat timeline. Half a viewport keeps
+ * the other half on screen as a visual anchor, which is what stops a reader
+ * losing their place in a long thread; a full-viewport jump does not.
+ */
+export const CHAT_SCROLL_KEYBINDING_COMMANDS = [
+  "chat.scrollHalfPageUp",
+  "chat.scrollHalfPageDown",
+] as const;
+export type ChatScrollKeybindingCommand = (typeof CHAT_SCROLL_KEYBINDING_COMMANDS)[number];
+
 export const STATIC_KEYBINDING_COMMANDS = [
   "sidebar.toggle",
   "terminal.toggle",
@@ -72,6 +83,13 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "chat.new",
   "chat.newLocal",
   "editor.openFavorite",
+  "traitsPicker.toggle",
+  // Both open a branch-toolbar control. The workspace one exists only while
+  // the thread can still change workspace, which is why it has no counterpart
+  // once a thread owns a worktree.
+  "workspacePicker.toggle",
+  "branchPicker.toggle",
+  ...CHAT_SCROLL_KEYBINDING_COMMANDS,
   ...MODEL_PICKER_KEYBINDING_COMMANDS,
   ...THREAD_KEYBINDING_COMMANDS,
 ] as const;

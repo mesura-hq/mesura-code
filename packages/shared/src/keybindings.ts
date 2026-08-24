@@ -26,7 +26,10 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+d", command: "terminal.splitVertical", when: "terminalFocus" },
   { key: "mod+n", command: "terminal.new", when: "terminalFocus" },
   { key: "mod+w", command: "terminal.close", when: "terminalFocus" },
-  { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
+  // Moved off mod+d so the reading scroll can take the vim pair mod+u/mod+d.
+  // The move reaches existing configs through RETIRED_KEYBINDING_DEFAULTS
+  // below, which startup applies before it backfills missing defaults.
+  { key: "mod+shift+d", command: "diff.toggle", when: "!terminalFocus" },
   { key: "mod+shift+j", command: "preview.toggle" },
   { key: "mod+r", command: "preview.refresh", when: "previewFocus" },
   { key: "mod+l", command: "preview.focusUrl", when: "previewFocus" },
@@ -43,8 +46,28 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+n", command: "chat.newLocal", when: "!terminalFocus" },
+  // Order matters for the label, not for matching: shortcutLabelForCommand
+  // reports the last binding that wins, so the everywhere-works chord goes
+  // last and alt+m stays the alternate.
+  { key: "alt+m", command: "modelPicker.toggle", when: "!terminalFocus" },
   { key: "mod+shift+m", command: "modelPicker.toggle", when: "!terminalFocus" },
+  { key: "alt+e", command: "traitsPicker.toggle", when: "!terminalFocus" },
+  { key: "alt+w", command: "workspacePicker.toggle", when: "!terminalFocus" },
+  { key: "alt+b", command: "branchPicker.toggle", when: "!terminalFocus" },
+  { key: "mod+u", command: "chat.scrollHalfPageUp", when: "!terminalFocus" },
+  { key: "mod+d", command: "chat.scrollHalfPageDown", when: "!terminalFocus" },
   { key: "mod+o", command: "editor.openFavorite" },
+  // Browsers keep ctrl+tab for their own tab strip and never deliver it to a
+  // page, so this pair reaches the desktop app only. It is listed first so the
+  // bracket pair below is the one the UI reports as the shortcut: the label
+  // resolver returns the last binding that wins, and naming a chord that half
+  // the surfaces never receive would be a lie on the other half.
+  //
+  // Unlike the bracket pair, these are gated on terminal focus. Ghostty
+  // encodes ctrl+tab and would otherwise both traverse threads and write the
+  // key into the shell.
+  { key: "ctrl+shift+tab", command: "thread.previous", when: "!terminalFocus" },
+  { key: "ctrl+tab", command: "thread.next", when: "!terminalFocus" },
   { key: "mod+shift+[", command: "thread.previous" },
   { key: "mod+shift+]", command: "thread.next" },
   ...THREAD_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
@@ -57,6 +80,247 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
     when: "modelPickerOpen",
   })),
 ];
+
+/**
+ * Defaults that used to ship on a different key.
+ *
+ * Startup backfill only adds defaults for commands a config does not already
+ * mention, so moving a default never reaches anyone who has run the app
+ * before: their file keeps the old rule, and whatever took the freed key over
+ * silently gets nothing. Each entry here lets startup rewrite that one rule.
+ *
+ * `from` must match a retired default exactly — key, command, and `when`
+ * together. A rule that differs in any of the three is the user's own and is
+ * left alone.
+ */
+export const RETIRED_KEYBINDING_DEFAULTS: ReadonlyArray<{
+  readonly from: KeybindingRule;
+  readonly toKey: string;
+}> = [
+  {
+    // Freed for chat.scrollHalfPageDown; see the diff.toggle default above.
+    from: { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
+    toKey: "mod+shift+d",
+  },
+];
+
+/**
+ * Defaults introduced for a command that already shipped one.
+ *
+ * Startup backfill is per command, so a second default never reaches anyone
+ * who has run the app before: their file already mentions the command, the
+ * new rule is skipped, and the shortcut exists only on a fresh install.
+ * Documenting that is not shipping it.
+ *
+ * Re-adding an *old* default would be wrong — the user may have deleted it on
+ * purpose. A default introduced in a release carries no such history: it never
+ * existed for them to remove, so adding it once is safe. "Once" is the whole
+ * contract, which is why each entry has a stable id the server records after
+ * applying it. Delete the shortcut afterwards and it stays deleted.
+ *
+ * Never edit an id, and never reuse one for a different rule: an installation
+ * that already recorded it will skip the new rule forever.
+ */
+export interface AddedKeybindingDefault {
+  readonly id: string;
+  readonly rule: KeybindingRule;
+  /**
+   * The shipped default this addition must sit before, when the command has
+   * more than one. Order decides the label, not the matching:
+   * `shortcutLabelForCommand` reports the binding that wins, which is the last
+   * one. Appending would make an upgraded install advertise a different chord
+   * than a fresh one — and for `ctrl+tab`, one the web client never receives.
+   */
+  readonly insertBefore?: KeybindingRule;
+}
+
+export const ADDED_KEYBINDING_DEFAULTS: ReadonlyArray<AddedKeybindingDefault> = [
+  {
+    id: "2026-08-model-picker-alt-m",
+    rule: { key: "alt+m", command: "modelPicker.toggle", when: "!terminalFocus" },
+    insertBefore: { key: "mod+shift+m", command: "modelPicker.toggle", when: "!terminalFocus" },
+  },
+  {
+    id: "2026-08-thread-next-ctrl-tab",
+    rule: { key: "ctrl+tab", command: "thread.next", when: "!terminalFocus" },
+    insertBefore: { key: "mod+shift+]", command: "thread.next" },
+  },
+  {
+    id: "2026-08-thread-previous-ctrl-shift-tab",
+    rule: { key: "ctrl+shift+tab", command: "thread.previous", when: "!terminalFocus" },
+    insertBefore: { key: "mod+shift+[", command: "thread.previous" },
+  },
+];
+
+export type IntroducedKeybindingAdditionOutcome =
+  /** Appended to the config. */
+  | "applied"
+  /** The exact rule was already there, so nothing changed. */
+  | "already-present"
+  /** Another rule holds that chord; forcing it would disable one of the two. */
+  | "context-claimed";
+
+export interface IntroducedKeybindingAdditionResult {
+  readonly id: string;
+  readonly rule: KeybindingRule;
+  readonly outcome: IntroducedKeybindingAdditionOutcome;
+}
+
+export interface IntroducedKeybindingDefaultsInput {
+  readonly config: ReadonlyArray<KeybindingRule>;
+  readonly appliedIds: ReadonlySet<string>;
+  /** Largest config the caller may persist; additions stop at it. */
+  readonly capacity: number;
+  /**
+   * Whether an existing rule holds a chord. Injected because the authoritative
+   * comparison normalizes the chord first — `Alt+M`, `alt + m`, and `m+alt` are
+   * one context — and that normalizer lives with the server's config codecs.
+   */
+  readonly claimsShortcutContext: (rule: KeybindingRule, candidate: KeybindingRule) => boolean;
+}
+
+/**
+ * Appends every introduced default the ledger has not recorded yet.
+ *
+ * An addition is skipped, but still recorded, when its chord already belongs
+ * to another rule: forcing it would put two commands on one chord and, under
+ * last-wins resolution, quietly disable one. Recording the skip keeps startup
+ * from retrying it on every boot.
+ *
+ * Additions dropped for lack of room come back in `deferred` and are NOT
+ * recorded, so they are offered again once the user frees space.
+ */
+export function addIntroducedKeybindingDefaults(input: IntroducedKeybindingDefaultsInput): {
+  readonly config: ReadonlyArray<KeybindingRule>;
+  readonly results: ReadonlyArray<IntroducedKeybindingAdditionResult>;
+  readonly deferred: ReadonlyArray<AddedKeybindingDefault>;
+} {
+  const next = [...input.config];
+  const results: IntroducedKeybindingAdditionResult[] = [];
+  const deferred: AddedKeybindingDefault[] = [];
+
+  for (const addition of ADDED_KEYBINDING_DEFAULTS) {
+    if (input.appliedIds.has(addition.id)) continue;
+
+    if (next.some((entry) => isSameKeybindingRule(entry, addition.rule))) {
+      results.push({ id: addition.id, rule: addition.rule, outcome: "already-present" });
+      continue;
+    }
+    if (next.some((entry) => input.claimsShortcutContext(entry, addition.rule))) {
+      results.push({ id: addition.id, rule: addition.rule, outcome: "context-claimed" });
+      continue;
+    }
+    if (next.length >= input.capacity) {
+      deferred.push(addition);
+      continue;
+    }
+
+    const before = addition.insertBefore;
+    const index = before ? next.findIndex((entry) => isSameKeybindingRule(entry, before)) : -1;
+    if (index === -1) {
+      next.push(addition.rule);
+    } else {
+      next.splice(index, 0, addition.rule);
+    }
+    results.push({ id: addition.id, rule: addition.rule, outcome: "applied" });
+  }
+
+  const applied = results.some((entry) => entry.outcome === "applied");
+  return { config: applied ? next : input.config, results, deferred };
+}
+
+export interface RetiredKeybindingRewrite {
+  readonly command: KeybindingRule["command"];
+  readonly fromKey: string;
+  readonly toKey: string;
+}
+
+export interface BlockedRetiredKeybindingRewrite extends RetiredKeybindingRewrite {
+  readonly reason: "destination-claimed";
+}
+
+/** True when two rules bind the same command on the same shortcut context. */
+export function isSameKeybindingRule(left: KeybindingRule, right: KeybindingRule): boolean {
+  return (
+    left.command === right.command &&
+    left.key === right.key &&
+    (left.when ?? undefined) === (right.when ?? undefined)
+  );
+}
+
+function claimsShortcutContext(
+  rule: KeybindingRule,
+  key: string,
+  when: string | undefined,
+): boolean {
+  return rule.key === key && (rule.when ?? undefined) === when;
+}
+
+/**
+ * Rewrites any retired default still present in a user config onto its current
+ * key. Returns the config unchanged when nothing moved, so callers can skip the
+ * write.
+ *
+ * Three things keep this from damaging a config:
+ *
+ * - `from` must match a retired default exactly, so a rule the user edited in
+ *   any of key, command, or `when` is left alone.
+ * - A rewrite is skipped when the destination shortcut context already belongs
+ *   to some other rule. Moving onto it would leave two rules on one chord, and
+ *   since resolution is last-wins one of the two commands would quietly stop
+ *   working — the same silent failure this function exists to remove. Those
+ *   cases come back in `blocked` so the caller can say so.
+ * - A rewritten rule no longer matches its `from`, which makes the pass
+ *   idempotent, and rewrites that collapse onto an identical rule are deduped.
+ */
+export function migrateRetiredKeybindingDefaults(config: ReadonlyArray<KeybindingRule>): {
+  readonly config: ReadonlyArray<KeybindingRule>;
+  readonly rewrites: ReadonlyArray<RetiredKeybindingRewrite>;
+  readonly blocked: ReadonlyArray<BlockedRetiredKeybindingRewrite>;
+} {
+  const rewrites: RetiredKeybindingRewrite[] = [];
+  const blocked: BlockedRetiredKeybindingRewrite[] = [];
+  const next: KeybindingRule[] = [];
+
+  for (const rule of config) {
+    const retired = RETIRED_KEYBINDING_DEFAULTS.find((entry) =>
+      isSameKeybindingRule(entry.from, rule),
+    );
+    if (!retired) {
+      next.push(rule);
+      continue;
+    }
+
+    const destination = { ...rule, key: retired.toKey };
+    const claimedByAnother = config.some(
+      (entry) =>
+        entry !== rule && claimsShortcutContext(entry, retired.toKey, rule.when ?? undefined),
+    );
+    if (claimedByAnother) {
+      blocked.push({
+        command: rule.command,
+        fromKey: rule.key,
+        toKey: retired.toKey,
+        reason: "destination-claimed",
+      });
+      next.push(rule);
+      continue;
+    }
+
+    // A config may hold the retired rule more than once; collapsing both onto
+    // the destination would persist a duplicate.
+    if (next.some((entry) => isSameKeybindingRule(entry, destination))) {
+      continue;
+    }
+
+    rewrites.push({ command: rule.command, fromKey: rule.key, toKey: retired.toKey });
+    next.push(destination);
+  }
+
+  return rewrites.length === 0
+    ? { config, rewrites, blocked }
+    : { config: next, rewrites, blocked };
+}
 
 function normalizeKeyToken(token: string): string {
   if (token === "space") return " ";
