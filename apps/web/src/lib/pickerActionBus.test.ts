@@ -45,6 +45,22 @@ describe("pickerActionBus", () => {
     stopBranch();
   });
 
+  it("delivers to every subscriber of the same action", () => {
+    // Documents the fan-out invariant the callers rely on: a composer renders
+    // either the traits picker or its compact menu, never both, and one
+    // branch toolbar is mounted at a time. A second simultaneous subscriber
+    // means one of those invariants broke.
+    const seen: string[] = [];
+    const stopFirst = subscribePickerAction("traits", () => seen.push("first"));
+    const stopSecond = subscribePickerAction("traits", () => seen.push("second"));
+
+    dispatchPickerAction("traits");
+
+    expect(seen).toEqual(["first", "second"]);
+    stopFirst();
+    stopSecond();
+  });
+
   it("stops delivering once unsubscribed", () => {
     // The unsubscribe path is the leak-prone one: the workspace picker
     // resubscribes whenever it locks or unlocks, so a listener outliving its

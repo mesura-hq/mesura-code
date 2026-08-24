@@ -205,11 +205,14 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         return keys[0];
       };
 
-      assert.deepEqual(keysFor("thread.previous"), ["mod+shift+[", "ctrl+shift+tab"]);
-      assert.deepEqual(keysFor("thread.next"), ["mod+shift+]", "ctrl+tab"]);
+      // The everywhere-works chord is last on purpose: the label resolver
+      // reports the binding that wins, and naming ctrl+tab would be wrong on
+      // every surface that never receives it.
+      assert.deepEqual(keysFor("thread.previous"), ["ctrl+shift+tab", "mod+shift+["]);
+      assert.deepEqual(keysFor("thread.next"), ["ctrl+tab", "mod+shift+]"]);
       assert.equal(soleKeyFor("thread.jump.1"), "mod+1");
       assert.equal(soleKeyFor("thread.jump.9"), "mod+9");
-      assert.deepEqual(keysFor("modelPicker.toggle"), ["mod+shift+m", "alt+m"]);
+      assert.deepEqual(keysFor("modelPicker.toggle"), ["alt+m", "mod+shift+m"]);
       assert.equal(soleKeyFor("themeEditor.toggle"), "mod+alt+shift+t");
       assert.equal(soleKeyFor("filePicker.toggle"), "mod+p");
       assert.equal(soleKeyFor("projectSearch.toggle"), "mod+shift+f");
@@ -324,6 +327,147 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         }
         assert.isTrue(byCommand.has("script.run-tests.run"));
       }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("keeps every retired default entry consistent with the shipped defaults", () =>
+    Effect.sync(() => {
+      // A wrong entry here rewrites a real config on startup, so the table is
+      // checked against the defaults rather than trusted.
+      for (const entry of Keybindings.RETIRED_KEYBINDING_DEFAULTS) {
+        assert.isNotNull(
+          Keybindings.parseKeybindingShortcut(entry.toKey),
+          `retired default ${entry.from.command} moves to an unparseable key`,
+        );
+        assert.isTrue(
+          Keybindings.DEFAULT_KEYBINDINGS.some(
+            (rule) => rule.command === entry.from.command && rule.key === entry.toKey,
+          ),
+          `retired default ${entry.from.command} moves to a key it no longer ships on`,
+        );
+        assert.isFalse(
+          Keybindings.DEFAULT_KEYBINDINGS.some((rule) =>
+            Keybindings.isSameKeybindingRule(rule, entry.from),
+          ),
+          `retired default ${entry.from.command} is still a live default, so the rewrite would fight it every startup`,
+        );
+      }
+    }),
+  );
+
+  it.effect("ships no two defaults on the same shortcut context", () =>
+    Effect.sync(() => {
+      // Resolution is last-wins, so two defaults sharing key and `when` would
+      // silently make one command unreachable. mod+1 legitimately appears
+      // twice under different `when` clauses, which this key separates.
+      const seen = new Set<string>();
+      for (const rule of Keybindings.DEFAULT_KEYBINDINGS) {
+        const context = `${rule.key}\u0000${rule.when ?? ""}`;
+        assert.isFalse(seen.has(context), `two defaults share the context ${context}`);
+        seen.add(context);
+      }
+    }),
+  );
+
+  it.effect("persists a rewrite even when there is nothing to backfill", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      // Every default present, but diff.toggle still on its retired key. The
+      // backfill has nothing to add, so only the rewrite justifies a write.
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        ...Keybindings.DEFAULT_KEYBINDINGS.filter((rule) => rule.command !== "diff.toggle"),
+        { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
+      ]);
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepEqual(
+        persisted.filter((entry) => entry.command === "diff.toggle").map((entry) => entry.key),
+        ["mod+shift+d"],
+      );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("keeps a retired default when its new key is already taken", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      // Moving onto mod+shift+d would put two commands on one chord and, since
+      // resolution is last-wins, silently disable one of them.
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
+        { key: "mod+shift+d", command: "preview.toggle", when: "!terminalFocus" },
+      ]);
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepEqual(
+        persisted.filter((entry) => entry.command === "diff.toggle").map((entry) => entry.key),
+        ["mod+d"],
+      );
+      assert.isTrue(
+        persisted.some(
+          (entry) => entry.command === "preview.toggle" && entry.key === "mod+shift+d",
+        ),
+      );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("rewrites when a same-command rule differs only by its when clause", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      // An unrelated diff.toggle rule already sits on mod+shift+d but under a
+      // different `when`, so the destination context is free.
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
+        { key: "mod+shift+d", command: "diff.toggle", when: "terminalOpen" },
+      ]);
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.isTrue(
+        persisted.some(
+          (entry) =>
+            entry.command === "diff.toggle" &&
+            entry.key === "mod+shift+d" &&
+            entry.when === "!terminalFocus",
+        ),
+      );
+      assert.isFalse(
+        persisted.some((entry) => entry.key === "mod+d" && entry.command === "diff.toggle"),
+      );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("collapses a retired default that appears twice into one rule", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
+        { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
+      ]);
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepEqual(
+        persisted.filter((entry) => entry.command === "diff.toggle").map((entry) => entry.key),
+        ["mod+shift+d"],
+      );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
 
   it.effect("moves a retired default onto its current key and backfills what it freed", () =>

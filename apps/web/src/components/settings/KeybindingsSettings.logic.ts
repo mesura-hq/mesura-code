@@ -109,22 +109,42 @@ function sourceForBinding(binding: ResolvedKeybindingRule): KeybindingSource {
 
 function defaultBindingForBinding(
   binding: ResolvedKeybindingRule,
+  keybindings: ResolvedKeybindingsConfig,
 ): ResolvedKeybindingRule | undefined {
   const bindingKey = shortcutToKeybindingInput(binding.shortcut);
   const bindingWhen = whenAstToExpression(binding.whenAst);
 
+  const exact = DEFAULT_RESOLVED_KEYBINDINGS.find(
+    (entry) =>
+      entry.command === binding.command &&
+      shortcutToKeybindingInput(entry.shortcut) === bindingKey &&
+      whenAstToExpression(entry.whenAst) === bindingWhen,
+  );
+  if (exact) return exact;
+
+  // A command may ship several defaults. Offering a row the default that some
+  // other row already sits on would turn "reset to default" into a collision:
+  // the user would end up with two rules on one chord and lose whichever
+  // resolution ordered last. Prefer a default no row currently claims.
+  const isUnclaimed = (candidate: ResolvedKeybindingRule) =>
+    !keybindings.some(
+      (entry) =>
+        entry !== binding &&
+        entry.command === candidate.command &&
+        shortcutToKeybindingInput(entry.shortcut) ===
+          shortcutToKeybindingInput(candidate.shortcut) &&
+        whenAstToExpression(entry.whenAst) === whenAstToExpression(candidate.whenAst),
+    );
+  const sameWhen = DEFAULT_RESOLVED_KEYBINDINGS.filter(
+    (entry) =>
+      entry.command === binding.command && whenAstToExpression(entry.whenAst) === bindingWhen,
+  );
+  const anyForCommand = DEFAULT_RESOLVED_KEYBINDINGS.filter(
+    (entry) => entry.command === binding.command,
+  );
+
   return (
-    DEFAULT_RESOLVED_KEYBINDINGS.find(
-      (entry) =>
-        entry.command === binding.command &&
-        shortcutToKeybindingInput(entry.shortcut) === bindingKey &&
-        whenAstToExpression(entry.whenAst) === bindingWhen,
-    ) ??
-    DEFAULT_RESOLVED_KEYBINDINGS.find(
-      (entry) =>
-        entry.command === binding.command && whenAstToExpression(entry.whenAst) === bindingWhen,
-    ) ??
-    DEFAULT_RESOLVED_KEYBINDINGS.find((entry) => entry.command === binding.command)
+    sameWhen.find(isUnclaimed) ?? sameWhen[0] ?? anyForCommand.find(isUnclaimed) ?? anyForCommand[0]
   );
 }
 
@@ -160,7 +180,7 @@ export function buildKeybindingRows(
 ): ReadonlyArray<KeybindingRow> {
   const normalizedQuery = query.trim().toLowerCase();
   const rows = keybindings.map((binding, index) => {
-    const defaultBinding = defaultBindingForBinding(binding);
+    const defaultBinding = defaultBindingForBinding(binding, keybindings);
     const key = shortcutToKeybindingInput(binding.shortcut);
     const when = whenAstToExpression(binding.whenAst);
     return {

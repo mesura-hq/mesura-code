@@ -15,7 +15,9 @@ hand it to you — that shortcut works on a fresh install and stays absent in yo
 
 A release that _moves_ a default onto a different key is handled for you: startup rewrites the old
 rule, but only when it still matches the retired default exactly, key and command and `when`
-together. A rule you changed yourself is never touched.
+together. A rule you changed yourself is never touched. When the new key already belongs to a rule
+of yours, the move is skipped rather than stacking two commands on one chord, and the server logs a
+warning saying so.
 
 The file is a JSON array of rules.
 
@@ -78,17 +80,20 @@ characters and uses SQLite's ASCII case-insensitive matching.
 
 ### Composer pickers
 
-`modelPicker.toggle` opens the model picker from the composer and defaults to `mod+shift+m`. While
-it is open, `mod+1` through `mod+9` select a model directly.
+`modelPicker.toggle` opens the model picker from the composer and defaults to `mod+shift+m`, and
+additionally to `alt+m`. While it is open, `mod+1` through `mod+9` select a model directly.
 
 `traitsPicker.toggle` opens the composer control that holds reasoning effort, thinking, fast mode,
 context window, and agent. It defaults to `alt+e`. Two cases make it do nothing, both by design:
 a provider that exposes none of those traits does not render the control at all, and a narrow
 composer folds the traits into its compact controls menu, which has no separate picker to open.
 
-On macOS, `Option+E` is the dead key that starts an acute accent, so that default may be swallowed
-before the app sees it. Rebind the command in **Settings** → **Keybindings** if you type accented
-characters.
+Four defaults sit on `Alt` with a letter: `alt+e`, `alt+w`, `alt+b`, and `alt+m`. The app claims
+those chords before the character reaches the composer, which matters on two platforms. On macOS
+`Option` composes characters — `Option+E` starts an acute accent, and the other three would type
+`∑`, `∫`, and `µ` — so a default may be swallowed or may suppress a character you wanted. Firefox
+uses `Alt` with a letter for menu access keys. Rebind any of them in **Settings** →
+**Keybindings**.
 
 ### Branch toolbar
 
@@ -96,9 +101,11 @@ characters.
 `mod+alt+b` is a different shortcut: it toggles the right panel.
 
 `workspacePicker.toggle` opens the workspace control beside it — the one choosing between the
-current checkout and a new worktree — and defaults to `alt+w`. It only does something while that
-choice can still change. Once a thread owns a worktree the control becomes plain text, because
-moving an existing thread between workspaces is not something the app offers.
+current checkout and a new worktree — and defaults to `alt+w`. Three situations make it do nothing.
+The choice can no longer change, because the thread already owns a worktree and the control has
+become plain text; the project exposes no git controls at all; or the window is narrow enough that
+the toolbar collapses into its compact layout, which uses a different control the shortcut does not
+reach.
 
 New threads pick their workspace from a setting rather than from the last thread. The resolution
 order is the project's own setting, then a `defaultThreadEnvMode` entry in the project's `t3.json`,
@@ -131,9 +138,10 @@ wheel. Without that, the next chunk of a streaming reply would pull you back to 
 ### Moving between threads
 
 `thread.next` and `thread.previous` default to `mod+shift+]` and `mod+shift+[`, and additionally to
-`ctrl+tab` and `ctrl+shift+tab`. The bracket pair works everywhere; the tab pair reaches the desktop
-app only, because browsers keep those two for their own tab strip. `mod+1` through `mod+9` jump
-straight to a thread by position.
+`ctrl+tab` and `ctrl+shift+tab`. The bracket pair works everywhere and is the one the app reports as
+the shortcut. The tab pair is desktop-only, because browsers keep those two chords for their own tab
+strip; it is also inactive while the terminal has focus, since the terminal encodes `ctrl+tab`
+itself. `mod+1` through `mod+9` jump straight to a thread by position.
 
 ### Closing terminals and windows
 

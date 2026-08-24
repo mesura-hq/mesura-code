@@ -209,11 +209,15 @@ export function BranchToolbarBranchSelector({
   // Git ref queries
   // ---------------------------------------------------------------------------
   const [isBranchMenuOpen, setIsBranchMenuOpen] = useState(false);
-  // The branch control is always editable, so unlike the workspace selector
-  // beside it this subscription needs no visibility gate.
+  // The trigger is disabled while refs are still loading or a branch action is
+  // in flight, and the shortcut has to respect that too. A ref rather than a
+  // dependency: those two flags change with every query transition, and
+  // resubscribing that often would be churn for nothing.
+  const branchTriggerDisabledRef = useRef(false);
   useEffect(
     () =>
       subscribePickerAction("branch", () => {
+        if (branchTriggerDisabledRef.current) return;
         setIsBranchMenuOpen((open) => !open);
       }),
     [],
@@ -340,6 +344,9 @@ export function BranchToolbarBranchSelector({
         ? queriedActiveBranch.isRemote === true
         : null;
   const [isBranchActionPending, startBranchActionTransition] = useTransition();
+  useEffect(() => {
+    branchTriggerDisabledRef.current = isInitialBranchesLoadPending || isBranchActionPending;
+  }, [isInitialBranchesLoadPending, isBranchActionPending]);
   const totalBranchCount = branchRefState.data?.totalCount ?? 0;
   const branchStatusText = isInitialBranchesLoadPending
     ? "Loading refs..."

@@ -46,16 +46,20 @@ import { fromJsonStringPretty, fromLenientJson } from "@t3tools/shared/schemaJso
 import {
   DEFAULT_KEYBINDINGS,
   DEFAULT_RESOLVED_KEYBINDINGS,
+  RETIRED_KEYBINDING_DEFAULTS,
   compileResolvedKeybindingRule,
   compileResolvedKeybindingsConfig,
+  isSameKeybindingRule,
   migrateRetiredKeybindingDefaults,
   parseKeybindingShortcut,
 } from "@t3tools/shared/keybindings";
 
 export {
   DEFAULT_KEYBINDINGS,
+  RETIRED_KEYBINDING_DEFAULTS,
   compileResolvedKeybindingRule,
   compileResolvedKeybindingsConfig,
+  isSameKeybindingRule,
   parseKeybindingShortcut,
 };
 
@@ -100,14 +104,6 @@ export const ResolvedKeybindingFromConfig = KeybindingRule.pipe(
 export const ResolvedKeybindingsFromConfig = Schema.Array(ResolvedKeybindingFromConfig).check(
   Schema.isMaxLength(MAX_KEYBINDINGS_COUNT),
 );
-
-function isSameKeybindingRule(left: KeybindingRule, right: KeybindingRule): boolean {
-  return (
-    left.command === right.command &&
-    left.key === right.key &&
-    (left.when ?? undefined) === (right.when ?? undefined)
-  );
-}
 
 function keybindingShortcutContext(rule: KeybindingRule): string | null {
   const parsed = parseKeybindingShortcut(rule.key);
@@ -499,11 +495,22 @@ const make = Effect.gen(function* () {
       const migration = migrateRetiredKeybindingDefaults(runtimeConfig.keybindings);
       const customConfig = migration.config;
       for (const rewrite of migration.rewrites) {
+        // Info rather than warning: the rewrite is expected and self-healing,
+        // and it runs at most once per retired default.
         yield* Effect.logInfo("moved a retired default keybinding to its current key", {
           path: keybindingsConfigPath,
           command: rewrite.command,
           from: rewrite.fromKey,
           to: rewrite.toKey,
+        });
+      }
+      for (const rewrite of migration.blocked) {
+        yield* Effect.logWarning("kept a retired default keybinding: its new key is taken", {
+          path: keybindingsConfigPath,
+          command: rewrite.command,
+          key: rewrite.fromKey,
+          blockedBy: rewrite.toKey,
+          reason: rewrite.reason,
         });
       }
       const existingCommands = new Set(customConfig.map((entry) => entry.command));
@@ -542,16 +549,6 @@ const make = Effect.gen(function* () {
           reason: "shortcut context already used by existing rule",
         });
       }
-      if (missingDefaults.length === 0) {
-        // A rewrite with nothing to append still has to reach disk, or the
-        // retired default returns on the next startup.
-        if (migration.rewrites.length > 0) {
-          yield* writeConfigAtomically(customConfig);
-        }
-        yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
-        return;
-      }
-
       const matchingDefaults = Array.filterMap(DEFAULT_KEYBINDINGS, (defaultRule) =>
         customConfig.some((entry) => isSameKeybindingRule(entry, defaultRule))
           ? Result.succeed(defaultRule.command)
@@ -576,15 +573,13 @@ const make = Effect.gen(function* () {
           commands: skippedDefaults.map((rule) => rule.command),
         });
       }
-      if (defaultsToAppend.length === 0) {
-        if (migration.rewrites.length > 0) {
-          yield* writeConfigAtomically(customConfig);
-        }
-        yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
-        return;
-      }
 
-      yield* writeConfigAtomically([...customConfig, ...defaultsToAppend]);
+      // One write site on purpose. A rewrite has to reach disk even when there
+      // is nothing to append, or the retired default comes back on the next
+      // startup; an early return added above this line would lose it silently.
+      if (migration.rewrites.length > 0 || defaultsToAppend.length > 0) {
+        yield* writeConfigAtomically([...customConfig, ...defaultsToAppend]);
+      }
       yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
     }),
   );

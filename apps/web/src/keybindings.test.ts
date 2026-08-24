@@ -971,6 +971,20 @@ describe("shipped defaults on Linux", () => {
     assert.strictEqual(resolve(press("[", { ctrlKey: true, shiftKey: true })), "thread.previous");
   });
 
+  it("reports the everywhere-works chord as the shortcut label", () => {
+    // The resolver returns the binding that wins, which is the last match.
+    // Naming ctrl+tab here would be wrong on every surface that never
+    // receives it, so the bracket pair has to be ordered last in the defaults.
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "thread.next", "Linux"),
+      "Ctrl+Shift+]",
+    );
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "modelPicker.toggle", "Linux"),
+      "Ctrl+Shift+M",
+    );
+  });
+
   it("opens the model picker from either of its two defaults", () => {
     assert.strictEqual(resolve(press("m", { altKey: true })), "modelPicker.toggle");
     assert.strictEqual(
@@ -992,5 +1006,10 @@ describe("shipped defaults on Linux", () => {
     assert.strictEqual(resolve(press("e", { altKey: true }), true), null);
     assert.strictEqual(resolve(press("w", { altKey: true }), true), null);
     assert.strictEqual(resolve(press("b", { altKey: true }), true), null);
+    // Ghostty encodes ctrl+tab, so an ungated binding would traverse threads
+    // and write the key into the shell at the same time. The bracket pair is
+    // deliberately not gated, matching the behaviour it already had.
+    assert.strictEqual(resolve(press("Tab", { ctrlKey: true }), true), null);
+    assert.strictEqual(resolve(press("]", { ctrlKey: true, shiftKey: true }), true), "thread.next");
   });
 });
