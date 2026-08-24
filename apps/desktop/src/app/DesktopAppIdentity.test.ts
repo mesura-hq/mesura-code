@@ -129,7 +129,11 @@ const withIdentity = <A, E, R>(
               input.legacyPathProbeError
                 ? Effect.fail(input.legacyPathProbeError)
                 : Effect.succeed(
-                    input.legacyPathExists === true && path.includes("T3 Code (Alpha)"),
+                    // This fork resolves both names to "mesura-code", so the
+                    // probe matches the same directory the non-legacy branch
+                    // returns. See DESKTOP_USER_DATA_IDENTITY for why the two
+                    // must not diverge into a T3-named directory.
+                    input.legacyPathExists === true && path.includes("mesura-code"),
                   ),
             readFileString: () =>
               Effect.succeed(input.packageJson ?? '{"t3codeCommitHash":"abcdef1234567890"}'),
@@ -144,20 +148,50 @@ const withIdentity = <A, E, R>(
 };
 
 describe("DesktopAppIdentity", () => {
-  it.effect("keeps using the legacy userData path when it already exists", () =>
+  it.effect("resolves the userData path from the real environment", () =>
     withIdentity(
       Effect.gen(function* () {
         const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
         const userDataPath = yield* identity.resolveUserDataPath;
 
-        assert.equal(userDataPath, "/Users/alice/Library/Application Support/T3 Code (Alpha)");
+        // Keep this literal. It builds the real DesktopEnvironment layer, so
+        // it is what fails if a weekly merge restores upstream's hardcoded
+        // "t3code". Do not replace it with resolveDesktopUserDataIdentity.
+        assert.equal(userDataPath, "/Users/alice/Library/Application Support/mesura-code");
       }),
       { legacyPathExists: true },
     ),
   );
 
+  // This fork resolves both directory names to the same value, so the test
+  // above cannot tell the two branches apart. Upstream's legacy preference is
+  // behavior this fork still carries, so it gets its own environment.
+  it.effect("prefers the legacy userData path when the two names differ", () =>
+    Effect.gen(function* () {
+      const environment = DesktopEnvironment.DesktopEnvironment.of({
+        appDataDirectory: "/tmp/app-data",
+        userDataDirName: "current-dir",
+        legacyUserDataDirName: "legacy-dir",
+        path: { join: (...parts: ReadonlyArray<string>) => parts.join("/") },
+      } as unknown as DesktopEnvironment.DesktopEnvironment["Service"]);
+
+      const resolveWith = (legacyExists: boolean) =>
+        DesktopAppIdentity.resolveUserDataPath.pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              Layer.succeed(DesktopEnvironment.DesktopEnvironment, environment),
+              FileSystem.layerNoop({ exists: () => Effect.succeed(legacyExists) }),
+            ),
+          ),
+        );
+
+      assert.equal(yield* resolveWith(true), "/tmp/app-data/legacy-dir");
+      assert.equal(yield* resolveWith(false), "/tmp/app-data/current-dir");
+    }),
+  );
+
   it.effect("preserves failures while inspecting the legacy userData path", () => {
-    const legacyPath = "/Users/alice/Library/Application Support/T3 Code (Alpha)";
+    const legacyPath = "/Users/alice/Library/Application Support/mesura-code";
     const cause = PlatformError.systemError({
       _tag: "PermissionDenied",
       module: "FileSystem",

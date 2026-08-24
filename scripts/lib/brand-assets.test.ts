@@ -3,12 +3,14 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   BRAND_ASSET_PATHS,
   DESKTOP_LINUX_IDENTITY,
+  DESKTOP_USER_DATA_IDENTITY,
   DEVELOPMENT_ICON_OVERRIDES,
   DEVELOPMENT_PUBLIC_ICON_OVERRIDES,
   resolveWebAssetBrandForChannel,
   resolveWebAssetBrandForPackageVersion,
   resolveWebIconOverrides,
   resolveDesktopLinuxIdentity,
+  resolveDesktopUserDataIdentity,
 } from "./brand-assets.ts";
 
 describe("brand-assets", () => {
@@ -98,6 +100,21 @@ describe("brand-assets", () => {
         desktopEntryName: "mesura-code.desktop",
         executableName: "mesura-code",
         wmClass: "mesura-code",
+      },
+    });
+  });
+
+  it("keeps the Mesura desktop userData directory separate from installed T3 Code", () => {
+    expect(resolveDesktopUserDataIdentity(true)).toBe(DESKTOP_USER_DATA_IDENTITY.development);
+    expect(resolveDesktopUserDataIdentity(false)).toBe(DESKTOP_USER_DATA_IDENTITY.production);
+    expect(DESKTOP_USER_DATA_IDENTITY).toEqual({
+      development: {
+        userDataDirName: "mesura-code-dev",
+        legacyUserDataDirName: "mesura-code-dev",
+      },
+      production: {
+        userDataDirName: "mesura-code",
+        legacyUserDataDirName: "mesura-code",
       },
     });
   });
