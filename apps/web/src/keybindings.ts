@@ -107,13 +107,20 @@ function matchesShortcutModifiers(
   );
 }
 
-function matchesShortcut(
+export function matchesShortcutKey(
+  event: ShortcutEventLike,
+  shortcut: KeybindingShortcut,
+): boolean {
+  return resolveEventKeys(event).has(shortcut.key);
+}
+
+export function matchesShortcut(
   event: ShortcutEventLike,
   shortcut: KeybindingShortcut,
   platform = navigator.platform,
 ): boolean {
   if (!matchesShortcutModifiers(event, shortcut, platform)) return false;
-  return resolveEventKeys(event).has(shortcut.key);
+  return matchesShortcutKey(event, shortcut);
 }
 
 function resolvePlatform(options: ShortcutMatchOptions | undefined): string {
@@ -167,7 +174,7 @@ function shortcutConflictKey(shortcut: KeybindingShortcut, platform = navigator.
   ].join("|");
 }
 
-function findEffectiveShortcutForCommand(
+export function findEffectiveShortcutForCommand(
   keybindings: ResolvedKeybindingsConfig,
   command: KeybindingCommand,
   options?: ShortcutMatchOptions,

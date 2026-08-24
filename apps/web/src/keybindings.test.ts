@@ -8,6 +8,7 @@ import {
 } from "@t3tools/contracts";
 import {
   formatShortcutLabel,
+  findEffectiveShortcutForCommand,
   isChatNewShortcut,
   isChatNewLocalShortcut,
   isDiffToggleShortcut,
@@ -85,6 +86,17 @@ function compile(bindings: TestBinding[]): ResolvedKeybindingsConfig {
 }
 
 const DEFAULT_BINDINGS = compile([
+  {
+    shortcut: {
+      key: "u",
+      metaKey: false,
+      ctrlKey: false,
+      shiftKey: false,
+      altKey: true,
+      modKey: false,
+    },
+    command: "usage.peek",
+  },
   { shortcut: modShortcut("b"), command: "sidebar.toggle" },
   { shortcut: modShortcut("j"), command: "terminal.toggle" },
   { shortcut: modShortcut("b", { altKey: true }), command: "rightPanel.toggle" },
@@ -337,6 +349,7 @@ describe("shortcutLabelForCommand", () => {
       shortcutLabelForCommand(DEFAULT_BINDINGS, "rightPanel.toggle", "MacIntel"),
       "⌥⌘B",
     );
+    assert.strictEqual(shortcutLabelForCommand(DEFAULT_BINDINGS, "usage.peek", "Linux"), "Alt+U");
     assert.strictEqual(
       shortcutLabelForCommand(DEFAULT_BINDINGS, "commandPalette.toggle", "MacIntel"),
       "⌘K",
@@ -371,6 +384,35 @@ describe("shortcutLabelForCommand", () => {
         context: { modelPickerOpen: true },
       }),
       "⌘3",
+    );
+  });
+
+  it("resolves the effective held Usage shortcut after precedence", () => {
+    const bindings = compile([
+      {
+        shortcut: {
+          key: "u",
+          metaKey: false,
+          ctrlKey: false,
+          shiftKey: false,
+          altKey: true,
+          modKey: false,
+        },
+        command: "usage.peek",
+      },
+      { shortcut: modShortcut("u"), command: "diff.toggle" },
+    ]);
+
+    assert.deepEqual(
+      findEffectiveShortcutForCommand(bindings, "usage.peek", { platform: "Linux" }),
+      {
+        key: "u",
+        metaKey: false,
+        ctrlKey: false,
+        shiftKey: false,
+        altKey: true,
+        modKey: false,
+      },
     );
   });
 

@@ -5,7 +5,7 @@ import {
   SettingsIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { memo, useCallback } from "react";
+import { memo, useCallback, useState } from "react";
 import { Link, useCanGoBack, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
@@ -32,6 +32,7 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
+import { AccountLimitsPopover, useAccountLimitsPanelController } from "./AccountLimitsPanel";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
@@ -107,17 +108,32 @@ function SidebarUtilityItem({
   icon,
   label,
   onClick,
+  buttonRef,
+  onPointerEnter,
+  onPointerLeave,
+  suppressTooltip = false,
 }: {
   icon: ReactNode;
   label: string;
   onClick: () => void;
+  buttonRef?: (element: HTMLButtonElement | null) => void;
+  onPointerEnter?: () => void;
+  onPointerLeave?: () => void;
+  suppressTooltip?: boolean;
 }) {
   return (
     <SidebarMenuItem className="shrink-0">
-      <Tooltip>
+      <Tooltip disabled={suppressTooltip}>
         <TooltipTrigger
           render={
-            <SidebarMenuButton aria-label={label} onClick={onClick} size="icon">
+            <SidebarMenuButton
+              aria-label={label}
+              onClick={onClick}
+              onPointerEnter={onPointerEnter}
+              onPointerLeave={onPointerLeave}
+              ref={buttonRef}
+              size="icon"
+            >
               {icon}
             </SidebarMenuButton>
           }
@@ -143,6 +159,9 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             : null,
   });
   const { environments } = useEnvironments();
+  const accountLimitsController = useAccountLimitsPanelController(!isMobile);
+  const [footerAnchor, setFooterAnchor] = useState<HTMLUListElement | null>(null);
+  const [usageAnchor, setUsageAnchor] = useState<HTMLButtonElement | null>(null);
   // The page reads every connected server, so one of them offering pull requests is enough for
   // the link to lead somewhere.
   const pullRequestsSupported = environments.some(
@@ -163,11 +182,12 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   }, [closeMobileSidebar, navigate]);
 
   const handleUsageClick = useCallback(() => {
+    accountLimitsController.close();
     if (isMobile) {
       setOpenMobile(false);
     }
     void navigate({ to: "/usage" });
-  }, [isMobile, navigate, setOpenMobile]);
+  }, [accountLimitsController, isMobile, navigate, setOpenMobile]);
 
   const handleBackClick = useCallback(() => {
     closeMobileSidebar();
@@ -179,7 +199,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   }, [canGoBack, closeMobileSidebar, navigate]);
 
   return (
-    <SidebarMenu className="flex-row items-center">
+    <SidebarMenu className="flex-row items-center" ref={setFooterAnchor}>
       {currentFooterPage ? (
         <SidebarMenuItem className="min-w-0 flex-1">
           <SidebarMenuButton onClick={handleBackClick}>
@@ -202,13 +222,23 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             />
           ) : null}
           <SidebarUtilityItem
+            buttonRef={setUsageAnchor}
             icon={<ChartNoAxesColumnIcon />}
             label="Usage"
             onClick={handleUsageClick}
+            onPointerEnter={accountLimitsController.onPointerEnter}
+            onPointerLeave={accountLimitsController.onPointerLeave}
+            suppressTooltip={accountLimitsController.open}
           />
         </>
       )}
       <SidebarUpdatePill />
+      {!isMobile ? (
+        <AccountLimitsPopover
+          anchor={usageAnchor ?? footerAnchor}
+          controller={accountLimitsController}
+        />
+      ) : null}
     </SidebarMenu>
   );
 });

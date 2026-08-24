@@ -2,8 +2,8 @@
  * ClaudeDriver — `ProviderDriver` for the Claude Agent SDK runtime.
  *
  * Mirrors `CodexDriver`: a plain value whose `create()` returns one
- * `ProviderInstance` bundling `snapshot` / `adapter` / `textGeneration`
- * closures captured over the per-instance `ClaudeSettings`.
+ * `ProviderInstance` bundling its snapshot, adapter, text generation, and
+ * optional account-limit reader over the per-instance `ClaudeSettings`.
  *
  * Unlike Codex, the Claude snapshot probe may invoke a secondary probe
  * (`probeClaudeCapabilities`) to read Anthropic account + slash-command
@@ -33,6 +33,7 @@ import {
   checkClaudeProviderStatus,
   makePendingClaudeProvider,
   probeClaudeCapabilities,
+  readClaudeAccountLimits,
 } from "../Layers/ClaudeProvider.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
@@ -216,6 +217,19 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         snapshot,
         adapter,
         textGeneration,
+        readAccountLimits: () =>
+          readClaudeAccountLimits(effectiveConfig, processEnv, cwd).pipe(
+            Effect.provideService(Path.Path, path),
+            Effect.mapError(
+              (cause) =>
+                new ProviderDriverError({
+                  driver: DRIVER_KIND,
+                  instanceId,
+                  detail: "Failed to read Claude account limits.",
+                  cause,
+                }),
+            ),
+          ),
       } satisfies ProviderInstance;
     }),
 };
