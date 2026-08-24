@@ -471,6 +471,105 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
 
+  it.effect("adds a default introduced for a command the config already binds", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      // Per-command backfill would skip alt+m entirely: modelPicker.toggle is
+      // already here, so the second default would never reach this install.
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+shift+m", command: "modelPicker.toggle", when: "!terminalFocus" },
+      ]);
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.isTrue(
+        persisted.some((entry) => entry.command === "modelPicker.toggle" && entry.key === "alt+m"),
+      );
+      assert.isTrue(
+        persisted.some((entry) => entry.command === "thread.next" && entry.key === "ctrl+tab"),
+      );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("offers an introduced default once, so deleting it makes it stay deleted", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+shift+m", command: "modelPicker.toggle", when: "!terminalFocus" },
+      ]);
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      // The user removes the shortcut that was just offered.
+      const afterFirstRun = yield* readKeybindingsConfig(keybindingsConfigPath);
+      yield* writeKeybindingsConfig(
+        keybindingsConfigPath,
+        afterFirstRun.filter((entry) => entry.key !== "alt+m"),
+      );
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.isFalse(
+        persisted.some((entry) => entry.key === "alt+m"),
+        "an introduced default came back after the user deleted it",
+      );
+      assert.isTrue(
+        yield* fs.exists(`${keybindingsConfigPath.replace(/\.json$/, "")}.applied.json`),
+      );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("never lets an introduced default take a key the user already bound", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+shift+m", command: "modelPicker.toggle", when: "!terminalFocus" },
+        { key: "alt+m", command: "preview.toggle", when: "!terminalFocus" },
+      ]);
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepEqual(
+        persisted.filter((entry) => entry.key === "alt+m").map((entry) => entry.command),
+        ["preview.toggle"],
+      );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("keeps every introduced default consistent with the shipped defaults", () =>
+    Effect.sync(() => {
+      const seenIds = new Set<string>();
+      for (const addition of Keybindings.ADDED_KEYBINDING_DEFAULTS) {
+        assert.isFalse(seenIds.has(addition.id), `duplicate addition id ${addition.id}`);
+        seenIds.add(addition.id);
+        // An addition that is not a shipped default would hand out a binding
+        // a fresh install never gets, so the two would drift apart.
+        assert.isTrue(
+          Keybindings.DEFAULT_KEYBINDINGS.some((rule) =>
+            Keybindings.isSameKeybindingRule(rule, addition.rule),
+          ),
+          `introduced default ${addition.id} is not in DEFAULT_KEYBINDINGS`,
+        );
+      }
+    }),
+  );
+
   it.effect("moves a retired default onto its current key and backfills what it freed", () =>
     Effect.gen(function* () {
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;

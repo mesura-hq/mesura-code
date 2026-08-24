@@ -8,16 +8,21 @@ the server, if you prefer editing it directly. Mesura Code writes the built-in d
 file on first run, and adds any new defaults on later startups unless a rule of yours already
 claims the command or the shortcut.
 
-That last condition has a consequence worth knowing. Startup only backfills defaults for commands
-your file does not mention, so a release that gives an existing command a _second_ default does not
-hand it to you — that shortcut works on a fresh install and stays absent in yours. Add it in
-**Settings** → **Keybindings** if you want it.
+New defaults reach an existing file two ways, and both run once.
 
-A release that _moves_ a default onto a different key is handled for you: startup rewrites the old
-rule, but only when it still matches the retired default exactly, key and command and `when`
-together. A rule you changed yourself is never touched. When the new key already belongs to a rule
-of yours, the move is skipped rather than stacking two commands on one chord, and the server logs a
-warning saying so.
+A release that _moves_ a default onto a different key rewrites the old rule, but only when it still
+matches the retired default exactly, key and command and `when` together. A rule you changed
+yourself is never touched.
+
+A release that gives an already-bound command a _second_ default adds that rule the first time you
+start the new build. Offering it once is the whole contract: delete the shortcut afterwards and it
+stays deleted, because startup records what it has already offered in a `keybindings.applied.json`
+beside your config. An old default you removed is never resurrected — only defaults introduced
+after your file was written are offered at all.
+
+Either way, when the key involved already belongs to a rule of yours, nothing is changed: stacking
+two commands on one chord would quietly disable one of them, so the server leaves your rule alone
+and logs a warning instead.
 
 The file is a JSON array of rules.
 
@@ -156,13 +161,15 @@ that platform.
 
 ### If you upgraded from an older build
 
-`diff.toggle` used to default to `mod+d`, and `Ctrl+W` used to close the desktop window. Both
-changed, and both reach you without action: the `diff.toggle` rule is rewritten on the next start,
+Everything below reaches you on the next start, with nothing to do by hand.
+
+`diff.toggle` used to default to `mod+d`, and `Ctrl+W` used to close the desktop window. The
+`diff.toggle` rule is rewritten on the next start,
 which is also what frees `mod+d` for the reading scroll.
 
-The one thing startup cannot hand you is a _second_ default for a command your file already binds.
-`alt+m` for the model picker and the `ctrl+tab` pair for thread navigation are in that group, so
-add them in **Settings** → **Keybindings** if you want them.
+`alt+m` for the model picker and the `ctrl+tab` pair for thread navigation are second defaults for
+commands your file already binds, so they are added once on that same start. If any of those keys
+is already yours, that one is skipped and your rule stands.
 
 The full command list and the current defaults are shown in **Settings** → **Keybindings**, which
 always matches the build you are running. Use that rather than a copied list.

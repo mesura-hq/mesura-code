@@ -104,6 +104,87 @@ export const RETIRED_KEYBINDING_DEFAULTS: ReadonlyArray<{
   },
 ];
 
+/**
+ * Defaults introduced for a command that already shipped one.
+ *
+ * Startup backfill is per command, so a second default never reaches anyone
+ * who has run the app before: their file already mentions the command, the
+ * new rule is skipped, and the shortcut exists only on a fresh install.
+ * Documenting that is not shipping it.
+ *
+ * Re-adding an *old* default would be wrong — the user may have deleted it on
+ * purpose. A default introduced in a release carries no such history: it never
+ * existed for them to remove, so adding it once is safe. "Once" is the whole
+ * contract, which is why each entry has a stable id the server records after
+ * applying it. Delete the shortcut afterwards and it stays deleted.
+ *
+ * Never edit an id, and never reuse one for a different rule: an installation
+ * that already recorded it will skip the new rule forever.
+ */
+export interface AddedKeybindingDefault {
+  readonly id: string;
+  readonly rule: KeybindingRule;
+}
+
+export const ADDED_KEYBINDING_DEFAULTS: ReadonlyArray<AddedKeybindingDefault> = [
+  {
+    id: "2026-08-model-picker-alt-m",
+    rule: { key: "alt+m", command: "modelPicker.toggle", when: "!terminalFocus" },
+  },
+  {
+    id: "2026-08-thread-next-ctrl-tab",
+    rule: { key: "ctrl+tab", command: "thread.next", when: "!terminalFocus" },
+  },
+  {
+    id: "2026-08-thread-previous-ctrl-shift-tab",
+    rule: { key: "ctrl+shift+tab", command: "thread.previous", when: "!terminalFocus" },
+  },
+];
+
+export interface AppliedKeybindingAddition {
+  readonly id: string;
+  readonly rule: KeybindingRule;
+  /** False when the shortcut context was already claimed, so nothing was added. */
+  readonly applied: boolean;
+}
+
+/**
+ * Appends every introduced default the given ledger has not recorded yet.
+ *
+ * An addition is skipped, but still recorded, when its shortcut context
+ * already belongs to another rule: forcing it would put two commands on one
+ * chord and, under last-wins resolution, quietly disable one. Recording the
+ * skip keeps startup from retrying it on every boot.
+ */
+export function addIntroducedKeybindingDefaults(
+  config: ReadonlyArray<KeybindingRule>,
+  appliedIds: ReadonlySet<string>,
+): {
+  readonly config: ReadonlyArray<KeybindingRule>;
+  readonly results: ReadonlyArray<AppliedKeybindingAddition>;
+} {
+  const next = [...config];
+  const results: AppliedKeybindingAddition[] = [];
+
+  for (const addition of ADDED_KEYBINDING_DEFAULTS) {
+    if (appliedIds.has(addition.id)) continue;
+
+    const alreadyPresent = next.some((entry) => isSameKeybindingRule(entry, addition.rule));
+    const contextClaimed = next.some((entry) =>
+      claimsShortcutContext(entry, addition.rule.key, addition.rule.when ?? undefined),
+    );
+    if (alreadyPresent || contextClaimed) {
+      results.push({ id: addition.id, rule: addition.rule, applied: false });
+      continue;
+    }
+
+    next.push(addition.rule);
+    results.push({ id: addition.id, rule: addition.rule, applied: true });
+  }
+
+  return results.length === 0 ? { config, results } : { config: next, results };
+}
+
 export interface RetiredKeybindingRewrite {
   readonly command: KeybindingRule["command"];
   readonly fromKey: string;
