@@ -9,6 +9,7 @@ import {
   type LinuxPasswordStoreSwitch,
   type LinuxPasswordStorePreference,
 } from "../linuxSecretStorage.ts";
+import { resolveDesktopLinuxIdentity } from "../../../../scripts/lib/brand-assets.ts";
 import {
   resolveDesktopBaseDir,
   resolveDesktopStateDir,
@@ -81,7 +82,7 @@ export function resolveEarlyLinuxElectronOptions(
 ): EarlyLinuxElectronOptions {
   const preference = resolveEarlyLinuxPasswordStorePreference(input);
   return {
-    linuxWmClass: isDevelopmentEnvironment(input.env) ? "t3code-dev" : "t3code",
+    linuxWmClass: resolveDesktopLinuxIdentity(isDevelopmentEnvironment(input.env)).wmClass,
     passwordStore: resolveLinuxPasswordStoreSwitch({
       preference,
       env: input.env,

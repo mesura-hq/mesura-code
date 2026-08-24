@@ -714,6 +714,11 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverGetUsageSummary,
       staleTimeMs: 60_000,
     }),
+    accountLimits: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:account-limits",
+      tag: WS_METHODS.serverGetAccountLimits,
+      staleTimeMs: 60_000,
+    }),
     configProjection,
     welcome: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:welcome",

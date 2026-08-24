@@ -553,6 +553,53 @@ describe("deriveMessagesTimelineRows", () => {
     ).toBeDefined();
   });
 
+  it("keeps completed context compaction visible outside the turn fold", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "compact-message-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:00Z",
+          message: {
+            id: "compact-message" as never,
+            role: "user",
+            text: "/compact",
+            turnId: null,
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "compaction-entry",
+          kind: "work",
+          createdAt: "2026-01-01T00:00:04Z",
+          entry: {
+            id: "compaction-activity",
+            createdAt: "2026-01-01T00:00:04Z",
+            turnId: "turn-compact" as never,
+            label: "Context compacted",
+            tone: "info",
+            sourceActivityKind: "context-compaction",
+          },
+        },
+      ],
+      latestTurn: {
+        turnId: "turn-compact" as never,
+        state: "completed",
+        startedAt: "2026-01-01T00:00:00Z",
+        completedAt: "2026-01-01T00:00:04Z",
+      },
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(rows.map((row) => row.id)).toEqual(["compact-message-entry", "compaction-entry"]);
+    expect(rows.some((row) => row.kind === "turn-fold")).toBe(false);
+  });
+
   it("derives a sane duration for a steer-superseded turn with one instant commentary message", () => {
     // A steer ends the previous turn early: its only message completes the
     // instant it is created, and trailing work entries land after it. The

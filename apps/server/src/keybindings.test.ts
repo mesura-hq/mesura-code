@@ -214,6 +214,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.equal(soleKeyFor("thread.jump.9"), "mod+9");
       assert.deepEqual(keysFor("modelPicker.toggle"), ["alt+m", "mod+shift+m"]);
       assert.equal(soleKeyFor("themeEditor.toggle"), "mod+alt+shift+t");
+      assert.equal(soleKeyFor("usage.peek"), "alt+u");
       assert.equal(soleKeyFor("filePicker.toggle"), "mod+p");
       assert.equal(soleKeyFor("projectSearch.toggle"), "mod+shift+f");
       assert.equal(soleKeyFor("sidebar.toggle"), "mod+b");

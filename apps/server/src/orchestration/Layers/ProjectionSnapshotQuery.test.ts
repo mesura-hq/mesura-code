@@ -6,6 +6,7 @@ import {
   ThreadId,
   TurnId,
   ProviderInstanceId,
+  type OrchestrationThreadActivity,
 } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -16,7 +17,10 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
-import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
+import {
+  enrichContextCompactionActivityDetails,
+  OrchestrationProjectionSnapshotQueryLive,
+} from "./ProjectionSnapshotQuery.ts";
 import * as ThreadBackgroundLiveness from "../ThreadBackgroundLiveness.ts";
 import * as ThreadPlanProgress from "../ThreadPlanProgress.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
@@ -27,6 +31,62 @@ const asTurnId = (value: string): TurnId => TurnId.make(value);
 const asMessageId = (value: string): MessageId => MessageId.make(value);
 const asEventId = (value: string): EventId => EventId.make(value);
 const asCheckpointRef = (value: string): CheckpointRef => CheckpointRef.make(value);
+
+it("enriches historical compaction rows from persisted context snapshots", () => {
+  const activities = [
+    {
+      id: asEventId("unrelated"),
+      tone: "info",
+      kind: "tool.completed",
+      summary: "Unrelated activity",
+      payload: { status: "completed" },
+      turnId: null,
+      sequence: 36,
+      createdAt: "2026-08-22T17:44:20.000Z",
+    },
+    {
+      id: asEventId("context-before"),
+      tone: "info",
+      kind: "context-window.updated",
+      summary: "Context window updated",
+      turnId: null,
+      sequence: 37,
+      createdAt: "2026-08-22T17:44:27.990Z",
+      payload: { usedTokens: 26_826 },
+    },
+    {
+      id: asEventId("context-after"),
+      tone: "info",
+      kind: "context-window.updated",
+      summary: "Context window updated",
+      turnId: null,
+      sequence: 45,
+      createdAt: "2026-08-22T17:44:43.614Z",
+      payload: { usedTokens: 4_707 },
+    },
+    {
+      id: asEventId("context-compaction"),
+      tone: "info",
+      kind: "context-compaction",
+      summary: "Context compacted",
+      turnId: null,
+      sequence: 46,
+      createdAt: "2026-08-22T17:44:43.615Z",
+      payload: {},
+    },
+  ] satisfies ReadonlyArray<OrchestrationThreadActivity>;
+
+  const enriched = enrichContextCompactionActivityDetails(activities);
+  assert.strictEqual(enriched[0], activities[0]);
+  assert.equal(
+    (enriched[3]?.payload as { detail?: string } | undefined)?.detail,
+    "The provider did not expose the compaction summary for this earlier event.\n\n" +
+      "Compaction details\n" +
+      "Before: 26,826 tokens\n" +
+      "After: 4,707 tokens\n" +
+      "Reduced: 22,119 tokens (82%)",
+  );
+});
 
 const projectionSnapshotLayer = it.layer(
   OrchestrationProjectionSnapshotQueryLive.pipe(

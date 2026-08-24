@@ -13,11 +13,16 @@ import {
   serializeComposerFileLink,
   type ComposerTrigger,
 } from "@t3tools/shared/composerTrigger";
+import {
+  buildNativeComposerControlCommands,
+  classifyComposerControlSubmission,
+} from "@t3tools/shared/composerControlCommand";
 import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { ReactNode } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Image,
   Platform,
   Pressable,
@@ -116,6 +121,7 @@ export interface ThreadComposerProps {
   readonly onRemoveDraftImage: (imageId: string) => void;
   readonly onStopThread: () => void;
   readonly onSendMessage: () => Promise<MessageId | null>;
+  readonly onCompactContext: () => Promise<boolean>;
   readonly onUpdateModelSelection: (modelSelection: ModelSelection) => void;
   readonly onUpdateRuntimeMode: (runtimeMode: RuntimeMode) => void;
   readonly onUpdateInteractionMode: (interactionMode: ProviderInteractionMode) => void;
@@ -416,6 +422,16 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           label: "/default",
           description: "Switch to default mode",
         },
+        ...buildNativeComposerControlCommands({
+          nativeContextCompaction: selectedProviderStatus?.nativeContextCompaction,
+          hasExistingSession: props.selectedThread.session !== null,
+        }).map((item) => ({
+          id: `cmd:${item.command}`,
+          type: "slash-command" as const,
+          command: item.command,
+          label: item.label,
+          description: item.description,
+        })),
       ];
       const builtIn = allBuiltIn.filter((item) => item.command.includes(q));
 
@@ -542,7 +558,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     }
 
     return [];
-  }, [composerTrigger, pathSearch.entries, selectedProviderStatus]);
+  }, [composerTrigger, pathSearch.entries, props.selectedThread.session, selectedProviderStatus]);
 
   // ── Handle command selection ──────────────────────────────
   const { onChangeDraftMessage, onUpdateInteractionMode, draftMessage, onSendMessage } = props;
@@ -552,6 +568,30 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     if (inFlightThreadIdsRef.current.has(threadKey)) return;
     inFlightThreadIdsRef.current.add(threadKey);
     try {
+      const controlCommand = classifyComposerControlSubmission({
+        text: draftMessage,
+        attachmentCount: props.draftAttachments.length,
+        hasSupplementalContext: false,
+      });
+      if (
+        controlCommand === "compact-context" &&
+        selectedProviderStatus?.nativeContextCompaction === true
+      ) {
+        if (showStopAction) {
+          Alert.alert(
+            "Finish the current turn",
+            "Wait for the agent to finish before compacting context.",
+          );
+          return;
+        }
+        if (!props.selectedThread.session) {
+          Alert.alert("Start this thread first", "Send a message before compacting its context.");
+          return;
+        }
+        const accepted = await props.onCompactContext();
+        if (accepted) onChangeDraftMessage("");
+        return;
+      }
       await onSendMessage();
       // Sending a prompt starts agent work: arm the lock-screen card while the
       // app is foregrounded and the activity token can be registered. Armed
@@ -567,10 +607,16 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     }
   }, [
     onSendMessage,
+    draftMessage,
+    onChangeDraftMessage,
+    props.draftAttachments.length,
     props.environmentId,
     props.environmentLabel,
+    props.onCompactContext,
     props.selectedThread.id,
     props.selectedThread.title,
+    selectedProviderStatus?.nativeContextCompaction,
+    showStopAction,
   ]);
   const handleCommandSelect = useCallback(
     (item: ComposerCommandItem) => {

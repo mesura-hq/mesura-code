@@ -138,6 +138,7 @@ export interface CodexSessionRuntimeShape {
     input: CodexSessionRuntimeSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, CodexSessionRuntimeError>;
   readonly interruptTurn: (turnId?: TurnId) => Effect.Effect<void, CodexSessionRuntimeError>;
+  readonly compactContext: Effect.Effect<void, CodexSessionRuntimeError>;
   readonly readThread: Effect.Effect<CodexThreadSnapshot, CodexSessionRuntimeError>;
   readonly rollbackThread: (
     numTurns: number,
@@ -160,6 +161,13 @@ export type CodexSessionRuntimeError =
   | CodexSessionRuntimePendingUserInputNotFoundError
   | CodexSessionRuntimeInvalidUserInputAnswersError
   | CodexSessionRuntimeThreadIdMissingError;
+
+export function requestCodexContextCompaction(
+  client: Pick<CodexClient.CodexAppServerClient["Service"], "request">,
+  providerThreadId: string,
+) {
+  return client.request("thread/compact/start", { threadId: providerThreadId }).pipe(Effect.asVoid);
+}
 
 export class CodexSessionRuntimePendingApprovalNotFoundError extends Schema.TaggedErrorClass<CodexSessionRuntimePendingApprovalNotFoundError>()(
   "CodexSessionRuntimePendingApprovalNotFoundError",
@@ -590,7 +598,7 @@ export function makeMemoryConsolidationNotificationFilter(): (
   };
 }
 
-function readRouteFields(notification: CodexServerNotification): {
+export function readCodexNotificationRouteFields(notification: CodexServerNotification): {
   readonly turnId: TurnId | undefined;
   readonly itemId: ProviderItemId | undefined;
 } {
@@ -613,6 +621,11 @@ function readRouteFields(notification: CodexServerNotification): {
       };
     case "turn/diff/updated":
     case "turn/plan/updated":
+      return {
+        turnId: TurnId.make(notification.params.turnId),
+        itemId: undefined,
+      };
+    case "thread/compacted":
       return {
         turnId: TurnId.make(notification.params.turnId),
         itemId: undefined,
@@ -1303,7 +1316,7 @@ export const makeCodexSessionRuntime = (
           suppressMemoryConsolidationNotification(notification);
 
         const payload = notification.params;
-        const route = readRouteFields(notification);
+        const route = readCodexNotificationRouteFields(notification);
         const collabReceiverTurns = yield* Ref.get(collabReceiverTurnsRef);
         const childParentTurnId = (() => {
           const providerConversationId = readNotificationThreadId(notification);
@@ -1893,6 +1906,10 @@ export const makeCodexSessionRuntime = (
             turnId: effectiveTurnId,
           });
         }),
+      compactContext: Effect.gen(function* () {
+        const providerThreadId = yield* readProviderThreadId;
+        yield* requestCodexContextCompaction(client, providerThreadId);
+      }),
       readThread: Effect.gen(function* () {
         const providerThreadId = yield* readProviderThreadId;
         const response = yield* client.request("thread/read", {

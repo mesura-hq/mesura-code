@@ -41,6 +41,7 @@ const CODEX_APP_SERVER_PROBE_FORCE_KILL_AFTER = "2 seconds" as const;
 const CODEX_PRESENTATION = {
   displayName: "Codex",
   showInteractionModeToggle: true,
+  nativeContextCompaction: true,
 } as const;
 
 export interface CodexAppServerProviderSnapshot {
@@ -325,20 +326,43 @@ export function buildCodexInitializeParams(): CodexSchema.V1InitializeParams {
   };
 }
 
-const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(function* (input: {
+interface CodexAppServerLaunchInput {
   readonly binaryPath: string;
   readonly homePath?: string;
   readonly launchArgs?: string;
   readonly cwd: string;
-  readonly customModels?: ReadonlyArray<string>;
   readonly environment?: NodeJS.ProcessEnv;
-}) {
+}
+
+const makeCodexAppServerClient = Effect.fn("makeCodexAppServerClient")(function* (
+  input: CodexAppServerLaunchInput,
+) {
+  const command = yield* buildCodexAppServerCommand(input);
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const child = yield* spawner.spawn(command).pipe(
+    Effect.mapError(
+      (cause) =>
+        new CodexErrors.CodexAppServerSpawnError({
+          command: `${input.binaryPath} app-server`,
+          cause,
+        }),
+    ),
+  );
+  const clientContext = yield* Layer.build(CodexClient.layerChildProcess(child));
+  const client = yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
+    Effect.provide(clientContext),
+  );
+  return client;
+});
+
+export const buildCodexAppServerCommand = Effect.fn("buildCodexAppServerCommand")(function* (
+  input: CodexAppServerLaunchInput,
+) {
   // `~` is not shell-expanded when env vars are set via `child_process.spawn`,
   // so `CODEX_HOME=~/.codex_work` would reach codex verbatim and trip
   // "CODEX_HOME points to '~/.codex_work', but that path does not exist".
   // Expand here for parity with `CodexTextGeneration`/`CodexSessionRuntime`.
   const resolvedHomePath = input.homePath ? expandHomePath(input.homePath) : undefined;
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const environment = {
     ...input.environment,
     ...(resolvedHomePath ? { CODEX_HOME: resolvedHomePath } : {}),
@@ -351,40 +375,51 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
       extendEnv: true,
     },
   );
-  const child = yield* spawner
-    .spawn(
-      ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-        cwd: input.cwd,
-        env: environment,
-        extendEnv: true,
-        forceKillAfter: CODEX_APP_SERVER_PROBE_FORCE_KILL_AFTER,
-        shell: spawnCommand.shell,
-      }),
-    )
-    .pipe(
-      Effect.mapError(
-        (cause) =>
-          new CodexErrors.CodexAppServerSpawnError({
-            command: `${input.binaryPath} app-server`,
-            cause,
-          }),
-      ),
-    );
-  const clientContext = yield* Layer.build(CodexClient.layerChildProcess(child));
-  const client = yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
-    Effect.provide(clientContext),
-  );
-
-  const initialize = yield* client.request("initialize", {
-    clientInfo: {
-      name: "t3code_desktop",
-      title: "Mesura Code Desktop",
-      version: "0.1.0",
-    },
-    capabilities: {
-      experimentalApi: true,
-    },
+  return ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+    cwd: input.cwd,
+    env: environment,
+    extendEnv: true,
+    forceKillAfter: CODEX_APP_SERVER_PROBE_FORCE_KILL_AFTER,
+    shell: spawnCommand.shell,
   });
+});
+
+interface CodexAccountLimitsClient {
+  readonly initialize: () => Effect.Effect<unknown, CodexErrors.CodexAppServerError>;
+  readonly notifyInitialized: () => Effect.Effect<void, CodexErrors.CodexAppServerError>;
+  readonly readAccountLimits: () => Effect.Effect<
+    CodexSchema.V2GetAccountRateLimitsResponse,
+    CodexErrors.CodexAppServerError
+  >;
+}
+
+export const requestCodexAccountLimits = Effect.fn("requestCodexAccountLimits")(function* (
+  client: CodexAccountLimitsClient,
+) {
+  yield* client.initialize();
+  yield* client.notifyInitialized();
+  return yield* client.readAccountLimits();
+});
+
+export const readCodexAccountLimits = Effect.fn("readCodexAccountLimits")(function* (
+  input: CodexAppServerLaunchInput,
+) {
+  return yield* Effect.gen(function* () {
+    const client = yield* makeCodexAppServerClient(input);
+    return yield* requestCodexAccountLimits({
+      initialize: () => client.request("initialize", buildCodexInitializeParams()),
+      notifyInitialized: () => client.notify("initialized", undefined),
+      readAccountLimits: () => client.request("account/rateLimits/read", undefined),
+    });
+  }).pipe(Effect.scoped, Effect.timeout(Duration.millis(AUTH_PROBE_TIMEOUT_MS)));
+});
+
+const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(function* (
+  input: CodexAppServerLaunchInput & { readonly customModels?: ReadonlyArray<string> },
+) {
+  const client = yield* makeCodexAppServerClient(input);
+
+  const initialize = yield* client.request("initialize", buildCodexInitializeParams());
   yield* client.notify("initialized", undefined);
 
   // Extract the version string after the first '/' in userAgent, up to the next space or the end

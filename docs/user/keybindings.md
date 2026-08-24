@@ -71,6 +71,9 @@ successful pick; its hover glow and badge preview the element and color family t
 `rightPanel.toggleMaximized` maximizes or restores the open right panel. It has no default shortcut,
 so add one in **Settings** → **Keybindings** if you want to use it.
 
+`usage.peek` shows the subscription-limit panel while you hold its shortcut. It defaults to
+`alt+u`. Releasing the main key or a required modifier closes the panel.
+
 ### Command palette
 
 The command palette searches active thread titles, projects, branches, user messages, and final
@@ -88,10 +91,10 @@ context window, and agent. It defaults to `alt+e`. Two cases make it do nothing,
 a provider that exposes none of those traits does not render the control at all, and a narrow
 composer folds the traits into its compact controls menu, which has no separate picker to open.
 
-Four defaults sit on `Alt` with a letter: `alt+e`, `alt+w`, `alt+b`, and `alt+m`. The app claims
-those chords before the character reaches the composer, which matters on two platforms. On macOS
-`Option` composes characters — `Option+E` starts an acute accent, and the other three would type
-`∑`, `∫`, and `µ` — so a default may be swallowed or may suppress a character you wanted. Firefox
+Five defaults sit on `Alt` with a letter: `alt+e`, `alt+w`, `alt+b`, `alt+m`, and `alt+u`. The app
+claims those chords before the character reaches the composer, which matters on two platforms. On
+macOS `Option` composes characters — `Option+E` starts an acute accent, and the others type symbols
+like `∑` and `µ` — so a default may be swallowed or may suppress a character you wanted. Firefox
 uses `Alt` with a letter for menu access keys. Rebind any of them in **Settings** →
 **Keybindings**.
 

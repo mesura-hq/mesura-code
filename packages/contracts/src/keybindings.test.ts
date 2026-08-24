@@ -84,6 +84,12 @@ it.effect("parses keybinding rules", () =>
     });
     assert.strictEqual(parsedThemeEditor.command, "themeEditor.toggle");
 
+    const parsedUsagePeek = yield* decode(KeybindingRule, {
+      key: "alt+u",
+      command: "usage.peek",
+    });
+    assert.strictEqual(parsedUsagePeek.command, "usage.peek");
+
     const parsedLocal = yield* decode(KeybindingRule, {
       key: "mod+shift+n",
       command: "chat.newLocal",

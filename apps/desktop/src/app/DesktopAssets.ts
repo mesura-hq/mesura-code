@@ -69,6 +69,7 @@ const sourceTreeIconFileNames = {
   },
   prod: {
     ico: "t3-black-windows.ico",
+    linuxPng: "black-linux-1024.png",
     macPng: "black-macos-1024.png",
     universalPng: "black-universal-1024.png",
   },
@@ -81,12 +82,14 @@ function resolveSourceTreeIconPath(
   if (environment.isPackaged || ext === "icns") return undefined;
   const brand = environment.isDevelopment ? "dev" : "prod";
   const fileNames = sourceTreeIconFileNames[brand];
-  const fileName =
-    ext === "ico"
-      ? fileNames.ico
-      : environment.platform === "darwin"
-        ? fileNames.macPng
-        : fileNames.universalPng;
+  const fileName = (() => {
+    if (ext === "ico") return fileNames.ico;
+    if (environment.platform === "darwin") return fileNames.macPng;
+    if (brand === "prod" && environment.platform === "linux") {
+      return sourceTreeIconFileNames.prod.linuxPng;
+    }
+    return fileNames.universalPng;
+  })();
   return environment.path.join(environment.rootDir, "assets", brand, fileName);
 }
 
