@@ -1006,6 +1006,18 @@ describe("shipped defaults on Linux", () => {
     assert.strictEqual(resolve(press("b", { ctrlKey: true, altKey: true })), "rightPanel.toggle");
   });
 
+  it("folds the question prompt on alt+q, and leaves the terminal alone", () => {
+    assert.strictEqual(resolve(press("q", { altKey: true })), "question.toggleCollapse");
+    assert.strictEqual(resolve(press("q", { altKey: true }), true), null);
+  });
+
+  it("leaves AltGr+Q free to type the character it produces", () => {
+    // Chromium on Linux reports AltGr as ctrl+alt, and a Latin American layout
+    // types "@" there. Matching on alt alone would eat that keystroke while
+    // the user writes their own answer in the composer.
+    assert.strictEqual(resolve(press("@", { ctrlKey: true, altKey: true })), null);
+  });
+
   it("navigates threads with the desktop-only tab pair as well as the brackets", () => {
     assert.strictEqual(resolve(press("Tab", { ctrlKey: true })), "thread.next");
     assert.strictEqual(resolve(press("Tab", { ctrlKey: true, shiftKey: true })), "thread.previous");

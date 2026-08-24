@@ -89,6 +89,11 @@ export const STATIC_KEYBINDING_COMMANDS = [
   // once a thread owns a worktree.
   "workspacePicker.toggle",
   "branchPicker.toggle",
+  // Folds the agent's question prompt into its header so the thread behind it
+  // is readable while the answer is still being composed. Reachable by click
+  // from that header too; the shortcut exists because the question arrives
+  // while the hands are on the keyboard.
+  "question.toggleCollapse",
   ...CHAT_SCROLL_KEYBINDING_COMMANDS,
   ...MODEL_PICKER_KEYBINDING_COMMANDS,
   ...THREAD_KEYBINDING_COMMANDS,

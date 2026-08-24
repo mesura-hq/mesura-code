@@ -86,7 +86,7 @@ agent responses across connected environments. Message matches show one labeled 
 keeping the thread's project, branch, and machine context visible. Message search begins after two
 characters and uses SQLite's ASCII case-insensitive matching.
 
-### Composer pickers
+### Composer pickers and question prompts
 
 `modelPicker.toggle` opens the model picker from the composer and defaults to `mod+shift+m`, and
 additionally to `alt+m`. While it is open, `mod+1` through `mod+9` select a model directly.
@@ -96,12 +96,24 @@ context window, and agent. It defaults to `alt+e`. Two cases make it do nothing,
 a provider that exposes none of those traits does not render the control at all, and a narrow
 composer folds the traits into its compact controls menu, which has no separate picker to open.
 
-Five defaults sit on `Alt` with a letter: `alt+e`, `alt+w`, `alt+b`, `alt+m`, and `alt+u`. The app
-claims those chords before the character reaches the composer, which matters on two platforms. On
-macOS `Option` composes characters — `Option+E` starts an acute accent, and the others type symbols
-like `∑` and `µ` — so a default may be swallowed or may suppress a character you wanted. Firefox
-uses `Alt` with a letter for menu access keys. Rebind any of them in **Settings** →
-**Keybindings**.
+`question.toggleCollapse` folds the question the agent is asking into its header, and unfolds it
+again. It defaults to `alt+q`. Folded, the card keeps one line — the question's label, its position
+in the set, and the question itself, cut to fit — and gives the rest of the height back to the
+thread behind it, which is usually where the answer is. The header is also a button, so a click on
+it does the same thing. The shortcut works while you type your own answer, which a click does not.
+Two things follow from the fold: the number keys that pick an option are off while the card is
+folded, because the numbers they name are not on screen, and the card unfolds by itself when the
+prompt moves to its next question.
+
+Six defaults sit on `Alt` with a letter: `alt+e`, `alt+w`, `alt+b`, `alt+m`, `alt+q`, and `alt+u`.
+The app claims those chords before the character reaches the composer, which matters on two
+platforms. On macOS `Option` composes characters — `Option+E` starts an acute accent, and the
+others type symbols like `∑` and `µ` — so a default may be swallowed or may suppress a character
+you wanted. Firefox uses `Alt` with a letter for menu access keys. Rebind any of them in
+**Settings** → **Keybindings**.
+
+On a Latin American layout, `AltGr+Q` types `@`. That is a different chord — the app sees `AltGr`
+as `Ctrl+Alt` — so `alt+q` never eats it.
 
 ### Branch toolbar
 

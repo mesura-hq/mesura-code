@@ -29,20 +29,26 @@ describe("pickerActionBus", () => {
     stop();
   });
 
-  it("never delivers one picker's action to another", () => {
-    // The three pickers share one event name, so a missing detail check would
-    // make alt+w open the traits menu as well as the workspace one.
+  it("never delivers one action to another target", () => {
+    // Every target shares one event name, so a missing detail check would make
+    // alt+w open the traits menu as well as the workspace one. The question
+    // fold is the costliest of these to get wrong: it is the only subscriber
+    // that is mounted while the user reads, so a stray delivery hides the very
+    // question they are answering.
     const seen: string[] = [];
     const stopTraits = subscribePickerAction("traits", () => seen.push("traits"));
     const stopWorkspace = subscribePickerAction("workspace", () => seen.push("workspace"));
     const stopBranch = subscribePickerAction("branch", () => seen.push("branch"));
+    const stopQuestion = subscribePickerAction("question", () => seen.push("question"));
 
     dispatchPickerAction("workspace");
+    dispatchPickerAction("question");
 
-    expect(seen).toEqual(["workspace"]);
+    expect(seen).toEqual(["workspace", "question"]);
     stopTraits();
     stopWorkspace();
     stopBranch();
+    stopQuestion();
   });
 
   it("delivers to every subscriber of the same action", () => {
