@@ -552,6 +552,105 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
 
+  it.effect("does not let an addition suppress that command's other defaults", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      // thread.next is unbound here, so the ordinary per-command backfill owes
+      // this config every thread.next default, not just the introduced one.
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+b", command: "sidebar.toggle" },
+      ]);
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepEqual(
+        persisted.filter((entry) => entry.command === "thread.next").map((entry) => entry.key),
+        ["ctrl+tab", "mod+shift+]"],
+      );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("stays within the entry cap instead of failing the write", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      // A config already at the cap. Appending an addition would push the
+      // encode past its max-length check and fail startup outright.
+      const filler = Array.from({ length: 255 }, (_unused, index) => ({
+        key: `mod+alt+shift+f${index}`,
+        command: "sidebar.toggle" as const,
+      }));
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+shift+m", command: "modelPicker.toggle", when: "!terminalFocus" },
+        ...filler,
+      ]);
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.isAtMost(persisted.length, 256);
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("keeps a deleted shortcut deleted when the ledger cannot be read", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const { keybindingsConfigPath, keybindingsAppliedPath } = yield* ServerConfig.ServerConfig;
+      // The user was offered alt+m, removed it, and the ledger later got
+      // corrupted. Reading it as empty would undo their deletion.
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+shift+m", command: "modelPicker.toggle", when: "!terminalFocus" },
+      ]);
+      yield* fs.writeFileString(keybindingsAppliedPath, "{ not-json");
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.isFalse(persisted.some((entry) => entry.key === "alt+m"));
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("seeds the ledger on a fresh install so nothing is re-offered", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const { keybindingsConfigPath, keybindingsAppliedPath } = yield* ServerConfig.ServerConfig;
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const ledger = yield* fs.readFileString(keybindingsAppliedPath);
+      for (const addition of Keybindings.ADDED_KEYBINDING_DEFAULTS) {
+        assert.isTrue(ledger.includes(addition.id), `ledger is missing ${addition.id}`);
+      }
+
+      // A user removing one of them on a fresh install must also make it stay
+      // removed, which only holds because the ledger was seeded above.
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      yield* writeKeybindingsConfig(
+        keybindingsConfigPath,
+        persisted.filter((entry) => entry.key !== "alt+m"),
+      );
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const afterDelete = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.isFalse(afterDelete.some((entry) => entry.key === "alt+m"));
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
   it.effect("keeps every introduced default consistent with the shipped defaults", () =>
     Effect.sync(() => {
       const seenIds = new Set<string>();
@@ -565,6 +664,19 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
             Keybindings.isSameKeybindingRule(rule, addition.rule),
           ),
           `introduced default ${addition.id} is not in DEFAULT_KEYBINDINGS`,
+        );
+        if (!addition.insertBefore) continue;
+        const additionIndex = Keybindings.DEFAULT_KEYBINDINGS.findIndex((rule) =>
+          Keybindings.isSameKeybindingRule(rule, addition.rule),
+        );
+        const beforeIndex = Keybindings.DEFAULT_KEYBINDINGS.findIndex((rule) =>
+          Keybindings.isSameKeybindingRule(rule, addition.insertBefore!),
+        );
+        assert.isAtLeast(beforeIndex, 0, `insertBefore of ${addition.id} is not a shipped default`);
+        assert.isBelow(
+          additionIndex,
+          beforeIndex,
+          `${addition.id} must precede its insertBefore in DEFAULT_KEYBINDINGS too, or a fresh install and an upgraded one would advertise different chords`,
         );
       }
     }),

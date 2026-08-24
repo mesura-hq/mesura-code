@@ -161,11 +161,14 @@ that platform.
 
 ### If you upgraded from an older build
 
-Everything below reaches you on the next start, with nothing to do by hand.
+Everything below reaches you with nothing to do by hand.
 
-`diff.toggle` used to default to `mod+d`, and `Ctrl+W` used to close the desktop window. The
-`diff.toggle` rule is rewritten on the next start,
-which is also what frees `mod+d` for the reading scroll.
+`diff.toggle` used to default to `mod+d`. Its rule is rewritten to `mod+shift+d` on the next start,
+which is also what frees `mod+d` for the reading scroll in the same run.
+
+`Ctrl+W` used to close the desktop window, and off macOS that quit the whole application. That one
+is a change to the native menu rather than to a keybinding, so it needs nothing from your config:
+the key now closes a focused terminal and does nothing otherwise.
 
 `alt+m` for the model picker and the `ctrl+tab` pair for thread navigation are second defaults for
 commands your file already binds, so they are added once on that same start. If any of those keys

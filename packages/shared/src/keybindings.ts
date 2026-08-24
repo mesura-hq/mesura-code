@@ -124,65 +124,109 @@ export const RETIRED_KEYBINDING_DEFAULTS: ReadonlyArray<{
 export interface AddedKeybindingDefault {
   readonly id: string;
   readonly rule: KeybindingRule;
+  /**
+   * The shipped default this addition must sit before, when the command has
+   * more than one. Order decides the label, not the matching:
+   * `shortcutLabelForCommand` reports the binding that wins, which is the last
+   * one. Appending would make an upgraded install advertise a different chord
+   * than a fresh one — and for `ctrl+tab`, one the web client never receives.
+   */
+  readonly insertBefore?: KeybindingRule;
 }
 
 export const ADDED_KEYBINDING_DEFAULTS: ReadonlyArray<AddedKeybindingDefault> = [
   {
     id: "2026-08-model-picker-alt-m",
     rule: { key: "alt+m", command: "modelPicker.toggle", when: "!terminalFocus" },
+    insertBefore: { key: "mod+shift+m", command: "modelPicker.toggle", when: "!terminalFocus" },
   },
   {
     id: "2026-08-thread-next-ctrl-tab",
     rule: { key: "ctrl+tab", command: "thread.next", when: "!terminalFocus" },
+    insertBefore: { key: "mod+shift+]", command: "thread.next" },
   },
   {
     id: "2026-08-thread-previous-ctrl-shift-tab",
     rule: { key: "ctrl+shift+tab", command: "thread.previous", when: "!terminalFocus" },
+    insertBefore: { key: "mod+shift+[", command: "thread.previous" },
   },
 ];
 
-export interface AppliedKeybindingAddition {
+export type IntroducedKeybindingAdditionOutcome =
+  /** Appended to the config. */
+  | "applied"
+  /** The exact rule was already there, so nothing changed. */
+  | "already-present"
+  /** Another rule holds that chord; forcing it would disable one of the two. */
+  | "context-claimed";
+
+export interface IntroducedKeybindingAdditionResult {
   readonly id: string;
   readonly rule: KeybindingRule;
-  /** False when the shortcut context was already claimed, so nothing was added. */
-  readonly applied: boolean;
+  readonly outcome: IntroducedKeybindingAdditionOutcome;
+}
+
+export interface IntroducedKeybindingDefaultsInput {
+  readonly config: ReadonlyArray<KeybindingRule>;
+  readonly appliedIds: ReadonlySet<string>;
+  /** Largest config the caller may persist; additions stop at it. */
+  readonly capacity: number;
+  /**
+   * Whether an existing rule holds a chord. Injected because the authoritative
+   * comparison normalizes the chord first — `Alt+M`, `alt + m`, and `m+alt` are
+   * one context — and that normalizer lives with the server's config codecs.
+   */
+  readonly claimsShortcutContext: (rule: KeybindingRule, candidate: KeybindingRule) => boolean;
 }
 
 /**
- * Appends every introduced default the given ledger has not recorded yet.
+ * Appends every introduced default the ledger has not recorded yet.
  *
- * An addition is skipped, but still recorded, when its shortcut context
- * already belongs to another rule: forcing it would put two commands on one
- * chord and, under last-wins resolution, quietly disable one. Recording the
- * skip keeps startup from retrying it on every boot.
+ * An addition is skipped, but still recorded, when its chord already belongs
+ * to another rule: forcing it would put two commands on one chord and, under
+ * last-wins resolution, quietly disable one. Recording the skip keeps startup
+ * from retrying it on every boot.
+ *
+ * Additions dropped for lack of room come back in `deferred` and are NOT
+ * recorded, so they are offered again once the user frees space.
  */
-export function addIntroducedKeybindingDefaults(
-  config: ReadonlyArray<KeybindingRule>,
-  appliedIds: ReadonlySet<string>,
-): {
+export function addIntroducedKeybindingDefaults(input: IntroducedKeybindingDefaultsInput): {
   readonly config: ReadonlyArray<KeybindingRule>;
-  readonly results: ReadonlyArray<AppliedKeybindingAddition>;
+  readonly results: ReadonlyArray<IntroducedKeybindingAdditionResult>;
+  readonly deferred: ReadonlyArray<AddedKeybindingDefault>;
 } {
-  const next = [...config];
-  const results: AppliedKeybindingAddition[] = [];
+  const next = [...input.config];
+  const results: IntroducedKeybindingAdditionResult[] = [];
+  const deferred: AddedKeybindingDefault[] = [];
 
   for (const addition of ADDED_KEYBINDING_DEFAULTS) {
-    if (appliedIds.has(addition.id)) continue;
+    if (input.appliedIds.has(addition.id)) continue;
 
-    const alreadyPresent = next.some((entry) => isSameKeybindingRule(entry, addition.rule));
-    const contextClaimed = next.some((entry) =>
-      claimsShortcutContext(entry, addition.rule.key, addition.rule.when ?? undefined),
-    );
-    if (alreadyPresent || contextClaimed) {
-      results.push({ id: addition.id, rule: addition.rule, applied: false });
+    if (next.some((entry) => isSameKeybindingRule(entry, addition.rule))) {
+      results.push({ id: addition.id, rule: addition.rule, outcome: "already-present" });
+      continue;
+    }
+    if (next.some((entry) => input.claimsShortcutContext(entry, addition.rule))) {
+      results.push({ id: addition.id, rule: addition.rule, outcome: "context-claimed" });
+      continue;
+    }
+    if (next.length >= input.capacity) {
+      deferred.push(addition);
       continue;
     }
 
-    next.push(addition.rule);
-    results.push({ id: addition.id, rule: addition.rule, applied: true });
+    const before = addition.insertBefore;
+    const index = before ? next.findIndex((entry) => isSameKeybindingRule(entry, before)) : -1;
+    if (index === -1) {
+      next.push(addition.rule);
+    } else {
+      next.splice(index, 0, addition.rule);
+    }
+    results.push({ id: addition.id, rule: addition.rule, outcome: "applied" });
   }
 
-  return results.length === 0 ? { config, results } : { config: next, results };
+  const applied = results.some((entry) => entry.outcome === "applied");
+  return { config: applied ? next : input.config, results, deferred };
 }
 
 export interface RetiredKeybindingRewrite {
