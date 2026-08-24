@@ -57,6 +57,36 @@ export function resolveDesktopLinuxIdentity(isDevelopment: boolean) {
   return isDevelopment ? DESKTOP_LINUX_IDENTITY.development : DESKTOP_LINUX_IDENTITY.production;
 }
 
+/**
+ * Electron scopes its single-instance lock to the userData directory. Upstream
+ * names that directory `t3code`, which the separately installed T3 Code claims
+ * too, so whichever application started second read itself as a secondary
+ * instance and quit before opening a window — silently, because
+ * `DesktopClerk.configure` exits through `Effect.interrupt` on that path.
+ *
+ * `legacyUserDataDirName` repeats `userDataDirName` on purpose. Mesura Code has
+ * no directory from before this rename, and `resolveUserDataPath` adopts the
+ * legacy directory whenever it exists. Pointing that field at `t3code`, or at
+ * upstream's older `T3 Code (Alpha)`, would hand both applications the same
+ * directory again and restore the collision this exists to remove.
+ */
+export const DESKTOP_USER_DATA_IDENTITY = {
+  development: {
+    userDataDirName: "mesura-code-dev",
+    legacyUserDataDirName: "mesura-code-dev",
+  },
+  production: {
+    userDataDirName: "mesura-code",
+    legacyUserDataDirName: "mesura-code",
+  },
+} as const;
+
+export function resolveDesktopUserDataIdentity(isDevelopment: boolean) {
+  return isDevelopment
+    ? DESKTOP_USER_DATA_IDENTITY.development
+    : DESKTOP_USER_DATA_IDENTITY.production;
+}
+
 export type WebAssetBrand = "development" | "nightly" | "production";
 
 export const WEB_ASSET_CHANNELS = ["latest", "nightly"] as const;

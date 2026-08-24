@@ -3,12 +3,14 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   BRAND_ASSET_PATHS,
   DESKTOP_LINUX_IDENTITY,
+  DESKTOP_USER_DATA_IDENTITY,
   DEVELOPMENT_ICON_OVERRIDES,
   DEVELOPMENT_PUBLIC_ICON_OVERRIDES,
   resolveWebAssetBrandForChannel,
   resolveWebAssetBrandForPackageVersion,
   resolveWebIconOverrides,
   resolveDesktopLinuxIdentity,
+  resolveDesktopUserDataIdentity,
 } from "./brand-assets.ts";
 
 describe("brand-assets", () => {
@@ -100,6 +102,33 @@ describe("brand-assets", () => {
         wmClass: "mesura-code",
       },
     });
+  });
+
+  it("keeps the Mesura desktop userData directory separate from installed T3 Code", () => {
+    expect(resolveDesktopUserDataIdentity(true)).toBe(DESKTOP_USER_DATA_IDENTITY.development);
+    expect(resolveDesktopUserDataIdentity(false)).toBe(DESKTOP_USER_DATA_IDENTITY.production);
+    expect(DESKTOP_USER_DATA_IDENTITY).toEqual({
+      development: {
+        userDataDirName: "mesura-code-dev",
+        legacyUserDataDirName: "mesura-code-dev",
+      },
+      production: {
+        userDataDirName: "mesura-code",
+        legacyUserDataDirName: "mesura-code",
+      },
+    });
+  });
+
+  // Electron scopes its single-instance lock to the userData directory, so a
+  // directory name the installed T3 Code also claims makes Mesura Code quit
+  // without a window. A weekly merge that resolves DesktopEnvironment.ts in
+  // upstream's favor restores `t3code` with every other test still passing.
+  it("never names the desktop userData directory after T3 Code", () => {
+    for (const identity of Object.values(DESKTOP_USER_DATA_IDENTITY)) {
+      for (const dirName of Object.values(identity)) {
+        expect(dirName).toMatch(/^mesura-code(-dev)?$/);
+      }
+    }
   });
 
   it("keeps development, nightly, and production icon families separate", () => {

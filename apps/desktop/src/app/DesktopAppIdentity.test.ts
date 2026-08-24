@@ -129,7 +129,11 @@ const withIdentity = <A, E, R>(
               input.legacyPathProbeError
                 ? Effect.fail(input.legacyPathProbeError)
                 : Effect.succeed(
-                    input.legacyPathExists === true && path.includes("T3 Code (Alpha)"),
+                    // This fork resolves both names to "mesura-code", so the
+                    // probe matches the same directory the non-legacy branch
+                    // returns. See DESKTOP_USER_DATA_IDENTITY for why the two
+                    // must not diverge into a T3-named directory.
+                    input.legacyPathExists === true && path.includes("mesura-code"),
                   ),
             readFileString: () =>
               Effect.succeed(input.packageJson ?? '{"t3codeCommitHash":"abcdef1234567890"}'),
@@ -150,14 +154,14 @@ describe("DesktopAppIdentity", () => {
         const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
         const userDataPath = yield* identity.resolveUserDataPath;
 
-        assert.equal(userDataPath, "/Users/alice/Library/Application Support/T3 Code (Alpha)");
+        assert.equal(userDataPath, "/Users/alice/Library/Application Support/mesura-code");
       }),
       { legacyPathExists: true },
     ),
   );
 
   it.effect("preserves failures while inspecting the legacy userData path", () => {
-    const legacyPath = "/Users/alice/Library/Application Support/T3 Code (Alpha)";
+    const legacyPath = "/Users/alice/Library/Application Support/mesura-code";
     const cause = PlatformError.systemError({
       _tag: "PermissionDenied",
       module: "FileSystem",
