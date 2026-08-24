@@ -226,6 +226,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.equal(soleKeyFor("traitsPicker.toggle"), "alt+e");
       assert.equal(soleKeyFor("workspacePicker.toggle"), "alt+w");
       assert.equal(soleKeyFor("branchPicker.toggle"), "alt+b");
+      assert.equal(soleKeyFor("question.toggleCollapse"), "alt+q");
       assert.equal(soleKeyFor("chat.scrollHalfPageUp"), "mod+u");
       assert.equal(soleKeyFor("chat.scrollHalfPageDown"), "mod+d");
       // diff.toggle gave mod+d up to the reading scroll. terminal.splitVertical

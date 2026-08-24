@@ -7,6 +7,7 @@ import {
 } from "../../pendingUserInput";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
+import { subscribePickerAction } from "../../lib/pickerActionBus";
 import { cn } from "~/lib/utils";
 
 interface PendingUserInputPanelProps {
@@ -74,10 +75,25 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   // sending from the composer advances the active question.
   const [collapsedQuestionId, setCollapsedQuestionId] = useState<string | null>(null);
   const isCollapsed = collapsedQuestionId !== null && collapsedQuestionId === activeQuestion?.id;
+  const activeQuestionId = activeQuestion?.id ?? null;
 
   useEffect(() => {
     onAdvanceRef.current = onAdvance;
   }, [onAdvance]);
+
+  // The `question.toggleCollapse` keybinding, dispatched from ChatView's
+  // window-level handler, sets the collapsed state directly rather than
+  // clicking the header. `Collapsible` is controlled through `open`, so both
+  // paths converge on the same state. It stays live while a response is in
+  // flight, unlike the number keys below: folding changes what is on screen,
+  // never what gets answered. Keyed on the question id rather than the object,
+  // which `derivePendingUserInputProgress` rebuilds every render.
+  useEffect(() => {
+    if (!activeQuestionId) return;
+    return subscribePickerAction("question", () => {
+      setCollapsedQuestionId((current) => (current === activeQuestionId ? null : activeQuestionId));
+    });
+  }, [activeQuestionId]);
 
   useEffect(() => {
     if (!activeQuestion || activeQuestion.multiSelect || !optimisticSingleSelect) {

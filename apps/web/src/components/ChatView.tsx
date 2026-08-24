@@ -4972,6 +4972,15 @@ function ChatViewContent(props: ChatViewProps) {
         return;
       }
 
+      if (command === "question.toggleCollapse") {
+        event.preventDefault();
+        event.stopPropagation();
+        // No-op when no question is waiting: the prompt panel is the only
+        // subscriber and it is unmounted then.
+        dispatchPickerAction("question");
+        return;
+      }
+
       if (command === "chat.scrollHalfPageUp" || command === "chat.scrollHalfPageDown") {
         event.preventDefault();
         event.stopPropagation();

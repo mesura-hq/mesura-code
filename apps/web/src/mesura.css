@@ -1,0 +1,62 @@
+/**
+ * Styling this fork overrides on top of upstream's, loaded after `index.css`.
+ *
+ * Plain CSS on purpose: Tailwind processes `index.css` alone, so `@variant` and
+ * `@apply` are unavailable here. Dark mode is a class — upstream declares
+ * `@custom-variant dark (&:is(.dark, .dark *))` — so `.dark <selector>` is the
+ * equivalent and needs no build step.
+ *
+ * Keep every rule here scoped and commented. A blanket override is how a fork
+ * stops being able to take upstream's redesigns.
+ */
+
+/**
+ * Drop the blue wash from the drawer that holds the agent's question.
+ *
+ * Upstream tags that drawer `data-variant="info"`, which tints its surface and
+ * outline with `--info`. The question is not an informational notice: it is the
+ * one thing on screen waiting on the user, it can fill half the viewport, and
+ * the colour reads as a status the thread does not have. Restoring the neutral
+ * surface also puts it back in line with the composer directly below it, which
+ * carries no variant at all.
+ *
+ * The two declarations are copied from upstream's variant-less base rule for
+ * `.chat-composer-top-drawer`, so this lands exactly where the drawer would sit
+ * with no `data-variant` at all rather than inventing a third look.
+ *
+ * Scoped by `:has()` to the drawer that actually holds a question. The same
+ * drawer serves the plan follow-up banner under the same `info` variant, and
+ * that one is a notice, so it keeps the tint. Matching the drawer itself rather
+ * than its content would strip the tint from that banner too, which is the one
+ * case this scoping exists to protect. The known cost of scoping this way: the
+ * drawer's own visibility is gated on a pending prompt existing, while the
+ * panel renders nothing until a question is active, so in that window the strip
+ * is empty, matches nothing here, and is briefly blue. Widening the selector is
+ * the wrong fix for it; gating the drawer upstream is the right one.
+ *
+ * The hook is upstream's `data-pending-user-input-toggle`, which upstream's own
+ * test asserts on, so it cannot be renamed there without that test failing.
+ * Were it renamed anyway, this override stops matching and the card returns to
+ * upstream's blue — a look we do not want, not a broken layout.
+ *
+ * Two things make this win, and the weaker one is the one people notice.
+ * `:has()` raises specificity to (0,3,0) against the variant rule's (0,2,0), so
+ * stylesheet order does not decide it. The stronger one: upstream's block sits
+ * in `@layer components` and this file is unlayered, and an unlayered rule
+ * outranks any layered one whatever its specificity. Never wrap this file in a
+ * `@layer` — that hands the decision back to specificity alone.
+ */
+.chat-composer-top-drawer[data-variant="info"]:has([data-pending-user-input-toggle]) {
+  --chat-composer-attached-outline: var(
+    --chat-composer-outline,
+    color-mix(in srgb, var(--foreground) 8%, transparent)
+  );
+  --chat-composer-attached-tint: transparent;
+}
+
+.dark .chat-composer-top-drawer[data-variant="info"]:has([data-pending-user-input-toggle]) {
+  --chat-composer-attached-outline: var(
+    --chat-composer-outline,
+    color-mix(in srgb, var(--color-white) 5%, transparent)
+  );
+}

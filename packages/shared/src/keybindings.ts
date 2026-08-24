@@ -54,6 +54,9 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "alt+e", command: "traitsPicker.toggle", when: "!terminalFocus" },
   { key: "alt+w", command: "workspacePicker.toggle", when: "!terminalFocus" },
   { key: "alt+b", command: "branchPicker.toggle", when: "!terminalFocus" },
+  // No ADDED_KEYBINDING_DEFAULTS entry: the command is new, so no existing
+  // config mentions it and the ordinary startup backfill installs it.
+  { key: "alt+q", command: "question.toggleCollapse", when: "!terminalFocus" },
   { key: "mod+u", command: "chat.scrollHalfPageUp", when: "!terminalFocus" },
   { key: "mod+d", command: "chat.scrollHalfPageDown", when: "!terminalFocus" },
   { key: "mod+o", command: "editor.openFavorite" },
