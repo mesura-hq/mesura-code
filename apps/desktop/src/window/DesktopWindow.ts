@@ -558,10 +558,12 @@ export const make = Effect.gen(function* () {
       }
     });
 
-    // Electron's windowMenu close role owns CmdOrCtrl+W. Holding the
-    // close-terminal shortcut can outlive the terminal that handled its first
-    // press, so reject repeats before they reach the native window accelerator.
-    // Deliberate presses still flow through the renderer or native menu.
+    // On macOS the windowMenu close role still owns Cmd+W; DesktopApplicationMenu
+    // drops that role on every other platform, so there the accelerator no longer
+    // exists. The guard below is kept for macOS and as belt and braces elsewhere:
+    // holding the close-terminal shortcut can outlive the terminal that handled
+    // its first press, so reject repeats before they reach any native window
+    // accelerator. Deliberate presses still flow through the renderer or the menu.
     // Chrome-style hold-to-quit: intercept the quit accelerator before the
     // native menu sees it and only quit after the shortcut is held. The
     // renderer shows the "Hold to Quit" hint via QUIT_SHORTCUT_CHANNEL.

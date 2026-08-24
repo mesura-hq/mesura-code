@@ -475,35 +475,33 @@ export const TraitsPicker = memo(function TraitsPicker({
   ...persistence
 }: TraitsPickerProps & TraitsPersistence) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  // Subscribed above the early return below, which the visibility check can
-  // take on any render when the selected provider exposes no traits.
+  const traitsVisibilityInput = {
+    provider,
+    models,
+    model,
+    prompt,
+    modelOptions,
+    allowPromptInjectedEffort,
+    planModeEnabled,
+  };
+  const { descriptors, primarySelectDescriptor, ultrathinkPromptControlled } =
+    getTraitsSectionVisibility(traitsVisibilityInput);
+  const canRenderTraits = shouldRenderTraitsControls(traitsVisibilityInput);
+  // Hooks must run before the early return below, so the subscription is gated
+  // on the same visibility check rather than sitting above it. Without the
+  // gate a press while the provider exposes no traits still flips the state,
+  // and the menu then opens on its own the moment the user selects a provider
+  // that does. Closing on the way out keeps that state from surviving either.
   useEffect(() => {
-    if (!respondsToShortcut) return;
+    if (!respondsToShortcut || !canRenderTraits) {
+      setIsMenuOpen(false);
+      return;
+    }
     return subscribeTraitsPickerToggle(() => {
       setIsMenuOpen((open) => !open);
     });
-  }, [respondsToShortcut]);
-  const { descriptors, primarySelectDescriptor, ultrathinkPromptControlled } =
-    getTraitsSectionVisibility({
-      provider,
-      models,
-      model,
-      prompt,
-      modelOptions,
-      allowPromptInjectedEffort,
-      planModeEnabled,
-    });
-  if (
-    !shouldRenderTraitsControls({
-      provider,
-      models,
-      model,
-      prompt,
-      modelOptions,
-      allowPromptInjectedEffort,
-      planModeEnabled,
-    })
-  ) {
+  }, [respondsToShortcut, canRenderTraits]);
+  if (!canRenderTraits) {
     return null;
   }
 

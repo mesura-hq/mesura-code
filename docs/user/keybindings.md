@@ -66,6 +66,13 @@ successful pick; its hover glow and badge preview the element and color family t
 `rightPanel.toggleMaximized` maximizes or restores the open right panel. It has no default shortcut,
 so add one in **Settings** → **Keybindings** if you want to use it.
 
+### Command palette
+
+The command palette searches active thread titles, projects, branches, user messages, and final
+agent responses across connected environments. Message matches show one labeled excerpt while
+keeping the thread's project, branch, and machine context visible. Message search begins after two
+characters and uses SQLite's ASCII case-insensitive matching.
+
 ### Composer pickers
 
 `modelPicker.toggle` opens the model picker from the composer and defaults to `mod+shift+m`. While
@@ -76,6 +83,10 @@ context window, and agent. It defaults to `alt+e`. Two cases make it do nothing,
 a provider that exposes none of those traits does not render the control at all, and a narrow
 composer folds the traits into its compact controls menu, which has no separate picker to open.
 
+On macOS, `Option+E` is the dead key that starts an acute accent, so that default may be swallowed
+before the app sees it. Rebind the command in **Settings** → **Keybindings** if you type accented
+characters.
+
 ### Reading a long thread
 
 `chat.scrollHalfPageUp` and `chat.scrollHalfPageDown` scroll the message timeline and default to
@@ -83,28 +94,31 @@ composer folds the traits into its compact controls menu, which has no separate 
 half of what you were reading stays visible and you keep your place. The move is animated over
 about a fifth of a second and slows as it lands; with the system set to reduce motion, it jumps
 instead. Holding a key keeps travelling, because each press aims from where the previous one was
-going rather than from the position the animation is passing through.
+going rather than from the position the animation is passing through. A scroll gesture arriving
+mid-animation wins: the wheel, a drag, or a touch stops the move where it is.
+
+Both shortcuts work while the composer has focus, since that is where the cursor usually sits
+while you read. They therefore take `mod+u` away from the readline-style "delete to line start"
+some text fields offer.
 
 Scrolling up also stops the timeline following the live edge, the same as scrolling with the
 wheel. Without that, the next chunk of a streaming reply would pull you back to the bottom.
 
-`diff.toggle` moved off `mod+d` to `mod+shift+d` to make room for that pair. If your keybindings
-file predates the move, see the warning above about defaults that cannot be backfilled.
+`diff.toggle` defaults to `mod+shift+d`, which leaves `mod+d` to the pair above.
 
-### `mod+w` no longer closes the desktop app
+### Closing terminals and windows
 
-`terminal.close` is bound to `mod+w` while the terminal has focus. On Linux and Windows the
-desktop window is the whole application, and its native Window menu also claimed `Ctrl+W` to close
-that window. A press aimed at a terminal that had just lost focus therefore quit Mesura Code.
+`terminal.close` defaults to `mod+w` while the terminal has focus. Anywhere else that key does
+nothing on Linux and Windows: the desktop window there is the whole application, so closing it
+would quit Mesura Code. Quit from **File** → **Quit**, the titlebar, or your window manager
+instead. On macOS `Cmd+W` closes a window without quitting the app, as it does everywhere else on
+that platform.
 
-The Window menu no longer claims that key on those platforms, so `Ctrl+W` closes a terminal and
-does nothing otherwise. Quit from **File** → **Quit**, the titlebar, or your window manager.
-On macOS nothing changed: `Cmd+W` closes a window there without quitting the app.
+### If you upgraded from an older build
 
-The command palette searches active thread titles, projects, branches, user messages, and final
-agent responses across connected environments. Message matches show one labeled excerpt while
-keeping the thread's project, branch, and machine context visible. Message search begins after two
-characters and uses SQLite's ASCII case-insensitive matching.
+`diff.toggle` used to default to `mod+d`, and `Ctrl+W` used to close the desktop window. Both
+changed. The `diff.toggle` move does not reach an existing keybindings file — see the warning near
+the top of this page — so edit that rule by hand if `mod+d` still opens the diff for you.
 
 The full command list and the current defaults are shown in **Settings** → **Keybindings**, which
 always matches the build you are running. Use that rather than a copied list.

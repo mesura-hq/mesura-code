@@ -21,7 +21,6 @@ export function dispatchTraitsPickerToggle(): void {
 
 export function subscribeTraitsPickerToggle(listener: () => void): () => void {
   if (typeof window === "undefined") return () => {};
-  const handler = () => listener();
-  window.addEventListener(EVENT_NAME, handler);
-  return () => window.removeEventListener(EVENT_NAME, handler);
+  window.addEventListener(EVENT_NAME, listener);
+  return () => window.removeEventListener(EVENT_NAME, listener);
 }

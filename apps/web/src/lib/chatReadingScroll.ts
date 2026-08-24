@@ -13,10 +13,17 @@
  */
 
 /** Fraction of the viewport one press travels. */
-export const READING_SCROLL_VIEWPORT_FRACTION = 0.5;
+const READING_SCROLL_VIEWPORT_FRACTION = 0.5;
 
 /** Duration of one reading scroll, in milliseconds. */
 export const READING_SCROLL_DURATION_MS = 180;
+
+/**
+ * Below this the readable height is treated as unmeasurable rather than tiny.
+ * A composer tall enough to cover the timeline would otherwise drive the
+ * travel distance to zero and turn both shortcuts into silent no-ops.
+ */
+export const MIN_READABLE_HEIGHT = 80;
 
 export type ReadingScrollDirection = "up" | "down";
 
@@ -60,7 +67,7 @@ export function readingScrollDistance(visibleHeight: number): number {
 export function resolveReadingScrollTarget(
   viewport: ReadingScrollViewport,
   direction: ReadingScrollDirection,
-  from?: number,
+  from: number | null = null,
 ): number {
   const maxScrollTop = Math.max(0, viewport.maxScrollTop);
   const origin = Math.min(maxScrollTop, Math.max(0, from ?? viewport.scrollTop));
