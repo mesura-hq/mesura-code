@@ -27,8 +27,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopClerk from "./DesktopClerk.ts";
-import { resolveDesktopUserDataIdentity } from "../../../../scripts/lib/brand-assets.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
+import { resolveDesktopUserDataIdentity } from "../../../../scripts/lib/brand-assets.ts";
 
 const makeDesktopClerkLayer = (isDevelopment = true, events: string[] = []) => {
   const environment = DesktopEnvironment.DesktopEnvironment.of({
@@ -99,8 +99,10 @@ describe("DesktopClerk", () => {
       // The bridge acquires Electron's single-instance lock at creation, and
       // the lock both lives in and creates the userData directory — so the
       // real path must be set before the bridge exists.
+      // Literal on purpose. The fixture above is built from the resolver, so
+      // deriving this expectation from the same call would assert nothing.
       assert.deepEqual(events, [
-        `setPath:userData:/tmp/app-data/${resolveDesktopUserDataIdentity(true).userDataDirName}`,
+        "setPath:userData:/tmp/app-data/mesura-code-dev",
         "createClerkBridge",
       ]);
       storageMock.mockClear();

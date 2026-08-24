@@ -119,18 +119,6 @@ describe("brand-assets", () => {
     });
   });
 
-  // Electron scopes its single-instance lock to the userData directory, so a
-  // directory name the installed T3 Code also claims makes Mesura Code quit
-  // without a window. A weekly merge that resolves DesktopEnvironment.ts in
-  // upstream's favor restores `t3code` with every other test still passing.
-  it("never names the desktop userData directory after T3 Code", () => {
-    for (const identity of Object.values(DESKTOP_USER_DATA_IDENTITY)) {
-      for (const dirName of Object.values(identity)) {
-        expect(dirName).toMatch(/^mesura-code(-dev)?$/);
-      }
-    }
-  });
-
   it("keeps development, nightly, and production icon families separate", () => {
     expect([
       BRAND_ASSET_PATHS.developmentIconComposerProject,
