@@ -189,33 +189,45 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
 
   it.effect("ships configurable thread navigation defaults", () =>
     Effect.sync(() => {
-      const defaultsByCommand = new Map(
-        Keybindings.DEFAULT_KEYBINDINGS.map((binding) => [binding.command, binding.key] as const),
-      );
+      // A command may ship more than one default, so collect every key rather
+      // than letting the last entry win.
+      const defaultsByCommand = new Map<string, string[]>();
+      for (const binding of Keybindings.DEFAULT_KEYBINDINGS) {
+        defaultsByCommand.set(binding.command, [
+          ...(defaultsByCommand.get(binding.command) ?? []),
+          binding.key,
+        ]);
+      }
+      const keysFor = (command: string) => defaultsByCommand.get(command) ?? [];
+      const soleKeyFor = (command: string) => {
+        const keys = keysFor(command);
+        assert.equal(keys.length, 1, `expected one default for ${command}, got ${keys.length}`);
+        return keys[0];
+      };
 
-      assert.equal(defaultsByCommand.get("thread.previous"), "mod+shift+[");
-      assert.equal(defaultsByCommand.get("thread.next"), "mod+shift+]");
-      assert.equal(defaultsByCommand.get("thread.jump.1"), "mod+1");
-      assert.equal(defaultsByCommand.get("thread.jump.9"), "mod+9");
-      assert.equal(defaultsByCommand.get("modelPicker.toggle"), "mod+shift+m");
-      assert.equal(defaultsByCommand.get("themeEditor.toggle"), "mod+alt+shift+t");
-      assert.equal(defaultsByCommand.get("filePicker.toggle"), "mod+p");
-      assert.equal(defaultsByCommand.get("projectSearch.toggle"), "mod+shift+f");
-      assert.equal(defaultsByCommand.get("sidebar.toggle"), "mod+b");
-      assert.equal(defaultsByCommand.get("rightPanel.toggle"), "mod+alt+b");
-      assert.isFalse(defaultsByCommand.has("rightPanel.toggleMaximized"));
-      assert.equal(defaultsByCommand.get("terminal.splitVertical"), "mod+shift+d");
-      assert.equal(defaultsByCommand.get("modelPicker.jump.1"), "mod+1");
-      assert.equal(defaultsByCommand.get("modelPicker.jump.9"), "mod+9");
-      assert.equal(defaultsByCommand.get("traitsPicker.toggle"), "alt+e");
-      assert.equal(defaultsByCommand.get("workspacePicker.toggle"), "alt+w");
-      assert.equal(defaultsByCommand.get("branchPicker.toggle"), "alt+b");
-      assert.equal(defaultsByCommand.get("chat.scrollHalfPageUp"), "mod+u");
-      assert.equal(defaultsByCommand.get("chat.scrollHalfPageDown"), "mod+d");
+      assert.deepEqual(keysFor("thread.previous"), ["mod+shift+[", "ctrl+shift+tab"]);
+      assert.deepEqual(keysFor("thread.next"), ["mod+shift+]", "ctrl+tab"]);
+      assert.equal(soleKeyFor("thread.jump.1"), "mod+1");
+      assert.equal(soleKeyFor("thread.jump.9"), "mod+9");
+      assert.deepEqual(keysFor("modelPicker.toggle"), ["mod+shift+m", "alt+m"]);
+      assert.equal(soleKeyFor("themeEditor.toggle"), "mod+alt+shift+t");
+      assert.equal(soleKeyFor("filePicker.toggle"), "mod+p");
+      assert.equal(soleKeyFor("projectSearch.toggle"), "mod+shift+f");
+      assert.equal(soleKeyFor("sidebar.toggle"), "mod+b");
+      assert.equal(soleKeyFor("rightPanel.toggle"), "mod+alt+b");
+      assert.deepEqual(keysFor("rightPanel.toggleMaximized"), []);
+      assert.equal(soleKeyFor("terminal.splitVertical"), "mod+shift+d");
+      assert.equal(soleKeyFor("modelPicker.jump.1"), "mod+1");
+      assert.equal(soleKeyFor("modelPicker.jump.9"), "mod+9");
+      assert.equal(soleKeyFor("traitsPicker.toggle"), "alt+e");
+      assert.equal(soleKeyFor("workspacePicker.toggle"), "alt+w");
+      assert.equal(soleKeyFor("branchPicker.toggle"), "alt+b");
+      assert.equal(soleKeyFor("chat.scrollHalfPageUp"), "mod+u");
+      assert.equal(soleKeyFor("chat.scrollHalfPageDown"), "mod+d");
       // diff.toggle gave mod+d up to the reading scroll. terminal.splitVertical
       // also sits on mod+shift+d, but only while the terminal has focus, so the
       // two never resolve at the same time.
-      assert.equal(defaultsByCommand.get("diff.toggle"), "mod+shift+d");
+      assert.equal(soleKeyFor("diff.toggle"), "mod+shift+d");
     }),
   );
 
@@ -312,6 +324,78 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         }
         assert.isTrue(byCommand.has("script.run-tests.run"));
       }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("moves a retired default onto its current key and backfills what it freed", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      // The rule an install written before the diff.toggle move still carries.
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
+      ]);
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepEqual(
+        persisted.filter((entry) => entry.command === "diff.toggle").map((entry) => entry.key),
+        ["mod+shift+d"],
+      );
+      // Freeing mod+d is the whole point. Without the rewrite the scroll
+      // default reads as conflicting and is skipped, so half the shipped pair
+      // ends up with no binding at all and nothing says so.
+      assert.isTrue(
+        persisted.some(
+          (entry) => entry.command === "chat.scrollHalfPageDown" && entry.key === "mod+d",
+        ),
+      );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("leaves a rule that only partly matches a retired default alone", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      // Same key and command as the retired default but a different `when`,
+      // so it is the user's own rule and must not be rewritten.
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+d", command: "diff.toggle", when: "terminalOpen" },
+      ]);
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepEqual(
+        persisted.filter((entry) => entry.command === "diff.toggle"),
+        [{ key: "mod+d", command: "diff.toggle", when: "terminalOpen" }],
+      );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("rewrites a retired default only once", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
+      ]);
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepEqual(
+        persisted.filter((entry) => entry.command === "diff.toggle").map((entry) => entry.key),
+        ["mod+shift+d"],
+      );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
 
   it.effect("skips conflicting default keybindings on startup and logs a detailed warning", () => {

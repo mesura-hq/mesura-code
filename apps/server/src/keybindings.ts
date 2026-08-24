@@ -48,6 +48,7 @@ import {
   DEFAULT_RESOLVED_KEYBINDINGS,
   compileResolvedKeybindingRule,
   compileResolvedKeybindingsConfig,
+  migrateRetiredKeybindingDefaults,
   parseKeybindingShortcut,
 } from "@t3tools/shared/keybindings";
 
@@ -492,7 +493,19 @@ const make = Effect.gen(function* () {
         yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
         return;
       }
-      const customConfig = runtimeConfig.keybindings;
+      // Retired defaults are rewritten before the conflict scan below, so a
+      // default whose key was freed by the rewrite is no longer seen as taken
+      // and gets backfilled in the same startup rather than a later one.
+      const migration = migrateRetiredKeybindingDefaults(runtimeConfig.keybindings);
+      const customConfig = migration.config;
+      for (const rewrite of migration.rewrites) {
+        yield* Effect.logInfo("moved a retired default keybinding to its current key", {
+          path: keybindingsConfigPath,
+          command: rewrite.command,
+          from: rewrite.fromKey,
+          to: rewrite.toKey,
+        });
+      }
       const existingCommands = new Set(customConfig.map((entry) => entry.command));
       const missingDefaults: KeybindingRule[] = [];
       const shortcutConflictWarnings: Array<{
@@ -530,6 +543,11 @@ const make = Effect.gen(function* () {
         });
       }
       if (missingDefaults.length === 0) {
+        // A rewrite with nothing to append still has to reach disk, or the
+        // retired default returns on the next startup.
+        if (migration.rewrites.length > 0) {
+          yield* writeConfigAtomically(customConfig);
+        }
         yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
         return;
       }
@@ -559,6 +577,9 @@ const make = Effect.gen(function* () {
         });
       }
       if (defaultsToAppend.length === 0) {
+        if (migration.rewrites.length > 0) {
+          yield* writeConfigAtomically(customConfig);
+        }
         yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
         return;
       }

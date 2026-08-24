@@ -48,6 +48,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+n", command: "chat.newLocal", when: "!terminalFocus" },
   { key: "mod+shift+m", command: "modelPicker.toggle", when: "!terminalFocus" },
+  { key: "alt+m", command: "modelPicker.toggle", when: "!terminalFocus" },
   { key: "alt+e", command: "traitsPicker.toggle", when: "!terminalFocus" },
   { key: "alt+w", command: "workspacePicker.toggle", when: "!terminalFocus" },
   { key: "alt+b", command: "branchPicker.toggle", when: "!terminalFocus" },
@@ -56,6 +57,11 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+o", command: "editor.openFavorite" },
   { key: "mod+shift+[", command: "thread.previous" },
   { key: "mod+shift+]", command: "thread.next" },
+  // Browsers keep ctrl+tab for their own tab strip and never deliver it to a
+  // page, so this pair reaches the desktop app only. The bracket pair above
+  // stays as the shortcut that works on every surface.
+  { key: "ctrl+tab", command: "thread.next" },
+  { key: "ctrl+shift+tab", command: "thread.previous" },
   ...THREAD_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
     key: `mod+${index + 1}`,
     command,
@@ -66,6 +72,68 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
     when: "modelPickerOpen",
   })),
 ];
+
+/**
+ * Defaults that used to ship on a different key.
+ *
+ * Startup backfill only adds defaults for commands a config does not already
+ * mention, so moving a default never reaches anyone who has run the app
+ * before: their file keeps the old rule, and whatever took the freed key over
+ * silently gets nothing. Each entry here lets startup rewrite that one rule.
+ *
+ * `from` must match a retired default exactly — key, command, and `when`
+ * together. A rule that differs in any of the three is the user's own and is
+ * left alone.
+ */
+export const RETIRED_KEYBINDING_DEFAULTS: ReadonlyArray<{
+  readonly from: KeybindingRule;
+  readonly toKey: string;
+}> = [
+  {
+    // Freed for chat.scrollHalfPageDown; see the diff.toggle default above.
+    from: { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
+    toKey: "mod+shift+d",
+  },
+];
+
+export interface RetiredKeybindingRewrite {
+  readonly command: KeybindingRule["command"];
+  readonly fromKey: string;
+  readonly toKey: string;
+}
+
+/**
+ * Rewrites any retired default still present in a user config onto its current
+ * key. Returns the config unchanged when nothing matches, so callers can skip
+ * the write.
+ *
+ * Idempotent: a rewritten rule no longer matches its `from`. A rewrite is also
+ * skipped when the config already binds that command to the destination key,
+ * which is the shape a user who moved the rule themselves would have.
+ */
+export function migrateRetiredKeybindingDefaults(config: ReadonlyArray<KeybindingRule>): {
+  readonly config: ReadonlyArray<KeybindingRule>;
+  readonly rewrites: ReadonlyArray<RetiredKeybindingRewrite>;
+} {
+  const rewrites: RetiredKeybindingRewrite[] = [];
+  const next = config.map((rule) => {
+    const retired = RETIRED_KEYBINDING_DEFAULTS.find(
+      (entry) =>
+        entry.from.key === rule.key &&
+        entry.from.command === rule.command &&
+        (entry.from.when ?? undefined) === (rule.when ?? undefined),
+    );
+    if (!retired) return rule;
+    const alreadyMoved = config.some(
+      (entry) => entry.command === rule.command && entry.key === retired.toKey,
+    );
+    if (alreadyMoved) return rule;
+    rewrites.push({ command: rule.command, fromKey: rule.key, toKey: retired.toKey });
+    return { ...rule, key: retired.toKey };
+  });
+
+  return rewrites.length === 0 ? { config, rewrites } : { config: next, rewrites };
+}
 
 function normalizeKeyToken(token: string): string {
   if (token === "space") return " ";

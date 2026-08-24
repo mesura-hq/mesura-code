@@ -964,6 +964,21 @@ describe("shipped defaults on Linux", () => {
     assert.strictEqual(resolve(press("b", { ctrlKey: true, altKey: true })), "rightPanel.toggle");
   });
 
+  it("navigates threads with the desktop-only tab pair as well as the brackets", () => {
+    assert.strictEqual(resolve(press("Tab", { ctrlKey: true })), "thread.next");
+    assert.strictEqual(resolve(press("Tab", { ctrlKey: true, shiftKey: true })), "thread.previous");
+    assert.strictEqual(resolve(press("]", { ctrlKey: true, shiftKey: true })), "thread.next");
+    assert.strictEqual(resolve(press("[", { ctrlKey: true, shiftKey: true })), "thread.previous");
+  });
+
+  it("opens the model picker from either of its two defaults", () => {
+    assert.strictEqual(resolve(press("m", { altKey: true })), "modelPicker.toggle");
+    assert.strictEqual(
+      resolve(press("m", { ctrlKey: true, shiftKey: true })),
+      "modelPicker.toggle",
+    );
+  });
+
   it("opens the composer pickers", () => {
     assert.strictEqual(resolve(press("e", { altKey: true })), "traitsPicker.toggle");
     assert.strictEqual(

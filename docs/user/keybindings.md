@@ -9,10 +9,13 @@ file on first run, and adds any new defaults on later startups unless a rule of 
 claims the command or the shortcut.
 
 That last condition has a consequence worth knowing. Startup only backfills defaults for commands
-your file does not mention. When a release _moves_ a default onto a different key, and your file
-already has a rule for that command, the move does not reach you: your old rule stays and keeps
-the old key. Nothing warns you, and the shortcut that was supposed to take the key over looks
-broken instead. If a documented default does not work, compare it against your file first.
+your file does not mention, so a release that gives an existing command a _second_ default does not
+hand it to you — that shortcut works on a fresh install and stays absent in yours. Add it in
+**Settings** → **Keybindings** if you want it.
+
+A release that _moves_ a default onto a different key is handled for you: startup rewrites the old
+rule, but only when it still matches the retired default exactly, key and command and `when`
+together. A rule you changed yourself is never touched.
 
 The file is a JSON array of rules.
 
@@ -125,6 +128,13 @@ wheel. Without that, the next chunk of a streaming reply would pull you back to 
 
 `diff.toggle` defaults to `mod+shift+d`, which leaves `mod+d` to the pair above.
 
+### Moving between threads
+
+`thread.next` and `thread.previous` default to `mod+shift+]` and `mod+shift+[`, and additionally to
+`ctrl+tab` and `ctrl+shift+tab`. The bracket pair works everywhere; the tab pair reaches the desktop
+app only, because browsers keep those two for their own tab strip. `mod+1` through `mod+9` jump
+straight to a thread by position.
+
 ### Closing terminals and windows
 
 `terminal.close` defaults to `mod+w` while the terminal has focus. Anywhere else that key does
@@ -136,8 +146,12 @@ that platform.
 ### If you upgraded from an older build
 
 `diff.toggle` used to default to `mod+d`, and `Ctrl+W` used to close the desktop window. Both
-changed. The `diff.toggle` move does not reach an existing keybindings file — see the warning near
-the top of this page — so edit that rule by hand if `mod+d` still opens the diff for you.
+changed, and both reach you without action: the `diff.toggle` rule is rewritten on the next start,
+which is also what frees `mod+d` for the reading scroll.
+
+The one thing startup cannot hand you is a _second_ default for a command your file already binds.
+`alt+m` for the model picker and the `ctrl+tab` pair for thread navigation are in that group, so
+add them in **Settings** → **Keybindings** if you want them.
 
 The full command list and the current defaults are shown in **Settings** → **Keybindings**, which
 always matches the build you are running. Use that rather than a copied list.
