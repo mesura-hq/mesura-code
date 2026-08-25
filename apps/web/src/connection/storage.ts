@@ -257,6 +257,28 @@ export interface CatalogBackend {
   readonly quarantine?: (raw: string) => Effect.Effect<void, ConnectionTransientError>;
 }
 
+/**
+ * What to tell a user whose desktop refused to store the credential.
+ *
+ * The main process knows which keyring it looked for; this renderer does not,
+ * so it asks. The fallback keeps the old sentence for a desktop build too old
+ * to answer — accurate, just not actionable.
+ */
+const SECURE_STORAGE_UNAVAILABLE_FALLBACK =
+  "Desktop secure storage is unavailable in this system context.";
+
+const secureStorageUnavailableReason: Effect.Effect<string> = Effect.suspend(() => {
+  const describe = window.desktopBridge?.getSecureStorageUnavailableReason;
+  return describe === undefined
+    ? Effect.succeed(SECURE_STORAGE_UNAVAILABLE_FALLBACK)
+    : Effect.tryPromise(() => describe()).pipe(
+        Effect.map((reason) =>
+          reason.trim().length > 0 ? reason : SECURE_STORAGE_UNAVAILABLE_FALLBACK,
+        ),
+        Effect.orElseSucceed(() => SECURE_STORAGE_UNAVAILABLE_FALLBACK),
+      );
+});
+
 export function makeCatalogBackend(database: IDBDatabase): CatalogBackend {
   const bridge = window.desktopBridge;
   if (bridge?.getConnectionCatalog !== undefined && bridge.setConnectionCatalog !== undefined) {
@@ -273,11 +295,8 @@ export function makeCatalogBackend(database: IDBDatabase): CatalogBackend {
           Effect.flatMap((stored) =>
             stored
               ? Effect.void
-              : Effect.fail(
-                  catalogError(
-                    "save",
-                    "Desktop secure storage is unavailable in this system context.",
-                  ),
+              : Effect.flatMap(secureStorageUnavailableReason, (reason) =>
+                  Effect.fail(catalogError("save", reason)),
                 ),
           ),
         ),

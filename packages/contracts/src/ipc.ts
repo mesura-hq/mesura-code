@@ -1080,6 +1080,17 @@ export interface DesktopBridge {
   getConnectionCatalog?: () => Promise<string | null>;
   setConnectionCatalog?: (catalog: string) => Promise<boolean>;
   clearConnectionCatalog?: () => Promise<void>;
+  /**
+   * Why `setConnectionCatalog` returned false, in words a user can act on.
+   *
+   * The renderer cannot work this out for itself: naming the right keyring
+   * needs the configured password-store preference, the backend Electron
+   * actually selected, and the session's desktop environment variables, and all
+   * three live in the main process. Without this the renderer can only say that
+   * secure storage is unavailable, which tells a user nothing about what to
+   * install or start.
+   */
+  getSecureStorageUnavailableReason?: () => Promise<string>;
   discoverSshHosts: () => Promise<readonly DesktopDiscoveredSshHost[]>;
   ensureSshEnvironment: (
     target: DesktopSshEnvironmentTarget,

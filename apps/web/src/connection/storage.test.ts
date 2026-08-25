@@ -74,4 +74,47 @@ describe("makeCatalogBackend", () => {
       expect(setConnectionCatalog).toHaveBeenCalledWith("{}");
     }),
   );
+
+  // Regression guard. The write failure used to hardcode "Desktop secure
+  // storage is unavailable in this system context", which names no keyring and
+  // no remedy — so a user on a session Electron does not recognize (Hyprland,
+  // for one) read a dead end. The main process knows which keyring it looked
+  // for; ask it. Do not inline a fixed sentence here again.
+  it.effect("reports the reason the desktop gives for refusing the catalog", () =>
+    Effect.gen(function* () {
+      vi.stubGlobal("window", {
+        desktopBridge: {
+          getConnectionCatalog: vi.fn().mockResolvedValue(null),
+          setConnectionCatalog: vi.fn().mockResolvedValue(false),
+          getSecureStorageUnavailableReason: vi
+            .fn()
+            .mockResolvedValue(
+              "Mesura Code could not access GNOME Keyring to save this environment credential. Install and start GNOME Keyring, then restart Mesura Code.",
+            ),
+        },
+      });
+      const backend = makeCatalogBackend({} as IDBDatabase);
+
+      const error = yield* backend.write("{}").pipe(Effect.flip);
+
+      expect(error.message).toContain("Install and start GNOME Keyring");
+    }),
+  );
+
+  it.effect("falls back to the generic wording when the desktop cannot explain", () =>
+    Effect.gen(function* () {
+      vi.stubGlobal("window", {
+        desktopBridge: {
+          getConnectionCatalog: vi.fn().mockResolvedValue(null),
+          setConnectionCatalog: vi.fn().mockResolvedValue(false),
+          getSecureStorageUnavailableReason: vi.fn().mockRejectedValue(new Error("no handler")),
+        },
+      });
+      const backend = makeCatalogBackend({} as IDBDatabase);
+
+      const error = yield* backend.write("{}").pipe(Effect.flip);
+
+      expect(error.message).toContain("Desktop secure storage is unavailable");
+    }),
+  );
 });
