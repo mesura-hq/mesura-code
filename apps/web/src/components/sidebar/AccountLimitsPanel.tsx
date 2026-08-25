@@ -151,7 +151,7 @@ function AccountLimitRowView(props: { row: AccountLimitsRow }) {
   const { row } = props;
   const ageLabel = readingAgeLabel(row.readingAgeMs);
   return (
-    <section className="border-border/60 border-t px-3 py-3 first:border-t-0">
+    <section className="border-border/60 border-t px-3 py-3 [&:first-of-type]:border-t-0">
       <div className="flex min-w-0 items-center gap-2">
         <ProviderInstanceIcon
           accentColor={row.accentColor}
@@ -299,9 +299,9 @@ export function AccountLimitsPopover(props: {
     >
       <PopoverPopup
         aria-label="Usage limits"
-        align="end"
+        align="start"
         anchor={anchor}
-        className="p-0"
+        className="p-0 [background:color-mix(in_srgb,var(--popover)_70%,var(--background))]! [-webkit-backdrop-filter:none]! [backdrop-filter:none]!"
         {...ACCOUNT_LIMITS_POPOVER_FOCUS_PROPS}
         onPointerEnter={controller.onPointerEnter}
         onPointerLeave={controller.onPointerLeave}
