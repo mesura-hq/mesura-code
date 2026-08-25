@@ -4350,8 +4350,15 @@ function ChatViewContent(props: ChatViewProps) {
   // which also explains why it is not inline here. It reads the same
   // activeThreadSettled the parked-thread banner renders from, so the shortcut
   // can never disagree with what the user is looking at.
+  //
+  // Gated on isServerThread: activeThreadRef is also set for a local draft, and
+  // settling one would send a command for an id the server has never seen. The
+  // usual guard cannot catch that, because canSettle only runs once the thread
+  // resolves to a shell.
   const toggleActiveThreadSettled = useThreadSettledToggle(
-    activeThreadRef === null ? null : { threadRef: activeThreadRef, settled: activeThreadSettled },
+    activeThreadRef === null || !isServerThread
+      ? null
+      : { threadRef: activeThreadRef, settled: activeThreadSettled },
   );
   const unsettleThreadMutation = useAtomCommand(threadEnvironment.unsettle, {
     reportFailure: false,

@@ -1004,6 +1004,10 @@ describe("shipped defaults on Linux", () => {
     assert.strictEqual(resolve(press("b", { altKey: true })), "branchPicker.toggle");
   });
 
+  it("toggles the open thread's settled state on alt+s", () => {
+    assert.strictEqual(resolve(press("s", { altKey: true })), "thread.toggleSettled");
+  });
+
   it("keeps alt+b clear of the right-panel toggle on mod+alt+b", () => {
     assert.strictEqual(resolve(press("b", { ctrlKey: true, altKey: true })), "rightPanel.toggle");
   });

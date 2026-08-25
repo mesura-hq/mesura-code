@@ -170,7 +170,8 @@ itself. `mod+1` through `mod+9` jump straight to a thread by position.
 ### Settling a thread
 
 `thread.toggleSettled` settles the open thread, or brings a settled one back to Active, and
-defaults to `alt+s`. Note that `mod+s` is a different shortcut: it stashes the composer draft.
+defaults to `alt+s`. Note that `mod+s` is a different shortcut: it stashes the composer draft. Like
+the other composer shortcuts, it is inactive while the terminal has focus.
 
 Settling moves the thread out of the sidebar's Active list. The shortcut acts on the same state the
 banner above the composer reports and the thread's own menu offers, so the three can never disagree.
@@ -178,6 +179,10 @@ banner above the composer reports and the thread's own menu offers, so the three
 A thread with live work cannot be settled: a running or starting session, a pending approval, a
 question waiting on you, or a message no turn has picked up yet. Settling one of those would hide
 it, so the shortcut reports the refusal instead. Un-settling has no such limit.
+
+A thread you have not sent a message to yet does not exist for the server, so the shortcut does
+nothing there. An environment whose server predates settling reports that instead of acting; update
+that server to use the shortcut against it.
 
 Un-settling pins the thread Active. The pin holds until real activity clears it, so a merged pull
 request or a long silence does not settle the thread again behind you.
