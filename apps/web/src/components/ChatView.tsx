@@ -166,6 +166,7 @@ import { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
 import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import { useChatReadingScroll } from "../lib/useChatReadingScroll";
+import { useThreadSettledToggle } from "../lib/useThreadSettledToggle";
 import { dispatchPickerAction } from "../lib/pickerActionBus";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
@@ -4345,6 +4346,13 @@ function ChatViewContent(props: ChatViewProps) {
     nowMinute,
     supportsSettlement,
   ]);
+  // Alt+S, both ways. The machinery lives in lib/useThreadSettledToggle.ts,
+  // which also explains why it is not inline here. It reads the same
+  // activeThreadSettled the parked-thread banner renders from, so the shortcut
+  // can never disagree with what the user is looking at.
+  const toggleActiveThreadSettled = useThreadSettledToggle(
+    activeThreadRef === null ? null : { threadRef: activeThreadRef, settled: activeThreadSettled },
+  );
   const unsettleThreadMutation = useAtomCommand(threadEnvironment.unsettle, {
     reportFailure: false,
   });
@@ -4981,6 +4989,13 @@ function ChatViewContent(props: ChatViewProps) {
         return;
       }
 
+      if (command === "thread.toggleSettled") {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleActiveThreadSettled();
+        return;
+      }
+
       if (command === "chat.scrollHalfPageUp" || command === "chat.scrollHalfPageDown") {
         event.preventDefault();
         event.stopPropagation();
@@ -5019,6 +5034,7 @@ function ChatViewContent(props: ChatViewProps) {
     toggleTerminalVisibility,
     composerRef,
     scrollTimelineForReading,
+    toggleActiveThreadSettled,
   ]);
 
   const onRevertToTurnCount = useCallback(
