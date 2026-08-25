@@ -21,7 +21,12 @@ const successfulRunner = (fs: FileSystem.FileSystem, path: Path.Path) =>
         const prefixIndex = input.args.indexOf("--prefix");
         const stagingDir = input.args[prefixIndex + 1];
         if (stagingDir === undefined) return yield* Effect.die("missing npm --prefix");
-        const entry = path.join(stagingDir, "node_modules", "t3", "dist", "bin.mjs");
+        // npm creates the directory named after the package it installed, so
+        // derive it from the install argument. Hardcoding a name here would let
+        // the install spec and the resolved entry path drift apart silently.
+        const spec = input.args[input.args.length - 1] ?? "";
+        const packageDir = spec.slice(0, spec.lastIndexOf("@"));
+        const entry = path.join(stagingDir, "node_modules", packageDir, "dist", "bin.mjs");
         yield* fs.makeDirectory(path.dirname(entry), { recursive: true }).pipe(Effect.orDie);
         yield* fs.writeFileString(entry, "export {};\n").pipe(Effect.orDie);
         return {
@@ -43,11 +48,12 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-pinned-runtime-test-" });
-      const finalPaths = pinnedRuntimePaths(path, baseDir, "1.2.3");
+      const finalPaths = pinnedRuntimePaths(path, baseDir, "1.2.3", "mesura-code-server-test");
       let validatedDirectory = "";
 
       const installed = yield* ensurePinnedRuntimeInstalled({
         baseDir,
+        packageName: "mesura-code-server-test",
         version: "1.2.3",
         fs,
         path,
@@ -72,10 +78,11 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-pinned-runtime-test-" });
-      const finalPaths = pinnedRuntimePaths(path, baseDir, "1.2.3");
+      const finalPaths = pinnedRuntimePaths(path, baseDir, "1.2.3", "mesura-code-server-test");
 
       yield* ensurePinnedRuntimeInstalled({
         baseDir,
+        packageName: "mesura-code-server-test",
         version: "1.2.3",
         fs,
         path,
@@ -99,12 +106,13 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-pinned-runtime-repair-" });
-      const finalPaths = pinnedRuntimePaths(path, baseDir, "1.2.3");
+      const finalPaths = pinnedRuntimePaths(path, baseDir, "1.2.3", "mesura-code-server-test");
       yield* fs.makeDirectory(finalPaths.versionDir, { recursive: true });
       yield* fs.writeFileString(path.join(finalPaths.versionDir, "partial"), "incomplete\n");
 
       yield* ensurePinnedRuntimeInstalled({
         baseDir,
+        packageName: "mesura-code-server-test",
         version: "1.2.3",
         fs,
         path,
@@ -122,7 +130,7 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-pinned-runtime-repair-" });
-      const finalPaths = pinnedRuntimePaths(path, baseDir, "1.2.3");
+      const finalPaths = pinnedRuntimePaths(path, baseDir, "1.2.3", "mesura-code-server-test");
       yield* fs.makeDirectory(path.dirname(finalPaths.entryPath), { recursive: true });
       yield* fs.writeFileString(finalPaths.entryPath, "broken\n");
       yield* fs.writeFileString(finalPaths.sentinelPath, "1.2.3\n");
@@ -130,6 +138,7 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
       let validations = 0;
       yield* ensurePinnedRuntimeInstalled({
         baseDir,
+        packageName: "mesura-code-server-test",
         version: "1.2.3",
         fs,
         path,
@@ -160,6 +169,7 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
       });
       const install = yield* ensurePinnedRuntimeInstalled({
         baseDir,
+        packageName: "mesura-code-server-test",
         version: "1.2.3",
         fs,
         path,

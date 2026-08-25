@@ -1061,6 +1061,21 @@ export const DesktopPreviewAutomationWaitForInputSchema = Schema.Struct({
   input: PreviewAutomationWaitForInput,
 });
 
+/**
+ * What a user reads when the desktop refused to store a credential and nothing
+ * more specific is known.
+ *
+ * Two processes produce this sentence — the main process when it cannot name a
+ * keyring (`apps/desktop/src/ipc/methods/connectionCatalog.ts`), and the
+ * renderer when the bridge cannot answer at all
+ * (`apps/web/src/connection/storage.ts`). They each used to spell their own
+ * wording, so which sentence a user read depended only on how old their desktop
+ * build was. It belongs beside `DesktopBridge.getSecureStorageUnavailableReason`
+ * below, which is the method whose absence or failure selects it.
+ */
+export const GENERIC_SECURE_STORAGE_UNAVAILABLE_MESSAGE =
+  "Mesura Code could not reach this system's secure storage to save the credential.";
+
 export interface DesktopBridge {
   getAppBranding: () => DesktopAppBranding | null;
   /**
@@ -1089,6 +1104,9 @@ export interface DesktopBridge {
    * three live in the main process. Without this the renderer can only say that
    * secure storage is unavailable, which tells a user nothing about what to
    * install or start.
+   *
+   * Absent, or failing, the caller says
+   * `GENERIC_SECURE_STORAGE_UNAVAILABLE_MESSAGE` above.
    */
   getSecureStorageUnavailableReason?: () => Promise<string>;
   discoverSshHosts: () => Promise<readonly DesktopDiscoveredSshHost[]>;

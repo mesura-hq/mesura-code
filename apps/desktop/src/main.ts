@@ -94,12 +94,17 @@ const resolveDesktopSshCliRunner = (
       nodeEngineRange: serverPackageJson.engines.node,
     };
   }
+  // Null means Mesura Code publishes no npm package, so there is nothing to
+  // install on a remote host that has no server yet. Omit the spec rather than
+  // passing a name: the runner script then refuses with an actionable message
+  // instead of installing upstream's server and connecting the desktop to it.
+  const packageSpec = resolveRemoteT3CliPackageSpec({
+    appVersion: environment.appVersion,
+    updateChannel: settings.updateChannel,
+    isDevelopment: environment.isDevelopment,
+  });
   return {
-    packageSpec: resolveRemoteT3CliPackageSpec({
-      appVersion: environment.appVersion,
-      updateChannel: settings.updateChannel,
-      isDevelopment: environment.isDevelopment,
-    }),
+    ...(packageSpec === null ? {} : { packageSpec }),
     nodeEngineRange: serverPackageJson.engines.node,
   };
 };

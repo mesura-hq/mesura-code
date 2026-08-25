@@ -87,6 +87,10 @@ export function ServerUpdateAction({
   const updateServer = useAtomCommand(serverEnvironment.updateServer, {
     reportFailure: false,
   });
+  // Unreachable while PUBLISHED_SERVER_PACKAGE_NAME is null: the `command ===
+  // null` early return below fires on every `selfUpdate === null` render, so
+  // nothing calls this. The hook still has to run unconditionally (rules of
+  // hooks). Delete this only together with that early return.
   const { copyToClipboard } = useCopyToClipboard<{ command: string }>({
     target: "update command",
     onCopy: ({ command }) => {
@@ -129,7 +133,7 @@ export function ServerUpdateAction({
       toastManager.add({
         type: "success",
         title: `${serverLabel} updated`,
-        description: `Reconnected on t3@${result.value.targetVersion}.`,
+        description: `Reconnected on ${result.value.targetVersion}.`,
       });
     } finally {
       pendingUpdateEnvironmentIds.delete(environmentId);

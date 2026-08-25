@@ -2,6 +2,7 @@ import * as NodeCrypto from "node:crypto";
 
 import type { DesktopSshEnvironmentTarget, DesktopUpdateChannel } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { PUBLISHED_SERVER_PACKAGE_NAME } from "@t3tools/shared/stateHome";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -364,19 +365,39 @@ export const resolveSshTarget = Effect.fn("ssh/command.resolveSshTarget")(functi
   );
 });
 
+/**
+ * Which npm package the SSH launcher should install on a remote host that has
+ * no server yet, or `null` when there is none to install.
+ *
+ * This used to hardcode `t3`, which is UPSTREAM's package, not Mesura's. On a
+ * host with no Mesura Code server the launcher therefore installed a different
+ * product and connected the desktop to it — the same hazard the self-update
+ * gate closes, reached by a different road. The reuse branch hid it: a host
+ * that already runs a Mesura server never gets here.
+ *
+ * Returning null is a real answer, not a failure. The caller omits the package
+ * spec, and the generated runner script refuses with a message that names what
+ * to do instead of installing someone else's server.
+ */
 export function resolveRemoteT3CliPackageSpec(input: {
   readonly appVersion: string;
   readonly updateChannel: DesktopUpdateChannel;
   readonly isDevelopment?: boolean;
-}): string {
+}): string | null {
+  if (PUBLISHED_SERVER_PACKAGE_NAME === null) {
+    return null;
+  }
+
   const appVersion = input.appVersion.trim();
   if (!input.isDevelopment && PUBLISHABLE_T3_VERSION_PATTERN.test(appVersion)) {
-    return `t3@${appVersion}`;
+    return `${PUBLISHED_SERVER_PACKAGE_NAME}@${appVersion}`;
   }
 
   if (input.isDevelopment) {
-    return "t3@nightly";
+    return `${PUBLISHED_SERVER_PACKAGE_NAME}@nightly`;
   }
 
-  return input.updateChannel === "nightly" ? "t3@nightly" : "t3@latest";
+  return input.updateChannel === "nightly"
+    ? `${PUBLISHED_SERVER_PACKAGE_NAME}@nightly`
+    : `${PUBLISHED_SERVER_PACKAGE_NAME}@latest`;
 }

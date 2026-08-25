@@ -427,6 +427,14 @@ fi
 if command -v t3 >/dev/null 2>&1; then
   exec t3 "$@"
 fi
+# An empty package spec means Mesura Code publishes nothing to install from.
+# Refuse here rather than falling through to npm: the name this script would
+# otherwise resolve belongs to upstream, so installing it would hand the
+# desktop a different product that does not implement Mesura's own RPC methods.
+if [ -z @@T3_PACKAGE_SPEC@@ ]; then
+  printf 'No Mesura Code server is installed on this host, and Mesura Code publishes no npm package to install one from. Install the server on the remote host, then retry.\\n' >&2
+  exit 1
+fi
 # npm extracts a package before it runs the native builds of its dependencies,
 # so a failed build (t3 depends on node-pty, which needs a C toolchain) leaves
 # the npx cache without a t3 executable. \`npx --yes\` then exits 0 without
@@ -653,7 +661,10 @@ fi
 `;
 
 export function buildRemoteT3RunnerScript(input?: RemoteT3RunnerOptions): string {
-  const packageSpec = shellSingleQuote(input?.packageSpec?.trim() || "t3@latest");
+  // No fallback package name. The previous default was `t3@latest`, which is
+  // upstream's package — see resolveRemoteT3CliPackageSpec. An empty spec makes
+  // the generated script refuse with an actionable message instead.
+  const packageSpec = shellSingleQuote(input?.packageSpec?.trim() ?? "");
   const nodeScriptPath = input?.nodeScriptPath?.trim() || "";
   return stripTrailingNewlines(
     applyScriptPlaceholders(REMOTE_RUNNER_SCRIPT, {
@@ -703,7 +714,10 @@ export function buildRemoteStopScript(target: DesktopSshEnvironmentTarget): stri
   });
 }
 
-function buildRemoteLogTailScript(target: DesktopSshEnvironmentTarget): string {
+// Exported for the state-directory regression test only: it carries the same
+// `ssh-launch` path as the three scripts above, so it has to be pinned with
+// them or it is the one copy free to drift.
+export function buildRemoteLogTailScript(target: DesktopSshEnvironmentTarget): string {
   return applyScriptPlaceholders(REMOTE_LOG_TAIL_SCRIPT, {
     T3_STATE_KEY: remoteStateKey(target),
   });

@@ -2,6 +2,10 @@
 
 T3 Code is a web and desktop GUI for running coding agents on your machine.
 
+> **Note.** Mesura Code publishes no npm package. The `npx t3@…` commands below are inherited from
+> upstream and install _upstream's_ server, not this fork. Build and install Mesura Code by hand
+> instead, and read the commands below only as the shape of the upstream install.
+
 ## Requirements
 
 Node.js `^22.16 || ^23.11 || >=24.10` on the machine that runs the T3 Code server.

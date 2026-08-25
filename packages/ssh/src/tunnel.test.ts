@@ -16,6 +16,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { SshPasswordPrompt } from "./auth.ts";
 import {
   buildRemoteLaunchScript,
+  buildRemoteLogTailScript,
   buildRemotePairingScript,
   buildRemoteStopScript,
   buildRemoteT3RunnerScript,
@@ -106,11 +107,13 @@ describe("ssh tunnel scripts", () => {
 
     assert.include(script, "T3_NODE_SCRIPT_PATH=''");
     assert.include(script, 'exec t3 "$@"');
-    assert.include(script, "exec npx --yes 't3@latest' \"$@\"");
-    assert.include(script, "exec npm exec --yes 't3@latest' -- \"$@\"");
-    assert.include(script, "could not install 't3@latest'");
-    assert.include(script, "require_installed_t3_cli npx --yes --package 't3@latest'");
-    assert.include(script, "require_installed_t3_cli npm exec --yes --package 't3@latest'");
+    // Regression guard. The default used to be `t3@latest` — upstream's
+    // package — so a host with no Mesura server silently got a different
+    // product installed and the desktop connected to it. With no spec the
+    // script must refuse; it must never invent a package name.
+    assert.include(script, "if [ -z '' ]; then");
+    assert.include(script, "publishes no npm package to install one from");
+    assert.notInclude(script, "t3@latest");
     assert.include(script, "npm produced no t3 executable");
     assert.include(script, 'prepend_path_if_dir "$HOME/.local/bin"');
     assert.include(script, `T3_NODE_ENGINE_RANGE='${TEST_NODE_ENGINE_RANGE}'`);
@@ -128,6 +131,20 @@ describe("ssh tunnel scripts", () => {
     assert.include(script, "nvm use --silent default");
     assert.include(script, 'for T3_NODE_BIN in "$NVM_DIR"/versions/node/*/bin');
     assert.notInclude(script, "ensure $NVM_DIR/nvm.sh is available");
+  });
+
+  it("still installs from an explicit package spec once one exists", () => {
+    const script = buildRemoteT3RunnerScript({ packageSpec: "mesura-code-server@1.2.3" });
+
+    assert.include(script, "exec npx --yes 'mesura-code-server@1.2.3' \"$@\"");
+    assert.include(script, "exec npm exec --yes 'mesura-code-server@1.2.3' -- \"$@\"");
+    assert.include(
+      script,
+      "require_installed_t3_cli npx --yes --package 'mesura-code-server@1.2.3'",
+    );
+    // The refusal guard stays in the script but tests a non-empty string, so it
+    // never fires. Only its subject changes with the spec.
+    assert.include(script, "if [ -z 'mesura-code-server@1.2.3' ]; then");
   });
 
   it("does not hard-code a remote node engine range", () => {
@@ -255,6 +272,7 @@ describe("ssh tunnel scripts", () => {
 
     for (const script of [
       buildRemoteLaunchScript(),
+      buildRemoteLogTailScript(target),
       buildRemotePairingScript(target),
       buildRemoteStopScript(target),
     ]) {
@@ -263,6 +281,11 @@ describe("ssh tunnel scripts", () => {
     }
 
     assert.include(buildRemoteLaunchScript(), `DEFAULT_SERVER_HOME="${REMOTE_DEFAULT_STATE_HOME}"`);
+
+    // These scripts interpolate the value raw into POSIX `sh`, so a space or a
+    // shell metacharacter in it would not fail loudly — it would split a word
+    // and write state somewhere else.
+    assert.match(REMOTE_DEFAULT_STATE_HOME, /^\$HOME\/[A-Za-z0-9._-]+$/u);
   });
 
   it.effect("accepts launch JSON after remote shell startup noise", () => {

@@ -1,5 +1,6 @@
 import { ConnectionTransientError } from "@t3tools/client-runtime/connection";
 import { ConnectionCatalogDocument } from "@t3tools/client-runtime/platform";
+import { GENERIC_SECURE_STORAGE_UNAVAILABLE_MESSAGE } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -70,7 +71,7 @@ describe("makeCatalogBackend", () => {
       const error = yield* backend.write("{}").pipe(Effect.flip);
 
       expect(error).toBeInstanceOf(ConnectionTransientError);
-      expect(error.message).toContain("Desktop secure storage is unavailable");
+      expect(error.message).toContain(GENERIC_SECURE_STORAGE_UNAVAILABLE_MESSAGE);
       expect(setConnectionCatalog).toHaveBeenCalledWith("{}");
     }),
   );
@@ -114,7 +115,46 @@ describe("makeCatalogBackend", () => {
 
       const error = yield* backend.write("{}").pipe(Effect.flip);
 
-      expect(error.message).toContain("Desktop secure storage is unavailable");
+      expect(error.message).toContain(GENERIC_SECURE_STORAGE_UNAVAILABLE_MESSAGE);
+    }),
+  );
+
+  // A desktop build older than `getSecureStorageUnavailableReason` exposes no
+  // such method at all. That is a different branch from the rejecting one
+  // above: it is taken inside the suspend, before any promise exists.
+  it.effect("falls back to the generic wording when the bridge has no reason method", () =>
+    Effect.gen(function* () {
+      vi.stubGlobal("window", {
+        desktopBridge: {
+          getConnectionCatalog: vi.fn().mockResolvedValue(null),
+          setConnectionCatalog: vi.fn().mockResolvedValue(false),
+        },
+      });
+      const backend = makeCatalogBackend({} as IDBDatabase);
+
+      const error = yield* backend.write("{}").pipe(Effect.flip);
+
+      expect(error.message).toContain(GENERIC_SECURE_STORAGE_UNAVAILABLE_MESSAGE);
+    }),
+  );
+
+  // A reason that is only whitespace is an answer in form and not in content.
+  // Trimming it back to the generic sentence keeps a blank line out of the
+  // error a user reads.
+  it.effect("falls back to the generic wording when the desktop answers with whitespace", () =>
+    Effect.gen(function* () {
+      vi.stubGlobal("window", {
+        desktopBridge: {
+          getConnectionCatalog: vi.fn().mockResolvedValue(null),
+          setConnectionCatalog: vi.fn().mockResolvedValue(false),
+          getSecureStorageUnavailableReason: vi.fn().mockResolvedValue("   "),
+        },
+      });
+      const backend = makeCatalogBackend({} as IDBDatabase);
+
+      const error = yield* backend.write("{}").pipe(Effect.flip);
+
+      expect(error.message).toContain(GENERIC_SECURE_STORAGE_UNAVAILABLE_MESSAGE);
     }),
   );
 });

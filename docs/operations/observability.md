@@ -183,7 +183,7 @@ Resolve the path for the launch mode once. Production and explicitly configured 
 state under the base directory's `userdata` folder:
 
 ```bash
-TRACE_FILE="${T3CODE_HOME:-$HOME/.t3}/userdata/logs/server.trace.ndjson"
+TRACE_FILE="${T3CODE_HOME:-$HOME/.mesura-code}/userdata/logs/server.trace.ndjson"
 ```
 
 A dev server started from a linked worktree defaults to that worktree's local home:
@@ -195,7 +195,7 @@ TRACE_FILE="$WORKTREE/.t3/userdata/logs/server.trace.ndjson"
 Only an implicit dev run outside a linked worktree uses the shared dev directory:
 
 ```bash
-TRACE_FILE="$HOME/.t3/dev/logs/server.trace.ndjson"
+TRACE_FILE="$HOME/.mesura-code/dev/logs/server.trace.ndjson"
 ```
 
 Tail the selected file:

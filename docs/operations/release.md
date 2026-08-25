@@ -191,7 +191,9 @@ connect the new client to a server on the previous version and verify that the u
 reconnects to the matching server. Use releases with identical migration manifests for the
 automatic path. When the manifest changed, verify that the remote action stops before restart and
 shows the exact local `npx t3@<version> service update` command. Also test the manual or
-desktop-managed guidance when those environments are available.
+desktop-managed guidance when those environments are available. (`t3` is upstream's package name;
+this fork publishes nothing, so `PUBLISHED_SERVER_PACKAGE_NAME` is `null` and no such command is
+offered.)
 
 ## Desktop auto-update notes
 

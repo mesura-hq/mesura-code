@@ -1,5 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { expect, it } from "@effect/vitest";
+import { describe, expect, it } from "@effect/vitest";
 import { HostProcessExecutablePath } from "@t3tools/shared/hostProcess";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -13,6 +13,16 @@ import * as ProcessRunner from "../processRunner.ts";
 import * as ServiceLauncherClient from "./serviceLauncherClient.ts";
 import { SERVICE_LAUNCHER_PROTOCOL } from "./serviceProtocol.ts";
 import * as ServerSelfUpdate from "./selfUpdate.ts";
+import { resolveServerSelfUpdateCapability } from "./selfUpdate.ts";
+
+/**
+ * A stand-in for a package Mesura Code might one day publish.
+ *
+ * Deliberately not `t3`: that is upstream's package, and spelling it here would
+ * reintroduce the literal these commits removed and imply the fork would
+ * publish under it.
+ */
+const TEST_PUBLISHED_PACKAGE_NAME = "mesura-code-server-test";
 
 interface HarnessOptions {
   readonly mode?: "web" | "desktop";
@@ -36,7 +46,12 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
           order.push("install");
           const prefix = input.args[input.args.indexOf("--prefix") + 1];
           if (prefix === undefined) return yield* Effect.die("missing npm prefix");
-          const entry = path.join(prefix, "node_modules", "t3", "dist", "bin.mjs");
+          // npm creates the directory named after the package it installed, so
+          // derive it from the install argument. Hardcoding a name here would let
+          // the install spec and the resolved entry path drift apart silently.
+          const spec = input.args[input.args.length - 1] ?? "";
+          const packageDir = spec.slice(0, spec.lastIndexOf("@"));
+          const entry = path.join(prefix, "node_modules", packageDir, "dist", "bin.mjs");
           yield* fs.makeDirectory(path.dirname(entry), { recursive: true }).pipe(Effect.orDie);
           yield* fs.writeFileString(entry, "export {};\n").pipe(Effect.orDie);
           return {
@@ -92,7 +107,9 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
   // itself is pinned separately, below.
   const selfUpdate = yield* ServerSelfUpdate.make({
     publishedPackageName:
-      options.publishedPackageName === undefined ? "t3" : options.publishedPackageName,
+      options.publishedPackageName === undefined
+        ? TEST_PUBLISHED_PACKAGE_NAME
+        : options.publishedPackageName,
   }).pipe(
     Effect.provideService(ProcessRunner.ProcessRunner, runner),
     Effect.provideService(ServiceLauncherClient.ServiceLauncherClient, launcher),
@@ -173,4 +190,50 @@ it.layer(NodeServices.layer)("server self update", (it) => {
       expect(order).toEqual([]);
     }),
   );
+});
+
+// The resolver calls itself "the only gate", and the descriptor a client reads
+// comes straight from it — so what it advertises is what decides whether the UI
+// offers an update button at all. Pin every branch directly: the runtime
+// refusal above passes even if the unpublished-package condition is deleted
+// from here, because `update` would still fail for other reasons.
+describe("resolveServerSelfUpdateCapability", () => {
+  it("prefers desktop-managed over the published-package gate", () => {
+    expect(
+      resolveServerSelfUpdateCapability({
+        desktopManaged: true,
+        launcherManaged: true,
+        publishedPackageName: null,
+      }),
+    ).toBe("desktop-managed");
+  });
+
+  it("advertises nothing while Mesura Code publishes no package", () => {
+    expect(
+      resolveServerSelfUpdateCapability({ desktopManaged: false, launcherManaged: true }),
+    ).toBeNull();
+  });
+
+  it("advertises boot-service once a package exists and a launcher manages the server", () => {
+    expect(
+      resolveServerSelfUpdateCapability({
+        desktopManaged: false,
+        launcherManaged: true,
+        publishedPackageName: TEST_PUBLISHED_PACKAGE_NAME,
+      }),
+    ).toBe("boot-service");
+  });
+
+  // An explicit null must mean "unpublished", not "not supplied". `??` would
+  // fall back to the constant here and disagree with `make`, which uses a
+  // destructuring default that only fires on undefined.
+  it("treats an explicit null as unpublished rather than as absent", () => {
+    expect(
+      resolveServerSelfUpdateCapability({
+        desktopManaged: false,
+        launcherManaged: true,
+        publishedPackageName: null,
+      }),
+    ).toBeNull();
+  });
 });

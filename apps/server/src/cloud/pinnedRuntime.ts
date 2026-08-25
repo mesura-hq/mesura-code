@@ -6,14 +6,21 @@ import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
 import * as Semaphore from "effect/Semaphore";
 
+import { PUBLISHED_SERVER_PACKAGE_NAME } from "@t3tools/shared/stateHome";
+
 import * as ProcessRunner from "../processRunner.ts";
 
 /**
- * A pinned runtime is an exact `t3@<version>` npm-installed into
+ * A pinned runtime is an exact `<package>@<version>` npm-installed into
  * <baseDir>/runtime/versions/<version>. The boot service points its unit or
  * launch agent here, and server self-update installs the target version here before
- * switching over, never `npx t3`, whose cache is ephemeral and whose
+ * switching over, never `npx`, whose cache is ephemeral and whose
  * registry fetch at boot would make startup depend on the network.
+ *
+ * The package name is Mesura Code's, and Mesura Code publishes none — so every
+ * install below refuses. It used to say `t3`, which is UPSTREAM's package: both
+ * routes that reach here (`t3 service install` and server self-update) would
+ * have installed a different product and registered it as the boot service.
  */
 
 const PINNED_RUNTIME_DIR = "runtime";
@@ -28,15 +35,32 @@ export interface PinnedRuntimePaths {
   readonly sentinelPath: string;
 }
 
+/**
+ * The directory npm creates under `node_modules` for the installed runtime.
+ *
+ * It must match the package the install actually fetches, or `entryPath` points
+ * at a directory npm never created. The literal is only a placeholder for the
+ * unpublished case, where nothing installs and no such directory can exist —
+ * it is never a package name this code fetches.
+ */
+const runtimePackageDir = (packageName: string | null): string => packageName ?? "unpublished";
+
 export function pinnedRuntimePaths(
   path: Path.Path,
   baseDir: string,
   version: string,
+  packageName: string | null = PUBLISHED_SERVER_PACKAGE_NAME,
 ): PinnedRuntimePaths {
   const versionDir = path.join(baseDir, PINNED_RUNTIME_DIR, "versions", version);
   return {
     versionDir,
-    entryPath: path.join(versionDir, "node_modules", "t3", "dist", "bin.mjs"),
+    entryPath: path.join(
+      versionDir,
+      "node_modules",
+      runtimePackageDir(packageName),
+      "dist",
+      "bin.mjs",
+    ),
     sentinelPath: path.join(versionDir, ".install-complete"),
   };
 }
@@ -79,6 +103,13 @@ export class PinnedRuntimePreflightBlockedError extends Schema.TaggedErrorClass<
  */
 interface PinnedRuntimeInstallInput {
   readonly baseDir: string;
+  /**
+   * The npm package to install. Callers must resolve it from
+   * `PUBLISHED_SERVER_PACKAGE_NAME` and refuse before calling when it is null —
+   * this file must never fall back to a name, because the one it used to
+   * hardcode, `t3`, belongs to upstream.
+   */
+  readonly packageName: string;
   readonly version: string;
   readonly fs: FileSystem.FileSystem;
   readonly path: Path.Path;
@@ -92,7 +123,7 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
   input: PinnedRuntimeInstallInput,
 ) {
   const { fs, runner } = input;
-  const paths = pinnedRuntimePaths(input.path, input.baseDir, input.version);
+  const paths = pinnedRuntimePaths(input.path, input.baseDir, input.version, input.packageName);
   const [versionDirExists, entryExists, sentinel] = yield* Effect.all([
     fs.exists(paths.versionDir),
     fs.exists(paths.entryPath),
@@ -146,7 +177,13 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
     );
   const stagingPaths: PinnedRuntimePaths = {
     versionDir: stagingDir,
-    entryPath: input.path.join(stagingDir, "node_modules", "t3", "dist", "bin.mjs"),
+    entryPath: input.path.join(
+      stagingDir,
+      "node_modules",
+      runtimePackageDir(input.packageName),
+      "dist",
+      "bin.mjs",
+    ),
     sentinelPath: input.path.join(stagingDir, ".install-complete"),
   };
 
@@ -155,7 +192,16 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
     yield* runner
       .run({
         command: "npm",
-        args: ["install", "--prefix", stagingDir, "--no-fund", "--no-audit", `t3@${input.version}`],
+        // Never the literal `t3` — that is upstream's package, and installing it
+        // would register a different product as this machine's boot service.
+        args: [
+          "install",
+          "--prefix",
+          stagingDir,
+          "--no-fund",
+          "--no-audit",
+          `${input.packageName}@${input.version}`,
+        ],
         // Native dependencies may compile from source on slower machines.
         timeout: PINNED_RUNTIME_INSTALL_TIMEOUT,
       })

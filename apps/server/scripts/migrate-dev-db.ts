@@ -29,6 +29,7 @@ import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeOS from "node:os";
 import { resolveWorktreeT3Home } from "@t3tools/shared/devHome";
+import { DEFAULT_STATE_HOME_DIR_NAME } from "@t3tools/shared/stateHome";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -362,7 +363,7 @@ export const runMigrateDevDb = Effect.fn("runMigrateDevDb")(function* (
   const path = yield* Path.Path;
 
   const sharedHome = path.resolve(
-    options.sharedHome ?? path.join(NodeOS.homedir(), ".mesura-code"),
+    options.sharedHome ?? path.join(NodeOS.homedir(), DEFAULT_STATE_HOME_DIR_NAME),
   );
   const sourcePath = path.resolve(
     input.source ?? path.join(sharedHome, "userdata", "state.sqlite"),

@@ -3,6 +3,7 @@ import {
   HostProcessPlatform,
   HostProcessUserId,
 } from "@t3tools/shared/hostProcess";
+import { PUBLISHED_SERVER_PACKAGE_NAME } from "@t3tools/shared/stateHome";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -436,7 +437,18 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
   readonly logsDir: string;
   readonly cliVersion: string;
   readonly host?: BootServiceHost;
+  /**
+   * The npm package `install` fetches into the pinned runtime. Production takes
+   * the default, which is the fork's real answer: none, so `install` refuses.
+   * Tests name one so the install, repair and uninstall machinery stays covered
+   * — the fork disabled the registry path, it did not delete it.
+   */
+  readonly publishedPackageName?: string | null;
 }) {
+  const publishedPackageName =
+    input.publishedPackageName === undefined
+      ? PUBLISHED_SERVER_PACKAGE_NAME
+      : input.publishedPackageName;
   const hostExecPath = yield* HostProcessExecutablePath;
   const platform = yield* HostProcessPlatform;
   const uid = yield* HostProcessUserId;
@@ -451,7 +463,12 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
   const logPath = path.join(input.logsDir, "boot-service.log");
   const launcherPath = path.join(input.baseDir, "runtime", SERVICE_LAUNCHER_FILE);
   const statePath = path.join(input.baseDir, "runtime", SERVICE_STATE_FILE);
-  const runtimePaths = pinnedRuntimePaths(path, input.baseDir, input.cliVersion);
+  const runtimePaths = pinnedRuntimePaths(
+    path,
+    input.baseDir,
+    input.cliVersion,
+    publishedPackageName,
+  );
   const launcherSourcePath =
     host.launcherSourcePath ??
     path.join(path.dirname(runtimePaths.entryPath), SERVICE_LAUNCHER_FILE);
@@ -535,9 +552,22 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
       .makeDirectory(input.logsDir, { recursive: true })
       .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
 
+    // `t3 service install` reaches the same npm install the self-update gate
+    // closed. Refuse here for the same reason: while Mesura Code publishes
+    // nothing, the name npm would resolve is upstream's `t3`, so this would
+    // register a different product as the machine's boot service.
+    if (publishedPackageName === null) {
+      return yield* new BootServiceInstallError({
+        cause: new PinnedRuntimeInstallError({
+          step: "resolving the package to install — Mesura Code publishes no npm package. Build the server and install it on this machine by hand, then point the service at it.",
+        }),
+      });
+    }
+
     // Prepare every immutable artifact before stopping the installed unit.
     yield* ensurePinnedRuntimeInstalled({
       baseDir: input.baseDir,
+      packageName: publishedPackageName,
       version: input.cliVersion,
       fs,
       path,

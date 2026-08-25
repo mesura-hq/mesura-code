@@ -3,6 +3,11 @@
 On Linux and macOS, T3 Code can run as a background service for your user, so it is ready without
 keeping a terminal open.
 
+> **Note.** Mesura Code publishes no npm package. The `npx t3@…` commands below are inherited from
+> upstream and install _upstream's_ server, not this fork. Build and install Mesura Code by hand on
+> the server machine instead, and read the commands below only as the shape of the service
+> operations.
+
 ## Manage the Service
 
 Install it with the latest T3 Code release:

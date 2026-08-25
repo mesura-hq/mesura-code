@@ -48,7 +48,16 @@ export function resolveServerSelfUpdateCapability(input: {
   /** Defaults to the fork's real answer; tests pass a name to exercise the machinery. */
   readonly publishedPackageName?: string | null;
 }): ServerSelfUpdateCapability | null {
-  const publishedPackageName = input.publishedPackageName ?? PUBLISHED_SERVER_PACKAGE_NAME;
+  // Check for `undefined`, not falsiness. `??` would treat an explicit null as
+  // "not supplied" and fall back to the constant, while `make` below uses a
+  // destructuring default that only fires on `undefined`. Once the constant is
+  // a real name the two hops would disagree, and this resolver would advertise
+  // `boot-service` for a service whose own failure message says there is no
+  // package to install.
+  const publishedPackageName =
+    input.publishedPackageName === undefined
+      ? PUBLISHED_SERVER_PACKAGE_NAME
+      : input.publishedPackageName;
   if (input.desktopManaged) return "desktop-managed" as const;
   if (publishedPackageName === null) return null;
   return input.launcherManaged ? ("boot-service" as const) : null;
@@ -107,6 +116,7 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* ({
       );
     }
     if (capability === null) {
+      // The capability above already decided; this only selects the wording.
       return yield* failWith(
         publishedPackageName === null
           ? "This Mesura Code server cannot update itself, because Mesura Code publishes no npm package to update from. Build the server and install it on the server machine by hand."
@@ -122,10 +132,18 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* ({
       return yield* failWith("A server update is already in progress.");
     }
 
+    // `capability !== null` above already proves this, but the compiler cannot
+    // see it and the install must never guess a name — the one it used to
+    // hardcode was upstream's.
+    if (publishedPackageName === null) {
+      return yield* failWith("Mesura Code publishes no npm package to install an update from.");
+    }
+
     return yield* Effect.gen(function* () {
       yield* reportProgress("downloading");
       const paths = yield* ensurePinnedRuntimeInstalled({
         baseDir: serverConfig.baseDir,
+        packageName: publishedPackageName,
         version: targetVersion,
         fs,
         path,

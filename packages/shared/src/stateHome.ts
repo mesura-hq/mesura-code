@@ -33,6 +33,12 @@ export const DEFAULT_STATE_HOME_DIR_NAME = ".mesura-code";
  * The same directory written as a shell expression, for the scripts that
  * packages/ssh sends to a remote host. `$HOME` stays unexpanded on purpose:
  * the remote user's home is not the local one.
+ *
+ * The value must contain no whitespace and no shell metacharacter. The remote
+ * scripts in packages/ssh/src/tunnel.ts interpolate it raw into generated POSIX
+ * `sh`, outside any quoting the generator controls, so a space would split a
+ * word and a metacharacter would be interpreted — either one writes state
+ * somewhere else, silently. packages/ssh/src/tunnel.test.ts pins the shape.
  */
 export const REMOTE_DEFAULT_STATE_HOME = `$HOME/${DEFAULT_STATE_HOME_DIR_NAME}`;
 

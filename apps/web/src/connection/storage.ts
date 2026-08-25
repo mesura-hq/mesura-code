@@ -18,7 +18,9 @@ import {
   ProfileStore,
 } from "@t3tools/client-runtime/connection";
 import {
+  type DesktopBridge,
   EnvironmentId,
+  GENERIC_SECURE_STORAGE_UNAVAILABLE_MESSAGE,
   OrchestrationShellSnapshot,
   OrchestrationThreadDetailSnapshot,
   ServerConfig,
@@ -26,6 +28,7 @@ import {
   VcsListRefsResult,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -258,26 +261,44 @@ export interface CatalogBackend {
 }
 
 /**
+ * How long to wait for the main process to name the keyring.
+ *
+ * This call sits on a path that previously failed instantly, so it must not be
+ * able to turn a refused save into a hang: answering reads desktop settings
+ * from disk, and a stalled home directory would otherwise leave the promise
+ * unsettled forever. A worse message beats a save that never returns.
+ */
+const SECURE_STORAGE_REASON_TIMEOUT = Duration.seconds(3);
+
+/**
  * What to tell a user whose desktop refused to store the credential.
  *
  * The main process knows which keyring it looked for; this renderer does not,
- * so it asks. The fallback keeps the old sentence for a desktop build too old
- * to answer — accurate, just not actionable.
+ * so it asks. A desktop build too old to answer falls back to the same sentence
+ * the main process says when it cannot name a keyring — accurate, just not
+ * actionable. The sentence is shared (`@t3tools/contracts`) so which of the two
+ * processes produced it cannot change what the user reads.
  */
-const SECURE_STORAGE_UNAVAILABLE_FALLBACK =
-  "Desktop secure storage is unavailable in this system context.";
-
-const secureStorageUnavailableReason: Effect.Effect<string> = Effect.suspend(() => {
-  const describe = window.desktopBridge?.getSecureStorageUnavailableReason;
-  return describe === undefined
-    ? Effect.succeed(SECURE_STORAGE_UNAVAILABLE_FALLBACK)
-    : Effect.tryPromise(() => describe()).pipe(
-        Effect.map((reason) =>
-          reason.trim().length > 0 ? reason : SECURE_STORAGE_UNAVAILABLE_FALLBACK,
-        ),
-        Effect.orElseSucceed(() => SECURE_STORAGE_UNAVAILABLE_FALLBACK),
-      );
-});
+const secureStorageUnavailableReason = (bridge: DesktopBridge): Effect.Effect<string> =>
+  Effect.suspend(() => {
+    const describe = bridge.getSecureStorageUnavailableReason;
+    if (describe === undefined) {
+      return Effect.succeed(GENERIC_SECURE_STORAGE_UNAVAILABLE_MESSAGE);
+    }
+    // Normalize inside the thunk, not in a later `Effect.map`. A bridge that
+    // resolves a non-string would make `.trim()` throw a defect, which
+    // `orElseSucceed` does not catch — the save would die instead of falling
+    // back to the generic wording.
+    return Effect.tryPromise(async () => {
+      const reason: unknown = await describe();
+      return typeof reason === "string" && reason.trim().length > 0
+        ? reason
+        : GENERIC_SECURE_STORAGE_UNAVAILABLE_MESSAGE;
+    }).pipe(
+      Effect.timeout(SECURE_STORAGE_REASON_TIMEOUT),
+      Effect.orElseSucceed(() => GENERIC_SECURE_STORAGE_UNAVAILABLE_MESSAGE),
+    );
+  });
 
 export function makeCatalogBackend(database: IDBDatabase): CatalogBackend {
   const bridge = window.desktopBridge;
@@ -295,7 +316,7 @@ export function makeCatalogBackend(database: IDBDatabase): CatalogBackend {
           Effect.flatMap((stored) =>
             stored
               ? Effect.void
-              : Effect.flatMap(secureStorageUnavailableReason, (reason) =>
+              : Effect.flatMap(secureStorageUnavailableReason(bridge), (reason) =>
                   Effect.fail(catalogError("save", reason)),
                 ),
           ),

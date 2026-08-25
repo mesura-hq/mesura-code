@@ -68,6 +68,9 @@ blocked when the installed launcher is too old. Upgrade the launcher once with:
 npx t3@<version> service update
 ```
 
+(`t3` is upstream's package name; this fork publishes nothing, so the command resolves upstream's
+server — see `PUBLISHED_SERVER_PACKAGE_NAME` in `packages/shared/src/stateHome.ts`.)
+
 The local command stops the unit, selects the new launcher and exact runtime, then restarts the
 service. Later releases, including releases with migrations, can use the remote trial path.
 

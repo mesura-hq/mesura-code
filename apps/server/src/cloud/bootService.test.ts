@@ -105,7 +105,7 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
   const sourceLauncher = path.join(home, "service-launcher.mjs");
   const statePath = path.join(baseDir, "runtime", "service-state.json");
   yield* fs.writeFileString(sourceLauncher, "export {};\n");
-  const runtime = pinnedRuntimePaths(path, baseDir, "1.2.3");
+  const runtime = pinnedRuntimePaths(path, baseDir, "1.2.3", "mesura-code-server-test");
   yield* fs.makeDirectory(path.dirname(runtime.entryPath), { recursive: true });
   yield* fs.writeFileString(runtime.entryPath, "export {};\n");
   yield* fs.writeFileString(
@@ -139,6 +139,7 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
     baseDir,
     logsDir: path.join(baseDir, "userdata", "logs"),
     cliVersion: "1.2.3",
+    publishedPackageName: "mesura-code-server-test",
     host: {
       execPath: "/usr/bin/node",
       ...(usePinnedLauncher ? {} : { launcherSourcePath: sourceLauncher }),

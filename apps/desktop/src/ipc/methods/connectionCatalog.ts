@@ -1,3 +1,4 @@
+import { GENERIC_SECURE_STORAGE_UNAVAILABLE_MESSAGE } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -9,10 +10,6 @@ import { resolveLinuxSecretStorageUnavailableMessage } from "../../linuxSecretSt
 import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
 import * as IpcChannels from "../channels.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
-
-/** Said when the platform has no keyring story worth naming, or none is known. */
-const GENERIC_SECURE_STORAGE_UNAVAILABLE_MESSAGE =
-  "Mesura Code could not reach this system's secure storage to save the credential.";
 
 export const getConnectionCatalog = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.GET_CONNECTION_CATALOG_CHANNEL,
