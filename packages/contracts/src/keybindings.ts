@@ -100,6 +100,11 @@ export const STATIC_KEYBINDING_COMMANDS = [
   // to a new name. A rename orphans the rule in every config that already has
   // it, silently.
   "question.toggleCollapse",
+  // Settle and un-settle in one command. Kept out of THREAD_KEYBINDING_COMMANDS
+  // because that group is traversal, dispatched by the sidebar; this acts on the
+  // open thread's lifecycle and is dispatched by the chat view. The rename
+  // warning above applies to this id too.
+  "thread.toggleSettled",
   ...CHAT_SCROLL_KEYBINDING_COMMANDS,
   ...MODEL_PICKER_KEYBINDING_COMMANDS,
   ...THREAD_KEYBINDING_COMMANDS,

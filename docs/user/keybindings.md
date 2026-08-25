@@ -109,12 +109,12 @@ Two situations make the shortcut do nothing. No question is waiting, so there is
 Or an approval prompt has taken the same panel, and approvals are answered rather than folded. Like
 the other `Alt` defaults, it is also off while the terminal has focus.
 
-Six defaults sit on `Alt` with a letter: `alt+e`, `alt+w`, `alt+b`, `alt+m`, `alt+q`, and `alt+u`.
-The app claims those chords before the character reaches the composer, which matters on two
+Seven defaults sit on `Alt` with a letter: `alt+e`, `alt+w`, `alt+b`, `alt+m`, `alt+q`, `alt+s`, and
+`alt+u`. The app claims those chords before the character reaches the composer, which matters on two
 platforms. On macOS `Option` composes characters — `Option+E` starts an acute accent, `Option+Q`
-types `œ`, and the others type symbols like `∑` and `µ` — so a default may be swallowed or may
-suppress a character you wanted. Firefox uses `Alt` with a letter for menu access keys. Rebind any of them in
-**Settings** → **Keybindings**.
+types `œ`, `Option+S` types `ß`, and the others type symbols like `∑` and `µ` — so a default may be
+swallowed or may suppress a character you wanted. Firefox uses `Alt` with a letter for menu access
+keys. Rebind any of them in **Settings** → **Keybindings**.
 
 On a Latin American layout, `AltGr+Q` types `@`. That is a different chord — the app sees `AltGr`
 as `Ctrl+Alt` — so `alt+q` never eats it.
@@ -166,6 +166,31 @@ wheel. Without that, the next chunk of a streaming reply would pull you back to 
 the shortcut. The tab pair is desktop-only, because browsers keep those two chords for their own tab
 strip; it is also inactive while the terminal has focus, since the terminal encodes `ctrl+tab`
 itself. `mod+1` through `mod+9` jump straight to a thread by position.
+
+### Settling a thread
+
+`thread.toggleSettled` settles the open thread, or brings a settled one back to Active, and
+defaults to `alt+s`. Note that `mod+s` is a different shortcut: it stashes the composer draft. Like
+the other composer shortcuts, it is inactive while the terminal has focus.
+
+Settling moves the thread out of the sidebar's Active list. The shortcut acts on the same state the
+banner above the composer reports and the thread's own menu offers, so the three can never disagree.
+
+A thread with live work cannot be settled: a running or starting session, a pending approval, a
+question waiting on you, or a message no turn has picked up yet. Settling one of those would hide
+it, so the shortcut reports the refusal instead. Un-settling has no such limit.
+
+A thread you have not sent a message to yet does not exist for the server, so the shortcut does
+nothing there. An environment whose server predates settling reports that instead of acting; update
+that server to use the shortcut against it.
+
+Un-settling pins the thread Active. The pin holds until real activity clears it, so a merged pull
+request or a long silence does not settle the thread again behind you.
+
+A press that arrives while the previous one is still travelling is ignored rather than queued. Over
+a remote connection the round trip is long enough to press twice, and the second press would read
+the state the first one has not changed yet — queueing it would settle a thread you asked to
+un-settle.
 
 ### Closing terminals and windows
 
