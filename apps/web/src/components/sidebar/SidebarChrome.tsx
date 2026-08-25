@@ -108,7 +108,6 @@ function SidebarUtilityItem({
   icon,
   label,
   onClick,
-  buttonRef,
   onPointerEnter,
   onPointerLeave,
   suppressTooltip = false,
@@ -116,7 +115,6 @@ function SidebarUtilityItem({
   icon: ReactNode;
   label: string;
   onClick: () => void;
-  buttonRef?: (element: HTMLButtonElement | null) => void;
   onPointerEnter?: () => void;
   onPointerLeave?: () => void;
   suppressTooltip?: boolean;
@@ -131,7 +129,6 @@ function SidebarUtilityItem({
               onClick={onClick}
               onPointerEnter={onPointerEnter}
               onPointerLeave={onPointerLeave}
-              ref={buttonRef}
               size="icon"
             >
               {icon}

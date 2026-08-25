@@ -108,7 +108,7 @@
  */
 [data-slot="popover-popup"]:has([data-usage-limits-panel]) {
   background: color-mix(in srgb, var(--popover) 20%, var(--card));
-  border-color: rgb(0 0 0 / 8%);
+  border-color: color-mix(in srgb, var(--foreground) 8%, transparent);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }

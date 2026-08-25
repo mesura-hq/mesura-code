@@ -7,7 +7,7 @@
  * person's Claude subscription and Codex subscription can carry the same
  * address and are still two separate accounts.
  *
- * @module usage/accountIdentity
+ * @module provider/accountIdentity
  */
 import type { AccountLimitsAccount, ProviderDriverKind } from "@t3tools/contracts";
 

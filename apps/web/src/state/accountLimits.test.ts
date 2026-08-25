@@ -158,12 +158,11 @@ describe("projectAccountLimits", () => {
       NOW,
     );
 
-    expect(result.rows.map((row) => row.accountLabel)).toEqual(["Codex", "Work account"]);
+    expect(result.rows.map((row) => row.providerLabel)).toEqual(["Codex", "Work account"]);
     expect(result.rows[1]?.accentColor).toBe("#4ade80");
-    expect(result.rows.map((row) => row.subtitle)).toEqual([
-      "home@example.com",
-      "work@example.com",
-    ]);
+    // Two names the user already set apart tell themselves apart; an address
+    // under each would be noise.
+    expect(result.rows.map((row) => row.subtitle)).toEqual([null, null]);
   });
 
   it("folds one subscription read from two environments into one row", () => {
@@ -338,7 +337,10 @@ describe("projectAccountLimits", () => {
     expect(result.rows.map((row) => percentOf(row))).toEqual([15, 65]);
   });
 
-  it("leaves out a provider whose CLI cannot answer a limits read", () => {
+  it("leaves out an errored provider that never produced a reading", () => {
+    // The case this exists for: a machine without the Codex CLI installed
+    // answers every read with a failure, and a permanent "Refresh failed" row
+    // reads as a broken subscription rather than as an absent provider.
     const result = projectAccountLimits(
       [
         environment({
@@ -355,12 +357,16 @@ describe("projectAccountLimits", () => {
           ],
           summary: summary([
             snapshot({ instanceId: "claudeAgent", driver: "claudeAgent", usedPercent: 10 }),
-            snapshot({
-              instanceId: "codex",
-              driver: "codex",
-              usedPercent: 0,
-              failed: true,
-            }),
+            {
+              providerInstanceId: ProviderInstanceId.make("codex"),
+              driver: ProviderDriverKind.make("codex"),
+              observation: null,
+              lastAttempt: {
+                attemptedAt: "2026-08-22T12:09:00.000Z",
+                status: "failed",
+                error: "Account-limit refresh failed.",
+              },
+            },
           ]),
         }),
       ],
@@ -368,6 +374,111 @@ describe("projectAccountLimits", () => {
     );
 
     expect(result.rows.map((row) => row.driver)).toEqual(["claudeAgent"]);
+  });
+
+  it("keeps a degraded provider that already reported a reading", () => {
+    // `ready` is a narrow bar. An instance can sit at `warning` and still be the
+    // one metering the account, so a reading already in hand keeps its row.
+    const result = projectAccountLimits(
+      [
+        environment({
+          id: "server",
+          label: "Server",
+          providers: [provider({ instanceId: "codex", driver: "codex", status: "warning" })],
+          summary: summary([snapshot({ instanceId: "codex", driver: "codex", usedPercent: 44 })]),
+        }),
+      ],
+      NOW,
+    );
+
+    expect(percentOf(result.rows[0])).toBe(44);
+  });
+
+  it("does not read `installed` as the gate", () => {
+    // The probe reports both, and only `status` says whether a read can answer.
+    const result = projectAccountLimits(
+      [
+        environment({
+          id: "server",
+          label: "Server",
+          providers: [provider({ instanceId: "codex", driver: "codex", installed: false })],
+          summary: summary([snapshot({ instanceId: "codex", driver: "codex", usedPercent: 12 })]),
+        }),
+      ],
+      NOW,
+    );
+
+    expect(percentOf(result.rows[0])).toBe(12);
+  });
+
+  it("keeps one address on two providers apart", () => {
+    const result = projectAccountLimits(
+      [
+        environment({
+          id: "local",
+          label: "Laptop",
+          providers: [
+            provider({ instanceId: "claudeAgent", driver: "claudeAgent" }),
+            provider({ instanceId: "codex", driver: "codex" }),
+          ],
+          summary: summary([
+            snapshot({
+              instanceId: "claudeAgent",
+              driver: "claudeAgent",
+              usedPercent: 30,
+              accountKey: "claudeAgent:dev@example.com",
+            }),
+            snapshot({
+              instanceId: "codex",
+              driver: "codex",
+              usedPercent: 70,
+              accountKey: "codex:dev@example.com",
+            }),
+          ]),
+        }),
+      ],
+      NOW,
+    );
+
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows.map((row) => percentOf(row))).toEqual([30, 70]);
+  });
+
+  it("does not fold an environment that reports no account into one that does", () => {
+    // The mixed-build case the optional contract fields exist for: an
+    // environment on an older build sends no account key and must keep its own
+    // row rather than inheriting another machine's numbers.
+    const providers = [provider({ instanceId: "codex", driver: "codex" })];
+    const result = projectAccountLimits(
+      [
+        environment({
+          id: "new",
+          label: "Updated",
+          providers,
+          summary: summary([
+            snapshot({
+              instanceId: "codex",
+              driver: "codex",
+              usedPercent: 30,
+              accountKey: "codex:dev@example.com",
+              accountLabel: "dev@example.com",
+            }),
+          ]),
+        }),
+        environment({
+          id: "old",
+          label: "Older build",
+          providers,
+          summary: summary([snapshot({ instanceId: "codex", driver: "codex", usedPercent: 55 })]),
+        }),
+      ],
+      NOW,
+    );
+
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows.map((row) => percentOf(row))).toEqual([30, 55]);
+    expect(result.rows[1]?.key.startsWith("#env:")).toBe(true);
+    expect(result.rows.map((row) => row.subtitle)).toEqual(["dev@example.com", "Older build"]);
   });
 
   it("chooses the newest duplicate only inside one environment and instance", () => {

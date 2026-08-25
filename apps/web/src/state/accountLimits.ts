@@ -3,6 +3,7 @@ import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 import {
   ACCOUNT_LIMITS_CONTRACT_VERSION,
+  accountLimitsWindowKey,
   type AccountLimitsSnapshot,
   type AccountLimitsSummary,
   type AccountLimitsWindow,
@@ -57,11 +58,9 @@ export type AccountLimitsRowState =
   | "refresh-failed"
   | "stale-refresh-failed";
 
-/** One window as it will be rendered, with the environment that reported it. */
+/** One window as it will be rendered, dated by the environment that reported it. */
 export interface AccountLimitsRowWindow {
   readonly window: AccountLimitsWindow;
-  readonly environmentId: EnvironmentId;
-  readonly environmentLabel: string;
   /** The reporting environment's current time, for the reset countdown. */
   readonly environmentNowMs: number | null;
   /** How old this number is on the environment that reported it. */
@@ -81,7 +80,7 @@ export interface AccountLimitsRow {
   readonly key: string;
   readonly driver: ProviderDriverKind;
   /** The provider instance's display name, e.g. "Claude". */
-  readonly accountLabel: string;
+  readonly providerLabel: string;
   readonly accentColor?: string | undefined;
   readonly plan: string | null;
   /**
@@ -138,7 +137,7 @@ function newestSnapshotsByInstance(
 }
 
 function rowState(snapshot: AccountLimitsSnapshot | null, nowMs: number): AccountLimitsRowState {
-  if (snapshot?.observation === null || snapshot === null) {
+  if (snapshot === null || snapshot.observation === null) {
     return snapshot?.lastAttempt.status === "failed" ? "refresh-failed" : "missing";
   }
   const observedAt = timestampMillis(snapshot.observation.observedAt);
@@ -193,17 +192,20 @@ function isSupportedDriver(driver: ProviderDriverKind): boolean {
 }
 
 /**
- * Only a provider that could answer a limits read belongs in this panel. An
- * instance whose CLI is missing reports a refresh failure forever, which reads
- * as a broken subscription rather than as a provider that is not installed here.
+ * Whether this instance belongs in the panel at all.
+ *
+ * An instance whose CLI is missing answers every read with a failure, and a row
+ * that says "Refresh failed" forever reads as a broken subscription rather than
+ * as a provider that is not installed here. But `ready` is a narrow bar — an
+ * instance can sit at `warning` and still be the one metering the account — so
+ * a reading we already hold keeps its row whatever the probe currently says.
  */
-function canReportAccountLimits(entry: ProviderInstanceEntry): boolean {
-  return isProviderInstancePickerReady(entry) && isSupportedDriver(entry.driverKind);
-}
-
-/** Windows are the same window across environments when their meter and id match. */
-function windowKey(window: AccountLimitsWindow): string {
-  return `${window.meter?.id ?? "primary"}:${window.id}`;
+function canReportAccountLimits(
+  entry: ProviderInstanceEntry,
+  snapshot: AccountLimitsSnapshot | null,
+): boolean {
+  if (!isSupportedDriver(entry.driverKind)) return false;
+  return isProviderInstancePickerReady(entry) || snapshot?.observation != null;
 }
 
 interface AccountLimitsCandidate {
@@ -216,7 +218,8 @@ interface AccountLimitsCandidate {
   readonly accentColor?: string | undefined;
   readonly snapshot: AccountLimitsSnapshot | null;
   readonly state: AccountLimitsRowState;
-  readonly accountLabel: string | null;
+  /** The account the provider named, when it named one. */
+  readonly accountName: string | null;
   readonly windows: ReadonlyArray<AccountLimitsRowWindow>;
   /** Age of this candidate's freshest window, for choosing what the row shows. */
   readonly readingAgeMs: number | null;
@@ -230,8 +233,6 @@ function candidateWindows(
   if (observation === null) return [];
   return selectVisibleAccountLimitWindows(observation.windows).map((window) => ({
     window,
-    environmentId: candidate.environmentId,
-    environmentLabel: candidate.environmentLabel,
     environmentNowMs: Number.isFinite(currentEnvironmentTime) ? currentEnvironmentTime : null,
     // A window carries its own date once the environment reports one. Older
     // environments date the whole observation, so fall back to that.
@@ -252,7 +253,7 @@ function freshestWindows(
   const chosen = new Map<string, AccountLimitsRowWindow>();
   for (const candidate of candidates) {
     for (const rowWindow of candidate.windows) {
-      const key = windowKey(rowWindow.window);
+      const key = accountLimitsWindowKey(rowWindow.window);
       const incumbent = chosen.get(key);
       if (incumbent === undefined || isFresher(rowWindow, incumbent)) chosen.set(key, rowWindow);
     }
@@ -274,14 +275,14 @@ function smallestAge(ages: ReadonlyArray<number | null>): number | null {
  * name, accent. The freshest reading wins so the row never labels itself from
  * a machine that has not talked to the provider in an hour.
  */
-function leadCandidate(
-  candidates: ReadonlyArray<AccountLimitsCandidate>,
-): AccountLimitsCandidate | undefined {
+function leadCandidate(candidates: ReadonlyArray<AccountLimitsCandidate>): AccountLimitsCandidate {
+  // A group only exists because a candidate was pushed into it, so the sort
+  // always has something to return.
   return [...candidates].sort((left, right) => {
     const leftAge = left.readingAgeMs ?? Number.POSITIVE_INFINITY;
     const rightAge = right.readingAgeMs ?? Number.POSITIVE_INFINITY;
     return leftAge - rightAge;
-  })[0];
+  })[0]!;
 }
 
 /**
@@ -305,12 +306,14 @@ export function projectAccountLimits(
     const snapshots = newestSnapshotsByInstance(environment.summary.snapshots);
     const currentEnvironmentTime = environmentNowMs(environment, nowMs);
     for (const entry of deriveProviderInstanceEntries(environment.providers)) {
-      if (!canReportAccountLimits(entry)) continue;
       const stored = snapshots.get(String(entry.instanceId));
       const snapshot = stored?.driver === entry.driverKind ? stored : null;
+      if (!canReportAccountLimits(entry, snapshot)) continue;
       const partial = {
         // An unnamed account cannot be folded, so it keys on where it was read.
-        groupKey: snapshot?.account?.key ?? `${environment.environmentId}:${entry.instanceId}`,
+        // The `#env:` prefix keeps that namespace apart from the account keys,
+        // which a driver kind always starts.
+        groupKey: snapshot?.account?.key ?? `#env:${environment.environmentId}:${entry.instanceId}`,
         environmentId: environment.environmentId,
         environmentLabel: environment.label,
         environmentNowMs: Number.isFinite(currentEnvironmentTime) ? currentEnvironmentTime : null,
@@ -319,7 +322,7 @@ export function projectAccountLimits(
         accentColor: entry.accentColor,
         snapshot,
         state: rowState(snapshot, currentEnvironmentTime),
-        accountLabel: snapshot?.account?.label ?? null,
+        accountName: snapshot?.account?.label ?? null,
       } satisfies Omit<AccountLimitsCandidate, "windows" | "readingAgeMs">;
       const windows = candidateWindows(partial, currentEnvironmentTime);
       const candidate: AccountLimitsCandidate = {
@@ -334,12 +337,12 @@ export function projectAccountLimits(
   }
 
   const rows = [...groups].map(([key, candidates]) => {
-    const lead = leadCandidate(candidates) ?? candidates[0]!;
+    const lead = leadCandidate(candidates);
     const windows = freshestWindows(candidates);
     return {
       key,
       driver: lead.driver,
-      accountLabel: lead.displayName,
+      providerLabel: lead.displayName,
       accentColor: lead.accentColor,
       plan: lead.snapshot?.observation?.plan ?? null,
       subtitle: null,
@@ -350,7 +353,7 @@ export function projectAccountLimits(
       windows,
       state: candidates.map((candidate) => candidate.state).reduce(bestRowState),
       readingAgeMs: smallestAge(windows.map((rowWindow) => rowWindow.ageMs)),
-      accountLabelText: lead.accountLabel,
+      accountName: lead.accountName,
     };
   });
 
@@ -367,29 +370,33 @@ export function projectAccountLimits(
 interface RowDraft extends Omit<AccountLimitsRow, "subtitle"> {
   readonly subtitle: null;
   /** The account the provider named, before we know whether it distinguishes. */
-  readonly accountLabelText: string | null;
+  readonly accountName: string | null;
 }
 
 /**
- * A row only needs a subtitle when another row of the same provider would read
- * the same. Then the account name tells them apart, or the environments do when
- * no account was named.
+ * A row only needs a subtitle when another row would read the same. Two Codex
+ * instances the user already named apart tell themselves apart, so counting per
+ * driver rather than per rendered title would put an address under both of them
+ * for nothing.
  */
 function withSubtitles(rows: ReadonlyArray<RowDraft>): ReadonlyArray<AccountLimitsRow> {
-  const perDriver = new Map<string, number>();
+  const titleOf = (row: { readonly driver: string; readonly providerLabel: string }) =>
+    `${row.driver}:${row.providerLabel}`;
+  const titles = new Map<string, number>();
   for (const row of rows) {
-    perDriver.set(row.driver, (perDriver.get(row.driver) ?? 0) + 1);
+    titles.set(titleOf(row), (titles.get(titleOf(row)) ?? 0) + 1);
   }
-  return rows.map(({ accountLabelText, ...row }) => {
-    if ((perDriver.get(row.driver) ?? 0) < 2) return { ...row, subtitle: null };
+  return rows.map(({ accountName, ...row }) => {
+    if ((titles.get(titleOf(row)) ?? 0) < 2) return { ...row, subtitle: null };
     const environmentLabels = [...new Set(row.environments.map((entry) => entry.label))];
     return {
       ...row,
-      subtitle: accountLabelText ?? environmentLabels.join(", "),
+      subtitle: accountName ?? environmentLabels.join(", "),
     };
   });
 }
 
+/** Exported for its unit test; `candidateWindows` above is the only caller. */
 export function selectVisibleAccountLimitWindows(
   windows: ReadonlyArray<AccountLimitsWindow>,
 ): ReadonlyArray<AccountLimitsWindow> {

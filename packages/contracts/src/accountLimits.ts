@@ -15,6 +15,8 @@ import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 export const ACCOUNT_LIMITS_CONTRACT_VERSION = 1 as const;
 
 const AccountLimitsErrorDetail = TrimmedNonEmptyString.check(Schema.isMaxLength(256));
+/** Provider-supplied and forwarded verbatim, so it is bounded like the rest. */
+const AccountLimitsIdentifier = TrimmedNonEmptyString.check(Schema.isMaxLength(256));
 const AccountLimitsPercent = Schema.Number.check(
   Schema.isFinite(),
   Schema.isBetween({ minimum: 0, maximum: 100 }),
@@ -55,8 +57,8 @@ export type AccountLimitsWindow = typeof AccountLimitsWindow.Type;
  * folded into another.
  */
 export const AccountLimitsAccount = Schema.Struct({
-  key: TrimmedNonEmptyString,
-  label: TrimmedNonEmptyString,
+  key: AccountLimitsIdentifier,
+  label: AccountLimitsIdentifier,
 });
 export type AccountLimitsAccount = typeof AccountLimitsAccount.Type;
 
@@ -93,3 +95,14 @@ export const AccountLimitsSummary = Schema.Struct({
   snapshots: Schema.Array(AccountLimitsSnapshot),
 });
 export type AccountLimitsSummary = typeof AccountLimitsSummary.Type;
+
+/**
+ * Identity of one window across readings.
+ *
+ * The server merges windows by it, the client folds environments by it, and
+ * React keys rows by it. Three copies of the formula is three chances for one
+ * to drift and for the merge to silently stop matching.
+ */
+export function accountLimitsWindowKey(window: AccountLimitsWindow): string {
+  return `${window.meter?.id ?? "primary"}:${window.id}`;
+}

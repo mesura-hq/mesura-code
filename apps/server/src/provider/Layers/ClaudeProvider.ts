@@ -44,7 +44,7 @@ import {
   spawnAndCollect,
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
-import { accountIdentityFromEmail } from "../../usage/accountIdentity.ts";
+import { accountIdentityFromEmail } from "../accountIdentity.ts";
 import type { AccountLimitsRead } from "../ProviderDriver.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
@@ -809,6 +809,14 @@ function claudeAccountIdentity(initializationResult: unknown): AccountLimitsAcco
   if (typeof initializationResult !== "object" || initializationResult === null) return undefined;
   const account = (initializationResult as { readonly account?: unknown }).account;
   if (typeof account !== "object" || account === null) return undefined;
+  // Only a first-party login is metered against a claude.ai subscription. The
+  // SDK leaves the account fields absent for Bedrock and Vertex, so the address
+  // check below already rejects those; this rejects a gateway or enterprise
+  // login that still names an address, because folding two environments on two
+  // different backends into one row would report one machine's numbers as the
+  // other's.
+  const apiProvider = (account as { readonly apiProvider?: unknown }).apiProvider;
+  if (apiProvider !== undefined && apiProvider !== "firstParty") return undefined;
   return accountIdentityFromEmail(
     ProviderDriverKind.make("claudeAgent"),
     (account as { readonly email?: unknown }).email,

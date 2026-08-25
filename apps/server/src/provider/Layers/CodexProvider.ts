@@ -37,7 +37,7 @@ import {
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
-import { accountIdentityFromEmail } from "../../usage/accountIdentity.ts";
+import { accountIdentityFromEmail } from "../accountIdentity.ts";
 import type { AccountLimitsRead } from "../ProviderDriver.ts";
 import packageJson from "../../../package.json" with { type: "json" };
 const isCodexAppServerSpawnError = Schema.is(CodexErrors.CodexAppServerSpawnError);
@@ -426,7 +426,10 @@ export const requestCodexAccountLimits = Effect.fn("requestCodexAccountLimits")(
       client.readAccountLimits(),
       client.readAccount().pipe(
         Effect.map(codexAccountIdentity),
-        Effect.catchCause(() => Effect.succeed(undefined)),
+        // Catch the typed failure only. `catchCause` would also swallow an
+        // interruption, and this whole read sits under a timeout — the timeout
+        // would then land as a successful reading with no account.
+        Effect.catch(() => Effect.succeed(undefined)),
       ),
     ],
     { concurrency: "unbounded" },

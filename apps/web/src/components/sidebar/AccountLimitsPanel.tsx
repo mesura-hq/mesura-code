@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { accountLimitsWindowKey } from "@t3tools/contracts";
 // A single circular arrow, not one of the two-arrow refresh glyphs: this panel
 // already says "Refresh failed" about the reading itself, and a window resetting
 // is a different event from Mesura Code re-reading it.
@@ -138,15 +139,24 @@ function formatCompactDuration(milliseconds: number): string {
 }
 
 /**
- * How long this window has left, with no leading words: the rotate icon beside
- * it carries the "resets in" meaning, and a screen reader gets that in text.
+ * How long this window has left.
+ *
+ * `shown` carries no leading words because the rotate icon beside it says what
+ * it is; `spoken` says it in full for anyone who cannot see that icon. They are
+ * separate because a window that has already reset shows "due", and "Resets in
+ * due" is not a sentence.
  */
-function resetRemaining(resetsAt: string | null, environmentNowMs: number | null): string | null {
+function resetRemaining(
+  resetsAt: string | null,
+  environmentNowMs: number | null,
+): { readonly shown: string; readonly spoken: string } | null {
   if (resetsAt === null || environmentNowMs === null) return null;
   const resetAtMs = Date.parse(resetsAt);
   if (!Number.isFinite(resetAtMs)) return null;
   const remaining = resetAtMs - environmentNowMs;
-  return remaining <= 0 ? "due" : formatCompactDuration(remaining);
+  if (remaining <= 0) return { shown: "due", spoken: "Reset due" };
+  const shown = formatCompactDuration(remaining);
+  return { shown, spoken: `Resets in ${shown}` };
 }
 
 function readingAgeLabel(readingAgeMs: number | null): string | null {
@@ -164,14 +174,16 @@ function AccountLimitRowView(props: { row: AccountLimitsRow }) {
         <ProviderInstanceIcon
           accentColor={row.accentColor}
           className="size-5"
-          displayName={row.accountLabel}
+          displayName={row.providerLabel}
           driverKind={row.driver}
           iconClassName="size-4 text-foreground/80"
           showBadge={Boolean(row.accentColor)}
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-1.5">
-            <span className="truncate text-xs font-medium text-foreground">{row.accountLabel}</span>
+            <span className="truncate text-xs font-medium text-foreground">
+              {row.providerLabel}
+            </span>
             {row.plan ? (
               <span className="truncate font-mono text-[10px] text-muted-foreground/65">
                 {row.plan}
@@ -196,7 +208,7 @@ function AccountLimitRowView(props: { row: AccountLimitsRow }) {
             const usedPercent = Math.round(window.usedPercent);
             const remaining = resetRemaining(window.resetsAt, rowWindow.environmentNowMs);
             return (
-              <div key={`${window.meter?.id ?? "primary"}:${window.id}`}>
+              <div key={accountLimitsWindowKey(window)}>
                 <div className="mb-1 flex items-center justify-between gap-3 font-mono text-[10px]">
                   <span className="text-muted-foreground">{window.label}</span>
                   <span className="flex items-center gap-1">
@@ -207,8 +219,8 @@ function AccountLimitRowView(props: { row: AccountLimitsRow }) {
                           className="size-2.5 shrink-0 text-muted-foreground/50"
                         />
                         <span className="text-muted-foreground/60">
-                          <span className="sr-only">Resets in </span>
-                          {remaining}
+                          <span className="sr-only">{remaining.spoken}</span>
+                          <span aria-hidden>{remaining.shown}</span>
                         </span>
                         <span aria-hidden className="text-muted-foreground/35">
                           ·
@@ -265,9 +277,9 @@ export function AccountLimitsPanelContent(props: {
         : "No account limits available";
   return (
     // `data-usage-limits-panel` is the hook `mesura.css` matches to give this
-    // popover the composer's glass instead of the default dropdown surface. It
-    // sits here, on a plain div we own, rather than on the popup itself, so the
-    // selector cannot break on how Base UI forwards props.
+    // popover an opaque surface of its own instead of the default dropdown
+    // glass. It sits here, on a plain div we own, rather than on the popup
+    // itself, so the selector cannot break on how Base UI forwards props.
     <div
       className="w-[21rem] max-w-[calc(100vw-1rem)]"
       aria-label="Usage limits"

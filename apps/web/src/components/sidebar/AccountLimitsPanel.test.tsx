@@ -40,7 +40,7 @@ function view(): AccountLimitsView {
       {
         key: "codex:dev@example.com",
         driver: ProviderDriverKind.make("codex"),
-        accountLabel: "Codex",
+        providerLabel: "Codex",
         plan: "pro",
         subtitle: "Laptop",
         environments: [{ environmentId, label: "Laptop" }],
@@ -54,8 +54,6 @@ function view(): AccountLimitsView {
               windowMinutes: 10_080,
               meter: { id: "codex", label: "Codex" },
             },
-            environmentId,
-            environmentLabel: "Laptop",
             environmentNowMs: Date.parse("2026-08-22T12:10:00.000Z"),
             ageMs: 60_000,
           },
@@ -90,8 +88,9 @@ describe("AccountLimitsPanelContent", () => {
     expect(markup).toContain("30%");
     // The rotate icon carries "resets in" visually; the words stay for readers
     // that cannot see it, so the countdown is never a bare duration.
-    expect(markup).toContain("Resets in ");
-    expect(markup).toContain("5h");
+    // The rotate icon carries "resets in" visually; the full sentence stays for
+    // readers that cannot see it.
+    expect(markup).toContain("Resets in 5h");
     expect(markup).toContain("1m ago");
     // `mesura.css` matches this attribute to give the popover the composer's
     // glass. Losing it drops the panel back to the default dropdown surface,

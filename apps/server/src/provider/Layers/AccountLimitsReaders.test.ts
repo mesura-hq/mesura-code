@@ -4,6 +4,8 @@ import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as TestClock from "effect/testing/TestClock";
 
+import * as CodexErrors from "effect-codex-app-server/errors";
+
 import { readClaudeAccountLimitsWithQuery } from "./ClaudeProvider.ts";
 import { buildCodexAppServerCommand, requestCodexAccountLimits } from "./CodexProvider.ts";
 
@@ -183,7 +185,15 @@ describe("Codex account-limit reader", () => {
           Effect.succeed({
             rateLimits: { limitId: "codex", primary: { usedPercent: 20 } },
           }),
-        readAccount: () => Effect.die(new Error("app-server refused the account read")),
+        // A typed failure, not a defect: the reader catches the error channel
+        // alone so an interruption still propagates.
+        readAccount: () =>
+          Effect.fail(
+            new CodexErrors.CodexAppServerTransportError({
+              operation: "read-input-stream",
+              cause: new Error("app-server refused the account read"),
+            }),
+          ),
       });
 
       assert.equal(result.account, undefined);
