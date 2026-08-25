@@ -98,6 +98,27 @@ describe("ServerUpdateAction", () => {
 
     expect(testState.toast).not.toHaveBeenCalled();
   });
+
+  // Every remote Mesura Code server takes this branch, because Mesura publishes
+  // no npm package and so advertises no self-update capability. The branch used
+  // to offer "Copy update command", and the command was `npx t3@<version>` —
+  // upstream's server, which would replace the user's fork server with a
+  // different product. Do not restore a copy button here without a package
+  // Mesura owns; see PUBLISHED_SERVER_PACKAGE_NAME.
+  it("offers no update command when there is no package to install", () => {
+    const markup = renderToStaticMarkup(
+      ServerUpdateAction({
+        environmentId: "env-test" as EnvironmentId,
+        serverLabel: "Test server",
+        selfUpdate: null,
+        targetVersion: "0.0.31",
+      }) as ReactElement,
+    );
+
+    expect(markup).toContain("Install a matching Mesura Code build");
+    expect(markup).not.toContain("Copy update command");
+    expect(markup).not.toContain("npx t3@");
+  });
 });
 
 describe("ServerUpdateProgress", () => {

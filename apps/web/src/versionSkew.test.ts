@@ -7,6 +7,7 @@ import {
   buildVersionMismatchDismissalKey,
   dismissVersionMismatch,
   isVersionMismatchDismissed,
+  manualServerUpdateCommand,
   resolveServerConfigVersionMismatch,
   resolveServerSelfUpdateCapability,
   resolveVersionMismatch,
@@ -104,7 +105,17 @@ describe("versionSkew", () => {
       "Update the desktop app that runs the Desktop server.",
     );
     expect(serverUpdateGuidance(null, "Local server")).toBe(
-      "Relaunch the Local server with the copied command to sync them.",
+      "Install a matching Mesura Code build on the Local server's machine to sync them.",
     );
+  });
+
+  // Regression guard. `manualServerUpdateCommand` used to return
+  // `npx t3@<version>` unconditionally, which is upstream's package, not
+  // Mesura's. A user who copied it replaced their fork server with a different
+  // product that does not implement Mesura's own RPC methods, and nothing said
+  // so. Do not restore a hardcoded command here: while Mesura publishes
+  // nothing, the honest answer is that there is no command.
+  it("offers no update command while Mesura Code publishes no package", () => {
+    expect(manualServerUpdateCommand("9.9.9")).toBeNull();
   });
 });

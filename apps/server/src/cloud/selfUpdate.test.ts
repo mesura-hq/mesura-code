@@ -19,6 +19,7 @@ interface HarnessOptions {
   readonly managed?: boolean;
   readonly preflight?: "ready" | "blocked";
   readonly requestUpdate?: ServiceLauncherClient.ServiceLauncherClient["Service"]["requestUpdate"];
+  readonly publishedPackageName?: string | null;
 }
 
 const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
@@ -85,7 +86,14 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
   const config = yield* ServerConfig.ServerConfig.pipe(
     Effect.provide(ServerConfig.layerTest(process.cwd(), baseDir)),
   );
-  const selfUpdate = yield* ServerSelfUpdate.make().pipe(
+  // Mesura Code publishes nothing, so the real service refuses every registry
+  // update — see PUBLISHED_SERVER_PACKAGE_NAME. Name a package here so these
+  // tests still exercise staging, preflight and single-flight. The refusal
+  // itself is pinned separately, below.
+  const selfUpdate = yield* ServerSelfUpdate.make({
+    publishedPackageName:
+      options.publishedPackageName === undefined ? "t3" : options.publishedPackageName,
+  }).pipe(
     Effect.provideService(ProcessRunner.ProcessRunner, runner),
     Effect.provideService(ServiceLauncherClient.ServiceLauncherClient, launcher),
     Effect.provideService(HostProcessExecutablePath, "/usr/bin/node"),
@@ -147,6 +155,22 @@ it.layer(NodeServices.layer)("server self update", (it) => {
       );
       yield* Deferred.succeed(accepted, "launcher-id");
       expect((yield* Fiber.join(first)).updateId).toBe("launcher-id");
+    }),
+  );
+
+  // Regression guard for the fork. A boot-service update installs the server
+  // from the public npm registry, and Mesura Code publishes nothing there, so
+  // the name resolves to upstream's `t3` — a different product that does not
+  // implement Mesura's own RPC methods. The update used to run anyway and
+  // report success. Do not re-enable this path by advertising the capability;
+  // enable it by giving PUBLISHED_SERVER_PACKAGE_NAME a name Mesura owns.
+  it.effect("refuses a registry update while Mesura Code publishes no package", () =>
+    Effect.gen(function* () {
+      const { selfUpdate, order } = yield* makeHarness({ publishedPackageName: null });
+      expect(
+        (yield* selfUpdate.update({ targetVersion: "1.1.0" }).pipe(Effect.flip)).reason,
+      ).toContain("publishes no npm package");
+      expect(order).toEqual([]);
     }),
   );
 });

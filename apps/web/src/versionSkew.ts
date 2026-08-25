@@ -1,4 +1,5 @@
 import type { EnvironmentId, ServerConfig, ServerSelfUpdateCapability } from "@t3tools/contracts";
+import { PUBLISHED_SERVER_PACKAGE_NAME } from "@t3tools/shared/stateHome";
 import * as Schema from "effect/Schema";
 
 import { APP_VERSION } from "./branding";
@@ -57,9 +58,20 @@ export function resolveServerSelfUpdateCapability(
   return serverConfig?.environment.capabilities.serverSelfUpdate ?? null;
 }
 
-/** The command to hand users whose server cannot update itself. */
-export function manualServerUpdateCommand(targetVersion: string): string {
-  return `npx t3@${targetVersion}`;
+/**
+ * The command to hand users whose server cannot update itself, or `null` when
+ * there is no such command.
+ *
+ * Mesura Code publishes no npm package, so `npx t3@<version>` would install
+ * *upstream's* server over the user's — a different product that does not
+ * implement Mesura's own RPC methods. Handing someone a command that quietly
+ * replaces their server is worse than telling them there is no command, so
+ * return null and let the caller say so.
+ */
+export function manualServerUpdateCommand(targetVersion: string): string | null {
+  return PUBLISHED_SERVER_PACKAGE_NAME === null
+    ? null
+    : `npx ${PUBLISHED_SERVER_PACKAGE_NAME}@${targetVersion}`;
 }
 
 /** One sentence telling the user how to resolve version skew for a server,
@@ -75,7 +87,9 @@ export function serverUpdateGuidance(
     case "desktop-managed":
       return `Update the desktop app that runs the ${serverLabel}.`;
     default:
-      return `Relaunch the ${serverLabel} with the copied command to sync them.`;
+      return PUBLISHED_SERVER_PACKAGE_NAME === null
+        ? `Install a matching Mesura Code build on the ${serverLabel}'s machine to sync them.`
+        : `Relaunch the ${serverLabel} with the copied command to sync them.`;
   }
 }
 

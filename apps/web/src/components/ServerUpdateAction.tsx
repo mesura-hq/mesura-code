@@ -146,6 +146,16 @@ export function ServerUpdateAction({
 
   if (selfUpdate === null) {
     const command = manualServerUpdateCommand(targetVersion);
+    // Mesura Code publishes no package, so there is no command to copy. Say
+    // that plainly rather than offering a button that installs upstream's
+    // server over this one.
+    if (command === null) {
+      return (
+        <span className="text-muted-foreground text-xs">
+          Install a matching Mesura Code build on that machine to update this server.
+        </span>
+      );
+    }
     return (
       <Button size="xs" variant="outline" onClick={() => copyToClipboard(command, { command })}>
         Copy update command

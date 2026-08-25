@@ -6,6 +6,7 @@ import {
   type ServerSelfUpdateResult,
 } from "@t3tools/contracts";
 import { HostProcessExecutablePath } from "@t3tools/shared/hostProcess";
+import { PUBLISHED_SERVER_PACKAGE_NAME } from "@t3tools/shared/stateHome";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -27,11 +28,29 @@ import { isExactServiceVersion, SERVICE_LAUNCHER_PROTOCOL } from "./serviceProto
 
 const PREFLIGHT_TIMEOUT = Duration.seconds(30);
 
+/**
+ * What update path this server can honour, or `null` when it can only be
+ * replaced by hand.
+ *
+ * This is the only gate. Every caller must ask here rather than re-deriving the
+ * answer from `mode` and `launcher.managed`, because the fork adds a condition
+ * that has nothing to do with either: a `boot-service` update installs the
+ * server from the public npm registry, and the fork publishes nothing. While
+ * `PUBLISHED_SERVER_PACKAGE_NAME` is null that lookup resolves *upstream's*
+ * `t3`, so accepting an update would swap this server for a different product —
+ * one that does not implement the fork's own RPC methods — and would report
+ * success while doing it. Advertise nothing rather than a capability the fork
+ * cannot honour; the client then shows manual guidance instead of a button.
+ */
 export function resolveServerSelfUpdateCapability(input: {
   readonly desktopManaged: boolean;
   readonly launcherManaged: boolean;
+  /** Defaults to the fork's real answer; tests pass a name to exercise the machinery. */
+  readonly publishedPackageName?: string | null;
 }): ServerSelfUpdateCapability | null {
+  const publishedPackageName = input.publishedPackageName ?? PUBLISHED_SERVER_PACKAGE_NAME;
   if (input.desktopManaged) return "desktop-managed" as const;
+  if (publishedPackageName === null) return null;
   return input.launcherManaged ? ("boot-service" as const) : null;
 }
 
@@ -45,7 +64,18 @@ export class ServerSelfUpdate extends Context.Service<
   }
 >()("t3/cloud/selfUpdate/ServerSelfUpdate") {}
 
-export const make = Effect.fn("cloud.server_self_update.make")(function* () {
+export const make = Effect.fn("cloud.server_self_update.make")(function* ({
+  publishedPackageName = PUBLISHED_SERVER_PACKAGE_NAME,
+}: {
+  /**
+   * Which npm package a registry update would install. Production takes the
+   * default, which is the fork's real answer: none. Tests pass a name so the
+   * staging, preflight and single-flight machinery stays covered — the fork
+   * disabled that path, it did not delete it, and an upstream merge has to
+   * keep finding it here.
+   */
+  readonly publishedPackageName?: string | null;
+} = {}) {
   const serverConfig = yield* ServerConfig.ServerConfig;
   const launcher = yield* ServiceLauncherClient.ServiceLauncherClient;
   const runner = yield* ProcessRunner.ProcessRunner;
@@ -54,8 +84,15 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
   const execPath = yield* HostProcessExecutablePath;
   const inFlight = yield* Ref.make(false);
 
-  const capability: ServerSelfUpdateCapability | null =
-    serverConfig.mode === "desktop" ? "desktop-managed" : launcher.managed ? "boot-service" : null;
+  // Ask the gate above rather than re-deriving the answer here. This branch
+  // used to duplicate the resolver's logic, so the descriptor a client reads
+  // and the check this service enforces could disagree — and did, the moment
+  // the fork added the unpublished-package condition to only one of them.
+  const capability = resolveServerSelfUpdateCapability({
+    desktopManaged: serverConfig.mode === "desktop",
+    launcherManaged: launcher.managed,
+    publishedPackageName,
+  });
   const failWith = (reason: string, cause?: unknown) =>
     cause === undefined
       ? new ServerSelfUpdateError({ reason })
@@ -71,7 +108,9 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
     }
     if (capability === null) {
       return yield* failWith(
-        "Remote updates require the Mesura Code background service. Run `t3 service install` on the server machine.",
+        publishedPackageName === null
+          ? "This Mesura Code server cannot update itself, because Mesura Code publishes no npm package to update from. Build the server and install it on the server machine by hand."
+          : "Remote updates require the Mesura Code background service. Run `t3 service install` on the server machine.",
       );
     }
 
