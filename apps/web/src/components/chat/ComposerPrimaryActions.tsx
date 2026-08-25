@@ -13,6 +13,12 @@ interface PendingActionState {
   canAdvance: boolean;
   isResponding: boolean;
   isComplete: boolean;
+  /**
+   * The first question still missing an answer, or null when the set is
+   * complete. Optional so a caller that does not track it keeps the previous
+   * behaviour: the button then simply stays disabled on an incomplete set.
+   */
+  firstUnansweredQuestionIndex?: number | null | undefined;
 }
 
 interface ComposerPrimaryActionsProps {
@@ -41,9 +47,25 @@ export const formatPendingPrimaryActionLabel = (input: {
   isLastQuestion: boolean;
   isResponding: boolean;
   questionIndex: number;
+  // `| undefined` spelled out for `exactOptionalPropertyTypes`: the caller
+  // forwards an optional field straight through.
+  isComplete?: boolean | undefined;
+  firstUnansweredQuestionIndex?: number | null | undefined;
 }) => {
   if (input.isResponding) {
     return "Submitting...";
+  }
+  // The last question is answered and the set still is not, so an earlier
+  // answer is missing. One question is on screen at a time, so the button is
+  // the only place that can say WHICH one — and pressing it goes there.
+  if (
+    input.isLastQuestion &&
+    input.isComplete === false &&
+    input.firstUnansweredQuestionIndex !== undefined &&
+    input.firstUnansweredQuestionIndex !== null
+  ) {
+    const questionNumber = input.firstUnansweredQuestionIndex + 1;
+    return input.compact ? `Question ${questionNumber}` : `Answer question ${questionNumber}`;
   }
   if (input.compact) {
     return input.isLastQuestion ? "Submit" : "Next";
@@ -107,6 +129,26 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   );
 
   if (pendingAction) {
+    // Set when the question on screen is the last one, the set is still
+    // incomplete, and there is an earlier question to send the user back to.
+    const unansweredQuestionNumber =
+      pendingAction.isLastQuestion &&
+      !pendingAction.isComplete &&
+      pendingAction.firstUnansweredQuestionIndex !== undefined &&
+      pendingAction.firstUnansweredQuestionIndex !== null
+        ? pendingAction.firstUnansweredQuestionIndex + 1
+        : null;
+    // The question ON SCREEN decides whether this button works, on the last
+    // question as much as on any other. It used to read the whole set there
+    // instead, which left the button disabled with nothing to tell the user
+    // which earlier answer was missing.
+    const pendingPrimaryActionDisabled =
+      isEnvironmentUnavailable ||
+      pendingAction.isResponding ||
+      !pendingAction.canAdvance ||
+      (pendingAction.isLastQuestion &&
+        !pendingAction.isComplete &&
+        unansweredQuestionNumber === null);
     return (
       <div className={cn("flex items-center justify-end", compact ? "gap-1.5" : "gap-2")}>
         {isRunning ? renderStopGenerationButton(true) : null}
@@ -144,17 +186,20 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
             compact ? "px-3" : "px-4",
           )}
           {...pointerFocusProps}
-          disabled={
-            isEnvironmentUnavailable ||
-            pendingAction.isResponding ||
-            (pendingAction.isLastQuestion ? !pendingAction.isComplete : !pendingAction.canAdvance)
+          title={
+            unansweredQuestionNumber === null
+              ? undefined
+              : `Question ${unansweredQuestionNumber} has no answer yet`
           }
+          disabled={pendingPrimaryActionDisabled}
         >
           {formatPendingPrimaryActionLabel({
             compact,
             isLastQuestion: pendingAction.isLastQuestion,
             isResponding: pendingAction.isResponding,
             questionIndex: pendingAction.questionIndex,
+            isComplete: pendingAction.isComplete,
+            firstUnansweredQuestionIndex: pendingAction.firstUnansweredQuestionIndex,
           })}
         </Button>
       </div>

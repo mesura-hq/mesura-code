@@ -44,6 +44,45 @@ function renderPendingActions(isRunning: boolean) {
   );
 }
 
+function renderPendingSubmit(
+  pendingAction: Partial<{
+    questionIndex: number;
+    isLastQuestion: boolean;
+    canAdvance: boolean;
+    isResponding: boolean;
+    isComplete: boolean;
+    firstUnansweredQuestionIndex: number | null;
+  }> = {},
+  compact = false,
+) {
+  return renderToStaticMarkup(
+    createElement(ComposerPrimaryActions, {
+      compact,
+      pendingAction: {
+        questionIndex: 2,
+        isLastQuestion: true,
+        canAdvance: true,
+        isResponding: false,
+        isComplete: true,
+        firstUnansweredQuestionIndex: null,
+        ...pendingAction,
+      },
+      isRunning: true,
+      showPlanFollowUpPrompt: false,
+      promptHasText: false,
+      isSendBusy: false,
+      sendDisabledReason: null,
+      isConnecting: false,
+      isEnvironmentUnavailable: false,
+      isPreparingWorktree: false,
+      hasSendableContent: false,
+      onPreviousPendingQuestion: () => {},
+      onInterrupt: () => {},
+      onImplementPlanInNewThread: () => {},
+    }),
+  );
+}
+
 function renderStandaloneStop() {
   return renderToStaticMarkup(
     createElement(ComposerPrimaryActions, {
@@ -191,6 +230,33 @@ describe("formatPendingPrimaryActionLabel", () => {
     ).toBe("Submit answers");
   });
 
+  it("names the unanswered question when the set is still incomplete", () => {
+    expect(
+      formatPendingPrimaryActionLabel({
+        compact: false,
+        isLastQuestion: true,
+        isResponding: false,
+        questionIndex: 2,
+        isComplete: false,
+        firstUnansweredQuestionIndex: 0,
+      }),
+    ).toBe("Answer question 1");
+  });
+
+  // Callers that track no unanswered index keep the previous wording, which
+  // is what the optional fields are for.
+  it("keeps the plain submit wording when no unanswered index is supplied", () => {
+    expect(
+      formatPendingPrimaryActionLabel({
+        compact: false,
+        isLastQuestion: true,
+        isResponding: false,
+        questionIndex: 2,
+        isComplete: false,
+      }),
+    ).toBe("Submit answers");
+  });
+
   it("returns plural 'Submit answers' for higher question indices", () => {
     expect(
       formatPendingPrimaryActionLabel({
@@ -259,5 +325,42 @@ describe("ComposerPrimaryActions", () => {
 
     expect(markup).toContain('aria-label="Stop generation"');
     expect(markup).not.toContain('aria-label="Send message"');
+  });
+
+  // The dead end this replaces: on the last question the button read the
+  // WHOLE set, so a missing earlier answer left it disabled — and the prompt
+  // shows one question at a time, so nothing on screen said which one. The
+  // only way out was to cancel the prompt and answer everything again.
+  it("sends the user to the missing answer instead of sitting disabled", () => {
+    const markup = renderPendingSubmit({ isComplete: false, firstUnansweredQuestionIndex: 0 });
+
+    expect(markup).toContain("Answer question 1");
+    expect(markup).toContain('title="Question 1 has no answer yet"');
+    expect(markup).not.toContain('disabled=""');
+  });
+
+  it("shortens that label on a compact composer", () => {
+    expect(
+      renderPendingSubmit({ isComplete: false, firstUnansweredQuestionIndex: 1 }, true),
+    ).toContain("Question 2");
+  });
+
+  it("submits normally once every question is answered", () => {
+    const markup = renderPendingSubmit();
+
+    expect(markup).toContain("Submit answers");
+    expect(markup).not.toContain('disabled=""');
+  });
+
+  // The question ON SCREEN still governs the button, on the last question as
+  // much as on any other.
+  it("stays disabled while the question on screen has no answer", () => {
+    expect(
+      renderPendingSubmit({
+        canAdvance: false,
+        isComplete: false,
+        firstUnansweredQuestionIndex: 2,
+      }),
+    ).toContain('disabled=""');
   });
 });

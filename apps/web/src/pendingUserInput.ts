@@ -17,6 +17,13 @@ export interface PendingUserInputProgress {
   isLastQuestion: boolean;
   isComplete: boolean;
   canAdvance: boolean;
+  /**
+   * The first question still missing an answer, or null when every one of them
+   * has one. The submit control reads it to say WHICH answer is missing: the
+   * prompt shows one question at a time, so a set that cannot be submitted
+   * gives the user nothing to look at without it.
+   */
+  firstUnansweredQuestionIndex: number | null;
 }
 
 function normalizeDraftAnswer(value: string | undefined): string | null {
@@ -155,6 +162,7 @@ export function derivePendingUserInputProgress(
   const answeredQuestionCount = countAnsweredPendingUserInputQuestions(questions, draftAnswers);
   const isLastQuestion =
     questions.length === 0 ? true : normalizedQuestionIndex >= questions.length - 1;
+  const isComplete = buildPendingUserInputAnswers(questions, draftAnswers) !== null;
 
   return {
     questionIndex: normalizedQuestionIndex,
@@ -166,7 +174,46 @@ export function derivePendingUserInputProgress(
     usingCustomAnswer: customAnswer.trim().length > 0,
     answeredQuestionCount,
     isLastQuestion,
-    isComplete: buildPendingUserInputAnswers(questions, draftAnswers) !== null,
+    isComplete,
     canAdvance: Boolean(resolvedAnswer),
+    firstUnansweredQuestionIndex: isComplete
+      ? null
+      : findFirstUnansweredPendingUserInputQuestionIndex(questions, draftAnswers),
   };
+}
+
+/**
+ * What pressing the prompt's primary control does, given the question on
+ * screen and the answers gathered so far.
+ *
+ * Pure, and separate from the component, because every entry point converges
+ * here: the button, the Enter key, and a dictation delivered with submit
+ * enabled. The Enter path in particular never consults the button's disabled
+ * state, so a rule kept only in the markup was no rule at all.
+ */
+export type PendingUserInputAdvance =
+  | { kind: "blocked" }
+  | { kind: "submit" }
+  | { kind: "go-to-question"; questionIndex: number };
+
+export function decidePendingUserInputAdvance(
+  progress: PendingUserInputProgress,
+): PendingUserInputAdvance {
+  // Never leave the question on screen behind without an answer. Skipping it
+  // stranded the whole prompt: the last question then refused to submit and
+  // nothing said which answer was missing.
+  if (!progress.canAdvance) {
+    return { kind: "blocked" };
+  }
+  if (!progress.isLastQuestion) {
+    return { kind: "go-to-question", questionIndex: progress.questionIndex + 1 };
+  }
+  if (progress.isComplete) {
+    return { kind: "submit" };
+  }
+  // Last question answered, set still incomplete: an earlier answer is
+  // missing, so go back to it rather than refusing silently.
+  return progress.firstUnansweredQuestionIndex === null
+    ? { kind: "blocked" }
+    : { kind: "go-to-question", questionIndex: progress.firstUnansweredQuestionIndex };
 }

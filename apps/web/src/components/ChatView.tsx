@@ -101,6 +101,7 @@ import { type LegendListRef } from "@legendapp/list/react";
 import { getAnchoredTurnMetrics, type TimelineScrollMode } from "./chat/timelineScrollAnchoring";
 import {
   buildPendingUserInputAnswers,
+  decidePendingUserInputAdvance,
   derivePendingUserInputProgress,
   setPendingUserInputCustomAnswer,
   togglePendingUserInputOptionSelection,
@@ -5863,17 +5864,26 @@ function ChatViewContent(props: ChatViewProps) {
     [activePendingUserInput, composerRef],
   );
 
+  // Every way of moving the prompt forward lands here — the primary button,
+  // the Enter key, and a dictation delivered with submit enabled — so the
+  // rules live in `decidePendingUserInputAdvance` rather than in any one of
+  // them. Enter reaches `submitComposer` without ever reading the button's
+  // disabled state, which is how an unanswered question used to get skipped.
   const onAdvanceActivePendingUserInput = useCallback(() => {
     if (!activePendingUserInput || !activePendingProgress) {
       return;
     }
-    if (activePendingProgress.isLastQuestion) {
+    const advance = decidePendingUserInputAdvance(activePendingProgress);
+    if (advance.kind === "blocked") {
+      return;
+    }
+    if (advance.kind === "submit") {
       if (activePendingResolvedAnswers) {
         void onRespondToUserInput(activePendingUserInput.requestId, activePendingResolvedAnswers);
       }
       return;
     }
-    setActivePendingUserInputQuestionIndex(activePendingProgress.questionIndex + 1);
+    setActivePendingUserInputQuestionIndex(advance.questionIndex);
   }, [
     activePendingProgress,
     activePendingResolvedAnswers,

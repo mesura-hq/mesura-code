@@ -566,6 +566,7 @@ export interface ChatComposerProps {
     isLastQuestion: boolean;
     canAdvance: boolean;
     customAnswer: string;
+    firstUnansweredQuestionIndex: number | null;
     activeQuestion: { id: string; multiSelect?: boolean | undefined } | null;
   } | null;
   activePendingResolvedAnswers: Record<string, unknown> | null;
@@ -1301,6 +1302,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             canAdvance: activePendingProgress.canAdvance,
             isResponding: activePendingIsResponding,
             isComplete: Boolean(activePendingResolvedAnswers),
+            firstUnansweredQuestionIndex: activePendingProgress.firstUnansweredQuestionIndex,
           }
         : null,
     [activePendingIsResponding, activePendingProgress, activePendingResolvedAnswers],
@@ -2632,17 +2634,21 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     void addComposerImages(imageFiles);
   };
 
+  // Inserts at the end of whatever text the composer is currently presenting.
+  // With a question on screen that is the question's custom answer, which
+  // `applyPromptReplacement` writes through `onChangeActivePendingUserInputCustomAnswer`.
+  //
+  // ⚠ Do NOT add `pendingUserInputs.length > 0` back to this guard. It was
+  // there, and it is what broke dictation: refusing here sent the transcript
+  // down the caller's store fallback, which a question-bearing composer does
+  // not read — the words never became an answer, went nowhere visible, and
+  // the turn skipped that question. Editing IS allowed while a question is
+  // up; the editor is live and typing an answer by hand always worked.
   const insertComposerTextAtEnd = (
     text: string,
     options?: { ensureLeadingBoundary?: boolean },
   ): boolean => {
-    if (
-      text.length === 0 ||
-      isConnecting ||
-      isComposerApprovalState ||
-      pendingUserInputs.length > 0 ||
-      projectSelectionRequired
-    ) {
+    if (text.length === 0 || isConnecting || isComposerApprovalState || projectSelectionRequired) {
       return false;
     }
     const prompt = promptRef.current;
