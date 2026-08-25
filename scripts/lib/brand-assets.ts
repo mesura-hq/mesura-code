@@ -4,6 +4,11 @@ export const BRAND_ASSET_PATHS = {
   mobileAndroidNotificationIconPng: "apps/mobile/assets/android-notification-icon.png",
   mobileWidgetMarkSvg: "apps/mobile/assets/widget/T3Mark.svg",
   desktopMasterPng: "assets/mesura-code/desktop-master.png",
+  // The boot splash draws the cube alone, with no channel container behind it,
+  // so one mark serves every channel. The stage label is rendered as text next
+  // to it rather than baked into the artwork.
+  splashMarkSourcePng: "assets/mesura-code/splash-mark.png",
+  webSplashMarkPng: "apps/web/public/splash-mark.png",
   developmentMasterPng: "assets/mesura-code/development-master.png",
   developmentIconComposerProject: "assets/dev/app-icon.icon",
   developmentIosIconPng: "assets/dev/blueprint-ios-1024.png",

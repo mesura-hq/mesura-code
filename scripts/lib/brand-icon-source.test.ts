@@ -12,6 +12,13 @@ const APPROVED_PRODUCTION_SHA256 =
 const APPROVED_LOGO_128_SHA256 = "80d36634edb03a42044cc5a6199467c2a0764d5060dc6015ea64af304bffac00";
 const APPROVED_DESKTOP_SHA256 = "b16b7c50c80d41571e35f7e6b18b698baa06c6f3f33f9682bc65f8b6d81c405f";
 const EXPECTED_RASTER_SIZE = 1254;
+const EXPECTED_SPLASH_MARK_SIZE = 1024;
+/**
+ * Channel identity is a wordmark in the strip under the cube, not a coloured
+ * frame around it, so every row above this one has to match production byte
+ * for byte. The bound also keeps the wordmark clear of the Apple safe area.
+ */
+const CHANNEL_WORDMARK_BAND_TOP = 1097;
 
 const sourcePath = (relativePath: string) => `${REPOSITORY_ROOT}/${relativePath}`;
 const readSource = (relativePath: string) => NodeFS.readFileSync(sourcePath(relativePath));
@@ -47,6 +54,29 @@ function expectPixelRegionToEqual(
       .equals(expected.data.subarray(rowStart, rowEnd));
   }
   expect(everyRowMatches).toBe(true);
+}
+
+function countDifferingPixels(
+  actual: PNG,
+  expected: PNG,
+  region: {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+  },
+): number {
+  let differingPixels = 0;
+  for (let y = region.y; y < region.y + region.height; y += 1) {
+    for (let x = region.x; x < region.x + region.width; x += 1) {
+      const offset = (expected.width * y + x) * 4;
+      const isEqual = actual.data
+        .subarray(offset, offset + 4)
+        .equals(expected.data.subarray(offset, offset + 4));
+      if (!isEqual) differingPixels += 1;
+    }
+  }
+  return differingPixels;
 }
 
 function expectWellFormedSvgWithOnlyPaths(svg: string): void {
@@ -85,22 +115,57 @@ describe("Mesura Code icon sources", () => {
     const production = readPng("assets/mesura-code/production-master.png");
     const development = readPng("assets/mesura-code/development-master.png");
     const nightly = readPng("assets/mesura-code/nightly-master.png");
+    const wordmarkBand = {
+      x: 0,
+      y: CHANNEL_WORDMARK_BAND_TOP,
+      width: EXPECTED_RASTER_SIZE,
+      height: EXPECTED_RASTER_SIZE - CHANNEL_WORDMARK_BAND_TOP,
+    };
 
     for (const channel of [development, nightly]) {
       expect({ width: channel.width, height: channel.height }).toEqual({
         width: production.width,
         height: production.height,
       });
+      // Everything above the wordmark band is production's artwork verbatim,
+      // which is what rules out a channel frame around the cube.
       expectPixelRegionToEqual(channel, production, {
-        x: 250,
-        y: 157,
-        width: 754,
-        height: 940,
+        x: 0,
+        y: 0,
+        width: EXPECTED_RASTER_SIZE,
+        height: CHANNEL_WORDMARK_BAND_TOP,
       });
+      expect(countDifferingPixels(channel, production, wordmarkBand)).toBeGreaterThan(0);
     }
-    expect(rgbaAt(development, 32, 32)).toEqual([0, 99, 155, 255]);
-    expect(rgbaAt(nightly, 32, 32)).toEqual([117, 101, 199, 255]);
-    expect(rgbaAt(development, 32, 32)).not.toEqual(rgbaAt(nightly, 32, 32));
+
+    // A frame would tint the corners; a wordmark leaves them alone.
+    expect(rgbaAt(development, 32, 32)).toEqual(rgbaAt(production, 32, 32));
+    expect(rgbaAt(nightly, 32, 32)).toEqual(rgbaAt(production, 32, 32));
+    // DEV and NIGHTLY are different words, so the band cannot be shared art.
+    expect(countDifferingPixels(development, nightly, wordmarkBand)).toBeGreaterThan(0);
+  });
+
+  it("draws the boot splash mark as a container-free transparent cube", () => {
+    const splashMark = readPng("assets/mesura-code/splash-mark.png");
+
+    expect({ width: splashMark.width, height: splashMark.height }).toEqual({
+      width: EXPECTED_SPLASH_MARK_SIZE,
+      height: EXPECTED_SPLASH_MARK_SIZE,
+    });
+    // No field and no container: the corners and the full margin are clear, so
+    // the mark reads on a light splash background as well as a dark one.
+    for (const [x, y] of [
+      [0, 0],
+      [EXPECTED_SPLASH_MARK_SIZE - 1, 0],
+      [0, EXPECTED_SPLASH_MARK_SIZE - 1],
+      [EXPECTED_SPLASH_MARK_SIZE - 1, EXPECTED_SPLASH_MARK_SIZE - 1],
+      [EXPECTED_SPLASH_MARK_SIZE / 2, 0],
+    ]) {
+      expect(rgbaAt(splashMark, x!, y!)[3]).toBe(0);
+    }
+    expect(rgbaAt(splashMark, EXPECTED_SPLASH_MARK_SIZE / 2, EXPECTED_SPLASH_MARK_SIZE / 2)[3]).toBe(
+      255,
+    );
   });
 
   it("keeps the realistic master as the only full-color source at small sizes", () => {

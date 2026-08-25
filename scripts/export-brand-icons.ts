@@ -18,6 +18,12 @@ import { encodePngIco, readPngDimensions, WINDOWS_ICON_SIZES } from "./lib/icon-
 
 export const PINNED_LIBVIPS_VERSION = "8.18.3";
 
+/**
+ * The boot splash blocks first paint on this file, so it ships at 3x the 64px
+ * box the splash draws it in rather than at icon resolution.
+ */
+export const SPLASH_MARK_SIZE = 192;
+
 export interface VariantOutputs {
   readonly ios: string;
   readonly macos: string;
@@ -267,6 +273,13 @@ export async function collectGeneratedBrandAssets(
   generated.set(
     BRAND_ASSET_PATHS.productionLinuxIconPng,
     await renderRasterIcon(NodePath.join(repositoryRoot, BRAND_ASSET_PATHS.desktopMasterPng), 1024),
+  );
+  generated.set(
+    BRAND_ASSET_PATHS.webSplashMarkPng,
+    await renderRasterIcon(
+      NodePath.join(repositoryRoot, BRAND_ASSET_PATHS.splashMarkSourcePng),
+      SPLASH_MARK_SIZE,
+    ),
   );
   return generated;
 }

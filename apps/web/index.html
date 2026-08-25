@@ -441,8 +441,10 @@
         position: relative;
         z-index: 1;
         display: flex;
+        flex-direction: column;
         align-items: center;
         justify-content: center;
+        gap: 10px;
         width: 96px;
         height: 96px;
       }
@@ -452,6 +454,21 @@
         height: 64px;
         object-fit: contain;
       }
+
+      /* The mark itself carries no channel colour, so Dev and Nightly say so
+         here instead. Alpha and Latest stay unmarked and leave this empty. */
+      #boot-shell-stage {
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.18em;
+        line-height: 1;
+        opacity: 0.55;
+        text-transform: uppercase;
+      }
+
+      #boot-shell-stage[hidden] {
+        display: none;
+      }
     </style>
     <title>Mesura Code (Alpha)</title>
   </head>
@@ -459,10 +476,48 @@
     <div id="root">
       <div id="boot-shell">
         <div id="boot-shell-card" aria-label="Mesura Code splash screen">
-          <img id="boot-shell-logo" src="/apple-touch-icon.png" alt="Mesura Code" />
+          <img id="boot-shell-logo" src="/splash-mark.png" alt="Mesura Code" />
+          <span id="boot-shell-stage" hidden></span>
         </div>
       </div>
     </div>
+    <script>
+      (() => {
+        // Keep this script after the theme boot script in <head>:
+        // apps/web/src/themeBoot.test.ts reads the FIRST inline <script> block
+        // in this file, and would silently start asserting against this one.
+        //
+        // Keep this small boot-time copy in sync with apps/web/src/branding.ts
+        // so the stage reads the same before and after React mounts. Vite
+        // substitutes both placeholders; an unsubstituted one matches neither
+        // channel and falls through to the build mode.
+        const HOSTED_APP_CHANNEL = "%VITE_HOSTED_APP_CHANNEL%";
+        const MODE = "%MODE%";
+
+        const readStageLabel = () => {
+          try {
+            const injected = window.desktopBridge?.getAppBranding?.()?.stageLabel;
+            if (typeof injected === "string" && injected.trim()) return injected;
+          } catch {
+            // A bridge that throws carries no stage; fall back to the build.
+          }
+          const channel = HOSTED_APP_CHANNEL.trim().toLowerCase();
+          if (channel === "nightly") return "Nightly";
+          if (channel === "latest") return "Latest";
+          return MODE === "development" ? "Dev" : "Alpha";
+        };
+
+        // Mirrors resolveEnvironmentIdentificationPillLabel: only Dev and
+        // Nightly identify themselves, so a release splash stays unmarked.
+        const stageLabel = readStageLabel().trim();
+        const normalized = stageLabel.toLowerCase();
+        if (normalized === "dev" || normalized === "nightly") {
+          const stageElement = document.getElementById("boot-shell-stage");
+          stageElement.textContent = stageLabel;
+          stageElement.hidden = false;
+        }
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

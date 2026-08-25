@@ -7,6 +7,11 @@ import sharp from "sharp";
 
 const REPOSITORY_ROOT = NodePath.resolve(import.meta.dirname, "..");
 const MOBILE_ROOT = NodePath.join(REPOSITORY_ROOT, "apps/mobile");
+/**
+ * `CHANNEL_WORDMARK_BAND_TOP` from `brand-icon-source.test.ts`, expressed in
+ * the 256px raster this test scans: 1097 of 1254 rounds to 224.
+ */
+const ADAPTIVE_WORDMARK_BAND_TOP = 224;
 
 type AppVariant = "development" | "preview" | "production";
 
@@ -117,6 +122,7 @@ describe("mobile brand assets", () => {
         .toBuffer({ resolveWithObject: true });
 
       const visibleMetalPixels: Array<readonly [number, number]> = [];
+      const wordmarkPixels: Array<readonly [number, number]> = [];
       for (let y = 0; y < info.height; y += 1) {
         for (let x = 0; x < info.width; x += 1) {
           const offset = (y * info.width + x) * info.channels;
@@ -125,7 +131,11 @@ describe("mobile brand assets", () => {
           const blue = data[offset + 2]!;
           const brightness = (red + green + blue) / 3;
           const chroma = Math.max(red, green, blue) - Math.min(red, green, blue);
-          if (brightness > 95 && chroma < 55) visibleMetalPixels.push([x, y]);
+          if (brightness > 95 && chroma < 55) {
+            // The channel wordmark is metal-coloured too, so split it out by
+            // the band it is pinned to. This test is about the cube.
+            (y < ADAPTIVE_WORDMARK_BAND_TOP ? visibleMetalPixels : wordmarkPixels).push([x, y]);
+          }
         }
       }
       const xs = visibleMetalPixels.map(([x]) => x);
@@ -135,6 +145,10 @@ describe("mobile brand assets", () => {
       expect(Math.max(...xs)).toBeLessThanOrEqual(217);
       expect(Math.min(...ys)).toBeGreaterThanOrEqual(38);
       expect(Math.max(...ys)).toBeLessThanOrEqual(217);
+      // Only development and preview carry a wordmark, and it sits in the
+      // margin an adaptive launcher masks away. That is not a regression: the
+      // coloured frame it replaced sat further out still, at y≈4 of 256.
+      expect(wordmarkPixels.length > 0).toBe(appVariant !== "production");
     }
   });
 
@@ -165,13 +179,22 @@ describe("mobile brand assets", () => {
     }
   });
 
-  it("uses each detailed channel icon in light and dark splash screens", async () => {
+  it("uses the container-free cube in light and dark splash screens", async () => {
     for (const appVariant of ["development", "preview", "production"] as const) {
       const config = await loadMobileConfig(appVariant);
       const splash = pluginOptions(config, "expo-splash-screen");
-      expect(splash.image).toBe(config.icon);
-      expect((splash.dark as Record<string, unknown>).image).toBe(config.icon);
+      expect(splash.image).toMatch(/assets[/\\]mesura-code[/\\]splash-mark\.png$/);
+      expect((splash.dark as Record<string, unknown>).image).toBe(splash.image);
+      // The launcher icon carries an opaque field, so borrowing it here would
+      // cut a square out of both splash backgrounds. Light mode is the worst
+      // case: a near-black tile on #ffffff.
+      expect(splash.image).not.toBe(config.icon);
     }
+
+    const { channels, width, height } = await sharp(
+      NodePath.join(REPOSITORY_ROOT, "assets/mesura-code/splash-mark.png"),
+    ).metadata();
+    expect({ channels, width, height }).toEqual({ channels: 4, width: 1024, height: 1024 });
   });
 
   it("ships the Mesura Code template to the Apple widget", () => {
