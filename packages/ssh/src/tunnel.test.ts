@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NetService from "@t3tools/shared/Net";
+import { REMOTE_DEFAULT_STATE_HOME } from "@t3tools/shared/stateHome";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -234,6 +235,34 @@ describe("ssh tunnel scripts", () => {
       buildRemoteLaunchScript().indexOf('DEFAULT_RUNTIME_INFO="$(resolve_default_runtime_port'),
       buildRemoteLaunchScript().indexOf('elif [ -n "$REMOTE_PID" ]'),
     );
+  });
+
+  // Regression guard. These scripts used to write `$HOME/.t3` while the server
+  // resolved `$HOME/.mesura-code` (apps/server/src/os-jank.ts), because the
+  // fork renamed the state directory in one place only. Two silent
+  // consequences: a launcher-started server and a hand-started one used
+  // different databases on the same machine, and the external-server reuse path
+  // never matched, because it looked for `server-runtime.json` under a path no
+  // server writes. Read the name from the shared module — do not spell it out
+  // here either, or this test pins a second copy of the same fact.
+  it("keeps the remote scripts on the state directory the server actually uses", () => {
+    const target = {
+      alias: "devbox",
+      hostname: "devbox.example.com",
+      username: "julius",
+      port: 2222,
+    } as const;
+
+    for (const script of [
+      buildRemoteLaunchScript(),
+      buildRemotePairingScript(target),
+      buildRemoteStopScript(target),
+    ]) {
+      assert.include(script, `${REMOTE_DEFAULT_STATE_HOME}/ssh-launch/`);
+      assert.notInclude(script, "$HOME/.t3");
+    }
+
+    assert.include(buildRemoteLaunchScript(), `DEFAULT_SERVER_HOME="${REMOTE_DEFAULT_STATE_HOME}"`);
   });
 
   it.effect("accepts launch JSON after remote shell startup noise", () => {

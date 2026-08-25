@@ -6,6 +6,7 @@ import {
   readPathFromLaunchctl,
   resolveWindowsEnvironment,
 } from "@t3tools/shared/shell";
+import { DEFAULT_STATE_HOME_DIR_NAME } from "@t3tools/shared/stateHome";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -105,7 +106,7 @@ export const expandHomePath = Effect.fn(function* (input: string) {
 export const resolveBaseDir = Effect.fn(function* (raw: string | undefined) {
   const { join, resolve } = yield* Path.Path;
   if (!raw || raw.trim().length === 0) {
-    return join(NodeOS.homedir(), ".mesura-code");
+    return join(NodeOS.homedir(), DEFAULT_STATE_HOME_DIR_NAME);
   }
   return resolve(yield* expandHomePath(raw.trim()));
 });

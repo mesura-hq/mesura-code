@@ -55,6 +55,10 @@
       "types": "./src/semver.ts",
       "import": "./src/semver.ts"
     },
+    "./stateHome": {
+      "types": "./src/stateHome.ts",
+      "import": "./src/stateHome.ts"
+    },
     "./Net": {
       "types": "./src/Net.ts",
       "import": "./src/Net.ts"
