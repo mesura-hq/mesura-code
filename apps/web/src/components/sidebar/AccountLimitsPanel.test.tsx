@@ -88,8 +88,15 @@ describe("AccountLimitsPanelContent", () => {
     expect(markup).toContain("Codex");
     expect(markup).toContain("Laptop");
     expect(markup).toContain("30%");
-    expect(markup).toContain("Resets in 5h");
+    // The rotate icon carries "resets in" visually; the words stay for readers
+    // that cannot see it, so the countdown is never a bare duration.
+    expect(markup).toContain("Resets in ");
+    expect(markup).toContain("5h");
     expect(markup).toContain("1m ago");
+    // `mesura.css` matches this attribute to give the popover the composer's
+    // glass. Losing it drops the panel back to the default dropdown surface,
+    // which is a look, not an error, so nothing else would catch it.
+    expect(markup).toContain("data-usage-limits-panel");
   });
 
   it("renders a quiet missing-reading state", () => {

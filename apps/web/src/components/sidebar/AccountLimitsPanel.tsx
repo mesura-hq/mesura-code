@@ -1,4 +1,8 @@
 import { useAtomValue } from "@effect/atom-react";
+// A single circular arrow, not one of the two-arrow refresh glyphs: this panel
+// already says "Refresh failed" about the reading itself, and a window resetting
+// is a different event from Mesura Code re-reading it.
+import { RotateCcwIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { shortcutLabelForCommand } from "../../keybindings";
@@ -133,12 +137,16 @@ function formatCompactDuration(milliseconds: number): string {
   return `${minutes}m`;
 }
 
-function resetLabel(resetsAt: string | null, environmentNowMs: number | null): string | null {
+/**
+ * How long this window has left, with no leading words: the rotate icon beside
+ * it carries the "resets in" meaning, and a screen reader gets that in text.
+ */
+function resetRemaining(resetsAt: string | null, environmentNowMs: number | null): string | null {
   if (resetsAt === null || environmentNowMs === null) return null;
   const resetAtMs = Date.parse(resetsAt);
   if (!Number.isFinite(resetAtMs)) return null;
   const remaining = resetAtMs - environmentNowMs;
-  return remaining <= 0 ? "Reset due" : `Resets in ${formatCompactDuration(remaining)}`;
+  return remaining <= 0 ? "due" : formatCompactDuration(remaining);
 }
 
 function readingAgeLabel(readingAgeMs: number | null): string | null {
@@ -186,12 +194,29 @@ function AccountLimitRowView(props: { row: AccountLimitsRow }) {
           {row.windows.map((rowWindow) => {
             const { window } = rowWindow;
             const usedPercent = Math.round(window.usedPercent);
-            const reset = resetLabel(window.resetsAt, rowWindow.environmentNowMs);
+            const remaining = resetRemaining(window.resetsAt, rowWindow.environmentNowMs);
             return (
               <div key={`${window.meter?.id ?? "primary"}:${window.id}`}>
-                <div className="mb-1 flex items-baseline justify-between gap-3 font-mono text-[10px]">
+                <div className="mb-1 flex items-center justify-between gap-3 font-mono text-[10px]">
                   <span className="text-muted-foreground">{window.label}</span>
-                  <span className="tabular-nums text-foreground/75">{usedPercent}%</span>
+                  <span className="flex items-center gap-1">
+                    {remaining ? (
+                      <>
+                        <RotateCcwIcon
+                          aria-hidden
+                          className="size-2.5 shrink-0 text-muted-foreground/50"
+                        />
+                        <span className="text-muted-foreground/60">
+                          <span className="sr-only">Resets in </span>
+                          {remaining}
+                        </span>
+                        <span aria-hidden className="text-muted-foreground/35">
+                          ·
+                        </span>
+                      </>
+                    ) : null}
+                    <span className="tabular-nums text-foreground/75">{usedPercent}%</span>
+                  </span>
                 </div>
                 <div className="h-1 overflow-hidden rounded-full bg-foreground/8">
                   <div
@@ -199,11 +224,6 @@ function AccountLimitRowView(props: { row: AccountLimitsRow }) {
                     style={{ width: `${Math.min(100, Math.max(0, window.usedPercent))}%` }}
                   />
                 </div>
-                {reset ? (
-                  <div className="mt-1 text-right font-mono text-[9px] text-muted-foreground/50">
-                    {reset}
-                  </div>
-                ) : null}
               </div>
             );
           })}
@@ -244,7 +264,15 @@ export function AccountLimitsPanelContent(props: {
         ? "Could not load account limits"
         : "No account limits available";
   return (
-    <div className="w-[21rem] max-w-[calc(100vw-1rem)]" aria-label="Usage limits">
+    // `data-usage-limits-panel` is the hook `mesura.css` matches to give this
+    // popover the composer's glass instead of the default dropdown surface. It
+    // sits here, on a plain div we own, rather than on the popup itself, so the
+    // selector cannot break on how Base UI forwards props.
+    <div
+      className="w-[21rem] max-w-[calc(100vw-1rem)]"
+      aria-label="Usage limits"
+      data-usage-limits-panel
+    >
       <header className="flex items-center justify-between gap-3 border-border/60 border-b px-3 py-2.5">
         <div>
           <div className="text-xs font-medium text-foreground">Usage limits</div>
@@ -301,7 +329,7 @@ export function AccountLimitsPopover(props: {
         aria-label="Usage limits"
         align="start"
         anchor={anchor}
-        className="p-0 [background:color-mix(in_srgb,var(--popover)_70%,var(--background))]! [-webkit-backdrop-filter:none]! [backdrop-filter:none]!"
+        className="p-0"
         {...ACCOUNT_LIMITS_POPOVER_FOCUS_PROPS}
         onPointerEnter={controller.onPointerEnter}
         onPointerLeave={controller.onPointerLeave}
