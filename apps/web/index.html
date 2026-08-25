@@ -10,7 +10,16 @@
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <script>
+    <!-- The boot splash blocks first paint on this image, and the <img> that
+         needs it sits at the end of the document. Hint it to the preload
+         scanner here instead. -->
+    <link rel="preload" as="image" href="/splash-mark.png" fetchpriority="high" />
+    <!-- Carries the hosted channel as data rather than as JS source. Vite
+         substitutes the placeholder; the boot script reads the attribute, so a
+         value containing a quote or a newline cannot break or extend the
+         script. An unsubstituted placeholder matches no channel. -->
+    <meta name="app-channel" content="%VITE_HOSTED_APP_CHANNEL%" />
+    <script data-boot="theme">
       (() => {
         const LIGHT_BACKGROUND = "#ffffff";
         const DARK_BACKGROUND = "#0a0a0a";
@@ -466,9 +475,6 @@
         text-transform: uppercase;
       }
 
-      #boot-shell-stage[hidden] {
-        display: none;
-      }
     </style>
     <title>Mesura Code (Alpha)</title>
   </head>
@@ -476,23 +482,24 @@
     <div id="root">
       <div id="boot-shell">
         <div id="boot-shell-card" aria-label="Mesura Code splash screen">
-          <img id="boot-shell-logo" src="/splash-mark.png" alt="Mesura Code" />
+          <img
+            id="boot-shell-logo"
+            src="/splash-mark.png"
+            alt="Mesura Code"
+            fetchpriority="high"
+          />
           <span id="boot-shell-stage" hidden></span>
         </div>
       </div>
     </div>
-    <script>
+    <script data-boot="stage">
       (() => {
-        // Keep this script after the theme boot script in <head>:
-        // apps/web/src/themeBoot.test.ts reads the FIRST inline <script> block
-        // in this file, and would silently start asserting against this one.
-        //
         // Keep this small boot-time copy in sync with apps/web/src/branding.ts
-        // so the stage reads the same before and after React mounts. Vite
-        // substitutes both placeholders; an unsubstituted one matches neither
-        // channel and falls through to the build mode.
-        const HOSTED_APP_CHANNEL = "%VITE_HOSTED_APP_CHANNEL%";
-        const MODE = "%MODE%";
+        // so the stage reads the same before and after React mounts. %DEV% is
+        // the placeholder form of import.meta.env.DEV, which branding.ts uses;
+        // %MODE% is NOT the same thing — `vite build --mode staging` sets
+        // DEV=false with MODE="staging", and the two would disagree.
+        const IS_DEV = "%DEV%" === "true";
 
         const readStageLabel = () => {
           try {
@@ -501,18 +508,24 @@
           } catch {
             // A bridge that throws carries no stage; fall back to the build.
           }
-          const channel = HOSTED_APP_CHANNEL.trim().toLowerCase();
+          const channel = (
+            document.querySelector('meta[name="app-channel"]')?.content ?? ""
+          )
+            .trim()
+            .toLowerCase();
           if (channel === "nightly") return "Nightly";
+          // "Latest" never renders below, but it keeps this block a
+          // line-for-line mirror of HOSTED_APP_CHANNEL_LABEL in branding.ts.
           if (channel === "latest") return "Latest";
-          return MODE === "development" ? "Dev" : "Alpha";
+          return IS_DEV ? "Dev" : "Alpha";
         };
 
         // Mirrors resolveEnvironmentIdentificationPillLabel: only Dev and
         // Nightly identify themselves, so a release splash stays unmarked.
         const stageLabel = readStageLabel().trim();
         const normalized = stageLabel.toLowerCase();
-        if (normalized === "dev" || normalized === "nightly") {
-          const stageElement = document.getElementById("boot-shell-stage");
+        const stageElement = document.getElementById("boot-shell-stage");
+        if (stageElement && (normalized === "dev" || normalized === "nightly")) {
           stageElement.textContent = stageLabel;
           stageElement.hidden = false;
         }

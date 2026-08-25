@@ -98,7 +98,7 @@ describe("cross-platform brand icon export", () => {
       BRAND_ASSET_PATHS.mobileAndroidNotificationIconPng,
       BRAND_ASSET_PATHS.mobileWidgetMarkSvg,
     ];
-    expect([...generated.keys()]).toHaveLength(32);
+    expect([...generated.keys()]).toHaveLength(33);
     expect(mobilePaths.every((relativePath) => generated.has(relativePath))).toBe(true);
 
     const temporaryRoot = NodeFS.mkdtempSync(

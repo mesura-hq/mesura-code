@@ -11,6 +11,22 @@ export function formatAppDisplayName(input: {
   return `${input.baseName} (${input.stageLabel})`;
 }
 
+export type EnvironmentIdentificationPillLabel = "Dev" | "Nightly";
+
+/**
+ * Names the stage only when it is one a user needs telling about. Alpha and
+ * Latest are the unmarked default, so this returns null for them. The boot
+ * splash in index.html mirrors this rule before React mounts.
+ */
+export function resolveEnvironmentIdentificationPillLabel(
+  stageLabel: string,
+): EnvironmentIdentificationPillLabel | null {
+  const normalized = stageLabel.trim().toLowerCase();
+  if (normalized === "dev") return "Dev";
+  if (normalized === "nightly") return "Nightly";
+  return null;
+}
+
 export function resolveServerBackedAppStageLabel(input: {
   readonly primaryServerVersion: string | null | undefined;
   readonly fallbackStageLabel: string;

@@ -20,9 +20,14 @@ export const PINNED_LIBVIPS_VERSION = "8.18.3";
 
 /**
  * The boot splash blocks first paint on this file, so it ships at 3x the 64px
- * box the splash draws it in rather than at icon resolution.
+ * box the splash draws it in rather than at icon resolution, and it is the one
+ * rendition worth quantizing: a palette cuts it by 58% (37,489 -> 15,657
+ * bytes) at 46 dB PSNR, which is invisible on a 64px metallic cube. The icons
+ * keep the plain encoding, because changing theirs would rewrite every tracked
+ * asset for no user-visible gain.
  */
 export const SPLASH_MARK_SIZE = 192;
+export const SPLASH_MARK_PNG_OPTIONS = { palette: true, quality: 90, effort: 10 } as const;
 
 export interface VariantOutputs {
   readonly ios: string;
@@ -168,10 +173,24 @@ const RepositoryRoot = Effect.service(Path.Path).pipe(
   ),
 );
 
-export async function renderRasterIcon(sourcePath: string, size: number): Promise<Buffer> {
-  const contents = await sharp(sourcePath, { failOn: "error" })
+export async function renderRasterIcon(
+  sourcePath: string,
+  size: number,
+  pngOptions: sharp.PngOptions = { adaptiveFiltering: true, compressionLevel: 9 },
+): Promise<Buffer> {
+  const image = sharp(sourcePath, { failOn: "error" });
+  // `fit: "fill"` stretches rather than letterboxes, so a non-square source
+  // would ship distorted and still satisfy the output check below, which only
+  // measures the rendition. Reject it at the source instead.
+  const source = await image.metadata();
+  if (source.width !== source.height) {
+    throw new Error(
+      `Raster icon source must be square, but ${sourcePath} is ${source.width}x${source.height}.`,
+    );
+  }
+  const contents = await image
     .resize(size, size, { fit: "fill", kernel: sharp.kernel.lanczos3 })
-    .png({ adaptiveFiltering: true, compressionLevel: 9 })
+    .png(pngOptions)
     .toBuffer();
   const dimensions = readPngDimensions(contents);
   if (dimensions.width !== size || dimensions.height !== size) {
@@ -279,6 +298,7 @@ export async function collectGeneratedBrandAssets(
     await renderRasterIcon(
       NodePath.join(repositoryRoot, BRAND_ASSET_PATHS.splashMarkSourcePng),
       SPLASH_MARK_SIZE,
+      SPLASH_MARK_PNG_OPTIONS,
     ),
   );
   return generated;

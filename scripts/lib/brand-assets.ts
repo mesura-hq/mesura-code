@@ -45,6 +45,23 @@ export const BRAND_ASSET_PATHS = {
   developmentWebAppleTouchIconPng: "assets/dev/blueprint-web-apple-touch-180.png",
 } as const;
 
+/** Side of the square channel masters in `assets/mesura-code/`. */
+export const MASTER_RASTER_SIZE = 1254;
+
+/**
+ * First row of the strip a channel master may treat as its own. Above it the
+ * development and nightly masters are the production artwork verbatim, which
+ * is what rules out a coloured frame around the cube; below it they carry the
+ * uppercase channel wordmark. Guards in `brand-icon-source.test.ts` and
+ * `mobile-brand-assets.test.ts` both derive their bounds from this, so the
+ * two cannot drift apart.
+ *
+ * The band sits outside Android's adaptive-icon safe zone, so an adaptive
+ * launcher clips the wordmark. That is not a regression: the coloured frame
+ * this replaced sat further out still and was clipped too.
+ */
+export const CHANNEL_WORDMARK_BAND_TOP = 1097;
+
 export const DESKTOP_LINUX_IDENTITY = {
   development: {
     desktopEntryName: "mesura-code-dev.desktop",

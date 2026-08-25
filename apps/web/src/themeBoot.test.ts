@@ -23,9 +23,12 @@ const THEME_STORAGE_KEY = "t3code:theme";
 // boot copy of that default stays derived from the real palette.
 const DEFAULT_DARK_CHROME = getDefaultThemeColors("dark").chrome;
 
+// Selected by attribute, not by position. Matching the first inline <script>
+// meant that adding another one above this test's target silently repointed it
+// and the theme boot lost its guard without going red.
 const bootScript = (() => {
-  const match = indexHtml.match(/<script>([\s\S]*?)<\/script>/);
-  if (!match?.[1]) throw new Error("Could not find the inline boot script in index.html");
+  const match = indexHtml.match(/<script data-boot="theme">([\s\S]*?)<\/script>/);
+  if (!match?.[1]) throw new Error("Could not find the theme boot script in index.html");
   return match[1];
 })();
 

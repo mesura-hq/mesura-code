@@ -1,10 +1,11 @@
 import { APP_STAGE_LABEL } from "../branding";
-import { resolveEnvironmentIdentificationPillLabel } from "./SidebarStageBackdrop";
+import { resolveEnvironmentIdentificationPillLabel } from "../branding.logic";
 
 /**
- * The React-side twin of the `#boot-shell` markup in `apps/web/index.html`.
- * Both draw the channel-neutral cube and name the stage below it, so keep the
- * two in step whenever either changes.
+ * Nothing renders this today — the splash a user sees is the `#boot-shell`
+ * markup in `apps/web/index.html`, which paints before React mounts. It is
+ * kept in the same shape as that markup so wiring it up later is a one-line
+ * change rather than a redesign.
  */
 export function SplashScreen() {
   const stageLabel = resolveEnvironmentIdentificationPillLabel(APP_STAGE_LABEL);
