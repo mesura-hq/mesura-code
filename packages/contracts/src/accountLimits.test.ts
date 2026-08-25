@@ -42,6 +42,92 @@ describe("AccountLimitsSummary", () => {
     expect(summary.snapshots[0]?.observation?.windows[0]?.meter?.id).toBe("codex");
   });
 
+  it("decodes a reading from an environment that names no account and dates no window", () => {
+    // Clients fold two environments onto one row by account key. An environment
+    // too old to send one has to keep decoding, so it stays on its own row
+    // instead of emptying the panel.
+    const summary = decodeSummary({
+      contractVersion: ACCOUNT_LIMITS_CONTRACT_VERSION,
+      readAt: "2026-08-22T12:00:00.000Z",
+      snapshots: [
+        {
+          providerInstanceId: "claudeAgent",
+          driver: "claudeAgent",
+          observation: {
+            plan: "max",
+            observedAt: "2026-08-22T11:59:00.000Z",
+            source: "poll",
+            windows: [
+              {
+                id: "five_hour",
+                label: "5h",
+                usedPercent: 18,
+                resetsAt: "2026-08-22T16:00:00.000Z",
+                windowMinutes: 300,
+              },
+            ],
+          },
+          lastAttempt: {
+            attemptedAt: "2026-08-22T11:59:00.000Z",
+            status: "succeeded",
+            error: null,
+          },
+        },
+      ],
+    });
+
+    expect(summary.snapshots[0]?.account).toBeUndefined();
+    expect(summary.snapshots[0]?.observation?.windows[0]?.observedAt).toBeUndefined();
+  });
+
+  it("keeps the account and the per-window reading date", () => {
+    const summary = decodeSummary({
+      contractVersion: ACCOUNT_LIMITS_CONTRACT_VERSION,
+      readAt: "2026-08-22T12:00:00.000Z",
+      snapshots: [
+        {
+          providerInstanceId: "claudeAgent",
+          driver: "claudeAgent",
+          account: { key: "claudeAgent:dev@example.com", label: "dev@example.com" },
+          observation: {
+            plan: "max",
+            observedAt: "2026-08-22T11:59:00.000Z",
+            source: "event",
+            windows: [
+              {
+                id: "five_hour",
+                label: "5h",
+                usedPercent: 18,
+                resetsAt: "2026-08-22T16:00:00.000Z",
+                windowMinutes: 300,
+                observedAt: "2026-08-22T11:59:00.000Z",
+              },
+              {
+                id: "seven_day",
+                label: "7d",
+                usedPercent: 17,
+                resetsAt: "2026-08-29T12:00:00.000Z",
+                windowMinutes: 10_080,
+                observedAt: "2026-08-22T11:20:00.000Z",
+              },
+            ],
+          },
+          lastAttempt: {
+            attemptedAt: "2026-08-22T11:59:00.000Z",
+            status: "succeeded",
+            error: null,
+          },
+        },
+      ],
+    });
+
+    expect(summary.snapshots[0]?.account?.key).toBe("claudeAgent:dev@example.com");
+    expect(summary.snapshots[0]?.observation?.windows.map((window) => window.observedAt)).toEqual([
+      "2026-08-22T11:59:00.000Z",
+      "2026-08-22T11:20:00.000Z",
+    ]);
+  });
+
   it("decodes future fields and unknown provider window identifiers", () => {
     const summary = decodeSummary({
       contractVersion: ACCOUNT_LIMITS_CONTRACT_VERSION,

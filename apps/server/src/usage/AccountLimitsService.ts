@@ -1,7 +1,9 @@
 /** Resident, per-provider-instance account-limit authority. */
 import {
   ACCOUNT_LIMITS_CONTRACT_VERSION,
+  accountLimitsWindowKey,
   AccountLimitsSnapshot,
+  type AccountLimitsAccount,
   type AccountLimitsSummary,
   type AccountLimitsWindow,
   type ProviderDriverKind,
@@ -105,16 +107,19 @@ function normalizePoll(
   return null;
 }
 
-function windowKey(window: AccountLimitsWindow): string {
-  return `${window.meter?.id ?? "primary"}:${window.id}`;
-}
-
+/**
+ * Replace a window in place rather than moving it to the end. A provider event
+ * names one window, and appending it would reorder the panel's bars on every
+ * event and order them back on the next full poll.
+ */
 function mergeWindow(
   previous: readonly AccountLimitsWindow[],
   next: AccountLimitsWindow,
 ): readonly AccountLimitsWindow[] {
-  const nextKey = windowKey(next);
-  return [...previous.filter((window) => windowKey(window) !== nextKey), next];
+  const nextKey = accountLimitsWindowKey(next);
+  return previous.some((window) => accountLimitsWindowKey(window) === nextKey)
+    ? previous.map((window) => (accountLimitsWindowKey(window) === nextKey ? next : window))
+    : [...previous, next];
 }
 
 function mergeWindows(
@@ -122,6 +127,52 @@ function mergeWindows(
   next: readonly AccountLimitsWindow[],
 ): readonly AccountLimitsWindow[] {
   return next.reduce<readonly AccountLimitsWindow[]>(mergeWindow, previous);
+}
+
+/**
+ * Date each window with the reading that produced it.
+ *
+ * A merge carries windows a provider did not report this time, so one
+ * observation holds numbers of different ages. Without a per-window date the
+ * merged result claims the newest reading's freshness for all of them, which is
+ * what made two environments on one subscription disagree while both looked
+ * current.
+ *
+ * The date is when the reading was asked for, not when it came back, so it runs
+ * early by however long the provider took to answer — seconds for a poll that
+ * spawns a CLI. Readings of one subscription sit minutes apart, so that bias
+ * never decides which environment a window comes from.
+ */
+function stampWindows(
+  windows: readonly AccountLimitsWindow[],
+  observedAt: string,
+): readonly AccountLimitsWindow[] {
+  return windows.map((window) => ({ ...window, observedAt }));
+}
+
+/**
+ * One reading built from a provider event.
+ *
+ * Two payload shapes arrive on this path. A full usage payload normalizes like
+ * a poll does. A Claude rate-limit event names one window instead, and that one
+ * is merged into the windows already held so the rest keep their own dates.
+ */
+function eventReading(
+  event: AccountLimitsIngestInput,
+  previous: AccountLimitsSnapshot | undefined,
+): { readonly plan: string | null; readonly windows: readonly AccountLimitsWindow[] } | null {
+  const held = previous?.observation?.windows ?? [];
+  const polled = normalizePoll(event.driver, event.payload);
+  if (polled !== null) {
+    return { plan: polled.plan, windows: stampWindows(polled.windows, event.createdAt) };
+  }
+  if (event.driver !== "claudeAgent") return null;
+  const window = normalizeClaudeRateLimitEvent(event.payload);
+  if (window === null) return null;
+  return {
+    plan: previous?.observation?.plan ?? null,
+    windows: mergeWindow(held, { ...window, observedAt: event.createdAt }),
+  };
 }
 
 export function makeAccountLimitsService(input: {
@@ -246,6 +297,7 @@ export function makeAccountLimitsService(input: {
       instance: ProviderInstance,
       attemptedAt: string,
       normalized: NormalizedAccountLimits | null,
+      account?: AccountLimitsAccount | undefined,
     ) {
       if (!(yield* isCurrentInstance(instance))) return;
       yield* stateLock.withPermits(1)(
@@ -254,12 +306,17 @@ export function makeAccountLimitsService(input: {
           if (knownInstances.get(key) !== instance) return;
           const previous = snapshots.get(key);
           if (previous && hasNewerAttempt(previous, attemptedAt)) return;
+          // A failed read never clears the account: the subscription a cached
+          // observation belongs to does not change because one poll failed.
+          const effectiveAccount = account ?? previous?.account;
+          const stamped = normalized === null ? [] : stampWindows(normalized.windows, attemptedAt);
           snapshots.set(
             key,
             normalized === null
               ? {
                   providerInstanceId: instance.instanceId,
                   driver: instance.driverKind,
+                  ...(effectiveAccount ? { account: effectiveAccount } : {}),
                   observation: previous?.observation ?? null,
                   lastAttempt: {
                     attemptedAt,
@@ -270,12 +327,13 @@ export function makeAccountLimitsService(input: {
               : {
                   providerInstanceId: instance.instanceId,
                   driver: instance.driverKind,
+                  ...(effectiveAccount ? { account: effectiveAccount } : {}),
                   observation: {
                     plan: normalized.plan ?? previous?.observation?.plan ?? null,
                     windows:
                       instance.driverKind === "codex"
-                        ? mergeWindows(previous?.observation?.windows ?? [], normalized.windows)
-                        : normalized.windows,
+                        ? mergeWindows(previous?.observation?.windows ?? [], stamped)
+                        : stamped,
                     observedAt: attemptedAt,
                     source: "poll",
                   },
@@ -304,8 +362,13 @@ export function makeAccountLimitsService(input: {
       yield* instance.readAccountLimits().pipe(
         Effect.matchEffect({
           onFailure: () => commitRefresh(instance, attemptedAt, null),
-          onSuccess: (payload) =>
-            commitRefresh(instance, attemptedAt, normalizePoll(instance.driverKind, payload)),
+          onSuccess: (read) =>
+            commitRefresh(
+              instance,
+              attemptedAt,
+              normalizePoll(instance.driverKind, read.payload),
+              read.account,
+            ),
         }),
         Effect.ensuring(
           stateLock.withPermits(1)(Effect.sync(() => void inFlight.delete(instance))),
@@ -350,27 +413,19 @@ export function makeAccountLimitsService(input: {
             return;
           }
 
-          let normalized = normalizePoll(event.driver, event.payload);
-          if (event.driver === "claudeAgent" && normalized === null) {
-            const window = normalizeClaudeRateLimitEvent(event.payload);
-            normalized = window
-              ? {
-                  plan: previous?.observation?.plan ?? null,
-                  windows: mergeWindow(previous?.observation?.windows ?? [], window),
-                }
-              : null;
-          }
-          if (normalized === null) return;
+          const reading = eventReading(event, previous);
+          if (reading === null) return;
 
           snapshots.set(key, {
             providerInstanceId: event.providerInstanceId,
             driver: event.driver,
+            ...(previous?.account ? { account: previous.account } : {}),
             observation: {
-              plan: normalized.plan ?? previous?.observation?.plan ?? null,
+              plan: reading.plan ?? previous?.observation?.plan ?? null,
               windows:
                 event.driver === "codex"
-                  ? mergeWindows(previous?.observation?.windows ?? [], normalized.windows)
-                  : normalized.windows,
+                  ? mergeWindows(previous?.observation?.windows ?? [], reading.windows)
+                  : reading.windows,
               observedAt: event.createdAt,
               source: "event",
             },

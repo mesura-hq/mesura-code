@@ -6,9 +6,20 @@ Hover over the **Usage** button in the sidebar footer to open the limits panel. 
 `Alt+U`. Release the shortcut to close the panel. Selecting the Usage button still opens the Usage
 analytics page.
 
-The panel keeps each environment and provider account separate. It shows the reported rolling
-windows, percentage used, reset countdown, reading age, and refresh state. Mesura Code updates the
-readings in the background. A failed refresh keeps the last valid reading visible.
+The panel shows one row for each subscription, not one for each machine. When two environments drive
+the same Claude or Codex account, their readings become one row, and every window shows the newest
+of the two. Two different accounts stay on separate rows, and a row then names the account it
+belongs to.
+
+Each row shows the reported rolling windows, percentage used, reset countdown, reading age, and
+refresh state. Mesura Code updates the readings in the background. A failed refresh keeps the last
+valid reading visible, and it does not hide a good reading another machine took of the same account.
+
+Environments read a subscription on their own clock, so the same account can be a few minutes newer
+on one machine than on another. The reading age above each row tells you how old its newest number
+is.
+
+A provider that is not installed on an environment does not get a row there.
 
 The panel does not show the Codex Spark meter in this first version. Mesura Code still retains that
 meter in its account-limit data.

@@ -60,3 +60,59 @@
     color-mix(in srgb, var(--color-white) 5%, transparent)
   );
 }
+
+/**
+ * Give the usage-limits popover a solid surface of its own.
+ *
+ * Upstream's `dropdown-glass` blurs the backdrop and lets ~16% of it through.
+ * On this panel that showed: the popover opens over the sidebar and, at any
+ * sidebar narrower than the panel, crosses onto the chat canvas — two surfaces
+ * two shades apart. The boundary between them printed straight through the
+ * glass as a hard vertical line belonging to no element in the panel. The
+ * blurred backdrop cannot hide an edge that runs the full height of what it is
+ * blurring.
+ *
+ * We tried the composer's glass here first, on the theory that the line came
+ * from a doubled border under the header. That border was real and is fixed,
+ * and the line stayed — so it was the bleed-through, and no glass recipe
+ * removes it. Opaque does.
+ *
+ * The surface sits one fifth of the way from the sidebar's own fill toward the
+ * default overlay: far enough to lift off the sidebar it covers, close enough
+ * that going solid did not brighten the panel from what the glass composited
+ * to. Both are real tokens, so custom themes keep deciding their own values.
+ *
+ * Dropping the backdrop filter also drops a full-panel blur and saturate pass
+ * and its compositing layer, which a backdrop filter re-runs whenever anything
+ * behind it repaints — the chat, during a streaming turn, at the display's
+ * refresh rate.
+ *
+ * `--color-white` is a Tailwind theme variable and Tailwind emits only the ones
+ * it sees used. Upstream's own rules use it, so it is present; the fallback
+ * covers the day they stop.
+ *
+ * Matched through `:has()` on the content div rather than on the popup itself.
+ * The popup is a Base UI component and the attribute would have to survive its
+ * prop forwarding; the div inside is ours. What decides this against
+ * `dropdown-glass` is not the specificity `:has()` buys, though: it is that
+ * this whole file is unlayered and `dropdown-glass` compiles into
+ * `@layer utilities`.
+ *
+ * One case stays upstream's, deliberately. In a browser with no
+ * `backdrop-filter`, `dropdown-glass` sets `background: var(--popover)
+ * !important` inside its own `@supports not`. Important declarations reverse
+ * layer order, so a layered one beats any unlayered rule — including an
+ * important one. The panel takes `--popover` there, which is a readable solid
+ * surface and the right degradation. Do not add an `!important` here to fight
+ * it: it cannot win, and it would make every other browser harder to override.
+ */
+[data-slot="popover-popup"]:has([data-usage-limits-panel]) {
+  background: color-mix(in srgb, var(--popover) 20%, var(--card));
+  border-color: color-mix(in srgb, var(--foreground) 8%, transparent);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.dark [data-slot="popover-popup"]:has([data-usage-limits-panel]) {
+  border-color: color-mix(in srgb, var(--color-white, #fff) 6%, transparent);
+}

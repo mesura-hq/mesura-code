@@ -27,11 +27,16 @@ const encode = (value: string) => Stream.make(new TextEncoder().encode(value));
  * test set the outcome of the `off` (pre-clear) and `serve` calls separately —
  * they are the same subcommand and are told apart by the trailing `off`.
  */
-const spawnerLayer = (input: { readonly off?: CallResult; readonly serve?: CallResult }) =>
+const spawnerLayer = (input: {
+  readonly off?: CallResult;
+  readonly serve?: CallResult;
+  readonly recordServeArgs?: (args: ReadonlyArray<string>) => void;
+}) =>
   Layer.succeed(
     ChildProcessSpawner.ChildProcessSpawner,
     ChildProcessSpawner.make((command) => {
       const args = "args" in command ? (command.args as ReadonlyArray<string>) : [];
+      if (!args.includes("status") && !args.includes("off")) input.recordServeArgs?.(args);
       const result: CallResult = args.includes("status")
         ? { exitCode: 0 }
         : args.includes("off")
@@ -99,6 +104,28 @@ describe("shareDevServer", () => {
 
       assert.equal(shared.host, "host.example.ts.net");
       assert.equal(shared.url, "https://host.example.ts.net:5788/");
+    }),
+  );
+
+  it.effect("names the proxy target instead of pinning an address family", () =>
+    Effect.gen(function* () {
+      let serveArgs: ReadonlyArray<string> = [];
+      yield* shareDevServer({ webPort: 5788 }).pipe(
+        Effect.provide(
+          spawnerLayer({
+            off: { exitCode: 1, stderr: NO_HANDLER_STDERR },
+            recordServeArgs: (args) => {
+              serveArgs = args;
+            },
+          }),
+        ),
+      );
+
+      // Vite binds its default `localhost`, and the family that resolves to is
+      // the machine's business. A target pinned to 127.0.0.1 answers 502 with
+      // an empty body wherever `localhost` resolves to ::1 first, which reads
+      // as a blank page with nothing in the console.
+      assert.deepEqual(serveArgs, ["serve", "--bg", "--https=5788", "http://localhost:5788"]);
     }),
   );
 

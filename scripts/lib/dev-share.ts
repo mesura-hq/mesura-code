@@ -195,7 +195,18 @@ export const shareDevServer = Effect.fn("devShare.shareDevServer")(function* (in
     });
   }
 
-  yield* ensureTailscaleServe({ localPort: input.webPort, servePort: input.webPort }).pipe(
+  // Name the proxy target rather than pinning it to an address family. The web
+  // dev server binds Vite's default `localhost`, and which family that lands on
+  // is the machine's business: a box where `localhost` resolves to ::1 first
+  // gets an IPv6-only listener, and a serve mapping pointed at 127.0.0.1 then
+  // answers 502 with an empty body — a blank page and a silent console, the
+  // hardest possible failure to read. Tailscale resolves the name per request
+  // and tries both families, so the mapping follows wherever Vite bound.
+  yield* ensureTailscaleServe({
+    localPort: input.webPort,
+    servePort: input.webPort,
+    localHost: "localhost",
+  }).pipe(
     Effect.mapError((error) => {
       const explanation = explainCommandFailure(error);
       return new DevServeFailedError({

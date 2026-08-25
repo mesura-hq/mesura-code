@@ -1,10 +1,14 @@
 import { useAtomValue } from "@effect/atom-react";
+import { accountLimitsWindowKey } from "@t3tools/contracts";
+// A single circular arrow, not one of the two-arrow refresh glyphs: this panel
+// already says "Refresh failed" about the reading itself, and a window resetting
+// is a different event from Mesura Code re-reading it.
+import { RotateCcwIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { shortcutLabelForCommand } from "../../keybindings";
 import { isTerminalFocused } from "../../lib/terminalFocus";
 import {
-  selectVisibleAccountLimitWindows,
   useAccountLimits,
   type AccountLimitsRow,
   type AccountLimitsView,
@@ -134,12 +138,25 @@ function formatCompactDuration(milliseconds: number): string {
   return `${minutes}m`;
 }
 
-function resetLabel(resetsAt: string | null, environmentNowMs: number | null): string | null {
+/**
+ * How long this window has left.
+ *
+ * `shown` carries no leading words because the rotate icon beside it says what
+ * it is; `spoken` says it in full for anyone who cannot see that icon. They are
+ * separate because a window that has already reset shows "due", and "Resets in
+ * due" is not a sentence.
+ */
+function resetRemaining(
+  resetsAt: string | null,
+  environmentNowMs: number | null,
+): { readonly shown: string; readonly spoken: string } | null {
   if (resetsAt === null || environmentNowMs === null) return null;
   const resetAtMs = Date.parse(resetsAt);
   if (!Number.isFinite(resetAtMs)) return null;
   const remaining = resetAtMs - environmentNowMs;
-  return remaining <= 0 ? "Reset due" : `Resets in ${formatCompactDuration(remaining)}`;
+  if (remaining <= 0) return { shown: "due", spoken: "Reset due" };
+  const shown = formatCompactDuration(remaining);
+  return { shown, spoken: `Resets in ${shown}` };
 }
 
 function readingAgeLabel(readingAgeMs: number | null): string | null {
@@ -148,35 +165,33 @@ function readingAgeLabel(readingAgeMs: number | null): string | null {
   return `Updated ${formatCompactDuration(readingAgeMs)} ago`;
 }
 
-function AccountLimitRowView(props: { row: AccountLimitsRow; showEnvironment: boolean }) {
-  const { row, showEnvironment } = props;
-  const observation = row.snapshot?.observation ?? null;
-  const windows = observation ? selectVisibleAccountLimitWindows(observation.windows) : [];
+function AccountLimitRowView(props: { row: AccountLimitsRow }) {
+  const { row } = props;
   const ageLabel = readingAgeLabel(row.readingAgeMs);
   return (
-    <section className="border-border/60 border-t px-3 py-3 first:border-t-0">
+    <section className="border-border/60 border-t px-3 py-3 [&:first-of-type]:border-t-0">
       <div className="flex min-w-0 items-center gap-2">
         <ProviderInstanceIcon
           accentColor={row.accentColor}
           className="size-5"
-          displayName={row.accountLabel}
+          displayName={row.providerLabel}
           driverKind={row.driver}
           iconClassName="size-4 text-foreground/80"
           showBadge={Boolean(row.accentColor)}
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-1.5">
-            <span className="truncate text-xs font-medium text-foreground">{row.accountLabel}</span>
-            {observation?.plan ? (
+            <span className="truncate text-xs font-medium text-foreground">
+              {row.providerLabel}
+            </span>
+            {row.plan ? (
               <span className="truncate font-mono text-[10px] text-muted-foreground/65">
-                {observation.plan}
+                {row.plan}
               </span>
             ) : null}
           </div>
-          {showEnvironment ? (
-            <div className="truncate text-[10px] text-muted-foreground/60">
-              {row.environmentLabel}
-            </div>
+          {row.subtitle ? (
+            <div className="truncate text-[10px] text-muted-foreground/60">{row.subtitle}</div>
           ) : null}
         </div>
         {ageLabel ? (
@@ -186,16 +201,34 @@ function AccountLimitRowView(props: { row: AccountLimitsRow; showEnvironment: bo
         ) : null}
       </div>
 
-      {windows.length > 0 ? (
+      {row.windows.length > 0 ? (
         <div className="mt-2.5 space-y-2.5">
-          {windows.map((window) => {
+          {row.windows.map((rowWindow) => {
+            const { window } = rowWindow;
             const usedPercent = Math.round(window.usedPercent);
-            const reset = resetLabel(window.resetsAt, row.environmentNowMs);
+            const remaining = resetRemaining(window.resetsAt, rowWindow.environmentNowMs);
             return (
-              <div key={`${window.meter?.id ?? "primary"}:${window.id}`}>
-                <div className="mb-1 flex items-baseline justify-between gap-3 font-mono text-[10px]">
+              <div key={accountLimitsWindowKey(window)}>
+                <div className="mb-1 flex items-center justify-between gap-3 font-mono text-[10px]">
                   <span className="text-muted-foreground">{window.label}</span>
-                  <span className="tabular-nums text-foreground/75">{usedPercent}%</span>
+                  <span className="flex items-center gap-1">
+                    {remaining ? (
+                      <>
+                        <RotateCcwIcon
+                          aria-hidden
+                          className="size-2.5 shrink-0 text-muted-foreground/50"
+                        />
+                        <span className="text-muted-foreground/60">
+                          <span className="sr-only">{remaining.spoken}</span>
+                          <span aria-hidden>{remaining.shown}</span>
+                        </span>
+                        <span aria-hidden className="text-muted-foreground/35">
+                          ·
+                        </span>
+                      </>
+                    ) : null}
+                    <span className="tabular-nums text-foreground/75">{usedPercent}%</span>
+                  </span>
                 </div>
                 <div className="h-1 overflow-hidden rounded-full bg-foreground/8">
                   <div
@@ -203,11 +236,6 @@ function AccountLimitRowView(props: { row: AccountLimitsRow; showEnvironment: bo
                     style={{ width: `${Math.min(100, Math.max(0, window.usedPercent))}%` }}
                   />
                 </div>
-                {reset ? (
-                  <div className="mt-1 text-right font-mono text-[9px] text-muted-foreground/50">
-                    {reset}
-                  </div>
-                ) : null}
               </div>
             );
           })}
@@ -223,7 +251,7 @@ function AccountLimitRowView(props: { row: AccountLimitsRow; showEnvironment: bo
       ) : null}
       {row.state === "refresh-failed" || row.state === "stale-refresh-failed" ? (
         <div className="mt-1 text-[10px] text-muted-foreground/65">
-          Refresh failed{observation ? " · showing the last reading" : ""}
+          Refresh failed{row.windows.length > 0 ? " · showing the last reading" : ""}
         </div>
       ) : null}
     </section>
@@ -235,7 +263,6 @@ export function AccountLimitsPanelContent(props: {
   readonly shortcutLabel: string | null;
 }) {
   const { view, shortcutLabel } = props;
-  const showEnvironment = view.environments.length > 1;
   const disconnected = view.environments.filter(
     (environment) => environment.state !== "ready" && environment.state !== "pending",
   );
@@ -249,7 +276,15 @@ export function AccountLimitsPanelContent(props: {
         ? "Could not load account limits"
         : "No account limits available";
   return (
-    <div className="w-[21rem] max-w-[calc(100vw-1rem)]" aria-label="Usage limits">
+    // `data-usage-limits-panel` is the hook `mesura.css` matches to give this
+    // popover an opaque surface of its own instead of the default dropdown
+    // glass. It sits here, on a plain div we own, rather than on the popup
+    // itself, so the selector cannot break on how Base UI forwards props.
+    <div
+      className="w-[21rem] max-w-[calc(100vw-1rem)]"
+      aria-label="Usage limits"
+      data-usage-limits-panel
+    >
       <header className="flex items-center justify-between gap-3 border-border/60 border-b px-3 py-2.5">
         <div>
           <div className="text-xs font-medium text-foreground">Usage limits</div>
@@ -271,13 +306,7 @@ export function AccountLimitsPanelContent(props: {
           {emptyMessage}
         </div>
       ) : (
-        view.rows.map((row) => (
-          <AccountLimitRowView
-            key={`${row.environmentId}:${row.providerInstanceId}`}
-            row={row}
-            showEnvironment={showEnvironment}
-          />
-        ))
+        view.rows.map((row) => <AccountLimitRowView key={row.key} row={row} />)
       )}
 
       {view.isPartial || disconnected.length > 0 ? (
@@ -310,7 +339,7 @@ export function AccountLimitsPopover(props: {
     >
       <PopoverPopup
         aria-label="Usage limits"
-        align="end"
+        align="start"
         anchor={anchor}
         className="p-0"
         {...ACCOUNT_LIMITS_POPOVER_FOCUS_PROPS}

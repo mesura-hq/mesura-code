@@ -108,7 +108,6 @@ function SidebarUtilityItem({
   icon,
   label,
   onClick,
-  buttonRef,
   onPointerEnter,
   onPointerLeave,
   suppressTooltip = false,
@@ -116,7 +115,6 @@ function SidebarUtilityItem({
   icon: ReactNode;
   label: string;
   onClick: () => void;
-  buttonRef?: (element: HTMLButtonElement | null) => void;
   onPointerEnter?: () => void;
   onPointerLeave?: () => void;
   suppressTooltip?: boolean;
@@ -131,7 +129,6 @@ function SidebarUtilityItem({
               onClick={onClick}
               onPointerEnter={onPointerEnter}
               onPointerLeave={onPointerLeave}
-              ref={buttonRef}
               size="icon"
             >
               {icon}
@@ -161,7 +158,6 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const { environments } = useEnvironments();
   const accountLimitsController = useAccountLimitsPanelController(!isMobile);
   const [footerAnchor, setFooterAnchor] = useState<HTMLUListElement | null>(null);
-  const [usageAnchor, setUsageAnchor] = useState<HTMLButtonElement | null>(null);
   // The page reads every connected server, so one of them offering pull requests is enough for
   // the link to lead somewhere.
   const pullRequestsSupported = environments.some(
@@ -222,7 +218,6 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             />
           ) : null}
           <SidebarUtilityItem
-            buttonRef={setUsageAnchor}
             icon={<ChartNoAxesColumnIcon />}
             label="Usage"
             onClick={handleUsageClick}
@@ -233,11 +228,17 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
         </>
       )}
       <SidebarUpdatePill />
+      {/*
+       * Anchored to the footer row, not to the Usage button inside it. Aligning
+       * to the button lines the panel up with the third icon, which leaves it
+       * hanging over the middle of the sidebar; the row's left edge is the
+       * sidebar's content column, so aligning to it reads as flush. It also
+       * survives the Pull Requests item appearing and disappearing, which moves
+       * the button by its own width and would break any fixed offset tuned for
+       * one of the two cases.
+       */}
       {!isMobile ? (
-        <AccountLimitsPopover
-          anchor={usageAnchor ?? footerAnchor}
-          controller={accountLimitsController}
-        />
+        <AccountLimitsPopover anchor={footerAnchor} controller={accountLimitsController} />
       ) : null}
     </SidebarMenu>
   );
