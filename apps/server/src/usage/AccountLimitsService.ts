@@ -2,6 +2,7 @@
 import {
   ACCOUNT_LIMITS_CONTRACT_VERSION,
   AccountLimitsSnapshot,
+  type AccountLimitsAccount,
   type AccountLimitsSummary,
   type AccountLimitsWindow,
   type ProviderDriverKind,
@@ -122,6 +123,22 @@ function mergeWindows(
   next: readonly AccountLimitsWindow[],
 ): readonly AccountLimitsWindow[] {
   return next.reduce<readonly AccountLimitsWindow[]>(mergeWindow, previous);
+}
+
+/**
+ * Date each window with the reading that produced it.
+ *
+ * A merge carries windows a provider did not report this time, so one
+ * observation holds numbers of different ages. Without a per-window date the
+ * merged result claims the newest reading's freshness for all of them, which is
+ * what made two environments on one subscription disagree while both looked
+ * current.
+ */
+function stampWindows(
+  windows: readonly AccountLimitsWindow[],
+  observedAt: string,
+): readonly AccountLimitsWindow[] {
+  return windows.map((window) => ({ ...window, observedAt }));
 }
 
 export function makeAccountLimitsService(input: {
@@ -246,6 +263,7 @@ export function makeAccountLimitsService(input: {
       instance: ProviderInstance,
       attemptedAt: string,
       normalized: NormalizedAccountLimits | null,
+      account?: AccountLimitsAccount | undefined,
     ) {
       if (!(yield* isCurrentInstance(instance))) return;
       yield* stateLock.withPermits(1)(
@@ -254,12 +272,17 @@ export function makeAccountLimitsService(input: {
           if (knownInstances.get(key) !== instance) return;
           const previous = snapshots.get(key);
           if (previous && hasNewerAttempt(previous, attemptedAt)) return;
+          // A failed read never clears the account: the subscription a cached
+          // observation belongs to does not change because one poll failed.
+          const effectiveAccount = account ?? previous?.account;
+          const stamped = normalized === null ? [] : stampWindows(normalized.windows, attemptedAt);
           snapshots.set(
             key,
             normalized === null
               ? {
                   providerInstanceId: instance.instanceId,
                   driver: instance.driverKind,
+                  ...(effectiveAccount ? { account: effectiveAccount } : {}),
                   observation: previous?.observation ?? null,
                   lastAttempt: {
                     attemptedAt,
@@ -270,12 +293,13 @@ export function makeAccountLimitsService(input: {
               : {
                   providerInstanceId: instance.instanceId,
                   driver: instance.driverKind,
+                  ...(effectiveAccount ? { account: effectiveAccount } : {}),
                   observation: {
                     plan: normalized.plan ?? previous?.observation?.plan ?? null,
                     windows:
                       instance.driverKind === "codex"
-                        ? mergeWindows(previous?.observation?.windows ?? [], normalized.windows)
-                        : normalized.windows,
+                        ? mergeWindows(previous?.observation?.windows ?? [], stamped)
+                        : stamped,
                     observedAt: attemptedAt,
                     source: "poll",
                   },
@@ -304,8 +328,13 @@ export function makeAccountLimitsService(input: {
       yield* instance.readAccountLimits().pipe(
         Effect.matchEffect({
           onFailure: () => commitRefresh(instance, attemptedAt, null),
-          onSuccess: (payload) =>
-            commitRefresh(instance, attemptedAt, normalizePoll(instance.driverKind, payload)),
+          onSuccess: (read) =>
+            commitRefresh(
+              instance,
+              attemptedAt,
+              normalizePoll(instance.driverKind, read.payload),
+              read.account,
+            ),
         }),
         Effect.ensuring(
           stateLock.withPermits(1)(Effect.sync(() => void inFlight.delete(instance))),
@@ -350,27 +379,34 @@ export function makeAccountLimitsService(input: {
             return;
           }
 
+          // An event names one window. Stamping only that window keeps the
+          // dates of the ones it carried over, so the reading stays readable as
+          // what it is: one fresh number beside older ones.
           let normalized = normalizePoll(event.driver, event.payload);
+          let windows =
+            normalized === null ? null : stampWindows(normalized.windows, event.createdAt);
           if (event.driver === "claudeAgent" && normalized === null) {
             const window = normalizeClaudeRateLimitEvent(event.payload);
-            normalized = window
-              ? {
-                  plan: previous?.observation?.plan ?? null,
-                  windows: mergeWindow(previous?.observation?.windows ?? [], window),
-                }
-              : null;
+            if (window) {
+              normalized = { plan: previous?.observation?.plan ?? null, windows: [window] };
+              windows = mergeWindow(previous?.observation?.windows ?? [], {
+                ...window,
+                observedAt: event.createdAt,
+              });
+            }
           }
-          if (normalized === null) return;
+          if (normalized === null || windows === null) return;
 
           snapshots.set(key, {
             providerInstanceId: event.providerInstanceId,
             driver: event.driver,
+            ...(previous?.account ? { account: previous.account } : {}),
             observation: {
               plan: normalized.plan ?? previous?.observation?.plan ?? null,
               windows:
                 event.driver === "codex"
-                  ? mergeWindows(previous?.observation?.windows ?? [], normalized.windows)
-                  : normalized.windows,
+                  ? mergeWindows(previous?.observation?.windows ?? [], windows)
+                  : windows,
               observedAt: event.createdAt,
               source: "event",
             },

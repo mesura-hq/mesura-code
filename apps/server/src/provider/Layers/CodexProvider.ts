@@ -22,7 +22,11 @@ import type {
   ServerProviderModel,
   ServerProviderSkill,
 } from "@t3tools/contracts";
-import { PREFERRED_DEFAULT_CODEX_MODELS, ServerSettingsError } from "@t3tools/contracts";
+import {
+  PREFERRED_DEFAULT_CODEX_MODELS,
+  ProviderDriverKind,
+  ServerSettingsError,
+} from "@t3tools/contracts";
 
 import { createModelCapabilities } from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
@@ -33,6 +37,8 @@ import {
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
+import { accountIdentityFromEmail } from "../../usage/accountIdentity.ts";
+import type { AccountLimitsRead } from "../ProviderDriver.ts";
 import packageJson from "../../../package.json" with { type: "json" };
 const isCodexAppServerSpawnError = Schema.is(CodexErrors.CodexAppServerSpawnError);
 
@@ -391,6 +397,21 @@ interface CodexAccountLimitsClient {
     CodexSchema.V2GetAccountRateLimitsResponse,
     CodexErrors.CodexAppServerError
   >;
+  readonly readAccount: () => Effect.Effect<
+    CodexSchema.V2GetAccountResponse,
+    CodexErrors.CodexAppServerError
+  >;
+}
+
+/**
+ * The account behind a rate-limit reading. Only a ChatGPT login carries the
+ * subscription the windows are metered against; an API-key or Bedrock account
+ * has no plan limits to fold.
+ */
+function codexAccountIdentity(response: CodexSchema.V2GetAccountResponse) {
+  const account = response.account;
+  if (!account || account.type !== "chatgpt") return undefined;
+  return accountIdentityFromEmail(ProviderDriverKind.make("codex"), account.email);
 }
 
 export const requestCodexAccountLimits = Effect.fn("requestCodexAccountLimits")(function* (
@@ -398,7 +419,19 @@ export const requestCodexAccountLimits = Effect.fn("requestCodexAccountLimits")(
 ) {
   yield* client.initialize();
   yield* client.notifyInitialized();
-  return yield* client.readAccountLimits();
+  // The account read only names the login; a failure there must not lose the
+  // limits themselves, so the reading degrades to an unfoldable one instead.
+  const [payload, account] = yield* Effect.all(
+    [
+      client.readAccountLimits(),
+      client.readAccount().pipe(
+        Effect.map(codexAccountIdentity),
+        Effect.catchCause(() => Effect.succeed(undefined)),
+      ),
+    ],
+    { concurrency: "unbounded" },
+  );
+  return { payload, ...(account ? { account } : {}) } satisfies AccountLimitsRead;
 });
 
 export const readCodexAccountLimits = Effect.fn("readCodexAccountLimits")(function* (
@@ -410,6 +443,7 @@ export const readCodexAccountLimits = Effect.fn("readCodexAccountLimits")(functi
       initialize: () => client.request("initialize", buildCodexInitializeParams()),
       notifyInitialized: () => client.notify("initialized", undefined),
       readAccountLimits: () => client.request("account/rateLimits/read", undefined),
+      readAccount: () => client.request("account/read", {}),
     });
   }).pipe(Effect.scoped, Effect.timeout(Duration.millis(AUTH_PROBE_TIMEOUT_MS)));
 });

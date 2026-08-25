@@ -1,4 +1,4 @@
-import { EnvironmentId, ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
+import { EnvironmentId, ProviderDriverKind } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -38,53 +38,29 @@ function view(): AccountLimitsView {
     ],
     rows: [
       {
-        environmentId,
-        environmentLabel: "Laptop",
-        providerInstanceId: ProviderInstanceId.make("codex"),
+        key: "codex:dev@example.com",
         driver: ProviderDriverKind.make("codex"),
         accountLabel: "Codex",
-        snapshot: {
-          providerInstanceId: ProviderInstanceId.make("codex"),
-          driver: ProviderDriverKind.make("codex"),
-          observation: {
-            plan: "pro",
-            observedAt: "2026-08-22T12:09:00.000Z",
-            source: "event",
-            windows: [
-              {
-                id: "seven_day",
-                label: "7d",
-                usedPercent: 30,
-                resetsAt: "2026-08-22T17:10:00.000Z",
-                windowMinutes: 10_080,
-                meter: { id: "codex", label: "Codex" },
-              },
-              {
-                id: "seven_day",
-                label: "7d Spark",
-                usedPercent: 5,
-                resetsAt: null,
-                windowMinutes: 10_080,
-                meter: { id: "codex_spark", label: "GPT-5.3-Codex-Spark" },
-              },
-              {
-                id: "nimbus_quill",
-                label: "Nimbus quill",
-                usedPercent: 0,
-                resetsAt: null,
-                windowMinutes: null,
-                meter: { id: "nimbus_quill", label: "Nimbus quill" },
-              },
-            ],
+        plan: "pro",
+        subtitle: "Laptop",
+        environments: [{ environmentId, label: "Laptop" }],
+        windows: [
+          {
+            window: {
+              id: "seven_day",
+              label: "7d",
+              usedPercent: 30,
+              resetsAt: "2026-08-22T17:10:00.000Z",
+              windowMinutes: 10_080,
+              meter: { id: "codex", label: "Codex" },
+            },
+            environmentId,
+            environmentLabel: "Laptop",
+            environmentNowMs: Date.parse("2026-08-22T12:10:00.000Z"),
+            ageMs: 60_000,
           },
-          lastAttempt: {
-            attemptedAt: "2026-08-22T12:09:00.000Z",
-            status: "succeeded",
-            error: null,
-          },
-        },
+        ],
         state: "current",
-        environmentNowMs: Date.parse("2026-08-22T12:10:00.000Z"),
         readingAgeMs: 60_000,
       },
     ],
@@ -102,7 +78,7 @@ describe("AccountLimitsPanelContent", () => {
     });
   });
 
-  it("renders account meters, reset time, reading age, and shortcut without Spark", () => {
+  it("renders account meters, reset time, reading age, and shortcut", () => {
     const markup = renderToStaticMarkup(
       <AccountLimitsPanelContent shortcutLabel="Alt+U" view={view()} />,
     );
@@ -114,8 +90,6 @@ describe("AccountLimitsPanelContent", () => {
     expect(markup).toContain("30%");
     expect(markup).toContain("Resets in 5h");
     expect(markup).toContain("1m ago");
-    expect(markup).not.toContain("Spark");
-    expect(markup).not.toContain("Nimbus");
   });
 
   it("renders a quiet missing-reading state", () => {
@@ -125,7 +99,7 @@ describe("AccountLimitsPanelContent", () => {
         shortcutLabel={null}
         view={{
           ...missing,
-          rows: [{ ...missing.rows[0]!, snapshot: null, state: "missing", readingAgeMs: null }],
+          rows: [{ ...missing.rows[0]!, windows: [], state: "missing", readingAgeMs: null }],
         }}
       />,
     );

@@ -1,6 +1,11 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import { AccountLimitsSnapshot, ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
+import {
+  AccountLimitsSnapshot,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type AccountLimitsAccount,
+} from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -23,13 +28,20 @@ function providerInstance(input: {
   readonly id: string;
   readonly driver: "claudeAgent" | "codex";
   readonly enabled?: boolean;
+  readonly account?: AccountLimitsAccount;
   readonly read: () => Effect.Effect<unknown, ProviderDriverError>;
 }): ProviderInstance {
   return {
     instanceId: ProviderInstanceId.make(input.id),
     driverKind: ProviderDriverKind.make(input.driver),
     enabled: input.enabled ?? true,
-    readAccountLimits: input.read,
+    readAccountLimits: () =>
+      input.read().pipe(
+        Effect.map((payload) => ({
+          payload,
+          ...(input.account ? { account: input.account } : {}),
+        })),
+      ),
   } as ProviderInstance;
 }
 
@@ -223,6 +235,107 @@ it.layer(NodeServices.layer)("AccountLimitsService", (it) => {
 
       const snapshot = (yield* service.readSummary()).snapshots[0];
       assert.equal(snapshot?.observation?.windows[0]?.usedPercent, 79);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("carries the account a reading came from, and keeps it across a failure", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "account-limits-account-" });
+      const shouldFail = yield* Ref.make(false);
+      const instances = yield* Ref.make<ReadonlyArray<ProviderInstance>>([
+        providerInstance({
+          id: "claude",
+          driver: "claudeAgent",
+          account: { key: "claudeAgent:dev@example.com", label: "dev@example.com" },
+          read: () =>
+            Ref.get(shouldFail).pipe(
+              Effect.flatMap((fail) =>
+                fail
+                  ? Effect.fail(
+                      new ProviderDriverError({
+                        driver: "claudeAgent",
+                        instanceId: "claude",
+                        detail: "unreachable",
+                      }),
+                    )
+                  : Effect.succeed(claudePayload(31)),
+              ),
+            ),
+        }),
+      ]);
+      const service = yield* makeTestService(instances, path.join(tempDir, "cache.json"));
+      yield* service.refreshStale;
+
+      assert.deepEqual((yield* service.readSummary()).snapshots[0]?.account, {
+        key: "claudeAgent:dev@example.com",
+        label: "dev@example.com",
+      });
+
+      // The subscription a cached reading belongs to does not change because a
+      // poll failed, and the client needs it to keep folding environments.
+      yield* Ref.set(shouldFail, true);
+      yield* TestClock.adjust("5 minutes");
+      yield* service.refreshStale;
+
+      const failed = (yield* service.readSummary()).snapshots[0];
+      assert.equal(failed?.lastAttempt.status, "failed");
+      assert.equal(failed?.account?.key, "claudeAgent:dev@example.com");
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("dates each window with the reading that produced it", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "account-limits-window-age-" });
+      const instances = yield* Ref.make<ReadonlyArray<ProviderInstance>>([
+        providerInstance({
+          id: "claude",
+          driver: "claudeAgent",
+          read: () =>
+            Effect.succeed({
+              subscription_type: "max",
+              rate_limits: {
+                five_hour: { utilization: 20, resets_at: "2026-08-22T18:00:00.000Z" },
+                seven_day: { utilization: 40, resets_at: "2026-08-29T12:00:00.000Z" },
+              },
+            }),
+        }),
+      ]);
+      const service = yield* makeTestService(instances, path.join(tempDir, "cache.json"));
+      yield* service.refreshStale;
+
+      const polled = (yield* service.readSummary()).snapshots[0]?.observation;
+      const polledAt = polled?.observedAt;
+      assert.equal(
+        polled?.windows.every((window) => window.observedAt === polledAt),
+        true,
+      );
+
+      // An event names one window. The windows it carries over keep their own
+      // dates, so a stale number never claims the event's freshness.
+      yield* service.ingest({
+        providerInstanceId: ProviderInstanceId.make("claude"),
+        driver: ProviderDriverKind.make("claudeAgent"),
+        payload: {
+          rate_limit_info: {
+            rateLimitType: "five_hour",
+            utilization: 55,
+            resetsAt: 1_787_000_000,
+          },
+        },
+        createdAt: "2026-09-01T10:00:00.000Z",
+      });
+
+      const merged = (yield* service.readSummary()).snapshots[0]?.observation;
+      const fiveHour = merged?.windows.find((window) => window.id === "five_hour");
+      const sevenDay = merged?.windows.find((window) => window.id === "seven_day");
+      assert.equal(fiveHour?.usedPercent, 55);
+      assert.equal(fiveHour?.observedAt, "2026-09-01T10:00:00.000Z");
+      assert.equal(sevenDay?.usedPercent, 40);
+      assert.equal(sevenDay?.observedAt, polledAt);
     }).pipe(Effect.scoped),
   );
 

@@ -23,7 +23,9 @@ describe("Claude account-limit reader", () => {
             aborted = true;
           });
           return {
-            initializationResult: async () => ({ account: { subscriptionType: "max" } }),
+            initializationResult: async () => ({
+              account: { email: "Dev@Example.com", subscriptionType: "max" },
+            }),
             usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async () => ({
               subscription_type: "max",
               rate_limits_available: true,
@@ -46,7 +48,16 @@ describe("Claude account-limit reader", () => {
           readonly pathToClaudeCodeExecutable?: string;
         };
       };
-      assert.equal((result as { readonly subscription_type?: string }).subscription_type, "max");
+      assert.equal(
+        (result.payload as { readonly subscription_type?: string }).subscription_type,
+        "max",
+      );
+      // The identity folds two environments on one subscription into one row,
+      // so it must not vary with how the address was typed.
+      assert.deepEqual(result.account, {
+        key: "claudeAgent:dev@example.com",
+        label: "Dev@Example.com",
+      });
       assert.equal(input.options.cwd, "/workspace/work");
       assert.equal(input.options.env?.HOME, "/home/claude-work");
       assert.equal(input.options.env?.ACCOUNT_MARKER, "work");
@@ -140,14 +151,61 @@ describe("Codex account-limit reader", () => {
             },
           });
         },
+        readAccount: () => {
+          calls.push("request:account/read");
+          return Effect.succeed({
+            account: { type: "chatgpt", email: "Dev@Example.com", planType: "plus" },
+            requiresOpenaiAuth: false,
+          });
+        },
       });
 
-      assert.deepEqual(calls, [
-        "request:initialize",
-        "notify:initialized",
-        "request:account/rateLimits/read",
-      ]);
-      assert.equal(result.rateLimits.limitId, "codex");
+      assert.deepEqual(calls.slice(0, 2), ["request:initialize", "notify:initialized"]);
+      assert.deepEqual(
+        new Set(calls.slice(2)),
+        new Set(["request:account/rateLimits/read", "request:account/read"]),
+      );
+      assert.equal(
+        (result.payload as { readonly rateLimits: { readonly limitId: string } }).rateLimits
+          .limitId,
+        "codex",
+      );
+      assert.deepEqual(result.account, { key: "codex:dev@example.com", label: "Dev@Example.com" });
+    }),
+  );
+
+  it.effect("keeps the limits when the account read fails", () =>
+    Effect.gen(function* () {
+      const result = yield* requestCodexAccountLimits({
+        initialize: () => Effect.succeed({ userAgent: "codex-cli/1.0.0" }),
+        notifyInitialized: () => Effect.void,
+        readAccountLimits: () =>
+          Effect.succeed({
+            rateLimits: { limitId: "codex", primary: { usedPercent: 20 } },
+          }),
+        readAccount: () => Effect.die(new Error("app-server refused the account read")),
+      });
+
+      assert.equal(result.account, undefined);
+      assert.equal(
+        (result.payload as { readonly rateLimits: { readonly limitId: string } }).rateLimits
+          .limitId,
+        "codex",
+      );
+    }),
+  );
+
+  it.effect("names no account for an api-key login", () =>
+    Effect.gen(function* () {
+      const result = yield* requestCodexAccountLimits({
+        initialize: () => Effect.succeed({ userAgent: "codex-cli/1.0.0" }),
+        notifyInitialized: () => Effect.void,
+        readAccountLimits: () => Effect.succeed({ rateLimits: { limitId: "codex" } }),
+        readAccount: () =>
+          Effect.succeed({ account: { type: "apiKey" }, requiresOpenaiAuth: true }),
+      });
+
+      assert.equal(result.account, undefined);
     }),
   );
 });

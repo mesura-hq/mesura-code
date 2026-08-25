@@ -1,4 +1,6 @@
 import {
+  ProviderDriverKind,
+  type AccountLimitsAccount,
   type ClaudeSettings,
   type ModelCapabilities,
   type ModelSelection,
@@ -42,6 +44,8 @@ import {
   spawnAndCollect,
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
+import { accountIdentityFromEmail } from "../../usage/accountIdentity.ts";
+import type { AccountLimitsRead } from "../ProviderDriver.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import { discoverClaudeSkills } from "../Drivers/ClaudeSkills.ts";
@@ -796,6 +800,21 @@ interface ClaudeAccountLimitsQuery {
   readonly usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: () => Promise<unknown>;
 }
 
+/**
+ * The account behind a usage reading. The control session already awaits
+ * `initializationResult()` before it can ask for usage, and that response
+ * carries the logged-in account, so the identity costs no extra request.
+ */
+function claudeAccountIdentity(initializationResult: unknown): AccountLimitsAccount | undefined {
+  if (typeof initializationResult !== "object" || initializationResult === null) return undefined;
+  const account = (initializationResult as { readonly account?: unknown }).account;
+  if (typeof account !== "object" || account === null) return undefined;
+  return accountIdentityFromEmail(
+    ProviderDriverKind.make("claudeAgent"),
+    (account as { readonly email?: unknown }).email,
+  );
+}
+
 type ClaudeAccountLimitsQueryFactory = (
   input: Parameters<typeof claudeQuery>[0],
 ) => ClaudeAccountLimitsQuery;
@@ -808,7 +827,7 @@ export function readClaudeAccountLimitsWithQuery(input: {
   readonly timeout?: Duration.Input;
   readonly extraArgs?: Record<string, string | null>;
   readonly queryFactory?: ClaudeAccountLimitsQueryFactory;
-}): Effect.Effect<unknown, ProviderAdapterRequestError> {
+}): Effect.Effect<AccountLimitsRead, ProviderAdapterRequestError> {
   const abort = new AbortController();
   const queryFactory = input.queryFactory ?? claudeQuery;
   return Effect.tryPromise({
@@ -829,8 +848,10 @@ export function readClaudeAccountLimitsWithQuery(input: {
           ...(input.extraArgs ? { extraArgs: input.extraArgs } : {}),
         },
       });
-      await query.initializationResult();
-      return await query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET();
+      const initializationResult = await query.initializationResult();
+      const payload = await query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET();
+      const account = claudeAccountIdentity(initializationResult);
+      return { payload, ...(account ? { account } : {}) } satisfies AccountLimitsRead;
     },
     catch: (cause) =>
       new ProviderAdapterRequestError({

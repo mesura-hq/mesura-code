@@ -23,6 +23,7 @@
  * @module provider/ProviderDriver
  */
 import type {
+  AccountLimitsAccount,
   ProviderDriverKind,
   ProviderInstanceEnvironment,
   ProviderInstanceId,
@@ -73,7 +74,18 @@ export interface ProviderInstance {
   readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
   readonly textGeneration: TextGeneration.TextGeneration["Service"];
   /** Read provider-owned account limits without starting a user turn. */
-  readonly readAccountLimits?: () => Effect.Effect<unknown, ProviderDriverError>;
+  readonly readAccountLimits?: () => Effect.Effect<AccountLimitsRead, ProviderDriverError>;
+}
+
+/**
+ * One account-limit reading: the driver-native payload the usage normalizers
+ * parse, plus the subscription it was read from. `account` is absent when the
+ * provider does not name an account, which keeps that reading unfoldable
+ * against another environment's.
+ */
+export interface AccountLimitsRead {
+  readonly payload: unknown;
+  readonly account?: AccountLimitsAccount | undefined;
 }
 
 export interface ProviderContinuationIdentity {

@@ -33,8 +33,32 @@ export const AccountLimitsWindow = Schema.Struct({
   resetsAt: Schema.NullOr(Schema.String),
   windowMinutes: Schema.NullOr(Schema.Number),
   meter: Schema.optional(AccountLimitsMeter),
+  /**
+   * When this window's number was read, on the reporting environment's clock.
+   *
+   * Windows in one observation can carry different times: a provider event
+   * refreshes the single window it names and leaves the others untouched.
+   * Absent on readings taken before this field existed; callers fall back to
+   * the observation's `observedAt`.
+   */
+  observedAt: Schema.optional(Schema.String),
 });
 export type AccountLimitsWindow = typeof AccountLimitsWindow.Type;
+
+/**
+ * The subscription a reading belongs to.
+ *
+ * `key` identifies the subscription across environments: two environments that
+ * report the same key share one account, so the client folds them into one row
+ * instead of listing the same limits once per machine. It is absent when the
+ * provider does not name an account — an environment reporting no key is never
+ * folded into another.
+ */
+export const AccountLimitsAccount = Schema.Struct({
+  key: TrimmedNonEmptyString,
+  label: TrimmedNonEmptyString,
+});
+export type AccountLimitsAccount = typeof AccountLimitsAccount.Type;
 
 export const AccountLimitsObservationSource = Schema.Literals(["event", "poll"]);
 export type AccountLimitsObservationSource = typeof AccountLimitsObservationSource.Type;
@@ -57,6 +81,7 @@ export type AccountLimitsAttempt = typeof AccountLimitsAttempt.Type;
 export const AccountLimitsSnapshot = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   driver: ProviderDriverKind,
+  account: Schema.optional(AccountLimitsAccount),
   observation: Schema.NullOr(AccountLimitsObservation),
   lastAttempt: AccountLimitsAttempt,
 });

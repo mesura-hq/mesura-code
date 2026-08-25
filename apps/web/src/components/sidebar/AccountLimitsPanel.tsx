@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { shortcutLabelForCommand } from "../../keybindings";
 import { isTerminalFocused } from "../../lib/terminalFocus";
 import {
-  selectVisibleAccountLimitWindows,
   useAccountLimits,
   type AccountLimitsRow,
   type AccountLimitsView,
@@ -148,10 +147,8 @@ function readingAgeLabel(readingAgeMs: number | null): string | null {
   return `Updated ${formatCompactDuration(readingAgeMs)} ago`;
 }
 
-function AccountLimitRowView(props: { row: AccountLimitsRow; showEnvironment: boolean }) {
-  const { row, showEnvironment } = props;
-  const observation = row.snapshot?.observation ?? null;
-  const windows = observation ? selectVisibleAccountLimitWindows(observation.windows) : [];
+function AccountLimitRowView(props: { row: AccountLimitsRow }) {
+  const { row } = props;
   const ageLabel = readingAgeLabel(row.readingAgeMs);
   return (
     <section className="border-border/60 border-t px-3 py-3 first:border-t-0">
@@ -167,16 +164,14 @@ function AccountLimitRowView(props: { row: AccountLimitsRow; showEnvironment: bo
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-1.5">
             <span className="truncate text-xs font-medium text-foreground">{row.accountLabel}</span>
-            {observation?.plan ? (
+            {row.plan ? (
               <span className="truncate font-mono text-[10px] text-muted-foreground/65">
-                {observation.plan}
+                {row.plan}
               </span>
             ) : null}
           </div>
-          {showEnvironment ? (
-            <div className="truncate text-[10px] text-muted-foreground/60">
-              {row.environmentLabel}
-            </div>
+          {row.subtitle ? (
+            <div className="truncate text-[10px] text-muted-foreground/60">{row.subtitle}</div>
           ) : null}
         </div>
         {ageLabel ? (
@@ -186,11 +181,12 @@ function AccountLimitRowView(props: { row: AccountLimitsRow; showEnvironment: bo
         ) : null}
       </div>
 
-      {windows.length > 0 ? (
+      {row.windows.length > 0 ? (
         <div className="mt-2.5 space-y-2.5">
-          {windows.map((window) => {
+          {row.windows.map((rowWindow) => {
+            const { window } = rowWindow;
             const usedPercent = Math.round(window.usedPercent);
-            const reset = resetLabel(window.resetsAt, row.environmentNowMs);
+            const reset = resetLabel(window.resetsAt, rowWindow.environmentNowMs);
             return (
               <div key={`${window.meter?.id ?? "primary"}:${window.id}`}>
                 <div className="mb-1 flex items-baseline justify-between gap-3 font-mono text-[10px]">
@@ -223,7 +219,7 @@ function AccountLimitRowView(props: { row: AccountLimitsRow; showEnvironment: bo
       ) : null}
       {row.state === "refresh-failed" || row.state === "stale-refresh-failed" ? (
         <div className="mt-1 text-[10px] text-muted-foreground/65">
-          Refresh failed{observation ? " · showing the last reading" : ""}
+          Refresh failed{row.windows.length > 0 ? " · showing the last reading" : ""}
         </div>
       ) : null}
     </section>
@@ -235,7 +231,6 @@ export function AccountLimitsPanelContent(props: {
   readonly shortcutLabel: string | null;
 }) {
   const { view, shortcutLabel } = props;
-  const showEnvironment = view.environments.length > 1;
   const disconnected = view.environments.filter(
     (environment) => environment.state !== "ready" && environment.state !== "pending",
   );
@@ -271,13 +266,7 @@ export function AccountLimitsPanelContent(props: {
           {emptyMessage}
         </div>
       ) : (
-        view.rows.map((row) => (
-          <AccountLimitRowView
-            key={`${row.environmentId}:${row.providerInstanceId}`}
-            row={row}
-            showEnvironment={showEnvironment}
-          />
-        ))
+        view.rows.map((row) => <AccountLimitRowView key={row.key} row={row} />)
       )}
 
       {view.isPartial || disconnected.length > 0 ? (
