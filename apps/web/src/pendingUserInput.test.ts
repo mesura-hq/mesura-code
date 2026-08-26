@@ -4,6 +4,7 @@ import {
   buildPendingUserInputAnswers,
   countAnsweredPendingUserInputQuestions,
   decidePendingUserInputAdvance,
+  isPendingUserInputOptionShortcut,
   derivePendingUserInputProgress,
   findFirstUnansweredPendingUserInputQuestionIndex,
   resolvePendingUserInputAnswer,
@@ -354,5 +355,28 @@ describe("first unanswered question in the derived progress", () => {
         1,
       ).firstUnansweredQuestionIndex,
     ).toBeNull();
+  });
+});
+
+// Two listeners in two files depend on this answer agreeing with itself: the
+// panel acts on the digit, and ChatView's capture-phase handler has to let it
+// through instead of typing it into the custom answer.
+describe("isPendingUserInputOptionShortcut", () => {
+  it("claims a digit that names one of the options", () => {
+    expect(isPendingUserInputOptionShortcut(multiSelectQuestion, "2")).toBe(true);
+  });
+
+  it("leaves a digit past the last option alone", () => {
+    expect(isPendingUserInputOptionShortcut(multiSelectQuestion, "3")).toBe(false);
+  });
+
+  it("leaves zero, letters and multi-character keys alone", () => {
+    expect(isPendingUserInputOptionShortcut(multiSelectQuestion, "0")).toBe(false);
+    expect(isPendingUserInputOptionShortcut(multiSelectQuestion, "a")).toBe(false);
+    expect(isPendingUserInputOptionShortcut(multiSelectQuestion, "Enter")).toBe(false);
+  });
+
+  it("claims nothing when no question is on screen", () => {
+    expect(isPendingUserInputOptionShortcut(null, "1")).toBe(false);
   });
 });

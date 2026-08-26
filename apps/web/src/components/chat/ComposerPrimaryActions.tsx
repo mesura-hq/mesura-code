@@ -21,6 +21,29 @@ interface PendingActionState {
   firstUnansweredQuestionIndex?: number | null | undefined;
 }
 
+/**
+ * The question the control should go back to, 1-based, or null when there is
+ * nowhere to go.
+ *
+ * Null covers three cases, and the third is the one worth naming: the
+ * unanswered question IS the one on screen. Sending the user to where they
+ * already are, on a control that cannot move, reads as a broken button.
+ */
+function resolveUnansweredQuestionNumber(pendingAction: PendingActionState): number | null {
+  if (!pendingAction.isLastQuestion || pendingAction.isComplete) {
+    return null;
+  }
+  const unansweredIndex = pendingAction.firstUnansweredQuestionIndex;
+  if (
+    unansweredIndex === undefined ||
+    unansweredIndex === null ||
+    unansweredIndex === pendingAction.questionIndex
+  ) {
+    return null;
+  }
+  return unansweredIndex + 1;
+}
+
 interface ComposerPrimaryActionsProps {
   compact: boolean;
   pendingAction: PendingActionState | null;
@@ -47,25 +70,25 @@ export const formatPendingPrimaryActionLabel = (input: {
   isLastQuestion: boolean;
   isResponding: boolean;
   questionIndex: number;
-  // `| undefined` spelled out for `exactOptionalPropertyTypes`: the caller
-  // forwards an optional field straight through.
-  isComplete?: boolean | undefined;
-  firstUnansweredQuestionIndex?: number | null | undefined;
+  /**
+   * Which question the control goes back to, 1-based, when an earlier answer
+   * is missing — see `resolveUnansweredQuestionNumber`, which is the one place
+   * that decides it. `| undefined` is spelled out for
+   * `exactOptionalPropertyTypes`, since the caller forwards it straight
+   * through.
+   */
+  unansweredQuestionNumber?: number | null | undefined;
 }) => {
   if (input.isResponding) {
     return "Submitting...";
   }
-  // The last question is answered and the set still is not, so an earlier
-  // answer is missing. One question is on screen at a time, so the button is
-  // the only place that can say WHICH one — and pressing it goes there.
-  if (
-    input.isLastQuestion &&
-    input.isComplete === false &&
-    input.firstUnansweredQuestionIndex !== undefined &&
-    input.firstUnansweredQuestionIndex !== null
-  ) {
-    const questionNumber = input.firstUnansweredQuestionIndex + 1;
-    return input.compact ? `Question ${questionNumber}` : `Answer question ${questionNumber}`;
+  // An earlier answer is missing. One question is on screen at a time, so the
+  // button is the only place that can say WHICH one — and pressing it goes
+  // there.
+  if (input.unansweredQuestionNumber !== undefined && input.unansweredQuestionNumber !== null) {
+    return input.compact
+      ? `Question ${input.unansweredQuestionNumber}`
+      : `Answer question ${input.unansweredQuestionNumber}`;
   }
   if (input.compact) {
     return input.isLastQuestion ? "Submit" : "Next";
@@ -129,19 +152,16 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   );
 
   if (pendingAction) {
-    // Set when the question on screen is the last one, the set is still
-    // incomplete, and there is an earlier question to send the user back to.
-    const unansweredQuestionNumber =
-      pendingAction.isLastQuestion &&
-      !pendingAction.isComplete &&
-      pendingAction.firstUnansweredQuestionIndex !== undefined &&
-      pendingAction.firstUnansweredQuestionIndex !== null
-        ? pendingAction.firstUnansweredQuestionIndex + 1
-        : null;
+    const unansweredQuestionNumber = resolveUnansweredQuestionNumber(pendingAction);
     // The question ON SCREEN decides whether this button works, on the last
     // question as much as on any other. It used to read the whole set there
     // instead, which left the button disabled with nothing to tell the user
     // which earlier answer was missing.
+    // The last clause is unreachable from `derivePendingUserInputProgress`
+    // (an incomplete set whose missing answer is not the question on screen
+    // always has somewhere to go, and one that IS the question on screen
+    // fails `canAdvance` first). It stays because the alternative is the very
+    // defect this control had: a button that looks live and does nothing.
     const pendingPrimaryActionDisabled =
       isEnvironmentUnavailable ||
       pendingAction.isResponding ||
@@ -198,8 +218,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
             isLastQuestion: pendingAction.isLastQuestion,
             isResponding: pendingAction.isResponding,
             questionIndex: pendingAction.questionIndex,
-            isComplete: pendingAction.isComplete,
-            firstUnansweredQuestionIndex: pendingAction.firstUnansweredQuestionIndex,
+            unansweredQuestionNumber,
           })}
         </Button>
       </div>

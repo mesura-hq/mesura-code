@@ -146,6 +146,29 @@ export function findFirstUnansweredPendingUserInputQuestionIndex(
   return unansweredIndex === -1 ? Math.max(questions.length - 1, 0) : unansweredIndex;
 }
 
+/**
+ * Whether `key` is the digit shortcut of one of this question's options.
+ *
+ * Two listeners have to agree on this and they are not in the same file: the
+ * panel acts on the digit, and the window-level type-to-focus handler has to
+ * let it through. That handler runs in the capture phase, so a disagreement
+ * does not degrade gracefully — it swallows the key and types it into the
+ * custom answer, which clears the option the user had already picked.
+ */
+export function isPendingUserInputOptionShortcut(
+  question: UserInputQuestion | null,
+  key: string,
+): boolean {
+  if (!question) {
+    return false;
+  }
+  const digit = Number.parseInt(key, 10);
+  if (Number.isNaN(digit) || digit < 1 || digit > 9) {
+    return false;
+  }
+  return digit - 1 < question.options.length;
+}
+
 export function derivePendingUserInputProgress(
   questions: ReadonlyArray<UserInputQuestion>,
   draftAnswers: Record<string, PendingUserInputDraftAnswer>,
@@ -182,20 +205,21 @@ export function derivePendingUserInputProgress(
   };
 }
 
+/** The outcome of pressing the prompt's primary control. */
+export type PendingUserInputAdvance =
+  | { kind: "blocked" }
+  | { kind: "submit" }
+  | { kind: "go-to-question"; questionIndex: number };
+
 /**
- * What pressing the prompt's primary control does, given the question on
- * screen and the answers gathered so far.
+ * What pressing that control does, given the question on screen and the
+ * answers gathered so far.
  *
  * Pure, and separate from the component, because every entry point converges
  * here: the button, the Enter key, and a dictation delivered with submit
  * enabled. The Enter path in particular never consults the button's disabled
  * state, so a rule kept only in the markup was no rule at all.
  */
-export type PendingUserInputAdvance =
-  | { kind: "blocked" }
-  | { kind: "submit" }
-  | { kind: "go-to-question"; questionIndex: number };
-
 export function decidePendingUserInputAdvance(
   progress: PendingUserInputProgress,
 ): PendingUserInputAdvance {
@@ -212,7 +236,9 @@ export function decidePendingUserInputAdvance(
     return { kind: "submit" };
   }
   // Last question answered, set still incomplete: an earlier answer is
-  // missing, so go back to it rather than refusing silently.
+  // missing, so go back to it rather than refusing silently. The null case
+  // cannot arise from `derivePendingUserInputProgress`, which pairs a null
+  // index with `isComplete`; it guards a hand-built progress value.
   return progress.firstUnansweredQuestionIndex === null
     ? { kind: "blocked" }
     : { kind: "go-to-question", questionIndex: progress.firstUnansweredQuestionIndex };

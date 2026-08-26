@@ -44,6 +44,15 @@ function renderPendingActions(isRunning: boolean) {
   );
 }
 
+// Two traps in one assertion: the markup also holds the stop and Previous
+// buttons, and every button's class list contains `disabled:opacity-64`. So
+// read the submit button's own tag, and look for the ATTRIBUTE.
+function isSubmitButtonDisabled(markup: string): boolean {
+  const tag = markup.match(/<button[^>]*type="submit"[^>]*>/);
+  if (!tag) throw new Error("no submit button rendered");
+  return tag[0].includes('disabled=""');
+}
+
 function renderPendingSubmit(
   pendingAction: Partial<{
     questionIndex: number;
@@ -237,22 +246,20 @@ describe("formatPendingPrimaryActionLabel", () => {
         isLastQuestion: true,
         isResponding: false,
         questionIndex: 2,
-        isComplete: false,
-        firstUnansweredQuestionIndex: 0,
+        unansweredQuestionNumber: 1,
       }),
     ).toBe("Answer question 1");
   });
 
-  // Callers that track no unanswered index keep the previous wording, which
-  // is what the optional fields are for.
-  it("keeps the plain submit wording when no unanswered index is supplied", () => {
+  // Callers that track no unanswered question keep the previous wording,
+  // which is what the optional field is for.
+  it("keeps the plain submit wording when no unanswered question is supplied", () => {
     expect(
       formatPendingPrimaryActionLabel({
         compact: false,
         isLastQuestion: true,
         isResponding: false,
         questionIndex: 2,
-        isComplete: false,
       }),
     ).toBe("Submit answers");
   });
@@ -336,7 +343,7 @@ describe("ComposerPrimaryActions", () => {
 
     expect(markup).toContain("Answer question 1");
     expect(markup).toContain('title="Question 1 has no answer yet"');
-    expect(markup).not.toContain('disabled=""');
+    expect(isSubmitButtonDisabled(markup)).toBe(false);
   });
 
   it("shortens that label on a compact composer", () => {
@@ -349,18 +356,22 @@ describe("ComposerPrimaryActions", () => {
     const markup = renderPendingSubmit();
 
     expect(markup).toContain("Submit answers");
-    expect(markup).not.toContain('disabled=""');
+    expect(isSubmitButtonDisabled(markup)).toBe(false);
   });
 
   // The question ON SCREEN still governs the button, on the last question as
   // much as on any other.
   it("stays disabled while the question on screen has no answer", () => {
-    expect(
-      renderPendingSubmit({
-        canAdvance: false,
-        isComplete: false,
-        firstUnansweredQuestionIndex: 2,
-      }),
-    ).toContain('disabled=""');
+    const markup = renderPendingSubmit({
+      canAdvance: false,
+      isComplete: false,
+      firstUnansweredQuestionIndex: 2,
+    });
+
+    expect(isSubmitButtonDisabled(markup)).toBe(true);
+    // And it must not offer to take the user to question 3 — that is the
+    // question already on screen, and this button cannot move.
+    expect(markup).toContain("Submit answers");
+    expect(markup).not.toContain("Answer question 3");
   });
 });
