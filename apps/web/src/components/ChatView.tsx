@@ -101,7 +101,9 @@ import { type LegendListRef } from "@legendapp/list/react";
 import { getAnchoredTurnMetrics, type TimelineScrollMode } from "./chat/timelineScrollAnchoring";
 import {
   buildPendingUserInputAnswers,
+  decidePendingUserInputAdvance,
   derivePendingUserInputProgress,
+  isPendingUserInputOptionShortcut,
   setPendingUserInputCustomAnswer,
   togglePendingUserInputOptionSelection,
   type PendingUserInputDraftAnswer,
@@ -1412,6 +1414,20 @@ function ChatViewContent(props: ChatViewProps) {
   const [pendingUserInputAnswersByRequestId, setPendingUserInputAnswersByRequestId] = useState<
     Record<string, Record<string, PendingUserInputDraftAnswer>>
   >({});
+  // The same answers, held where they can be read in the task that wrote
+  // them. Dictation places its text and dispatches the send synchronously,
+  // so the advance decision cannot wait for a render — reading state there
+  // decided with the answers of the render BEFORE the dictated one, which
+  // blocked the very turn the dictation had just answered. Every write goes
+  // through `applyPendingUserInputAnswers`, so the two never disagree.
+  const pendingUserInputAnswersRef = useRef(pendingUserInputAnswersByRequestId);
+  const applyPendingUserInputAnswers = useCallback(
+    (nextAnswers: Record<string, Record<string, PendingUserInputDraftAnswer>>) => {
+      pendingUserInputAnswersRef.current = nextAnswers;
+      setPendingUserInputAnswersByRequestId(nextAnswers);
+    },
+    [],
+  );
   const [pendingUserInputQuestionIndexByRequestId, setPendingUserInputQuestionIndexByRequestId] =
     useState<Record<string, number>>({});
   const shouldUseRightPanelSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
@@ -4859,7 +4875,12 @@ function ChatViewContent(props: ChatViewProps) {
       if (
         !shortcutContext.terminalFocus &&
         !shortcutContext.modelPickerOpen &&
-        shouldTypeToFocusComposer(event)
+        shouldTypeToFocusComposer(event) &&
+        // The question prompt answers 1-9 with its own options, and this
+        // handler is registered on `window` in the CAPTURE phase — it runs
+        // before the panel's listener and would swallow the digit, typing it
+        // into the custom answer and clearing the option the user had picked.
+        !isPendingUserInputOptionShortcut(activePendingProgress?.activeQuestion ?? null, event.key)
       ) {
         if (composerRef.current?.insertTextAtEnd(event.key)) {
           event.preventDefault();
@@ -5021,6 +5042,7 @@ function ChatViewContent(props: ChatViewProps) {
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
   }, [
+    activePendingProgress?.activeQuestion,
     activeProject,
     activeRightPanelSurface,
     addTerminalSurface,
@@ -5801,32 +5823,35 @@ function ChatViewContent(props: ChatViewProps) {
       if (!activePendingUserInput) {
         return;
       }
-      setPendingUserInputAnswersByRequestId((existing) => {
-        const question =
-          (activePendingProgress?.activeQuestion?.id === questionId
-            ? activePendingProgress.activeQuestion
-            : undefined) ??
-          activePendingUserInput.questions.find((entry) => entry.id === questionId);
-        if (!question) {
-          return existing;
-        }
+      const question =
+        (activePendingProgress?.activeQuestion?.id === questionId
+          ? activePendingProgress.activeQuestion
+          : undefined) ?? activePendingUserInput.questions.find((entry) => entry.id === questionId);
+      if (!question) {
+        return;
+      }
 
-        return {
-          ...existing,
-          [activePendingUserInput.requestId]: {
-            ...existing[activePendingUserInput.requestId],
-            [questionId]: togglePendingUserInputOptionSelection(
-              question,
-              existing[activePendingUserInput.requestId]?.[questionId],
-              optionLabel,
-            ),
-          },
-        };
+      const existing = pendingUserInputAnswersRef.current;
+      applyPendingUserInputAnswers({
+        ...existing,
+        [activePendingUserInput.requestId]: {
+          ...existing[activePendingUserInput.requestId],
+          [questionId]: togglePendingUserInputOptionSelection(
+            question,
+            existing[activePendingUserInput.requestId]?.[questionId],
+            optionLabel,
+          ),
+        },
       });
       promptRef.current = "";
       composerRef.current?.resetCursorState({ cursor: 0 });
     },
-    [activePendingProgress?.activeQuestion, activePendingUserInput, composerRef],
+    [
+      activePendingProgress?.activeQuestion,
+      activePendingUserInput,
+      applyPendingUserInputAnswers,
+      composerRef,
+    ],
   );
 
   const onChangeActivePendingUserInputCustomAnswer = useCallback(
@@ -5841,7 +5866,8 @@ function ChatViewContent(props: ChatViewProps) {
         return;
       }
       promptRef.current = value;
-      setPendingUserInputAnswersByRequestId((existing) => ({
+      const existing = pendingUserInputAnswersRef.current;
+      applyPendingUserInputAnswers({
         ...existing,
         [activePendingUserInput.requestId]: {
           ...existing[activePendingUserInput.requestId],
@@ -5850,7 +5876,7 @@ function ChatViewContent(props: ChatViewProps) {
             value,
           ),
         },
-      }));
+      });
       const snapshot = composerRef.current?.readSnapshot();
       if (
         snapshot?.value !== value ||
@@ -5860,23 +5886,43 @@ function ChatViewContent(props: ChatViewProps) {
         composerRef.current?.focusAt(nextCursor);
       }
     },
-    [activePendingUserInput, composerRef],
+    [activePendingUserInput, applyPendingUserInputAnswers, composerRef],
   );
 
+  // Every way of moving the prompt forward lands here — the primary button,
+  // the Enter key, and a dictation delivered with submit enabled — so the
+  // rules live in `decidePendingUserInputAdvance` rather than in any one of
+  // them. Enter reaches `submitComposer` without ever reading the button's
+  // disabled state, which is how an unanswered question used to get skipped.
   const onAdvanceActivePendingUserInput = useCallback(() => {
-    if (!activePendingUserInput || !activePendingProgress) {
+    if (!activePendingUserInput) {
       return;
     }
-    if (activePendingProgress.isLastQuestion) {
-      if (activePendingResolvedAnswers) {
-        void onRespondToUserInput(activePendingUserInput.requestId, activePendingResolvedAnswers);
+    // Derived here from the ref rather than taken from the render's memo:
+    // see `pendingUserInputAnswersRef`. An answer written moments ago in
+    // this same task has to count.
+    const draftAnswers =
+      pendingUserInputAnswersRef.current[activePendingUserInput.requestId] ??
+      EMPTY_PENDING_USER_INPUT_ANSWERS;
+    const progress = derivePendingUserInputProgress(
+      activePendingUserInput.questions,
+      draftAnswers,
+      activePendingQuestionIndex,
+    );
+    const advance = decidePendingUserInputAdvance(progress);
+    if (advance.kind === "blocked") {
+      return;
+    }
+    if (advance.kind === "submit") {
+      const answers = buildPendingUserInputAnswers(activePendingUserInput.questions, draftAnswers);
+      if (answers) {
+        void onRespondToUserInput(activePendingUserInput.requestId, answers);
       }
       return;
     }
-    setActivePendingUserInputQuestionIndex(activePendingProgress.questionIndex + 1);
+    setActivePendingUserInputQuestionIndex(advance.questionIndex);
   }, [
-    activePendingProgress,
-    activePendingResolvedAnswers,
+    activePendingQuestionIndex,
     activePendingUserInput,
     onRespondToUserInput,
     setActivePendingUserInputQuestionIndex,

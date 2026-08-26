@@ -3,6 +3,7 @@ import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { type PendingUserInput } from "../../session-logic";
 import {
   derivePendingUserInputProgress,
+  isPendingUserInputOptionShortcut,
   type PendingUserInputDraftAnswer,
 } from "../../pendingUserInput";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
@@ -162,11 +163,10 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       ) {
         return;
       }
-      const digit = Number.parseInt(event.key, 10);
-      if (Number.isNaN(digit) || digit < 1 || digit > 9) return;
-      const optionIndex = digit - 1;
-      if (optionIndex >= activeQuestion.options.length) return;
-      const option = activeQuestion.options[optionIndex];
+      // Shared with ChatView's type-to-focus handler, which has to let these
+      // digits through rather than typing them into the custom answer.
+      if (!isPendingUserInputOptionShortcut(activeQuestion, event.key)) return;
+      const option = activeQuestion.options[Number.parseInt(event.key, 10) - 1];
       if (!option) return;
       event.preventDefault();
       handleOptionSelection(activeQuestion.id, option.label);

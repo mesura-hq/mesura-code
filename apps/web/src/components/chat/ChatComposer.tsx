@@ -566,6 +566,8 @@ export interface ChatComposerProps {
     isLastQuestion: boolean;
     canAdvance: boolean;
     customAnswer: string;
+    isComplete: boolean;
+    firstUnansweredQuestionIndex: number | null;
     activeQuestion: { id: string; multiSelect?: boolean | undefined } | null;
   } | null;
   activePendingResolvedAnswers: Record<string, unknown> | null;
@@ -1300,10 +1302,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             isLastQuestion: activePendingProgress.isLastQuestion,
             canAdvance: activePendingProgress.canAdvance,
             isResponding: activePendingIsResponding,
-            isComplete: Boolean(activePendingResolvedAnswers),
+            isComplete: activePendingProgress.isComplete,
+            firstUnansweredQuestionIndex: activePendingProgress.firstUnansweredQuestionIndex,
           }
         : null,
-    [activePendingIsResponding, activePendingProgress, activePendingResolvedAnswers],
+    [activePendingIsResponding, activePendingProgress],
   );
   const collapsedComposerPrimaryActionDisabled =
     phase === "running" ||
@@ -1376,9 +1379,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Sync refs back to parent
   // ------------------------------------------------------------------
   useEffect(() => {
+    // While a question is on screen the composer edits that question's custom
+    // answer, not the thread draft — the editor renders `customAnswer` and the
+    // effect below owns `promptRef`. Copying the draft in here anyway left
+    // `promptRef` holding text the user could not see, which the next
+    // insertion then appended its own text to.
+    if (activePendingProgress) return;
     promptRef.current = prompt;
     setComposerCursor((existing) => clampCollapsedComposerCursor(prompt, existing));
-  }, [prompt, promptRef]);
+  }, [activePendingProgress, prompt, promptRef]);
 
   useEffect(() => {
     if (composerSubmissionError === null) return;
@@ -2632,17 +2641,21 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     void addComposerImages(imageFiles);
   };
 
+  // Inserts at the end of whatever text the composer is currently presenting.
+  // With a question on screen that is the question's custom answer, which
+  // `applyPromptReplacement` writes through `onChangeActivePendingUserInputCustomAnswer`.
+  //
+  // ⚠ Do NOT add `pendingUserInputs.length > 0` back to this guard. It was
+  // there, and it is what broke dictation: refusing here sent the transcript
+  // down the caller's store fallback, which a question-bearing composer does
+  // not read — the words never became an answer, went nowhere visible, and
+  // the turn skipped that question. Editing IS allowed while a question is
+  // up; the editor is live and typing an answer by hand always worked.
   const insertComposerTextAtEnd = (
     text: string,
     options?: { ensureLeadingBoundary?: boolean },
   ): boolean => {
-    if (
-      text.length === 0 ||
-      isConnecting ||
-      isComposerApprovalState ||
-      pendingUserInputs.length > 0 ||
-      projectSelectionRequired
-    ) {
+    if (text.length === 0 || isConnecting || isComposerApprovalState || projectSelectionRequired) {
       return false;
     }
     const prompt = promptRef.current;

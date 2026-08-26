@@ -3,6 +3,8 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   buildPendingUserInputAnswers,
   countAnsweredPendingUserInputQuestions,
+  decidePendingUserInputAdvance,
+  isPendingUserInputOptionShortcut,
   derivePendingUserInputProgress,
   findFirstUnansweredPendingUserInputQuestionIndex,
   resolvePendingUserInputAnswer,
@@ -246,5 +248,135 @@ describe("pending user input question progress", () => {
       canAdvance: true,
       isComplete: true,
     });
+  });
+});
+
+describe("decidePendingUserInputAdvance", () => {
+  const questions = [
+    singleSelectQuestion,
+    {
+      id: "compat",
+      header: "Compat",
+      question: "How strict should compatibility be?",
+      options: [
+        {
+          label: "Keep current envelope",
+          description: "Preserve current wire format",
+        },
+      ],
+      multiSelect: false,
+    },
+  ] as const;
+
+  const advanceFrom = (
+    draftAnswers: Parameters<typeof derivePendingUserInputProgress>[1],
+    questionIndex: number,
+  ) =>
+    decidePendingUserInputAdvance(
+      derivePendingUserInputProgress(questions, draftAnswers, questionIndex),
+    );
+
+  // The defect this pins: Enter reaches the submit path without reading the
+  // primary button's disabled state, so it used to walk past a question that
+  // had no answer. The prompt then could never be submitted, and nothing on
+  // screen said why.
+  it("refuses to leave the question on screen without an answer", () => {
+    expect(advanceFrom({}, 0)).toEqual({ kind: "blocked" });
+  });
+
+  it("moves to the next question once the one on screen is answered", () => {
+    expect(advanceFrom({ scope: { selectedOptionLabels: ["Orchestration-first"] } }, 0)).toEqual({
+      kind: "go-to-question",
+      questionIndex: 1,
+    });
+  });
+
+  it("submits from the last question once every answer is in", () => {
+    expect(
+      advanceFrom(
+        {
+          scope: { selectedOptionLabels: ["Orchestration-first"] },
+          compat: { customAnswer: "Keep it for one release window" },
+        },
+        1,
+      ),
+    ).toEqual({ kind: "submit" });
+  });
+
+  // The recovery path: the last question is answered, an earlier one is not,
+  // and the control that used to sit disabled now names that question and
+  // goes there.
+  it("goes back to the first unanswered question instead of refusing", () => {
+    expect(advanceFrom({ compat: { customAnswer: "Keep it for one release window" } }, 1)).toEqual({
+      kind: "go-to-question",
+      questionIndex: 0,
+    });
+  });
+});
+
+describe("first unanswered question in the derived progress", () => {
+  const questions = [
+    singleSelectQuestion,
+    {
+      id: "compat",
+      header: "Compat",
+      question: "How strict should compatibility be?",
+      options: [
+        {
+          label: "Keep current envelope",
+          description: "Preserve current wire format",
+        },
+      ],
+      multiSelect: false,
+    },
+  ] as const;
+
+  it("names the question whose answer is missing", () => {
+    expect(
+      derivePendingUserInputProgress(
+        questions,
+        { compat: { customAnswer: "Keep it for one release window" } },
+        1,
+      ).firstUnansweredQuestionIndex,
+    ).toBe(0);
+  });
+
+  // Distinct from `findFirstUnansweredPendingUserInputQuestionIndex`, which
+  // answers "the last one" for a complete set. Null here means there is
+  // nowhere to send the user, which is what the submit control reads.
+  it("is null once every question is answered", () => {
+    expect(
+      derivePendingUserInputProgress(
+        questions,
+        {
+          scope: { selectedOptionLabels: ["Orchestration-first"] },
+          compat: { customAnswer: "Keep it for one release window" },
+        },
+        1,
+      ).firstUnansweredQuestionIndex,
+    ).toBeNull();
+  });
+});
+
+// Two listeners in two files depend on this answer agreeing with itself: the
+// panel acts on the digit, and ChatView's capture-phase handler has to let it
+// through instead of typing it into the custom answer.
+describe("isPendingUserInputOptionShortcut", () => {
+  it("claims a digit that names one of the options", () => {
+    expect(isPendingUserInputOptionShortcut(multiSelectQuestion, "2")).toBe(true);
+  });
+
+  it("leaves a digit past the last option alone", () => {
+    expect(isPendingUserInputOptionShortcut(multiSelectQuestion, "3")).toBe(false);
+  });
+
+  it("leaves zero, letters and multi-character keys alone", () => {
+    expect(isPendingUserInputOptionShortcut(multiSelectQuestion, "0")).toBe(false);
+    expect(isPendingUserInputOptionShortcut(multiSelectQuestion, "a")).toBe(false);
+    expect(isPendingUserInputOptionShortcut(multiSelectQuestion, "Enter")).toBe(false);
+  });
+
+  it("claims nothing when no question is on screen", () => {
+    expect(isPendingUserInputOptionShortcut(null, "1")).toBe(false);
   });
 });

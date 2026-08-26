@@ -44,6 +44,54 @@ function renderPendingActions(isRunning: boolean) {
   );
 }
 
+// Two traps in one assertion: the markup also holds the stop and Previous
+// buttons, and every button's class list contains `disabled:opacity-64`. So
+// read the submit button's own tag, and look for the ATTRIBUTE.
+function isSubmitButtonDisabled(markup: string): boolean {
+  const tag = markup.match(/<button[^>]*type="submit"[^>]*>/);
+  if (!tag) throw new Error("no submit button rendered");
+  return tag[0].includes('disabled=""');
+}
+
+function renderPendingSubmit(
+  pendingAction: Partial<{
+    questionIndex: number;
+    isLastQuestion: boolean;
+    canAdvance: boolean;
+    isResponding: boolean;
+    isComplete: boolean;
+    firstUnansweredQuestionIndex: number | null;
+  }> = {},
+  compact = false,
+) {
+  return renderToStaticMarkup(
+    createElement(ComposerPrimaryActions, {
+      compact,
+      pendingAction: {
+        questionIndex: 2,
+        isLastQuestion: true,
+        canAdvance: true,
+        isResponding: false,
+        isComplete: true,
+        firstUnansweredQuestionIndex: null,
+        ...pendingAction,
+      },
+      isRunning: true,
+      showPlanFollowUpPrompt: false,
+      promptHasText: false,
+      isSendBusy: false,
+      sendDisabledReason: null,
+      isConnecting: false,
+      isEnvironmentUnavailable: false,
+      isPreparingWorktree: false,
+      hasSendableContent: false,
+      onPreviousPendingQuestion: () => {},
+      onInterrupt: () => {},
+      onImplementPlanInNewThread: () => {},
+    }),
+  );
+}
+
 function renderStandaloneStop() {
   return renderToStaticMarkup(
     createElement(ComposerPrimaryActions, {
@@ -191,6 +239,31 @@ describe("formatPendingPrimaryActionLabel", () => {
     ).toBe("Submit answers");
   });
 
+  it("names the unanswered question when the set is still incomplete", () => {
+    expect(
+      formatPendingPrimaryActionLabel({
+        compact: false,
+        isLastQuestion: true,
+        isResponding: false,
+        questionIndex: 2,
+        unansweredQuestionNumber: 1,
+      }),
+    ).toBe("Answer question 1");
+  });
+
+  // Callers that track no unanswered question keep the previous wording,
+  // which is what the optional field is for.
+  it("keeps the plain submit wording when no unanswered question is supplied", () => {
+    expect(
+      formatPendingPrimaryActionLabel({
+        compact: false,
+        isLastQuestion: true,
+        isResponding: false,
+        questionIndex: 2,
+      }),
+    ).toBe("Submit answers");
+  });
+
   it("returns plural 'Submit answers' for higher question indices", () => {
     expect(
       formatPendingPrimaryActionLabel({
@@ -259,5 +332,46 @@ describe("ComposerPrimaryActions", () => {
 
     expect(markup).toContain('aria-label="Stop generation"');
     expect(markup).not.toContain('aria-label="Send message"');
+  });
+
+  // The dead end this replaces: on the last question the button read the
+  // WHOLE set, so a missing earlier answer left it disabled — and the prompt
+  // shows one question at a time, so nothing on screen said which one. The
+  // only way out was to cancel the prompt and answer everything again.
+  it("sends the user to the missing answer instead of sitting disabled", () => {
+    const markup = renderPendingSubmit({ isComplete: false, firstUnansweredQuestionIndex: 0 });
+
+    expect(markup).toContain("Answer question 1");
+    expect(markup).toContain('title="Question 1 has no answer yet"');
+    expect(isSubmitButtonDisabled(markup)).toBe(false);
+  });
+
+  it("shortens that label on a compact composer", () => {
+    expect(
+      renderPendingSubmit({ isComplete: false, firstUnansweredQuestionIndex: 1 }, true),
+    ).toContain("Question 2");
+  });
+
+  it("submits normally once every question is answered", () => {
+    const markup = renderPendingSubmit();
+
+    expect(markup).toContain("Submit answers");
+    expect(isSubmitButtonDisabled(markup)).toBe(false);
+  });
+
+  // The question ON SCREEN still governs the button, on the last question as
+  // much as on any other.
+  it("stays disabled while the question on screen has no answer", () => {
+    const markup = renderPendingSubmit({
+      canAdvance: false,
+      isComplete: false,
+      firstUnansweredQuestionIndex: 2,
+    });
+
+    expect(isSubmitButtonDisabled(markup)).toBe(true);
+    // And it must not offer to take the user to question 3 — that is the
+    // question already on screen, and this button cannot move.
+    expect(markup).toContain("Submit answers");
+    expect(markup).not.toContain("Answer question 3");
   });
 });
