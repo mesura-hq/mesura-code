@@ -9,6 +9,7 @@ import {
   ProviderDriverKind,
   type ScopedThreadRef,
   type SidebarProjectGroupingMode,
+  type SidebarThreadSortOrder,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
@@ -124,6 +125,7 @@ import {
   durationToSeconds,
   formatDiagnosticsDescription,
   getChangedBrowserSettingLabels,
+  getChangedThreadOrderSettingLabels,
   getChangedTypographySettingLabels,
   normalizeIntervalSeconds,
   PROVIDER_HEALTH_INTERVAL_STEP_SECONDS,
@@ -133,6 +135,7 @@ import {
   readLastEnabledProjectGroupingMode,
   rememberEnabledProjectGroupingMode,
   resolveBackgroundActivityProfileOption,
+  THREAD_ORDER_DEFAULT_SETTINGS_PATCH,
 } from "./SettingsPanels.logic";
 import {
   PolicyTooltip,
@@ -156,6 +159,11 @@ const TIMESTAMP_FORMAT_LABELS = {
   "12-hour": "12-hour",
   "24-hour": "24-hour",
 } as const;
+
+const THREAD_ORDER_LABELS: Record<SidebarThreadSortOrder, string> = {
+  updated_at: "Last user message",
+  created_at: "Created at",
+};
 
 const BACKGROUND_ACTIVITY_PROFILE_LABELS: Record<BackgroundActivityProfile, string> = {
   balanced: "Balanced",
@@ -490,6 +498,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode
         ? ["Project Grouping"]
         : []),
+      ...getChangedThreadOrderSettingLabels(settings.sidebarThreadSortOrder),
       ...(settings.sidebarAutoSettleAfterDays !==
       DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays
         ? ["Auto-settle inactive threads"]
@@ -566,6 +575,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.sidebarAutoSettleAfterDays,
       settings.sidebarAutoSettleOnMerge,
       settings.sidebarProjectGroupingMode,
+      settings.sidebarThreadSortOrder,
       settings.sidebarThreadPreviewCount,
       settings.timestampFormat,
       settings.wordWrap,
@@ -645,6 +655,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
+      ...THREAD_ORDER_DEFAULT_SETTINGS_PATCH,
       sidebarAutoSettleAfterDays: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays,
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
       enableLegacyTokenStreaming: DEFAULT_UNIFIED_SETTINGS.enableLegacyTokenStreaming,
@@ -1875,6 +1886,41 @@ export function GeneralSettingsPanel() {
               }}
               aria-label="Project grouping"
             />
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("thread-order")}
+          description="Choose how active, unpinned threads are ordered."
+          resetAction={
+            settings.sidebarThreadSortOrder !== DEFAULT_UNIFIED_SETTINGS.sidebarThreadSortOrder ? (
+              <SettingResetButton
+                label="thread order"
+                onClick={() => updateSettings(THREAD_ORDER_DEFAULT_SETTINGS_PATCH)}
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.sidebarThreadSortOrder}
+              onValueChange={(value) => {
+                if (value === "updated_at" || value === "created_at") {
+                  updateSettings({ sidebarThreadSortOrder: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-48" aria-label="Thread order">
+                <SelectValue>{THREAD_ORDER_LABELS[settings.sidebarThreadSortOrder]}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="updated_at">
+                  {THREAD_ORDER_LABELS.updated_at}
+                </SelectItem>
+                <SelectItem hideIndicator value="created_at">
+                  {THREAD_ORDER_LABELS.created_at}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
           }
         />
 
