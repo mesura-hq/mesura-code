@@ -31,6 +31,7 @@ import {
   sortSettledThreadsForSidebar,
   shouldRevealPromotedActiveThread,
   promotedActiveThreadScrollBehavior,
+  promotedActiveThreadScrollTop,
   pinOrderKeyBetween,
   planPinnedReorder,
   sortPinnedThreadsForSidebar,
@@ -931,6 +932,26 @@ describe("promotedActiveThreadScrollBehavior", () => {
         prefersReducedMotion: true,
       }),
     ).toBe("auto");
+  });
+});
+
+describe("promotedActiveThreadScrollTop", () => {
+  it("targets the promoted row after pinned content", () => {
+    expect(
+      promotedActiveThreadScrollTop({
+        viewportLayoutTop: 120,
+        rowLayoutTop: 360,
+      }),
+    ).toBe(240);
+  });
+
+  it("does not request a negative scroll position", () => {
+    expect(
+      promotedActiveThreadScrollTop({
+        viewportLayoutTop: 120,
+        rowLayoutTop: 100,
+      }),
+    ).toBe(0);
   });
 });
 

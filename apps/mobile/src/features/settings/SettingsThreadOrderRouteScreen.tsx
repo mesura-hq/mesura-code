@@ -21,9 +21,9 @@ export function SettingsThreadOrderRouteScreen() {
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
   const savePreferences = useAtomSet(updateMobilePreferencesAtom);
   const preferencesReady = AsyncResult.isSuccess(preferencesResult) && !preferencesResult.waiting;
-  const selectedOrder = resolveMobileThreadSortOrder(
-    AsyncResult.isSuccess(preferencesResult) ? preferencesResult.value : undefined,
-  );
+  const selectedOrder = preferencesReady
+    ? resolveMobileThreadSortOrder(preferencesResult.value)
+    : null;
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">

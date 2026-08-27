@@ -133,6 +133,7 @@ import {
   orderItemsByPreferredIds,
   planPinnedReorder,
   promotedActiveThreadScrollBehavior,
+  promotedActiveThreadScrollTop,
   resolveAdjacentThreadId,
   resolveSettledTimestamp,
   resolveSidebarThreadStatus,
@@ -214,6 +215,16 @@ function threadTimeLabel(thread: SidebarThreadSummary): string {
 function settledTimeLabel(thread: SidebarThreadSummary): string {
   const timestamp = resolveSettledTimestamp(thread);
   return timestamp === null ? "" : compactSidebarTimeLabel(formatRelativeTimeLabel(timestamp));
+}
+
+function elementLayoutTop(element: HTMLElement): number {
+  let layoutTop = 0;
+  let currentElement: HTMLElement | null = element;
+  while (currentElement) {
+    layoutTop += currentElement.offsetTop;
+    currentElement = currentElement.offsetParent as HTMLElement | null;
+  }
+  return layoutTop;
 }
 
 // Floats at the row's right edge, vertically centered, while the jump
@@ -3341,9 +3352,11 @@ export default function Sidebar() {
 
   const threadListNodeRef = useRef<HTMLUListElement | null>(null);
   const listAnimationControllerRef = useRef<ReturnType<typeof autoAnimate> | null>(null);
-  const detachThreadVisibilityListenersRef = useRef<(() => void) | null>(null);
+  const activeRouteThreadVisibilityObserverRef = useRef<IntersectionObserver | null>(null);
   const activeRouteThreadVisibleRef = useRef(false);
-  const updateActiveRouteThreadVisibility = useCallback(() => {
+  const observeActiveRouteThreadVisibility = useCallback(() => {
+    activeRouteThreadVisibilityObserverRef.current?.disconnect();
+    activeRouteThreadVisibilityObserverRef.current = null;
     const threadListNode = threadListNodeRef.current;
     const activeThreadKey = routeThreadKeyRef.current;
     const scrollViewport = threadListNode?.closest<HTMLElement>(
@@ -3357,42 +3370,41 @@ export default function Sidebar() {
       return;
     }
 
-    const viewportBounds = scrollViewport.getBoundingClientRect();
-    const rowBounds = activeThreadRow.getBoundingClientRect();
-    activeRouteThreadVisibleRef.current =
-      rowBounds.bottom > viewportBounds.top && rowBounds.top < viewportBounds.bottom;
+    const visibilityObserver = new IntersectionObserver(
+      ([entry]) => {
+        activeRouteThreadVisibleRef.current = entry?.isIntersecting === true;
+      },
+      { root: scrollViewport },
+    );
+    visibilityObserver.observe(activeThreadRow);
+    activeRouteThreadVisibilityObserverRef.current = visibilityObserver;
   }, []);
   const attachListAutoAnimateRef = useCallback(
     (node: HTMLUListElement | null) => {
       if (node === threadListNodeRef.current) return;
       listAnimationControllerRef.current?.destroy?.();
       listAnimationControllerRef.current = null;
-      detachThreadVisibilityListenersRef.current?.();
-      detachThreadVisibilityListenersRef.current = null;
+      activeRouteThreadVisibilityObserverRef.current?.disconnect();
+      activeRouteThreadVisibilityObserverRef.current = null;
       threadListNodeRef.current = node;
       if (node) {
         listAnimationControllerRef.current = autoAnimate(node, {
           duration: 320,
           easing: "ease-in-out",
         });
-        const scrollViewport = node.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
-        scrollViewport?.addEventListener("scroll", updateActiveRouteThreadVisibility, {
-          passive: true,
-        });
-        node.addEventListener("transitionend", updateActiveRouteThreadVisibility);
-        detachThreadVisibilityListenersRef.current = () => {
-          scrollViewport?.removeEventListener("scroll", updateActiveRouteThreadVisibility);
-          node.removeEventListener("transitionend", updateActiveRouteThreadVisibility);
-        };
-        updateActiveRouteThreadVisibility();
+        observeActiveRouteThreadVisibility();
       }
     },
-    [updateActiveRouteThreadVisibility],
+    [observeActiveRouteThreadVisibility],
   );
 
   useLayoutEffect(() => {
-    updateActiveRouteThreadVisibility();
-  }, [routeThreadKey, updateActiveRouteThreadVisibility]);
+    observeActiveRouteThreadVisibility();
+    return () => {
+      activeRouteThreadVisibilityObserverRef.current?.disconnect();
+      activeRouteThreadVisibilityObserverRef.current = null;
+    };
+  }, [routeThreadKey, observeActiveRouteThreadVisibility]);
 
   const activeThreadOrderSnapshot = useMemo(
     () =>
@@ -3427,11 +3439,19 @@ export default function Sidebar() {
     let revealFrame = 0;
     const layoutFrame = requestAnimationFrame(() => {
       revealFrame = requestAnimationFrame(() => {
-        const scrollViewport = threadListNodeRef.current?.closest<HTMLElement>(
+        const threadListNode = threadListNodeRef.current;
+        const scrollViewport = threadListNode?.closest<HTMLElement>(
           '[data-slot="scroll-area-viewport"]',
         );
+        const activeThreadRow = [
+          ...(threadListNode?.querySelectorAll<HTMLElement>("[data-thread-key]") ?? []),
+        ].find((candidate) => candidate.dataset.threadKey === routeThreadKey);
+        if (!scrollViewport || !activeThreadRow) return;
         scrollViewport?.scrollTo({
-          top: 0,
+          top: promotedActiveThreadScrollTop({
+            rowLayoutTop: elementLayoutTop(activeThreadRow),
+            viewportLayoutTop: elementLayoutTop(scrollViewport),
+          }),
           behavior: promotedActiveThreadScrollBehavior({
             wasVisibleBeforePromotion,
             prefersReducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,

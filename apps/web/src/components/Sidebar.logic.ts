@@ -584,6 +584,13 @@ export function promotedActiveThreadScrollBehavior(input: {
   return input.wasVisibleBeforePromotion || input.prefersReducedMotion ? "auto" : "smooth";
 }
 
+export function promotedActiveThreadScrollTop(input: {
+  readonly rowLayoutTop: number;
+  readonly viewportLayoutTop: number;
+}): number {
+  return Math.max(0, input.rowLayoutTop - input.viewportLayoutTop);
+}
+
 // Pinned-reorder key math and the keyed sort live in client-runtime
 // (state/thread-sort) so web and mobile compute identical pinned orders.
 export {

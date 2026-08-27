@@ -532,25 +532,28 @@ function ConfiguredSettingsRouteScreen() {
 function GeneralSettingsSection() {
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
   const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+  const threadListV2Enabled = useThreadListV2Enabled();
   const autoSettleOnMerge =
     !AsyncResult.isSuccess(preferencesResult) ||
     preferencesResult.value.autoSettleOnMerge !== false;
-  const threadSortOrder = resolveMobileThreadSortOrder(
-    AsyncResult.isSuccess(preferencesResult) ? preferencesResult.value : undefined,
-  );
-  const threadSortOrderLabel =
-    THREAD_ORDER_OPTIONS.find((option) => option.value === threadSortOrder)?.label ??
-    THREAD_ORDER_OPTIONS[0]!.label;
+  const threadSortOrder = AsyncResult.isSuccess(preferencesResult)
+    ? resolveMobileThreadSortOrder(preferencesResult.value)
+    : null;
+  const threadSortOrderLabel = THREAD_ORDER_OPTIONS.find(
+    (option) => option.value === threadSortOrder,
+  )?.label;
 
   return (
     <SettingsSection title="General">
       <SettingsRow icon="folder" label="Project Grouping" target="SettingsProjectGrouping" />
-      <SettingsRow
-        icon="arrow.up.arrow.down"
-        label="Thread Order"
-        value={threadSortOrderLabel}
-        target="SettingsThreadOrder"
-      />
+      {threadListV2Enabled ? (
+        <SettingsRow
+          icon="arrow.up.arrow.down"
+          label="Thread Order"
+          value={threadSortOrderLabel}
+          target="SettingsThreadOrder"
+        />
+      ) : null}
       <SettingsSwitchRow
         icon="arrow.triangle.branch"
         label="Auto-settle merged threads"

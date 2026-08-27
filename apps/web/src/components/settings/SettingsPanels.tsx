@@ -9,7 +9,6 @@ import {
   ProviderDriverKind,
   type ScopedThreadRef,
   type SidebarProjectGroupingMode,
-  type SidebarThreadSortOrder,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
@@ -147,6 +146,7 @@ import {
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { SIDEBAR_THREAD_SORT_LABELS } from "../sidebar/threadOrderLabels";
 
 const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, string> = {
   artwork: "Artwork",
@@ -159,11 +159,6 @@ const TIMESTAMP_FORMAT_LABELS = {
   "12-hour": "12-hour",
   "24-hour": "24-hour",
 } as const;
-
-const THREAD_ORDER_LABELS: Record<SidebarThreadSortOrder, string> = {
-  updated_at: "Last user message",
-  created_at: "Created at",
-};
 
 const BACKGROUND_ACTIVITY_PROFILE_LABELS: Record<BackgroundActivityProfile, string> = {
   balanced: "Balanced",
@@ -1910,14 +1905,16 @@ export function GeneralSettingsPanel() {
               }}
             >
               <SelectTrigger className="w-full sm:w-48" aria-label="Thread order">
-                <SelectValue>{THREAD_ORDER_LABELS[settings.sidebarThreadSortOrder]}</SelectValue>
+                <SelectValue>
+                  {SIDEBAR_THREAD_SORT_LABELS[settings.sidebarThreadSortOrder]}
+                </SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
                 <SelectItem hideIndicator value="updated_at">
-                  {THREAD_ORDER_LABELS.updated_at}
+                  {SIDEBAR_THREAD_SORT_LABELS.updated_at}
                 </SelectItem>
                 <SelectItem hideIndicator value="created_at">
-                  {THREAD_ORDER_LABELS.created_at}
+                  {SIDEBAR_THREAD_SORT_LABELS.created_at}
                 </SelectItem>
               </SelectPopup>
             </Select>
