@@ -33,6 +33,7 @@ import type { SavedRemoteConnection } from "../../lib/connection";
 import { scopedProjectKey } from "../../lib/scopedEntities";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
+import { resolveMobileThreadSortOrder } from "../../state/thread-order";
 import { useThreadSearch } from "../../state/queries";
 import { useThreadListV2Enabled } from "../threads/use-thread-list-v2-enabled";
 import { environmentServerConfigsAtom } from "../../state/server";
@@ -211,6 +212,9 @@ export function HomeScreen(props: HomeScreenProps) {
   const autoSettleOnMerge =
     !AsyncResult.isSuccess(preferencesResult) ||
     preferencesResult.value.autoSettleOnMerge !== false;
+  const threadSortOrder = resolveMobileThreadSortOrder(
+    AsyncResult.isSuccess(preferencesResult) ? preferencesResult.value : undefined,
+  );
   const savePreferences = useAtomSet(updateMobilePreferencesAtom);
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
   const listRef = useRef<LegendListRef | null>(null);
@@ -482,7 +486,7 @@ export function HomeScreen(props: HomeScreenProps) {
           ),
     [v2ScopedProjectGroup],
   );
-  // Thread List v2 (beta): one flat list in creation order, no grouping.
+  // Default thread list: one flat list with configurable active ordering.
   // Settled threads collapse into a recency tail below the card block.
   // Settled threads stay in the live shell stream (settled ≠ archived), so
   // the partition works directly off live shells — no snapshot merging or
@@ -676,6 +680,7 @@ export function HomeScreen(props: HomeScreenProps) {
       matchedThreadKeys,
       changeRequestByKey,
       autoSettleOnMerge,
+      threadSortOrder,
       settlementEnvironmentIds,
       snoozeEnvironmentIds,
       settledLimit: settledVisibleCount,
@@ -688,6 +693,7 @@ export function HomeScreen(props: HomeScreenProps) {
   }, [
     changeRequestByKey,
     autoSettleOnMerge,
+    threadSortOrder,
     nowMinute,
     snoozeWakeTick,
     snoozedShelfExpanded,

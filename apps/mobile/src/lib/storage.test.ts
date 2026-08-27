@@ -196,6 +196,14 @@ describe("mobile connection storage", () => {
     });
   });
 
+  it("loads valid thread order preferences and drops unknown values", async () => {
+    mocks.setPreferencesJson(JSON.stringify({ threadSortOrder: "created_at" }), 10);
+    await expect(loadPreferences()).resolves.toEqual({ threadSortOrder: "created_at" });
+
+    mocks.setPreferencesJson(JSON.stringify({ threadSortOrder: "agent_activity" }), 20);
+    await expect(loadPreferences()).resolves.toEqual({});
+  });
+
   it("falls back to secure storage when SQLite cannot save preferences", async () => {
     mocks.setDatabaseFailures(true, true);
     await expect(savePreferencesPatch({ baseFontSize: 19 })).resolves.toEqual({ baseFontSize: 19 });

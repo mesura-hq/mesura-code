@@ -1,5 +1,13 @@
 # Organizing threads
 
+Choose **Thread order** in Settings → General to organize active, unpinned threads in the default
+thread list by **Last user message** or **Created at**. **Last user message** is the default. It moves
+a thread when you send a new message; agent responses and completion do not change that thread's
+position. Each web, desktop, or mobile client stores its own choice. The legacy thread list keeps
+its existing order selector.
+
+This preference does not change the order of pinned threads, snoozed threads, or settled threads.
+
 Pin a thread from its context menu to keep it in the pinned section above your active work.
 Pinned threads are shown independently of their project, including when you connect to more than
 one environment.

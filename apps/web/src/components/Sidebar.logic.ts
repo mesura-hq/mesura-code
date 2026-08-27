@@ -538,18 +538,57 @@ export function firstValidTimestamp(
   return null;
 }
 
-// Sidebar sort: static creation order, newest thread on top. Activity NEVER
-// reorders the list — a row holds its position from open until settled, so
-// the screen only moves at lifecycle transitions. Status (including pending
-// approval) is carried by each card's edge strip, not by position.
-export function sortThreadsForSidebar<
-  T extends { readonly id: string; readonly createdAt: string },
->(threads: readonly T[]): T[] {
-  return [...threads].toSorted(
-    (left, right) =>
-      parseTimestampMs(right.createdAt) - parseTimestampMs(left.createdAt) ||
-      left.id.localeCompare(right.id),
-  );
+// Keep the default sidebar on the shared thread-order contract used by the
+// legacy web sidebar and mobile. The lifecycle partition happens before this
+// call, so pinned, snoozed and settled sections retain their own order.
+export function sortThreadsForSidebar<T extends { readonly id: string } & ThreadSortInput>(
+  threads: readonly T[],
+  sortOrder: SidebarThreadSortOrder,
+): T[] {
+  return sortThreads(threads, sortOrder);
+}
+
+export interface ActiveThreadOrderEntry {
+  readonly key: string;
+  readonly latestUserMessageAt: string | null;
+}
+
+/**
+ * Reveals only the user-driven promotion that this sort mode promises.
+ * Session and agent updates can re-render the list without changing the user
+ * timestamp, and preference changes can reorder every row; neither should
+ * pull a scrolled sidebar away from what the user was reading.
+ */
+export function shouldRevealPromotedActiveThread(input: {
+  readonly activeThreadKey: string | null;
+  readonly sortOrder: SidebarThreadSortOrder;
+  readonly previous: ReadonlyArray<ActiveThreadOrderEntry> | null;
+  readonly next: ReadonlyArray<ActiveThreadOrderEntry>;
+}): boolean {
+  if (input.sortOrder !== "updated_at" || input.activeThreadKey === null) return false;
+  if (input.previous === null) return false;
+
+  const previousIndex = input.previous.findIndex((entry) => entry.key === input.activeThreadKey);
+  const nextIndex = input.next.findIndex((entry) => entry.key === input.activeThreadKey);
+  if (previousIndex <= 0 || nextIndex !== 0) return false;
+
+  const previousTimestamp = input.previous[previousIndex]?.latestUserMessageAt ?? null;
+  const nextTimestamp = input.next[nextIndex]?.latestUserMessageAt ?? null;
+  return previousTimestamp !== nextTimestamp;
+}
+
+export function promotedActiveThreadScrollBehavior(input: {
+  readonly wasVisibleBeforePromotion: boolean;
+  readonly prefersReducedMotion: boolean;
+}): "auto" | "smooth" {
+  return input.wasVisibleBeforePromotion || input.prefersReducedMotion ? "auto" : "smooth";
+}
+
+export function promotedActiveThreadScrollTop(input: {
+  readonly rowLayoutTop: number;
+  readonly viewportLayoutTop: number;
+}): number {
+  return Math.max(0, input.rowLayoutTop - input.viewportLayoutTop);
 }
 
 // Pinned-reorder key math and the keyed sort live in client-runtime

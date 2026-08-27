@@ -12,8 +12,17 @@ import type {
 } from "@t3tools/client-runtime/state/thread-settled";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
-import { sortPinnedThreadsByOrderKey } from "@t3tools/client-runtime/state/thread-sort";
-import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import {
+  sortPinnedThreadsByOrderKey,
+  sortThreads,
+  type ThreadSortInput,
+} from "@t3tools/client-runtime/state/thread-sort";
+import {
+  DEFAULT_SIDEBAR_THREAD_SORT_ORDER,
+  type EnvironmentId,
+  type ProjectId,
+  type SidebarThreadSortOrder,
+} from "@t3tools/contracts";
 
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 
@@ -161,22 +170,12 @@ function firstValidTimestampMs(...candidates: ReadonlyArray<string | null | unde
   return 0;
 }
 
-/**
- * v2 sort: static creation order, newest thread on top. Activity NEVER
- * reorders the list — a row holds its position from open until settled, so
- * the screen only moves at lifecycle transitions. Mirrors web's
- * sortThreadsForSidebarV2.
- */
-export function sortThreadsForListV2<T extends { readonly id: string; readonly createdAt: string }>(
+/** Applies the shared preference after lifecycle sections are partitioned. */
+export function sortThreadsForListV2<T extends { readonly id: string } & ThreadSortInput>(
   threads: readonly T[],
+  sortOrder: SidebarThreadSortOrder,
 ): T[] {
-  // .sort() on a copy, not .toSorted(): Hermes doesn't ship the ES2023
-  // change-by-copy array methods.
-  return [...threads].sort(
-    (left, right) =>
-      parseTimestampMs(right.createdAt) - parseTimestampMs(left.createdAt) ||
-      left.id.localeCompare(right.id),
-  );
+  return sortThreads(threads, sortOrder);
 }
 
 export interface ThreadListV2Item {
@@ -308,9 +307,9 @@ export function buildThreadListV2ListItems(input: {
 }
 
 /**
- * Partitions visible threads into the active card block (creation order) and
- * the settled recency tail, matching the web v2 list. Mobile stores these
- * auto-settle preferences per device.
+ * Partitions visible threads into the configurable active card block and the
+ * settled recency tail, matching the default web list. Mobile stores the sort
+ * and auto-settle preferences per device.
  */
 export function buildThreadListV2Items(input: {
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
@@ -332,6 +331,7 @@ export function buildThreadListV2Items(input: {
   readonly snoozeEnvironmentIds?: ReadonlySet<EnvironmentId>;
   readonly autoSettleAfterDays?: number;
   readonly autoSettleOnMerge?: boolean;
+  readonly threadSortOrder?: SidebarThreadSortOrder;
   /** Max settled rows to render; the rest are counted, not built. */
   readonly settledLimit?: number;
   /** Injectable for tests; defaults to now. */
@@ -353,6 +353,7 @@ export function buildThreadListV2Items(input: {
   const snoozeNow = input.snoozeNow ?? now;
   const autoSettleAfterDays = input.autoSettleAfterDays ?? 3;
   const autoSettleOnMerge = input.autoSettleOnMerge ?? true;
+  const threadSortOrder = input.threadSortOrder ?? DEFAULT_SIDEBAR_THREAD_SORT_ORDER;
   const query = input.searchQuery.trim().toLocaleLowerCase();
   const projectKeys = input.projectRefs
     ? new Set(input.projectRefs.map((ref) => `${ref.environmentId}:${ref.projectId}`))
@@ -422,7 +423,7 @@ export function buildThreadListV2Items(input: {
     }
   }
 
-  const orderedActive = sortThreadsForListV2(active);
+  const orderedActive = sortThreadsForListV2(active, threadSortOrder);
   const orderedSnoozed = [...snoozed].sort(
     (left, right) =>
       parseTimestampMs(left.snoozedUntil ?? "") - parseTimestampMs(right.snoozedUntil ?? ""),

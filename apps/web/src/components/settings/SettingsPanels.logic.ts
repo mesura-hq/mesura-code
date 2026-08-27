@@ -7,6 +7,7 @@ import type {
   ProviderInstanceId,
   ServerSettings,
   SidebarProjectGroupingMode,
+  SidebarThreadSortOrder,
   UnifiedSettings,
 } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
@@ -21,6 +22,15 @@ import * as Equal from "effect/Equal";
 
 export function isProjectGroupingEnabled(mode: SidebarProjectGroupingMode): boolean {
   return mode !== "separate";
+}
+
+export const THREAD_ORDER_DEFAULT_SETTINGS_PATCH: Pick<UnifiedSettings, "sidebarThreadSortOrder"> =
+  {
+    sidebarThreadSortOrder: DEFAULT_UNIFIED_SETTINGS.sidebarThreadSortOrder,
+  };
+
+export function getChangedThreadOrderSettingLabels(sortOrder: SidebarThreadSortOrder): string[] {
+  return sortOrder === DEFAULT_UNIFIED_SETTINGS.sidebarThreadSortOrder ? [] : ["Thread order"];
 }
 
 export function projectGroupingModeFromToggle(
