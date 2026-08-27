@@ -3427,16 +3427,15 @@ export default function Sidebar() {
     let revealFrame = 0;
     const layoutFrame = requestAnimationFrame(() => {
       revealFrame = requestAnimationFrame(() => {
-        const row = [
-          ...(threadListNodeRef.current?.querySelectorAll<HTMLElement>("[data-thread-key]") ?? []),
-        ].find((candidate) => candidate.dataset.threadKey === routeThreadKey);
-        row?.scrollIntoView({
+        const scrollViewport = threadListNodeRef.current?.closest<HTMLElement>(
+          '[data-slot="scroll-area-viewport"]',
+        );
+        scrollViewport?.scrollTo({
+          top: 0,
           behavior: promotedActiveThreadScrollBehavior({
             wasVisibleBeforePromotion,
             prefersReducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
           }),
-          block: "start",
-          inline: "nearest",
         });
       });
     });
