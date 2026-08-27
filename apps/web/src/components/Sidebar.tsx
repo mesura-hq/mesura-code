@@ -132,6 +132,7 @@ import {
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
   planPinnedReorder,
+  promotedActiveThreadScrollBehavior,
   resolveAdjacentThreadId,
   resolveSettledTimestamp,
   resolveSidebarThreadStatus,
@@ -3340,18 +3341,58 @@ export default function Sidebar() {
 
   const threadListNodeRef = useRef<HTMLUListElement | null>(null);
   const listAnimationControllerRef = useRef<ReturnType<typeof autoAnimate> | null>(null);
-  const attachListAutoAnimateRef = useCallback((node: HTMLUListElement | null) => {
-    if (node === threadListNodeRef.current) return;
-    listAnimationControllerRef.current?.destroy?.();
-    listAnimationControllerRef.current = null;
-    threadListNodeRef.current = node;
-    if (node) {
-      listAnimationControllerRef.current = autoAnimate(node, {
-        duration: 320,
-        easing: "ease-in-out",
-      });
+  const detachThreadVisibilityListenersRef = useRef<(() => void) | null>(null);
+  const activeRouteThreadVisibleRef = useRef(false);
+  const updateActiveRouteThreadVisibility = useCallback(() => {
+    const threadListNode = threadListNodeRef.current;
+    const activeThreadKey = routeThreadKeyRef.current;
+    const scrollViewport = threadListNode?.closest<HTMLElement>(
+      '[data-slot="scroll-area-viewport"]',
+    );
+    const activeThreadRow = [
+      ...(threadListNode?.querySelectorAll<HTMLElement>("[data-thread-key]") ?? []),
+    ].find((candidate) => candidate.dataset.threadKey === activeThreadKey);
+    if (!scrollViewport || !activeThreadRow) {
+      activeRouteThreadVisibleRef.current = false;
+      return;
     }
+
+    const viewportBounds = scrollViewport.getBoundingClientRect();
+    const rowBounds = activeThreadRow.getBoundingClientRect();
+    activeRouteThreadVisibleRef.current =
+      rowBounds.bottom > viewportBounds.top && rowBounds.top < viewportBounds.bottom;
   }, []);
+  const attachListAutoAnimateRef = useCallback(
+    (node: HTMLUListElement | null) => {
+      if (node === threadListNodeRef.current) return;
+      listAnimationControllerRef.current?.destroy?.();
+      listAnimationControllerRef.current = null;
+      detachThreadVisibilityListenersRef.current?.();
+      detachThreadVisibilityListenersRef.current = null;
+      threadListNodeRef.current = node;
+      if (node) {
+        listAnimationControllerRef.current = autoAnimate(node, {
+          duration: 320,
+          easing: "ease-in-out",
+        });
+        const scrollViewport = node.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
+        scrollViewport?.addEventListener("scroll", updateActiveRouteThreadVisibility, {
+          passive: true,
+        });
+        node.addEventListener("transitionend", updateActiveRouteThreadVisibility);
+        detachThreadVisibilityListenersRef.current = () => {
+          scrollViewport?.removeEventListener("scroll", updateActiveRouteThreadVisibility);
+          node.removeEventListener("transitionend", updateActiveRouteThreadVisibility);
+        };
+        updateActiveRouteThreadVisibility();
+      }
+    },
+    [updateActiveRouteThreadVisibility],
+  );
+
+  useLayoutEffect(() => {
+    updateActiveRouteThreadVisibility();
+  }, [routeThreadKey, updateActiveRouteThreadVisibility]);
 
   const activeThreadOrderSnapshot = useMemo(
     () =>
@@ -3370,6 +3411,7 @@ export default function Sidebar() {
   useLayoutEffect(() => {
     const next = currentActiveThreadOrderRef.current;
     const previous = previousActiveThreadOrderRef.current;
+    const wasVisibleBeforePromotion = activeRouteThreadVisibleRef.current;
     previousActiveThreadOrderRef.current = next;
     if (
       !shouldRevealPromotedActiveThread({
@@ -3389,9 +3431,10 @@ export default function Sidebar() {
           ...(threadListNodeRef.current?.querySelectorAll<HTMLElement>("[data-thread-key]") ?? []),
         ].find((candidate) => candidate.dataset.threadKey === routeThreadKey);
         row?.scrollIntoView({
-          behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-            ? "auto"
-            : "smooth",
+          behavior: promotedActiveThreadScrollBehavior({
+            wasVisibleBeforePromotion,
+            prefersReducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+          }),
           block: "start",
           inline: "nearest",
         });

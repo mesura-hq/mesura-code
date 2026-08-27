@@ -30,6 +30,7 @@ import {
   sortLogicalProjectsForSidebar,
   sortSettledThreadsForSidebar,
   shouldRevealPromotedActiveThread,
+  promotedActiveThreadScrollBehavior,
   pinOrderKeyBetween,
   planPinnedReorder,
   sortPinnedThreadsForSidebar,
@@ -901,6 +902,35 @@ describe("shouldRevealPromotedActiveThread", () => {
         next,
       }),
     ).toBe(false);
+  });
+});
+
+describe("promotedActiveThreadScrollBehavior", () => {
+  it("moves instantly to the top when the promoted thread was visible", () => {
+    expect(
+      promotedActiveThreadScrollBehavior({
+        wasVisibleBeforePromotion: true,
+        prefersReducedMotion: false,
+      }),
+    ).toBe("auto");
+  });
+
+  it("scrolls smoothly when the promoted thread was outside the viewport", () => {
+    expect(
+      promotedActiveThreadScrollBehavior({
+        wasVisibleBeforePromotion: false,
+        prefersReducedMotion: false,
+      }),
+    ).toBe("smooth");
+  });
+
+  it("respects reduced motion", () => {
+    expect(
+      promotedActiveThreadScrollBehavior({
+        wasVisibleBeforePromotion: false,
+        prefersReducedMotion: true,
+      }),
+    ).toBe("auto");
   });
 });
 

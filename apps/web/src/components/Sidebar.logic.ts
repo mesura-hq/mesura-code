@@ -577,6 +577,13 @@ export function shouldRevealPromotedActiveThread(input: {
   return previousTimestamp !== nextTimestamp;
 }
 
+export function promotedActiveThreadScrollBehavior(input: {
+  readonly wasVisibleBeforePromotion: boolean;
+  readonly prefersReducedMotion: boolean;
+}): "auto" | "smooth" {
+  return input.wasVisibleBeforePromotion || input.prefersReducedMotion ? "auto" : "smooth";
+}
+
 // Pinned-reorder key math and the keyed sort live in client-runtime
 // (state/thread-sort) so web and mobile compute identical pinned orders.
 export {
