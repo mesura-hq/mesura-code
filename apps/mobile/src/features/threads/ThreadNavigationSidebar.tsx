@@ -32,6 +32,7 @@ import { scopedProjectKey, scopedThreadKey } from "../../lib/scopedEntities";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { useProjects, useThreadShells } from "../../state/entities";
 import { mobilePreferencesAtom } from "../../state/preferences";
+import { resolveMobileThreadSortOrder } from "../../state/thread-order";
 import { useThreadSearch } from "../../state/queries";
 import { useThreadListV2Enabled } from "./use-thread-list-v2-enabled";
 import { environmentServerConfigsAtom } from "../../state/server";
@@ -222,6 +223,9 @@ function ThreadNavigationSidebarPane(
   const autoSettleOnMerge =
     !AsyncResult.isSuccess(preferencesResult) ||
     preferencesResult.value.autoSettleOnMerge !== false;
+  const threadSortOrder = resolveMobileThreadSortOrder(
+    AsyncResult.isSuccess(preferencesResult) ? preferencesResult.value : undefined,
+  );
   const pendingTasks = usePendingNewTasks();
   const { openPendingTask, confirmDeletePendingTask } = usePendingTaskListActions();
   const environments = useMemo(
@@ -561,6 +565,7 @@ function ThreadNavigationSidebarPane(
       matchedThreadKeys,
       changeRequestByKey,
       autoSettleOnMerge,
+      threadSortOrder,
       settlementEnvironmentIds,
       snoozeEnvironmentIds,
       settledLimit: settledVisibleCount,
@@ -573,6 +578,7 @@ function ThreadNavigationSidebarPane(
   }, [
     changeRequestByKey,
     autoSettleOnMerge,
+    threadSortOrder,
     nowMinute,
     snoozeWakeTick,
     snoozedShelfExpanded,
@@ -695,9 +701,8 @@ function ThreadNavigationSidebarPane(
               ],
             },
           ] satisfies MenuAction[])),
-      // v2 lays the list out in fixed creation order — offering sort/group
-      // controls it silently ignores would be a lie. Environment still
-      // scopes the v2 partition, so it stays.
+      // The default list reads organization preferences from Settings, not
+      // this legacy per-list menu. Environment still scopes the partition.
       ...(threadListV2Enabled
         ? []
         : ([
@@ -1157,8 +1162,8 @@ function ThreadNavigationSidebarPane(
       updateGroupDisplay,
     ],
   );
-  // v2 ignores the sort/group options, so only the environment filter can
-  // light the "customized" state while the beta is on.
+  // The default list's organization preferences live in Settings, so only
+  // the environment filter can light this menu's "customized" state.
   const filterCustomized = threadListV2Enabled
     ? options.selectedEnvironmentId !== null || selectedProjectKey !== null
     : hasCustomHomeListOptions({ ...options, selectedProjectKey });

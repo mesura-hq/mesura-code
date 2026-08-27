@@ -35,6 +35,7 @@ import { WorkspaceSidebarToolbar } from "../layout/workspace-sidebar-toolbar";
 import { runtime } from "../../lib/runtime";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
+import { resolveMobileThreadSortOrder } from "../../state/thread-order";
 import { useThreadListV2Enabled } from "../threads/use-thread-list-v2-enabled";
 import {
   type AppUpdateCheckState,
@@ -47,6 +48,7 @@ import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
 import { resolveAgentAwarenessPlatformPresentation } from "./SettingsRouteScreen.logic";
+import { THREAD_ORDER_OPTIONS } from "./thread-order-settings";
 
 type NotificationStatus = "checking" | "enabled" | "disabled" | "unsupported";
 type LiveActivityStatus = "checking" | "enabled" | "disabled" | "signed-out" | "linking";
@@ -533,10 +535,22 @@ function GeneralSettingsSection() {
   const autoSettleOnMerge =
     !AsyncResult.isSuccess(preferencesResult) ||
     preferencesResult.value.autoSettleOnMerge !== false;
+  const threadSortOrder = resolveMobileThreadSortOrder(
+    AsyncResult.isSuccess(preferencesResult) ? preferencesResult.value : undefined,
+  );
+  const threadSortOrderLabel =
+    THREAD_ORDER_OPTIONS.find((option) => option.value === threadSortOrder)?.label ??
+    THREAD_ORDER_OPTIONS[0]!.label;
 
   return (
     <SettingsSection title="General">
       <SettingsRow icon="folder" label="Project Grouping" target="SettingsProjectGrouping" />
+      <SettingsRow
+        icon="arrow.up.arrow.down"
+        label="Thread Order"
+        value={threadSortOrderLabel}
+        target="SettingsThreadOrder"
+      />
       <SettingsSwitchRow
         icon="arrow.triangle.branch"
         label="Auto-settle merged threads"
