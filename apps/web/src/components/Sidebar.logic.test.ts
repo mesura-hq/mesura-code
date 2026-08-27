@@ -29,6 +29,7 @@ import {
   shouldClearThreadSelectionOnMouseDown,
   sortLogicalProjectsForSidebar,
   sortSettledThreadsForSidebar,
+  shouldRevealPromotedActiveThread,
   pinOrderKeyBetween,
   planPinnedReorder,
   sortPinnedThreadsForSidebar,
@@ -843,6 +844,63 @@ describe("sortThreadsForSidebar", () => {
     const reversed = sortThreadsForSidebar(tiedThreads.toReversed(), "created_at");
 
     expect(forward.map((thread) => thread.id)).toEqual(reversed.map((thread) => thread.id));
+  });
+});
+
+describe("shouldRevealPromotedActiveThread", () => {
+  const entry = (key: string, latestUserMessageAt: string) => ({ key, latestUserMessageAt });
+  const older = "2026-03-09T10:00:00.000Z";
+  const newer = "2026-03-09T11:00:00.000Z";
+
+  it("reveals the open thread when a new user message promotes it to first", () => {
+    expect(
+      shouldRevealPromotedActiveThread({
+        activeThreadKey: "thread-b",
+        sortOrder: "updated_at",
+        previous: [entry("thread-a", newer), entry("thread-b", older)],
+        next: [entry("thread-b", "2026-03-09T12:00:00.000Z"), entry("thread-a", newer)],
+      }),
+    ).toBe(true);
+  });
+
+  it("does not follow agent-only updates or a different thread", () => {
+    const previous = [entry("thread-a", newer), entry("thread-b", older)];
+    expect(
+      shouldRevealPromotedActiveThread({
+        activeThreadKey: "thread-b",
+        sortOrder: "updated_at",
+        previous,
+        next: previous,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRevealPromotedActiveThread({
+        activeThreadKey: "thread-b",
+        sortOrder: "updated_at",
+        previous,
+        next: [entry("thread-c", "2026-03-09T12:00:00.000Z"), ...previous],
+      }),
+    ).toBe(false);
+  });
+
+  it("does not follow creation-order changes or initial hydration", () => {
+    const next = [entry("thread-b", newer), entry("thread-a", older)];
+    expect(
+      shouldRevealPromotedActiveThread({
+        activeThreadKey: "thread-b",
+        sortOrder: "created_at",
+        previous: [entry("thread-a", older), entry("thread-b", older)],
+        next,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRevealPromotedActiveThread({
+        activeThreadKey: "thread-b",
+        sortOrder: "updated_at",
+        previous: null,
+        next,
+      }),
+    ).toBe(false);
   });
 });
 

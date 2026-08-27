@@ -59,6 +59,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -135,6 +136,7 @@ import {
   resolveSettledTimestamp,
   resolveSidebarThreadStatus,
   searchSidebarThreadsByTitle,
+  shouldRevealPromotedActiveThread,
   shouldCreateNewThreadInCurrentProject,
   resolveWorkingStartedAt,
   sortLogicalProjectsForSidebar,
@@ -1197,6 +1199,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     return (
       <li
         data-thread-item
+        data-thread-key={threadKey}
         className="list-none [content-visibility:auto] [contain-intrinsic-size:auto_34px]"
       >
         <Tooltip>
@@ -1337,6 +1340,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   return (
     <li
       data-thread-item
+      data-thread-key={threadKey}
       ref={sortable?.setNodeRef}
       style={
         sortable
@@ -3334,10 +3338,70 @@ export default function Sidebar() {
     setShowJumpHints(shouldShowJumpHintsNow);
   }, [shouldShowJumpHintsNow]);
 
+  const threadListNodeRef = useRef<HTMLUListElement | null>(null);
+  const listAnimationControllerRef = useRef<ReturnType<typeof autoAnimate> | null>(null);
   const attachListAutoAnimateRef = useCallback((node: HTMLUListElement | null) => {
-    if (!node) return;
-    autoAnimate(node, { duration: 150, easing: "ease-out" });
+    if (node === threadListNodeRef.current) return;
+    listAnimationControllerRef.current?.destroy?.();
+    listAnimationControllerRef.current = null;
+    threadListNodeRef.current = node;
+    if (node) {
+      listAnimationControllerRef.current = autoAnimate(node, {
+        duration: 320,
+        easing: "ease-in-out",
+      });
+    }
   }, []);
+
+  const activeThreadOrderSnapshot = useMemo(
+    () =>
+      activeThreads.map((thread) => ({
+        key: scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        latestUserMessageAt: thread.latestUserMessageAt,
+      })),
+    [activeThreads],
+  );
+  const activeThreadOrderSignature = activeThreadOrderSnapshot
+    .map((entry) => `${entry.key}\u0000${entry.latestUserMessageAt ?? ""}`)
+    .join("\u0001");
+  const currentActiveThreadOrderRef = useRef(activeThreadOrderSnapshot);
+  currentActiveThreadOrderRef.current = activeThreadOrderSnapshot;
+  const previousActiveThreadOrderRef = useRef<typeof activeThreadOrderSnapshot | null>(null);
+  useLayoutEffect(() => {
+    const next = currentActiveThreadOrderRef.current;
+    const previous = previousActiveThreadOrderRef.current;
+    previousActiveThreadOrderRef.current = next;
+    if (
+      !shouldRevealPromotedActiveThread({
+        activeThreadKey: routeThreadKey,
+        sortOrder: sidebarThreadSortOrder,
+        previous,
+        next,
+      })
+    ) {
+      return;
+    }
+
+    let revealFrame = 0;
+    const layoutFrame = requestAnimationFrame(() => {
+      revealFrame = requestAnimationFrame(() => {
+        const row = [
+          ...(threadListNodeRef.current?.querySelectorAll<HTMLElement>("[data-thread-key]") ?? []),
+        ].find((candidate) => candidate.dataset.threadKey === routeThreadKey);
+        row?.scrollIntoView({
+          behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+            ? "auto"
+            : "smooth",
+          block: "start",
+          inline: "nearest",
+        });
+      });
+    });
+    return () => {
+      cancelAnimationFrame(layoutFrame);
+      cancelAnimationFrame(revealFrame);
+    };
+  }, [activeThreadOrderSignature, routeThreadKey, sidebarThreadSortOrder]);
 
   // New thread defaults to the project you're in (active thread's project,
   // falling back to the top project) — same resolution the command palette
@@ -3644,7 +3708,11 @@ export default function Sidebar() {
               closeDelay={0}
               timeout={400}
             >
-              <ul ref={attachListAutoAnimateRef} role="list" className="flex flex-col gap-px">
+              <ul
+                ref={attachListAutoAnimateRef}
+                role="list"
+                className="flex flex-col gap-px [overflow-anchor:none]"
+              >
                 {(() => {
                   const renderThreadRow = (
                     thread: EnvironmentThreadShell,

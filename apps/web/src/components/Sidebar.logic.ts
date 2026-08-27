@@ -548,6 +548,35 @@ export function sortThreadsForSidebar<T extends { readonly id: string } & Thread
   return sortThreads(threads, sortOrder);
 }
 
+export interface ActiveThreadOrderEntry {
+  readonly key: string;
+  readonly latestUserMessageAt: string | null;
+}
+
+/**
+ * Reveals only the user-driven promotion that this sort mode promises.
+ * Session and agent updates can re-render the list without changing the user
+ * timestamp, and preference changes can reorder every row; neither should
+ * pull a scrolled sidebar away from what the user was reading.
+ */
+export function shouldRevealPromotedActiveThread(input: {
+  readonly activeThreadKey: string | null;
+  readonly sortOrder: SidebarThreadSortOrder;
+  readonly previous: ReadonlyArray<ActiveThreadOrderEntry> | null;
+  readonly next: ReadonlyArray<ActiveThreadOrderEntry>;
+}): boolean {
+  if (input.sortOrder !== "updated_at" || input.activeThreadKey === null) return false;
+  if (input.previous === null) return false;
+
+  const previousIndex = input.previous.findIndex((entry) => entry.key === input.activeThreadKey);
+  const nextIndex = input.next.findIndex((entry) => entry.key === input.activeThreadKey);
+  if (previousIndex <= 0 || nextIndex !== 0) return false;
+
+  const previousTimestamp = input.previous[previousIndex]?.latestUserMessageAt ?? null;
+  const nextTimestamp = input.next[nextIndex]?.latestUserMessageAt ?? null;
+  return previousTimestamp !== nextTimestamp;
+}
+
 // Pinned-reorder key math and the keyed sort live in client-runtime
 // (state/thread-sort) so web and mobile compute identical pinned orders.
 export {
