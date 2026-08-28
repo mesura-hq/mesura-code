@@ -137,8 +137,13 @@ const DEFAULT_BINDINGS = compile([
     whenAst: whenNot(whenIdentifier("terminalFocus")),
   },
   {
-    shortcut: modShortcut("f", { shiftKey: true }),
+    shortcut: modShortcut("g", { shiftKey: true }),
     command: "projectSearch.toggle",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
+  {
+    shortcut: modShortcut("f", { shiftKey: true }),
+    command: "projectScope.toggle",
     whenAst: whenNot(whenIdentifier("terminalFocus")),
   },
   {
@@ -361,6 +366,10 @@ describe("shortcutLabelForCommand", () => {
     );
     assert.strictEqual(
       shortcutLabelForCommand(DEFAULT_BINDINGS, "projectSearch.toggle", "MacIntel"),
+      "⇧⌘G",
+    );
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_BINDINGS, "projectScope.toggle", "MacIntel"),
       "⇧⌘F",
     );
     assert.strictEqual(
@@ -613,18 +622,35 @@ describe("chat/editor shortcuts", () => {
 
   it("matches projectSearch.toggle shortcut outside terminal focus", () => {
     assert.strictEqual(
-      resolveShortcutCommand(event({ key: "f", metaKey: true, shiftKey: true }), DEFAULT_BINDINGS, {
+      resolveShortcutCommand(event({ key: "g", metaKey: true, shiftKey: true }), DEFAULT_BINDINGS, {
         platform: "MacIntel",
         context: { terminalFocus: false },
       }),
       "projectSearch.toggle",
     );
     assert.notStrictEqual(
-      resolveShortcutCommand(event({ key: "f", metaKey: true, shiftKey: true }), DEFAULT_BINDINGS, {
+      resolveShortcutCommand(event({ key: "g", metaKey: true, shiftKey: true }), DEFAULT_BINDINGS, {
         platform: "MacIntel",
         context: { terminalFocus: true },
       }),
       "projectSearch.toggle",
+    );
+  });
+
+  it("matches projectScope.toggle shortcut outside terminal focus", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "f", metaKey: true, shiftKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: false },
+      }),
+      "projectScope.toggle",
+    );
+    assert.notStrictEqual(
+      resolveShortcutCommand(event({ key: "f", metaKey: true, shiftKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: true },
+      }),
+      "projectScope.toggle",
     );
   });
 
@@ -1006,6 +1032,22 @@ describe("shipped defaults on Linux", () => {
 
   it("toggles the open thread's settled state on alt+s", () => {
     assert.strictEqual(resolve(press("s", { altKey: true })), "thread.toggleSettled");
+  });
+
+  it("gives Ctrl+Shift+F to the project scope picker and moves the search to Ctrl+Shift+G", () => {
+    assert.strictEqual(
+      resolve(press("f", { ctrlKey: true, shiftKey: true })),
+      "projectScope.toggle",
+    );
+    assert.strictEqual(
+      resolve(press("g", { ctrlKey: true, shiftKey: true })),
+      "projectSearch.toggle",
+    );
+  });
+
+  it("keeps both off the terminal, which owns its own Ctrl+Shift chords", () => {
+    assert.strictEqual(resolve(press("f", { ctrlKey: true, shiftKey: true }), true), null);
+    assert.strictEqual(resolve(press("g", { ctrlKey: true, shiftKey: true }), true), null);
   });
 
   it("keeps alt+b clear of the right-panel toggle on mod+alt+b", () => {

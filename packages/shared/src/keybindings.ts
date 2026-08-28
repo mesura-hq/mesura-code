@@ -39,7 +39,11 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+0", command: "preview.resetZoom", when: "previewFocus" },
   { key: "mod+k", command: "commandPalette.toggle", when: "!terminalFocus" },
   { key: "mod+p", command: "filePicker.toggle", when: "!terminalFocus" },
-  { key: "mod+shift+f", command: "projectSearch.toggle", when: "!terminalFocus" },
+  // The content search gave mod+shift+f up to the project scope picker. The move
+  // reaches existing configs through RETIRED_KEYBINDING_DEFAULTS below; without
+  // that entry the freed chord stays claimed and the picker silently gets nothing.
+  { key: "mod+shift+g", command: "projectSearch.toggle", when: "!terminalFocus" },
+  { key: "mod+shift+f", command: "projectScope.toggle", when: "!terminalFocus" },
   { key: "mod+alt+shift+t", command: "themeEditor.toggle" },
   { key: "mod+s", command: "composer.stash", when: "!terminalFocus" },
   { key: "alt+u", command: "usage.peek" },
@@ -107,6 +111,13 @@ export const RETIRED_KEYBINDING_DEFAULTS: ReadonlyArray<{
     // Freed for chat.scrollHalfPageDown; see the diff.toggle default above.
     from: { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
     toKey: "mod+shift+d",
+  },
+  {
+    // Freed for projectScope.toggle; see the projectSearch.toggle default above.
+    // The rewrite runs before the per-command backfill, which is what lets the
+    // picker take mod+shift+f on a config that already held the search there.
+    from: { key: "mod+shift+f", command: "projectSearch.toggle", when: "!terminalFocus" },
+    toKey: "mod+shift+g",
   },
 ];
 

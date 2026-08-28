@@ -216,7 +216,8 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.equal(soleKeyFor("themeEditor.toggle"), "mod+alt+shift+t");
       assert.equal(soleKeyFor("usage.peek"), "alt+u");
       assert.equal(soleKeyFor("filePicker.toggle"), "mod+p");
-      assert.equal(soleKeyFor("projectSearch.toggle"), "mod+shift+f");
+      assert.equal(soleKeyFor("projectSearch.toggle"), "mod+shift+g");
+      assert.equal(soleKeyFor("projectScope.toggle"), "mod+shift+f");
       assert.equal(soleKeyFor("sidebar.toggle"), "mod+b");
       assert.equal(soleKeyFor("rightPanel.toggle"), "mod+alt+b");
       assert.deepEqual(keysFor("rightPanel.toggleMaximized"), []);
@@ -391,6 +392,70 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         persisted.filter((entry) => entry.command === "diff.toggle").map((entry) => entry.key),
         ["mod+shift+d"],
       );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("moves the content search off mod+shift+f and backfills the project scope picker", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      // A config written before the chord moved: the content search still holds
+      // mod+shift+f and projectScope.toggle does not appear in it at all. The
+      // rewrite has to run before the backfill, or the backfill finds the chord
+      // taken and silently skips the new command.
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        ...Keybindings.DEFAULT_KEYBINDINGS.filter(
+          (rule) =>
+            rule.command !== "projectSearch.toggle" && rule.command !== "projectScope.toggle",
+        ),
+        { key: "mod+shift+f", command: "projectSearch.toggle", when: "!terminalFocus" },
+      ]);
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepEqual(
+        persisted
+          .filter((entry) => entry.command === "projectSearch.toggle")
+          .map((entry) => entry.key),
+        ["mod+shift+g"],
+      );
+      assert.deepEqual(
+        persisted
+          .filter((entry) => entry.command === "projectScope.toggle")
+          .map((entry) => entry.key),
+        ["mod+shift+f"],
+      );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("leaves an already-migrated config untouched on the next startup", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        ...Keybindings.DEFAULT_KEYBINDINGS.filter(
+          (rule) =>
+            rule.command !== "projectSearch.toggle" && rule.command !== "projectScope.toggle",
+        ),
+        { key: "mod+shift+f", command: "projectSearch.toggle", when: "!terminalFocus" },
+      ]);
+
+      const sync = Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      yield* sync;
+      const afterFirstStartup = yield* readKeybindingsConfig(keybindingsConfigPath);
+      yield* sync;
+      const afterSecondStartup = yield* readKeybindingsConfig(keybindingsConfigPath);
+
+      // A retirement that re-fired would move the rule a second time, and a
+      // backfill that forgot its ledger would append the same rule twice. Both
+      // failures look like a working migration until someone boots twice.
+      assert.deepEqual(afterSecondStartup, afterFirstStartup);
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
 

@@ -32,7 +32,7 @@ export function browseInputEndPaddingClass(input: {
 /**
  * The global search overlay hosts three mutually exclusive surfaces: the
  * command palette (⌘K), the project file picker (⌘P), and project content
- * search (⇧⌘F). One reducer owns open/mode state so the surfaces can never
+ * search (⇧⌘G). One reducer owns open/mode state so the surfaces can never
  * stack and re-triggering a mode's shortcut toggles it closed.
  */
 export type SearchOverlayMode = "command" | "files" | "content";
