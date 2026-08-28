@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import type { Thread } from "../types";
 import {
   browseInputEndPaddingClass,
@@ -8,7 +9,9 @@ import {
   enumerateCommandPaletteItems,
   filterPinnedBrowseEntries,
   filterCommandPaletteGroups,
+  findJumpTargetItem,
   reduceCommandPaletteUiState,
+  type CommandPaletteActionItem,
   type CommandPaletteGroup,
 } from "./CommandPalette.logic";
 
@@ -107,6 +110,84 @@ describe("reduceCommandPaletteUiState", () => {
     expect(reduceCommandPaletteUiState(filesOpen, { _tag: "SetOpen", open: true })).toEqual({
       open: true,
       mode: "command",
+      openIntent: null,
+    });
+  });
+});
+
+describe("findJumpTargetItem", () => {
+  const press = (key: string) => ({
+    key,
+    ctrlKey: true,
+    shiftKey: false,
+    altKey: false,
+    metaKey: false,
+  });
+  const items: CommandPaletteActionItem[] = [
+    {
+      kind: "action",
+      value: "a",
+      searchTerms: ["a"],
+      title: "a",
+      icon: null,
+      shortcutCommand: "thread.jump.1",
+      run: async () => {},
+    },
+    {
+      kind: "action",
+      value: "b",
+      searchTerms: ["b"],
+      title: "b",
+      icon: null,
+      shortcutCommand: "thread.jump.2",
+      run: async () => {},
+    },
+  ];
+
+  it("returns the row the pressed jump chord names", () => {
+    expect(
+      findJumpTargetItem({
+        event: press("2"),
+        keybindings: DEFAULT_RESOLVED_KEYBINDINGS,
+        items,
+        platform: "Linux",
+      })?.value,
+    ).toBe("b");
+  });
+
+  it("returns null for a chord that is not a jump", () => {
+    expect(
+      findJumpTargetItem({
+        event: press("k"),
+        keybindings: DEFAULT_RESOLVED_KEYBINDINGS,
+        items,
+        platform: "Linux",
+      }),
+    ).toBe(null);
+  });
+
+  it("returns null when the jump chord names a row that is not on screen", () => {
+    expect(
+      findJumpTargetItem({
+        event: press("7"),
+        keybindings: DEFAULT_RESOLVED_KEYBINDINGS,
+        items,
+        platform: "Linux",
+      }),
+    ).toBe(null);
+  });
+});
+
+describe("the projects overlay mode", () => {
+  it("opens on its own chord and closes on the next press", () => {
+    const closed = { open: false, mode: "command", openIntent: null } as const;
+
+    const opened = reduceCommandPaletteUiState(closed, { _tag: "ToggleMode", mode: "projects" });
+    expect(opened).toEqual({ open: true, mode: "projects", openIntent: null });
+
+    expect(reduceCommandPaletteUiState(opened, { _tag: "ToggleMode", mode: "projects" })).toEqual({
+      open: false,
+      mode: "projects",
       openIntent: null,
     });
   });
