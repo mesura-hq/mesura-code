@@ -54,12 +54,21 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "alt+e", command: "traitsPicker.toggle", when: "!terminalFocus" },
   { key: "alt+w", command: "workspacePicker.toggle", when: "!terminalFocus" },
   { key: "alt+b", command: "branchPicker.toggle", when: "!terminalFocus" },
-  // Both are new commands, so no existing config mentions them and the ordinary
-  // per-command startup backfill installs them. No ADDED_KEYBINDING_DEFAULTS
-  // entries: that mechanism exists for a SECOND default on a command a config
+  // A new command, so no existing config mentions it and the ordinary
+  // per-command startup backfill installs it. No ADDED_KEYBINDING_DEFAULTS
+  // entry: that mechanism exists for a SECOND default on a command a config
   // already binds.
   { key: "alt+q", command: "question.toggleCollapse", when: "!terminalFocus" },
-  { key: "alt+s", command: "thread.toggleSettled", when: "!terminalFocus" },
+  // Shipped on alt+s first and moved here, deliberately with no
+  // RETIRED_KEYBINDING_DEFAULTS entry. The backfill is per command, so a config
+  // that never mentioned thread.toggleSettled gets this rule for the same
+  // reason alt+q above needs no entry. The accepted cost is a config written by
+  // a build that did ship alt+s: it keeps that rule and never sees this one.
+  //
+  // mod+s is composer.stash, so this now sits one Shift away from it rather
+  // than on a different modifier. The same-shortcut-context guard in the
+  // server's keybindings tests is what holds the two apart.
+  { key: "mod+shift+s", command: "thread.toggleSettled", when: "!terminalFocus" },
   { key: "mod+u", command: "chat.scrollHalfPageUp", when: "!terminalFocus" },
   { key: "mod+d", command: "chat.scrollHalfPageDown", when: "!terminalFocus" },
   { key: "mod+o", command: "editor.openFavorite" },
