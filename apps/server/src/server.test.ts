@@ -101,6 +101,7 @@ const collectQueueUntil = Effect.fn("TransferBudget.collectQueueUntil")(function
 
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as ServerConfig from "./config.ts";
+import { browserApiCorsAllowedHeaders, browserApiCorsAllowedMethods } from "./httpCors.ts";
 import { makeRoutesLayer } from "./server.ts";
 import { isThreadDetailEvent, resolveAvailableEditorsForConfig } from "./ws.ts";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
@@ -1354,18 +1355,14 @@ const assertBrowserApiCorsPreflightHeaders = (
   },
 ) => {
   assertBrowserApiCorsResponseHeaders(headers, options);
-  assert.deepEqual(splitHeaderTokens(headers["access-control-allow-methods"] ?? null), [
-    "GET",
-    "OPTIONS",
-    "POST",
-  ]);
-  assert.deepEqual(splitHeaderTokens(headers["access-control-allow-headers"]), [
-    "authorization",
-    "b3",
-    "content-type",
-    "dpop",
-    "traceparent",
-  ]);
+  assert.deepEqual(
+    splitHeaderTokens(headers["access-control-allow-methods"] ?? null),
+    browserApiCorsAllowedMethods.toSorted(),
+  );
+  assert.deepEqual(
+    splitHeaderTokens(headers["access-control-allow-headers"]),
+    browserApiCorsAllowedHeaders.toSorted(),
+  );
 };
 const crossOriginClientOrigin = "http://remote-client.test:3773";
 
@@ -4285,18 +4282,14 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       assert.equal(response.status, 204);
       assert.equal(response.headers["access-control-allow-origin"], "*");
-      assert.deepEqual(splitHeaderTokens(response.headers["access-control-allow-methods"]), [
-        "GET",
-        "OPTIONS",
-        "POST",
-      ]);
-      assert.deepEqual(splitHeaderTokens(response.headers["access-control-allow-headers"]), [
-        "authorization",
-        "b3",
-        "content-type",
-        "dpop",
-        "traceparent",
-      ]);
+      assert.deepEqual(
+        splitHeaderTokens(response.headers["access-control-allow-methods"]),
+        browserApiCorsAllowedMethods.toSorted(),
+      );
+      assert.deepEqual(
+        splitHeaderTokens(response.headers["access-control-allow-headers"]),
+        browserApiCorsAllowedHeaders.toSorted(),
+      );
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
