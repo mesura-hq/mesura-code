@@ -1030,8 +1030,23 @@ describe("shipped defaults on Linux", () => {
     assert.strictEqual(resolve(press("b", { altKey: true })), "branchPicker.toggle");
   });
 
-  it("toggles the open thread's settled state on alt+s", () => {
-    assert.strictEqual(resolve(press("s", { altKey: true })), "thread.toggleSettled");
+  it("toggles the open thread's settled state on mod+shift+s, and leaves the terminal alone", () => {
+    assert.strictEqual(
+      resolve(press("s", { ctrlKey: true, shiftKey: true })),
+      "thread.toggleSettled",
+    );
+    assert.strictEqual(resolve(press("s", { ctrlKey: true, shiftKey: true }), true), null);
+    // mod+s stashes the composer draft and is one Shift away. Asserting it here
+    // keeps a future reshuffle from collapsing the two onto one chord, which
+    // last-wins resolution would hide rather than report.
+    assert.strictEqual(resolve(press("s", { ctrlKey: true })), "composer.stash");
+  });
+
+  it("leaves alt+s free now that the settle toggle has moved off it", () => {
+    // The chord has to be genuinely unbound, not merely unreported: a user who
+    // rebinds alt+s to something of their own must not find the settle toggle
+    // still eating it.
+    assert.strictEqual(resolve(press("s", { altKey: true })), null);
   });
 
   it("gives Ctrl+Shift+F to the project scope picker and moves the search to Ctrl+Shift+G", () => {
