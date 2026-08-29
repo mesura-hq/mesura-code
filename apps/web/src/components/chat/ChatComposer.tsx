@@ -3563,7 +3563,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         return (
                           <div
                             key={attachment.id}
-                            className="relative h-16 w-16 overflow-hidden rounded-lg border border-border/80 bg-background"
+                            className="group relative h-16 w-16 overflow-hidden rounded-lg border border-border/80 bg-background"
                           >
                             {image?.previewUrl ? (
                               <button
@@ -3597,7 +3597,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                     <span
                                       role="img"
                                       aria-label="Draft attachment may not persist"
-                                      className="absolute left-1 top-1 inline-flex items-center justify-center rounded bg-background/85 p-0.5 text-amber-600"
+                                      className={cn(
+                                        "absolute left-1 inline-flex items-center justify-center rounded bg-background/85 p-0.5 text-amber-600",
+                                        attachment.status === "failed" ? "bottom-1" : "top-1",
+                                      )}
                                     >
                                       <CircleAlertIcon className="size-3" />
                                     </span>
@@ -3615,7 +3618,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             <Button
                               variant="ghost"
                               size="icon-xs"
-                              className="absolute right-1 top-1 bg-background/80 hover:bg-background/90"
+                              className="pointer-events-none absolute right-1 top-1 bg-background/80 opacity-0 transition-opacity hover:bg-background/90 focus-visible:pointer-events-auto focus-visible:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100"
                               onClick={() => {
                                 removeAttachment(attachment);
                               }}
@@ -3628,7 +3631,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                 type="button"
                                 variant="ghost"
                                 size="icon-xs"
-                                className="absolute bottom-1 left-1 bg-background/80 hover:bg-background/90"
+                                className="pointer-events-none absolute left-1 top-1 bg-background/80 opacity-0 transition-opacity hover:bg-background/90 focus-visible:pointer-events-auto focus-visible:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100"
                                 onClick={() => void prepareImageAndUpload(attachment)}
                                 aria-label={`Retry ${attachment.name}`}
                               >
