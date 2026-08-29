@@ -29,31 +29,29 @@ export function ComposerAttachmentList(props: {
                 : attachment.status === "preparing"
                   ? "Preparing"
                   : `Uploading ${progress}%`;
+        const statusDotClass =
+          attachment.status === "ready"
+            ? "bg-emerald-500"
+            : attachment.status === "failed"
+              ? "bg-destructive"
+              : attachment.status === "cancelled"
+                ? "bg-muted-foreground"
+                : "bg-amber-500";
         return (
           <div
             key={attachment.id}
-            className="relative flex min-w-0 items-center gap-3 overflow-hidden rounded-lg border border-border/70 bg-background/55 px-3 py-2"
+            className="flex min-w-0 items-center gap-3 rounded-lg border border-border/70 bg-background/55 px-3 py-2"
           >
-            <div className="absolute inset-x-0 bottom-0 h-0.5 bg-border/50" aria-hidden="true">
-              <div
-                className={cn(
-                  "h-full transition-[width] duration-200",
-                  attachment.status === "failed"
-                    ? "bg-destructive"
-                    : attachment.status === "cancelled"
-                      ? "bg-muted-foreground"
-                      : attachment.status === "ready"
-                        ? "bg-emerald-500"
-                        : "bg-message-action",
-                )}
-                style={{ width: `${attachment.status === "ready" ? 100 : progress}%` }}
-              />
-            </div>
             <FileIcon className="size-4 shrink-0 text-icon-muted" />
             <div className="min-w-0 flex-1">
               <div className="truncate text-xs font-medium">{attachment.name}</div>
-              <div className="truncate text-[11px] text-secondary-label">
-                {formatAttachmentSize(attachment.sizeBytes)} · {label}
+              <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-secondary-label">
+                <span className="shrink-0">{formatAttachmentSize(attachment.sizeBytes)} ·</span>
+                <span
+                  className={cn("size-1.5 shrink-0 rounded-full", statusDotClass)}
+                  aria-hidden
+                />
+                <span className="truncate">{label}</span>
               </div>
             </div>
             {attachment.status === "failed" ? (

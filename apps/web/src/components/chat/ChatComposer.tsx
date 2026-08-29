@@ -3598,8 +3598,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                       role="img"
                                       aria-label="Draft attachment may not persist"
                                       className={cn(
-                                        "absolute left-1 inline-flex items-center justify-center rounded bg-background/85 p-0.5 text-amber-600",
-                                        attachment.status === "failed" ? "bottom-1" : "top-1",
+                                        "absolute inline-flex items-center justify-center rounded bg-background/85 p-0.5 text-amber-600",
+                                        attachment.status === "failed"
+                                          ? "right-1 bottom-1"
+                                          : "top-1 left-1",
                                       )}
                                     >
                                       <CircleAlertIcon className="size-3" />
@@ -3638,30 +3640,34 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                 <RotateCcwIcon />
                               </Button>
                             ) : null}
-                            <div
-                              role="progressbar"
-                              aria-valuemin={0}
-                              aria-valuemax={100}
-                              aria-valuenow={attachment.status === "ready" ? 100 : progress}
-                              aria-label={
-                                attachment.status === "ready"
-                                  ? `${attachment.name} ready`
-                                  : attachment.status === "failed"
+                            {attachment.status === "preparing" ||
+                            attachment.status === "uploading" ? (
+                              <div
+                                role="progressbar"
+                                aria-valuemin={0}
+                                aria-valuemax={100}
+                                aria-valuenow={progress}
+                                aria-label={`${attachment.name} ${attachment.status}`}
+                                className="absolute inset-x-0 bottom-0 h-0.5 bg-amber-500"
+                                style={{ width: `${progress}%` }}
+                              />
+                            ) : attachment.status === "failed" ||
+                              attachment.status === "cancelled" ? (
+                              <span
+                                role="status"
+                                aria-label={
+                                  attachment.status === "failed"
                                     ? (attachment.error ?? "Upload failed")
-                                    : `${attachment.name} ${attachment.status}`
-                              }
-                              className={cn(
-                                "absolute inset-x-0 bottom-0 h-0.5",
-                                attachment.status === "failed"
-                                  ? "bg-destructive"
-                                  : attachment.status === "ready"
-                                    ? "bg-emerald-500"
-                                    : "bg-message-action",
-                              )}
-                              style={{
-                                width: `${attachment.status === "ready" ? 100 : progress}%`,
-                              }}
-                            />
+                                    : `${attachment.name} cancelled`
+                                }
+                                className={cn(
+                                  "absolute bottom-1 left-1 size-1.5 rounded-full",
+                                  attachment.status === "failed"
+                                    ? "bg-destructive"
+                                    : "bg-muted-foreground",
+                                )}
+                              />
+                            ) : null}
                           </div>
                         );
                       })}
