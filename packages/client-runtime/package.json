@@ -147,6 +147,10 @@
       "types": "./src/state/threadSearch.ts",
       "default": "./src/state/threadSearch.ts"
     },
+    "./state/thread-token-search": {
+      "types": "./src/state/threadTokenSearch.ts",
+      "default": "./src/state/threadTokenSearch.ts"
+    },
     "./state/vcs": {
       "types": "./src/state/vcs.ts",
       "default": "./src/state/vcs.ts"
