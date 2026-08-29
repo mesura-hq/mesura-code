@@ -15,6 +15,11 @@
 import * as Schema from "effect/Schema";
 
 import { SymmetriaCommandEnvelope, SymmetriaCommandReceipt } from "./command.ts";
+import {
+  SymmetriaDictationCommand,
+  SymmetriaDictationReceipt,
+  SymmetriaDictationSession,
+} from "./dictation.ts";
 import { SymmetriaProjectSummary } from "./projectSummary.ts";
 import { SymmetriaDraft, SymmetriaDraftUpdate, SymmetriaDraftUpdateResult } from "./draft.ts";
 import { SymmetriaStreamItem } from "./stream.ts";
@@ -78,6 +83,24 @@ export const SYMMETRIA_SCHEMA_ROOTS: ReadonlyArray<SymmetriaSchemaRoot> = [
     schema: SymmetriaCommandReceipt,
   },
   {
+    root: "SymmetriaDictationSession",
+    file: "dictationSession.schema.json",
+    summary: "The non-transcript snapshot of one Shell-owned dictation session.",
+    schema: SymmetriaDictationSession,
+  },
+  {
+    root: "SymmetriaDictationCommand",
+    file: "dictationCommand.schema.json",
+    summary: "A reserved-session control, presentation update or delivery command.",
+    schema: SymmetriaDictationCommand,
+  },
+  {
+    root: "SymmetriaDictationReceipt",
+    file: "dictationReceipt.schema.json",
+    summary: "The confirmed effect or typed failure of one dictation command.",
+    schema: SymmetriaDictationReceipt,
+  },
+  {
     root: "SymmetriaDraft",
     file: "draft.schema.json",
     summary: "The versioned composer draft of one thread.",
@@ -128,12 +151,12 @@ export const SYMMETRIA_SCHEMA_ROOTS: ReadonlyArray<SymmetriaSchemaRoot> = [
  *   `SymmetriaStreamNotOpened` and `SymmetriaStreamItemMalformed`, are the
  *   typed outcomes the decode helpers return to their own caller. Nothing
  *   transmits them, and this run builds no transport that could.
- * - `EnvironmentId` is an upstream identifier this package re-exports for a
- *   producer to type its own code with. No projection field carries one.
+ * `EnvironmentId` used to be named here because no projection carried it. A
+ * dictation target now carries the environment boundary, so the schema became
+ * reachable from three published roots and the exemption had to disappear.
  */
 export const SYMMETRIA_UNPUBLISHED_SCHEMAS: ReadonlyArray<string> = [
   "AnnouncedProtocolVersion",
-  "EnvironmentId",
   "SymmetriaProtocolVersionMalformed",
   "SymmetriaProtocolVersionMismatch",
   "SymmetriaProtocolVersionRejection",

@@ -1,6 +1,6 @@
 {
-  "checksum": "528b440a65d3818f7e8ceb4cacfd16679fcff9dff90c3a644ec3930c5d8bb76c",
-  "contractVersion": "1.1.0",
+  "checksum": "708d698d63cf48cf90152abfc6ea6075f1668dc13b146458b8be4428562bfbc5",
+  "contractVersion": "1.2.0",
   "schemas": [
     {
       "file": "commandEnvelope.schema.json",
@@ -11,6 +11,21 @@
       "file": "commandReceipt.schema.json",
       "root": "SymmetriaCommandReceipt",
       "summary": "The answer to one command, whether it applied, replayed or was refused."
+    },
+    {
+      "file": "dictationCommand.schema.json",
+      "root": "SymmetriaDictationCommand",
+      "summary": "A reserved-session control, presentation update or delivery command."
+    },
+    {
+      "file": "dictationReceipt.schema.json",
+      "root": "SymmetriaDictationReceipt",
+      "summary": "The confirmed effect or typed failure of one dictation command."
+    },
+    {
+      "file": "dictationSession.schema.json",
+      "root": "SymmetriaDictationSession",
+      "summary": "The non-transcript snapshot of one Shell-owned dictation session."
     },
     {
       "file": "draft.schema.json",
@@ -48,5 +63,5 @@
       "summary": "The narrow read projection of one agent thread."
     }
   ],
-  "sourceChecksum": "82ad0e34cac763cd42a23c2313332acf344b1dd90f9502f9080e3ce473d85bc0"
+  "sourceChecksum": "327a14f6bf2283d46a790edefb225e9c6fc8fd65493346dd68b96b0d3c586d7a"
 }
