@@ -13,6 +13,8 @@ import { CommandId, IsoDateTime } from "@t3tools/contracts";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
+export { subscribeToOrderedRendererFrames } from "./rendererFrameSubscription.ts";
+
 export const DICTATION_CAPABILITIES = [
   "session-control",
   "mode-selection",
@@ -135,60 +137,4 @@ export function parseDictationReceipt(raw: unknown): DictationReceipt | null {
 
 export function formatDictationServerMessage(message: DictationServerMessage): string {
   return `${JSON.stringify(message)}\n`;
-}
-
-/** Keeps a renderer reload ordered while its listener and snapshot request attach separately. */
-export function subscribeToOrderedRendererFrames(options: {
-  readonly load: () => Promise<DictationRendererFrame>;
-  readonly attach: (listener: (frame: DictationRendererFrame) => void) => () => void;
-  readonly listener: (session: DictationSession | null) => void;
-  readonly onError?: (error: Error) => void;
-}): () => void {
-  let active = true;
-  let opening = true;
-  let revision = -1;
-  const queued: Array<DictationRendererFrame> = [];
-  const unsubscribe = options.attach((frame) => {
-    if (!active) return;
-    if (opening) {
-      queued.push(frame);
-      return;
-    }
-    if (frame.revision <= revision) return;
-    revision = frame.revision;
-    options.listener(frame.session);
-  });
-
-  void options
-    .load()
-    .then((frame) => {
-      if (!active) return;
-      revision = frame.revision;
-      options.listener(frame.session);
-      opening = false;
-      queued.sort((left, right) => left.revision - right.revision);
-      for (const pending of queued) {
-        if (pending.revision <= revision) continue;
-        revision = pending.revision;
-        options.listener(pending.session);
-      }
-      queued.length = 0;
-    })
-    .catch((cause) => {
-      opening = false;
-      queued.sort((left, right) => left.revision - right.revision);
-      for (const pending of queued) {
-        if (pending.revision <= revision) continue;
-        revision = pending.revision;
-        options.listener(pending.session);
-      }
-      queued.length = 0;
-      options.onError?.(cause instanceof Error ? cause : new Error(String(cause)));
-    });
-
-  return () => {
-    active = false;
-    queued.length = 0;
-    unsubscribe();
-  };
 }

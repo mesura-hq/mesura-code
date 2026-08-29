@@ -1,4 +1,5 @@
 import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import { resolveElectronLaunchCommand } from "./electron-launcher.mjs";
@@ -6,6 +7,28 @@ import { resolveElectronLaunchCommand } from "./electron-launcher.mjs";
 const __dirname = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
 const desktopDir = NodePath.resolve(__dirname, "..");
 const mainJs = NodePath.resolve(desktopDir, "dist-electron/main.cjs");
+const preloadJs = NodePath.resolve(desktopDir, "dist-electron/preload.cjs");
+
+const preloadSource = NodeFS.readFileSync(preloadJs, "utf8");
+const preloadRuntimeRequires = [...preloadSource.matchAll(/\brequire\(["']([^"']+)["']\)/gu)].map(
+  (match) => match[1],
+);
+const unsupportedPreloadRequires = preloadRuntimeRequires.filter(
+  (moduleName) => moduleName !== "electron",
+);
+if (
+  unsupportedPreloadRequires.length > 0 ||
+  /\b(?:setImmediate|clearImmediate)\b/u.test(preloadSource)
+) {
+  console.error("\nDesktop preload sandbox check failed:");
+  for (const moduleName of unsupportedPreloadRequires) {
+    console.error(` - runtime require(${JSON.stringify(moduleName)})`);
+  }
+  if (/\b(?:setImmediate|clearImmediate)\b/u.test(preloadSource)) {
+    console.error(" - bundled immediate scheduler collides with Electron's sandbox globals");
+  }
+  process.exit(1);
+}
 
 console.log("\nLaunching Electron smoke test...");
 

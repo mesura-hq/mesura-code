@@ -8,7 +8,7 @@ import { exposeClerkBridge } from "@clerk/electron/preload";
 import { contextBridge, ipcRenderer } from "electron";
 
 import * as IpcChannels from "./ipc/channels.ts";
-import { subscribeToOrderedRendererFrames } from "./symmetria/dictationProtocol.ts";
+import { subscribeToOrderedRendererFrames } from "./symmetria/rendererFrameSubscription.ts";
 
 exposeClerkBridge({ passkeys: true });
 
