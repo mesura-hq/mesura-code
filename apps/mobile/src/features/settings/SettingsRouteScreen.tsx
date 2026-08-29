@@ -35,6 +35,7 @@ import { WorkspaceSidebarToolbar } from "../layout/workspace-sidebar-toolbar";
 import { runtime } from "../../lib/runtime";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
+import { resolveMobileThreadSortOrder } from "../../state/thread-order";
 import { useThreadListV2Enabled } from "../threads/use-thread-list-v2-enabled";
 import {
   type AppUpdateCheckState,
@@ -47,6 +48,7 @@ import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
 import { resolveAgentAwarenessPlatformPresentation } from "./SettingsRouteScreen.logic";
+import { THREAD_ORDER_OPTIONS } from "./thread-order-settings";
 
 type NotificationStatus = "checking" | "enabled" | "disabled" | "unsupported";
 type LiveActivityStatus = "checking" | "enabled" | "disabled" | "signed-out" | "linking";
@@ -530,13 +532,28 @@ function ConfiguredSettingsRouteScreen() {
 function GeneralSettingsSection() {
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
   const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+  const threadListV2Enabled = useThreadListV2Enabled();
   const autoSettleOnMerge =
     !AsyncResult.isSuccess(preferencesResult) ||
     preferencesResult.value.autoSettleOnMerge !== false;
+  const threadSortOrder = AsyncResult.isSuccess(preferencesResult)
+    ? resolveMobileThreadSortOrder(preferencesResult.value)
+    : null;
+  const threadSortOrderLabel = THREAD_ORDER_OPTIONS.find(
+    (option) => option.value === threadSortOrder,
+  )?.label;
 
   return (
     <SettingsSection title="General">
       <SettingsRow icon="folder" label="Project Grouping" target="SettingsProjectGrouping" />
+      {threadListV2Enabled ? (
+        <SettingsRow
+          icon="arrow.up.arrow.down"
+          label="Thread Order"
+          value={threadSortOrderLabel}
+          target="SettingsThreadOrder"
+        />
+      ) : null}
       <SettingsSwitchRow
         icon="arrow.triangle.branch"
         label="Auto-settle merged threads"

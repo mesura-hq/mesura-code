@@ -13,13 +13,25 @@ import {
   buildProviderInstanceUpdatePatch,
   formatDiagnosticsDescription,
   getChangedBrowserSettingLabels,
+  getChangedThreadOrderSettingLabels,
   getChangedTypographySettingLabels,
   isSamePreviewViewport,
   hasChangedBackgroundActivitySettings,
   isProjectGroupingEnabled,
   projectGroupingModeFromToggle,
   resolveBackgroundActivityProfileOption,
+  THREAD_ORDER_DEFAULT_SETTINGS_PATCH,
 } from "./SettingsPanels.logic";
+
+describe("thread order settings restore", () => {
+  it("reports a creation-order override and restores the recent-order default", () => {
+    expect(getChangedThreadOrderSettingLabels("updated_at")).toEqual([]);
+    expect(getChangedThreadOrderSettingLabels("created_at")).toEqual(["Thread order"]);
+    expect(THREAD_ORDER_DEFAULT_SETTINGS_PATCH).toEqual({
+      sidebarThreadSortOrder: "updated_at",
+    });
+  });
+});
 
 describe("typography settings restore", () => {
   it("detects family and size changes by font row", () => {

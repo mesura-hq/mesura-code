@@ -1,6 +1,7 @@
 import {
   type FilesystemBrowseEntry,
   type KeybindingCommand,
+  type ResolvedKeybindingsConfig,
   THREAD_JUMP_KEYBINDING_COMMANDS,
 } from "@t3tools/contracts";
 import { filterFilesystemBrowseEntries } from "@t3tools/client-runtime/state/filesystem";
@@ -8,6 +9,11 @@ import type { SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
 import { type ReactNode } from "react";
+import {
+  resolveShortcutCommand,
+  threadJumpIndexFromCommand,
+  type ShortcutEventLike,
+} from "../keybindings";
 import { sortThreads } from "../lib/threadSort";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { type Project, type SidebarThreadSummary, type Thread } from "../types";
@@ -30,12 +36,13 @@ export function browseInputEndPaddingClass(input: {
 }
 
 /**
- * The global search overlay hosts three mutually exclusive surfaces: the
- * command palette (⌘K), the project file picker (⌘P), and project content
- * search (⇧⌘F). One reducer owns open/mode state so the surfaces can never
- * stack and re-triggering a mode's shortcut toggles it closed.
+ * The global search overlay hosts four mutually exclusive surfaces: the
+ * command palette (⌘K), the project file picker (⌘P), project content
+ * search (⇧⌘G), and the project scope picker (⇧⌘F). One reducer owns
+ * open/mode state so the surfaces can never stack and re-triggering a mode's
+ * shortcut toggles it closed.
  */
-export type SearchOverlayMode = "command" | "files" | "content";
+export type SearchOverlayMode = "command" | "files" | "content" | "projects";
 
 export interface CommandPaletteOpenIntent {
   readonly kind: "add-project" | "new-thread-in";
@@ -122,6 +129,32 @@ export interface CommandPaletteView {
   readonly addonIcon: ReactNode;
   readonly groups: ReadonlyArray<CommandPaletteGroup>;
   readonly initialQuery?: string;
+}
+
+/**
+ * The row a mod+1..9 press names, or null when the press was not a jump chord
+ * or names a row that is not on screen.
+ *
+ * Shared by the command palette and the project scope picker: both number
+ * their first nine rows with `enumerateCommandPaletteItems` and both have to
+ * turn a press back into a row. The `modelPickerOpen: false` context is part
+ * of the rule rather than an incidental argument — mod+1..9 belongs to the
+ * model picker while that is open, and an overlay reading these chords is by
+ * definition on top of it.
+ */
+export function findJumpTargetItem(input: {
+  event: ShortcutEventLike;
+  keybindings: ResolvedKeybindingsConfig;
+  items: ReadonlyArray<CommandPaletteActionItem | CommandPaletteSubmenuItem>;
+  platform?: string;
+}): CommandPaletteActionItem | CommandPaletteSubmenuItem | null {
+  const command = resolveShortcutCommand(input.event, input.keybindings, {
+    ...(input.platform === undefined ? {} : { platform: input.platform }),
+    context: { modelPickerOpen: false },
+  });
+  if (command === null || threadJumpIndexFromCommand(command) === null) return null;
+
+  return input.items.find((item) => item.shortcutCommand === command) ?? null;
 }
 
 export function enumerateCommandPaletteItems(

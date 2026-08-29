@@ -77,6 +77,12 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "commandPalette.toggle",
   "filePicker.toggle",
   "projectSearch.toggle",
+  // Opens the project scope picker, which filters the sidebar's thread list to
+  // one project. It writes the same state the sidebar's own dropdown writes, so
+  // the two are one filter and not two. The rename warning below applies to this
+  // id too: RETIRED_KEYBINDING_DEFAULTS matches on the command, so it can move a
+  // rule's key but never carry it to a new command name.
+  "projectScope.toggle",
   "themeEditor.toggle",
   "composer.stash",
   "composer.attachFiles",

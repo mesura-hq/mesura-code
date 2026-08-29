@@ -62,8 +62,9 @@ Commands are IDs like `terminal.toggle`, `commandPalette.toggle`, `preview.refre
 `chat.new`. Project scripts are addressable as `script.{id}.run`, for example `script.test.run`.
 
 `filePicker.toggle` opens file search for the active project and defaults to `mod+p`.
-`projectSearch.toggle` searches inside the active project's files and defaults to `mod+shift+f`.
+`projectSearch.toggle` searches inside the active project's files and defaults to `mod+shift+g`.
 Repeating either shortcut closes that search, and switching shortcuts replaces the open search.
+`projectScope.toggle` filters the thread list to one project and defaults to `mod+shift+f`.
 `themeEditor.toggle` opens or closes the floating theme editor and defaults to
 `mod+alt+shift+t`. Select a color label to spotlight the elements that use it; select the label
 again to clear the spotlight. The swatch and hex field keep that color selected while you edit it.
@@ -109,12 +110,12 @@ Two situations make the shortcut do nothing. No question is waiting, so there is
 Or an approval prompt has taken the same panel, and approvals are answered rather than folded. Like
 the other `Alt` defaults, it is also off while the terminal has focus.
 
-Seven defaults sit on `Alt` with a letter: `alt+e`, `alt+w`, `alt+b`, `alt+m`, `alt+q`, `alt+s`, and
-`alt+u`. The app claims those chords before the character reaches the composer, which matters on two
+Six defaults sit on `Alt` with a letter: `alt+e`, `alt+w`, `alt+b`, `alt+m`, `alt+q`, and `alt+u`.
+The app claims those chords before the character reaches the composer, which matters on two
 platforms. On macOS `Option` composes characters — `Option+E` starts an acute accent, `Option+Q`
-types `œ`, `Option+S` types `ß`, and the others type symbols like `∑` and `µ` — so a default may be
-swallowed or may suppress a character you wanted. Firefox uses `Alt` with a letter for menu access
-keys. Rebind any of them in **Settings** → **Keybindings**.
+types `œ`, and the others type symbols like `∑` and `µ` — so a default may be swallowed or may
+suppress a character you wanted. Firefox uses `Alt` with a letter for menu access keys. Rebind any
+of them in **Settings** → **Keybindings**.
 
 On a Latin American layout, `AltGr+Q` types `@`. That is a different chord — the app sees `AltGr`
 as `Ctrl+Alt` — so `alt+q` never eats it.
@@ -170,8 +171,14 @@ itself. `mod+1` through `mod+9` jump straight to a thread by position.
 ### Settling a thread
 
 `thread.toggleSettled` settles the open thread, or brings a settled one back to Active, and
-defaults to `alt+s`. Note that `mod+s` is a different shortcut: it stashes the composer draft. Like
-the other composer shortcuts, it is inactive while the terminal has focus.
+defaults to `mod+shift+s`. Note that `mod+s` — the same chord without `Shift` — is a different
+shortcut: it stashes the composer draft. Like the other composer shortcuts, it is inactive while
+the terminal has focus.
+
+Some browsers keep `Ctrl+Shift` with a letter for themselves, and a web page cannot take those
+chords back. If the shortcut does nothing in your browser, look for it in that browser's own
+keyboard shortcuts, then rebind it in **Settings** → **Keybindings**. The desktop app is not
+affected.
 
 Settling moves the thread out of the sidebar's Active list. The shortcut acts on the same state the
 banner above the composer reports and the thread's own menu offers, so the three can never disagree.

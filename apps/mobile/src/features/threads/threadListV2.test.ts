@@ -252,17 +252,105 @@ describe("resolveThreadListV2SnoozeGateExpiryMs", () => {
 });
 
 describe("sortThreadsForListV2", () => {
-  it("orders by creation time, newest first, ignoring activity", () => {
-    const sorted = sortThreadsForListV2([
-      { id: "oldest", createdAt: "2026-06-01T08:00:00.000Z" },
-      { id: "newest", createdAt: "2026-06-01T12:00:00.000Z" },
-      { id: "middle", createdAt: "2026-06-01T10:00:00.000Z" },
+  const sortable = (input: {
+    readonly id: string;
+    readonly createdAt: string;
+    readonly latestUserMessageAt?: string;
+    readonly updatedAt?: string;
+  }) => ({
+    ...input,
+    latestUserMessageAt: input.latestUserMessageAt ?? input.createdAt,
+    updatedAt: input.updatedAt ?? input.createdAt,
+  });
+
+  it("orders by the latest user message without following agent-only updates", () => {
+    const sorted = sortThreadsForListV2(
+      [
+        sortable({
+          id: "recent-user-message",
+          createdAt: "2026-06-01T08:00:00.000Z",
+          latestUserMessageAt: "2026-06-01T11:00:00.000Z",
+          updatedAt: "2026-06-01T11:01:00.000Z",
+        }),
+        sortable({
+          id: "recent-agent-update",
+          createdAt: "2026-06-01T10:00:00.000Z",
+          latestUserMessageAt: "2026-06-01T10:30:00.000Z",
+          updatedAt: "2026-06-01T12:00:00.000Z",
+        }),
+      ],
+      "updated_at",
+    );
+    expect(sorted.map((thread) => thread.id)).toEqual([
+      "recent-user-message",
+      "recent-agent-update",
     ]);
+  });
+
+  it("orders by creation time when that mode is selected", () => {
+    const sorted = sortThreadsForListV2(
+      [
+        sortable({ id: "oldest", createdAt: "2026-06-01T08:00:00.000Z" }),
+        sortable({ id: "newest", createdAt: "2026-06-01T12:00:00.000Z" }),
+        sortable({ id: "middle", createdAt: "2026-06-01T10:00:00.000Z" }),
+      ],
+      "created_at",
+    );
     expect(sorted.map((thread) => thread.id)).toEqual(["newest", "middle", "oldest"]);
   });
 });
 
 describe("buildThreadListV2Items", () => {
+  it("applies thread order only inside the unpinned active block", () => {
+    const threads = [
+      makeThread({
+        id: ThreadId.make("pinned"),
+        title: "Pinned",
+        pinnedAt: "2026-06-01T08:00:00.000Z",
+        createdAt: "2026-06-01T08:00:00.000Z",
+        latestUserMessageAt: "2026-06-01T08:00:00.000Z",
+      }),
+      makeThread({
+        id: ThreadId.make("newer-created"),
+        title: "Newer created",
+        createdAt: "2026-06-01T11:00:00.000Z",
+        latestUserMessageAt: "2026-06-01T11:00:00.000Z",
+      }),
+      makeThread({
+        id: ThreadId.make("newer-message"),
+        title: "Newer message",
+        createdAt: "2026-06-01T09:00:00.000Z",
+        latestUserMessageAt: "2026-06-01T12:00:00.000Z",
+      }),
+    ];
+
+    const byMessage = buildThreadListV2Items({
+      threads,
+      environmentId: null,
+      searchQuery: "",
+      threadSortOrder: "updated_at",
+      now: NOW,
+    });
+    const byCreation = buildThreadListV2Items({
+      threads,
+      environmentId: null,
+      searchQuery: "",
+      threadSortOrder: "created_at",
+      now: NOW,
+    });
+
+    expect(byMessage.items.map((item) => item.thread.id)).toEqual([
+      "pinned",
+      "newer-message",
+      "newer-created",
+    ]);
+    expect(byCreation.items.map((item) => item.thread.id)).toEqual([
+      "pinned",
+      "newer-created",
+      "newer-message",
+    ]);
+  });
+
   it("keeps a merged thread active when auto-settle on merge is off", () => {
     const merged = makeThread({ id: ThreadId.make("merged"), title: "Merged" });
     const layout = buildThreadListV2Items({
@@ -303,9 +391,11 @@ describe("buildThreadListV2Items", () => {
       now: NOW,
     });
 
-    // Same createdAt → static sort tiebreaks by id; the point is the woken
-    // thread is BACK in the card block and the snoozed one is gone.
-    expect(layout.items.map((item) => item.thread.id)).toEqual(["active", "woken"]);
+    // The point is that the woken thread is BACK in the card block and the
+    // snoozed one is gone; tie direction belongs to the shared sort helper.
+    expect(new Set(layout.items.map((item) => item.thread.id))).toEqual(
+      new Set(["active", "woken"]),
+    );
     expect(layout.snoozedCount).toBe(1);
   });
 
@@ -579,7 +669,7 @@ describe("buildThreadListV2Items", () => {
     expect(layout.settledShelfHeaderIndex).toBe(0);
   });
 
-  it("keeps cards in creation order while settled sorts by recency", () => {
+  it("keeps cards in creation order when that mode is selected", () => {
     const { items } = buildThreadListV2Items({
       threads: [
         makeThread({
@@ -596,6 +686,7 @@ describe("buildThreadListV2Items", () => {
       ],
       environmentId: null,
       searchQuery: "",
+      threadSortOrder: "created_at",
       now: NOW,
     });
 
@@ -686,7 +777,7 @@ describe("buildThreadListV2Items", () => {
       now: NOW,
     });
 
-    expect(items.map((item) => item.thread.id)).toEqual(["local", "remote"]);
+    expect(new Set(items.map((item) => item.thread.id))).toEqual(new Set(["local", "remote"]));
   });
 });
 

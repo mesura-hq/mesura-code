@@ -31,7 +31,7 @@ import {
   scopedThreadKey,
 } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
-import type { TimestampFormat } from "@t3tools/contracts/settings";
+import type { SidebarThreadSortOrder, TimestampFormat } from "@t3tools/contracts/settings";
 import {
   AlarmClockIcon,
   AlarmClockOffIcon,
@@ -59,6 +59,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -97,6 +98,7 @@ import {
 } from "../sidebarProjectGrouping";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
+import { useProjectScopeStore } from "../projectScopeStore";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { openCommandPalette } from "../commandPaletteBus";
@@ -131,10 +133,13 @@ import {
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
   planPinnedReorder,
+  promotedActiveThreadScrollBehavior,
+  promotedActiveThreadScrollTop,
   resolveAdjacentThreadId,
   resolveSettledTimestamp,
   resolveSidebarThreadStatus,
   searchSidebarThreadsByTitle,
+  shouldRevealPromotedActiveThread,
   shouldCreateNewThreadInCurrentProject,
   resolveWorkingStartedAt,
   sortLogicalProjectsForSidebar,
@@ -211,6 +216,16 @@ function threadTimeLabel(thread: SidebarThreadSummary): string {
 function settledTimeLabel(thread: SidebarThreadSummary): string {
   const timestamp = resolveSettledTimestamp(thread);
   return timestamp === null ? "" : compactSidebarTimeLabel(formatRelativeTimeLabel(timestamp));
+}
+
+function elementLayoutTop(element: HTMLElement): number {
+  let layoutTop = 0;
+  let currentElement: HTMLElement | null = element;
+  while (currentElement) {
+    layoutTop += currentElement.offsetTop;
+    currentElement = currentElement.offsetParent as HTMLElement | null;
+  }
+  return layoutTop;
 }
 
 // Floats at the row's right edge, vertically centered, while the jump
@@ -1197,6 +1212,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     return (
       <li
         data-thread-item
+        data-thread-key={threadKey}
         className="list-none [content-visibility:auto] [contain-intrinsic-size:auto_34px]"
       >
         <Tooltip>
@@ -1337,6 +1353,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   return (
     <li
       data-thread-item
+      data-thread-key={threadKey}
       ref={sortable?.setNodeRef}
       style={
         sortable
@@ -1712,6 +1729,9 @@ export default function Sidebar() {
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const sidebarProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
+  const sidebarThreadSortOrder = useClientSettings<SidebarThreadSortOrder>(
+    (s) => s.sidebarThreadSortOrder,
+  );
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const {
@@ -1920,7 +1940,8 @@ export default function Sidebar() {
 
   // Project scope: one menu above the list. Scoping filters the list without
   // making the header width depend on the number or length of project names.
-  const [projectScopeKey, setProjectScopeKey] = useState<string | null>(null);
+  const projectScopeKey = useProjectScopeStore((store) => store.projectScopeKey);
+  const setProjectScopeKey = useProjectScopeStore((store) => store.setProjectScopeKey);
   const scopedProjectGroup = useMemo(
     () =>
       projectScopeKey === null
@@ -2080,7 +2101,7 @@ export default function Sidebar() {
           )
           .map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
       ),
-      activeThreads: sortThreadsForSidebar(active),
+      activeThreads: sortThreadsForSidebar(active, sidebarThreadSortOrder),
       // Soonest wake first: "what comes back next" is the shelf's question.
       snoozedThreads: snoozed.toSorted(
         (left, right) =>
@@ -2097,6 +2118,7 @@ export default function Sidebar() {
     nowMinute,
     scopedProjectKeys,
     serverConfigs,
+    sidebarThreadSortOrder,
     snoozeWakeTick,
     threads,
   ]);
@@ -3330,10 +3352,120 @@ export default function Sidebar() {
     setShowJumpHints(shouldShowJumpHintsNow);
   }, [shouldShowJumpHintsNow]);
 
-  const attachListAutoAnimateRef = useCallback((node: HTMLUListElement | null) => {
-    if (!node) return;
-    autoAnimate(node, { duration: 150, easing: "ease-out" });
+  const threadListNodeRef = useRef<HTMLUListElement | null>(null);
+  const listAnimationControllerRef = useRef<ReturnType<typeof autoAnimate> | null>(null);
+  const activeRouteThreadVisibilityObserverRef = useRef<IntersectionObserver | null>(null);
+  const activeRouteThreadVisibleRef = useRef(false);
+  const observeActiveRouteThreadVisibility = useCallback(() => {
+    activeRouteThreadVisibilityObserverRef.current?.disconnect();
+    activeRouteThreadVisibilityObserverRef.current = null;
+    const threadListNode = threadListNodeRef.current;
+    const activeThreadKey = routeThreadKeyRef.current;
+    const scrollViewport = threadListNode?.closest<HTMLElement>(
+      '[data-slot="scroll-area-viewport"]',
+    );
+    const activeThreadRow = [
+      ...(threadListNode?.querySelectorAll<HTMLElement>("[data-thread-key]") ?? []),
+    ].find((candidate) => candidate.dataset.threadKey === activeThreadKey);
+    if (!scrollViewport || !activeThreadRow) {
+      activeRouteThreadVisibleRef.current = false;
+      return;
+    }
+
+    const visibilityObserver = new IntersectionObserver(
+      ([entry]) => {
+        activeRouteThreadVisibleRef.current = entry?.isIntersecting === true;
+      },
+      { root: scrollViewport },
+    );
+    visibilityObserver.observe(activeThreadRow);
+    activeRouteThreadVisibilityObserverRef.current = visibilityObserver;
   }, []);
+  const attachListAutoAnimateRef = useCallback(
+    (node: HTMLUListElement | null) => {
+      if (node === threadListNodeRef.current) return;
+      listAnimationControllerRef.current?.destroy?.();
+      listAnimationControllerRef.current = null;
+      activeRouteThreadVisibilityObserverRef.current?.disconnect();
+      activeRouteThreadVisibilityObserverRef.current = null;
+      threadListNodeRef.current = node;
+      if (node) {
+        listAnimationControllerRef.current = autoAnimate(node, {
+          duration: 320,
+          easing: "ease-in-out",
+        });
+        observeActiveRouteThreadVisibility();
+      }
+    },
+    [observeActiveRouteThreadVisibility],
+  );
+
+  useLayoutEffect(() => {
+    observeActiveRouteThreadVisibility();
+    return () => {
+      activeRouteThreadVisibilityObserverRef.current?.disconnect();
+      activeRouteThreadVisibilityObserverRef.current = null;
+    };
+  }, [routeThreadKey, observeActiveRouteThreadVisibility]);
+
+  const activeThreadOrderSnapshot = useMemo(
+    () =>
+      activeThreads.map((thread) => ({
+        key: scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        latestUserMessageAt: thread.latestUserMessageAt,
+      })),
+    [activeThreads],
+  );
+  const activeThreadOrderSignature = activeThreadOrderSnapshot
+    .map((entry) => `${entry.key}\u0000${entry.latestUserMessageAt ?? ""}`)
+    .join("\u0001");
+  const currentActiveThreadOrderRef = useRef(activeThreadOrderSnapshot);
+  currentActiveThreadOrderRef.current = activeThreadOrderSnapshot;
+  const previousActiveThreadOrderRef = useRef<typeof activeThreadOrderSnapshot | null>(null);
+  useLayoutEffect(() => {
+    const next = currentActiveThreadOrderRef.current;
+    const previous = previousActiveThreadOrderRef.current;
+    const wasVisibleBeforePromotion = activeRouteThreadVisibleRef.current;
+    previousActiveThreadOrderRef.current = next;
+    if (
+      !shouldRevealPromotedActiveThread({
+        activeThreadKey: routeThreadKey,
+        sortOrder: sidebarThreadSortOrder,
+        previous,
+        next,
+      })
+    ) {
+      return;
+    }
+
+    let revealFrame = 0;
+    const layoutFrame = requestAnimationFrame(() => {
+      revealFrame = requestAnimationFrame(() => {
+        const threadListNode = threadListNodeRef.current;
+        const scrollViewport = threadListNode?.closest<HTMLElement>(
+          '[data-slot="scroll-area-viewport"]',
+        );
+        const activeThreadRow = [
+          ...(threadListNode?.querySelectorAll<HTMLElement>("[data-thread-key]") ?? []),
+        ].find((candidate) => candidate.dataset.threadKey === routeThreadKey);
+        if (!scrollViewport || !activeThreadRow) return;
+        scrollViewport?.scrollTo({
+          top: promotedActiveThreadScrollTop({
+            rowLayoutTop: elementLayoutTop(activeThreadRow),
+            viewportLayoutTop: elementLayoutTop(scrollViewport),
+          }),
+          behavior: promotedActiveThreadScrollBehavior({
+            wasVisibleBeforePromotion,
+            prefersReducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+          }),
+        });
+      });
+    });
+    return () => {
+      cancelAnimationFrame(layoutFrame);
+      cancelAnimationFrame(revealFrame);
+    };
+  }, [activeThreadOrderSignature, routeThreadKey, sidebarThreadSortOrder]);
 
   // New thread defaults to the project you're in (active thread's project,
   // falling back to the top project) — same resolution the command palette
@@ -3640,7 +3772,11 @@ export default function Sidebar() {
               closeDelay={0}
               timeout={400}
             >
-              <ul ref={attachListAutoAnimateRef} role="list" className="flex flex-col gap-px">
+              <ul
+                ref={attachListAutoAnimateRef}
+                role="list"
+                className="flex flex-col gap-px [overflow-anchor:none]"
+              >
                 {(() => {
                   const renderThreadRow = (
                     thread: EnvironmentThreadShell,

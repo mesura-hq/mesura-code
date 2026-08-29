@@ -4369,7 +4369,7 @@ function ChatViewContent(props: ChatViewProps) {
     nowMinute,
     supportsSettlement,
   ]);
-  // Alt+S, both ways. The machinery lives in lib/useThreadSettledToggle.ts,
+  // Mod+Shift+S, both ways. The machinery lives in lib/useThreadSettledToggle.ts,
   // which also explains why it is not inline here. It reads the same
   // activeThreadSettled the parked-thread banner renders from, so the shortcut
   // can never disagree with what the user is looking at.

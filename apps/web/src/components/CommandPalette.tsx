@@ -44,6 +44,7 @@ import {
   ServerIcon,
   SettingsIcon,
   SquarePenIcon,
+  FolderSearchIcon,
   TextSearchIcon,
 } from "lucide-react";
 import {
@@ -63,7 +64,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
-import { useClientSettings } from "../hooks/useSettings";
+import { useClientSettings, useLegacySidebarEnabled } from "../hooks/useSettings";
 import { useTheme } from "../hooks/useTheme";
 import { readLocalApi } from "../localApi";
 import { desktopLocalBackendId } from "../connection/desktopLocal";
@@ -116,6 +117,7 @@ import {
   type CommandPaletteView,
   filterCommandPaletteGroups,
   filterPinnedBrowseEntries,
+  findJumpTargetItem,
   getCommandPaletteInputPlaceholder,
   getCommandPaletteMode,
   ITEM_ICON_CLASS,
@@ -130,6 +132,7 @@ import { CommandPaletteResults } from "./CommandPaletteResults";
 import { AzureDevOpsIcon, BitbucketIcon, GitHubIcon, GitLabIcon } from "./Icons";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { ProjectFilePicker } from "./files/ProjectFilePicker";
+import { ProjectScopePicker } from "./projects/ProjectScopePicker";
 import { ProjectContentSearchDialog } from "./search/ProjectContentSearchDialog";
 import { toggleThemeEditorForTheme } from "./settings/themeEditorStore";
 import {
@@ -144,7 +147,7 @@ import {
   resolveDefaultProviderModelSelection,
   type ProviderInstanceEntry,
 } from "../providerInstances";
-import { resolveShortcutCommand, threadJumpIndexFromCommand } from "../keybindings";
+import { resolveShortcutCommand } from "../keybindings";
 import { CommandDialog, CommandDialogPopup } from "./ui/command";
 import { Button } from "./ui/button";
 import { Kbd, KbdGroup } from "./ui/kbd";
@@ -383,6 +386,7 @@ const OVERLAY_MODE_BY_COMMAND = {
   "commandPalette.toggle": "command",
   "filePicker.toggle": "files",
   "projectSearch.toggle": "content",
+  "projectScope.toggle": "projects",
 } as const satisfies Partial<Record<string, SearchOverlayMode>>;
 
 function overlayModeForCommand(command: string | null): SearchOverlayMode | null {
@@ -528,7 +532,9 @@ function CommandPaletteDialog(props: {
           ? "File picker"
           : props.mode === "content"
             ? "Search project contents"
-            : "Command palette"
+            : props.mode === "projects"
+              ? "Filter threads by project"
+              : "Command palette"
       }
       className={cn("overflow-hidden p-0", props.mode === "content" && "h-105")}
       data-command-palette="true"
@@ -546,6 +552,8 @@ function CommandPaletteDialog(props: {
         <ProjectFilePicker setOpen={props.setOpen} />
       ) : props.mode === "content" ? (
         <ProjectContentSearchDialog onOpenChange={props.setOpen} />
+      ) : props.mode === "projects" ? (
+        <ProjectScopePicker setOpen={props.setOpen} />
       ) : (
         <OpenCommandPaletteDialog
           openIntent={props.openIntent}
@@ -566,6 +574,7 @@ function OpenCommandPaletteDialog(props: {
 }) {
   const navigate = useNavigate();
   const { clearOpenIntent, openIntent, openOverlayMode, setOpen } = props;
+  const legacySidebarEnabled = useLegacySidebarEnabled();
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
   const isActionsOnly = deferredQuery.startsWith(">");
@@ -1553,6 +1562,23 @@ function OpenCommandPaletteDialog(props: {
     },
   });
 
+  // The legacy sidebar has no project filter for this to drive, so offering it
+  // there would be a row that silently does nothing.
+  if (!legacySidebarEnabled) {
+    actionItems.push({
+      kind: "action",
+      value: "action:filter-threads-by-project",
+      searchTerms: ["filter threads", "project filter", "scope", "narrow", "by project"],
+      title: "Filter threads by project",
+      icon: <FolderSearchIcon className={ITEM_ICON_CLASS} />,
+      keepOpen: true,
+      shortcutCommand: "projectScope.toggle",
+      run: async () => {
+        openOverlayMode("projects");
+      },
+    });
+  }
+
   actionItems.push({
     kind: "action",
     value: "action:add-project",
@@ -2154,20 +2180,17 @@ function OpenCommandPaletteDialog(props: {
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
-    const command = resolveShortcutCommand(event, keybindings, {
+    const jumpTarget = findJumpTargetItem({
+      event,
+      keybindings,
+      items: displayedGroups.flatMap((group) => group.items),
       platform: navigator.platform,
-      context: { modelPickerOpen: false },
     });
-    if (threadJumpIndexFromCommand(command ?? "") !== null) {
-      const matchingItem = displayedGroups
-        .flatMap((group) => group.items)
-        .find((item) => item.shortcutCommand === command);
-      if (matchingItem) {
-        event.preventDefault();
-        event.stopPropagation();
-        executeItem(matchingItem);
-        return;
-      }
+    if (jumpTarget) {
+      event.preventDefault();
+      event.stopPropagation();
+      executeItem(jumpTarget);
+      return;
     }
 
     if (addProjectCloneFlow?.step === "repository" && event.key === "Enter") {
