@@ -217,7 +217,11 @@ export const attachmentUploadRouteLayer = Layer.unwrap(
     return Layer.mergeAll(
       HttpRouter.add("OPTIONS", ATTACHMENT_UPLOAD_ROUTE_PREFIX, handler),
       HttpRouter.add("POST", ATTACHMENT_UPLOAD_ROUTE_PREFIX, handler),
-      HttpRouter.add("*", `${ATTACHMENT_UPLOAD_ROUTE_PREFIX}/*`, handler),
+      // Effect's router dispatches HEAD through the matching GET route while
+      // preserving request.method, so the handler still executes HEAD logic.
+      HttpRouter.add("GET", `${ATTACHMENT_UPLOAD_ROUTE_PREFIX}/*`, handler),
+      HttpRouter.add("PATCH", `${ATTACHMENT_UPLOAD_ROUTE_PREFIX}/*`, handler),
+      HttpRouter.add("DELETE", `${ATTACHMENT_UPLOAD_ROUTE_PREFIX}/*`, handler),
     );
   }),
 );
