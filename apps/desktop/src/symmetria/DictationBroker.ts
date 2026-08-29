@@ -222,11 +222,76 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
 
     switch (command.type) {
       case "dictation.mode.set":
+        if (
+          reserved.phase !== "recording" &&
+          reserved.phase !== "paused" &&
+          reserved.phase !== "processing" &&
+          reserved.phase !== "grace"
+        ) {
+          return null;
+        }
         session = { ...reserved, mode: command.mode };
         publish();
         return null;
       case "dictation.control":
-        session = { ...reserved, phase: phaseForControl(reserved.phase, command.action) };
+        session = {
+          ...reserved,
+          phase: phaseForControl(reserved.phase, command.action),
+          lastControl: { commandId: command.commandId, action: command.action },
+        };
+        publish();
+        return null;
+      case "dictation.state.update":
+        session = {
+          ...reserved,
+          phase: command.phase,
+          elapsedMs: command.elapsedMs,
+          audioLevel: command.audioLevel,
+          graceRemainingMs: command.graceRemainingMs,
+        };
+        publish();
+        return null;
+      case "dictation.action.acknowledge": {
+        const acknowledged = { ...reserved };
+        if (
+          command.actionKind === "control" &&
+          acknowledged.lastControl?.commandId === command.acknowledgedCommandId
+        ) {
+          delete acknowledged.lastControl;
+        }
+        if (
+          command.actionKind === "vocabulary" &&
+          acknowledged.lastVocabulary?.commandId === command.acknowledgedCommandId
+        ) {
+          delete acknowledged.lastVocabulary;
+        }
+        session = acknowledged;
+        publish();
+        return null;
+      }
+      case "dictation.vocabulary.add":
+        session = {
+          ...reserved,
+          lastVocabulary: { commandId: command.commandId, action: "add", word: command.word },
+        };
+        publish();
+        return null;
+      case "dictation.vocabulary.remove":
+        session = {
+          ...reserved,
+          lastVocabulary: {
+            commandId: command.commandId,
+            action: "remove",
+            index: command.index,
+          },
+        };
+        publish();
+        return null;
+      case "dictation.vocabulary.toggle":
+        session = {
+          ...reserved,
+          lastVocabulary: { commandId: command.commandId, action: "toggle" },
+        };
         publish();
         return null;
       case "dictation.presentation": {
@@ -317,6 +382,10 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
   const command = (
     nextCommand: SymmetriaDictationCommand,
   ): Promise<SymmetriaDictationReceipt | null> => {
+    // Progress is a replace-only snapshot update. Reapplying the same values is
+    // idempotent, and retaining four updates per second in the durable command
+    // ledger would grow memory for the lifetime of the desktop process.
+    if (nextCommand.type === "dictation.state.update") return applyCommand(nextCommand);
     const key = `${nextCommand.sessionId}:${nextCommand.commandId}`;
     const recorded = commandLedger.get(key);
     if (recorded !== undefined) {

@@ -14,7 +14,7 @@ import {
 } from "./dictation.ts";
 import { buildSymmetriaJsonSchemaArtifacts, SYMMETRIA_SCHEMA_ROOTS } from "./jsonSchema.ts";
 
-const PROTOCOL_VERSION = { major: 1, minor: 2 } as const;
+const PROTOCOL_VERSION = { major: 1, minor: 4 } as const;
 const SESSION_ID = "stt_01K3PH7X2A";
 const COMMAND_ID = CommandId.make("cmd_01K3PH8B65");
 const ENVIRONMENT_ID = EnvironmentId.make("env_local");
@@ -154,6 +154,82 @@ describe("SymmetriaDictationCommand", () => {
       expect(Result.isFailure(decodeCommand(omit(command, "sessionId")))).toBe(true);
       expect(Result.isFailure(decodeCommand(omit(command, "commandId")))).toBe(true);
     }
+  });
+
+  it("accepts engine progress and keeps the latest control identity in a snapshot", () => {
+    const progress = {
+      type: "dictation.state.update",
+      protocolVersion: PROTOCOL_VERSION,
+      sessionId: SESSION_ID,
+      commandId: CommandId.make("cmd_progress"),
+      createdAt: "2026-08-29T12:00:01.000Z",
+      phase: "grace",
+      elapsedMs: 3200,
+      audioLevel: null,
+      graceRemainingMs: 2800,
+    } as const;
+    expect(Result.isSuccess(decodeCommand(progress))).toBe(true);
+
+    const session = {
+      protocolVersion: PROTOCOL_VERSION,
+      sessionId: SESSION_ID,
+      target: threadTarget,
+      source: "mesura",
+      phase: "recording",
+      mode: "submit",
+      projectName: "Mesura Code",
+      startedAt: "2026-08-29T12:00:00.000Z",
+      elapsedMs: 0,
+      audioLevel: 0,
+      graceRemainingMs: null,
+      lastControl: { commandId: COMMAND_ID, action: "restart" },
+      presentation: { mesuraOwnsPresentation: false, leaseExpiresAt: null },
+    } as const;
+    expect(Result.isSuccess(decodeSession(session))).toBe(true);
+  });
+
+  it("carries add, remove, and toggle vocabulary actions with command identities", () => {
+    const base = {
+      protocolVersion: PROTOCOL_VERSION,
+      sessionId: SESSION_ID,
+      createdAt: "2026-08-29T12:00:01.000Z",
+    } as const;
+    const commands = [
+      {
+        ...base,
+        type: "dictation.vocabulary.add",
+        commandId: CommandId.make("cmd_vocab_add"),
+        word: "Quickshell",
+      },
+      {
+        ...base,
+        type: "dictation.vocabulary.remove",
+        commandId: CommandId.make("cmd_vocab_remove"),
+        index: 1,
+      },
+      {
+        ...base,
+        type: "dictation.vocabulary.toggle",
+        commandId: CommandId.make("cmd_vocab_toggle"),
+      },
+    ] as const;
+    for (const command of commands) expect(Result.isSuccess(decodeCommand(command))).toBe(true);
+  });
+
+  it("acknowledges one exact pending Shell action", () => {
+    expect(
+      Result.isSuccess(
+        decodeCommand({
+          type: "dictation.action.acknowledge",
+          protocolVersion: PROTOCOL_VERSION,
+          sessionId: SESSION_ID,
+          commandId: CommandId.make("cmd_ack"),
+          createdAt: "2026-08-29T12:00:02.000Z",
+          actionKind: "control",
+          acknowledgedCommandId: CommandId.make("cmd_control"),
+        }),
+      ),
+    ).toBe(true);
   });
 });
 

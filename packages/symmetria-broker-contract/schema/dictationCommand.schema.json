@@ -25,6 +25,57 @@
       ],
       "type": "object"
     },
+    "SymmetriaDictationActionAcknowledgementCommand": {
+      "additionalProperties": true,
+      "properties": {
+        "acknowledgedCommandId": {
+          "type": "string"
+        },
+        "actionKind": {
+          "enum": [
+            "control",
+            "vocabulary"
+          ],
+          "type": "string"
+        },
+        "commandId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "protocolVersion": {
+          "$ref": "#/$defs/Objects_"
+        },
+        "sessionId": {
+          "allOf": [
+            {
+              "minLength": 1
+            },
+            {
+              "pattern": "\\S"
+            }
+          ],
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "dictation.action.acknowledge"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "protocolVersion",
+        "sessionId",
+        "commandId",
+        "createdAt",
+        "actionKind",
+        "acknowledgedCommandId"
+      ],
+      "type": "object"
+    },
     "SymmetriaDictationControlCommand": {
       "additionalProperties": true,
       "properties": {
@@ -331,6 +382,102 @@
       ],
       "type": "object"
     },
+    "SymmetriaDictationStateUpdateCommand": {
+      "additionalProperties": true,
+      "properties": {
+        "audioLevel": {
+          "anyOf": [
+            {
+              "allOf": [
+                {
+                  "maximum": 1,
+                  "minimum": 0
+                }
+              ],
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "commandId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "elapsedMs": {
+          "allOf": [
+            {
+              "minimum": 0
+            }
+          ],
+          "type": "integer"
+        },
+        "graceRemainingMs": {
+          "anyOf": [
+            {
+              "allOf": [
+                {
+                  "minimum": 0
+                }
+              ],
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "phase": {
+          "enum": [
+            "recording",
+            "paused",
+            "processing",
+            "grace",
+            "delivering",
+            "confirming",
+            "completed",
+            "failed",
+            "cancelled"
+          ],
+          "type": "string"
+        },
+        "protocolVersion": {
+          "$ref": "#/$defs/Objects_"
+        },
+        "sessionId": {
+          "allOf": [
+            {
+              "minLength": 1
+            },
+            {
+              "pattern": "\\S"
+            }
+          ],
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "dictation.state.update"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "protocolVersion",
+        "sessionId",
+        "commandId",
+        "createdAt",
+        "phase",
+        "elapsedMs",
+        "audioLevel",
+        "graceRemainingMs"
+      ],
+      "type": "object"
+    },
     "SymmetriaDictationThreadTarget": {
       "additionalProperties": true,
       "properties": {
@@ -353,6 +500,148 @@
         "threadId"
       ],
       "type": "object"
+    },
+    "SymmetriaDictationVocabularyCommand": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "properties": {
+            "commandId": {
+              "type": "string"
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "protocolVersion": {
+              "$ref": "#/$defs/Objects_"
+            },
+            "sessionId": {
+              "allOf": [
+                {
+                  "minLength": 1
+                },
+                {
+                  "pattern": "\\S"
+                }
+              ],
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "dictation.vocabulary.add"
+              ],
+              "type": "string"
+            },
+            "word": {
+              "allOf": [
+                {
+                  "minLength": 1
+                },
+                {
+                  "pattern": "\\S"
+                }
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "protocolVersion",
+            "sessionId",
+            "commandId",
+            "createdAt",
+            "word"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "commandId": {
+              "type": "string"
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "index": {
+              "allOf": [
+                {
+                  "minimum": 0
+                }
+              ],
+              "type": "integer"
+            },
+            "protocolVersion": {
+              "$ref": "#/$defs/Objects_"
+            },
+            "sessionId": {
+              "allOf": [
+                {
+                  "minLength": 1
+                },
+                {
+                  "pattern": "\\S"
+                }
+              ],
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "dictation.vocabulary.remove"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "protocolVersion",
+            "sessionId",
+            "commandId",
+            "createdAt",
+            "index"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "commandId": {
+              "type": "string"
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "protocolVersion": {
+              "$ref": "#/$defs/Objects_"
+            },
+            "sessionId": {
+              "allOf": [
+                {
+                  "minLength": 1
+                },
+                {
+                  "pattern": "\\S"
+                }
+              ],
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "dictation.vocabulary.toggle"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "protocolVersion",
+            "sessionId",
+            "commandId",
+            "createdAt"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "SymmetriaScopedThreadRef": {
       "additionalProperties": true,
@@ -392,6 +681,15 @@
     },
     {
       "$ref": "#/$defs/SymmetriaDictationModeCommand"
+    },
+    {
+      "$ref": "#/$defs/SymmetriaDictationStateUpdateCommand"
+    },
+    {
+      "$ref": "#/$defs/SymmetriaDictationVocabularyCommand"
+    },
+    {
+      "$ref": "#/$defs/SymmetriaDictationActionAcknowledgementCommand"
     },
     {
       "$ref": "#/$defs/SymmetriaDictationDeliverCommand"

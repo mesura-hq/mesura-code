@@ -97,6 +97,114 @@
             }
           ]
         },
+        "lastControl": {
+          "additionalProperties": true,
+          "properties": {
+            "action": {
+              "enum": [
+                "start",
+                "pause",
+                "resume",
+                "cancel",
+                "restart",
+                "stop",
+                "retry",
+                "send-now"
+              ],
+              "type": "string"
+            },
+            "commandId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "commandId",
+            "action"
+          ],
+          "type": "object"
+        },
+        "lastVocabulary": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "properties": {
+                "action": {
+                  "enum": [
+                    "add"
+                  ],
+                  "type": "string"
+                },
+                "commandId": {
+                  "type": "string"
+                },
+                "word": {
+                  "allOf": [
+                    {
+                      "minLength": 1
+                    },
+                    {
+                      "pattern": "\\S"
+                    }
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "commandId",
+                "action",
+                "word"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": true,
+              "properties": {
+                "action": {
+                  "enum": [
+                    "remove"
+                  ],
+                  "type": "string"
+                },
+                "commandId": {
+                  "type": "string"
+                },
+                "index": {
+                  "allOf": [
+                    {
+                      "minimum": 0
+                    }
+                  ],
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "commandId",
+                "action",
+                "index"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": true,
+              "properties": {
+                "action": {
+                  "enum": [
+                    "toggle"
+                  ],
+                  "type": "string"
+                },
+                "commandId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "commandId",
+                "action"
+              ],
+              "type": "object"
+            }
+          ]
+        },
         "mode": {
           "enum": [
             "clipboard",

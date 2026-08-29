@@ -3,6 +3,7 @@ import {
   SymmetriaDictationReceipt,
   SymmetriaDictationTarget,
 } from "@symmetria/broker-contract";
+import { CommandId } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -162,6 +163,122 @@ it("sends a renderer reconnect the current snapshot before later events", async 
 
   assert.deepEqual(observed, ["recording", "recording"]);
   assert.equal(broker.snapshot()?.mode, "inject");
+});
+
+it("retains exact controls and applies Shell engine progress to the session snapshot", async () => {
+  const broker = createDictationBroker({
+    reserveTarget: async () => ({ target: targetA, projectName: "Project A" }),
+    deliver: async () => makeTurnRunningReceipt(),
+  });
+  await broker.reserve(reserveRequest);
+
+  await broker.command(
+    decodeCommand({
+      type: "dictation.control",
+      protocolVersion: { major: 1, minor: 4 },
+      sessionId: "session-a",
+      commandId: "command-restart",
+      createdAt: "2026-08-29T12:00:01.000Z",
+      action: "restart",
+    }),
+  );
+  assert.deepEqual(broker.snapshot()?.lastControl, {
+    commandId: CommandId.make("command-restart"),
+    action: "restart",
+  });
+  await broker.command(
+    decodeCommand({
+      type: "dictation.state.update",
+      protocolVersion: { major: 1, minor: 4 },
+      sessionId: "session-a",
+      commandId: "command-progress",
+      createdAt: "2026-08-29T12:00:02.000Z",
+      phase: "grace",
+      elapsedMs: 4200,
+      audioLevel: null,
+      graceRemainingMs: 2800,
+    }),
+  );
+
+  assert.equal(broker.snapshot()?.lastControl?.commandId, "command-restart");
+  assert.equal(broker.snapshot()?.phase, "grace");
+  assert.equal(broker.snapshot()?.elapsedMs, 4200);
+  assert.equal(broker.snapshot()?.audioLevel, null);
+  assert.equal(broker.snapshot()?.graceRemainingMs, 2800);
+
+  await broker.command(
+    decodeCommand({
+      type: "dictation.action.acknowledge",
+      protocolVersion: { major: 1, minor: 4 },
+      sessionId: "session-a",
+      commandId: "command-ack-wrong",
+      createdAt: "2026-08-29T12:00:03.000Z",
+      actionKind: "control",
+      acknowledgedCommandId: "another-control",
+    }),
+  );
+  assert.equal(broker.snapshot()?.lastControl?.commandId, "command-restart");
+
+  await broker.command(
+    decodeCommand({
+      type: "dictation.action.acknowledge",
+      protocolVersion: { major: 1, minor: 4 },
+      sessionId: "session-a",
+      commandId: "command-ack-restart",
+      createdAt: "2026-08-29T12:00:04.000Z",
+      actionKind: "control",
+      acknowledgedCommandId: "command-restart",
+    }),
+  );
+  assert.isUndefined(broker.snapshot()?.lastControl);
+});
+
+it("retains the exact vocabulary action for the Shell client", async () => {
+  const broker = createDictationBroker({
+    reserveTarget: async () => ({ target: targetA, projectName: "Project A" }),
+    deliver: async () => makeTurnRunningReceipt(),
+  });
+  await broker.reserve(reserveRequest);
+
+  await broker.command(
+    decodeCommand({
+      type: "dictation.vocabulary.add",
+      protocolVersion: { major: 1, minor: 4 },
+      sessionId: "session-a",
+      commandId: "command-vocabulary",
+      createdAt: "2026-08-29T12:00:01.000Z",
+      word: "Quickshell",
+    }),
+  );
+
+  assert.deepEqual(broker.snapshot()?.lastVocabulary, {
+    commandId: CommandId.make("command-vocabulary"),
+    action: "add",
+    word: "Quickshell",
+  });
+});
+
+it("freezes the delivery mode once delivery starts", async () => {
+  const broker = createDictationBroker({
+    reserveTarget: async () => ({ target: targetA, projectName: "Project A" }),
+    deliver: async () => makeTurnRunningReceipt(),
+  });
+  await broker.reserve(reserveRequest);
+  await broker.command(makeDeliverCommand());
+
+  await broker.command(
+    decodeCommand({
+      type: "dictation.mode.set",
+      protocolVersion: { major: 1, minor: 4 },
+      sessionId: "session-a",
+      commandId: "command-mode-late",
+      createdAt: "2026-08-29T12:00:05.000Z",
+      mode: "clipboard",
+    }),
+  );
+
+  assert.equal(broker.snapshot()?.phase, "completed");
+  assert.equal(broker.snapshot()?.mode, "submit");
 });
 
 // Acceptance: expiration changes only presentation ownership. It must not

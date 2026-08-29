@@ -203,10 +203,10 @@ describe("additive contract changes advance the minor version", () => {
   // EnvironmentId for the first time. Keeping the old exact assertions would
   // make a correct additive release look like a regression.
   it("announces the latest additive protocol surface", () => {
-    expect(SYMMETRIA_PROTOCOL_MINOR).toBe(3);
+    expect(SYMMETRIA_PROTOCOL_MINOR).toBe(4);
   });
 
   it("keeps the semantic contract version in step", () => {
-    expect(SYMMETRIA_CONTRACT_VERSION).toBe("1.3.0");
+    expect(SYMMETRIA_CONTRACT_VERSION).toBe("1.4.0");
   });
 });

@@ -85,6 +85,18 @@ export const SYMMETRIA_DICTATION_SOURCES = ["shell", "mesura"] as const;
 export const SymmetriaDictationSource = Schema.Literals(SYMMETRIA_DICTATION_SOURCES);
 export type SymmetriaDictationSource = typeof SymmetriaDictationSource.Type;
 
+export const SYMMETRIA_DICTATION_CONTROL_ACTIONS = [
+  "start",
+  "pause",
+  "resume",
+  "cancel",
+  "restart",
+  "stop",
+  "retry",
+  "send-now",
+] as const;
+export const SymmetriaDictationControlAction = Schema.Literals(SYMMETRIA_DICTATION_CONTROL_ACTIONS);
+
 const AudioLevel = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 }));
 
 export const SymmetriaDictationPresentation = Schema.Struct({
@@ -106,6 +118,23 @@ export const SymmetriaDictationSession = Schema.Struct({
   elapsedMs: NonNegativeInteger,
   audioLevel: Schema.NullOr(AudioLevel),
   graceRemainingMs: Schema.NullOr(NonNegativeInteger),
+  lastControl: Schema.optionalKey(
+    Schema.Struct({
+      commandId: CommandId,
+      action: SymmetriaDictationControlAction,
+    }),
+  ),
+  lastVocabulary: Schema.optionalKey(
+    Schema.Union([
+      Schema.Struct({ commandId: CommandId, action: Schema.Literal("add"), word: NonEmptyText }),
+      Schema.Struct({
+        commandId: CommandId,
+        action: Schema.Literal("remove"),
+        index: NonNegativeInteger,
+      }),
+      Schema.Struct({ commandId: CommandId, action: Schema.Literal("toggle") }),
+    ]),
+  ),
   presentation: SymmetriaDictationPresentation,
 }).annotate({ identifier: "SymmetriaDictationSession" });
 export type SymmetriaDictationSession = typeof SymmetriaDictationSession.Type;
@@ -116,18 +145,6 @@ const DictationCommandBaseFields = {
   commandId: CommandId,
   createdAt: IsoDateTime,
 } as const;
-
-export const SYMMETRIA_DICTATION_CONTROL_ACTIONS = [
-  "start",
-  "pause",
-  "resume",
-  "cancel",
-  "restart",
-  "stop",
-  "retry",
-  "send-now",
-] as const;
-export const SymmetriaDictationControlAction = Schema.Literals(SYMMETRIA_DICTATION_CONTROL_ACTIONS);
 
 /** Starts one Shell job after the renderer reserves the supplied target. */
 export const SymmetriaDictationReserveCommand = Schema.Struct({
@@ -148,6 +165,40 @@ export const SymmetriaDictationModeCommand = Schema.Struct({
   ...DictationCommandBaseFields,
   mode: SymmetriaDictationMode,
 }).annotate({ identifier: "SymmetriaDictationModeCommand" });
+
+/** Publishes engine-owned progress without changing the reserved target or mode. */
+export const SymmetriaDictationStateUpdateCommand = Schema.Struct({
+  type: Schema.Literal("dictation.state.update"),
+  ...DictationCommandBaseFields,
+  phase: SymmetriaDictationPhase,
+  elapsedMs: NonNegativeInteger,
+  audioLevel: Schema.NullOr(AudioLevel),
+  graceRemainingMs: Schema.NullOr(NonNegativeInteger),
+}).annotate({ identifier: "SymmetriaDictationStateUpdateCommand" });
+
+export const SymmetriaDictationVocabularyCommand = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("dictation.vocabulary.add"),
+    ...DictationCommandBaseFields,
+    word: NonEmptyText,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("dictation.vocabulary.remove"),
+    ...DictationCommandBaseFields,
+    index: NonNegativeInteger,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("dictation.vocabulary.toggle"),
+    ...DictationCommandBaseFields,
+  }),
+]).annotate({ identifier: "SymmetriaDictationVocabularyCommand" });
+
+export const SymmetriaDictationActionAcknowledgementCommand = Schema.Struct({
+  type: Schema.Literal("dictation.action.acknowledge"),
+  ...DictationCommandBaseFields,
+  actionKind: Schema.Literals(["control", "vocabulary"]),
+  acknowledgedCommandId: CommandId,
+}).annotate({ identifier: "SymmetriaDictationActionAcknowledgementCommand" });
 
 /** The only command whose body carries the dictated words. */
 export const SymmetriaDictationDeliverCommand = Schema.Struct({
@@ -172,6 +223,9 @@ export const SymmetriaDictationCommand = Schema.Union([
   SymmetriaDictationReserveCommand,
   SymmetriaDictationControlCommand,
   SymmetriaDictationModeCommand,
+  SymmetriaDictationStateUpdateCommand,
+  SymmetriaDictationVocabularyCommand,
+  SymmetriaDictationActionAcknowledgementCommand,
   SymmetriaDictationDeliverCommand,
   SymmetriaDictationPresentationCommand,
 ]);
