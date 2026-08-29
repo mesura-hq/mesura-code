@@ -224,6 +224,8 @@ import {
 } from "../composerDraftStore";
 import { submitComposerDraft } from "./chat/composerSubmission";
 import { useSttDelivery } from "../symmetria/useSttDelivery";
+import { dictationCoordinator } from "../symmetria/dictationCoordinator";
+import { captureDictationTarget } from "../symmetria/dictationTarget";
 import {
   appendTerminalContextsToPrompt,
   formatTerminalContextLabel,
@@ -5799,6 +5801,24 @@ function ChatViewContent(props: ChatViewProps) {
     [composerDraftTarget],
   );
   useSttDelivery(sttWriter);
+  const registeredDictationTarget = useMemo(
+    () =>
+      captureDictationTarget(
+        composerDraftTarget,
+        typeof composerDraftTarget === "string" ? draftThread : null,
+      ),
+    [composerDraftTarget, draftThread],
+  );
+  useEffect(() => {
+    if (registeredDictationTarget === null) return;
+    return dictationCoordinator.registerComposer({
+      target: registeredDictationTarget,
+      projectName: activeProject?.title ?? null,
+      handle: {
+        replacePrompt: (prompt) => composerRef.current?.replacePrompt(prompt) ?? false,
+      },
+    });
+  }, [activeProject?.title, composerRef, registeredDictationTarget]);
 
   const onInterrupt = async () => {
     if (!activeThread) return;

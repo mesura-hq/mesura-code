@@ -119,6 +119,7 @@ import { ContextWindowMeter } from "./ContextWindowMeter";
 import { resolveContextWindowModelDisplayName } from "./ContextWindowMeter.logic";
 import { buildExpandedImagePreview, type ExpandedImagePreview } from "./ExpandedImagePreview";
 import { basenameOfPath } from "../../pierre-icons";
+import { appendComposerTextAtEnd } from "../../symmetria/dictationTarget";
 import { cn, randomUUID } from "~/lib/utils";
 import { Separator } from "../ui/separator";
 import {
@@ -525,6 +526,7 @@ export interface ChatComposerHandle {
   focusAt: (cursor: number) => void;
   addDroppedFiles: (files: File[]) => void;
   insertTextAtEnd: (text: string, options?: { ensureLeadingBoundary?: boolean }) => boolean;
+  replacePrompt: (prompt: string) => boolean;
   openModelPicker: () => void;
   clearFileUploads: (attachmentIds: ReadonlyArray<string>) => void;
   markFileUploadsFailed: (attachmentIds: ReadonlyArray<string>, message: string) => void;
@@ -2936,13 +2938,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       return false;
     }
     const prompt = promptRef.current;
-    const needsLeadingSpace =
-      (options?.ensureLeadingBoundary ?? false) && prompt.length > 0 && !/\s$/.test(prompt);
-    return applyPromptReplacement(
-      prompt.length,
-      prompt.length,
-      needsLeadingSpace ? ` ${text}` : text,
-    );
+    const nextPrompt =
+      (options?.ensureLeadingBoundary ?? false)
+        ? appendComposerTextAtEnd(prompt, text)
+        : `${prompt}${text}`;
+    return applyPromptReplacement(prompt.length, prompt.length, nextPrompt.slice(prompt.length));
   };
 
   // File-tree drags land as mentions. Handled in the capture phase so the
@@ -3054,6 +3054,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         focusComposer();
       },
       insertTextAtEnd: insertComposerTextAtEnd,
+      replacePrompt: (prompt: string) =>
+        applyPromptReplacement(0, promptRef.current.length, prompt, {
+          focusEditorAfterReplace: false,
+        }),
       openModelPicker: () => {
         setIsComposerModelPickerOpen(true);
       },

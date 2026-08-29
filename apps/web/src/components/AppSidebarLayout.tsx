@@ -25,6 +25,7 @@ import {
 } from "./SidebarStageBackdrop";
 import { useProjects, useThreadShells } from "../state/entities";
 import { useThreadFeed } from "../symmetria/useThreadFeed";
+import { useDictationBridge } from "../symmetria/useDictationBridge";
 import {
   resolveInitialThreadSidebarWidth,
   resolveThreadSidebarMaximumWidth,
@@ -147,6 +148,11 @@ function SymmetriaThreadFeedRetention() {
   return null;
 }
 
+function SymmetriaDictationRetention() {
+  useDictationBridge();
+  return null;
+}
+
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const legacySidebarEnabled = useLegacySidebarEnabled();
@@ -223,6 +229,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     <SidebarProvider className="h-dvh! min-h-0!" defaultOpen style={sidebarProviderStyle}>
       <ProjectProjectionRetention />
       <SymmetriaThreadFeedRetention />
+      <SymmetriaDictationRetention />
       <Sidebar
         side="left"
         collapsible="offcanvas"
