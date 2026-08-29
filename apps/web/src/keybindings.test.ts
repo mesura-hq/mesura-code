@@ -147,6 +147,11 @@ const DEFAULT_BINDINGS = compile([
     whenAst: whenNot(whenIdentifier("terminalFocus")),
   },
   {
+    shortcut: modShortcut("k", { shiftKey: true }),
+    command: "threadSearch.toggle",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
+  {
     shortcut: modShortcut("t", { altKey: true, shiftKey: true }),
     command: "themeEditor.toggle",
   },
@@ -1143,4 +1148,26 @@ describe("shipped defaults on Linux", () => {
     assert.strictEqual(resolve(press("Tab", { ctrlKey: true }), true), null);
     assert.strictEqual(resolve(press("]", { ctrlKey: true, shiftKey: true }), true), "thread.next");
   });
+});
+
+it("labels the thread search shortcut on both platforms", () => {
+  assert.strictEqual(
+    shortcutLabelForCommand(DEFAULT_BINDINGS, "threadSearch.toggle", "MacIntel"),
+    "⇧⌘K",
+  );
+  assert.strictEqual(
+    shortcutLabelForCommand(DEFAULT_BINDINGS, "threadSearch.toggle", "Linux"),
+    "Ctrl+Shift+K",
+  );
+});
+
+it("resolves mod+shift+k to the thread search outside terminal focus", () => {
+  assert.strictEqual(
+    resolveShortcutCommand(
+      { key: "k", metaKey: false, ctrlKey: true, shiftKey: true, altKey: false },
+      DEFAULT_BINDINGS,
+      { platform: "Linux", context: { terminalFocus: false } },
+    ),
+    "threadSearch.toggle",
+  );
 });

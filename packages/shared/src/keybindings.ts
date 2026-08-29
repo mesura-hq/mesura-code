@@ -44,6 +44,12 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // that entry the freed chord stays claimed and the picker silently gets nothing.
   { key: "mod+shift+g", command: "projectSearch.toggle", when: "!terminalFocus" },
   { key: "mod+shift+f", command: "projectScope.toggle", when: "!terminalFocus" },
+  // Beside mod+k on purpose: the same overlay, narrowed to threads. A new
+  // command on a free chord, so the ordinary per-command startup backfill
+  // installs it; RETIRED_KEYBINDING_DEFAULTS is for moving a rule that already
+  // shipped and ADDED_KEYBINDING_DEFAULTS for a second default on a command a
+  // config already binds, and this is neither.
+  { key: "mod+shift+k", command: "threadSearch.toggle", when: "!terminalFocus" },
   { key: "mod+alt+shift+t", command: "themeEditor.toggle" },
   { key: "mod+s", command: "composer.stash", when: "!terminalFocus" },
   { key: "alt+u", command: "usage.peek" },
