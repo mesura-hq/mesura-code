@@ -51,6 +51,7 @@ type CoordinatorOptions = {
   readonly threadExists?: (threadRef: ScopedThreadRef) => boolean;
   readonly submit?: typeof submitDirectedDictation;
   readonly confirm?: typeof confirmDirectedDictationTurn;
+  readonly reportLateReceipt?: (receipt: SymmetriaDictationReceipt) => void;
 };
 
 const failedReceipt = (
@@ -77,6 +78,15 @@ export function createDictationCoordinator(options: CoordinatorOptions = {}) {
       appAtomRegistry.get(environmentThreadShells.threadShellAtom(threadRef)) !== null);
   const submit = options.submit ?? submitDirectedDictation;
   const confirm = options.confirm ?? confirmDirectedDictationTurn;
+  const reportLateReceipt =
+    options.reportLateReceipt ??
+    ((receipt: SymmetriaDictationReceipt) => {
+      if (typeof window === "undefined") return;
+      void window.symmetriaDictationBridge?.sendCommand({
+        type: "dictation.late-receipt",
+        receipt,
+      });
+    });
   let registration: (DictationComposerRegistration & { readonly token: symbol }) | null = null;
   let reservation: {
     readonly sessionId: string;
@@ -264,15 +274,18 @@ export function createDictationCoordinator(options: CoordinatorOptions = {}) {
             "the submitted thread identity is unavailable",
           );
         }
-        return await confirm({
-          protocolVersion: command.protocolVersion,
-          sessionId: command.sessionId,
-          commandId: command.commandId,
-          target: reserved.target,
-          environmentId: confirmationRef.environmentId,
-          threadId: confirmationRef.threadId,
-          messageId: submission.messageId,
-        });
+        return await confirm(
+          {
+            protocolVersion: command.protocolVersion,
+            sessionId: command.sessionId,
+            commandId: command.commandId,
+            target: reserved.target,
+            environmentId: confirmationRef.environmentId,
+            threadId: confirmationRef.threadId,
+            messageId: submission.messageId,
+          },
+          { onLateReceipt: reportLateReceipt },
+        );
       }
 
       return {

@@ -14,6 +14,7 @@ const MAX_INPUT_BYTES = 1024 * 1024;
 export type DictationSessionServerOptions = {
   readonly snapshot: () => SymmetriaDictationSession | null;
   readonly subscribe: (listener: (snapshot: SymmetriaDictationSession) => void) => () => void;
+  readonly subscribeReceipts?: (listener: (receipt: DictationServerMessage) => void) => () => void;
   readonly handle: (message: DictationClientMessage) => Promise<DictationServerMessage | null>;
   readonly onError?: (error: Error) => void;
 };
@@ -37,6 +38,7 @@ export function createDictationSessionServer(
     const unsubscribe = options.subscribe((session) =>
       write({ type: "dictation.snapshot", session }),
     );
+    const unsubscribeReceipts = options.subscribeReceipts?.(write) ?? (() => undefined);
 
     connection.on("data", (chunk: string) => {
       buffered += chunk;
@@ -72,6 +74,9 @@ export function createDictationSessionServer(
       }
     });
     connection.on("error", (error) => options.onError?.(error));
-    connection.on("close", unsubscribe);
+    connection.on("close", () => {
+      unsubscribeReceipts();
+      unsubscribe();
+    });
   });
 }

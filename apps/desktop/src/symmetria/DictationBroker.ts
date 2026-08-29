@@ -82,6 +82,8 @@ export type LocalDictationBroker = {
       readonly session: SymmetriaDictationSession | null;
     }) => void,
   ) => () => void;
+  readonly watchReceipts: (listener: (receipt: SymmetriaDictationReceipt) => void) => () => void;
+  readonly reportLateReceipt: (receipt: SymmetriaDictationReceipt) => boolean;
   readonly expirePresentation: (now: string) => void;
   readonly dispose: () => void;
 };
@@ -130,12 +132,15 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
       readonly session: SymmetriaDictationSession | null;
     }) => void
   >();
+  const receiptListeners = new Set<(receipt: SymmetriaDictationReceipt) => void>();
   const commandLedger = new Map<string, Promise<SymmetriaDictationReceipt | null>>();
+  const retryableDeliveryCommands = new Set<string>();
   const reservationLedger = new Map<string, Promise<SymmetriaDictationSession>>();
   let pendingReservation: {
     readonly sessionId: string;
     readonly promise: Promise<SymmetriaDictationSession>;
   } | null = null;
+  let activeDeliveryCommandId: string | null = null;
 
   const publish = (): void => {
     if (session === null) return;
@@ -191,6 +196,8 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
           graceRemainingMs: null,
           presentation: { mesuraOwnsPresentation: false, leaseExpiresAt: null },
         };
+        activeDeliveryCommandId = null;
+        retryableDeliveryCommands.clear();
         publish();
         return session;
       })
@@ -234,6 +241,14 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
         publish();
         return null;
       case "dictation.control":
+        if (command.action === "retry") {
+          const sessionPrefix = `${command.sessionId}:`;
+          for (const key of retryableDeliveryCommands) {
+            if (!key.startsWith(sessionPrefix)) continue;
+            commandLedger.delete(key);
+            retryableDeliveryCommands.delete(key);
+          }
+        }
         session = {
           ...reserved,
           phase: phaseForControl(reserved.phase, command.action),
@@ -329,6 +344,7 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
           };
         }
         session = { ...reserved, phase: "delivering", mode: command.mode };
+        activeDeliveryCommandId = command.commandId;
         publish();
         let receipt: SymmetriaDictationReceipt;
         try {
@@ -393,12 +409,59 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
     }
     const pending = applyCommand(nextCommand);
     commandLedger.set(key, pending);
+    if (nextCommand.type === "dictation.deliver") {
+      void pending.then((receipt) => {
+        if (
+          receipt?.outcome === "failed" &&
+          (receipt.code === "provider_start_failed" ||
+            receipt.code === "persistence_failed" ||
+            receipt.code === "deadline_exceeded")
+        ) {
+          retryableDeliveryCommands.add(key);
+        } else {
+          retryableDeliveryCommands.delete(key);
+        }
+      });
+    }
     return pending;
   };
 
   const watch = (listener: (snapshot: SymmetriaDictationSession) => void): (() => void) => {
     listeners.add(listener);
     return () => listeners.delete(listener);
+  };
+
+  const reportLateReceipt = (receipt: SymmetriaDictationReceipt): boolean => {
+    if (
+      session === null ||
+      receipt.sessionId !== session.sessionId ||
+      receipt.commandId !== activeDeliveryCommandId ||
+      !targetsEqual(receipt.target, session.target)
+    ) {
+      return false;
+    }
+    const phase =
+      receipt.outcome === "confirmation-pending"
+        ? "confirming"
+        : receipt.outcome === "failed" || receipt.outcome === "refused"
+          ? "failed"
+          : "completed";
+    session = { ...session, phase };
+    const commandKey = `${receipt.sessionId}:${receipt.commandId}`;
+    commandLedger.set(commandKey, Promise.resolve(receipt));
+    if (
+      receipt.outcome === "failed" &&
+      (receipt.code === "provider_start_failed" ||
+        receipt.code === "persistence_failed" ||
+        receipt.code === "deadline_exceeded")
+    ) {
+      retryableDeliveryCommands.add(commandKey);
+    } else {
+      retryableDeliveryCommands.delete(commandKey);
+    }
+    publish();
+    for (const listener of receiptListeners) listener(receipt);
+    return true;
   };
 
   return {
@@ -411,6 +474,11 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
       frameListeners.add(listener);
       return () => frameListeners.delete(listener);
     },
+    watchReceipts: (listener) => {
+      receiptListeners.add(listener);
+      return () => receiptListeners.delete(listener);
+    },
+    reportLateReceipt,
     subscribe: (listener) => {
       listener(session);
       return watch(listener);
@@ -421,6 +489,7 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
       cancelLeaseExpiration = null;
       listeners.clear();
       frameListeners.clear();
+      receiptListeners.clear();
     },
   };
 }
@@ -579,6 +648,21 @@ const makeRequired = Effect.gen(function* () {
     channel: DICTATION_COMMAND_CHANNEL,
     handler: (raw: unknown) =>
       Effect.promise(async () => {
+        if (
+          typeof raw === "object" &&
+          raw !== null &&
+          (raw as Record<string, unknown>)["type"] === "dictation.late-receipt"
+        ) {
+          const receipt = parseDictationReceipt((raw as Record<string, unknown>)["receipt"]);
+          if (receipt === null || !broker.reportLateReceipt(receipt)) {
+            return {
+              type: "dictation.error",
+              code: "malformed_input",
+              detail: "the late dictation receipt does not match the active session",
+            } satisfies DictationServerMessage;
+          }
+          return { type: "dictation.receipt", receipt } satisfies DictationServerMessage;
+        }
         const parsed = parseDictationClientMessage(raw);
         if (!parsed.ok || parsed.message.type === "dictation.hello") {
           return {
@@ -624,6 +708,8 @@ const makeRequired = Effect.gen(function* () {
     const server = createDictationSessionServer({
       snapshot: broker.snapshot,
       subscribe: broker.watch,
+      subscribeReceipts: (listener) =>
+        broker.watchReceipts((receipt) => listener({ type: "dictation.receipt", receipt })),
       handle: async (message) => {
         if (message.type === "dictation.hello") {
           return {

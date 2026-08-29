@@ -281,6 +281,117 @@ it("freezes the delivery mode once delivery starts", async () => {
   assert.equal(broker.snapshot()?.mode, "submit");
 });
 
+it("retries one failed delivery with its original command identity only after explicit retry", async () => {
+  let deliveryCount = 0;
+  const broker = createDictationBroker({
+    reserveTarget: async () => ({ target: targetA, projectName: "Project A" }),
+    deliver: async () => {
+      deliveryCount += 1;
+      return deliveryCount === 1
+        ? decodeReceipt({
+            outcome: "failed",
+            protocolVersion: { major: 1, minor: 4 },
+            sessionId: "session-a",
+            commandId: "command-deliver",
+            target: targetA,
+            application: "first",
+            code: "provider_start_failed",
+            detail: "provider did not start",
+          })
+        : makeTurnRunningReceipt();
+    },
+  });
+  await broker.reserve(reserveRequest);
+
+  await broker.command(makeDeliverCommand());
+  await broker.command(makeDeliverCommand());
+  assert.equal(deliveryCount, 1);
+
+  await broker.command(
+    decodeCommand({
+      type: "dictation.control",
+      protocolVersion: { major: 1, minor: 4 },
+      sessionId: "session-a",
+      commandId: "command-retry",
+      createdAt: "2026-08-29T12:00:06.000Z",
+      action: "retry",
+    }),
+  );
+  const retried = await broker.command(makeDeliverCommand());
+
+  assert.equal(deliveryCount, 2);
+  assert.equal(retried?.outcome, "turn-running");
+});
+
+it("forwards a correlated late receipt to connected Shell clients", async () => {
+  const broker = createDictationBroker({
+    reserveTarget: async () => ({ target: targetA, projectName: "Project A" }),
+    deliver: async () => makeTurnRunningReceipt(),
+  });
+  await broker.reserve(reserveRequest);
+  await broker.command(makeDeliverCommand());
+  const receipts: Array<unknown> = [];
+  const unsubscribe = broker.watchReceipts((receipt) => receipts.push(receipt));
+
+  const reported = broker.reportLateReceipt(makeTurnRunningReceipt());
+  unsubscribe();
+
+  assert.isTrue(reported);
+  assert.equal(broker.snapshot()?.phase, "completed");
+  assert.deepEqual(receipts, [makeTurnRunningReceipt()]);
+});
+
+it("retries the original delivery identity after a retryable late failure", async () => {
+  let deliveryCount = 0;
+  const broker = createDictationBroker({
+    reserveTarget: async () => ({ target: targetA, projectName: "Project A" }),
+    deliver: async () => {
+      deliveryCount += 1;
+      return deliveryCount === 1
+        ? decodeReceipt({
+            outcome: "confirmation-pending",
+            protocolVersion: { major: 1, minor: 4 },
+            sessionId: "session-a",
+            commandId: "command-deliver",
+            target: targetA,
+            application: "first",
+          })
+        : makeTurnRunningReceipt();
+    },
+  });
+  await broker.reserve(reserveRequest);
+  await broker.command(makeDeliverCommand());
+  assert.isTrue(
+    broker.reportLateReceipt(
+      decodeReceipt({
+        outcome: "failed",
+        protocolVersion: { major: 1, minor: 4 },
+        sessionId: "session-a",
+        commandId: "command-deliver",
+        target: targetA,
+        application: "first",
+        code: "provider_start_failed",
+        detail: "provider did not start",
+      }),
+    ),
+  );
+
+  await broker.command(
+    decodeCommand({
+      type: "dictation.control",
+      protocolVersion: { major: 1, minor: 4 },
+      sessionId: "session-a",
+      commandId: "command-retry-late",
+      createdAt: "2026-08-29T12:00:07.000Z",
+      action: "retry",
+    }),
+  );
+  const retried = await broker.command(makeDeliverCommand());
+
+  assert.equal(deliveryCount, 2);
+  assert.equal(retried?.outcome, "turn-running");
+});
+
 // Acceptance: expiration changes only presentation ownership. It must not
 // cancel, fail, or retarget the active recording.
 it("hands presentation to Shell when the Mesura visibility lease expires", async () => {

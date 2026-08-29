@@ -2,7 +2,14 @@ import {
   SymmetriaDictationCommand,
   type SymmetriaDictationTarget,
 } from "@symmetria/broker-contract";
-import { CommandId, EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import {
+  CommandId,
+  EnvironmentId,
+  MessageId,
+  ProjectId,
+  ThreadId,
+  TurnId,
+} from "@t3tools/contracts";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import * as Schema from "effect/Schema";
 import { beforeEach, assert, it } from "vite-plus/test";
@@ -152,6 +159,43 @@ it("marks a submitted pending answer for the Shell toast", async () => {
   assert.equal(receipt.outcome, "inserted");
   if (receipt.outcome !== "inserted") return;
   assert.equal(receipt.action, "answer");
+});
+
+it("reports a late correlated turn receipt after visible confirmation times out", async () => {
+  const lateReceipts: Array<unknown> = [];
+  const messageId = MessageId.make("dictation-command-deliver");
+  const coordinator = createTestCoordinator({
+    submit: async () => ({ kind: "turn-dispatched", messageId }),
+    confirm: async (identity, options) => {
+      options?.onLateReceipt?.({
+        outcome: "turn-running",
+        protocolVersion: identity.protocolVersion,
+        sessionId: identity.sessionId,
+        commandId: identity.commandId,
+        target: identity.target,
+        application: "first",
+        messageId,
+        turnId: TurnId.make("turn-late"),
+      });
+      return {
+        outcome: "confirmation-pending",
+        protocolVersion: identity.protocolVersion,
+        sessionId: identity.sessionId,
+        commandId: identity.commandId,
+        target: identity.target,
+        application: "first",
+      };
+    },
+    reportLateReceipt: (receipt) => lateReceipts.push(receipt),
+  });
+  coordinator.registerComposer({ target: targetA, projectName: "Project A", handle: null });
+  await coordinator.reserve(reserveRequest);
+
+  const receipt = await coordinator.deliver(deliver("submit"));
+
+  assert.equal(receipt.outcome, "confirmation-pending");
+  assert.equal(lateReceipts.length, 1);
+  assert.deepInclude(lateReceipts[0] as object, { outcome: "turn-running", turnId: "turn-late" });
 });
 
 // Acceptance: replay after a renderer reconnect cannot append a second copy.

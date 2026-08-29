@@ -252,6 +252,14 @@ export function createDirectedComposerExecutor(
       if (recorded !== undefined) return recorded;
       const pending = submitDirectedComposer(submission, dependencies);
       commands.set(submission.commandId, pending);
+      void pending.then((result) => {
+        if (
+          (result.kind === "provider-start-failed" || result.kind === "answer-submit-failed") &&
+          commands.get(submission.commandId) === pending
+        ) {
+          commands.delete(submission.commandId);
+        }
+      });
       return pending;
     },
   };

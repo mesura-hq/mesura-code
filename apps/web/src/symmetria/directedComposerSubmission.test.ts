@@ -237,6 +237,22 @@ it("reports provider start failure after the user message was accepted", async (
   });
 });
 
+it("allows an explicit broker retry to reuse an identity after provider start failed", async () => {
+  let starts = 0;
+  const executor = createDirectedComposerExecutor({
+    startTurn: async () => {
+      starts += 1;
+      return starts > 1;
+    },
+    answerQuestion: async () => true,
+  });
+  const submission = normalSubmission();
+
+  assert.equal((await executor.submit(submission)).kind, "provider-start-failed");
+  assert.equal((await executor.submit(submission)).kind, "turn-dispatched");
+  assert.equal(starts, 2);
+});
+
 it("submits the active later question with all existing answers", async () => {
   const answers: Array<
     Parameters<Parameters<typeof createDirectedComposerExecutor>[0]["answerQuestion"]>[0]
