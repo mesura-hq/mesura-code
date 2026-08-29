@@ -13,6 +13,10 @@ import {
   toSortableTimestamp,
 } from "@t3tools/client-runtime/state/thread-sort";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
+import {
+  matchesThreadTokens,
+  tokenizeThreadSearchQuery,
+} from "@t3tools/client-runtime/state/thread-token-search";
 import type {
   EnvironmentId,
   ScopedProjectRef,
@@ -289,7 +293,7 @@ export function buildHomeThreadGroups(input: {
     groups.get(groupKey)?.threads.push(thread);
   }
 
-  const query = input.searchQuery.trim().toLocaleLowerCase();
+  const tokens = tokenizeThreadSearchQuery(input.searchQuery);
   const result: HomeThreadGroup[] = [];
 
   for (const group of groups.values()) {
@@ -301,15 +305,29 @@ export function buildHomeThreadGroups(input: {
     const title =
       groupTitleByKey.get(group.key) ??
       deriveProjectGroupLabel({ representative, members: group.projects });
+    // Every word of the query has to match something, but the words may come
+    // from different fields and in any order: "mesura rename" finds a thread
+    // titled "Rename the sidebar" inside the "Mesura Code" project. The group
+    // name and its member project names are searched as one field, because a
+    // logical project can span several of them.
+    const groupSearchText = [title, ...group.projects.map((project) => project.title)].join(" ");
     const groupMatches =
-      query.length === 0 ||
-      title.toLocaleLowerCase().includes(query) ||
-      group.projects.some((project) => project.title.toLocaleLowerCase().includes(query));
+      tokens.length === 0 || matchesThreadTokens({ fields: { title: groupSearchText }, tokens });
     const matchingThreads = groupMatches
       ? group.threads
       : group.threads.filter(
           (thread) =>
-            thread.title.toLocaleLowerCase().includes(query) ||
+            matchesThreadTokens({
+              fields: {
+                title: thread.title,
+                projectTitle: groupSearchText,
+                branch: thread.branch,
+              },
+              tokens,
+            }) ||
+            // The server is asked for the query exactly as typed and matches it
+            // contiguously, so a hit proves the whole phrase is inside this
+            // thread's messages and therefore answers for every word at once.
             input.matchedThreadKeys?.has(
               threadSearchMatchKey({
                 environmentId: thread.environmentId,
@@ -320,7 +338,7 @@ export function buildHomeThreadGroups(input: {
     const matchingPendingTasks = groupMatches
       ? group.pendingTasks
       : group.pendingTasks.filter((pendingTask) =>
-          pendingTask.title.toLocaleLowerCase().includes(query),
+          matchesThreadTokens({ fields: { title: pendingTask.title }, tokens }),
         );
 
     if (matchingThreads.length === 0 && matchingPendingTasks.length === 0) {
@@ -331,7 +349,7 @@ export function buildHomeThreadGroups(input: {
     // An active search should reach the full history, so the recency window
     // only trims the default (no-query) view.
     const recentThreads =
-      query.length === 0
+      tokens.length === 0
         ? selectRecentThreads(sortedThreads, input.threadSortOrder, now)
         : sortedThreads;
 

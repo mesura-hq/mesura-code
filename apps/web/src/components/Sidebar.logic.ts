@@ -1,6 +1,10 @@
 import * as React from "react";
 import { defaultAnimateLayoutChanges, type AnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { ContextMenuItem } from "@t3tools/contracts";
+import {
+  matchesThreadTokens,
+  tokenizeThreadSearchQuery,
+} from "@t3tools/client-runtime/state/thread-token-search";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import {
   getThreadSortTimestamp,
@@ -601,17 +605,40 @@ export {
 export { sortPinnedThreadsByOrderKey as sortPinnedThreadsForSidebar } from "@t3tools/client-runtime/state/thread-sort";
 
 /**
- * Search the already-ordered sidebar thread collection by title only.
+ * Search the already-ordered sidebar thread collection.
+ *
+ * Every word of the query has to match the thread's title, its project's name
+ * or its branch, and the order of the words does not matter — the same rule the
+ * thread search picker uses, so the two searches never disagree about what a
+ * query means.
+ *
+ * Scope stays the caller's decision: this filters exactly the threads it is
+ * given, which in the sidebar are the ones the project filter already allowed.
+ * Reaching every project is the picker's job, not this one's.
+ *
  * Keeping the input order means lifecycle ordering (active, snoozed, settled)
  * remains stable while the user narrows the list.
  */
-export function searchSidebarThreadsByTitle<T extends { readonly title: string }>(
-  threads: readonly T[],
-  query: string,
-): T[] {
-  const normalizedQuery = query.trim().toLowerCase();
-  if (normalizedQuery.length === 0) return [];
-  return threads.filter((thread) => thread.title.toLowerCase().includes(normalizedQuery));
+export function searchSidebarThreads<
+  T extends {
+    readonly title: string;
+    readonly projectId: string;
+    readonly branch?: string | null;
+  },
+>(threads: readonly T[], query: string, projectTitleById: ReadonlyMap<string, string>): T[] {
+  const tokens = tokenizeThreadSearchQuery(query);
+  if (tokens.length === 0) return [];
+
+  return threads.filter((thread) =>
+    matchesThreadTokens({
+      fields: {
+        title: thread.title,
+        projectTitle: projectTitleById.get(thread.projectId) ?? null,
+        branch: thread.branch ?? null,
+      },
+      tokens,
+    }),
+  );
 }
 
 type SettledTimestampInput = Pick<

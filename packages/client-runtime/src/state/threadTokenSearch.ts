@@ -72,37 +72,62 @@ function startsAWord(character: string | undefined): boolean {
 }
 
 /**
- * How well one word sits in one field, or null when the field lacks it.
+ * How well one word sits in one already-normalised field, or null when the
+ * field lacks it.
  *
  * Every occurrence is weighed, not just the first: in "prerename call rename"
  * the first hit is buried inside another word while a later one starts a word,
  * and reporting the buried one would under-rank the field.
  */
-function scoreInField(field: string, word: string): number | null {
-  const normalized = normalizeThreadSearchText(field);
-  if (normalized.length === 0) return null;
-  if (normalized === word) return WHOLE_FIELD;
+function scoreInField(normalizedField: string, word: string): number | null {
+  if (normalizedField.length === 0) return null;
+  if (normalizedField === word) return WHOLE_FIELD;
 
   let best: number | null = null;
-  for (let at = normalized.indexOf(word); at !== -1; at = normalized.indexOf(word, at + 1)) {
+  for (
+    let at = normalizedField.indexOf(word);
+    at !== -1;
+    at = normalizedField.indexOf(word, at + 1)
+  ) {
     // Whole-field is already ruled out, so a prefix is the best still possible.
     if (at === 0) return FIELD_PREFIX;
-    const quality = startsAWord(normalized[at - 1]) ? WORD_START : SUBSTRING;
+    const quality = startsAWord(normalizedField[at - 1]) ? WORD_START : SUBSTRING;
     if (best === null || quality > best) best = quality;
   }
   return best;
 }
 
-/** The best any field does with this word, weighted by which field it was, or
-    null when no field has it at all. */
-function scoreAcrossFields(fields: ThreadSearchFields, word: string): number | null {
-  let best: number | null = null;
+/**
+ * A thread's fields normalised once, with the weight each carries.
+ *
+ * Normalising is NFKD plus two regexes plus a lowercase, and both callers of
+ * this module search as the user types. Doing it once per field per query
+ * rather than once per field per word is what keeps a keystroke cheap on a long
+ * thread list.
+ */
+function weighFields(fields: ThreadSearchFields): ReadonlyArray<readonly [string, number]> {
+  const weighed: Array<readonly [string, number]> = [];
   for (const name of ["title", "projectTitle", "branch"] as const) {
     const value = fields[name];
     if (value == null) continue;
-    const quality = scoreInField(value, word);
+    const normalized = normalizeThreadSearchText(value);
+    if (normalized.length === 0) continue;
+    weighed.push([normalized, FIELD_WEIGHT[name] * FIELD_WEIGHT_STEP] as const);
+  }
+  return weighed;
+}
+
+/** The best any field does with this word, weighted by which field it was, or
+    null when no field has it at all. */
+function scoreAcrossFields(
+  weighedFields: ReadonlyArray<readonly [string, number]>,
+  word: string,
+): number | null {
+  let best: number | null = null;
+  for (const [normalizedField, weight] of weighedFields) {
+    const quality = scoreInField(normalizedField, word);
     if (quality === null) continue;
-    const weighted = FIELD_WEIGHT[name] * FIELD_WEIGHT_STEP + quality;
+    const weighted = weight + quality;
     if (best === null || weighted > best) best = weighted;
   }
   return best;
@@ -131,9 +156,10 @@ export interface ThreadTokenMatchInput {
 export function scoreThreadTokenMatch(input: ThreadTokenMatchInput): number | null {
   if (input.tokens.length === 0) return 0;
 
+  const weighedFields = weighFields(input.fields);
   let total = 0;
   for (const word of input.tokens) {
-    const fieldScore = scoreAcrossFields(input.fields, word);
+    const fieldScore = scoreAcrossFields(weighedFields, word);
     if (fieldScore !== null) {
       total += fieldScore;
       continue;

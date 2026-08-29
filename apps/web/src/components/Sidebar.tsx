@@ -138,7 +138,7 @@ import {
   resolveAdjacentThreadId,
   resolveSettledTimestamp,
   resolveSidebarThreadStatus,
-  searchSidebarThreadsByTitle,
+  searchSidebarThreads,
   shouldRevealPromotedActiveThread,
   shouldCreateNewThreadInCurrentProject,
   resolveWorkingStartedAt,
@@ -2131,9 +2131,15 @@ export default function Sidebar() {
     () => [...pinnedThreads, ...activeThreads, ...snoozedThreads, ...settledThreads],
     [activeThreads, pinnedThreads, settledThreads, snoozedThreads],
   );
+  // The picker on mod+shift+k reaches every project; this stays inside whatever
+  // the sidebar's own project filter already allowed.
+  const searchProjectTitleById = useMemo(
+    () => new Map(projects.map((project) => [String(project.id), project.title] as const)),
+    [projects],
+  );
   const threadSearchResults = useMemo(
-    () => searchSidebarThreadsByTitle(searchableThreads, threadSearchQuery),
-    [searchableThreads, threadSearchQuery],
+    () => searchSidebarThreads(searchableThreads, threadSearchQuery, searchProjectTitleById),
+    [searchProjectTitleById, searchableThreads, threadSearchQuery],
   );
   const threadSearchResultOrderKey = threadSearchResults
     .map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)))
