@@ -32,7 +32,9 @@ import {
 import { sttSocketPath } from "./sttSocketFiles.ts";
 import { closeServer, listenOnPath } from "./unixSocket.ts";
 
-const { logInfo, logWarning } = makeComponentLogger("symmetria-stt-delivery");
+// Compatibility endpoint during the reserved-session rollout. New clients use
+// DictationBroker; this path remains destination-less until phase nine removes it.
+const { logInfo, logWarning } = makeComponentLogger("symmetria-stt-delivery-legacy");
 
 /**
  * How long the window gets before the shell is told there was nowhere to put
