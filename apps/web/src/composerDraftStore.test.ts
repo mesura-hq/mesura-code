@@ -76,6 +76,7 @@ import {
   type TerminalContextDraft,
 } from "./lib/terminalContext";
 import { createDebouncedStorage } from "./lib/storage";
+import type { ComposerAttachmentUpload } from "./components/chat/composerAttachments";
 
 function makeImage(input: {
   id: string;
@@ -101,6 +102,22 @@ function makeImage(input: {
     sizeBytes: file.size,
     previewUrl: input.previewUrl,
     file,
+  };
+}
+
+function makeUpload(id: string, kind: "image" | "file" = "file"): ComposerAttachmentUpload {
+  const mimeType = kind === "image" ? "image/png" : "video/mp4";
+  const name = kind === "image" ? `${id}.png` : `${id}.mp4`;
+  const file = new File([id], name, { type: mimeType });
+  return {
+    id,
+    kind,
+    file,
+    name,
+    mimeType,
+    sizeBytes: file.size,
+    status: "preparing",
+    uploadedBytes: 0,
   };
 }
 
@@ -257,6 +274,73 @@ describe("composerDraftStore addImages", () => {
   });
 });
 
+describe("composerDraftStore attachment uploads", () => {
+  const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("thread-uploads"));
+
+  beforeEach(() => resetComposerDraftStore());
+
+  it("reserves mixed and concurrent batches against one attachment limit", () => {
+    const store = useComposerDraftStore.getState();
+    const first = store.reserveAttachmentUploads(
+      threadRef,
+      [
+        makeUpload("image-1", "image"),
+        ...Array.from({ length: 5 }, (_, index) => makeUpload(`file-${index}`)),
+      ],
+      8,
+    );
+    const second = store.reserveAttachmentUploads(
+      threadRef,
+      [makeUpload("video-6"), makeUpload("video-7"), makeUpload("video-8")],
+      8,
+    );
+
+    expect(first).toHaveLength(6);
+    expect(second.map((attachment) => attachment.id)).toEqual(["video-6", "video-7"]);
+    expect(
+      useComposerDraftStore.getState().getComposerDraft(threadRef)?.attachmentUploads,
+    ).toHaveLength(8);
+  });
+
+  it("retains ready uploads when another draft becomes active", () => {
+    const store = useComposerDraftStore.getState();
+    store.reserveAttachmentUploads(
+      threadRef,
+      [{ ...makeUpload("ready-video"), status: "ready" }],
+      8,
+    );
+    store.setPrompt(
+      scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("another-thread")),
+      "another draft",
+    );
+
+    expect(
+      useComposerDraftStore.getState().getComposerDraft(threadRef)?.attachmentUploads,
+    ).toMatchObject([{ id: "ready-video", status: "ready" }]);
+  });
+
+  it("updates and removes one upload without changing another ready upload", () => {
+    const store = useComposerDraftStore.getState();
+    store.reserveAttachmentUploads(
+      threadRef,
+      [
+        { ...makeUpload("expired"), status: "ready" },
+        { ...makeUpload("preserved"), status: "ready" },
+      ],
+      8,
+    );
+    store.updateAttachmentUpload(threadRef, "expired", (attachment) => ({
+      ...attachment,
+      status: "failed",
+    }));
+    store.removeAttachmentUpload(threadRef, "expired");
+
+    expect(
+      useComposerDraftStore.getState().getComposerDraft(threadRef)?.attachmentUploads,
+    ).toMatchObject([{ id: "preserved", status: "ready" }]);
+  });
+});
+
 describe("composerDraftStore clearComposerContent", () => {
   const threadId = ThreadId.make("thread-clear");
   const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, threadId);
@@ -286,6 +370,23 @@ describe("composerDraftStore clearComposerContent", () => {
     const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
     expect(draft).toBeUndefined();
     expect(revokeSpy).not.toHaveBeenCalledWith("blob:optimistic");
+  });
+
+  it("retains staged uploads until the turn succeeds or the user removes them", () => {
+    const store = useComposerDraftStore.getState();
+    store.setPrompt(threadRef, "send this video");
+    store.reserveAttachmentUploads(
+      threadRef,
+      [{ ...makeUpload("staged-video"), status: "ready" }],
+      8,
+    );
+
+    store.clearComposerContent(threadRef);
+
+    expect(store.getComposerDraft(threadRef)?.prompt).toBe("");
+    expect(store.getComposerDraft(threadRef)?.attachmentUploads).toMatchObject([
+      { id: "staged-video", status: "ready" },
+    ]);
   });
 });
 
