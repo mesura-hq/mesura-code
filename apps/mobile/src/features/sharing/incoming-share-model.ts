@@ -2,13 +2,19 @@ import {
   isProviderSendTurnSupportedImageMimeType,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+  PROVIDER_SEND_TURN_MAX_FILE_BYTES,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import type { ResolvedSharePayload, SharePayload } from "expo-sharing";
 
-import { DraftComposerImageAttachmentSchema } from "../../lib/composer-image-schema";
-import type { DraftComposerImageAttachment } from "../../lib/composerImages";
+import { DraftComposerAttachmentSchema } from "../../lib/composer-image-schema";
+import type { DraftComposerAttachment } from "../../lib/composerImages";
 import { estimateBase64ByteSize } from "../../lib/base64";
+
+export function buildOwnedIncomingShareFileName(name: string, uniqueId: string): string {
+  const safeName = name.replace(/[^a-zA-Z0-9._-]+/g, "-") || "attachment.bin";
+  return `${uniqueId}-${safeName}`;
+}
 
 export interface IncomingShareDraft {
   readonly schemaVersion: 1;
@@ -16,7 +22,7 @@ export interface IncomingShareDraft {
   readonly createdAt: string;
   readonly destination?: IncomingShareDestination;
   readonly text: string;
-  readonly attachments: ReadonlyArray<DraftComposerImageAttachment>;
+  readonly attachments: ReadonlyArray<DraftComposerAttachment>;
   readonly warnings: ReadonlyArray<string>;
 }
 
@@ -36,7 +42,7 @@ export const IncomingShareDraftSchema = Schema.Struct({
   createdAt: Schema.String,
   destination: Schema.optional(IncomingShareDestinationSchema),
   text: Schema.String,
-  attachments: Schema.Array(DraftComposerImageAttachmentSchema),
+  attachments: Schema.Array(DraftComposerAttachmentSchema),
   warnings: Schema.Array(Schema.String),
 });
 
@@ -48,6 +54,11 @@ export function decodeIncomingShareDraft(value: unknown): IncomingShareDraft {
 
 export interface IncomingShareFileReader {
   readonly readBase64: (uri: string) => Promise<string>;
+  readonly copyOwnedFile?: (
+    uri: string,
+    name: string,
+    mimeType: string,
+  ) => Promise<{ readonly uri: string; readonly sizeBytes: number }>;
   readonly removeOwnedFile: (uri: string) => Promise<void> | void;
 }
 
@@ -130,13 +141,13 @@ export async function buildIncomingShareDraft(input: {
   readonly id: string;
   readonly createdAt: string;
 }): Promise<IncomingShareDraft> {
-  const attachments: DraftComposerImageAttachment[] = [];
+  const attachments: DraftComposerAttachment[] = [];
   const warnings: string[] = [];
   const consumedResolvedPayloadIndexes = new Set<number>();
   let warnedAttachmentLimit = false;
 
   for (const [index, payload] of input.payloads.entries()) {
-    if (payload.shareType !== "image") {
+    if (!["image", "video", "audio", "file"].includes(payload.shareType)) {
       continue;
     }
     const resolved = resolvedImageFor(
@@ -149,7 +160,7 @@ export async function buildIncomingShareDraft(input: {
     if (attachments.length >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
       if (!warnedAttachmentLimit) {
         warnings.push(
-          `Only the first ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} shared images were attached.`,
+          `Only the first ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} shared files were attached.`,
         );
         warnedAttachmentLimit = true;
       }
@@ -158,12 +169,13 @@ export async function buildIncomingShareDraft(input: {
     }
 
     const mimeType = (resolved?.contentMimeType ?? payload.mimeType ?? "image/png").toLowerCase();
-    if (!uri || !mimeType.startsWith("image/")) {
-      warnings.push("One shared item was not a supported image.");
+    if (!uri) {
+      warnings.push("One shared file was unavailable.");
       await releaseOwnedFiles(input.fileReader, [uri, payload.value]);
       continue;
     }
-    if (!isProviderSendTurnSupportedImageMimeType(mimeType)) {
+    const isImage = mimeType.startsWith("image/");
+    if (isImage && !isProviderSendTurnSupportedImageMimeType(mimeType)) {
       warnings.push(
         `'${resolved?.originalName ?? fallbackName(uri, index, mimeType)}' is not a supported image type.`,
       );
@@ -173,16 +185,38 @@ export async function buildIncomingShareDraft(input: {
     if (
       resolved?.contentSize !== null &&
       resolved?.contentSize !== undefined &&
-      resolved.contentSize > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES
+      resolved.contentSize >
+        (isImage ? PROVIDER_SEND_TURN_MAX_IMAGE_BYTES : PROVIDER_SEND_TURN_MAX_FILE_BYTES)
     ) {
       warnings.push(
-        `'${resolved.originalName ?? fallbackName(uri, index, mimeType)}' exceeds the 10 MB attachment limit.`,
+        `'${resolved.originalName ?? fallbackName(uri, index, mimeType)}' exceeds the ${isImage ? "10 MB" : "2 GB"} attachment limit.`,
       );
       await releaseOwnedFiles(input.fileReader, [uri, payload.value]);
       continue;
     }
 
     try {
+      const name = resolved?.originalName ?? fallbackName(uri, index, mimeType);
+      if (!isImage) {
+        if (!input.fileReader.copyOwnedFile) {
+          throw new Error("Shared file copying is unavailable.");
+        }
+        const ownedFile = await input.fileReader.copyOwnedFile(uri, name, mimeType);
+        if (ownedFile.sizeBytes <= 0 || ownedFile.sizeBytes > PROVIDER_SEND_TURN_MAX_FILE_BYTES) {
+          warnings.push(`'${name}' exceeds the 2 GB attachment limit.`);
+          await input.fileReader.removeOwnedFile(ownedFile.uri);
+          continue;
+        }
+        attachments.push({
+          id: `${input.id}:file:${index}`,
+          type: "file",
+          name,
+          mimeType,
+          sizeBytes: ownedFile.sizeBytes,
+          uri: ownedFile.uri,
+        });
+        continue;
+      }
       const base64 = await input.fileReader.readBase64(uri);
       const sizeBytes = resolved?.contentSize ?? estimateBase64ByteSize(base64);
       if (sizeBytes <= 0 || sizeBytes > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES) {
@@ -195,7 +229,7 @@ export async function buildIncomingShareDraft(input: {
       attachments.push({
         id: `${input.id}:image:${index}`,
         type: "image",
-        name: resolved?.originalName ?? fallbackName(uri, index, mimeType),
+        name,
         mimeType,
         sizeBytes,
         dataUrl,

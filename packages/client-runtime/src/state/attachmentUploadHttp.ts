@@ -137,46 +137,96 @@ export const uploadEnvironmentAttachment = Effect.fn("AttachmentUploadHttp.uploa
     readonly chunkBytes?: number;
     readonly fetch?: (request: Request) => Promise<Response>;
     readonly maxResumeAttempts?: number;
-    readonly onCreated?: (uploadId: AttachmentUploadId, uploadPath: string) => void;
+    readonly existingUpload?: {
+      readonly uploadId: AttachmentUploadId;
+      readonly uploadPath: string;
+    };
+    readonly onCreated?: (uploadId: AttachmentUploadId, uploadPath: string) => void | Promise<void>;
     readonly onProgress?: (uploadedBytes: number, totalBytes: number) => void;
   }) {
     const commonHeaders = { "Tus-Resumable": ATTACHMENT_UPLOAD_TUS_VERSION };
-    const created = yield* executeAttachmentUploadRequest({
-      prepared: input.prepared,
-      signer: input.signer,
-      method: "POST",
-      uploadPath: ATTACHMENT_UPLOAD_ROUTE_PREFIX,
-      headers: {
-        ...commonHeaders,
-        "Upload-Length": String(input.file.size),
-        "Upload-Metadata": encodeUploadMetadata({
-          threadId: input.threadId,
-          kind: input.kind,
-          name: input.name,
-          mimeType: input.mimeType,
-        }),
-      },
-      ...(input.signal ? { signal: input.signal } : {}),
-      ...(input.fetch ? { fetch: input.fetch } : {}),
-    }).pipe(Effect.flatMap((response) => expectUploadResponse(response, [201])));
-    const uploadPath = responseHeader(created, "Location");
-    if (!uploadPath) {
-      return yield* new AttachmentUploadRequestError({
+    let uploadId: AttachmentUploadId;
+    let uploadPath: string;
+    let offset = 0;
+    if (input.existingUpload) {
+      uploadId = input.existingUpload.uploadId;
+      uploadPath = input.existingUpload.uploadPath;
+      const resumed = yield* executeAttachmentUploadRequest({
+        prepared: input.prepared,
+        signer: input.signer,
+        ...(input.fetch ? { fetch: input.fetch } : {}),
+        method: "HEAD",
+        uploadPath,
+        headers: commonHeaders,
+        ...(input.signal ? { signal: input.signal } : {}),
+      }).pipe(Effect.flatMap((response) => expectUploadResponse(response, [200, 204])));
+      offset = Number(responseHeader(resumed, "Upload-Offset"));
+      if (!Number.isSafeInteger(offset) || offset < 0 || offset > input.file.size) {
+        return yield* new AttachmentUploadRequestError({
+          method: "HEAD",
+          url: resumed.url,
+          cause: "Attachment upload returned an invalid resume offset.",
+        });
+      }
+    } else {
+      const created = yield* executeAttachmentUploadRequest({
+        prepared: input.prepared,
+        signer: input.signer,
         method: "POST",
-        url: created.url,
-        cause: "Attachment upload response did not include Location.",
-      });
+        uploadPath: ATTACHMENT_UPLOAD_ROUTE_PREFIX,
+        headers: {
+          ...commonHeaders,
+          "Upload-Length": String(input.file.size),
+          "Upload-Metadata": encodeUploadMetadata({
+            threadId: input.threadId,
+            kind: input.kind,
+            name: input.name,
+            mimeType: input.mimeType,
+          }),
+        },
+        ...(input.signal ? { signal: input.signal } : {}),
+        ...(input.fetch ? { fetch: input.fetch } : {}),
+      }).pipe(Effect.flatMap((response) => expectUploadResponse(response, [201])));
+      const createdUploadPath = responseHeader(created, "Location");
+      if (!createdUploadPath) {
+        return yield* new AttachmentUploadRequestError({
+          method: "POST",
+          url: created.url,
+          cause: "Attachment upload response did not include Location.",
+        });
+      }
+      uploadPath = createdUploadPath;
+      const uploadIdValue = uploadPath.split("/").at(-1);
+      uploadId = yield* decodeAttachmentUploadId(uploadIdValue).pipe(
+        Effect.mapError(
+          (cause) => new AttachmentUploadRequestError({ method: "POST", url: created.url, cause }),
+        ),
+      );
+      if (input.onCreated) {
+        yield* Effect.tryPromise({
+          try: () => Promise.resolve(input.onCreated?.(uploadId, uploadPath)),
+          catch: (cause) =>
+            new AttachmentUploadRequestError({ method: "PERSIST", url: uploadPath, cause }),
+        }).pipe(
+          Effect.catch((persistenceError) =>
+            executeAttachmentUploadRequest({
+              prepared: input.prepared,
+              signer: input.signer,
+              method: "DELETE",
+              uploadPath,
+              headers: commonHeaders,
+              ...(input.fetch ? { fetch: input.fetch } : {}),
+            }).pipe(
+              Effect.flatMap((response) => expectUploadResponse(response, [204, 404])),
+              Effect.ignore,
+              Effect.andThen(Effect.fail(persistenceError)),
+            ),
+          ),
+        );
+      }
     }
-    const uploadIdValue = uploadPath.split("/").at(-1);
-    const uploadId = yield* decodeAttachmentUploadId(uploadIdValue).pipe(
-      Effect.mapError(
-        (cause) => new AttachmentUploadRequestError({ method: "POST", url: created.url, cause }),
-      ),
-    );
-    input.onCreated?.(uploadId, uploadPath);
     const chunkBytes = Math.max(64 * 1024, input.chunkBytes ?? DEFAULT_UPLOAD_CHUNK_BYTES);
     const maxResumeAttempts = Math.max(0, input.maxResumeAttempts ?? 3);
-    let offset = 0;
     let resumeAttempts = 0;
     input.onProgress?.(offset, input.file.size);
     while (offset < input.file.size) {

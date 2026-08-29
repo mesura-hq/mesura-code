@@ -11,3 +11,5 @@ The turn command contains opaque upload references. The server claims the refere
 Provider adapters receive validated absolute paths. Codex, Claude, Cursor, and Grok keep native image delivery and receive generic files through prompt paths. OpenCode receives native file parts. Title, branch, and regeneration prompts include readable attachment paths.
 
 `@` mentions are separate. They identify an environment-local workspace path and transfer no bytes.
+
+Mobile drafts and outbox records store generic attachment metadata with an app-owned URI. The outbox resolves that URI to an Expo `File`, which implements `Blob`, and uses the same upload client before dispatch. It removes the owned file only after an accepted turn or explicit queue removal. Android and iOS share inputs copy generic native payloads into durable app storage before the share extension payload is acknowledged.

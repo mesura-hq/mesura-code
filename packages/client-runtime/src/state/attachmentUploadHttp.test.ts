@@ -62,7 +62,9 @@ it.effect("resumes a chunked upload from the server offset after an interrupted 
       mimeType: "video/mp4",
       chunkBytes: 65_536,
       onProgress: (uploadedBytes) => progress.push(uploadedBytes),
-      onCreated: (uploadId, uploadPath) => created.push(`${uploadId}:${uploadPath}`),
+      onCreated: (uploadId, uploadPath) => {
+        created.push(`${uploadId}:${uploadPath}`);
+      },
     });
 
     expect(result.uploadId).toBe("upload-11111111-1111-1111-1111-111111111111");
@@ -131,6 +133,77 @@ it.effect("creates a fresh DPoP proof for every resumable upload request", () =>
       "proof-3",
       "proof-4",
     ]);
+  }),
+);
+
+it.effect("continues a persisted upload without creating a second upload", () =>
+  Effect.gen(function* () {
+    const methods: string[] = [];
+    const fetch = (request: Request): Promise<Response> => {
+      methods.push(request.method);
+      if (request.method === "HEAD") {
+        return Promise.resolve(
+          new Response(null, { status: 200, headers: { "Upload-Offset": "65536" } }),
+        );
+      }
+      return Promise.resolve(
+        new Response(null, { status: 204, headers: { "Upload-Offset": "70000" } }),
+      );
+    };
+
+    const result = yield* uploadEnvironmentAttachment({
+      prepared: preparedConnection,
+      signer: Option.none(),
+      fetch,
+      threadId: "thread-1" as ThreadId,
+      kind: "file",
+      file: new Blob([new Uint8Array(70_000)]),
+      name: "recording.mp4",
+      mimeType: "video/mp4",
+      chunkBytes: 65_536,
+      existingUpload: {
+        uploadId: "upload-11111111-1111-1111-1111-111111111111",
+        uploadPath: "/api/attachments/uploads/upload-11111111-1111-1111-1111-111111111111",
+      },
+    });
+
+    expect(result.uploadId).toBe("upload-11111111-1111-1111-1111-111111111111");
+    expect(methods).toEqual(["HEAD", "PATCH"]);
+  }),
+);
+
+it.effect("cancels a new upload when its durable identity cannot be saved", () =>
+  Effect.gen(function* () {
+    const methods: string[] = [];
+    const fetch = (request: Request): Promise<Response> => {
+      methods.push(request.method);
+      if (request.method === "POST") {
+        return Promise.resolve(
+          new Response(null, {
+            status: 201,
+            headers: {
+              Location: "/api/attachments/uploads/upload-11111111-1111-1111-1111-111111111111",
+            },
+          }),
+        );
+      }
+      return Promise.resolve(new Response(null, { status: 204 }));
+    };
+
+    const result = yield* uploadEnvironmentAttachment({
+      prepared: preparedConnection,
+      signer: Option.none(),
+      fetch,
+      threadId: "thread-1" as ThreadId,
+      kind: "file",
+      file: new Blob([new Uint8Array(1)]),
+      name: "notes.pdf",
+      mimeType: "application/pdf",
+      onCreated: () => Promise.reject(new Error("disk full")),
+    }).pipe(Effect.result);
+
+    expect(result._tag).toBe("Failure");
+    expect(methods).toEqual(["POST", "DELETE"]);
   }),
 );
 

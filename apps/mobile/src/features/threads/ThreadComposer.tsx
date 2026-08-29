@@ -44,6 +44,7 @@ import { armAgentAwarenessLiveActivityForLocalWork } from "../agent-awareness/re
 import { scopedThreadKey } from "../../lib/scopedEntities";
 
 import { AppText as Text } from "../../components/AppText";
+import { SymbolView } from "../../components/AppSymbol";
 import { ComposerAttachmentStrip } from "../../components/ComposerAttachmentStrip";
 import { GlassSurface } from "../../components/GlassSurface";
 import {
@@ -59,7 +60,7 @@ import {
 } from "../../components/ComposerToolbar";
 import { ControlPill } from "../../components/ControlPill";
 import { ProviderIcon } from "../../components/ProviderIcon";
-import type { DraftComposerImageAttachment } from "../../lib/composerImages";
+import type { DraftComposerAttachment } from "../../lib/composerImages";
 import { buildModelOptions, groupByProvider } from "../../lib/modelOptions";
 import { useScaledTextRole } from "../settings/appearance/useScaledTextRole";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
@@ -96,7 +97,7 @@ export const COMPOSER_EXPANDED_CHROME = 156;
 
 export interface ThreadComposerProps {
   readonly draftMessage: string;
-  readonly draftAttachments: ReadonlyArray<DraftComposerImageAttachment>;
+  readonly draftAttachments: ReadonlyArray<DraftComposerAttachment>;
   readonly placeholder: string;
   readonly contentMaxWidth?: number;
   readonly bottomInset?: number;
@@ -112,6 +113,8 @@ export interface ThreadComposerProps {
   readonly selectedThread: OrchestrationThreadShell;
   readonly serverConfig: T3ServerConfig | null;
   readonly queueCount: number;
+  readonly queueUploadProgress: number | null;
+  readonly blockedQueueError: string | null;
   readonly environmentId: EnvironmentId;
   readonly projectCwd: string | null;
   readonly editorRef?: RefObject<ComposerEditorHandle | null>;
@@ -121,6 +124,8 @@ export interface ThreadComposerProps {
   readonly onRemoveDraftImage: (imageId: string) => void;
   readonly onStopThread: () => void;
   readonly onSendMessage: () => Promise<MessageId | null>;
+  readonly onRetryBlockedQueuedMessage: () => Promise<void>;
+  readonly onDeleteBlockedQueuedMessage: () => Promise<void>;
   readonly onCompactContext: () => Promise<boolean>;
   readonly onUpdateModelSelection: (modelSelection: ModelSelection) => void;
   readonly onUpdateRuntimeMode: (runtimeMode: RuntimeMode) => void;
@@ -409,6 +414,13 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           description: "Switch model",
         },
         {
+          id: "cmd:attach",
+          type: "slash-command" as const,
+          command: "attach",
+          label: "/attach",
+          description: "Attach files from this device",
+        },
+        {
           id: "cmd:plan",
           type: "slash-command" as const,
           command: "plan",
@@ -622,6 +634,19 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     (item: ComposerCommandItem) => {
       if (!composerTrigger) return;
 
+      if (item.type === "slash-command" && item.command === "attach") {
+        const result = replaceTextRange(
+          draftMessage,
+          composerTrigger.rangeStart,
+          composerTrigger.rangeEnd,
+          "",
+        );
+        setComposerSelection({ start: result.cursor, end: result.cursor });
+        onChangeDraftMessage(result.text);
+        void props.onPickDraftImages();
+        return;
+      }
+
       if (
         item.type === "slash-command" &&
         (item.command === "plan" || item.command === "default")
@@ -658,7 +683,13 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       setComposerSelection({ start: result.cursor, end: result.cursor });
       onChangeDraftMessage(result.text);
     },
-    [composerTrigger, draftMessage, onChangeDraftMessage, onUpdateInteractionMode],
+    [
+      composerTrigger,
+      draftMessage,
+      onChangeDraftMessage,
+      onUpdateInteractionMode,
+      props.onPickDraftImages,
+    ],
   );
 
   // ── Model menu ───────────────────────────────────────────
@@ -874,13 +905,26 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           </View>
           {!isExpanded && props.draftAttachments.length > 0 ? (
             <View className="flex-row gap-1 pl-1">
-              {props.draftAttachments.slice(0, 3).map((image) => (
-                <Pressable key={image.id} onPress={() => onPressImage(image.previewUri)}>
-                  <Image
-                    source={{ uri: image.previewUri }}
-                    className="size-[30px] rounded-lg bg-subtle"
-                    resizeMode="cover"
-                  />
+              {props.draftAttachments.slice(0, 3).map((attachment) => (
+                <Pressable
+                  key={attachment.id}
+                  onPress={
+                    attachment.type === "image"
+                      ? () => onPressImage(attachment.previewUri)
+                      : undefined
+                  }
+                >
+                  {attachment.type === "image" ? (
+                    <Image
+                      source={{ uri: attachment.previewUri }}
+                      className="size-[30px] rounded-lg bg-subtle"
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View className="size-[30px] items-center justify-center rounded-lg bg-subtle">
+                      <SymbolView name="doc" size={14} tintColor={foregroundColor} />
+                    </View>
+                  )}
                 </Pressable>
               ))}
               {props.draftAttachments.length > 3 ? (
@@ -954,10 +998,33 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         {/* Queue count */}
         {props.queueCount > 0 ? (
           <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(120)}>
-            <Text className="pt-2 text-xs text-foreground-muted">
-              {props.queueCount} queued message{props.queueCount === 1 ? "" : "s"} will send
-              automatically.
-            </Text>
+            {props.blockedQueueError ? (
+              <View className="flex-row items-center gap-3 pt-2">
+                <Text className="min-w-0 flex-1 text-xs text-danger" numberOfLines={2}>
+                  Attachment send failed: {props.blockedQueueError}
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Retry queued message"
+                  onPress={() => void props.onRetryBlockedQueuedMessage()}
+                >
+                  <Text className="text-xs font-medium text-accent">Retry</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Delete queued message"
+                  onPress={() => void props.onDeleteBlockedQueuedMessage()}
+                >
+                  <Text className="text-xs font-medium text-danger">Delete</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <Text className="pt-2 text-xs text-foreground-muted">
+                {props.queueUploadProgress === null
+                  ? `${props.queueCount} queued message${props.queueCount === 1 ? "" : "s"} will send automatically.`
+                  : `Uploading attachments… ${props.queueUploadProgress}%`}
+              </Text>
+            )}
           </Animated.View>
         ) : null}
       </Animated.View>

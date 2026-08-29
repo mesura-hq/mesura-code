@@ -110,6 +110,67 @@ describe("thread outbox", () => {
     });
   });
 
+  it("persists a generic file as an owned URI without base64 content", () => {
+    const message = {
+      ...queuedMessage({
+        messageId: "message-file",
+        createdAt: "2026-06-08T10:00:01.000Z",
+      }),
+      attachments: [
+        {
+          id: "video-1",
+          type: "file" as const,
+          name: "recording.mp4",
+          mimeType: "video/mp4",
+          sizeBytes: 1024,
+          uri: "file:///documents/composer-attachments/video-1-recording.mp4",
+        },
+      ],
+    } satisfies QueuedThreadMessage;
+
+    const encoded = encodeQueuedThreadMessage(message);
+    expect(JSON.stringify(encoded)).not.toContain("base64");
+    expect(decodeQueuedThreadMessage(encoded)).toEqual(message);
+  });
+
+  it("retains a deterministic failed turn without scheduling automatic retries", () => {
+    expect(
+      resolveThreadOutboxFailureAction({
+        stage: "start-turn",
+        error: new Error("invalid provider input"),
+        interrupted: false,
+        hasOwnedAttachments: true,
+      }),
+    ).toBe("retain");
+  });
+
+  it("round-trips persisted remote upload state for response-loss recovery", () => {
+    const message = {
+      ...queuedMessage({
+        messageId: "message-upload",
+        createdAt: "2026-06-08T10:00:01.000Z",
+      }),
+      attachments: [
+        {
+          id: "video-1",
+          type: "file" as const,
+          name: "recording.mp4",
+          mimeType: "video/mp4",
+          sizeBytes: 1024,
+          uri: "file:///documents/composer-attachments/video-1-recording.mp4",
+          remoteUpload: {
+            uploadId: "upload-11111111-1111-1111-1111-111111111111" as const,
+            uploadPath: "/api/attachments/uploads/upload-11111111-1111-1111-1111-111111111111",
+            completed: true,
+          },
+        },
+      ],
+      deliveryBlocked: { message: "invalid provider input" },
+    } satisfies QueuedThreadMessage;
+
+    expect(decodeQueuedThreadMessage(encodeQueuedThreadMessage(message))).toEqual(message);
+  });
+
   it("compares model options as part of the queued settings change", () => {
     const base = {
       instanceId: ProviderInstanceId.make("codex"),
@@ -174,6 +235,7 @@ describe("thread outbox", () => {
     const stored = new Map([[message.messageId, message]]);
     let loadCalls = 0;
     let removeCalls = 0;
+    const removedMessages: QueuedThreadMessage[] = [];
     let releaseInitialLoad!: () => void;
     const initialLoadBlocked = new Promise<void>((resolve) => {
       releaseInitialLoad = resolve;
@@ -192,7 +254,11 @@ describe("thread outbox", () => {
         stored.delete(candidate.messageId);
       },
     };
-    const manager = createThreadOutboxManager({ registry, storage });
+    const manager = createThreadOutboxManager({
+      registry,
+      storage,
+      onMessagesRemoved: async (messages) => void removedMessages.push(...messages),
+    });
 
     const loading = manager.load();
     await Promise.resolve();
@@ -206,6 +272,7 @@ describe("thread outbox", () => {
     releaseInitialLoad();
     await Promise.all([loading, clearing]);
     expect(registry.get(manager.queuedMessagesByThreadKeyAtom)).toEqual({});
+    expect(removedMessages).toEqual([message]);
     registry.dispose();
   });
 
@@ -454,6 +521,41 @@ describe("thread outbox", () => {
     await expect(manager.update({ ...message, text: "stale flush" })).resolves.toBe(false);
     expect(registry.get(manager.queuedMessagesByThreadKeyAtom)).toEqual({});
     expect(stored.size).toBe(0);
+    registry.dispose();
+  });
+
+  it("reports attachments removed by an edit after the durable update", async () => {
+    const registry = AtomRegistry.make();
+    const removed: QueuedThreadMessage[] = [];
+    const manager = createThreadOutboxManager({
+      registry,
+      storage: {
+        load: async () => [],
+        write: async () => undefined,
+        remove: async () => undefined,
+      },
+      onMessagesRemoved: async (messages) => void removed.push(...messages),
+    });
+    const attachment = {
+      id: "file-1",
+      type: "file" as const,
+      name: "notes.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 12,
+      uri: "file:///documents/composer-attachments/notes.pdf",
+    };
+    const message = {
+      ...queuedMessage({
+        messageId: "message-edit",
+        createdAt: "2026-06-08T10:00:01.000Z",
+      }),
+      attachments: [attachment],
+    } satisfies QueuedThreadMessage;
+
+    await manager.enqueue(message);
+    await manager.update({ ...message, attachments: [] });
+
+    expect(removed).toEqual([{ ...message, attachments: [attachment] }]);
     registry.dispose();
   });
 

@@ -55,7 +55,7 @@ import { ControlPill } from "../../components/ControlPill";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import type { ComposerEditorHandle } from "../../components/ComposerEditor";
 import type { StatusTone } from "../../components/StatusPill";
-import type { DraftComposerImageAttachment } from "../../lib/composerImages";
+import type { DraftComposerAttachment } from "../../lib/composerImages";
 import { CHAT_CONTENT_MAX_WIDTH, type LayoutVariant } from "../../lib/layout";
 import { IOS_NAV_BAR_HEIGHT } from "../../lib/layoutMetrics";
 import { scopedThreadKey } from "../../lib/scopedEntities";
@@ -95,7 +95,7 @@ export interface ThreadDetailScreenProps {
   readonly activePendingUserInputAnswers: Record<string, string | ReadonlyArray<string>> | null;
   readonly respondingUserInputId: ApprovalRequestId | null;
   readonly draftMessage: string;
-  readonly draftAttachments: ReadonlyArray<DraftComposerImageAttachment>;
+  readonly draftAttachments: ReadonlyArray<DraftComposerAttachment>;
   readonly connectionStateLabel: EnvironmentConnectionPhase;
   /** Message sync status for the selected thread (drives the composer status pill). */
   readonly threadSyncStatus?: EnvironmentThreadStatus;
@@ -105,6 +105,8 @@ export interface ThreadDetailScreenProps {
   readonly projectWorkspaceRoot: string | null;
   readonly threadCwd: string | null;
   readonly selectedThreadQueueCount: number;
+  readonly selectedThreadUploadProgress: number | null;
+  readonly blockedQueueError: string | null;
   readonly serverConfig: T3ServerConfig | null;
   readonly layoutVariant?: LayoutVariant;
   readonly usesAutomaticContentInsets?: boolean;
@@ -116,6 +118,8 @@ export interface ThreadDetailScreenProps {
   readonly onRemoveDraftImage: (imageId: string) => void;
   readonly onStopThread: () => void;
   readonly onSendMessage: () => Promise<MessageId | null>;
+  readonly onRetryBlockedQueuedMessage: () => Promise<void>;
+  readonly onDeleteBlockedQueuedMessage: () => Promise<void>;
   readonly onCompactContext: () => Promise<boolean>;
   readonly onReconnectEnvironment: () => void;
   readonly onUpdateThreadModelSelection: (modelSelection: ModelSelection) => void;
@@ -728,6 +732,8 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                 selectedThread={props.selectedThread}
                 serverConfig={props.serverConfig}
                 queueCount={props.selectedThreadQueueCount}
+                queueUploadProgress={props.selectedThreadUploadProgress}
+                blockedQueueError={props.blockedQueueError}
                 environmentId={props.environmentId}
                 projectCwd={props.projectWorkspaceRoot}
                 bottomInset={composerBottomInset}
@@ -737,6 +743,8 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                 onRemoveDraftImage={props.onRemoveDraftImage}
                 onStopThread={props.onStopThread}
                 onSendMessage={handleSendMessage}
+                onRetryBlockedQueuedMessage={props.onRetryBlockedQueuedMessage}
+                onDeleteBlockedQueuedMessage={props.onDeleteBlockedQueuedMessage}
                 onCompactContext={props.onCompactContext}
                 onReconnectEnvironment={props.onReconnectEnvironment}
                 onUpdateModelSelection={props.onUpdateThreadModelSelection}

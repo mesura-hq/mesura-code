@@ -17,9 +17,10 @@ import { makeQueuedMessageMetadata } from "../lib/commandMetadata";
 import {
   convertPastedImagesToAttachments,
   pasteComposerClipboard,
-  pickComposerImages,
+  pickComposerAttachments,
+  removeOwnedComposerAttachment,
 } from "../lib/composerImages";
-import type { DraftComposerImageAttachment } from "../lib/composerImages";
+import type { DraftComposerAttachment } from "../lib/composerImages";
 import { scopedThreadKey } from "../lib/scopedEntities";
 import { buildThreadFeed } from "../lib/threadActivity";
 import { appAtomRegistry } from "../state/atom-registry";
@@ -39,14 +40,19 @@ import {
 import { setPendingConnectionError } from "../state/use-remote-environment-registry";
 import { useSelectedThreadDetail } from "../state/use-thread-detail";
 import { useThreadSelection } from "../state/use-thread-selection";
-import { enqueueThreadOutboxMessage } from "./thread-outbox";
+import {
+  enqueueThreadOutboxMessage,
+  removeThreadOutboxMessage,
+  updateThreadOutboxMessage,
+} from "./thread-outbox";
 import { useThreadOutboxMessages } from "./use-thread-outbox";
+import { attachmentUploadProgressByIdAtom } from "./attachment-upload-progress";
 
 export function appendReviewCommentToDraft(input: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly text: string;
-  readonly attachments?: ReadonlyArray<DraftComposerImageAttachment>;
+  readonly attachments?: ReadonlyArray<DraftComposerAttachment>;
 }): void {
   const threadKey = scopedThreadKey(input.environmentId, input.threadId);
   const existing = appAtomRegistry.get(composerDraftsAtom)[threadKey]?.text ?? "";
@@ -78,6 +84,7 @@ export function useThreadComposerState() {
   const selectedThreadDetail = useSelectedThreadDetail();
   const composerDrafts = useAtomValue(composerDraftsAtom);
   const queuedMessagesByThreadKey = useThreadOutboxMessages();
+  const attachmentUploadProgressById = useAtomValue(attachmentUploadProgressByIdAtom);
 
   useEffect(() => {
     ensureComposerDraftsLoaded();
@@ -99,6 +106,19 @@ export function useThreadComposerState() {
   const draftMessage = selectedDraft?.text ?? "";
   const draftAttachments = selectedDraft?.attachments ?? [];
   const selectedThreadQueueCount = selectedThreadQueuedMessages.length;
+  const blockedQueuedMessage = selectedThreadQueuedMessages.find(
+    (message) => message.deliveryBlocked !== undefined,
+  );
+  const selectedThreadUploadProgress = useMemo(() => {
+    const activeProgress = selectedThreadQueuedMessages
+      .flatMap((message) => message.attachments)
+      .map((attachment) => attachmentUploadProgressById[attachment.id])
+      .filter((progress): progress is number => progress !== undefined);
+    if (activeProgress.length === 0) return null;
+    return Math.round(
+      activeProgress.reduce((total, progress) => total + progress, 0) / activeProgress.length,
+    );
+  }, [attachmentUploadProgressById, selectedThreadQueuedMessages]);
   const selectedThread = selectedThreadDetail ?? selectedThreadShell;
   const modelSelection = selectedDraft?.modelSelection ?? selectedThread?.modelSelection ?? null;
   const runtimeMode = selectedDraft?.runtimeMode ?? selectedThread?.runtimeMode ?? null;
@@ -162,7 +182,7 @@ export function useThreadComposerState() {
       interactionMode: draft.interactionMode ?? thread.interactionMode,
       createdAt: metadata.createdAt,
     });
-    clearComposerDraftContent(threadKey);
+    clearComposerDraftContent(threadKey, { preserveRemovedAttachments: true });
     enqueuePromise.catch((error: unknown) => {
       // Restore text via merge (idempotent) but attachments via the uncapped
       // append: the merge path slots existing attachments first and truncates
@@ -176,6 +196,17 @@ export function useThreadComposerState() {
     });
     return messageId;
   }, [selectedThreadDetail, selectedThreadShell]);
+
+  const onRetryBlockedQueuedMessage = useCallback(async () => {
+    if (!blockedQueuedMessage) return;
+    const { deliveryBlocked: _deliveryBlocked, ...retryableMessage } = blockedQueuedMessage;
+    await updateThreadOutboxMessage(retryableMessage);
+  }, [blockedQueuedMessage]);
+
+  const onDeleteBlockedQueuedMessage = useCallback(async () => {
+    if (!blockedQueuedMessage) return;
+    await removeThreadOutboxMessage(blockedQueuedMessage);
+  }, [blockedQueuedMessage]);
 
   const onChangeDraftMessage = useCallback(
     (value: string) => {
@@ -195,11 +226,11 @@ export function useThreadComposerState() {
     }
 
     const threadKey = scopedThreadKey(selectedThreadShell.environmentId, selectedThreadShell.id);
-    const result = await pickComposerImages({
+    const result = await pickComposerAttachments({
       existingCount: composerDrafts[threadKey]?.attachments.length ?? 0,
     });
-    if (result.images.length > 0) {
-      appendComposerDraftAttachments(threadKey, result.images);
+    if (result.attachments.length > 0) {
+      appendComposerDraftAttachments(threadKey, result.attachments);
     }
     if (result.error) {
       setPendingConnectionError(result.error);
@@ -260,9 +291,13 @@ export function useThreadComposerState() {
       }
 
       const threadKey = scopedThreadKey(selectedThreadShell.environmentId, selectedThreadShell.id);
+      const attachment = composerDrafts[threadKey]?.attachments.find(
+        (candidate) => candidate.id === imageId,
+      );
       removeComposerDraftAttachment(threadKey, imageId);
+      if (attachment) void removeOwnedComposerAttachment(attachment);
     },
-    [selectedThreadShell],
+    [composerDrafts, selectedThreadShell],
   );
 
   const onUpdateModelSelection = useCallback(
@@ -298,6 +333,8 @@ export function useThreadComposerState() {
   return {
     selectedThreadFeed,
     selectedThreadQueueCount,
+    selectedThreadUploadProgress,
+    blockedQueueError: blockedQueuedMessage?.deliveryBlocked?.message ?? null,
     activeWorkStartedAt,
     draftMessage,
     draftAttachments,
@@ -310,6 +347,8 @@ export function useThreadComposerState() {
     onNativePasteImages,
     onRemoveDraftImage,
     onSendMessage,
+    onRetryBlockedQueuedMessage,
+    onDeleteBlockedQueuedMessage,
     onUpdateModelSelection,
     onUpdateRuntimeMode,
     onUpdateInteractionMode,

@@ -17,11 +17,11 @@ import {
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
-import { DraftComposerImageAttachmentSchema } from "../lib/composer-image-schema";
-import type { DraftComposerImageAttachment } from "../lib/composerImages";
+import { DraftComposerAttachmentSchema } from "../lib/composer-image-schema";
+import type { DraftComposerAttachment } from "../lib/composerImages";
 import { scopedThreadKey } from "../lib/scopedEntities";
 
-const THREAD_OUTBOX_SCHEMA_VERSION = 3;
+const THREAD_OUTBOX_SCHEMA_VERSION = 4;
 const THREAD_OUTBOX_MAX_RETRY_DELAY_MS = 16_000;
 
 const QueuedThreadCreationSchema = Schema.Struct({
@@ -37,13 +37,13 @@ const QueuedThreadCreationSchema = Schema.Struct({
 });
 
 export const QueuedThreadMessageSchema = Schema.Struct({
-  schemaVersion: Schema.Literals([1, 2, THREAD_OUTBOX_SCHEMA_VERSION]),
+  schemaVersion: Schema.Literals([1, 2, 3, THREAD_OUTBOX_SCHEMA_VERSION]),
   environmentId: EnvironmentId,
   threadId: ThreadId,
   messageId: MessageId,
   commandId: CommandId,
   text: Schema.String,
-  attachments: Schema.Array(DraftComposerImageAttachmentSchema),
+  attachments: Schema.Array(DraftComposerAttachmentSchema),
   modelSelection: Schema.optional(ModelSelection),
   runtimeMode: Schema.optional(RuntimeMode),
   interactionMode: Schema.optional(ProviderInteractionMode),
@@ -51,6 +51,11 @@ export const QueuedThreadMessageSchema = Schema.Struct({
   // instead of appending a turn to an existing one.
   creation: Schema.optional(QueuedThreadCreationSchema),
   createdAt: IsoDateTime,
+  deliveryBlocked: Schema.optional(
+    Schema.Struct({
+      message: Schema.String,
+    }),
+  ),
 });
 
 const decodeStoredQueuedThreadMessage = Schema.decodeUnknownSync(QueuedThreadMessageSchema);
@@ -72,12 +77,13 @@ export interface QueuedThreadMessage {
   readonly messageId: MessageId;
   readonly commandId: CommandId;
   readonly text: string;
-  readonly attachments: ReadonlyArray<DraftComposerImageAttachment>;
+  readonly attachments: ReadonlyArray<DraftComposerAttachment>;
   readonly modelSelection?: ModelSelectionType;
   readonly runtimeMode?: RuntimeModeType;
   readonly interactionMode?: ProviderInteractionModeType;
   readonly creation?: QueuedThreadCreation;
   readonly createdAt: string;
+  readonly deliveryBlocked?: { readonly message: string };
 }
 
 export interface ThreadSettingsSnapshot {
@@ -209,12 +215,13 @@ export function shouldRetryThreadOutboxDelivery(error: unknown): boolean {
 }
 
 export type ThreadOutboxCommandStage = "settings-sync" | "start-turn";
-export type ThreadOutboxFailureAction = "retry" | "discard";
+export type ThreadOutboxFailureAction = "retry" | "discard" | "retain";
 
 export function resolveThreadOutboxFailureAction(input: {
   readonly stage: ThreadOutboxCommandStage;
   readonly error: unknown;
   readonly interrupted: boolean;
+  readonly hasOwnedAttachments?: boolean;
 }): ThreadOutboxFailureAction {
   if (
     input.stage === "settings-sync" ||
@@ -223,5 +230,6 @@ export function resolveThreadOutboxFailureAction(input: {
   ) {
     return "retry";
   }
+  if (input.hasOwnedAttachments === true) return "retain";
   return "discard";
 }
