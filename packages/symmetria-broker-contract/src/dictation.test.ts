@@ -184,6 +184,7 @@ describe("SymmetriaDictationReceipt", () => {
     const validReceipts = [
       { ...receiptBase, outcome: "copied" },
       { ...receiptBase, outcome: "inserted", draftVersion: 3 },
+      { ...receiptBase, outcome: "inserted", draftVersion: 4, action: "answer" },
       running,
       { ...receiptBase, outcome: "confirmation-pending" },
       {
@@ -205,6 +206,11 @@ describe("SymmetriaDictationReceipt", () => {
     expect(Result.isFailure(decodeReceipt(omit(running, "application")))).toBe(true);
     expect(Result.isFailure(decodeReceipt(omit(running, "messageId")))).toBe(true);
     expect(Result.isFailure(decodeReceipt(omit(running, "turnId")))).toBe(true);
+    expect(
+      Result.isFailure(
+        decodeReceipt({ ...receiptBase, outcome: "inserted", draftVersion: 4, action: "submit" }),
+      ),
+    ).toBe(true);
   });
 });
 

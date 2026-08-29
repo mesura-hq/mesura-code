@@ -230,6 +230,13 @@
     "SymmetriaDictationInsertedReceipt": {
       "additionalProperties": true,
       "properties": {
+        "action": {
+          "enum": [
+            "insert",
+            "answer"
+          ],
+          "type": "string"
+        },
         "application": {
           "enum": [
             "first",

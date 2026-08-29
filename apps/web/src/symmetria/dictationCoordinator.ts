@@ -4,9 +4,10 @@ import {
   type SymmetriaDictationReceipt,
   type SymmetriaDictationTarget,
 } from "@symmetria/broker-contract";
-import type { CommandId, ScopedThreadRef } from "@t3tools/contracts";
+import { MessageId, type CommandId, type ScopedThreadRef } from "@t3tools/contracts";
 
 import {
+  DraftId,
   appendPersistedDictation,
   useComposerDraftStore,
   type PersistedDictationAppendResult,
@@ -14,6 +15,12 @@ import {
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentThreadShells } from "../state/threads";
 import { dictationTargetsEqual, resolveDictationTarget } from "./dictationTarget";
+import {
+  submitDirectedDictation,
+  type DirectedComposerSubmissionResult,
+  type DirectedSubmissionContext,
+} from "./directedComposerSubmission";
+import { confirmDirectedDictationTurn } from "./dictationTurnConfirmation";
 
 export type DictationReservationRequest = {
   readonly protocolVersion: { readonly major: 1; readonly minor: number };
@@ -31,6 +38,7 @@ export type DictationComposerRegistration = {
   readonly target: SymmetriaDictationTarget;
   readonly projectName: string | null;
   readonly handle: DictationComposerHandle | null;
+  readonly readSubmissionContext?: () => DirectedSubmissionContext | null;
 };
 
 type CoordinatorOptions = {
@@ -41,12 +49,14 @@ type CoordinatorOptions = {
     sourceTargetKey?: string | null,
   ) => Promise<PersistedDictationAppendResult>;
   readonly threadExists?: (threadRef: ScopedThreadRef) => boolean;
+  readonly submit?: typeof submitDirectedDictation;
+  readonly confirm?: typeof confirmDirectedDictationTurn;
 };
 
 const failedReceipt = (
   command: Extract<SymmetriaDictationCommand, { type: "dictation.deliver" }>,
   target: SymmetriaDictationTarget,
-  code: "renderer_lost" | "persistence_failed",
+  code: "renderer_lost" | "persistence_failed" | "provider_start_failed",
   detail: string,
 ): SymmetriaDictationReceipt => ({
   outcome: "failed",
@@ -65,11 +75,14 @@ export function createDictationCoordinator(options: CoordinatorOptions = {}) {
     options.threadExists ??
     ((threadRef: ScopedThreadRef) =>
       appAtomRegistry.get(environmentThreadShells.threadShellAtom(threadRef)) !== null);
+  const submit = options.submit ?? submitDirectedDictation;
+  const confirm = options.confirm ?? confirmDirectedDictationTurn;
   let registration: (DictationComposerRegistration & { readonly token: symbol }) | null = null;
   let reservation: {
     readonly sessionId: string;
     readonly target: SymmetriaDictationTarget;
     readonly projectName: string | null;
+    readonly submissionContext: DirectedSubmissionContext | null;
   } | null = null;
 
   return {
@@ -90,6 +103,7 @@ export function createDictationCoordinator(options: CoordinatorOptions = {}) {
         sessionId: request.sessionId,
         target: registration.target,
         projectName: registration.projectName,
+        submissionContext: registration.readSubmissionContext?.() ?? null,
       };
       reservation = reserved;
       return { target: reserved.target, projectName: reserved.projectName };
@@ -168,6 +182,97 @@ export function createDictationCoordinator(options: CoordinatorOptions = {}) {
           "renderer_lost",
           "the mounted composer rejected the persisted prompt",
         );
+      }
+
+      if (command.mode === "submit") {
+        const messageId = MessageId.make(`dictation-${command.commandId}`);
+        let submission: DirectedComposerSubmissionResult;
+        try {
+          const submissionContext =
+            registration !== null && dictationTargetsEqual(registration.target, reserved.target)
+              ? (registration.readSubmissionContext?.() ?? reserved.submissionContext)
+              : reserved.submissionContext;
+          submission = await submit({
+            command,
+            reservedTarget: reserved.target,
+            composerTarget: resolved.target,
+            prompt: result.prompt,
+            messageId,
+            submissionContext,
+            sourceComposerTarget:
+              resolved.sourceTargetKey === null ? null : DraftId.make(resolved.sourceTargetKey),
+          });
+        } catch (cause) {
+          return failedReceipt(
+            command,
+            reserved.target,
+            "provider_start_failed",
+            cause instanceof Error ? cause.message : String(cause),
+          );
+        }
+        if (submission.kind === "refused") {
+          return {
+            outcome: "refused",
+            protocolVersion: command.protocolVersion,
+            sessionId: command.sessionId,
+            commandId: command.commandId,
+            target: reserved.target,
+            application: result.application,
+            code: submission.code,
+            detail: "the current composer action does not accept free-form text",
+          };
+        }
+        if (submission.kind === "provider-start-failed") {
+          return failedReceipt(
+            command,
+            reserved.target,
+            "provider_start_failed",
+            "the provider turn did not start",
+          );
+        }
+        if (submission.kind === "answer-submit-failed") {
+          return failedReceipt(
+            command,
+            reserved.target,
+            "provider_start_failed",
+            "the pending answer was not accepted",
+          );
+        }
+        if (submission.kind === "answer-submitted") {
+          return {
+            outcome: "inserted",
+            protocolVersion: command.protocolVersion,
+            sessionId: command.sessionId,
+            commandId: command.commandId,
+            target: reserved.target,
+            application: result.application,
+            draftVersion: SymmetriaDraftVersion.make(result.version),
+            action: "answer",
+          };
+        }
+        const confirmationRef =
+          typeof resolved.target === "string"
+            ? reserved.target.kind === "draft"
+              ? reserved.target.futureThreadRef
+              : null
+            : resolved.target;
+        if (confirmationRef === null) {
+          return failedReceipt(
+            command,
+            reserved.target,
+            "provider_start_failed",
+            "the submitted thread identity is unavailable",
+          );
+        }
+        return await confirm({
+          protocolVersion: command.protocolVersion,
+          sessionId: command.sessionId,
+          commandId: command.commandId,
+          target: reserved.target,
+          environmentId: confirmationRef.environmentId,
+          threadId: confirmationRef.threadId,
+          messageId: submission.messageId,
+        });
       }
 
       return {

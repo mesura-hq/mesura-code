@@ -39,11 +39,7 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
-import {
-  applyClaudePromptEffortPrefix,
-  createModelSelection,
-  resolvePromptInjectedEffort,
-} from "@t3tools/shared/model";
+import { createModelSelection } from "@t3tools/shared/model";
 import { CHAT_LIST_ANCHOR_OFFSET } from "@t3tools/shared/chatList";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { truncate } from "@t3tools/shared/String";
@@ -189,10 +185,10 @@ import {
   nextProjectScriptId,
   projectScriptIdFromCommand,
 } from "~/projectScripts";
-import { newDraftId, newMessageId, newThreadId } from "~/lib/utils";
+import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { useBrowserHistoryStore } from "~/browserHistoryStore";
 import { registerFaviconProjectForThread } from "~/browserFaviconStore";
-import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
+import { resolveSelectableProvider } from "../providerModels";
 import { NO_PROVIDER_MODEL_SELECTION } from "../providerInstances";
 import {
   useClientSettings,
@@ -222,10 +218,11 @@ import {
   useComposerDraftStore,
   type DraftId,
 } from "../composerDraftStore";
-import { submitComposerDraft } from "./chat/composerSubmission";
+import { formatOutgoingComposerPrompt, submitComposerDraft } from "./chat/composerSubmission";
 import { useSttDelivery } from "../symmetria/useSttDelivery";
 import { dictationCoordinator } from "../symmetria/dictationCoordinator";
 import { captureDictationTarget } from "../symmetria/dictationTarget";
+import { buildDirectedTurnStartInput } from "../symmetria/directedComposerSubmission";
 import {
   appendTerminalContextsToPrompt,
   formatTerminalContextLabel,
@@ -521,17 +518,6 @@ function shouldTypeToFocusComposer(event: KeyboardEvent): boolean {
   return true;
 }
 
-function formatOutgoingPrompt(params: {
-  provider: ProviderDriverKind;
-  model: string | null;
-  models: ReadonlyArray<ServerProvider["models"][number]>;
-  effort: string | null;
-  text: string;
-}): string {
-  const caps = getProviderModelCapabilities(params.models, params.model, params.provider);
-  const promptEffort = resolvePromptInjectedEffort(caps, params.effort);
-  return applyClaudePromptEffortPrefix(params.text, promptEffort);
-}
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
 
@@ -5253,7 +5239,7 @@ function ChatViewContent(props: ChatViewProps) {
         draftText: trimmed,
         planMarkdown: activeProposedPlan.planMarkdown,
       });
-      const outgoingFollowUpText = formatOutgoingPrompt({
+      const outgoingFollowUpText = formatOutgoingComposerPrompt({
         provider: ctxSelectedProvider,
         model: ctxSelectedModel,
         models: ctxSelectedProviderModels,
@@ -5351,7 +5337,7 @@ function ChatViewContent(props: ChatViewProps) {
       messageTextWithPreviewAnnotations,
       composerReviewCommentsSnapshot,
     );
-    const outgoingMessageText = formatOutgoingPrompt({
+    const outgoingMessageText = formatOutgoingComposerPrompt({
       provider: ctxSelectedProvider,
       model: ctxSelectedModel,
       models: ctxSelectedProviderModels,
@@ -5581,21 +5567,21 @@ function ChatViewContent(props: ChatViewProps) {
       beginLocalDispatch({ preparingWorktree: false });
       const startResult = await startThreadTurn({
         environmentId,
-        input: {
+        input: buildDirectedTurnStartInput({
+          environmentId,
+          commandId: newCommandId(),
           threadId: threadIdForSend,
-          message: {
-            messageId: messageIdForSend,
-            role: "user",
-            text: outgoingMessageText,
-            attachments: turnAttachmentsResult.value,
-          },
+          messageId: messageIdForSend,
+          createdAt: messageCreatedAt,
+          prompt: outgoingMessageText,
           modelSelection: ctxSelectedModelSelection,
           titleSeed: title,
           runtimeMode,
           interactionMode,
-          ...(bootstrap ? { bootstrap } : {}),
-          createdAt: messageCreatedAt,
-        },
+          attachments: turnAttachmentsResult.value,
+          bootstrap,
+          pendingAction: { kind: "composer" },
+        }),
       });
       if (startResult._tag === "Failure") {
         failure = startResult;
@@ -5817,8 +5803,50 @@ function ChatViewContent(props: ChatViewProps) {
       handle: {
         replacePrompt: (prompt) => composerRef.current?.replacePrompt(prompt) ?? false,
       },
+      readSubmissionContext: () => {
+        const sendContext = composerRef.current?.getSendContext();
+        if (!sendContext) return null;
+        const pendingAction = activePendingUserInput
+          ? {
+              kind: "text-question" as const,
+              requestId: activePendingUserInput.requestId,
+              questionId:
+                activePendingUserInput.questions[activePendingQuestionIndex]?.id ??
+                activePendingUserInput.questions[0]!.id,
+              questions: activePendingUserInput.questions,
+              draftAnswers: activePendingDraftAnswers,
+              questionIndex: activePendingQuestionIndex,
+            }
+          : activePendingApproval
+            ? { kind: "button-approval" as const }
+            : showPlanFollowUpPrompt && activeProposedPlan
+              ? {
+                  kind: "plan-follow-up" as const,
+                  planId: activeProposedPlan.id,
+                  planMarkdown: activeProposedPlan.planMarkdown,
+                }
+              : { kind: "composer" as const };
+        return {
+          providerAvailable: sendContext.providerAvailable,
+          provider: sendContext.selectedProvider,
+          model: sendContext.selectedModel,
+          models: sendContext.selectedProviderModels,
+          effort: sendContext.selectedPromptEffort,
+          pendingAction,
+        };
+      },
     });
-  }, [activeProject?.title, composerRef, registeredDictationTarget]);
+  }, [
+    activePendingApproval,
+    activePendingDraftAnswers,
+    activePendingQuestionIndex,
+    activePendingUserInput,
+    activeProject?.title,
+    activeProposedPlan,
+    composerRef,
+    registeredDictationTarget,
+    showPlanFollowUpPrompt,
+  ]);
 
   const onInterrupt = async () => {
     if (!activeThread) return;
@@ -6059,7 +6087,7 @@ function ChatViewContent(props: ChatViewProps) {
       const threadIdForSend = activeThread.id;
       const messageIdForSend = newMessageId();
       const messageCreatedAt = new Date().toISOString();
-      const outgoingMessageText = formatOutgoingPrompt({
+      const outgoingMessageText = formatOutgoingComposerPrompt({
         provider: ctxSelectedProvider,
         model: ctxSelectedModel,
         models: ctxSelectedProviderModels,
@@ -6216,7 +6244,7 @@ function ChatViewContent(props: ChatViewProps) {
     const nextThreadId = newThreadId();
     const planMarkdown = activeProposedPlan.planMarkdown;
     const implementationPrompt = buildPlanImplementationPrompt(planMarkdown);
-    const outgoingImplementationPrompt = formatOutgoingPrompt({
+    const outgoingImplementationPrompt = formatOutgoingComposerPrompt({
       provider: ctxSelectedProvider,
       model: ctxSelectedModel,
       models: ctxSelectedProviderModels,

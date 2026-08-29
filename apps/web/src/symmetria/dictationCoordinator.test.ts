@@ -140,6 +140,20 @@ it("leaves every composer unchanged in clipboard mode", async () => {
   assert.equal(promptAt(threadB), "keep B");
 });
 
+it("marks a submitted pending answer for the Shell toast", async () => {
+  const coordinator = createTestCoordinator({
+    submit: async () => ({ kind: "answer-submitted" }),
+  });
+  coordinator.registerComposer({ target: targetA, projectName: "Project A", handle: null });
+  await coordinator.reserve(reserveRequest);
+
+  const receipt = await coordinator.deliver(deliver("submit"));
+
+  assert.equal(receipt.outcome, "inserted");
+  if (receipt.outcome !== "inserted") return;
+  assert.equal(receipt.action, "answer");
+});
+
 // Acceptance: replay after a renderer reconnect cannot append a second copy.
 it("applies one command identity only once", async () => {
   const firstCoordinator = createTestCoordinator();
