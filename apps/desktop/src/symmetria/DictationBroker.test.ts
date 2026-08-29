@@ -95,6 +95,23 @@ it("reserves a renderer-supplied target before returning the session to Shell", 
   assert.deepEqual(broker.snapshot()?.target, targetA);
 });
 
+it("refuses a Mesura microphone reservation when no Shell client is connected", async () => {
+  const broker = createDictationBroker({
+    isShellAvailable: () => false,
+    reserveTarget: async () => ({ target: targetA, projectName: "Project A" }),
+    deliver: async () => makeTurnRunningReceipt(),
+  });
+
+  const error = await broker
+    .reserve({ ...reserveRequest, source: "mesura" })
+    .then(() => null)
+    .catch((cause: unknown) => cause);
+
+  assert.instanceOf(error, Error);
+  assert.include((error as Error).message, "Shell dictation is unavailable");
+  assert.isNull(broker.snapshot());
+});
+
 // Acceptance: delivery uses the reservation, even when the displayed route has
 // changed while transcription runs.
 it("delivers only to the reserved target and never asks for the current target", async () => {

@@ -14,8 +14,10 @@ export const DICTATION_RENDERER_REQUEST_CHANNEL = "desktop:dictation-renderer-re
 export const RESOLVE_DICTATION_RENDERER_REQUEST_CHANNEL =
   "desktop:resolve-dictation-renderer-request";
 export const GET_DICTATION_SNAPSHOT_CHANNEL = "desktop:get-dictation-snapshot";
+export const GET_DICTATION_SHELL_AVAILABILITY_CHANNEL = "desktop:get-dictation-shell-availability";
 export const DICTATION_COMMAND_CHANNEL = "desktop:dictation-command";
 export const DICTATION_SNAPSHOT_CHANNEL = "desktop:dictation-snapshot";
+export const DICTATION_SHELL_AVAILABILITY_CHANNEL = "desktop:dictation-shell-availability";
 // The renderer forwards its projected thread list here, and the main process
 // republishes it on the Symmetria socket. Renderer→main, unlike the dictation
 // pair above: the renderer already holds the read model, so a second

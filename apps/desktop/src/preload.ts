@@ -328,4 +328,14 @@ contextBridge.exposeInMainWorld("symmetriaDictationBridge", {
       },
       listener,
     }),
+  getShellAvailability: () =>
+    ipcRenderer.invoke(IpcChannels.GET_DICTATION_SHELL_AVAILABILITY_CHANNEL),
+  subscribeShellAvailability: (listener: (available: boolean) => void) => {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, available: unknown) => {
+      if (typeof available === "boolean") listener(available);
+    };
+    ipcRenderer.on(IpcChannels.DICTATION_SHELL_AVAILABILITY_CHANNEL, wrappedListener);
+    return () =>
+      ipcRenderer.removeListener(IpcChannels.DICTATION_SHELL_AVAILABILITY_CHANNEL, wrappedListener);
+  },
 });

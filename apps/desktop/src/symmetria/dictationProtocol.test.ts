@@ -5,8 +5,12 @@ import { SymmetriaDictationSession } from "@symmetria/broker-contract";
 import * as Schema from "effect/Schema";
 import { assert, it } from "vite-plus/test";
 
-import { createDictationSessionServer } from "./dictationSocket.ts";
 import {
+  createDictationSessionServer,
+  hasRequiredDictationCapabilities,
+} from "./dictationSocket.ts";
+import {
+  DICTATION_CAPABILITIES,
   formatDictationServerMessage,
   parseDictationClientLine,
   subscribeToOrderedRendererFrames,
@@ -65,6 +69,45 @@ it("formats each server message as exactly one JSON line", () => {
   assert.equal(line.endsWith("\n"), true);
   assert.notInclude(line.slice(0, -1), "\n");
   assert.deepEqual(JSON.parse(line), { type: "dictation.snapshot", session });
+});
+
+it("requires the complete Shell capability set", () => {
+  assert.isFalse(hasRequiredDictationCapabilities(["session-control"]));
+  assert.isTrue(hasRequiredDictationCapabilities(DICTATION_CAPABILITIES));
+});
+
+it("announces Shell availability only after a valid capability handshake", async () => {
+  const socketPath = `${NodeOS.tmpdir()}/dictation-capability-${process.pid}.sock`;
+  const availability: Array<boolean> = [];
+  const server = createDictationSessionServer({
+    snapshot: () => null,
+    subscribe: () => () => undefined,
+    handle: async () => null,
+    onCapabilityChange: (available) => availability.push(available),
+  });
+  await listenOnPath(server, socketPath);
+
+  await new Promise<void>((resolve, reject) => {
+    const client = NodeNet.createConnection(socketPath);
+    client.resume();
+    client.on("error", reject);
+    client.on("close", resolve);
+    client.on("connect", () => {
+      client.write("not-json\n");
+      assert.deepEqual(availability, []);
+      client.write(
+        `${JSON.stringify({
+          type: "dictation.hello",
+          protocolVersion: { major: 1, minor: 4 },
+          capabilities: DICTATION_CAPABILITIES,
+        })}\n`,
+        () => client.end(),
+      );
+    });
+  });
+
+  assert.deepEqual(availability, [true, false]);
+  await closeServer(server);
 });
 
 // Acceptance: a persistent Shell reconnect cannot observe a later event before

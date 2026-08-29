@@ -24,7 +24,9 @@ import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import {
   DICTATION_COMMAND_CHANNEL,
   DICTATION_RENDERER_REQUEST_CHANNEL,
+  DICTATION_SHELL_AVAILABILITY_CHANNEL,
   DICTATION_SNAPSHOT_CHANNEL,
+  GET_DICTATION_SHELL_AVAILABILITY_CHANNEL,
   GET_DICTATION_SNAPSHOT_CHANNEL,
   RESOLVE_DICTATION_RENDERER_REQUEST_CHANNEL,
 } from "../ipc/channels.ts";
@@ -58,6 +60,7 @@ export type DictationBrokerOptions = {
     reservedTarget: SymmetriaDictationTarget,
   ) => Promise<SymmetriaDictationReceipt>;
   readonly scheduleLeaseExpiration?: (expiresAt: string, expire: () => void) => () => void;
+  readonly isShellAvailable?: () => boolean;
 };
 
 export type LocalDictationBroker = {
@@ -175,6 +178,9 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
       return Promise.resolve(session);
     if (session !== null && !isTerminalPhase(session.phase)) {
       return Promise.reject(new Error("another dictation session is already active"));
+    }
+    if (request.source === "mesura" && options.isShellAvailable?.() === false) {
+      return Promise.reject(new Error("Symmetria Shell dictation is unavailable"));
     }
     cancelLeaseExpiration?.();
     cancelLeaseExpiration = null;
@@ -584,6 +590,7 @@ const makeRequired = Effect.gen(function* () {
       targetWindow.value.webContents.send(DICTATION_RENDERER_REQUEST_CHANNEL, request);
     },
   });
+  let shellConnectionCount = 0;
 
   const requestRenderer = async (request: RendererRequest): Promise<unknown> => {
     const dispatch = rendererRequests.dispatch(request);
@@ -598,6 +605,7 @@ const makeRequired = Effect.gen(function* () {
   };
 
   const broker = createDictationBroker({
+    isShellAvailable: () => shellConnectionCount > 0,
     reserveTarget: async (request) => {
       const raw = await requestRenderer({ kind: "reserve-target", request });
       if (typeof raw !== "object" || raw === null) {
@@ -642,6 +650,11 @@ const makeRequired = Effect.gen(function* () {
   yield* ipc.handle({
     channel: GET_DICTATION_SNAPSHOT_CHANNEL,
     handler: () => Effect.sync(() => broker.frame()),
+  });
+
+  yield* ipc.handle({
+    channel: GET_DICTATION_SHELL_AVAILABILITY_CHANNEL,
+    handler: () => Effect.sync(() => shellConnectionCount > 0),
   });
 
   yield* ipc.handle({
@@ -710,6 +723,18 @@ const makeRequired = Effect.gen(function* () {
       subscribe: broker.watch,
       subscribeReceipts: (listener) =>
         broker.watchReceipts((receipt) => listener({ type: "dictation.receipt", receipt })),
+      onCapabilityChange: (available) => {
+        shellConnectionCount = Math.max(0, shellConnectionCount + (available ? 1 : -1));
+        runPromise(
+          electronWindow.sendAll(DICTATION_SHELL_AVAILABILITY_CHANNEL, shellConnectionCount > 0),
+        ).catch((cause) => {
+          runSync(
+            logWarning("dictation Shell availability delivery failed", {
+              message: cause instanceof Error ? cause.message : String(cause),
+            }),
+          );
+        });
+      },
       handle: async (message) => {
         if (message.type === "dictation.hello") {
           return {

@@ -3,6 +3,7 @@ import * as NodeNet from "node:net";
 import type { SymmetriaDictationSession } from "@symmetria/broker-contract";
 
 import {
+  DICTATION_CAPABILITIES,
   formatDictationServerMessage,
   parseDictationClientLine,
   type DictationClientMessage,
@@ -11,12 +12,16 @@ import {
 
 const MAX_INPUT_BYTES = 1024 * 1024;
 
+export const hasRequiredDictationCapabilities = (capabilities: ReadonlyArray<string>): boolean =>
+  DICTATION_CAPABILITIES.every((capability) => capabilities.includes(capability));
+
 export type DictationSessionServerOptions = {
   readonly snapshot: () => SymmetriaDictationSession | null;
   readonly subscribe: (listener: (snapshot: SymmetriaDictationSession) => void) => () => void;
   readonly subscribeReceipts?: (listener: (receipt: DictationServerMessage) => void) => () => void;
   readonly handle: (message: DictationClientMessage) => Promise<DictationServerMessage | null>;
   readonly onError?: (error: Error) => void;
+  readonly onCapabilityChange?: (available: boolean) => void;
 };
 
 export function createDictationSessionServer(
@@ -26,6 +31,7 @@ export function createDictationSessionServer(
     let buffered = "";
     let handling = Promise.resolve();
     let handlerFailed = false;
+    let capabilityAnnounced = false;
     connection.setEncoding("utf8");
 
     const write = (message: DictationServerMessage): void => {
@@ -63,6 +69,13 @@ export function createDictationSessionServer(
             write({ type: "dictation.error", code: parsed.code, detail: parsed.detail });
             return;
           }
+          const hasRequiredCapabilities =
+            parsed.message.type === "dictation.hello" &&
+            hasRequiredDictationCapabilities(parsed.message.capabilities);
+          if (hasRequiredCapabilities && !capabilityAnnounced) {
+            capabilityAnnounced = true;
+            options.onCapabilityChange?.(true);
+          }
           const response = await options.handle(parsed.message);
           if (response !== null) write(response);
         });
@@ -75,6 +88,7 @@ export function createDictationSessionServer(
     });
     connection.on("error", (error) => options.onError?.(error));
     connection.on("close", () => {
+      if (capabilityAnnounced) options.onCapabilityChange?.(false);
       unsubscribeReceipts();
       unsubscribe();
     });

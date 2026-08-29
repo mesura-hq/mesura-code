@@ -223,6 +223,7 @@ import { useSttDelivery } from "../symmetria/useSttDelivery";
 import { dictationCoordinator } from "../symmetria/dictationCoordinator";
 import { captureDictationTarget } from "../symmetria/dictationTarget";
 import { buildDirectedTurnStartInput } from "../symmetria/directedComposerSubmission";
+import { DictationMicrophoneButton, DictationStrip } from "../symmetria/DictationStrip";
 import {
   appendTerminalContextsToPrompt,
   formatTerminalContextLabel,
@@ -6905,6 +6906,9 @@ function ChatViewContent(props: ChatViewProps) {
                         showComposerContextStrip && "chat-composer-glass-shell-with-context",
                       )}
                     >
+                      {registeredDictationTarget ? (
+                        <DictationStrip displayedTarget={registeredDictationTarget} />
+                      ) : null}
                       <div className="chat-composer-glass-host relative z-10 w-full rounded-[22px]">
                         <div ref={attachDraftHeroComposerAnchorRef} className="relative z-10">
                           <ChatComposer
@@ -6955,6 +6959,7 @@ function ChatViewContent(props: ChatViewProps) {
                             keybindings={keybindings}
                             terminalOpen={Boolean(terminalUiState.terminalOpen)}
                             gitCwd={gitCwd}
+                            dictationStartControl={<DictationMicrophoneButton />}
                             promptRef={promptRef}
                             composerImagesRef={composerImagesRef}
                             composerTerminalContextsRef={composerTerminalContextsRef}

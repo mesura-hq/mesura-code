@@ -18,6 +18,8 @@ type SymmetriaDictationBridge = {
   readonly onRequest: (listener: (request: unknown) => void) => () => void;
   readonly resolveRequest: (requestId: string, result: unknown) => void;
   readonly sendCommand: (command: unknown) => Promise<unknown>;
+  readonly getShellAvailability: () => Promise<unknown>;
+  readonly subscribeShellAvailability: (listener: (available: boolean) => void) => () => void;
 };
 
 declare global {
@@ -40,7 +42,27 @@ const decodeSession = Schema.decodeUnknownResult(SymmetriaDictationSession);
 export function useDictationBridge(): void {
   useEffect(() => {
     const bridge = window.symmetriaDictationBridge;
+    useDictationSessionStore.getState().setBridgeAvailable(false);
     if (!bridge) return;
+
+    let active = true;
+    let observedAvailabilityEvent = false;
+    const unsubscribeAvailability = bridge.subscribeShellAvailability((available) => {
+      observedAvailabilityEvent = true;
+      useDictationSessionStore.getState().setBridgeAvailable(available);
+    });
+    void bridge
+      .getShellAvailability()
+      .then((available) => {
+        if (active && !observedAvailabilityEvent && typeof available === "boolean") {
+          useDictationSessionStore.getState().setBridgeAvailable(available);
+        }
+      })
+      .catch(() => {
+        if (active && !observedAvailabilityEvent) {
+          useDictationSessionStore.getState().setBridgeAvailable(false);
+        }
+      });
 
     const unsubscribeSession = bridge.subscribe((raw) => {
       if (raw === null) {
@@ -93,6 +115,9 @@ export function useDictationBridge(): void {
     });
 
     return () => {
+      active = false;
+      useDictationSessionStore.getState().setBridgeAvailable(false);
+      unsubscribeAvailability();
       unsubscribeRequests();
       unsubscribeSession();
     };

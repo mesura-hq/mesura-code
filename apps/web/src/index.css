@@ -1156,6 +1156,78 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     content: "";
   }
 
+  .mesura-dictation-strip {
+    isolation: isolate;
+  }
+
+  .mesura-dictation-strip::before {
+    pointer-events: none;
+    position: absolute;
+    z-index: -1;
+    inset: 0;
+    border: 1px solid var(--chat-composer-outline);
+    border-radius: 16px 16px 0 0;
+    background: color-mix(
+      in srgb,
+      var(--chat-composer-glass-surface) var(--glass-opacity),
+      transparent
+    );
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    -webkit-mask-image: linear-gradient(to top, transparent 0 1rem, black 1rem);
+    mask-image: linear-gradient(to top, transparent 0 1rem, black 1rem);
+    box-shadow: 0 -12px 28px -18px rgb(0 0 0 / 40%);
+    content: "";
+
+    @variant dark {
+      border-color: rgb(255 255 255 / 7%);
+      background:
+        linear-gradient(
+          to top,
+          transparent 0 1rem,
+          rgb(0 0 0 / 18%) 1rem,
+          transparent calc(1rem + 10px)
+        ),
+        linear-gradient(rgb(255 255 255 / 2%), rgb(255 255 255 / 2%)),
+        color-mix(in srgb, var(--chat-composer-glass-surface) var(--glass-opacity), transparent);
+      box-shadow: 0 -14px 32px -18px rgb(0 0 0 / 75%);
+    }
+  }
+
+  .mesura-dictation-strip[data-phase="failed"]::before {
+    border-color: color-mix(in srgb, var(--error) 32%, transparent);
+  }
+
+  .mesura-dictation-strip:is([data-phase="delivering"], [data-phase="confirming"])
+    [data-dictation-mode-control="true"] {
+    color: var(--primary);
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--primary) 22%, transparent),
+      0 0 18px color-mix(in srgb, var(--primary) 16%, transparent);
+    animation: mesura-dictation-confirmation 800ms ease-in-out 2 alternate;
+  }
+
+  @keyframes mesura-dictation-confirmation {
+    to {
+      transform: scale(1.08);
+      box-shadow:
+        0 0 0 1px color-mix(in srgb, var(--primary) 38%, transparent),
+        0 0 22px color-mix(in srgb, var(--primary) 24%, transparent);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .mesura-dictation-strip [data-dictation-mode-control="true"] {
+      animation: none;
+    }
+  }
+
+  @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+    .mesura-dictation-strip::before {
+      background: var(--chat-composer-glass-surface);
+    }
+  }
+
   .chat-composer-glass-shell:is(
       .chat-composer-glass-shell-attached,
       :has(:is(.chat-composer-top-drawer, .chat-composer-shoulder-tab))
