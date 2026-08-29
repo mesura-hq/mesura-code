@@ -946,10 +946,10 @@ it.layer(
           text: "Remove",
           attachments: [
             {
-              type: "image",
+              type: "file",
               id: removeAttachmentId,
-              name: "remove.png",
-              mimeType: "image/png",
+              name: "remove.pdf",
+              mimeType: "application/pdf",
               sizeBytes: 5,
             },
           ],
@@ -961,7 +961,7 @@ it.layer(
       });
 
       const keepPath = path.join(attachmentsDir, `${keepAttachmentId}.png`);
-      const removePath = path.join(attachmentsDir, `${removeAttachmentId}.png`);
+      const removePath = path.join(attachmentsDir, `${removeAttachmentId}.bin`);
       yield* fileSystem.makeDirectory(attachmentsDir, { recursive: true });
       yield* fileSystem.writeFileString(keepPath, "keep");
       yield* fileSystem.writeFileString(removePath, "remove");
@@ -1079,10 +1079,10 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-atta
             text: "Delete",
             attachments: [
               {
-                type: "image",
+                type: "file",
                 id: attachmentId,
-                name: "delete.png",
-                mimeType: "image/png",
+                name: "delete.mp4",
+                mimeType: "video/mp4",
                 sizeBytes: 5,
               },
             ],
@@ -1093,7 +1093,7 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-atta
           },
         });
 
-        const threadAttachmentPath = path.join(attachmentsDir, `${attachmentId}.png`);
+        const threadAttachmentPath = path.join(attachmentsDir, `${attachmentId}.bin`);
         const otherThreadAttachmentPath = path.join(
           attachmentsDir,
           `${otherThreadAttachmentId}.png`,

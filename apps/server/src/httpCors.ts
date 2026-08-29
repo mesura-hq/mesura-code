@@ -1,10 +1,30 @@
-export const browserApiCorsAllowedMethods = ["GET", "POST", "OPTIONS"] as const;
+export const browserApiCorsAllowedMethods = [
+  "GET",
+  "HEAD",
+  "POST",
+  "PATCH",
+  "DELETE",
+  "OPTIONS",
+] as const;
 export const browserApiCorsAllowedHeaders = [
   "authorization",
   "b3",
   "traceparent",
   "content-type",
   "dpop",
+  "tus-resumable",
+  "upload-length",
+  "upload-metadata",
+  "upload-offset",
+] as const;
+
+export const browserApiCorsExposedHeaders = [
+  "location",
+  "tus-extension",
+  "tus-resumable",
+  "tus-version",
+  "upload-length",
+  "upload-offset",
 ] as const;
 
 export const browserApiCorsHeaders = {

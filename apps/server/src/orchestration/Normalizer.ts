@@ -11,6 +11,7 @@ import {
 } from "@t3tools/contracts";
 
 import { createAttachmentId, resolveAttachmentPath } from "../attachmentStore.ts";
+import { type AttachmentUploadStore, makeAttachmentUploadStore } from "../attachmentUploadStore.ts";
 import { ServerConfig } from "../config.ts";
 import { parseBase64DataUrl } from "../imageMime.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
@@ -42,6 +43,37 @@ export const canonicalizeClientCommandTimestamps = (
     },
   };
 };
+
+const updateUploadedAttachmentClaims = Effect.fn("Normalizer.updateUploadedAttachmentClaims")(
+  function* (
+    command: ClientOrchestrationCommand,
+    operation: "releaseClaim" | "commitClaim",
+    providedStore?: AttachmentUploadStore,
+  ) {
+    if (command.type !== "thread.turn.start") return;
+    const uploadedAttachments = command.message.attachments.filter(
+      (attachment) => attachment.type === "uploaded",
+    );
+    if (uploadedAttachments.length === 0) return;
+    const store = providedStore ?? (yield* makeAttachmentUploadStoreFromConfig);
+    yield* Effect.forEach(
+      uploadedAttachments,
+      (attachment) =>
+        store[operation]({ uploadId: attachment.uploadId, claimToken: command.commandId }).pipe(
+          Effect.ignore,
+        ),
+      { concurrency: 1, discard: true },
+    );
+  },
+);
+
+const makeAttachmentUploadStoreFromConfig = Effect.gen(function* () {
+  const serverConfig = yield* ServerConfig;
+  return yield* makeAttachmentUploadStore({
+    uploadsDir: serverConfig.attachmentUploadsDir,
+    attachmentsDir: serverConfig.attachmentsDir,
+  });
+});
 
 export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
   Effect.gen(function* () {
@@ -104,10 +136,40 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
       return canonicalCommand as OrchestrationCommand;
     }
 
+    const attachmentUploadStore = canonicalCommand.message.attachments.some(
+      (attachment) => attachment.type === "uploaded",
+    )
+      ? yield* makeAttachmentUploadStore({
+          uploadsDir: serverConfig.attachmentUploadsDir,
+          attachmentsDir: serverConfig.attachmentsDir,
+        })
+      : undefined;
+
     const normalizedAttachments = yield* Effect.forEach(
       canonicalCommand.message.attachments,
       (attachment) =>
         Effect.gen(function* () {
+          if (attachment.type === "uploaded") {
+            if (!attachmentUploadStore) {
+              return yield* new OrchestrationDispatchCommandError({
+                message: "Attachment upload storage is unavailable.",
+              });
+            }
+            return yield* attachmentUploadStore
+              .claim({
+                uploadId: attachment.uploadId,
+                threadId: canonicalCommand.threadId,
+                claimToken: canonicalCommand.commandId,
+              })
+              .pipe(
+                Effect.mapError(
+                  (error) =>
+                    new OrchestrationDispatchCommandError({
+                      message: error.message,
+                    }),
+                ),
+              );
+          }
           const parsed = parseBase64DataUrl(attachment.dataUrl);
           if (!parsed || !parsed.mimeType.startsWith("image/")) {
             return yield* new OrchestrationDispatchCommandError({
@@ -167,6 +229,16 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
           return persistedAttachment;
         }),
       { concurrency: 1 },
+    ).pipe(
+      Effect.onError(() =>
+        attachmentUploadStore
+          ? updateUploadedAttachmentClaims(
+              canonicalCommand,
+              "releaseClaim",
+              attachmentUploadStore,
+            ).pipe(Effect.ignore)
+          : Effect.void,
+      ),
     );
 
     return {
@@ -177,3 +249,9 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
       },
     } satisfies OrchestrationCommand;
   });
+
+export const rollbackDispatchCommandAttachments = (command: ClientOrchestrationCommand) =>
+  updateUploadedAttachmentClaims(command, "releaseClaim").pipe(Effect.ignore);
+
+export const commitDispatchCommandAttachments = (command: ClientOrchestrationCommand) =>
+  updateUploadedAttachmentClaims(command, "commitClaim").pipe(Effect.ignore);
