@@ -4,6 +4,7 @@ import {
   SymmetriaDictationSessionId,
   SymmetriaDictationSource,
   SymmetriaProtocolVersion,
+  type SymmetriaDictationSession as DictationSession,
 } from "@symmetria/broker-contract";
 import { CommandId, IsoDateTime } from "@t3tools/contracts";
 import * as Result from "effect/Result";
@@ -19,6 +20,7 @@ type SymmetriaDictationBridge = {
   readonly resolveRequest: (requestId: string, result: unknown) => void;
   readonly sendCommand: (command: unknown) => Promise<unknown>;
   readonly getShellAvailability: () => Promise<unknown>;
+  readonly getConfirmationRecovery: () => Promise<unknown>;
   readonly subscribeShellAvailability: (listener: (available: boolean) => void) => () => void;
 };
 
@@ -38,6 +40,20 @@ const ReservationRequest = Schema.Struct({
 const decodeReservation = Schema.decodeUnknownResult(ReservationRequest);
 const decodeCommand = Schema.decodeUnknownResult(SymmetriaDictationCommand);
 const decodeSession = Schema.decodeUnknownResult(SymmetriaDictationSession);
+const decodeConfirmationRecovery = Schema.decodeUnknownResult(
+  Schema.Struct({ session: SymmetriaDictationSession, commandId: CommandId }),
+);
+
+export function shouldResumeConfirmation(
+  current: DictationSession | null,
+  recovered: DictationSession,
+): boolean {
+  return (
+    current?.phase === "confirming" &&
+    current.sessionId === recovered.sessionId &&
+    recovered.phase === "confirming"
+  );
+}
 
 export function useDictationBridge(): void {
   useEffect(() => {
@@ -47,6 +63,7 @@ export function useDictationBridge(): void {
 
     let active = true;
     let observedAvailabilityEvent = false;
+    let confirmationRecoveryRequestKey: string | null = null;
     const unsubscribeAvailability = bridge.subscribeShellAvailability((available) => {
       observedAvailabilityEvent = true;
       useDictationSessionStore.getState().setBridgeAvailable(available);
@@ -64,14 +81,52 @@ export function useDictationBridge(): void {
         }
       });
 
+    const requestConfirmationRecovery = (session: DictationSession): void => {
+      const recoveryKey = session.sessionId;
+      if (confirmationRecoveryRequestKey === recoveryKey) return;
+      confirmationRecoveryRequestKey = recoveryKey;
+      void bridge
+        .getConfirmationRecovery()
+        .then((raw) => {
+          const decoded = decodeConfirmationRecovery(raw);
+          if (!active) return;
+          if (Result.isFailure(decoded)) {
+            if (confirmationRecoveryRequestKey === recoveryKey) {
+              confirmationRecoveryRequestKey = null;
+            }
+            return;
+          }
+          const currentSession = useDictationSessionStore.getState().session;
+          if (!shouldResumeConfirmation(currentSession, decoded.success.session)) return;
+          void dictationCoordinator
+            .resumeConfirmation(decoded.success.session, decoded.success.commandId)
+            .catch((cause: unknown) => {
+              useDictationSessionStore
+                .getState()
+                .setError(cause instanceof Error ? cause.message : String(cause));
+            });
+        })
+        .catch(() => {
+          if (confirmationRecoveryRequestKey === recoveryKey) {
+            confirmationRecoveryRequestKey = null;
+          }
+        });
+    };
+
     const unsubscribeSession = bridge.subscribe((raw) => {
       if (raw === null) {
+        dictationCoordinator.restoreSession(null);
         useDictationSessionStore.getState().setSession(null);
         return;
       }
       const decoded = decodeSession(raw);
       if (Result.isSuccess(decoded)) {
+        dictationCoordinator.restoreSession(decoded.success);
         useDictationSessionStore.getState().setSession(decoded.success);
+        if (decoded.success.phase === "confirming") requestConfirmationRecovery(decoded.success);
+        else if (confirmationRecoveryRequestKey === decoded.success.sessionId) {
+          confirmationRecoveryRequestKey = null;
+        }
       }
     });
 

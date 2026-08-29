@@ -275,6 +275,12 @@ describe("SymmetriaDictationReceipt", () => {
         code: "provider_start_failed",
         detail: null,
       },
+      {
+        ...receiptBase,
+        outcome: "failed",
+        code: "provider_turn_failed",
+        detail: "the correlated provider turn entered the error state",
+      },
     ];
     for (const receipt of validReceipts) {
       expect(Result.isSuccess(decodeReceipt(receipt)), receipt.outcome).toBe(true);

@@ -286,6 +286,7 @@ export const SymmetriaDictationRefusalCode = Schema.Literals(SYMMETRIA_DICTATION
 export const SYMMETRIA_DICTATION_FAILURE_CODES = [
   "renderer_lost",
   "provider_start_failed",
+  "provider_turn_failed",
   "persistence_failed",
   "deadline_exceeded",
   "malformed_input",

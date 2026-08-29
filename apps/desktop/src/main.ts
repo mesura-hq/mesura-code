@@ -32,7 +32,7 @@ import * as ElectronTheme from "./electron/ElectronTheme.ts";
 import * as ElectronUpdater from "./electron/ElectronUpdater.ts";
 import * as ElectronWindow from "./electron/ElectronWindow.ts";
 import * as DesktopApp from "./app/DesktopApp.ts";
-import * as SttDelivery from "./symmetria/SttDelivery.ts";
+import * as LegacySttEndpoint from "./symmetria/LegacySttEndpoint.ts";
 import * as DictationBroker from "./symmetria/DictationBroker.ts";
 import * as ThreadPublisher from "./symmetria/ThreadPublisher.ts";
 import * as DesktopAppIdentity from "./app/DesktopAppIdentity.ts";
@@ -196,7 +196,7 @@ const desktopApplicationLayer = Layer.mergeAll(
   DesktopLinuxUrlHandler.layer,
   DesktopShellEnvironment.layer,
   DictationBroker.layer,
-  SttDelivery.layer,
+  LegacySttEndpoint.layer,
   ThreadPublisher.layer,
   desktopSshLayer,
 ).pipe(

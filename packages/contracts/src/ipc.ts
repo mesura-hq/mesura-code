@@ -1159,27 +1159,13 @@ export interface DesktopBridge {
   probeRemoteEditors?: () => Promise<readonly EditorId[]>;
   onMenuAction: (listener: (action: string) => void) => () => void;
   /**
-   * Dictation pushed in from Symmetria Shell through the main process. The
-   * listener answers with `resolveSttDelivery`, because the shell blocks on a
-   * receipt that must not be written before the text has actually landed.
-   * Optional: only the Mesura desktop build emits it.
-   */
-  onSttDelivery?: (
-    listener: (delivery: { requestId: string; text: string; submit: boolean }) => void,
-  ) => () => void;
-  resolveSttDelivery?: (
-    requestId: string,
-    outcome: "placed" | "placed-and-submitted" | "placed-not-submitted" | "no-conversation",
-  ) => void;
-  /**
-   * ⚠ This member, and the two `stt*` ones above it, are FORK ADDITIONS to an
-   * upstream-owned interface, and each one is a merge conflict at every weekly
-   * upstream synchronization. The cost was accepted deliberately rather than
-   * overlooked — and there is a cheaper shape, because `DesktopBridge` is an
+   * ⚠ This member is a FORK ADDITION to an upstream-owned interface and causes
+   * a merge conflict at every weekly upstream synchronization. The cost was
+   * accepted rather than overlooked. A cheaper shape exists because `DesktopBridge` is an
    * `interface` and TypeScript declaration merging would let the fork add
-   * members without this file being touched at all. Moving all three is one
-   * piece of work (both app projects have to see the augmentation) and is
-   * tracked as issue #16. Do not add a fourth member here without reading it.
+   * members without this file being touched at all. Moving it requires both app
+   * projects to see the augmentation. Issue #16: Fork additions to DesktopBridge edit an upstream
+   * interface that declaration merging could leave untouched tracks that work.
    *
    * The renderer's projected thread list, forwarded to the main process so it
    * can republish it on the Symmetria socket. Fire-and-forget from the

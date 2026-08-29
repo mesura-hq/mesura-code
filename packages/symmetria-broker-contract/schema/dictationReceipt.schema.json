@@ -164,6 +164,7 @@
           "enum": [
             "renderer_lost",
             "provider_start_failed",
+            "provider_turn_failed",
             "persistence_failed",
             "deadline_exceeded",
             "malformed_input"

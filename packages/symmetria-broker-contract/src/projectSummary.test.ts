@@ -199,14 +199,13 @@ describe("the stream carries projects", () => {
 });
 
 describe("additive contract changes advance the minor version", () => {
-  // Projects introduced 1.1. Dictation introduces 1.2 and carries an
-  // EnvironmentId for the first time. Keeping the old exact assertions would
-  // make a correct additive release look like a regression.
+  // Projects introduced 1.1. Dictation started at 1.2 and evolves additively.
+  // These assertions move only when the published protocol surface moves.
   it("announces the latest additive protocol surface", () => {
-    expect(SYMMETRIA_PROTOCOL_MINOR).toBe(4);
+    expect(SYMMETRIA_PROTOCOL_MINOR).toBe(5);
   });
 
   it("keeps the semantic contract version in step", () => {
-    expect(SYMMETRIA_CONTRACT_VERSION).toBe("1.4.0");
+    expect(SYMMETRIA_CONTRACT_VERSION).toBe("1.5.0");
   });
 });

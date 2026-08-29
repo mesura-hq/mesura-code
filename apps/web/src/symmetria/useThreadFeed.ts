@@ -1,7 +1,7 @@
 /**
  * Forwards the renderer's projected thread list to the main process.
  *
- * Deliberately thin, like `useSttDelivery` beside it: everything decidable is
+ * Deliberately thin: everything decidable is
  * in `threadFeed.ts`, which is pure and is where the tests are.
  *
  * The generation is minted once per mount and is what tells the main process a

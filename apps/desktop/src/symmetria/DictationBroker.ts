@@ -26,6 +26,7 @@ import {
   DICTATION_RENDERER_REQUEST_CHANNEL,
   DICTATION_SHELL_AVAILABILITY_CHANNEL,
   DICTATION_SNAPSHOT_CHANNEL,
+  GET_DICTATION_CONFIRMATION_RECOVERY_CHANNEL,
   GET_DICTATION_SHELL_AVAILABILITY_CHANNEL,
   GET_DICTATION_SNAPSHOT_CHANNEL,
   RESOLVE_DICTATION_RENDERER_REQUEST_CHANNEL,
@@ -69,6 +70,10 @@ export type LocalDictationBroker = {
     command: SymmetriaDictationCommand,
   ) => Promise<SymmetriaDictationReceipt | null>;
   readonly snapshot: () => SymmetriaDictationSession | null;
+  readonly confirmationRecovery: () => {
+    readonly session: SymmetriaDictationSession;
+    readonly commandId: string;
+  } | null;
   readonly frame: () => {
     readonly revision: number;
     readonly session: SymmetriaDictationSession | null;
@@ -138,6 +143,7 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
   const receiptListeners = new Set<(receipt: SymmetriaDictationReceipt) => void>();
   const commandLedger = new Map<string, Promise<SymmetriaDictationReceipt | null>>();
   const retryableDeliveryCommands = new Set<string>();
+  const appliedDeliveryReceipts = new Map<string, SymmetriaDictationReceipt>();
   const reservationLedger = new Map<string, Promise<SymmetriaDictationSession>>();
   let pendingReservation: {
     readonly sessionId: string;
@@ -204,6 +210,7 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
         };
         activeDeliveryCommandId = null;
         retryableDeliveryCommands.clear();
+        appliedDeliveryReceipts.clear();
         publish();
         return session;
       })
@@ -249,11 +256,15 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
       case "dictation.control":
         if (command.action === "retry") {
           const sessionPrefix = `${command.sessionId}:`;
+          let retryAccepted = false;
           for (const key of retryableDeliveryCommands) {
             if (!key.startsWith(sessionPrefix)) continue;
+            retryAccepted = true;
             commandLedger.delete(key);
             retryableDeliveryCommands.delete(key);
+            appliedDeliveryReceipts.delete(key);
           }
+          if (!retryAccepted) return null;
         }
         session = {
           ...reserved,
@@ -368,6 +379,9 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
             detail,
           };
         }
+        const commandKey = `${command.sessionId}:${command.commandId}`;
+        const racedLateReceipt = appliedDeliveryReceipts.get(commandKey);
+        if (racedLateReceipt !== undefined) return racedLateReceipt;
         const receiptMatchesCommand =
           receipt.sessionId === command.sessionId &&
           receipt.commandId === command.commandId &&
@@ -391,6 +405,7 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
               ? "failed"
               : "completed";
         session = { ...session, phase };
+        appliedDeliveryReceipts.set(commandKey, receipt);
         cancelLeaseExpiration?.();
         cancelLeaseExpiration = null;
         publish();
@@ -446,6 +461,11 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
     ) {
       return false;
     }
+    const commandKey = `${receipt.sessionId}:${receipt.commandId}`;
+    if (isTerminalPhase(session.phase)) {
+      const recorded = appliedDeliveryReceipts.get(commandKey);
+      return recorded !== undefined && JSON.stringify(recorded) === JSON.stringify(receipt);
+    }
     const phase =
       receipt.outcome === "confirmation-pending"
         ? "confirming"
@@ -453,7 +473,7 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
           ? "failed"
           : "completed";
     session = { ...session, phase };
-    const commandKey = `${receipt.sessionId}:${receipt.commandId}`;
+    appliedDeliveryReceipts.set(commandKey, receipt);
     commandLedger.set(commandKey, Promise.resolve(receipt));
     if (
       receipt.outcome === "failed" &&
@@ -474,6 +494,10 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
     reserve,
     command,
     snapshot: () => session,
+    confirmationRecovery: () =>
+      session?.phase === "confirming" && activeDeliveryCommandId !== null
+        ? { session, commandId: activeDeliveryCommandId }
+        : null,
     frame: () => ({ revision, session }),
     watch,
     watchFrames: (listener) => {
@@ -650,6 +674,11 @@ const makeRequired = Effect.gen(function* () {
   yield* ipc.handle({
     channel: GET_DICTATION_SNAPSHOT_CHANNEL,
     handler: () => Effect.sync(() => broker.frame()),
+  });
+
+  yield* ipc.handle({
+    channel: GET_DICTATION_CONFIRMATION_RECOVERY_CHANNEL,
+    handler: () => Effect.sync(() => broker.confirmationRecovery()),
   });
 
   yield* ipc.handle({

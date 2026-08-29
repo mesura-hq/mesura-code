@@ -1,11 +1,10 @@
 /**
  * The wire shape Symmetria Shell already speaks, and the receipt it blocks on.
  *
- * `stt-inject.sh` writes one JSON line to a per-process Unix socket and waits
- * for one line back. In socket mode it deliberately never falls back to the
- * clipboard, so an exchange that is not answered does not degrade — it loses
- * the dictation. Every branch here therefore produces an answer, including the
- * ones that could not parse their input.
+ * An old `stt-inject.sh` writes one JSON line to a per-process Unix socket and
+ * waits for one line back. Mesura no longer accepts that destination-less
+ * request. Every branch still produces an answer so the old client receives an
+ * explicit refusal instead of a timeout.
  *
  * Pure on purpose: no Electron import, no node import, so the parsing and the
  * receipt shaping are testable without a socket.
@@ -17,23 +16,21 @@ export type SttRequest = {
   readonly submit: boolean;
 };
 
-export type SttErrorCode = "malformed-json" | "unknown-type" | "invalid-request";
+export type SttErrorCode =
+  | "malformed-json"
+  | "unknown-type"
+  | "invalid-request"
+  | "reserved-session-required";
 
 export type SttParseResult =
   | { readonly ok: true; readonly request: SttRequest }
   | { readonly ok: false; readonly code: SttErrorCode; readonly detail: string };
 
-/**
- * What delivery did. `no-conversation` is a failure but not an error: nothing
- * went wrong, there was simply nowhere to put the words. The shell needs the
- * two apart because only one of them is worth reporting as a fault.
- */
-export type SttOutcome =
-  | { readonly kind: "placed" }
-  | { readonly kind: "placed-and-submitted" }
-  | { readonly kind: "placed-not-submitted" }
-  | { readonly kind: "no-conversation" }
-  | { readonly kind: "error"; readonly code: SttErrorCode; readonly detail: string };
+export type SttOutcome = {
+  readonly kind: "error";
+  readonly code: SttErrorCode;
+  readonly detail: string;
+};
 
 const MESSAGE_TYPE = "stt_inject";
 
@@ -74,47 +71,6 @@ export function parseSttRequest(line: string): SttParseResult {
   return { ok: true, request: { text, submit: decoded["submit"] === true } };
 }
 
-/**
- * The window's answer, coming back over IPC. Lives here rather than beside the
- * Electron wiring so the accepted set is testable without importing Electron —
- * it grew from two values to four and a typo in one of them would otherwise
- * fall through to `null` with nothing to catch it.
- */
-export function parseRendererOutcome(
-  raw: unknown,
-): { readonly requestId: string; readonly outcome: SttOutcome } | null {
-  if (!isRecord(raw)) return null;
-  const { requestId, outcome } = raw;
-  if (typeof requestId !== "string") return null;
-  if (
-    outcome === "placed" ||
-    outcome === "placed-and-submitted" ||
-    outcome === "placed-not-submitted" ||
-    outcome === "no-conversation"
-  ) {
-    return { requestId, outcome: { kind: outcome } };
-  }
-  return null;
-}
-
 export function formatReceipt(outcome: SttOutcome): string {
-  switch (outcome.kind) {
-    case "placed":
-      return JSON.stringify({ ok: true, outcome: "placed" });
-    case "placed-and-submitted":
-      return JSON.stringify({ ok: true, outcome: "placed-and-submitted" });
-    case "placed-not-submitted":
-      // Not `ok`: the send the request asked for did not happen. The detail
-      // says where the words went, because the shell keeps no clipboard copy
-      // in socket mode and the operator would otherwise think they were lost.
-      return JSON.stringify({
-        ok: false,
-        outcome: "placed-not-submitted",
-        detail: "the text is in the composer but the turn did not start",
-      });
-    case "no-conversation":
-      return JSON.stringify({ ok: false, outcome: "no-conversation" });
-    case "error":
-      return JSON.stringify({ ok: false, outcome: outcome.code, detail: outcome.detail });
-  }
+  return JSON.stringify({ ok: false, outcome: outcome.code, detail: outcome.detail });
 }

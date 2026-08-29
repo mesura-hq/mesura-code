@@ -2,8 +2,7 @@
  * Builds what the renderer forwards to the main process for publication.
  *
  * Pure, and deliberately the only decidable part of this direction — the hook
- * beside it is glue. The same split as `sttDelivery.ts` next door, and for the
- * same reason: everything worth a test lives here.
+ * beside it is glue. Everything worth a test lives here.
  *
  * ## The allowlist starts here, not at the wire
  *

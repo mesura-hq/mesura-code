@@ -340,10 +340,57 @@ it("retries one failed delivery with its original command identity only after ex
   assert.equal(retried?.outcome, "turn-running");
 });
 
+it("does not retry a provider turn that already dispatched and entered error", async () => {
+  let deliveryCount = 0;
+  const broker = createDictationBroker({
+    reserveTarget: async () => ({ target: targetA, projectName: "Project A" }),
+    deliver: async () => {
+      deliveryCount += 1;
+      return decodeReceipt({
+        outcome: "failed",
+        protocolVersion: { major: 1, minor: 5 },
+        sessionId: "session-a",
+        commandId: "command-deliver",
+        target: targetA,
+        application: "first",
+        code: "provider_turn_failed",
+        detail: "the correlated provider turn entered the error state",
+      });
+    },
+  });
+  await broker.reserve(reserveRequest);
+  await broker.command(makeDeliverCommand());
+
+  await broker.command(
+    decodeCommand({
+      type: "dictation.control",
+      protocolVersion: { major: 1, minor: 5 },
+      sessionId: "session-a",
+      commandId: "command-retry-turn",
+      createdAt: "2026-08-29T12:00:06.000Z",
+      action: "retry",
+    }),
+  );
+  const replay = await broker.command(makeDeliverCommand());
+
+  assert.equal(deliveryCount, 1);
+  assert.equal(replay?.outcome, "failed");
+  if (replay?.outcome === "failed") assert.equal(replay.code, "provider_turn_failed");
+  assert.equal(broker.snapshot()?.phase, "failed");
+});
+
 it("forwards a correlated late receipt to connected Shell clients", async () => {
   const broker = createDictationBroker({
     reserveTarget: async () => ({ target: targetA, projectName: "Project A" }),
-    deliver: async () => makeTurnRunningReceipt(),
+    deliver: async () =>
+      decodeReceipt({
+        outcome: "confirmation-pending",
+        protocolVersion: { major: 1, minor: 4 },
+        sessionId: "session-a",
+        commandId: "command-deliver",
+        target: targetA,
+        application: "first",
+      }),
   });
   await broker.reserve(reserveRequest);
   await broker.command(makeDeliverCommand());
@@ -356,6 +403,38 @@ it("forwards a correlated late receipt to connected Shell clients", async () => 
   assert.isTrue(reported);
   assert.equal(broker.snapshot()?.phase, "completed");
   assert.deepEqual(receipts, [makeTurnRunningReceipt()]);
+});
+
+it("does not let a pending delivery response overwrite an earlier final receipt", async () => {
+  const callbacks: { resolve?: (receipt: ReturnType<typeof decodeReceipt>) => void } = {};
+  const broker = createDictationBroker({
+    reserveTarget: async () => ({ target: targetA, projectName: "Project A" }),
+    deliver: () =>
+      new Promise((resolve) => {
+        callbacks.resolve = resolve;
+      }),
+  });
+  await broker.reserve(reserveRequest);
+  const delivery = broker.command(makeDeliverCommand());
+  await Promise.resolve();
+
+  const late = makeTurnRunningReceipt();
+  assert.isTrue(broker.reportLateReceipt(late));
+  callbacks.resolve?.(
+    decodeReceipt({
+      outcome: "confirmation-pending",
+      protocolVersion: { major: 1, minor: 4 },
+      sessionId: "session-a",
+      commandId: "command-deliver",
+      target: targetA,
+      application: "first",
+    }),
+  );
+
+  const receipt = await delivery;
+  assert.equal(receipt?.outcome, "turn-running");
+  assert.equal(broker.snapshot()?.phase, "completed");
+  assert.isTrue(broker.reportLateReceipt(late));
 });
 
 it("retries the original delivery identity after a retryable late failure", async () => {
@@ -378,6 +457,10 @@ it("retries the original delivery identity after a retryable late failure", asyn
   });
   await broker.reserve(reserveRequest);
   await broker.command(makeDeliverCommand());
+  assert.deepEqual(broker.confirmationRecovery(), {
+    session: broker.snapshot(),
+    commandId: "command-deliver",
+  });
   assert.isTrue(
     broker.reportLateReceipt(
       decodeReceipt({
@@ -392,6 +475,7 @@ it("retries the original delivery identity after a retryable late failure", asyn
       }),
     ),
   );
+  assert.isNull(broker.confirmationRecovery());
 
   await broker.command(
     decodeCommand({
@@ -545,8 +629,8 @@ it("removes a renderer request when webContents.send throws", async () => {
   assert.equal(bridge.pendingCount(), 0);
 });
 
-// Acceptance: the rollout adds a new persistent socket beside the old one. It
-// does not silently turn the old destination-less request into the new path.
+// The old path remains a distinct refusal-only endpoint during rollout. It
+// cannot silently turn a destination-less request into the new path.
 it.effect("keeps the destination-less stt socket as a distinct compatibility endpoint", () =>
   Effect.gen(function* () {
     const runtimeDir = "/run/user/1000";

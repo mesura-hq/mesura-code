@@ -1,5 +1,6 @@
 import {
   SymmetriaDictationCommand,
+  SymmetriaDictationSession,
   type SymmetriaDictationTarget,
 } from "@symmetria/broker-contract";
 import {
@@ -7,6 +8,7 @@ import {
   EnvironmentId,
   MessageId,
   ProjectId,
+  ProviderDriverKind,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -29,8 +31,13 @@ const createTestCoordinator = (options: Parameters<typeof createDictationCoordin
   createDictationCoordinator({ threadExists: () => true, ...options });
 
 const environmentId = EnvironmentId.make("environment-a");
+const otherEnvironmentId = EnvironmentId.make("environment-b");
 const threadA = scopeThreadRef(environmentId, ThreadId.make("thread-a"));
 const threadB = scopeThreadRef(environmentId, ThreadId.make("thread-b"));
+const collidingThreadInOtherEnvironment = scopeThreadRef(
+  otherEnvironmentId,
+  ThreadId.make("thread-a"),
+);
 const targetA: SymmetriaDictationTarget = { kind: "thread", ...threadA };
 const targetB: SymmetriaDictationTarget = { kind: "thread", ...threadB };
 
@@ -43,6 +50,7 @@ const reserveRequest = {
 };
 
 const decodeCommand = Schema.decodeUnknownSync(SymmetriaDictationCommand);
+const decodeSession = Schema.decodeUnknownSync(SymmetriaDictationSession);
 
 const deliver = (
   mode: "clipboard" | "inject" | "submit" = "inject",
@@ -90,6 +98,43 @@ it("keeps the reserved target after navigation to another thread", async () => {
   assert.equal(receipt.outcome, "inserted");
   assert.equal(promptAt(threadA), "[voiced] dictated words");
   assert.isUndefined(promptAt(threadB));
+});
+
+it("does not retarget across environments whose thread ids collide", async () => {
+  const otherTarget: SymmetriaDictationTarget = {
+    kind: "thread",
+    ...collidingThreadInOtherEnvironment,
+  };
+  useComposerDraftStore
+    .getState()
+    .setPrompt(collidingThreadInOtherEnvironment, "other environment");
+  const coordinator = createTestCoordinator();
+  coordinator.registerComposer({ target: targetA, projectName: "Project A", handle: null });
+  await coordinator.reserve(reserveRequest);
+  coordinator.registerComposer({ target: otherTarget, projectName: "Project B", handle: null });
+
+  const receipt = await coordinator.deliver(deliver());
+
+  assert.equal(receipt.outcome, "inserted");
+  assert.equal(promptAt(threadA), "[voiced] dictated words");
+  assert.equal(promptAt(collidingThreadInOtherEnvironment), "other environment");
+});
+
+it("fails closed when the reserved thread disappears and leaves the visible chat untouched", async () => {
+  let targetAvailable = true;
+  useComposerDraftStore.getState().setPrompt(threadB, "visible chat");
+  const coordinator = createDictationCoordinator({ threadExists: () => targetAvailable });
+  coordinator.registerComposer({ target: targetA, projectName: "Project A", handle: null });
+  await coordinator.reserve(reserveRequest);
+  coordinator.registerComposer({ target: targetB, projectName: "Project B", handle: null });
+  targetAvailable = false;
+
+  const receipt = await coordinator.deliver(deliver());
+
+  assert.equal(receipt.outcome, "refused");
+  if (receipt.outcome === "refused") assert.equal(receipt.code, "target_missing");
+  assert.isUndefined(promptAt(threadA));
+  assert.equal(promptAt(threadB), "visible chat");
 });
 
 it("retains only the newest session reservation and no stale composer handle", async () => {
@@ -163,10 +208,12 @@ it("marks a submitted pending answer for the Shell toast", async () => {
 
 it("reports a late correlated turn receipt after visible confirmation times out", async () => {
   const lateReceipts: Array<unknown> = [];
+  let confirmations = 0;
   const messageId = MessageId.make("dictation-command-deliver");
   const coordinator = createTestCoordinator({
     submit: async () => ({ kind: "turn-dispatched", messageId }),
     confirm: async (identity, options) => {
+      confirmations += 1;
       options?.onLateReceipt?.({
         outcome: "turn-running",
         protocolVersion: identity.protocolVersion,
@@ -192,8 +239,24 @@ it("reports a late correlated turn receipt after visible confirmation times out"
   await coordinator.reserve(reserveRequest);
 
   const receipt = await coordinator.deliver(deliver("submit"));
+  const confirmingSession = decodeSession({
+    protocolVersion: { major: 1, minor: 5 },
+    sessionId: "session-a",
+    target: targetA,
+    source: "shell",
+    phase: "confirming",
+    mode: "submit",
+    projectName: "Project A",
+    startedAt: "2026-08-29T12:00:00.000Z",
+    elapsedMs: 17_000,
+    audioLevel: null,
+    graceRemainingMs: null,
+    presentation: { mesuraOwnsPresentation: false, leaseExpiresAt: null },
+  });
+  await coordinator.resumeConfirmation(confirmingSession, CommandId.make("command-deliver"));
 
   assert.equal(receipt.outcome, "confirmation-pending");
+  assert.equal(confirmations, 1);
   assert.equal(lateReceipts.length, 1);
   assert.deepInclude(lateReceipts[0] as object, { outcome: "turn-running", turnId: "turn-late" });
 });
@@ -219,6 +282,128 @@ it("applies one command identity only once", async () => {
   assert.equal(promptAt(threadA), "[voiced] dictated words");
 });
 
+it("restores the broker reservation after a renderer restart before delivery", async () => {
+  const coordinator = createTestCoordinator();
+  coordinator.restoreSession(
+    decodeSession({
+      protocolVersion: { major: 1, minor: 4 },
+      sessionId: deliver().sessionId,
+      target: targetA,
+      source: "shell",
+      phase: "processing",
+      mode: "inject",
+      projectName: "Project A",
+      startedAt: "2026-08-29T12:00:00.000Z",
+      elapsedMs: 2_000,
+      audioLevel: null,
+      graceRemainingMs: null,
+      presentation: { mesuraOwnsPresentation: false, leaseExpiresAt: null },
+    }),
+  );
+
+  const receipt = await coordinator.deliver(deliver());
+
+  assert.equal(receipt.outcome, "inserted");
+  assert.equal(promptAt(threadA), "[voiced] dictated words");
+});
+
+it("does not erase captured submission context when its own broker snapshot returns", async () => {
+  const capturedContext = {
+    providerAvailable: true,
+    provider: ProviderDriverKind.make("codex"),
+    model: null,
+    models: [],
+    effort: null,
+    pendingAction: { kind: "button-approval" as const },
+  };
+  let observedContext: unknown;
+  const coordinator = createTestCoordinator({
+    submit: async (input) => {
+      observedContext = input.submissionContext;
+      return { kind: "answer-submitted" };
+    },
+  });
+  coordinator.registerComposer({
+    target: targetA,
+    projectName: "Project A",
+    handle: null,
+    readSubmissionContext: () => capturedContext,
+  });
+  await coordinator.reserve(reserveRequest);
+  coordinator.restoreSession(
+    decodeSession({
+      protocolVersion: { major: 1, minor: 4 },
+      sessionId: deliver().sessionId,
+      target: targetA,
+      source: "shell",
+      phase: "recording",
+      mode: "submit",
+      projectName: "Project A",
+      startedAt: "2026-08-29T12:00:00.000Z",
+      elapsedMs: 0,
+      audioLevel: null,
+      graceRemainingMs: null,
+      presentation: { mesuraOwnsPresentation: false, leaseExpiresAt: null },
+    }),
+  );
+  coordinator.registerComposer({ target: targetB, projectName: "Project B", handle: null });
+
+  await coordinator.deliver(deliver("submit"));
+
+  assert.deepEqual(observedContext, capturedContext);
+});
+
+it("reattaches one confirmation watcher after a renderer reload", async () => {
+  let confirmations = 0;
+  const lateReceipts: Array<unknown> = [];
+  const commandId = CommandId.make("command-deliver");
+  const messageId = MessageId.make("dictation-command-deliver");
+  const coordinator = createTestCoordinator({
+    confirm: async (identity) => {
+      confirmations += 1;
+      return {
+        outcome: "turn-running",
+        protocolVersion: identity.protocolVersion,
+        sessionId: identity.sessionId,
+        commandId: identity.commandId,
+        target: identity.target,
+        application: "first",
+        messageId,
+        turnId: TurnId.make("turn-recovered"),
+      };
+    },
+    reportLateReceipt: (receipt) => lateReceipts.push(receipt),
+  });
+  const confirmingSession = decodeSession({
+    protocolVersion: { major: 1, minor: 5 },
+    sessionId: "session-a",
+    target: targetA,
+    source: "shell",
+    phase: "confirming",
+    mode: "submit",
+    projectName: "Project A",
+    startedAt: "2026-08-29T12:00:00.000Z",
+    elapsedMs: 17_000,
+    audioLevel: null,
+    graceRemainingMs: null,
+    presentation: { mesuraOwnsPresentation: false, leaseExpiresAt: null },
+  });
+
+  await Promise.all([
+    coordinator.resumeConfirmation(confirmingSession, commandId),
+    coordinator.resumeConfirmation(confirmingSession, commandId),
+  ]);
+
+  assert.equal(confirmations, 1);
+  assert.equal(lateReceipts.length, 1);
+  assert.deepInclude(lateReceipts[0] as object, {
+    outcome: "turn-running",
+    commandId,
+    messageId,
+    turnId: "turn-recovered",
+  });
+});
+
 // Acceptance: inserted is earned only after the forced persisted readback sees
 // the exact command and resulting prompt.
 it("emits inserted only after persistence confirms the exact append", async () => {
@@ -242,6 +427,59 @@ it("emits inserted only after persistence confirms the exact append", async () =
   const persisted = await readPersistedDictationTarget(targetKey);
   assert.equal(persisted?.prompt, "[voiced] dictated words");
   assert.equal(persisted?.applications[0]?.commandId, "command-deliver");
+});
+
+it("reports persistence failure without writing to another composer", async () => {
+  useComposerDraftStore.getState().setPrompt(threadB, "visible chat");
+  const coordinator = createTestCoordinator({
+    append: async () => ({ ok: false, reason: "persistence-failed" }),
+  });
+  coordinator.registerComposer({ target: targetA, projectName: "Project A", handle: null });
+  await coordinator.reserve(reserveRequest);
+  coordinator.registerComposer({ target: targetB, projectName: "Project B", handle: null });
+
+  const receipt = await coordinator.deliver(deliver());
+
+  assert.equal(receipt.outcome, "failed");
+  if (receipt.outcome === "failed") assert.equal(receipt.code, "persistence_failed");
+  assert.isUndefined(promptAt(threadA));
+  assert.equal(promptAt(threadB), "visible chat");
+});
+
+it("retries provider start with one persisted append and the original message identity", async () => {
+  let submissions = 0;
+  const messageId = MessageId.make("dictation-command-deliver");
+  const coordinator = createTestCoordinator({
+    submit: async () => {
+      submissions += 1;
+      return submissions === 1
+        ? { kind: "provider-start-failed", messageId }
+        : { kind: "turn-dispatched", messageId };
+    },
+    confirm: async (identity) => ({
+      outcome: "turn-running",
+      protocolVersion: identity.protocolVersion,
+      sessionId: identity.sessionId,
+      commandId: identity.commandId,
+      target: identity.target,
+      application: "first",
+      messageId,
+      turnId: TurnId.make("turn-retry"),
+    }),
+  });
+  coordinator.registerComposer({ target: targetA, projectName: "Project A", handle: null });
+  await coordinator.reserve(reserveRequest);
+  const command = deliver("submit");
+
+  const failed = await coordinator.deliver(command);
+  const retried = await coordinator.deliver(command);
+
+  assert.equal(failed.outcome, "failed");
+  assert.equal(retried.outcome, "turn-running");
+  assert.equal(submissions, 2);
+  assert.equal(promptAt(threadA), "[voiced] dictated words");
+  assert.equal(retried.commandId, command.commandId);
+  if (retried.outcome === "turn-running") assert.equal(retried.messageId, messageId);
 });
 
 it("carries the latest draft text across promotion before appending", async () => {
@@ -281,6 +519,59 @@ it("carries the latest draft text across promotion before appending", async () =
     useComposerDraftStore.getState().draftsByThreadKey[scopedThreadKey(threadA)]?.prompt,
     expected,
   );
+});
+
+it("submits a promoted draft through its preallocated thread identity", async () => {
+  const draftId = DraftId.make("draft-promoted-submit");
+  const draftSession = {
+    threadId: threadA.threadId,
+    environmentId,
+    projectId: ProjectId.make("project-a"),
+    logicalProjectKey: "project-a",
+    createdAt: "2026-08-29T12:00:00.000Z",
+    runtimeMode: "full-access" as const,
+    interactionMode: "default" as const,
+    branch: null,
+    worktreePath: null,
+    envMode: "local" as const,
+    startFromOrigin: false,
+    promotedTo: threadA,
+  };
+  const target = captureDictationTarget(draftId, draftSession);
+  if (target === null) throw new Error("invalid promoted submit fixture");
+  useComposerDraftStore.setState({
+    draftsByThreadKey: {
+      [draftId]: { ...createEmptyThreadDraft(), prompt: "typed before promotion" },
+    },
+    draftThreadsByThreadKey: { [draftId]: draftSession },
+  });
+  const submissions: Array<{ composerTarget: unknown; sourceComposerTarget?: unknown }> = [];
+  const messageId = MessageId.make("dictation-command-deliver");
+  const coordinator = createTestCoordinator({
+    submit: async (input) => {
+      submissions.push(input);
+      return { kind: "turn-dispatched", messageId };
+    },
+    confirm: async (identity) => ({
+      outcome: "turn-running",
+      protocolVersion: identity.protocolVersion,
+      sessionId: identity.sessionId,
+      commandId: identity.commandId,
+      target: identity.target,
+      application: "first",
+      messageId,
+      turnId: TurnId.make("turn-promoted"),
+    }),
+  });
+  coordinator.registerComposer({ target, projectName: "Project A", handle: null });
+  await coordinator.reserve(reserveRequest);
+
+  const receipt = await coordinator.deliver(deliver("submit", "session-a", target));
+
+  assert.equal(receipt.outcome, "turn-running");
+  assert.deepEqual(submissions[0]?.composerTarget, threadA);
+  assert.equal(submissions[0]?.sourceComposerTarget, draftId);
+  assert.equal(promptAt(threadA), "typed before promotion [voiced] dictated words");
 });
 
 it("bounds command history across targets and removes an environment ledger", async () => {

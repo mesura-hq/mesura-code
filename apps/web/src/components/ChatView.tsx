@@ -218,8 +218,7 @@ import {
   useComposerDraftStore,
   type DraftId,
 } from "../composerDraftStore";
-import { formatOutgoingComposerPrompt, submitComposerDraft } from "./chat/composerSubmission";
-import { useSttDelivery } from "../symmetria/useSttDelivery";
+import { formatOutgoingComposerPrompt } from "./chat/composerSubmission";
 import { dictationCoordinator } from "../symmetria/dictationCoordinator";
 import { captureDictationTarget } from "../symmetria/dictationTarget";
 import { buildDirectedTurnStartInput } from "../symmetria/directedComposerSubmission";
@@ -5689,105 +5688,6 @@ function ChatViewContent(props: ChatViewProps) {
     setThreadError,
   ]);
 
-  // Dictation from Symmetria Shell. It lives here rather than beside
-  // `composerDraftTarget` because it needs `onSend`, which is defined above.
-  //
-  // The target must be `composerDraftTarget` and not `routeThreadRef`: on a
-  // draft route those are different keys, and writing to the second one puts
-  // the text where the composer does not read it.
-  //
-  // Submitting goes through `submitComposerDraft`, the same entry point the
-  // composer's own send button uses, so its validation and its dispatch rule
-  // stay one implementation. Reaching past it to `startThreadTurn` would work
-  // today and drift the moment sending changes.
-  const onSendRef = useRef(onSend);
-  useEffect(() => {
-    onSendRef.current = onSend;
-  });
-  const sttWriter = useMemo(
-    () => ({
-      placePrompt: (text: string) => {
-        // Go through the composer's own handle, not a store write.
-        //
-        // Measured live on 2026-08-22: writing the store put the text on
-        // screen but left the caret at position 0, and — worse — `onSend`
-        // reads `promptRef`, which the composer maintains through its own
-        // change path and a store write never reaches. So a dictation with
-        // submit enabled hit `!hasSendableContent`, returned through a bare
-        // guard, and was reported to the shell as sent. `insertTextAtEnd` is
-        // the same entry point the composer's own typeahead uses.
-        //
-        // It APPENDS rather than replaces, which is the better behaviour
-        // anyway: dictating on top of text the user already typed should add
-        // to it, not destroy it.
-        const composer = composerRef.current;
-        if (composer?.insertTextAtEnd(text, { ensureLeadingBoundary: true })) return;
-        // No composer mounted — fall back to the store so the words are at
-        // least recoverable, even though the caret and `promptRef` will not
-        // agree with it.
-        useComposerDraftStore.getState().setPrompt(composerDraftTarget, text);
-      },
-      // ⚠ What `true` means here, exactly: the send was DISPATCHED without
-      // throwing. It does not mean the turn started.
-      //
-      // `onSend` returns `Promise<void>` — it computes `turnStartSucceeded`
-      // internally (declared around line 5381) but returns it from nowhere, and
-      // its dozen refusal guards are bare `return;`. So a send that is refused,
-      // or one whose `startThreadTurn` fails outright, resolves exactly like a
-      // send that worked. Closing that gap means having `onSend` return its own
-      // result, which changes a function the composer's send button also uses
-      // and was outside this change's approved scope; it is reported rather
-      // than guessed at here.
-      //
-      // An earlier version wrote `(await sending) !== false` with `sending`
-      // typed `unknown`. That comparison is meaningless against `Promise<void>`
-      // and the widening is the only reason it compiled — typed honestly, the
-      // compiler rejects it with TS2367. Do not widen it back.
-      submit: async (text: string) => {
-        // Wait for the composer to actually hold the text before sending.
-        // `onSend` reads `promptRef`, which the composer updates through its
-        // own change path — a render after the insert. Submitting immediately
-        // read an empty prompt, bailed on `!hasSendableContent`, and reported
-        // success. Waiting on the composer's own snapshot rather than on a
-        // guessed delay is what makes this observable instead of a race.
-        const composer = composerRef.current;
-        if (composer) {
-          let seen = false;
-          for (let attempt = 0; attempt < 30 && !seen; attempt += 1) {
-            seen = composer.getSendContext().prompt.includes(text);
-            if (!seen) await new Promise((resolve) => requestAnimationFrame(resolve));
-          }
-          // Never send a turn the composer cannot see. The words are in it —
-          // `placePrompt` ran — so this is `placed-not-submitted`, which is
-          // exactly what the shell needs to hear.
-          if (!seen) return false;
-        }
-
-        let sending: ReturnType<typeof onSend> | undefined;
-        const { didDispatch } = submitComposerDraft({
-          prompt: text,
-          submissionTarget: "provider-turn",
-          event: undefined,
-          onSend: (event) => {
-            sending = onSendRef.current(event);
-          },
-        });
-        // Refused by the prompt-length validation, before any send happened.
-        if (!didDispatch) return false;
-        try {
-          await sending;
-          return true;
-        } catch {
-          return false;
-        }
-      },
-    }),
-    // `onSend` is redefined every render, so it is read through the ref rather
-    // than depended on — otherwise the delivery effect would resubscribe on
-    // every render.
-    [composerDraftTarget],
-  );
-  useSttDelivery(sttWriter);
   const registeredDictationTarget = useMemo(
     () =>
       captureDictationTarget(

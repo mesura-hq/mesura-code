@@ -31,13 +31,13 @@ import * as Schema from "effect/Schema";
 import { NonNegativeInteger } from "./primitives.ts";
 
 /** Semantic version of the whole contract surface, pinned by consumers. */
-export const SYMMETRIA_CONTRACT_VERSION = "1.4.0";
+export const SYMMETRIA_CONTRACT_VERSION = "1.5.0";
 
 /** The single major version this build of the contract speaks. */
 export const SYMMETRIA_PROTOCOL_MAJOR = 1;
 
 /** The highest minor version this build of the contract speaks. */
-export const SYMMETRIA_PROTOCOL_MINOR = 4;
+export const SYMMETRIA_PROTOCOL_MINOR = 5;
 
 /**
  * A protocol version this build accepts. The major is pinned to a literal, so

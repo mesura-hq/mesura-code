@@ -2,6 +2,7 @@ import {
   SymmetriaDraftVersion,
   type SymmetriaDictationCommand,
   type SymmetriaDictationReceipt,
+  type SymmetriaDictationSession,
   type SymmetriaDictationTarget,
 } from "@symmetria/broker-contract";
 import { MessageId, type CommandId, type ScopedThreadRef } from "@t3tools/contracts";
@@ -94,8 +95,64 @@ export function createDictationCoordinator(options: CoordinatorOptions = {}) {
     readonly projectName: string | null;
     readonly submissionContext: DirectedSubmissionContext | null;
   } | null = null;
+  let resumedConfirmationKey: string | null = null;
+
+  const restoreSession = (session: SymmetriaDictationSession | null): void => {
+    if (session === null) {
+      reservation = null;
+      resumedConfirmationKey = null;
+      return;
+    }
+    if (
+      reservation?.sessionId === session.sessionId &&
+      dictationTargetsEqual(reservation.target, session.target)
+    ) {
+      return;
+    }
+    reservation = {
+      sessionId: session.sessionId,
+      target: session.target,
+      projectName: session.projectName,
+      submissionContext: null,
+    };
+    resumedConfirmationKey = null;
+  };
+
+  const resumeConfirmation = async (
+    session: SymmetriaDictationSession,
+    commandId: CommandId,
+  ): Promise<void> => {
+    restoreSession(session);
+    if (session.phase !== "confirming") return;
+    const recoveryKey = `${session.sessionId}:${commandId}`;
+    if (resumedConfirmationKey === recoveryKey) return;
+    resumedConfirmationKey = recoveryKey;
+    const threadRef =
+      session.target.kind === "draft" ? session.target.futureThreadRef : session.target;
+    const messageId = MessageId.make(`dictation-${commandId}`);
+    try {
+      const receipt = await confirm(
+        {
+          protocolVersion: session.protocolVersion,
+          sessionId: session.sessionId,
+          commandId,
+          target: session.target,
+          environmentId: threadRef.environmentId,
+          threadId: threadRef.threadId,
+          messageId,
+        },
+        { onLateReceipt: reportLateReceipt },
+      );
+      if (receipt.outcome !== "confirmation-pending") reportLateReceipt(receipt);
+    } catch (cause) {
+      if (resumedConfirmationKey === recoveryKey) resumedConfirmationKey = null;
+      throw cause;
+    }
+  };
 
   return {
+    restoreSession,
+    resumeConfirmation,
     registerComposer: (next: DictationComposerRegistration): (() => void) => {
       const token = Symbol("dictation-composer-registration");
       registration = { ...next, token };
@@ -274,18 +331,25 @@ export function createDictationCoordinator(options: CoordinatorOptions = {}) {
             "the submitted thread identity is unavailable",
           );
         }
-        return await confirm(
-          {
-            protocolVersion: command.protocolVersion,
-            sessionId: command.sessionId,
-            commandId: command.commandId,
-            target: reserved.target,
-            environmentId: confirmationRef.environmentId,
-            threadId: confirmationRef.threadId,
-            messageId: submission.messageId,
-          },
-          { onLateReceipt: reportLateReceipt },
-        );
+        const confirmationKey = `${command.sessionId}:${command.commandId}`;
+        resumedConfirmationKey = confirmationKey;
+        try {
+          return await confirm(
+            {
+              protocolVersion: command.protocolVersion,
+              sessionId: command.sessionId,
+              commandId: command.commandId,
+              target: reserved.target,
+              environmentId: confirmationRef.environmentId,
+              threadId: confirmationRef.threadId,
+              messageId: submission.messageId,
+            },
+            { onLateReceipt: reportLateReceipt },
+          );
+        } catch (cause) {
+          if (resumedConfirmationKey === confirmationKey) resumedConfirmationKey = null;
+          throw cause;
+        }
       }
 
       return {

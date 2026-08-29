@@ -57,7 +57,7 @@ const receiptFor = (
       commandId: identity.commandId,
       target: identity.target,
       application: "first",
-      code: "provider_start_failed",
+      code: "provider_turn_failed",
       detail: "the correlated provider turn entered the error state",
     };
   }

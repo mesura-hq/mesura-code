@@ -81,7 +81,7 @@ it("reports provider failure for the correlated errored turn", async () => {
 
   assert.deepInclude(receipt, {
     outcome: "failed",
-    code: "provider_start_failed",
+    code: "provider_turn_failed",
   });
 });
 

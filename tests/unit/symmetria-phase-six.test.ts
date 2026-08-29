@@ -9,6 +9,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   commandOutput,
   contractPackageRoot,
+  contractSourceRoot,
   expectSuccessfulCommand,
   run,
   runContractScript,
@@ -169,9 +170,9 @@ describe("Symmetria broker contract phase-six guards", () => {
     const script = [
       'import * as NodeFS from "node:fs";',
       'import * as Schema from "effect/Schema";',
-      'import { SymmetriaCommandEnvelope, SymmetriaCommandReceipt, SymmetriaDraft, SymmetriaDraftUpdate, SymmetriaDraftUpdateResult, SymmetriaProjectSummary, SymmetriaStreamItem, SymmetriaSurfacePresence, SymmetriaThreadSummary } from "@symmetria/broker-contract";',
+      'import { SYMMETRIA_SCHEMA_ROOTS } from "@symmetria/broker-contract/jsonSchema";',
       `const paths = ${JSON.stringify(documentPaths)};`,
-      "const roots = { SymmetriaThreadSummary, SymmetriaSurfacePresence, SymmetriaProjectSummary, SymmetriaCommandEnvelope, SymmetriaCommandReceipt, SymmetriaDraft, SymmetriaDraftUpdate, SymmetriaDraftUpdateResult, SymmetriaStreamItem };",
+      "const roots = Object.fromEntries(SYMMETRIA_SCHEMA_ROOTS.map(({ root, schema }) => [root, schema]));",
       "const canonical = (value) => {",
       "  if (Array.isArray(value)) return value.map(canonical);",
       '  if (value === null || typeof value !== "object") return value;',
@@ -224,7 +225,15 @@ describe("Symmetria broker contract phase-six guards", () => {
   it("indexes every emitted document with the contract version and checksum", () => {
     expect(NodeFS.existsSync(schemaIndexPath)).toBe(true);
     const index = readSchemaIndex();
-    expect(index.contractVersion).toBe("1.1.0");
+    const versionSource = NodeFS.readFileSync(
+      NodePath.join(contractSourceRoot, "version.ts"),
+      "utf8",
+    );
+    const contractVersion = versionSource.match(
+      /export const SYMMETRIA_CONTRACT_VERSION = "([^"]+)"/,
+    )?.[1];
+    expect(contractVersion).toBeDefined();
+    expect(index.contractVersion).toBe(contractVersion);
     expect(index.checksum).toMatch(/^[a-f0-9]{64}$/);
     expect(index.sourceChecksum).toMatch(/^[a-f0-9]{64}$/);
 
