@@ -35,7 +35,7 @@ import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 import * as Stream from "effect/Stream";
 
-import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import { appendReadableAttachmentPaths } from "../attachmentDelivery.ts";
 import * as ServerConfig from "../../config.ts";
 import {
   increment,
@@ -732,28 +732,22 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       );
     }
 
-    // Adapters inline attachment pixels into the model prompt, but the model's
-    // tools cannot dereference pixels. Appending the on-disk path is what lets
-    // a turn like "include this screenshot in the PR" copy the actual file.
-    // This runs after schema decode, so the appended lines are exempt from the
-    // PROVIDER_SEND_TURN_MAX_INPUT_CHARS check; attachment count is capped, so
-    // the overhead is bounded. Unresolvable ids are skipped here and surface
-    // as adapter errors when the file is read for inlining.
-    const attachmentPathLines = attachments.flatMap((attachment) => {
-      const attachmentPath = resolveAttachmentPath({
-        attachmentsDir: serverConfig.attachmentsDir,
-        attachment,
-      });
-      return attachmentPath === null
-        ? []
-        : [`[Attached ${attachment.type} "${attachment.name}" is saved at: ${attachmentPath}]`];
+    // The adapter receives every attachment path in the text boundary. Native
+    // image-capable adapters also inline image pixels, while generic files stay
+    // regular files. Validate all paths before provider work starts.
+    const attachmentDelivery = appendReadableAttachmentPaths({
+      message: parsed.input ?? "",
+      attachmentsDir: serverConfig.attachmentsDir,
+      attachments,
     });
-    const inputTextWithAttachmentPaths =
-      attachmentPathLines.length === 0
-        ? parsed.input
-        : [parsed.input, attachmentPathLines.join("\n")]
-            .filter((part): part is string => typeof part === "string" && part.length > 0)
-            .join("\n\n");
+    if (!attachmentDelivery.ok) {
+      return yield* toValidationError(
+        "ProviderService.sendTurn",
+        `Attachment '${attachmentDelivery.attachment.id}' ${attachmentDelivery.issue}`,
+        attachmentDelivery.cause,
+      );
+    }
+    const inputTextWithAttachmentPaths = attachmentDelivery.message;
 
     const input = {
       ...parsed,

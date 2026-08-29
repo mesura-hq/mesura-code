@@ -199,7 +199,7 @@ function makeHarness(config?: {
       Layer.provideMerge(
         ServerConfig.layerTest(
           config?.cwd ?? "/tmp/claude-adapter-test",
-          config?.baseDir ?? "/tmp",
+          config?.baseDir ?? { prefix: "t3code-claude-adapter-test-" },
         ),
       ),
       Layer.provideMerge(ServerSettingsService.layerTest()),
@@ -316,7 +316,11 @@ describe("ClaudeAdapterLive", () => {
         });
       }),
     ).pipe(
-      Layer.provideMerge(ServerConfig.layerTest("/tmp/claude-adapter-test", "/tmp")),
+      Layer.provideMerge(
+        ServerConfig.layerTest("/tmp/claude-adapter-test", {
+          prefix: "t3code-claude-startup-cause-test-",
+        }),
+      ),
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(NodeServices.layer),
     );
@@ -931,6 +935,52 @@ describe("ClaudeAdapterLive", () => {
             media_type: "image/png",
             data: "AQIDBA==",
           },
+        },
+      ]);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("keeps a generic PDF as path text instead of a Claude image block", () => {
+    const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "claude-generic-file-"));
+    const harness = makeHarness({
+      cwd: "/tmp/project-claude-generic-file",
+      baseDir,
+    });
+    return Effect.gen(function* () {
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => NodeFS.rmSync(baseDir, { recursive: true, force: true })),
+      );
+      const adapter = yield* ClaudeAdapter;
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "[Attached file requirements.pdf is saved at: /tmp/requirements.bin]",
+        attachments: [
+          {
+            type: "file",
+            id: "claude-generic-file-12345678-1234-1234-1234-123456789abc",
+            name: "requirements.pdf",
+            mimeType: "application/pdf",
+            sizeBytes: 10,
+          },
+        ],
+      });
+
+      const promptMessage = yield* Effect.promise(() =>
+        readFirstPromptMessage(harness.getLastCreateQueryInput()),
+      );
+      assert.deepEqual(promptMessage?.message.content, [
+        {
+          type: "text",
+          text: "[Attached file requirements.pdf is saved at: /tmp/requirements.bin]",
         },
       ]);
     }).pipe(
@@ -2101,7 +2151,11 @@ describe("ClaudeAdapterLive", () => {
         });
       }),
     ).pipe(
-      Layer.provideMerge(ServerConfig.layerTest("/tmp/claude-adapter-test", "/tmp")),
+      Layer.provideMerge(
+        ServerConfig.layerTest("/tmp/claude-adapter-test", {
+          prefix: "t3code-claude-replace-session-test-",
+        }),
+      ),
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(NodeServices.layer),
     );
@@ -2192,7 +2246,11 @@ describe("ClaudeAdapterLive", () => {
         });
       }),
     ).pipe(
-      Layer.provideMerge(ServerConfig.layerTest("/tmp/claude-adapter-test", "/tmp")),
+      Layer.provideMerge(
+        ServerConfig.layerTest("/tmp/claude-adapter-test", {
+          prefix: "t3code-claude-prompt-consumer-test-",
+        }),
+      ),
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(NodeServices.layer),
     );

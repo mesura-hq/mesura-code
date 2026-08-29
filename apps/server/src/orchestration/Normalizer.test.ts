@@ -9,10 +9,12 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 
 import { makeAttachmentUploadStore } from "../attachmentUploadStore.ts";
+import { resolveAttachmentPath } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import {
@@ -93,6 +95,55 @@ const normalizationTestLayer = Layer.mergeAll(
 ).pipe(Layer.provideMerge(NodeServices.layer));
 
 describe("normalizeDispatchCommand attachments", () => {
+  it.effect("persists a legacy inline image as a canonical image attachment", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const command: ClientOrchestrationCommand = {
+        type: "thread.turn.start",
+        commandId: CommandId.make("command-legacy-inline-image"),
+        threadId: ThreadId.make("thread-legacy-inline-image"),
+        message: {
+          messageId: MessageId.make("message-legacy-inline-image"),
+          role: "user",
+          text: "Inspect the legacy image",
+          attachments: [
+            {
+              type: "image",
+              name: "legacy.png",
+              mimeType: "image/png",
+              sizeBytes: 4,
+              dataUrl: "data:image/png;base64,AQIDBA==",
+            },
+          ],
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        createdAt: clientCreatedAt,
+      };
+
+      const normalized = yield* normalizeDispatchCommand(command);
+      if (normalized.type !== "thread.turn.start") {
+        throw new Error("Expected a thread.turn.start command");
+      }
+      const attachment = normalized.message.attachments[0];
+      expect(attachment).toMatchObject({
+        type: "image",
+        name: "legacy.png",
+        mimeType: "image/png",
+        sizeBytes: 4,
+      });
+      if (!attachment) throw new Error("Expected a canonical image attachment");
+      const attachmentPath = resolveAttachmentPath({
+        attachmentsDir: config.attachmentsDir,
+        attachment,
+      });
+      expect(attachmentPath).toBeTruthy();
+      if (!attachmentPath) throw new Error("Expected a persisted image path");
+      expect(Array.from(yield* fileSystem.readFile(attachmentPath))).toEqual([1, 2, 3, 4]);
+    }).pipe(Effect.scoped, Effect.provide(normalizationTestLayer)),
+  );
+
   it.effect("claims a completed upload before dispatching the turn", () =>
     Effect.gen(function* () {
       const config = yield* ServerConfig.ServerConfig;

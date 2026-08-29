@@ -53,6 +53,7 @@ import {
 } from "../Errors.ts";
 import { type CodexAdapterShape } from "../Services/CodexAdapter.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import { selectNativeImageAttachments } from "../attachmentDelivery.ts";
 import { ServerConfig } from "../../config.ts";
 import {
   CodexResumeCursorSchema,
@@ -1802,7 +1803,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
 
   const sendTurn: CodexAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
     const codexAttachments = yield* Effect.forEach(
-      input.attachments ?? [],
+      selectNativeImageAttachments(input.attachments),
       (attachment) => resolveAttachment(input, attachment),
       { concurrency: 1 },
     );

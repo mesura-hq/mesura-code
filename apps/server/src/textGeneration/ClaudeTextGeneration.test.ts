@@ -299,13 +299,25 @@ it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGeneration", (it) => {
               '  "Reconnect failures after restart because the session state does not recover"  ',
           },
         }),
-        stdinMustContain: "Please investigate reconnect failures after restarting the session.",
+        stdinMustContain: "/var/lib/mesura/attachments/requirements.bin",
       },
       (textGeneration) =>
         Effect.gen(function* () {
           const generated = yield* textGeneration.generateThreadTitle({
             cwd: process.cwd(),
             message: "Please investigate reconnect failures after restarting the session.",
+            attachments: [
+              {
+                type: "file",
+                id: "claude-title-file",
+                name: "requirements.pdf",
+                mimeType: "application/pdf",
+                sizeBytes: 10,
+              },
+            ],
+            attachmentPaths: {
+              "claude-title-file": "/var/lib/mesura/attachments/requirements.bin",
+            },
             modelSelection: {
               instanceId: ProviderInstanceId.make("claudeAgent"),
               model: "claude-sonnet-4-6",

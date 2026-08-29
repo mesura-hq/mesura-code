@@ -385,6 +385,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
         output: JSON.stringify({
           branch: "  Feat/Session  ",
         }),
+        stdinMustContain: "/var/lib/mesura/attachments/requirements.bin",
         stdinMustNotContain: "Image attachments supplied to the model",
       },
       (textGeneration) =>
@@ -392,6 +393,18 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
           const generated = yield* textGeneration.generateBranchName({
             cwd: process.cwd(),
             message: "Please update session handling.",
+            attachments: [
+              {
+                type: "file",
+                id: "codex-branch-file",
+                name: "requirements.pdf",
+                mimeType: "application/pdf",
+                sizeBytes: 10,
+              },
+            ],
+            attachmentPaths: {
+              "codex-branch-file": "/var/lib/mesura/attachments/requirements.bin",
+            },
             modelSelection: DEFAULT_TEST_MODEL_SELECTION,
           });
 
