@@ -528,7 +528,6 @@ export interface ChatComposerHandle {
   insertTextAtEnd: (text: string, options?: { ensureLeadingBoundary?: boolean }) => boolean;
   replacePrompt: (prompt: string) => boolean;
   openModelPicker: () => void;
-  clearFileUploads: (attachmentIds: ReadonlyArray<string>) => void;
   markFileUploadsFailed: (attachmentIds: ReadonlyArray<string>, message: string) => void;
   toggleModelPicker: () => void;
   isModelPickerOpen: () => boolean;
@@ -3139,13 +3138,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         selectedModel,
         selectedProviderModels,
       }),
-      clearFileUploads: (attachmentIds: ReadonlyArray<string>) => {
-        for (const attachmentId of attachmentIds) {
-          removeComposerAttachmentUpload(composerDraftTarget, attachmentId);
-          composerAttachmentAbortControllers.get(attachmentId)?.abort();
-          composerAttachmentAbortControllers.delete(attachmentId);
-        }
-      },
       markFileUploadsFailed: (attachmentIds: ReadonlyArray<string>, message: string) => {
         for (const attachmentId of attachmentIds) {
           updateComposerAttachmentUpload(composerDraftTarget, attachmentId, (attachment) => ({

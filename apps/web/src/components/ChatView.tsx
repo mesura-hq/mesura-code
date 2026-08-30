@@ -1355,6 +1355,9 @@ function ChatViewContent(props: ChatViewProps) {
   const setComposerDraftInteractionMode = useComposerDraftStore(
     (store) => store.setInteractionMode,
   );
+  const removeComposerAttachmentUploads = useComposerDraftStore(
+    (store) => store.removeAttachmentUploads,
+  );
   const clearComposerDraftContent = useComposerDraftStore((store) => store.clearComposerContent);
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const getDraftSessionByLogicalProjectKey = useComposerDraftStore(
@@ -5587,7 +5590,8 @@ function ChatViewContent(props: ChatViewProps) {
         failure = startResult;
       } else {
         turnStartSucceeded = true;
-        composerRef.current?.clearFileUploads(
+        removeComposerAttachmentUploads(
+          composerDraftTarget,
           composerFileUploadsSnapshot.map((attachment) => attachment.id),
         );
         acknowledgeActiveThreadWoke();

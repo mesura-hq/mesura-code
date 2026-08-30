@@ -342,6 +342,38 @@ describe("composerDraftStore attachment uploads", () => {
       useComposerDraftStore.getState().getComposerDraft(threadRef)?.attachmentUploads,
     ).toMatchObject([{ id: "preserved", status: "ready" }]);
   });
+
+  it("removes a sent batch from its original draft after another draft becomes active", () => {
+    const store = useComposerDraftStore.getState();
+    const otherThreadRef = scopeThreadRef(
+      TEST_ENVIRONMENT_ID,
+      ThreadId.make("another-active-thread"),
+    );
+    store.reserveAttachmentUploads(
+      threadRef,
+      [
+        { ...makeUpload("sent-image-1", "image"), status: "ready" },
+        { ...makeUpload("sent-image-2", "image"), status: "ready" },
+        { ...makeUpload("newer-image", "image"), status: "ready" },
+      ],
+      8,
+    );
+    store.reserveAttachmentUploads(
+      otherThreadRef,
+      [{ ...makeUpload("other-draft-image", "image"), status: "ready" }],
+      8,
+    );
+
+    const removed = store.removeAttachmentUploads(threadRef, ["sent-image-1", "sent-image-2"]);
+
+    expect(removed.map((attachment) => attachment.id)).toEqual(["sent-image-1", "sent-image-2"]);
+    expect(
+      store.getComposerDraft(threadRef)?.attachmentUploads.map((attachment) => attachment.id),
+    ).toEqual(["newer-image"]);
+    expect(
+      store.getComposerDraft(otherThreadRef)?.attachmentUploads.map((attachment) => attachment.id),
+    ).toEqual(["other-draft-image"]);
+  });
 });
 
 describe("composerDraftStore clearComposerContent", () => {

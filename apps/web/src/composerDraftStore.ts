@@ -508,6 +508,10 @@ interface ComposerDraftStoreState {
     threadRef: ComposerThreadTarget,
     attachmentId: string,
   ) => ComposerAttachmentUpload | null;
+  removeAttachmentUploads: (
+    threadRef: ComposerThreadTarget,
+    attachmentIds: ReadonlyArray<string>,
+  ) => ComposerAttachmentUpload[];
   clearAttachmentUploads: (threadRef: ComposerThreadTarget) => ComposerAttachmentUpload[];
   removeImage: (threadRef: ComposerThreadTarget, imageId: string) => void;
   insertTerminalContext: (
@@ -3159,21 +3163,22 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             };
           });
         },
-        removeAttachmentUpload: (threadRef, attachmentId) => {
+        removeAttachmentUploads: (threadRef, attachmentIds) => {
           const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
-          if (threadKey.length === 0) return null;
-          let removed: ComposerAttachmentUpload | null = null;
+          if (threadKey.length === 0 || attachmentIds.length === 0) return [];
+          const attachmentIdSet = new Set(attachmentIds);
+          let removed: ComposerAttachmentUpload[] = [];
           set((state) => {
             const existing = state.draftsByThreadKey[threadKey];
             if (!existing) return state;
-            removed =
-              existing.attachmentUploads.find((attachment) => attachment.id === attachmentId) ??
-              null;
-            if (!removed) return state;
+            removed = existing.attachmentUploads.filter((attachment) =>
+              attachmentIdSet.has(attachment.id),
+            );
+            if (removed.length === 0) return state;
             const nextDraft: ComposerThreadDraftState = {
               ...existing,
               attachmentUploads: existing.attachmentUploads.filter(
-                (attachment) => attachment.id !== attachmentId,
+                (attachment) => !attachmentIdSet.has(attachment.id),
               ),
             };
             const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
@@ -3183,21 +3188,16 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
           });
           return removed;
         },
+        removeAttachmentUpload: (threadRef, attachmentId) =>
+          get().removeAttachmentUploads(threadRef, [attachmentId])[0] ?? null,
         clearAttachmentUploads: (threadRef) => {
           const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
           if (threadKey.length === 0) return [];
-          let removed: ComposerAttachmentUpload[] = [];
-          set((state) => {
-            const existing = state.draftsByThreadKey[threadKey];
-            if (!existing || existing.attachmentUploads.length === 0) return state;
-            removed = existing.attachmentUploads;
-            const nextDraft: ComposerThreadDraftState = { ...existing, attachmentUploads: [] };
-            const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
-            if (shouldRemoveDraft(nextDraft)) delete nextDraftsByThreadKey[threadKey];
-            else nextDraftsByThreadKey[threadKey] = nextDraft;
-            return { draftsByThreadKey: nextDraftsByThreadKey };
-          });
-          return removed;
+          const attachmentIds =
+            get().draftsByThreadKey[threadKey]?.attachmentUploads.map(
+              (attachment) => attachment.id,
+            ) ?? [];
+          return get().removeAttachmentUploads(threadRef, attachmentIds);
         },
         removeImage: (threadRef, imageId) => {
           const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
