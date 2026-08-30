@@ -5,8 +5,30 @@ import * as NodePath from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 import sharp from "sharp";
 
+import { CHANNEL_WORDMARK_BAND_TOP, MASTER_RASTER_SIZE } from "./lib/brand-assets.ts";
+
 const REPOSITORY_ROOT = NodePath.resolve(import.meta.dirname, "..");
 const MOBILE_ROOT = NodePath.join(REPOSITORY_ROOT, "apps/mobile");
+const ADAPTIVE_RASTER_SIZE = 256;
+/** The shared band boundary expressed in the raster this test scans. */
+const ADAPTIVE_WORDMARK_BAND_TOP = Math.round(
+  (CHANNEL_WORDMARK_BAND_TOP / MASTER_RASTER_SIZE) * ADAPTIVE_RASTER_SIZE,
+);
+/**
+ * The cube is several thousand pixels at this size, so a floor here stops an
+ * empty set from satisfying the bounds below: `Math.max(...[])` is -Infinity
+ * and `Math.min(...[])` is Infinity, which passes every comparison.
+ */
+const MIN_ADAPTIVE_CUBE_PIXELS = 1000;
+/**
+ * Android guarantees only the centre of the layer, which is x/y 38..217 here.
+ * The cube measures 178 at its lowest, and this test partitions by
+ * `ADAPTIVE_WORDMARK_BAND_TOP`, so bound it well short of that boundary: a
+ * cube that grew past it would be counted as wordmark and stop being checked.
+ */
+const MAX_ADAPTIVE_CUBE_BOTTOM = 200;
+/** Measured wordmark extent: y 228..237, x 91..164 across both channels. */
+const ADAPTIVE_WORDMARK_BOUNDS = { maxY: 250, minX: 64, maxX: 192 };
 
 type AppVariant = "development" | "preview" | "production";
 
@@ -111,12 +133,13 @@ describe("mobile brand assets", () => {
       const foreground = config.android?.adaptiveIcon?.foregroundImage;
       expect(typeof foreground).toBe("string");
       const { data, info } = await sharp(resolveMobileAsset(foreground as string))
-        .resize(256, 256)
+        .resize(ADAPTIVE_RASTER_SIZE, ADAPTIVE_RASTER_SIZE)
         .removeAlpha()
         .raw()
         .toBuffer({ resolveWithObject: true });
 
       const visibleMetalPixels: Array<readonly [number, number]> = [];
+      const wordmarkPixels: Array<readonly [number, number]> = [];
       for (let y = 0; y < info.height; y += 1) {
         for (let x = 0; x < info.width; x += 1) {
           const offset = (y * info.width + x) * info.channels;
@@ -125,16 +148,36 @@ describe("mobile brand assets", () => {
           const blue = data[offset + 2]!;
           const brightness = (red + green + blue) / 3;
           const chroma = Math.max(red, green, blue) - Math.min(red, green, blue);
-          if (brightness > 95 && chroma < 55) visibleMetalPixels.push([x, y]);
+          if (brightness > 95 && chroma < 55) {
+            // The channel wordmark is metal-coloured too, so split it out by
+            // the band it is pinned to. This test is about the cube.
+            (y < ADAPTIVE_WORDMARK_BAND_TOP ? visibleMetalPixels : wordmarkPixels).push([x, y]);
+          }
         }
       }
       const xs = visibleMetalPixels.map(([x]) => x);
       const ys = visibleMetalPixels.map(([, y]) => y);
-      expect(visibleMetalPixels.length).toBeGreaterThan(0);
+      expect(visibleMetalPixels.length).toBeGreaterThan(MIN_ADAPTIVE_CUBE_PIXELS);
       expect(Math.min(...xs)).toBeGreaterThanOrEqual(38);
       expect(Math.max(...xs)).toBeLessThanOrEqual(217);
       expect(Math.min(...ys)).toBeGreaterThanOrEqual(38);
-      expect(Math.max(...ys)).toBeLessThanOrEqual(217);
+      expect(Math.max(...ys)).toBeLessThanOrEqual(MAX_ADAPTIVE_CUBE_BOTTOM);
+
+      // Only development and preview carry a wordmark, and it sits in the
+      // margin an adaptive launcher masks away. That is not a regression: the
+      // coloured frame it replaced sat further out still, at y~4 of 256.
+      if (appVariant === "production") {
+        expect(wordmarkPixels.length).toBe(0);
+        continue;
+      }
+      expect(wordmarkPixels.length).toBeGreaterThan(20);
+      // Bound the wordmark too. Without this the partition would let a cube
+      // that grew past the band boundary pass as wordmark and go unchecked.
+      const wordmarkXs = wordmarkPixels.map(([x]) => x);
+      const wordmarkYs = wordmarkPixels.map(([, y]) => y);
+      expect(Math.max(...wordmarkYs)).toBeLessThanOrEqual(ADAPTIVE_WORDMARK_BOUNDS.maxY);
+      expect(Math.min(...wordmarkXs)).toBeGreaterThanOrEqual(ADAPTIVE_WORDMARK_BOUNDS.minX);
+      expect(Math.max(...wordmarkXs)).toBeLessThanOrEqual(ADAPTIVE_WORDMARK_BOUNDS.maxX);
     }
   });
 
@@ -165,12 +208,16 @@ describe("mobile brand assets", () => {
     }
   });
 
-  it("uses each detailed channel icon in light and dark splash screens", async () => {
+  it("uses the container-free cube in light and dark splash screens", async () => {
     for (const appVariant of ["development", "preview", "production"] as const) {
       const config = await loadMobileConfig(appVariant);
       const splash = pluginOptions(config, "expo-splash-screen");
-      expect(splash.image).toBe(config.icon);
-      expect((splash.dark as Record<string, unknown>).image).toBe(config.icon);
+      expect(splash.image).toMatch(/assets[/\\]mesura-code[/\\]splash-mark\.png$/);
+      expect((splash.dark as Record<string, unknown>).image).toBe(splash.image);
+      // The launcher icon carries an opaque field, so borrowing it here would
+      // cut a square out of both splash backgrounds. Light mode is the worst
+      // case: a near-black tile on #ffffff.
+      expect(splash.image).not.toBe(config.icon);
     }
   });
 

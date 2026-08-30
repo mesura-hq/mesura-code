@@ -81,7 +81,13 @@ describe("application branding residuals", () => {
     expect(html).toContain('href="/favicon.ico"');
     expect(html).toContain('href="/apple-touch-icon.png"');
     expect(html).toContain('href="/manifest.webmanifest"');
-    expect(html).toContain('src="/apple-touch-icon.png" alt="Mesura Code"');
+    // The boot splash draws the container-free mark, not a launcher icon: an
+    // icon's opaque field cuts a square out of the splash background.
+    expect(html).toContain('src="/splash-mark.png"');
+    expect(html).toContain('href="/splash-mark.png"');
+    expect(
+      NodeFS.existsSync(NodePath.join(REPOSITORY_ROOT, "apps/web/public/splash-mark.png")),
+    ).toBe(true);
     expect(manifest.icons.map(({ src }) => src)).toEqual([
       "/favicon-32x32.png",
       "/apple-touch-icon.png",

@@ -4,6 +4,11 @@ export const BRAND_ASSET_PATHS = {
   mobileAndroidNotificationIconPng: "apps/mobile/assets/android-notification-icon.png",
   mobileWidgetMarkSvg: "apps/mobile/assets/widget/T3Mark.svg",
   desktopMasterPng: "assets/mesura-code/desktop-master.png",
+  // The boot splash draws the cube alone, with no channel container behind it,
+  // so one mark serves every channel. The stage label is rendered as text next
+  // to it rather than baked into the artwork.
+  splashMarkSourcePng: "assets/mesura-code/splash-mark.png",
+  webSplashMarkPng: "apps/web/public/splash-mark.png",
   developmentMasterPng: "assets/mesura-code/development-master.png",
   developmentIconComposerProject: "assets/dev/app-icon.icon",
   developmentIosIconPng: "assets/dev/blueprint-ios-1024.png",
@@ -39,6 +44,23 @@ export const BRAND_ASSET_PATHS = {
   developmentWebFavicon32Png: "assets/dev/blueprint-web-favicon-32x32.png",
   developmentWebAppleTouchIconPng: "assets/dev/blueprint-web-apple-touch-180.png",
 } as const;
+
+/** Side of the square channel masters in `assets/mesura-code/`. */
+export const MASTER_RASTER_SIZE = 1254;
+
+/**
+ * First row of the strip a channel master may treat as its own. Above it the
+ * development and nightly masters are the production artwork verbatim, which
+ * is what rules out a coloured frame around the cube; below it they carry the
+ * uppercase channel wordmark. Guards in `brand-icon-source.test.ts` and
+ * `mobile-brand-assets.test.ts` both derive their bounds from this, so the
+ * two cannot drift apart.
+ *
+ * The band sits outside Android's adaptive-icon safe zone, so an adaptive
+ * launcher clips the wordmark. That is not a regression: the coloured frame
+ * this replaced sat further out still and was clipped too.
+ */
+export const CHANNEL_WORDMARK_BAND_TOP = 1097;
 
 export const DESKTOP_LINUX_IDENTITY = {
   development: {

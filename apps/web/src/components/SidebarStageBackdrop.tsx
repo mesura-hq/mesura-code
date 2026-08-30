@@ -5,8 +5,15 @@ import { APP_STAGE_LABEL } from "../branding";
 import { resolveServerBackedAppStageLabel } from "../branding.logic";
 import { primaryServerConfigAtom } from "../state/server";
 
+// The pill resolver moved to branding.logic.ts so first-paint code can reach
+// it without pulling this module's atoms and backdrop art into its chunk.
+// Re-exported here because callers already import it from this path.
+export {
+  resolveEnvironmentIdentificationPillLabel,
+  type EnvironmentIdentificationPillLabel,
+} from "../branding.logic";
+
 export type SidebarStageBackdropVariant = "nightly" | "dev";
-export type EnvironmentIdentificationPillLabel = "Dev" | "Nightly";
 
 // A wide viewBox keeps the 96-unit art height at a fixed scale while sidebar resizing reveals
 // more horizontal canvas instead of zooming the scene.
@@ -29,15 +36,6 @@ export function resolveSidebarStageFocusRingOffsetClass(
   return variant === "nightly"
     ? "focus-visible:ring-offset-(--stage-night-bottom)"
     : "focus-visible:ring-offset-(--stage-art-bottom)";
-}
-
-export function resolveEnvironmentIdentificationPillLabel(
-  stageLabel: string,
-): EnvironmentIdentificationPillLabel | null {
-  const normalized = stageLabel.trim().toLowerCase();
-  if (normalized === "dev") return "Dev";
-  if (normalized === "nightly") return "Nightly";
-  return null;
 }
 
 export function useEnvironmentStageLabel(): string {
