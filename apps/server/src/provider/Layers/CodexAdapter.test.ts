@@ -36,6 +36,7 @@ import * as TestClock from "effect/testing/TestClock";
 import * as CodexErrors from "effect-codex-app-server/errors";
 
 import { ServerConfig } from "../../config.ts";
+import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { CodexAdapterShape } from "../Services/CodexAdapter.ts";
@@ -234,7 +235,9 @@ const validationLayer = it.layer(
       });
     }),
   ).pipe(
-    Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+    Layer.provideMerge(
+      ServerConfig.layerTest(process.cwd(), { prefix: "t3code-codex-validation-test-" }),
+    ),
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
     Layer.provideMerge(NodeServices.layer),
@@ -304,7 +307,9 @@ const sessionErrorLayer = it.layer(
       });
     }),
   ).pipe(
-    Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+    Layer.provideMerge(
+      ServerConfig.layerTest(process.cwd(), { prefix: "t3code-codex-session-error-test-" }),
+    ),
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
     Layer.provideMerge(NodeServices.layer),
@@ -359,6 +364,60 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         model: "gpt-5.3-codex",
         effort: "high",
         serviceTier: "priority",
+      });
+    }),
+  );
+
+  it.effect("does not encode a generic file as a Codex image attachment", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const config = yield* ServerConfig;
+      const threadId = asThreadId("codex-generic-file");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const runtime = sessionRuntimeFactory.lastRuntime;
+      NodeAssert.ok(runtime);
+      runtime.sendTurnImpl.mockClear();
+      const image = {
+        type: "image" as const,
+        id: "codex-generic-file-00000000-0000-4000-8000-000000000002",
+        name: "reference.png",
+        mimeType: "image/png",
+        sizeBytes: 4,
+      };
+      const imagePath = NodePath.join(config.attachmentsDir, attachmentRelativePath(image));
+      NodeFS.mkdirSync(NodePath.dirname(imagePath), { recursive: true });
+      NodeFS.writeFileSync(imagePath, new Uint8Array([1, 2, 3, 4]));
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => NodeFS.rmSync(imagePath, { force: true })),
+      );
+
+      yield* adapter.sendTurn({
+        threadId,
+        input: "Read the saved file path",
+        attachments: [
+          {
+            type: "file",
+            id: "codex-generic-file-00000000-0000-4000-8000-000000000001",
+            name: "recording.mp4",
+            mimeType: "video/mp4",
+            sizeBytes: 4,
+          },
+          image,
+        ],
+      });
+
+      NodeAssert.deepStrictEqual(runtime.sendTurnImpl.mock.calls[0]?.[0], {
+        input: "Read the saved file path",
+        attachments: [
+          {
+            type: "image",
+            url: "data:image/png;base64,AQIDBA==",
+          },
+        ],
       });
     }),
   );

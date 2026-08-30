@@ -1035,6 +1035,11 @@ describe("shipped defaults on Linux", () => {
     assert.strictEqual(resolve(press("b", { altKey: true })), "branchPicker.toggle");
   });
 
+  it("opens the attachment picker with Alt+A outside the terminal", () => {
+    assert.strictEqual(resolve(press("a", { altKey: true })), "composer.attachFiles");
+    assert.strictEqual(resolve(press("a", { altKey: true }), true), null);
+  });
+
   it("toggles the open thread's settled state on mod+shift+s, and leaves the terminal alone", () => {
     assert.strictEqual(
       resolve(press("s", { ctrlKey: true, shiftKey: true })),

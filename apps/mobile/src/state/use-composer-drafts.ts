@@ -14,8 +14,9 @@ import { useEffect } from "react";
 import { Atom } from "effect/unstable/reactivity";
 
 import { writeFileAtomically } from "../lib/atomic-file";
-import { DraftComposerImageAttachmentSchema } from "../lib/composer-image-schema";
-import type { DraftComposerImageAttachment } from "../lib/composerImages";
+import { DraftComposerAttachmentSchema } from "../lib/composer-image-schema";
+import type { DraftComposerAttachment } from "../lib/composerImages";
+import { removeOwnedComposerAttachment } from "../lib/composerAttachmentFiles";
 import { SerializedAsyncQueue } from "../lib/serialized-async-queue";
 import { appAtomRegistry } from "./atom-registry";
 
@@ -40,7 +41,7 @@ export class ComposerDraftPersistenceError extends Schema.TaggedErrorClass<Compo
 
 export interface ComposerDraft {
   readonly text: string;
-  readonly attachments: ReadonlyArray<DraftComposerImageAttachment>;
+  readonly attachments: ReadonlyArray<DraftComposerAttachment>;
   readonly importedShareIds?: ReadonlyArray<string>;
   readonly modelSelection?: ModelSelection;
   readonly runtimeMode?: RuntimeMode;
@@ -50,7 +51,7 @@ export interface ComposerDraft {
 
 export interface ComposerDraftContent {
   readonly text: string;
-  readonly attachments: ReadonlyArray<DraftComposerImageAttachment>;
+  readonly attachments: ReadonlyArray<DraftComposerAttachment>;
   readonly sourceShareId?: string;
 }
 
@@ -75,7 +76,7 @@ const ComposerDraftWorkspaceSelectionSchema = Schema.Struct({
 
 const ComposerDraftSchema = Schema.Struct({
   text: Schema.String,
-  attachments: Schema.Array(DraftComposerImageAttachmentSchema),
+  attachments: Schema.Array(DraftComposerAttachmentSchema),
   importedShareIds: Schema.optional(Schema.Array(Schema.String)),
   modelSelection: Schema.optional(ModelSelectionSchema),
   runtimeMode: Schema.optional(RuntimeModeSchema),
@@ -270,6 +271,7 @@ export function ensureComposerDraftsLoaded(): void {
 
 function updateComposerDrafts(
   update: (current: Record<string, ComposerDraft>) => Record<string, ComposerDraft>,
+  options?: { readonly preserveRemovedAttachments?: boolean },
 ): void {
   const current = appAtomRegistry.get(composerDraftsAtom);
   const next = update(current);
@@ -278,6 +280,15 @@ function updateComposerDrafts(
   }
   appAtomRegistry.set(composerDraftsAtom, next);
   schedulePersistComposerDrafts(next);
+  if (!options?.preserveRemovedAttachments) {
+    const retainedIds = new Set(
+      Object.values(next).flatMap((draft) => draft.attachments.map((attachment) => attachment.id)),
+    );
+    const removed = Object.values(current)
+      .flatMap((draft) => draft.attachments)
+      .filter((attachment) => !retainedIds.has(attachment.id));
+    void Promise.allSettled(removed.map(removeOwnedComposerAttachment));
+  }
 }
 
 export function setComposerDraftText(draftKey: string, value: string): void {
@@ -313,7 +324,7 @@ export function appendComposerDraftText(draftKey: string, value: string): void {
 
 export function appendComposerDraftAttachments(
   draftKey: string,
-  attachments: ReadonlyArray<DraftComposerImageAttachment>,
+  attachments: ReadonlyArray<DraftComposerAttachment>,
 ): void {
   if (attachments.length === 0) {
     return;
@@ -332,7 +343,7 @@ export function appendComposerDraftAttachments(
 
 export function replaceComposerDraftAttachments(
   draftKey: string,
-  attachments: ReadonlyArray<DraftComposerImageAttachment>,
+  attachments: ReadonlyArray<DraftComposerAttachment>,
 ): void {
   updateComposerDrafts((current) => {
     const draft = {
@@ -599,12 +610,21 @@ export async function restoreComposerDraftSnapshot(
 
 export function clearComposerDraftContent(
   draftKey: string,
-  options?: { readonly clearWorkspaceSelection?: boolean },
+  options?: {
+    readonly clearWorkspaceSelection?: boolean;
+    readonly preserveRemovedAttachments?: boolean;
+  },
 ): void {
-  updateComposerDrafts((current) => clearComposerDraftContentState(current, draftKey, options));
+  updateComposerDrafts(
+    (current) => clearComposerDraftContentState(current, draftKey, options),
+    options,
+  );
 }
 
-export function clearComposerDraft(draftKey: string): void {
+export function clearComposerDraft(
+  draftKey: string,
+  options?: { readonly preserveRemovedAttachments?: boolean },
+): void {
   updateComposerDrafts((current) => {
     if (!current[draftKey]) {
       return current;
@@ -612,7 +632,7 @@ export function clearComposerDraft(draftKey: string): void {
     const next = { ...current };
     delete next[draftKey];
     return next;
-  });
+  }, options);
 }
 
 export function removeComposerDraftsForEnvironment(
@@ -635,10 +655,14 @@ export async function clearComposerDraftsEnvironment(environmentId: EnvironmentI
     await loadPromise;
   }
 
-  const next = removeComposerDraftsForEnvironment(
-    appAtomRegistry.get(composerDraftsAtom),
-    environmentId,
+  const current = appAtomRegistry.get(composerDraftsAtom);
+  const next = removeComposerDraftsForEnvironment(current, environmentId);
+  const retainedIds = new Set(
+    Object.values(next).flatMap((draft) => draft.attachments.map((attachment) => attachment.id)),
   );
+  const removed = Object.values(current)
+    .flatMap((draft) => draft.attachments)
+    .filter((attachment) => !retainedIds.has(attachment.id));
 
   if (persistTimer !== null) {
     clearTimeout(persistTimer);
@@ -646,6 +670,7 @@ export async function clearComposerDraftsEnvironment(environmentId: EnvironmentI
   }
   appAtomRegistry.set(composerDraftsAtom, next);
   await persistenceQueue.run(() => writePersistedComposerDrafts(next));
+  await Promise.allSettled(removed.map(removeOwnedComposerAttachment));
 }
 
 export function useComposerDraft(draftKey: string | null): ComposerDraft {

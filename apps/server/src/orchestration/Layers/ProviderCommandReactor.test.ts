@@ -4,6 +4,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import {
+  type ChatAttachment,
   ModelSelection,
   ProviderRuntimeEvent,
   ProviderSession,
@@ -63,6 +64,7 @@ import * as Clock from "effect/Clock";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import * as GitWorkflowService from "../../git/GitWorkflowService.ts";
+import { attachmentRelativePath } from "../../attachmentStore.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
 const asApprovalRequestId = (value: string): ApprovalRequestId => ApprovalRequestId.make(value);
@@ -71,6 +73,12 @@ const asTurnId = (value: string): TurnId => TurnId.make(value);
 
 const deriveServerPathsSync = (baseDir: string, devUrl: URL | undefined) =>
   Effect.runSync(deriveServerPaths(baseDir, devUrl).pipe(Effect.provide(NodeServices.layer)));
+
+function writeAttachmentFixture(attachmentsDir: string, attachment: ChatAttachment): void {
+  const attachmentPath = NodePath.join(attachmentsDir, attachmentRelativePath(attachment));
+  NodeFS.mkdirSync(NodePath.dirname(attachmentPath), { recursive: true });
+  NodeFS.writeFileSync(attachmentPath, Buffer.alloc(attachment.sizeBytes, 1));
+}
 
 async function waitFor(
   predicate: () => boolean | Promise<boolean>,
@@ -159,7 +167,7 @@ describe("ProviderCommandReactor", () => {
     const baseDir =
       input?.baseDir ?? NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3code-reactor-"));
     createdBaseDirs.add(baseDir);
-    const { stateDir } = deriveServerPathsSync(baseDir, undefined);
+    const { attachmentsDir, stateDir } = deriveServerPathsSync(baseDir, undefined);
     createdStateDirs.add(stateDir);
     const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>());
     let nextSessionIndex = 1;
@@ -508,6 +516,7 @@ describe("ProviderCommandReactor", () => {
       generateBranchName,
       generateThreadTitle,
       runtimeSessions,
+      attachmentsDir,
       stateDir,
       drain,
       runEffect,
@@ -854,6 +863,15 @@ describe("ProviderCommandReactor", () => {
     harness.generateThreadTitle.mockReturnValue(
       Effect.succeed({ title: "Review subagent monitoring risks" }),
     );
+    for (const id of ["opening-context-image", "middle-context-image", "recent-context-image"]) {
+      writeAttachmentFixture(harness.attachmentsDir, {
+        type: "image",
+        id,
+        name: "image.png",
+        mimeType: "image/png",
+        sizeBytes: 5,
+      });
+    }
 
     await harness.runEffect(
       harness.engine.dispatch({
@@ -1153,11 +1171,18 @@ describe("ProviderCommandReactor", () => {
   it("pins the first user context and attachment before the retained tail", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
-    const firstUserContext = "USER:\nOld visual issue\n[Attachments: old-issue.png]";
+    const firstUserContext = "USER:\nOld document issue\n[Attachments: old-issue.pdf]";
     const truncationMarker = "[Earlier content truncated]\n\n";
     const retainedContext = "x".repeat(
       8_000 - firstUserContext.length - "\n\n".length - truncationMarker.length,
     );
+    writeAttachmentFixture(harness.attachmentsDir, {
+      type: "file",
+      id: "old-title-context-file",
+      name: "old-issue.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 5,
+    });
 
     await harness.runEffect(
       harness.engine.dispatch({
@@ -1175,13 +1200,13 @@ describe("ProviderCommandReactor", () => {
         message: {
           messageId: asMessageId("user-message-before-truncated-regeneration"),
           role: "user",
-          text: "Old visual issue",
+          text: "Old document issue",
           attachments: [
             {
-              type: "image",
-              id: "old-title-context-image",
-              name: "old-issue.png",
-              mimeType: "image/png",
+              type: "file",
+              id: "old-title-context-file",
+              name: "old-issue.pdf",
+              mimeType: "application/pdf",
               sizeBytes: 5,
             },
           ],
@@ -1226,8 +1251,8 @@ describe("ProviderCommandReactor", () => {
     );
     expect(harness.generateThreadTitle.mock.calls[0]?.[0].attachments).toEqual([
       expect.objectContaining({
-        id: "old-title-context-image",
-        name: "old-issue.png",
+        id: "old-title-context-file",
+        name: "old-issue.pdf",
       }),
     ]);
   });

@@ -41,11 +41,15 @@ import {
 } from "./use-thread-settings-sheet-presentation";
 
 import { makeTurnCommandMetadata } from "../../lib/commandMetadata";
-import { convertPastedImagesToAttachments, pickComposerImages } from "../../lib/composerImages";
+import {
+  convertPastedImagesToAttachments,
+  pickComposerAttachments,
+} from "../../lib/composerImages";
 import { useScaledTextRole } from "../settings/appearance/useScaledTextRole";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import {
   clearComposerDraftContent,
+  flushComposerDrafts,
   getComposerDraftSnapshot,
   mergeComposerDraftContent,
   restoreComposerDraftSnapshot,
@@ -472,7 +476,7 @@ export function NewTaskDraftScreen(props: {
       const warnings = [...incomingShare.warnings];
       if (skippedAttachmentCount > 0) {
         warnings.push(
-          `${skippedAttachmentCount} shared image${skippedAttachmentCount === 1 ? " was" : "s were"} skipped because this draft reached the attachment limit.`,
+          `${skippedAttachmentCount} shared file${skippedAttachmentCount === 1 ? " was" : "s were"} skipped because this draft reached the attachment limit.`,
         );
       }
       if (warnings.length > 0) {
@@ -613,10 +617,11 @@ export function NewTaskDraftScreen(props: {
     if (isIncomingShareTransferPending) {
       return;
     }
-    const result = await pickComposerImages({ existingCount: flow.attachments.length });
-    if (result.images.length > 0) {
-      flow.appendAttachments(result.images);
+    const result = await pickComposerAttachments({ existingCount: flow.attachments.length });
+    if (result.attachments.length > 0) {
+      flow.appendAttachments(result.attachments);
     }
+    if (result.error) Alert.alert("Could not attach every file", result.error);
   }
 
   const handleNativePasteImages = useCallback(
@@ -643,6 +648,7 @@ export function NewTaskDraftScreen(props: {
       return;
     }
     const draft = getComposerDraftSnapshot(draftKey);
+    let persistedAttachments = draft.attachments;
     // Snapshot read keeps just-typed selector state; the availability gate
     // still applies so a stored selection on a disabled provider falls back
     // to the flow's resolved model.
@@ -707,7 +713,10 @@ export function NewTaskDraftScreen(props: {
         // Drop the workspace selection with the content: the next task should
         // re-resolve mode/branch/origin from the server's configured defaults
         // instead of resurrecting this task's picks.
-        clearComposerDraftContent(draftKey, { clearWorkspaceSelection: true });
+        clearComposerDraftContent(draftKey, {
+          clearWorkspaceSelection: true,
+          preserveRemovedAttachments: true,
+        });
       }
       navigation.getParent()?.goBack();
       return;
@@ -739,6 +748,13 @@ export function NewTaskDraftScreen(props: {
       interactionMode,
       initialMessageText,
       initialAttachments: draft.attachments,
+      onAttachmentUploadState: async (attachmentId, remoteUpload) => {
+        persistedAttachments = persistedAttachments.map((attachment) =>
+          attachment.id === attachmentId ? { ...attachment, remoteUpload } : attachment,
+        );
+        flow.replaceAttachments(persistedAttachments);
+        await flushComposerDrafts();
+      },
       ...(editingPendingTask
         ? {
             turnMetadata: {
@@ -771,7 +787,10 @@ export function NewTaskDraftScreen(props: {
       }
       flow.finishEditingPendingTask();
     } else {
-      clearComposerDraftContent(draftKey, { clearWorkspaceSelection: true });
+      clearComposerDraftContent(draftKey, {
+        clearWorkspaceSelection: true,
+        preserveRemovedAttachments: true,
+      });
     }
     navigation.dispatch(
       StackActions.replace("Thread", {

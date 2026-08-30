@@ -1,4 +1,5 @@
 import * as Haptics from "expo-haptics";
+import { useAtomValue } from "@effect/atom-react";
 import { KeyboardAwareLegendList } from "@legendapp/list/keyboard";
 import { type LegendListRef } from "@legendapp/list/react-native";
 import type { EnvironmentId, MessageId, ThreadId, TurnId } from "@t3tools/contracts";
@@ -82,6 +83,7 @@ import {
 import { MOBILE_TYPOGRAPHY } from "../../lib/typography";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { useAppearanceCodeSurface } from "../settings/appearance/useAppearanceCodeSurface";
+import { attachmentUploadProgressByIdAtom } from "../../state/attachment-upload-progress";
 import { markdownFileIconSource } from "@t3tools/mobile-markdown-text/file-icons";
 import { resolveMarkdownLinkPresentation } from "@t3tools/mobile-markdown-text/links";
 import {
@@ -189,6 +191,40 @@ function MessageAttachmentImage(props: {
   return (
     <TouchableOpacity activeOpacity={0.7} onPress={() => props.onPressImage(uri)}>
       <Image source={{ uri }} className={props.className} resizeMode="cover" />
+    </TouchableOpacity>
+  );
+}
+
+function MessageAttachmentFile(props: {
+  readonly environmentId: EnvironmentId;
+  readonly attachmentId: string;
+  readonly name: string;
+}) {
+  const iconColor = useThemeColor("--color-foreground");
+  const uploadProgress = useAtomValue(attachmentUploadProgressByIdAtom)[props.attachmentId];
+  const uri = useAssetUrl(props.environmentId, {
+    _tag: "attachment",
+    attachmentId: props.attachmentId,
+  });
+  return (
+    <TouchableOpacity
+      activeOpacity={0.7}
+      disabled={uri === null}
+      onPress={uri ? () => void tryOpenExternalUrl(uri, "file-preview") : undefined}
+    >
+      <View className="mt-1.5 min-h-12 flex-row items-center gap-2 rounded-xl bg-white/15 px-3 py-2 dark:bg-white/10">
+        {uri === null ? (
+          <ActivityIndicator />
+        ) : (
+          <SymbolView name="doc" size={18} tintColor={iconColor} />
+        )}
+        <Text className="min-w-0 flex-1 text-sm" numberOfLines={1}>
+          {props.name}
+        </Text>
+        {uploadProgress !== undefined ? (
+          <Text className="text-xs tabular-nums text-foreground-muted">{uploadProgress}%</Text>
+        ) : null}
+      </View>
     </TouchableOpacity>
   );
 }
@@ -906,13 +942,20 @@ function renderFeedEntry(
               />
             ) : null}
             {attachments.map((attachment) => {
-              return (
+              return attachment.type === "image" ? (
                 <MessageAttachmentImage
                   key={attachment.id}
                   environmentId={props.environmentId}
                   attachmentId={attachment.id}
                   className="aspect-[1.3] w-full rounded-[14px] bg-white/15"
                   onPressImage={props.onPressImage}
+                />
+              ) : (
+                <MessageAttachmentFile
+                  key={attachment.id}
+                  environmentId={props.environmentId}
+                  attachmentId={attachment.id}
+                  name={attachment.name}
                 />
               );
             })}
@@ -967,13 +1010,20 @@ function renderFeedEntry(
           )
         ) : null}
         {attachments.map((attachment) => {
-          return (
+          return attachment.type === "image" ? (
             <MessageAttachmentImage
               key={attachment.id}
               environmentId={props.environmentId}
               attachmentId={attachment.id}
               className="mt-1.5 aspect-[1.3] w-full rounded-[18px] bg-neutral-200 dark:bg-neutral-800"
               onPressImage={props.onPressImage}
+            />
+          ) : (
+            <MessageAttachmentFile
+              key={attachment.id}
+              environmentId={props.environmentId}
+              attachmentId={attachment.id}
+              name={attachment.name}
             />
           );
         })}

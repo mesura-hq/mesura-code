@@ -214,26 +214,52 @@ it.layer(CursorTextGenerationTestLayer)("CursorTextGeneration", (it) => {
   );
 
   it.effect("generates thread titles through Cursor ACP text generation", () =>
-    withFakeAcpAgent(
-      {
-        T3_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
-          title: '"Trim reconnect spinner status after resume."',
-        }),
-      },
-      (textGeneration) =>
-        Effect.gen(function* () {
-          const generated = yield* textGeneration.generateThreadTitle({
-            cwd: process.cwd(),
-            message: "Fix the reconnect spinner after a resumed session.",
-            modelSelection: {
-              instanceId: ProviderInstanceId.make("cursor"),
-              model: "composer-2",
-            },
-          });
+    Effect.gen(function* () {
+      const requestLogDir = NodeFS.mkdtempSync(
+        NodePath.join(NodeOS.tmpdir(), "t3code-cursor-title-path-"),
+      );
+      const requestLogPath = NodePath.join(requestLogDir, "requests.ndjson");
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => NodeFS.rmSync(requestLogDir, { recursive: true, force: true })),
+      );
+      return yield* withFakeAcpAgent(
+        {
+          T3_ACP_REQUEST_LOG_PATH: requestLogPath,
+          // @effect-diagnostics-next-line preferSchemaOverJson:off
+          T3_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
+            title: '"Trim reconnect spinner status after resume."',
+          }),
+        },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const generated = yield* textGeneration.generateThreadTitle({
+              cwd: process.cwd(),
+              message: "Fix the reconnect spinner after a resumed session.",
+              attachments: [
+                {
+                  type: "file",
+                  id: "cursor-title-file",
+                  name: "requirements.pdf",
+                  mimeType: "application/pdf",
+                  sizeBytes: 10,
+                },
+              ],
+              attachmentPaths: {
+                "cursor-title-file": "/var/lib/mesura/attachments/requirements.bin",
+              },
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("cursor"),
+                model: "composer-2",
+              },
+            });
 
-          expect(generated.title).toBe("Trim reconnect spinner status after resume.");
-        }),
-    ),
+            expect(generated.title).toBe("Trim reconnect spinner status after resume.");
+            expect(NodeFS.readFileSync(requestLogPath, "utf8")).toContain(
+              "/var/lib/mesura/attachments/requirements.bin",
+            );
+          }),
+      );
+    }),
   );
 
   it.effect("closes the ACP child process after text generation completes", () => {

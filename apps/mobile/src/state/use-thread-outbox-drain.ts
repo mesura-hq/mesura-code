@@ -12,12 +12,12 @@ import {
 } from "@t3tools/contracts";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import * as Cause from "effect/Cause";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/unstable/reactivity";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { scopedThreadKey } from "../lib/scopedEntities";
 import { buildProjectThreadStartTurnInput } from "../lib/projectThreadStartTurn";
-import { toUploadChatImageAttachments } from "../lib/composerImages";
+import { uploadMobileComposerAttachments } from "../lib/attachmentUpload";
 import { randomHex } from "../lib/uuid";
 import { appAtomRegistry } from "./atom-registry";
 import { useProjects, useThreadShells } from "./entities";
@@ -25,6 +25,7 @@ import {
   confirmThreadOutboxMessageQueued,
   ensureThreadOutboxLoaded,
   removeThreadOutboxMessage,
+  updateThreadOutboxMessage,
 } from "./thread-outbox";
 import {
   isQueuedThreadCreationSendable,
@@ -45,11 +46,11 @@ import {
   useThreadOutboxShellStatuses,
 } from "./use-thread-outbox";
 import { useRemoteConnectionStatus } from "./use-remote-environment-registry";
-
-export const dispatchingQueuedMessageIdAtom = Atom.make<MessageId | null>(null).pipe(
-  Atom.keepAlive,
-  Atom.withLabel("mobile:thread-outbox:dispatching-message-id"),
-);
+import {
+  clearAttachmentUploadProgress,
+  dispatchingQueuedMessageIdAtom,
+  setAttachmentUploadProgress,
+} from "./attachment-upload-progress";
 
 function beginDispatchingQueuedMessage(queuedMessageId: MessageId): void {
   appAtomRegistry.set(dispatchingQueuedMessageIdAtom, queuedMessageId);
@@ -122,35 +123,52 @@ export function useThreadOutboxDrain(): void {
     const reportFailure = (
       commandResult: AtomCommandResult<unknown, unknown>,
       stage: ThreadOutboxCommandStage,
-    ): boolean => {
+    ) => {
       if (!AsyncResult.isFailure(commandResult)) {
-        return false;
+        return null;
       }
       const action = resolveThreadOutboxFailureAction({
         stage,
         error: Cause.squash(commandResult.cause),
         interrupted: Cause.hasInterruptsOnly(commandResult.cause),
+        hasOwnedAttachments: queuedMessage.attachments.some(
+          (attachment) => attachment.type === "file" || attachment.previewUri.startsWith("file:"),
+        ),
       });
-      const retry = action === "retry";
       console.warn("[thread-outbox] queued message delivery failed", {
         environmentId: queuedMessage.environmentId,
         threadId: queuedMessage.threadId,
         messageId: queuedMessage.messageId,
         stage,
         cause: commandResult.cause,
-        retry,
+        action,
       });
-      return retry;
+      return action;
     };
     const completeDelivery = async (
       deliveryResult: AtomCommandResult<unknown, unknown>,
+      persistedMessage: QueuedThreadMessage = queuedMessage,
     ): Promise<boolean> => {
-      if (reportFailure(deliveryResult, "start-turn")) {
+      const failureAction = reportFailure(deliveryResult, "start-turn");
+      if (failureAction === "retry") {
         return false;
+      }
+      if (failureAction === "retain") {
+        const cause = AsyncResult.isFailure(deliveryResult)
+          ? Cause.squash(deliveryResult.cause)
+          : new Error("The queued message could not be delivered.");
+        await updateThreadOutboxMessage({
+          ...persistedMessage,
+          deliveryBlocked: {
+            message: cause instanceof Error ? cause.message : String(cause),
+          },
+        });
+        return true;
       }
 
       try {
-        await removeThreadOutboxMessage(queuedMessage);
+        await removeThreadOutboxMessage(persistedMessage);
+        clearAttachmentUploadProgress(queuedMessage.attachments.map((attachment) => attachment.id));
         return true;
       } catch (error) {
         console.warn("[thread-outbox] failed to remove delivered queued message", {
@@ -217,6 +235,31 @@ export function useThreadOutboxDrain(): void {
         }
       }
 
+      let attachments;
+      let persistedMessage = queuedMessage;
+      try {
+        attachments = await uploadMobileComposerAttachments({
+          environmentId: queuedMessage.environmentId,
+          threadId: queuedMessage.threadId,
+          attachments: queuedMessage.attachments,
+          onProgress: setAttachmentUploadProgress,
+          onUploadState: async (attachmentId, remoteUpload) => {
+            const current = persistedMessage.attachments.map((attachment) =>
+              attachment.id === attachmentId ? { ...attachment, remoteUpload } : attachment,
+            );
+            const nextMessage = {
+              ...persistedMessage,
+              attachments: current,
+            };
+            const updated = await updateThreadOutboxMessage(nextMessage);
+            if (!updated) throw new Error("The queued attachment was removed during upload.");
+            persistedMessage = nextMessage;
+          },
+        });
+      } catch (error) {
+        console.warn("[thread-outbox] attachment upload failed", error);
+        return false;
+      }
       const deliveryResult = await startTurn({
         environmentId: queuedMessage.environmentId,
         input: {
@@ -226,7 +269,7 @@ export function useThreadOutboxDrain(): void {
             messageId: queuedMessage.messageId,
             role: "user",
             text: queuedMessage.text,
-            attachments: toUploadChatImageAttachments(queuedMessage.attachments),
+            attachments,
           },
           modelSelection: settings.modelSelection,
           runtimeMode: settings.runtimeMode,
@@ -234,7 +277,7 @@ export function useThreadOutboxDrain(): void {
           createdAt: queuedMessage.createdAt,
         },
       });
-      return completeDelivery(deliveryResult);
+      return completeDelivery(deliveryResult, persistedMessage);
     },
     [
       makeDeliveryHelpers,
@@ -256,6 +299,31 @@ export function useThreadOutboxDrain(): void {
         return false;
       }
       const { completeDelivery } = makeDeliveryHelpers(queuedMessage);
+      let attachments;
+      let persistedMessage = queuedMessage;
+      try {
+        attachments = await uploadMobileComposerAttachments({
+          environmentId: queuedMessage.environmentId,
+          threadId: queuedMessage.threadId,
+          attachments: queuedMessage.attachments,
+          onProgress: setAttachmentUploadProgress,
+          onUploadState: async (attachmentId, remoteUpload) => {
+            const current = persistedMessage.attachments.map((attachment) =>
+              attachment.id === attachmentId ? { ...attachment, remoteUpload } : attachment,
+            );
+            const nextMessage = {
+              ...persistedMessage,
+              attachments: current,
+            };
+            const updated = await updateThreadOutboxMessage(nextMessage);
+            if (!updated) throw new Error("The queued attachment was removed during upload.");
+            persistedMessage = nextMessage;
+          },
+        });
+      } catch (error) {
+        console.warn("[thread-outbox] attachment upload failed", error);
+        return false;
+      }
       const deliveryResult = await startTurn({
         environmentId: queuedMessage.environmentId,
         input: buildProjectThreadStartTurnInput({
@@ -266,7 +334,7 @@ export function useThreadOutboxDrain(): void {
           messageId: queuedMessage.messageId,
           createdAt: queuedMessage.createdAt,
           text: queuedMessage.text.trim(),
-          attachments: queuedMessage.attachments,
+          attachments,
           modelSelection,
           runtimeMode: queuedMessage.runtimeMode ?? DEFAULT_RUNTIME_MODE,
           interactionMode: queuedMessage.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -277,7 +345,7 @@ export function useThreadOutboxDrain(): void {
           worktreeBranchName: buildTemporaryWorktreeBranchName(randomHex),
         }),
       });
-      return completeDelivery(deliveryResult);
+      return completeDelivery(deliveryResult, persistedMessage);
     },
     [makeDeliveryHelpers, startTurn],
   );
@@ -290,6 +358,9 @@ export function useThreadOutboxDrain(): void {
     for (const [threadKey, queuedMessages] of Object.entries(queuedMessagesByThreadKey)) {
       const nextQueuedMessage = queuedMessages[0];
       if (!nextQueuedMessage) {
+        continue;
+      }
+      if (nextQueuedMessage.deliveryBlocked) {
         continue;
       }
       if (editingQueuedMessageIds[nextQueuedMessage.messageId]) {

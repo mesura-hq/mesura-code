@@ -92,6 +92,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "threadSearch.toggle",
   "themeEditor.toggle",
   "composer.stash",
+  "composer.attachFiles",
   "usage.peek",
   "chat.new",
   "chat.newLocal",

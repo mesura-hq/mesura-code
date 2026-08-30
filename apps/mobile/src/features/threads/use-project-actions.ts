@@ -14,10 +14,15 @@ import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
 
 import { threadEnvironment } from "../../state/threads";
-import type { DraftComposerImageAttachment } from "../../lib/composerImages";
+import {
+  removeOwnedComposerAttachment,
+  type DraftComposerAttachment,
+  type DraftComposerRemoteUpload,
+} from "../../lib/composerImages";
 import { makeTurnCommandMetadata, type TurnCommandMetadata } from "../../lib/commandMetadata";
 import { buildProjectThreadStartTurnInput } from "../../lib/projectThreadStartTurn";
 import { randomHex } from "../../lib/uuid";
+import { uploadMobileComposerAttachments } from "../../lib/attachmentUpload";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { setPendingConnectionError } from "../../state/use-remote-environment-registry";
 import { validateProjectThreadCreation } from "./projectThreadCreationValidation";
@@ -36,7 +41,11 @@ export function useCreateProjectThread() {
       readonly runtimeMode: RuntimeMode;
       readonly interactionMode: ProviderInteractionMode;
       readonly initialMessageText: string;
-      readonly initialAttachments: ReadonlyArray<DraftComposerImageAttachment>;
+      readonly initialAttachments: ReadonlyArray<DraftComposerAttachment>;
+      readonly onAttachmentUploadState?: (
+        attachmentId: string,
+        remoteUpload: DraftComposerRemoteUpload,
+      ) => Promise<void>;
       /** Reuse identifiers from a queued pending task instead of minting new ones. */
       readonly turnMetadata?: TurnCommandMetadata;
     }) => {
@@ -56,6 +65,20 @@ export function useCreateProjectThread() {
         return AsyncResult.failure(Cause.fail(validationError));
       }
 
+      let attachments;
+      try {
+        attachments = await uploadMobileComposerAttachments({
+          environmentId: input.project.environmentId,
+          threadId,
+          attachments: input.initialAttachments,
+          onUploadState: input.onAttachmentUploadState,
+        });
+      } catch (error) {
+        setPendingConnectionError(
+          error instanceof Error ? error.message : "The attachments could not be uploaded.",
+        );
+        return AsyncResult.failure(Cause.fail(error));
+      }
       const result = await startTurn({
         environmentId: input.project.environmentId,
         input: buildProjectThreadStartTurnInput({
@@ -66,7 +89,7 @@ export function useCreateProjectThread() {
           messageId: metadata.messageId,
           createdAt: metadata.createdAt,
           text: initialMessageText,
-          attachments: input.initialAttachments,
+          attachments,
           modelSelection: input.modelSelection,
           runtimeMode: input.runtimeMode,
           interactionMode: input.interactionMode,
@@ -84,6 +107,7 @@ export function useCreateProjectThread() {
         );
         return AsyncResult.failure(result.cause);
       }
+      await Promise.allSettled(input.initialAttachments.map(removeOwnedComposerAttachment));
       setPendingConnectionError(null);
 
       return mapAtomCommandResult(result, () =>

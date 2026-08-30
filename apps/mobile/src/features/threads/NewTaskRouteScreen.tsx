@@ -103,7 +103,7 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
       ? "Choose a project for what you shared"
       : incomingShare.attachments.length === 1
         ? "Choose a project for the image you shared"
-        : `Choose a project for the ${incomingShare.attachments.length} images you shared`
+        : `Choose a project for the ${incomingShare.attachments.length} files you shared`
     : null;
   const screenTitle = incomingShare ? "Start a task" : "Choose project";
   const projectEmptyState = deriveProjectEmptyState(catalogState);

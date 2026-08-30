@@ -12,6 +12,7 @@ import { Alert, AppState, Platform } from "react-native";
 
 import {
   buildIncomingShareDraft,
+  buildOwnedIncomingShareFileName,
   type IncomingShareDestination,
   type IncomingShareDraft,
 } from "./incoming-share-model";
@@ -54,7 +55,7 @@ const getIncomingSharePayloads = createIncomingSharePayloadReader({
   readPayloads: getSharedPayloads,
 });
 
-async function resolvedPayloadsForImages(): Promise<ReadonlyArray<ResolvedSharePayload>> {
+async function resolvedPayloadsForFiles(): Promise<ReadonlyArray<ResolvedSharePayload>> {
   try {
     return await getResolvedSharedPayloadsAsync();
   } catch (error) {
@@ -84,6 +85,22 @@ async function readBase64(uri: string): Promise<string> {
   return new File(uri).base64();
 }
 
+async function copyOwnedFile(
+  uri: string,
+  name: string,
+  _mimeType: string,
+): Promise<{ readonly uri: string; readonly sizeBytes: number }> {
+  const { Directory, File, Paths } = await import("expo-file-system");
+  const directory = new Directory(Paths.document, "incoming-share-files");
+  directory.create({ idempotent: true, intermediates: true });
+  const destination = new File(
+    directory,
+    buildOwnedIncomingShareFileName(name, Crypto.randomUUID()),
+  );
+  await new File(uri).copy(destination, { overwrite: false });
+  return { uri: destination.uri, sizeBytes: destination.size };
+}
+
 async function removeOwnedFile(uri: string): Promise<void> {
   if (!uri.startsWith("file:")) {
     return;
@@ -104,16 +121,16 @@ async function removeReplayedImagePayloadFiles(
 ): Promise<void> {
   const uris = new Set<string>();
   for (const payload of payloads) {
-    if (payload.shareType === "image") {
+    if (["image", "video", "audio", "file"].includes(payload.shareType)) {
       uris.add(payload.value);
     }
   }
   if (uris.size === 0) {
     return;
   }
-  const resolvedPayloads = await resolvedPayloadsForImages();
+  const resolvedPayloads = await resolvedPayloadsForFiles();
   for (const payload of resolvedPayloads) {
-    if (payload.shareType === "image" && payload.contentUri) {
+    if (["image", "video", "audio", "file"].includes(payload.shareType) && payload.contentUri) {
       uris.add(payload.contentUri);
     }
   }
@@ -131,14 +148,17 @@ const incomingShareInbox = new IncomingShareInbox({
   clearPayloads: clearSharedPayloads,
   buildDraft: async ({ payloads, id, createdAt }) => {
     const cleanupUris = new Set<string>();
-    const resolvedPayloads = payloads.some((payload) => payload.shareType === "image")
-      ? await resolvedPayloadsForImages()
+    const resolvedPayloads = payloads.some((payload) =>
+      ["image", "video", "audio", "file"].includes(payload.shareType),
+    )
+      ? await resolvedPayloadsForFiles()
       : [];
     const draft = await buildIncomingShareDraft({
       payloads,
       resolvedPayloads,
       fileReader: {
         readBase64,
+        copyOwnedFile,
         removeOwnedFile: (uri) => {
           cleanupUris.add(uri);
         },

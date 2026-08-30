@@ -51,6 +51,7 @@ export interface BranchNameGenerationInput {
   cwd: string;
   message: string;
   attachments?: ReadonlyArray<ChatAttachment> | undefined;
+  attachmentPaths?: Readonly<Record<string, string>> | undefined;
   /** What model and provider to use for generation. */
   modelSelection: ModelSelection;
 }
@@ -65,6 +66,7 @@ export interface ThreadTitleGenerationInput {
   /** Present when replacing an existing title from the current thread history. */
   previousTitle?: string | undefined;
   attachments?: ReadonlyArray<ChatAttachment> | undefined;
+  attachmentPaths?: Readonly<Record<string, string>> | undefined;
   /** What model and provider to use for generation. */
   modelSelection: ModelSelection;
 }

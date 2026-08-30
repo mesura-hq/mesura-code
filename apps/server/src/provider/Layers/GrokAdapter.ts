@@ -33,6 +33,7 @@ import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import { selectNativeImageAttachments } from "../attachmentDelivery.ts";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import {
@@ -958,7 +959,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
 
               const text = input.input?.trim();
               const imagePromptParts = yield* Effect.forEach(
-                input.attachments ?? [],
+                selectNativeImageAttachments(input.attachments),
                 (attachment) =>
                   Effect.gen(function* () {
                     const attachmentPath = resolveAttachmentPath({
