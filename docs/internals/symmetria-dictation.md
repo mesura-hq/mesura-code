@@ -12,9 +12,16 @@ is one of these values:
 - A server thread, addressed by `environmentId` and `threadId`.
 - A local draft, addressed by `draftId` and its preallocated `futureThreadRef`.
 
-Shell must reserve the target before audio capture starts. The renderer supplies the target from the
-registered composer. Navigation does not change the reservation. Delivery resolves only the
-reservation and never reads the current route.
+Shell captures the Mesura process and dispatches the reservation before audio capture starts. It can
+start capture immediately after that dispatch while Shell still owns presentation. The renderer
+supplies the exact target from the registered composer. If reservation fails, Shell keeps ordinary
+transcription active, reports the failure, and copies the result for manual paste. It never runs
+destination-less injection or automatic send. Navigation does not change a confirmed reservation.
+Delivery resolves only the reservation and never reads the current route.
+
+Fast transcription cannot bypass reservation. Shell holds a completed transcript until the broker
+confirms the target. Restart reuses the pending session identity, and the latest Shell mode is
+published after confirmation.
 
 The broker survives a renderer reload. The new renderer restores the broker snapshot into
 `dictationCoordinator`. Delivery then revalidates the target against the current draft store and
@@ -23,7 +30,8 @@ replacement target.
 
 ## Flow
 
-1. Shell or the Mesura microphone sends `dictation.reserve.request`.
+1. Shell or the Mesura microphone sends `dictation.reserve.request`; Shell starts capture under its
+   own presentation while that request is pending.
 2. Electron main asks the renderer to reserve its registered composer target.
 3. The broker publishes the session snapshot to Shell and every renderer.
 4. Shell runs the existing STT job and publishes phase, elapsed time, audio level, and grace time.

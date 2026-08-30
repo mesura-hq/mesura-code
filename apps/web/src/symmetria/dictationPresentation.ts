@@ -57,6 +57,7 @@ export function shouldPresentDictationInMesura(input: {
 }): boolean {
   return Boolean(
     input.session &&
+    input.session.phase !== "cancelled" &&
     input.focused &&
     input.visible &&
     dictationTargetsEqual(input.session.target, input.displayedTarget),
@@ -112,24 +113,6 @@ export function dictationPhaseLabel(phase: SymmetriaDictationPhase): string {
   }
 }
 
-export function buildCenterOutWaveform(input: {
-  readonly barCount: number;
-  readonly history: ReadonlyArray<number>;
-  readonly phase: SymmetriaDictationPhase;
-  readonly tick: number;
-}): ReadonlyArray<number> {
-  const center = (input.barCount - 1) / 2;
-  const historyLength = Math.ceil(input.barCount / 2);
-  return Array.from({ length: input.barCount }, (_, index) => {
-    const distance = Math.floor(Math.abs(index - center));
-    if (input.phase === "processing" || input.phase === "grace") {
-      const spatial = (distance / Math.max(1, historyLength - 1)) * Math.PI;
-      return 0.18 + 0.82 * (0.5 + 0.5 * Math.sin(spatial - input.tick * 0.7));
-    }
-    return Math.max(0, Math.min(1, input.history[distance] ?? 0));
-  });
-}
-
 export function shouldAnimateDictationWaveform(input: {
   readonly active: boolean;
   readonly reducedMotion: boolean;
@@ -138,6 +121,6 @@ export function shouldAnimateDictationWaveform(input: {
   return (
     input.active &&
     !input.reducedMotion &&
-    (input.phase === "processing" || input.phase === "grace")
+    (input.phase === "recording" || input.phase === "processing" || input.phase === "grace")
   );
 }

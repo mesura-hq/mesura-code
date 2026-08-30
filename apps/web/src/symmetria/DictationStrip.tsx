@@ -177,9 +177,11 @@ const StripButton = memo(function StripButton(props: {
             aria-label={props.label}
             disabled={props.disabled}
             data-dictation-mode-control={props.modeControl ? "true" : undefined}
+            data-dictation-control="true"
             className={cn(
-              "flex size-7 items-center justify-center rounded-full border border-border/55 bg-background/35 text-secondary-label shadow-xs backdrop-blur-md transition-[color,background-color,transform] duration-150 hover:scale-105 hover:bg-accent/55 hover:text-foreground active:scale-95",
-              props.destructive && "hover:bg-destructive/12 hover:text-destructive",
+              "flex size-7 cursor-pointer items-center justify-center rounded-full border border-border/55 bg-background/35 text-secondary-label shadow-xs backdrop-blur-md transition-[color,background-color,border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:scale-[1.06] hover:border-foreground/20 hover:bg-foreground/10 hover:text-foreground hover:shadow-sm focus-visible:border-foreground/25 focus-visible:ring-2 focus-visible:ring-foreground/20 focus-visible:outline-none active:translate-y-0 active:scale-95",
+              props.destructive &&
+                "hover:border-destructive/30 hover:bg-destructive/12 hover:text-destructive",
               props.disabled && "pointer-events-none opacity-35",
             )}
             onClick={props.onClick}
@@ -281,18 +283,13 @@ export const DictationStrip = memo(function DictationStrip(props: {
     session.phase === "processing" ||
     session.phase === "grace";
   const canDismiss =
-    session.phase === "confirming" ||
-    session.phase === "completed" ||
-    session.phase === "failed" ||
-    session.phase === "cancelled";
+    session.phase === "confirming" || session.phase === "completed" || session.phase === "failed";
   const terminalPresentation =
     session.phase === "completed"
       ? { icon: CheckIcon, label: "Delivered", className: "text-success" }
       : session.phase === "failed"
         ? { icon: CircleAlertIcon, label: "Delivery failed", className: "text-destructive" }
-        : session.phase === "cancelled"
-          ? { icon: XIcon, label: "Cancelled", className: "text-secondary-label" }
-          : null;
+        : null;
 
   return (
     <div

@@ -6,7 +6,6 @@ import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { assert, it } from "vite-plus/test";
 
 import {
-  buildCenterOutWaveform,
   claimDictationReservation,
   dictationMicrophonePresentation,
   dictationPhaseLabel,
@@ -62,6 +61,22 @@ it("presents only the exact focused visible target", () => {
       session,
       displayedTarget: session.target,
       focused: false,
+      visible: true,
+    }),
+  );
+  assert.isFalse(
+    shouldPresentDictationInMesura({
+      session: { ...session, phase: "cancelled" },
+      displayedTarget: session.target,
+      focused: true,
+      visible: true,
+    }),
+  );
+  assert.isTrue(
+    shouldPresentDictationInMesura({
+      session: { ...session, phase: "failed" },
+      displayedTarget: session.target,
+      focused: true,
       visible: true,
     }),
   );
@@ -145,23 +160,10 @@ it("distinguishes the initial confirmation from its background-watcher state", (
   assert.equal(dictationPhaseLabel("confirming"), "Still confirming");
 });
 
-it("mirrors newest samples from the center and ignores audio while processing", () => {
-  assert.deepEqual(
-    buildCenterOutWaveform({
-      barCount: 6,
-      history: [1, 0.5, 0.25],
-      phase: "recording",
-      tick: 0,
-    }),
-    [0.25, 0.5, 1, 1, 0.5, 0.25],
+it("animates recording and processing only while visible and motion is allowed", () => {
+  assert.isTrue(
+    shouldAnimateDictationWaveform({ active: true, reducedMotion: false, phase: "recording" }),
   );
-  assert.deepEqual(
-    buildCenterOutWaveform({ barCount: 6, history: [1, 1, 1], phase: "processing", tick: 2 }),
-    buildCenterOutWaveform({ barCount: 6, history: [0, 0, 0], phase: "processing", tick: 2 }),
-  );
-});
-
-it("animates processing only while visible and motion is allowed", () => {
   assert.isTrue(
     shouldAnimateDictationWaveform({ active: true, reducedMotion: false, phase: "processing" }),
   );

@@ -1160,6 +1160,20 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     isolation: isolate;
   }
 
+  .chat-composer-glass-shell:has(> .mesura-dictation-strip)::before {
+    /* The strip contributes 2.75rem before the composer after its overlap.
+       Start the shared glass at the composer instead of behind the inset strip. */
+    inset-block-start: 2.75rem;
+  }
+
+  .chat-composer-glass-shell:has(.mesura-dictation-strip) .chat-composer-glass-host::after,
+  .chat-composer-glass-shell:has(.mesura-dictation-strip)
+    .chat-composer-glass-host
+    [data-chat-composer-main-surface="true"]::after {
+    border-top-color: transparent;
+    box-shadow: none;
+  }
+
   .mesura-dictation-strip::before {
     pointer-events: none;
     position: absolute;
@@ -1192,10 +1206,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
         color-mix(in srgb, var(--chat-composer-glass-surface) var(--glass-opacity), transparent);
       box-shadow: 0 -14px 32px -18px rgb(0 0 0 / 75%);
     }
-  }
-
-  .mesura-dictation-strip[data-phase="failed"]::before {
-    border-color: color-mix(in srgb, var(--error) 32%, transparent);
   }
 
   .mesura-dictation-strip:is([data-phase="delivering"], [data-phase="confirming"])
