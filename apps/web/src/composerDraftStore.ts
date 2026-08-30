@@ -3794,8 +3794,122 @@ export type PersistedDictationAppendResult =
       readonly prompt: string;
       readonly version: number;
       readonly targetKey: string;
+      readonly persistedBytes: number;
+      readonly promptHash?: string | undefined;
     }
-  | { readonly ok: false; readonly reason: "missing-target" | "persistence-failed" };
+  | { readonly ok: false; readonly reason: "missing-target" }
+  | ({
+      readonly ok: false;
+      readonly reason: "persistence-failed";
+    } & DictationPersistenceFailure);
+
+export type DictationPersistenceFailureStage =
+  | "storage-write-failed"
+  | "storage-read-failed"
+  | "persisted-state-missing"
+  | "decode-failed"
+  | "target-missing"
+  | "command-missing"
+  | "prompt-mismatch";
+
+export type DictationPersistenceFailure = {
+  readonly stage: DictationPersistenceFailureStage;
+  readonly persistedBytes: number;
+  readonly expectedPromptHash?: string | undefined;
+  readonly actualPromptHash?: string | undefined;
+};
+
+type DictationPersistenceReadbackInput = {
+  readonly raw: string | null;
+  readonly targetKey: string;
+  readonly commandId: string;
+  readonly version: number;
+  readonly expectedPrompt: string;
+};
+
+type DictationPersistenceReadbackResult =
+  | {
+      readonly ok: true;
+      readonly persistedBytes: number;
+      readonly promptHash?: string | undefined;
+    }
+  | ({ readonly ok: false } & DictationPersistenceFailure);
+
+type DictationPersistenceDependencies = {
+  readonly flush: () => void;
+  readonly readRaw: () => string | null | Promise<string | null>;
+  readonly hashText?: (text: string) => string | undefined | Promise<string | undefined>;
+};
+
+const textEncoder = new TextEncoder();
+
+async function hashPersistedDictationText(text: string): Promise<string> {
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", textEncoder.encode(text));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function safeHashPersistedDictationText(
+  text: string,
+  hashText: (
+    text: string,
+  ) => string | undefined | Promise<string | undefined> = hashPersistedDictationText,
+): Promise<string | undefined> {
+  try {
+    return await hashText(text);
+  } catch {
+    return undefined;
+  }
+}
+
+const persistenceFailure = (
+  stage: DictationPersistenceFailureStage,
+  persistedBytes: number,
+  hashes: {
+    readonly expectedPromptHash?: string | undefined;
+    readonly actualPromptHash?: string | undefined;
+  } = {},
+): DictationPersistenceReadbackResult => ({ ok: false, stage, persistedBytes, ...hashes });
+
+/** Verifies a serialized composer snapshot without exposing its text in diagnostics. */
+export async function verifyPersistedDictationReadback(
+  input: DictationPersistenceReadbackInput,
+  hashText?: (text: string) => string | undefined | Promise<string | undefined>,
+): Promise<DictationPersistenceReadbackResult> {
+  const expectedPromptHash = await safeHashPersistedDictationText(input.expectedPrompt, hashText);
+  if (input.raw === null) {
+    return persistenceFailure("persisted-state-missing", 0, { expectedPromptHash });
+  }
+  const persistedBytes = textEncoder.encode(input.raw).byteLength;
+  let normalized: PersistedComposerDraftStoreState;
+  try {
+    const persisted = decodePersistedComposerDraftStoreStorage(input.raw);
+    normalized = normalizeCurrentPersistedComposerDraftStoreState(persisted.state);
+  } catch {
+    return persistenceFailure("decode-failed", persistedBytes, { expectedPromptHash });
+  }
+  const prompt = normalized.draftsByThreadKey[input.targetKey]?.prompt;
+  if (prompt === undefined) {
+    return persistenceFailure("target-missing", persistedBytes, { expectedPromptHash });
+  }
+  const actualPromptHash = await safeHashPersistedDictationText(prompt, hashText);
+  const applications = normalized.appliedDictationCommandsByTargetKey?.[input.targetKey] ?? [];
+  const storedApplication = applications.find(
+    (entry) => entry.commandId === input.commandId && entry.version === input.version,
+  );
+  if (storedApplication === undefined) {
+    return persistenceFailure("command-missing", persistedBytes, {
+      expectedPromptHash,
+      actualPromptHash,
+    });
+  }
+  if (prompt !== input.expectedPrompt) {
+    return persistenceFailure("prompt-mismatch", persistedBytes, {
+      expectedPromptHash,
+      actualPromptHash,
+    });
+  }
+  return { ok: true, persistedBytes, promptHash: actualPromptHash };
+}
 
 export async function readPersistedDictationTarget(targetKey: string): Promise<{
   readonly prompt: string;
@@ -3819,6 +3933,10 @@ export async function appendPersistedDictation(
   commandId: CommandId,
   transcript: string,
   sourceTargetKey: string | null = null,
+  persistence: DictationPersistenceDependencies = {
+    flush: () => composerDebouncedStorage.flush(),
+    readRaw: () => composerDebouncedStorage.getItem(COMPOSER_DRAFT_STORAGE_KEY),
+  },
 ): Promise<PersistedDictationAppendResult> {
   const targetKey = typeof target === "string" ? target : scopedThreadKey(target);
   const appendState: {
@@ -3878,20 +3996,47 @@ export async function appendPersistedDictation(
 
   const applied = appendState.applied;
   if (applied === undefined) return { ok: false, reason: "missing-target" };
+  const safePromptHash = (prompt: string) =>
+    safeHashPersistedDictationText(prompt, persistence.hashText);
   try {
-    composerDebouncedStorage.flush();
-    const persisted = await readPersistedDictationTarget(targetKey);
-    if (!persisted) return { ok: false, reason: "persistence-failed" };
-    const storedApplication = persisted.applications.find(
-      (entry) => entry.commandId === commandId && entry.version === applied?.version,
-    );
-    if (storedApplication === undefined || persisted.prompt !== applied.prompt) {
-      return { ok: false, reason: "persistence-failed" };
-    }
-    return { ok: true, targetKey, ...applied };
+    persistence.flush();
   } catch {
-    return { ok: false, reason: "persistence-failed" };
+    return {
+      ok: false,
+      reason: "persistence-failed",
+      stage: "storage-write-failed",
+      persistedBytes: 0,
+      expectedPromptHash: await safePromptHash(applied.prompt),
+    };
   }
+  let raw: string | null;
+  try {
+    raw = await persistence.readRaw();
+  } catch {
+    return {
+      ok: false,
+      reason: "persistence-failed",
+      stage: "storage-read-failed",
+      persistedBytes: 0,
+      expectedPromptHash: await safePromptHash(applied.prompt),
+    };
+  }
+  const readback = await verifyPersistedDictationReadback(
+    {
+      raw,
+      targetKey,
+      commandId,
+      version: applied.version,
+      expectedPrompt: applied.prompt,
+    },
+    persistence.hashText,
+  );
+  if (!readback.ok) {
+    const { ok: _readbackFailed, ...failure } = readback;
+    return { ok: false, reason: "persistence-failed", ...failure };
+  }
+  const { ok: _readbackSucceeded, ...verification } = readback;
+  return { ok: true, targetKey, ...applied, ...verification };
 }
 
 export function clearComposerDraftsEnvironment(environmentId: EnvironmentId): void {

@@ -7,6 +7,7 @@ import {
 import * as Schema from "effect/Schema";
 import {
   defaultInstanceIdForDriver,
+  CommandId,
   EnvironmentId,
   ProjectId,
   ProviderDriverKind,
@@ -59,6 +60,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 
 import {
   COMPOSER_DRAFT_STORAGE_KEY,
+  appendPersistedDictation,
   clearComposerDraftsEnvironment,
   finalizePromotedDraftThreadByRef,
   markPromotedDraftThread,
@@ -68,6 +70,7 @@ import {
   type ComposerImageAttachment,
   useComposerDraftStore,
   DraftId,
+  verifyPersistedDictationReadback,
 } from "./composerDraftStore";
 import { removeLocalStorageItem, setLocalStorageItem } from "./hooks/useLocalStorage";
 import {
@@ -1966,6 +1969,17 @@ describe("createDebouncedStorage", () => {
     expect(base.setItem).toHaveBeenCalledTimes(1);
   });
 
+  it("surfaces a base-storage exception from a forced flush", () => {
+    const base = createMockStorage();
+    base.setItem.mockImplementationOnce(() => {
+      throw new DOMException("quota exceeded", "QuotaExceededError");
+    });
+    const storage = createDebouncedStorage(base);
+    storage.setItem("key", "value");
+
+    expect(() => storage.flush()).toThrow("quota exceeded");
+  });
+
   it("flush is a no-op when nothing is pending", () => {
     const base = createMockStorage();
     const storage = createDebouncedStorage(base);
@@ -1996,5 +2010,138 @@ describe("createDebouncedStorage", () => {
     vi.advanceTimersByTime(300);
     expect(base.setItem).toHaveBeenCalledTimes(1);
     expect(base.setItem).toHaveBeenCalledWith("key", "v2");
+  });
+});
+
+describe("dictation persistence verification", () => {
+  const targetKey = scopedThreadKey(
+    scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("thread-dictation-verification")),
+  );
+  const commandId = CommandId.make("command-dictation-verification");
+  const expectedPrompt = "typed context [voiced] dictated words";
+  const persistedState = (
+    overrides: {
+      prompt?: string;
+      applications?: ReadonlyArray<{ commandId: string; version: number }>;
+    } = {},
+  ) =>
+    JSON.stringify({
+      version: 8,
+      state: {
+        draftsByThreadKey: {
+          [targetKey]: {
+            prompt: overrides.prompt ?? expectedPrompt,
+            attachments: [],
+          },
+        },
+        draftThreadsByThreadKey: {},
+        logicalProjectDraftThreadKeyByLogicalProjectKey: {},
+        stickyModelSelectionByProvider: {},
+        stickyActiveProvider: null,
+        appliedDictationCommandsByTargetKey: {
+          [targetKey]: overrides.applications ?? [{ commandId, version: 1 }],
+        },
+      },
+    });
+
+  it("returns durable metadata after exact prompt and command readback", async () => {
+    const raw = persistedState();
+
+    const result = await verifyPersistedDictationReadback({
+      raw,
+      targetKey,
+      commandId,
+      version: 1,
+      expectedPrompt,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      persistedBytes: new TextEncoder().encode(raw).byteLength,
+    });
+    if (result.ok) expect(result.promptHash).toMatch(/^[a-f0-9]{64}$/u);
+  });
+
+  it.each([
+    { name: "missing persisted state", raw: null, stage: "persisted-state-missing" },
+    { name: "decode failure", raw: "{broken", stage: "decode-failed" },
+    {
+      name: "missing target",
+      raw: JSON.stringify({
+        version: 8,
+        state: {
+          draftsByThreadKey: {},
+          draftThreadsByThreadKey: {},
+          logicalProjectDraftThreadKeyByLogicalProjectKey: {},
+        },
+      }),
+      stage: "target-missing",
+    },
+    {
+      name: "missing command",
+      raw: persistedState({ applications: [] }),
+      stage: "command-missing",
+    },
+    {
+      name: "prompt mismatch",
+      raw: persistedState({ prompt: "stale prompt" }),
+      stage: "prompt-mismatch",
+    },
+  ])("classifies $name", async ({ raw, stage }) => {
+    const result = await verifyPersistedDictationReadback({
+      raw,
+      targetKey,
+      commandId,
+      version: 1,
+      expectedPrompt,
+    });
+
+    expect(result).toMatchObject({ ok: false, stage });
+  });
+
+  it("classifies a forced durable-write exception before readback", async () => {
+    const target = scopeThreadRef(
+      TEST_ENVIRONMENT_ID,
+      ThreadId.make("thread-dictation-write-failure"),
+    );
+
+    const result = await appendPersistedDictation(target, commandId, "dictated words", null, {
+      flush: () => {
+        throw new DOMException("quota exceeded", "QuotaExceededError");
+      },
+      readRaw: () => persistedState(),
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "persistence-failed",
+      stage: "storage-write-failed",
+    });
+    expect(useComposerDraftStore.getState().getComposerDraft(target)?.prompt).toBe(
+      "[voiced] dictated words",
+    );
+  });
+
+  it("classifies a storage read exception and keeps the transcript recoverable", async () => {
+    const target = scopeThreadRef(
+      TEST_ENVIRONMENT_ID,
+      ThreadId.make("thread-dictation-read-failure"),
+    );
+
+    const result = await appendPersistedDictation(target, commandId, "dictated words", null, {
+      flush: () => undefined,
+      readRaw: () => {
+        throw new DOMException("storage unavailable", "InvalidStateError");
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "persistence-failed",
+      stage: "storage-read-failed",
+    });
+    expect(useComposerDraftStore.getState().getComposerDraft(target)?.prompt).toBe(
+      "[voiced] dictated words",
+    );
   });
 });

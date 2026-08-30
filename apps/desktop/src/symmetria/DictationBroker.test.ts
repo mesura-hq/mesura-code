@@ -51,8 +51,8 @@ const makeReserveRequest = (sessionId = "session-a", commandId = "command-reserv
 };
 const reserveRequest = makeReserveRequest();
 
-const makeDeliverCommand = (commandId = "command-deliver") =>
-  decodeCommand({
+const makeDeliverCommand = (commandId = "command-deliver") => {
+  const command = decodeCommand({
     type: "dictation.deliver",
     protocolVersion: { major: 1, minor: 2 },
     sessionId: "session-a",
@@ -62,6 +62,9 @@ const makeDeliverCommand = (commandId = "command-deliver") =>
     mode: "submit",
     text: "dictated words",
   });
+  if (command.type !== "dictation.deliver") throw new Error("invalid delivery fixture");
+  return command;
+};
 
 const makeTurnRunningReceipt = () =>
   decodeReceipt({
@@ -71,7 +74,7 @@ const makeTurnRunningReceipt = () =>
     commandId: "command-deliver",
     target: targetA,
     application: "first",
-    messageId: "message-a",
+    messageId: "dictation-command-deliver",
     turnId: "turn-a",
   });
 
@@ -131,6 +134,29 @@ it("delivers only to the reserved target and never asks for the current target",
 
   assert.deepEqual(currentTarget, targetB);
   assert.deepEqual(deliveredTargets, [targetA]);
+});
+
+it("reports an early mismatched-target refusal without changing the session phase", async () => {
+  const diagnostics: Array<unknown> = [];
+  const broker = createDictationBroker({
+    reportDiagnostic: (event) => diagnostics.push(event),
+    reserveTarget: async () => ({ target: targetA, projectName: "Project A" }),
+    deliver: async () => makeTurnRunningReceipt(),
+  });
+  await broker.reserve(reserveRequest);
+
+  const receipt = await broker.command(decodeCommand({ ...makeDeliverCommand(), target: targetB }));
+
+  assert.equal(receipt?.outcome, "refused");
+  assert.equal(broker.snapshot()?.phase, "recording");
+  assert.deepInclude(diagnostics[0] as object, {
+    source: "initial",
+    decision: "applied",
+    code: "target_missing",
+    rejectionReason: "target-mismatch",
+    phaseBefore: "recording",
+    phaseAfter: "recording",
+  });
 });
 
 // Acceptance: a replay can recover the recorded result, but cannot repeat the
@@ -403,6 +429,346 @@ it("forwards a correlated late receipt to connected Shell clients", async () => 
   assert.isTrue(reported);
   assert.equal(broker.snapshot()?.phase, "completed");
   assert.deepEqual(receipts, [makeTurnRunningReceipt()]);
+});
+
+it("promotes a correlated late success over an uncertain renderer deadline", async () => {
+  let deliveryCount = 0;
+  const broker = createDictationBroker({
+    reserveTarget: async () => ({ target: targetA, projectName: "Project A" }),
+    deliver: async () => {
+      deliveryCount += 1;
+      return decodeReceipt({
+        outcome: "failed",
+        protocolVersion: { major: 1, minor: 5 },
+        sessionId: "session-a",
+        commandId: "command-deliver",
+        target: targetA,
+        application: "first",
+        code: "deadline_exceeded",
+        detail: "the renderer response deadline expired",
+      });
+    },
+  });
+  await broker.reserve(reserveRequest);
+  await broker.command(makeDeliverCommand());
+  const receipts: Array<unknown> = [];
+  const unsubscribe = broker.watchReceipts((receipt) => receipts.push(receipt));
+
+  const reported = broker.reportLateReceipt(makeTurnRunningReceipt());
+  const replay = await broker.command(makeDeliverCommand());
+  unsubscribe();
+
+  assert.isTrue(reported);
+  assert.equal(broker.snapshot()?.phase, "completed");
+  assert.equal(deliveryCount, 1);
+  assert.equal(replay?.outcome, "turn-running");
+  assert.deepEqual(receipts, [makeTurnRunningReceipt()]);
+});
+
+it("emits a correlated renderer request lifecycle without command text", async () => {
+  const events: Array<unknown> = [];
+  const times = [1_000, 7_001, 8_000, 14_050, 15_000, 16_000];
+  const bridge = createRendererRequestBridge({
+    newRequestId: (() => {
+      let nextId = 0;
+      return () => `renderer-request-${(nextId += 1)}`;
+    })(),
+    now: () => times.shift() ?? 14_050,
+    observe: (event) => events.push(event),
+    send: () => undefined,
+  });
+
+  const first = bridge.dispatch({
+    kind: "deliver",
+    command: makeDeliverCommand(),
+    target: targetA,
+  });
+  assert.isTrue(bridge.resolve(first.requestId, { outcome: "confirmation-pending" }));
+  await first.response;
+  const second = bridge.dispatch({
+    kind: "deliver",
+    command: makeDeliverCommand("command-second"),
+    target: targetA,
+  });
+  second.abandon();
+  const third = bridge.dispatch({
+    kind: "deliver",
+    command: makeDeliverCommand("command-third"),
+    target: targetA,
+  });
+  const rejected = third.response.catch((cause: unknown) =>
+    cause instanceof Error ? cause.message : String(cause),
+  );
+  bridge.rejectAll(new Error("broker stopped"));
+  assert.equal(await rejected, "broker stopped");
+
+  assert.deepEqual(events, [
+    {
+      event: "symmetria.dictation.renderer-request",
+      action: "dispatched",
+      requestId: "renderer-request-1",
+      kind: "deliver",
+      sessionId: "session-a",
+      commandId: "command-deliver",
+    },
+    {
+      event: "symmetria.dictation.renderer-request",
+      action: "resolved",
+      requestId: "renderer-request-1",
+      kind: "deliver",
+      sessionId: "session-a",
+      commandId: "command-deliver",
+      elapsedMs: 6_001,
+    },
+    {
+      event: "symmetria.dictation.renderer-request",
+      action: "dispatched",
+      requestId: "renderer-request-2",
+      kind: "deliver",
+      sessionId: "session-a",
+      commandId: "command-second",
+    },
+    {
+      event: "symmetria.dictation.renderer-request",
+      action: "abandoned",
+      requestId: "renderer-request-2",
+      kind: "deliver",
+      sessionId: "session-a",
+      commandId: "command-second",
+      elapsedMs: 6_050,
+    },
+    {
+      event: "symmetria.dictation.renderer-request",
+      action: "dispatched",
+      requestId: "renderer-request-3",
+      kind: "deliver",
+      sessionId: "session-a",
+      commandId: "command-third",
+    },
+    {
+      event: "symmetria.dictation.renderer-request",
+      action: "abandoned",
+      requestId: "renderer-request-3",
+      kind: "deliver",
+      sessionId: "session-a",
+      commandId: "command-third",
+      elapsedMs: 1_000,
+    },
+  ]);
+  assert.notInclude(JSON.stringify(events), "dictated words");
+});
+
+it("reports initial and late receipt transitions with one correlation identity", async () => {
+  const diagnostics: Array<unknown> = [];
+  let currentTime = 1_000;
+  const broker = createDictationBroker({
+    now: () => currentTime,
+    reportDiagnostic: (event) => diagnostics.push(event),
+    reserveTarget: async () => ({ target: targetA, projectName: "Project A" }),
+    deliver: async () =>
+      decodeReceipt({
+        outcome: "failed",
+        protocolVersion: { major: 1, minor: 5 },
+        sessionId: "session-a",
+        commandId: "command-deliver",
+        target: targetA,
+        application: "first",
+        code: "deadline_exceeded",
+        detail: "renderer response deadline expired",
+      }),
+  });
+  await broker.reserve(reserveRequest);
+  await broker.command(makeDeliverCommand());
+  currentTime = 7_001;
+  broker.reportLateReceipt(makeTurnRunningReceipt());
+
+  assert.deepInclude(diagnostics[0] as object, {
+    event: "symmetria.dictation.receipt-transition",
+    source: "initial",
+    decision: "applied",
+    sessionId: "session-a",
+    commandId: "command-deliver",
+    outcome: "failed",
+    code: "deadline_exceeded",
+    phaseBefore: "delivering",
+    phaseAfter: "failed",
+  });
+  assert.deepInclude(diagnostics[1] as object, {
+    event: "symmetria.dictation.receipt-transition",
+    source: "late",
+    decision: "applied",
+    sessionId: "session-a",
+    commandId: "command-deliver",
+    outcome: "turn-running",
+    phaseBefore: "failed",
+    phaseAfter: "completed",
+    elapsedMs: 6_001,
+  });
+  assert.notInclude(JSON.stringify(diagnostics), "dictated words");
+});
+
+it("completes one broker delivery after a controlled renderer delay beyond five seconds", async () => {
+  let currentTime = 1_000;
+  let pendingRequestId: string | null = null;
+  const rendererDiagnostics: Array<unknown> = [];
+  const bridge = createRendererRequestBridge({
+    newRequestId: () => "renderer-request-delayed",
+    now: () => currentTime,
+    observe: (event) => rendererDiagnostics.push(event),
+    send: (request) => {
+      pendingRequestId = request.requestId;
+    },
+  });
+  let deliveryCount = 0;
+  const broker = createDictationBroker({
+    now: () => currentTime,
+    reserveTarget: async () => ({ target: targetA, projectName: "Project A" }),
+    deliver: async (command, target) => {
+      deliveryCount += 1;
+      const dispatched = bridge.dispatch({ kind: "deliver", command, target });
+      const raw = await dispatched.response;
+      return decodeReceipt(raw);
+    },
+  });
+  await broker.reserve(reserveRequest);
+  const delivery = broker.command(makeDeliverCommand());
+  await Promise.resolve();
+  await Promise.resolve();
+  if (pendingRequestId === null) throw new Error("renderer request was not dispatched");
+  currentTime = 7_001;
+  bridge.resolve(
+    pendingRequestId,
+    decodeReceipt({
+      outcome: "confirmation-pending",
+      protocolVersion: { major: 1, minor: 5 },
+      sessionId: "session-a",
+      commandId: "command-deliver",
+      target: targetA,
+      application: "first",
+    }),
+  );
+  await delivery;
+  const receipts: Array<unknown> = [];
+  const unsubscribe = broker.watchReceipts((receipt) => receipts.push(receipt));
+  currentTime = 8_000;
+  assert.isTrue(broker.reportLateReceipt(makeTurnRunningReceipt()));
+  const replay = await broker.command(makeDeliverCommand());
+  unsubscribe();
+
+  assert.equal(deliveryCount, 1);
+  assert.equal(broker.snapshot()?.phase, "completed");
+  assert.equal(replay?.outcome, "turn-running");
+  assert.deepEqual(receipts, [makeTurnRunningReceipt()]);
+  assert.deepInclude(rendererDiagnostics[1] as object, {
+    action: "resolved",
+    elapsedMs: 6_001,
+  });
+  assert.notInclude(JSON.stringify(rendererDiagnostics), "dictated words");
+});
+
+it.each([
+  "persistence_failed",
+  "provider_start_failed",
+  "provider_turn_failed",
+  "malformed_input",
+] as const)("does not replace definitive %s failure with late success", async (code) => {
+  let deliveryCount = 0;
+  const diagnostics: Array<unknown> = [];
+  const broker = createDictationBroker({
+    reportDiagnostic: (event) => diagnostics.push(event),
+    reserveTarget: async () => ({ target: targetA, projectName: "Project A" }),
+    deliver: async () => {
+      deliveryCount += 1;
+      return decodeReceipt({
+        outcome: "failed",
+        protocolVersion: { major: 1, minor: 5 },
+        sessionId: "session-a",
+        commandId: "command-deliver",
+        target: targetA,
+        application: "first",
+        code,
+        detail: `${code} detail`,
+      });
+    },
+  });
+  await broker.reserve(reserveRequest);
+  await broker.command(makeDeliverCommand());
+  const receipts: Array<unknown> = [];
+  const unsubscribe = broker.watchReceipts((receipt) => receipts.push(receipt));
+
+  const reported = broker.reportLateReceipt(makeTurnRunningReceipt());
+  const replay = await broker.command(makeDeliverCommand());
+  unsubscribe();
+
+  assert.isFalse(reported);
+  assert.equal(broker.snapshot()?.phase, "failed");
+  assert.equal(deliveryCount, 1);
+  assert.equal(replay?.outcome, "failed");
+  if (replay?.outcome === "failed") assert.equal(replay.code, code);
+  assert.deepEqual(receipts, []);
+  assert.deepInclude(diagnostics.at(-1) as object, {
+    source: "late",
+    decision: "rejected",
+    rejectionReason: "definitive-failure",
+  });
+});
+
+it("rejects every mismatched late turn identity while confirmation remains pending", async () => {
+  const diagnostics: Array<unknown> = [];
+  const broker = createDictationBroker({
+    reportDiagnostic: (event) => diagnostics.push(event),
+    reserveTarget: async () => ({ target: targetA, projectName: "Project A" }),
+    deliver: async () =>
+      decodeReceipt({
+        outcome: "confirmation-pending",
+        protocolVersion: { major: 1, minor: 5 },
+        sessionId: "session-a",
+        commandId: "command-deliver",
+        target: targetA,
+        application: "first",
+      }),
+  });
+  await broker.reserve(reserveRequest);
+  await broker.command(makeDeliverCommand());
+  const receipts: Array<unknown> = [];
+  const unsubscribe = broker.watchReceipts((receipt) => receipts.push(receipt));
+  const valid = makeTurnRunningReceipt();
+  const mismatches = [
+    decodeReceipt({ ...valid, sessionId: "session-other" }),
+    decodeReceipt({ ...valid, commandId: "command-other" }),
+    decodeReceipt({ ...valid, target: targetB }),
+    decodeReceipt({ ...valid, messageId: "dictation-command-other" }),
+  ];
+
+  const reported = mismatches.map((receipt) => broker.reportLateReceipt(receipt));
+  unsubscribe();
+
+  assert.deepEqual(reported, [false, false, false, false]);
+  assert.equal(broker.snapshot()?.phase, "confirming");
+  assert.deepEqual(receipts, []);
+  assert.deepEqual(
+    diagnostics.slice(-4).map((event) => (event as { rejectionReason?: string }).rejectionReason),
+    ["session-mismatch", "command-mismatch", "target-mismatch", "message-mismatch"],
+  );
+});
+
+it("reports a missing-session late receipt with null phases", () => {
+  const diagnostics: Array<unknown> = [];
+  const broker = createDictationBroker({
+    reportDiagnostic: (event) => diagnostics.push(event),
+    reserveTarget: async () => ({ target: targetA, projectName: "Project A" }),
+    deliver: async () => makeTurnRunningReceipt(),
+  });
+
+  assert.isFalse(broker.reportLateReceipt(makeTurnRunningReceipt()));
+
+  assert.deepInclude(diagnostics[0] as object, {
+    source: "late",
+    decision: "rejected",
+    rejectionReason: "missing-session",
+    phaseBefore: null,
+    phaseAfter: null,
+  });
 });
 
 it("does not let a pending delivery response overwrite an earlier final receipt", async () => {
