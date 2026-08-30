@@ -101,7 +101,9 @@ describe("index.html stage boot script", () => {
 
   it("survives a missing meta tag and a missing stage element", () => {
     expectLabel(runStageScript({ isDev: true, channel: null }), "Dev");
-    expect(() => runStageScript({ isDev: true, channel: "", hasStageElement: false })).not.toThrow();
+    expect(() =>
+      runStageScript({ isDev: true, channel: "", hasStageElement: false }),
+    ).not.toThrow();
   });
 
   it("agrees with the runtime resolver on every stage label", () => {

@@ -474,7 +474,6 @@
         opacity: 0.55;
         text-transform: uppercase;
       }
-
     </style>
     <title>Mesura Code (Alpha)</title>
   </head>
@@ -482,12 +481,7 @@
     <div id="root">
       <div id="boot-shell">
         <div id="boot-shell-card" aria-label="Mesura Code splash screen">
-          <img
-            id="boot-shell-logo"
-            src="/splash-mark.png"
-            alt="Mesura Code"
-            fetchpriority="high"
-          />
+          <img id="boot-shell-logo" src="/splash-mark.png" alt="Mesura Code" fetchpriority="high" />
           <span id="boot-shell-stage" hidden></span>
         </div>
       </div>
@@ -508,9 +502,7 @@
           } catch {
             // A bridge that throws carries no stage; fall back to the build.
           }
-          const channel = (
-            document.querySelector('meta[name="app-channel"]')?.content ?? ""
-          )
+          const channel = (document.querySelector('meta[name="app-channel"]')?.content ?? "")
             .trim()
             .toLowerCase();
           if (channel === "nightly") return "Nightly";

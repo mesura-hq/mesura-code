@@ -13,7 +13,8 @@ const APPROVED_PRODUCTION_SHA256 =
   "122d1c2349cf004c0d38e6d4a5b1b2f21783b25cf459af91b66ce9561a0f40d4";
 const APPROVED_LOGO_128_SHA256 = "80d36634edb03a42044cc5a6199467c2a0764d5060dc6015ea64af304bffac00";
 const APPROVED_DESKTOP_SHA256 = "b16b7c50c80d41571e35f7e6b18b698baa06c6f3f33f9682bc65f8b6d81c405f";
-const APPROVED_SPLASH_MARK_SHA256 = "8d3d493c764ad3aa2372d0fd2eb93996023c808b79a1f77d1e5ad3f9ca36994f";
+const APPROVED_SPLASH_MARK_SHA256 =
+  "8d3d493c764ad3aa2372d0fd2eb93996023c808b79a1f77d1e5ad3f9ca36994f";
 const EXPECTED_RASTER_SIZE = MASTER_RASTER_SIZE;
 const EXPECTED_SPLASH_MARK_SIZE = 1024;
 /**
@@ -191,9 +192,9 @@ describe("Mesura Code icon sources", () => {
     ]) {
       expect(rgbaAt(splashMark, x!, y!)[3]).toBe(0);
     }
-    expect(rgbaAt(splashMark, EXPECTED_SPLASH_MARK_SIZE / 2, EXPECTED_SPLASH_MARK_SIZE / 2)[3]).toBe(
-      255,
-    );
+    expect(
+      rgbaAt(splashMark, EXPECTED_SPLASH_MARK_SIZE / 2, EXPECTED_SPLASH_MARK_SIZE / 2)[3],
+    ).toBe(255);
   });
 
   it("keeps the realistic master as the only full-color source at small sizes", () => {
