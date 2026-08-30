@@ -62,6 +62,30 @@ export type DictationBrokerOptions = {
   ) => Promise<SymmetriaDictationReceipt>;
   readonly scheduleLeaseExpiration?: (expiresAt: string, expire: () => void) => () => void;
   readonly isShellAvailable?: () => boolean;
+  readonly reportDiagnostic?: (event: DictationReceiptTransitionDiagnostic) => void;
+  readonly now?: () => number;
+};
+
+export type DictationReceiptTransitionDiagnostic = {
+  readonly event: "symmetria.dictation.receipt-transition";
+  readonly source: "initial" | "late";
+  readonly decision: "applied" | "duplicate" | "rejected" | "stale";
+  readonly sessionId: string;
+  readonly commandId: string;
+  readonly outcome: SymmetriaDictationReceipt["outcome"];
+  readonly code?: string;
+  readonly phaseBefore: SymmetriaDictationSession["phase"] | null;
+  readonly phaseAfter: SymmetriaDictationSession["phase"] | null;
+  readonly rejectionReason?:
+    | "missing-session"
+    | "session-mismatch"
+    | "command-mismatch"
+    | "target-mismatch"
+    | "message-mismatch"
+    | "terminal-phase"
+    | "missing-recorded-receipt"
+    | "definitive-failure";
+  readonly elapsedMs?: number;
 };
 
 export type LocalDictationBroker = {
@@ -137,6 +161,7 @@ const isAuthoritativeTurnRunningReceipt = (receipt: SymmetriaDictationReceipt): 
   receipt.outcome === "turn-running" && receipt.messageId === `dictation-${receipt.commandId}`;
 
 export function createDictationBroker(options: DictationBrokerOptions): LocalDictationBroker {
+  const now = options.now ?? Date.now;
   let session: SymmetriaDictationSession | null = null;
   let revision = 0;
   let cancelLeaseExpiration: (() => void) | null = null;
@@ -157,6 +182,42 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
     readonly promise: Promise<SymmetriaDictationSession>;
   } | null = null;
   let activeDeliveryCommandId: string | null = null;
+  let activeDeliveryStartedAt: number | null = null;
+
+  const reportDiagnostic = (event: DictationReceiptTransitionDiagnostic): void => {
+    try {
+      options.reportDiagnostic?.(event);
+    } catch {
+      // Observability must never alter broker state transitions.
+    }
+  };
+
+  const reportReceiptTransition = (
+    receipt: SymmetriaDictationReceipt,
+    source: DictationReceiptTransitionDiagnostic["source"],
+    decision: DictationReceiptTransitionDiagnostic["decision"],
+    phaseBefore: SymmetriaDictationSession["phase"] | null,
+    phaseAfter: SymmetriaDictationSession["phase"] | null,
+    rejectionReason?: DictationReceiptTransitionDiagnostic["rejectionReason"],
+  ): void => {
+    reportDiagnostic({
+      event: "symmetria.dictation.receipt-transition",
+      source,
+      decision,
+      sessionId: receipt.sessionId,
+      commandId: receipt.commandId,
+      outcome: receipt.outcome,
+      ...(receipt.outcome === "failed" || receipt.outcome === "refused"
+        ? { code: receipt.code }
+        : {}),
+      phaseBefore,
+      phaseAfter,
+      ...(rejectionReason ? { rejectionReason } : {}),
+      ...(activeDeliveryStartedAt === null
+        ? {}
+        : { elapsedMs: Math.max(0, now() - activeDeliveryStartedAt) }),
+    });
+  };
 
   const publish = (): void => {
     if (session === null) return;
@@ -216,6 +277,7 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
           presentation: { mesuraOwnsPresentation: false, leaseExpiresAt: null },
         };
         activeDeliveryCommandId = null;
+        activeDeliveryStartedAt = null;
         retryableDeliveryCommands.clear();
         appliedDeliveryReceipts.clear();
         publish();
@@ -235,7 +297,7 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
     const reserved = session;
     if (reserved === null || reserved.sessionId !== command.sessionId) {
       if (command.type !== "dictation.deliver") return null;
-      return {
+      const receipt: SymmetriaDictationReceipt = {
         outcome: "refused",
         protocolVersion: command.protocolVersion,
         sessionId: command.sessionId,
@@ -245,6 +307,8 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
         code: "target_missing",
         detail: "the reserved dictation session is not available",
       };
+      reportReceiptTransition(receipt, "initial", "applied", null, null);
+      return receipt;
     }
 
     switch (command.type) {
@@ -356,7 +420,7 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
       }
       case "dictation.deliver": {
         if (!targetsEqual(command.target, reserved.target)) {
-          return {
+          const receipt: SymmetriaDictationReceipt = {
             outcome: "refused",
             protocolVersion: command.protocolVersion,
             sessionId: command.sessionId,
@@ -366,9 +430,19 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
             code: "target_missing",
             detail: "the delivery target differs from the reserved target",
           };
+          reportReceiptTransition(
+            receipt,
+            "initial",
+            "applied",
+            reserved.phase,
+            reserved.phase,
+            "target-mismatch",
+          );
+          return receipt;
         }
         session = { ...reserved, phase: "delivering", mode: command.mode };
         activeDeliveryCommandId = command.commandId;
+        activeDeliveryStartedAt = now();
         publish();
         let receipt: SymmetriaDictationReceipt;
         try {
@@ -388,7 +462,10 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
         }
         const commandKey = `${command.sessionId}:${command.commandId}`;
         const racedLateReceipt = appliedDeliveryReceipts.get(commandKey);
-        if (racedLateReceipt !== undefined) return racedLateReceipt;
+        if (racedLateReceipt !== undefined) {
+          reportReceiptTransition(receipt, "initial", "stale", session.phase, session.phase);
+          return racedLateReceipt;
+        }
         const receiptMatchesCommand =
           receipt.sessionId === command.sessionId &&
           receipt.commandId === command.commandId &&
@@ -411,11 +488,13 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
             : receipt.outcome === "failed" || receipt.outcome === "refused"
               ? "failed"
               : "completed";
+        const phaseBefore = session.phase;
         session = { ...session, phase };
         appliedDeliveryReceipts.set(commandKey, receipt);
         cancelLeaseExpiration?.();
         cancelLeaseExpiration = null;
         publish();
+        reportReceiptTransition(receipt, "initial", "applied", phaseBefore, phase);
         return receipt;
       }
       case "dictation.reserve":
@@ -460,29 +539,93 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
   };
 
   const reportLateReceipt = (receipt: SymmetriaDictationReceipt): boolean => {
-    if (
-      session === null ||
-      receipt.sessionId !== session.sessionId ||
-      receipt.commandId !== activeDeliveryCommandId ||
-      !targetsEqual(receipt.target, session.target)
-    ) {
+    const phaseBefore = session?.phase ?? null;
+    if (session === null) {
+      reportReceiptTransition(receipt, "late", "rejected", null, null, "missing-session");
+      return false;
+    }
+    if (receipt.sessionId !== session.sessionId) {
+      reportReceiptTransition(
+        receipt,
+        "late",
+        "rejected",
+        phaseBefore,
+        phaseBefore,
+        "session-mismatch",
+      );
+      return false;
+    }
+    if (receipt.commandId !== activeDeliveryCommandId) {
+      reportReceiptTransition(
+        receipt,
+        "late",
+        "rejected",
+        phaseBefore,
+        phaseBefore,
+        "command-mismatch",
+      );
+      return false;
+    }
+    if (!targetsEqual(receipt.target, session.target)) {
+      reportReceiptTransition(
+        receipt,
+        "late",
+        "rejected",
+        phaseBefore,
+        phaseBefore,
+        "target-mismatch",
+      );
       return false;
     }
     if (receipt.outcome === "turn-running" && !isAuthoritativeTurnRunningReceipt(receipt)) {
+      reportReceiptTransition(
+        receipt,
+        "late",
+        "rejected",
+        phaseBefore,
+        phaseBefore,
+        "message-mismatch",
+      );
       return false;
     }
     const commandKey = `${receipt.sessionId}:${receipt.commandId}`;
     if (isTerminalPhase(session.phase)) {
       const recorded = appliedDeliveryReceipts.get(commandKey);
       if (recorded !== undefined && JSON.stringify(recorded) === JSON.stringify(receipt)) {
+        reportReceiptTransition(receipt, "late", "duplicate", phaseBefore, phaseBefore);
         return true;
       }
-      if (
-        session.phase !== "failed" ||
-        recorded === undefined ||
-        !isUncertainDeliveryFailure(recorded) ||
-        !isAuthoritativeTurnRunningReceipt(receipt)
-      ) {
+      if (session.phase !== "failed") {
+        reportReceiptTransition(
+          receipt,
+          "late",
+          "rejected",
+          phaseBefore,
+          phaseBefore,
+          "terminal-phase",
+        );
+        return false;
+      }
+      if (recorded === undefined) {
+        reportReceiptTransition(
+          receipt,
+          "late",
+          "rejected",
+          phaseBefore,
+          phaseBefore,
+          "missing-recorded-receipt",
+        );
+        return false;
+      }
+      if (!isUncertainDeliveryFailure(recorded)) {
+        reportReceiptTransition(
+          receipt,
+          "late",
+          "rejected",
+          phaseBefore,
+          phaseBefore,
+          "definitive-failure",
+        );
         return false;
       }
     }
@@ -506,6 +649,7 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
       retryableDeliveryCommands.delete(commandKey);
     }
     publish();
+    reportReceiptTransition(receipt, "late", "applied", phaseBefore, phase);
     for (const listener of receiptListeners) listener(receipt);
     return true;
   };
@@ -567,42 +711,117 @@ type RendererRequest =
       readonly target: SymmetriaDictationTarget;
     };
 
+export type RendererRequestDiagnostic = {
+  readonly event: "symmetria.dictation.renderer-request";
+  readonly action: "dispatched" | "resolved" | "abandoned" | "send-failed";
+  readonly requestId: string;
+  readonly kind: RendererRequest["kind"];
+  readonly sessionId: string;
+  readonly commandId: string;
+  readonly elapsedMs?: number;
+};
+
 export function createRendererRequestBridge(options: {
   readonly newRequestId: () => string;
   readonly send: (request: RendererRequest & { readonly requestId: string }) => void;
+  readonly now?: () => number;
+  readonly observe?: (event: RendererRequestDiagnostic) => void;
 }) {
+  const now = options.now ?? Date.now;
   const pending = new Map<
     string,
-    { readonly resolve: (result: unknown) => void; readonly reject: (error: Error) => void }
+    {
+      readonly resolve: (result: unknown) => void;
+      readonly reject: (error: Error) => void;
+      readonly diagnostic: Omit<RendererRequestDiagnostic, "event" | "action" | "elapsedMs">;
+      readonly startedAt: number;
+    }
   >();
+  const observe = (event: RendererRequestDiagnostic): void => {
+    try {
+      options.observe?.(event);
+    } catch {
+      // Observability must never alter renderer request delivery.
+    }
+  };
+  const diagnosticFor = (
+    requestId: string,
+    request: RendererRequest,
+  ): Omit<RendererRequestDiagnostic, "event" | "action" | "elapsedMs"> => {
+    const correlation = request.kind === "deliver" ? request.command : request.request;
+    return {
+      requestId,
+      kind: request.kind,
+      sessionId: correlation.sessionId,
+      commandId: correlation.commandId,
+    };
+  };
 
   return {
     dispatch: (request: RendererRequest) => {
       const requestId = options.newRequestId();
+      const diagnostic = diagnosticFor(requestId, request);
+      const startedAt = now();
       const response = new Promise<unknown>((resolve, reject) => {
-        pending.set(requestId, { resolve, reject });
+        pending.set(requestId, { resolve, reject, diagnostic, startedAt });
+        observe({
+          event: "symmetria.dictation.renderer-request",
+          action: "dispatched",
+          ...diagnostic,
+        });
         try {
           options.send({ requestId, ...request });
         } catch (cause) {
           pending.delete(requestId);
+          observe({
+            event: "symmetria.dictation.renderer-request",
+            action: "send-failed",
+            ...diagnostic,
+            elapsedMs: Math.max(0, now() - startedAt),
+          });
           reject(cause instanceof Error ? cause : new Error(String(cause)));
         }
       });
       return {
         requestId,
         response,
-        abandon: () => pending.delete(requestId),
+        abandon: () => {
+          const request = pending.get(requestId);
+          if (request === undefined) return false;
+          pending.delete(requestId);
+          observe({
+            event: "symmetria.dictation.renderer-request",
+            action: "abandoned",
+            ...request.diagnostic,
+            elapsedMs: Math.max(0, now() - request.startedAt),
+          });
+          return true;
+        },
       };
     },
     resolve: (requestId: string, result: unknown): boolean => {
       const request = pending.get(requestId);
       if (request === undefined) return false;
       pending.delete(requestId);
+      observe({
+        event: "symmetria.dictation.renderer-request",
+        action: "resolved",
+        ...request.diagnostic,
+        elapsedMs: Math.max(0, now() - request.startedAt),
+      });
       request.resolve(result);
       return true;
     },
     rejectAll: (error: Error): void => {
-      for (const request of pending.values()) request.reject(error);
+      for (const request of pending.values()) {
+        observe({
+          event: "symmetria.dictation.renderer-request",
+          action: "abandoned",
+          ...request.diagnostic,
+          elapsedMs: Math.max(0, now() - request.startedAt),
+        });
+        request.reject(error);
+      }
       pending.clear();
     },
     pendingCount: (): number => pending.size,
@@ -633,6 +852,7 @@ const makeRequired = Effect.gen(function* () {
       if (Option.isNone(targetWindow)) throw new Error("the Mesura renderer is unavailable");
       targetWindow.value.webContents.send(DICTATION_RENDERER_REQUEST_CHANNEL, request);
     },
+    observe: (event) => runSync(logInfo("renderer request", event)),
   });
   let shellConnectionCount = 0;
 
@@ -649,6 +869,7 @@ const makeRequired = Effect.gen(function* () {
   };
 
   const broker = createDictationBroker({
+    reportDiagnostic: (event) => runSync(logInfo("receipt transition", event)),
     isShellAvailable: () => shellConnectionCount > 0,
     reserveTarget: async (request) => {
       const raw = await requestRenderer({ kind: "reserve-target", request });

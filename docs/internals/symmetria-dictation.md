@@ -64,13 +64,25 @@ Receipts describe an observed effect:
 - `copied`: Shell owns clipboard success. Mesura does not mutate a draft.
 - `inserted`: the exact draft append passed persistent readback.
 - `turn-running`: the projected running turn names the dictated `messageId` and a non-null `turnId`.
-- `confirmation-pending`: the 15-second visible wait ended, but the background watcher continues.
+- `confirmation-pending`: provider dispatch was accepted and the correlated background watcher is
+  still waiting for projected turn evidence.
 - `refused`: the target or composer action is invalid.
 - `failed`: persistence, renderer, deadline, or provider start failed.
 
 A correlated turn that reaches the provider `error` state reports `provider_turn_failed`. That code
 is not retryable because the directed executor already recorded the dispatch. A pre-dispatch
 `provider_start_failed` remains retryable with the original identities.
+
+The renderer returns `confirmation-pending` without holding the Desktop renderer request open for
+the confirmation window. This separates dispatch acceptance from projected-turn evidence. Shell
+keeps the session in `Still confirming` and does not retry while that evidence is unknown.
+
+Late receipt precedence is narrow. A canonical `turn-running` receipt can replace only
+`deadline_exceeded` or `renderer_lost`, because those codes do not prove whether dispatch took
+effect. The receipt must match the active session, command, target, and deterministic
+`dictation-<commandId>` message identity. Persistence, provider-start, provider-turn, malformed
+input, cancellation, and unrelated identities remain terminal. Reapplying an identical final
+receipt is a no-op and does not notify Shell twice.
 
 Only Shell emits final toasts. `Message sent successfully` requires `turn-running`; a dispatched
 command or a renderer response is not sufficient.
@@ -101,6 +113,21 @@ The old destination-less renderer subscription is removed. Mesura still binds th
 `symmetria-mesura-<pid>.sock` endpoint during Shell rollout, but that endpoint always returns
 `reserved-session-required`. It performs no renderer IPC and never writes text. Current Shell builds
 use `symmetria-mesura-dictation-<pid>.sock` and the reserved-session protocol.
+
+## Delivery diagnostics
+
+Desktop traces record renderer request dispatch, resolution, abandonment, and send failure. Each
+event includes the request kind, request ID, session ID, command ID, and elapsed milliseconds when
+the request ended. Receipt-transition events include the session ID, command ID, source, decision,
+outcome, optional code, elapsed milliseconds, and phase before and after the transition. Rejected
+late receipts also include an allowlisted reason such as session, command, target, or deterministic
+message mismatch; no-session events use null phases instead of inventing state.
+
+Shell logs the normalized final receipt with peer PID, session ID, command ID, outcome, code, and
+retryability. These diagnostics use an allowlist. They never contain transcript text, composer
+prompt text, receipt detail, attachment data, or serialized draft state. Composer persistence
+diagnostics can add serialized byte counts and non-reversible prompt hashes when hashing is
+available.
 
 Focused coverage lives in the `symmetria` test directories under `apps/web/src` and
 `apps/desktop/src`. The integration guard in `tests/unit/symmetria-dictation-integration.test.ts`
