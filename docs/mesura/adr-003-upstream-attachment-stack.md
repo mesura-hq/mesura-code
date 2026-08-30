@@ -11,13 +11,31 @@ implementations of that this fork carries.
 commits become the base; the work this fork shipped as PR #38 is removed rather
 than merged with them.
 
-**Carry exactly one thing forward**: the provider-path validation that `lstat`s
-each attachment and rejects symlinks and non-regular files before provider work
-starts. Upstream has no equivalent, it is small, and it guards a real boundary.
+**Carry two things forward.** The provider-path validation that `lstat`s each
+attachment and rejects symlinks and non-regular files before provider work
+starts — upstream has no equivalent and it guards a real boundary. And the
+`alt+a` keybinding with its `composer.attachFiles` command, because upstream
+ships no keyboard route to attaching at all: their `keybindings.ts` has zero
+attach entries. Both are small and neither has anything upstream to conflict
+with.
+
+**The attach button is not one of them, because we do not lose it.** Upstream
+has their own — `ChatComposer.tsx`, `aria-label="Attach files"` with a
+`PaperclipIcon` over an `<input type="file">`. So do paste and drag-and-drop.
+The click-to-attach affordance survives the switch untouched, and this is worth
+stating because an early reading of this decision assumed otherwise and nearly
+preserved fork code to protect a control upstream already had.
 
 **Everything else in #38 goes**, including the resumable transport, the 2 GB
 ceiling, the upload expiry sweep, and the fork's own upload route. The file
 ceiling becomes upstream's 50 MB.
+
+**The fork's richer drag-and-drop handling goes too, deliberately.** It is 13
+references against upstream's 3, so it is a real difference — but it lives
+inside `ChatComposer.tsx`, which upstream rewrites constantly and which already
+conflicts. The developer does not use drag-and-drop, so the capability is not
+exercised and the divergence would be paid every week for nothing. Recorded so
+nobody re-adds it believing it was dropped by accident.
 
 **The guard added in the 2026-W35 sync dies with it.** More on that below,
 because it is the part a later reader will get wrong.
