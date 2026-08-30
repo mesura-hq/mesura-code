@@ -12,6 +12,7 @@ import {
   appendPersistedDictation,
   useComposerDraftStore,
   type PersistedDictationAppendResult,
+  type DictationPersistenceFailure,
 } from "../composerDraftStore";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentThreadShells } from "../state/threads";
@@ -53,6 +54,14 @@ type CoordinatorOptions = {
   readonly submit?: typeof submitDirectedDictation;
   readonly confirm?: typeof confirmDirectedDictationTurn;
   readonly reportLateReceipt?: (receipt: SymmetriaDictationReceipt) => void;
+  readonly reportPersistenceFailure?: (event: DictationPersistenceDiagnosticEvent) => void;
+};
+
+export type DictationPersistenceDiagnosticEvent = DictationPersistenceFailure & {
+  readonly event: "symmetria.dictation.persistence.failed";
+  readonly sessionId: string;
+  readonly commandId: string;
+  readonly target: SymmetriaDictationTarget;
 };
 
 const failedReceipt = (
@@ -88,6 +97,27 @@ export function createDictationCoordinator(options: CoordinatorOptions = {}) {
         receipt,
       });
     });
+  const reportPersistenceFailure =
+    options.reportPersistenceFailure ??
+    ((event: DictationPersistenceDiagnosticEvent) => {
+      console.error(event.event, event);
+    });
+  const safelyReportPersistenceFailure = (event: DictationPersistenceDiagnosticEvent): void => {
+    try {
+      reportPersistenceFailure(event);
+    } catch (cause) {
+      try {
+        console.error("symmetria.dictation.persistence.reporter-failed", {
+          sessionId: event.sessionId,
+          commandId: event.commandId,
+          stage: event.stage,
+          message: cause instanceof Error ? cause.message : String(cause),
+        });
+      } catch {
+        // Diagnostics must never alter delivery behavior.
+      }
+    }
+  };
   let registration: (DictationComposerRegistration & { readonly token: symbol }) | null = null;
   let reservation: {
     readonly sessionId: string;
@@ -229,11 +259,25 @@ export function createDictationCoordinator(options: CoordinatorOptions = {}) {
         resolved.sourceTargetKey,
       );
       if (!result.ok) {
+        if (result.reason === "persistence-failed") {
+          safelyReportPersistenceFailure({
+            event: "symmetria.dictation.persistence.failed",
+            sessionId: command.sessionId,
+            commandId: command.commandId,
+            target: reserved.target,
+            stage: result.stage,
+            persistedBytes: result.persistedBytes,
+            ...(result.expectedPromptHash ? { expectedPromptHash: result.expectedPromptHash } : {}),
+            ...(result.actualPromptHash ? { actualPromptHash: result.actualPromptHash } : {}),
+          });
+        }
         return failedReceipt(
           command,
           reserved.target,
           result.reason === "persistence-failed" ? "persistence_failed" : "renderer_lost",
-          result.reason,
+          result.reason === "persistence-failed"
+            ? `dictation persistence verification failed at ${result.stage}`
+            : result.reason,
         );
       }
 

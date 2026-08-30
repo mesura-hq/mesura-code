@@ -14,7 +14,7 @@ import {
 } from "@t3tools/contracts";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import * as Schema from "effect/Schema";
-import { beforeEach, assert, it } from "vite-plus/test";
+import { beforeEach, assert, it, vi } from "vite-plus/test";
 
 import {
   appendPersistedDictation,
@@ -432,7 +432,13 @@ it("emits inserted only after persistence confirms the exact append", async () =
 it("reports persistence failure without writing to another composer", async () => {
   useComposerDraftStore.getState().setPrompt(threadB, "visible chat");
   const coordinator = createTestCoordinator({
-    append: async () => ({ ok: false, reason: "persistence-failed" }),
+    append: async () => ({
+      ok: false,
+      reason: "persistence-failed",
+      stage: "persisted-state-missing",
+      persistedBytes: 0,
+    }),
+    reportPersistenceFailure: () => undefined,
   });
   coordinator.registerComposer({ target: targetA, projectName: "Project A", handle: null });
   await coordinator.reserve(reserveRequest);
@@ -444,6 +450,141 @@ it("reports persistence failure without writing to another composer", async () =
   if (receipt.outcome === "failed") assert.equal(receipt.code, "persistence_failed");
   assert.isUndefined(promptAt(threadA));
   assert.equal(promptAt(threadB), "visible chat");
+});
+
+it("maps a precise persistence stage without starting the provider", async () => {
+  const submit = vi.fn(async () => ({
+    kind: "turn-dispatched" as const,
+    messageId: MessageId.make("must-not-dispatch"),
+  }));
+  const reportPersistenceFailure = vi.fn();
+  const coordinator = createTestCoordinator({
+    append: async () => ({
+      ok: false,
+      reason: "persistence-failed",
+      stage: "command-missing",
+      persistedBytes: 512,
+      expectedPromptHash: "a".repeat(64),
+    }),
+    submit,
+    reportPersistenceFailure,
+  });
+  coordinator.registerComposer({ target: targetA, projectName: "Project A", handle: null });
+  await coordinator.reserve(reserveRequest);
+
+  const receipt = await coordinator.deliver(deliver("submit"));
+
+  assert.equal(receipt.outcome, "failed");
+  if (receipt.outcome !== "failed") return;
+  assert.equal(receipt.code, "persistence_failed");
+  assert.equal(receipt.detail, "dictation persistence verification failed at command-missing");
+  assert.equal(submit.mock.calls.length, 0);
+  assert.deepEqual(reportPersistenceFailure.mock.calls[0]?.[0], {
+    event: "symmetria.dictation.persistence.failed",
+    sessionId: "session-a",
+    commandId: "command-deliver",
+    target: targetA,
+    stage: "command-missing",
+    persistedBytes: 512,
+    expectedPromptHash: "a".repeat(64),
+  });
+});
+
+it("keeps transcript and draft text out of persistence diagnostics", async () => {
+  const diagnostics: Array<unknown> = [];
+  const coordinator = createTestCoordinator({
+    append: async () => ({
+      ok: false,
+      reason: "persistence-failed",
+      stage: "prompt-mismatch",
+      persistedBytes: 128,
+      expectedPromptHash: "b".repeat(64),
+      actualPromptHash: "c".repeat(64),
+    }),
+    reportPersistenceFailure: (event) => diagnostics.push(event),
+  });
+  coordinator.registerComposer({ target: targetA, projectName: "Project A", handle: null });
+  await coordinator.reserve(reserveRequest);
+
+  await coordinator.deliver(deliver("submit"));
+
+  const serialized = JSON.stringify(diagnostics);
+  assert.notInclude(serialized, "dictated words");
+  assert.notInclude(serialized, "[voiced]");
+  assert.notInclude(serialized, "stale prompt text");
+  assert.include(serialized, "prompt-mismatch");
+});
+
+it("keeps the persistence result stable when diagnostic hashing fails", async () => {
+  const submit = vi.fn(async () => ({
+    kind: "turn-dispatched" as const,
+    messageId: MessageId.make("must-not-dispatch-after-hash-failure"),
+  }));
+  const diagnostics: Array<unknown> = [];
+  const coordinator = createTestCoordinator({
+    append: (target, commandId, text, sourceTargetKey) =>
+      appendPersistedDictation(target, commandId, text, sourceTargetKey, {
+        flush: () => {
+          throw new DOMException("quota exceeded", "QuotaExceededError");
+        },
+        readRaw: () => null,
+        hashText: async () => {
+          throw new Error("digest unavailable");
+        },
+      }),
+    submit,
+    reportPersistenceFailure: (event) => diagnostics.push(event),
+  });
+  coordinator.registerComposer({ target: targetA, projectName: "Project A", handle: null });
+  await coordinator.reserve(reserveRequest);
+
+  const receipt = await coordinator.deliver(deliver("submit"));
+
+  assert.equal(receipt.outcome, "failed");
+  if (receipt.outcome !== "failed") return;
+  assert.equal(receipt.code, "persistence_failed");
+  assert.include(receipt.detail, "storage-write-failed");
+  assert.equal(submit.mock.calls.length, 0);
+  assert.deepInclude(diagnostics[0] as object, { stage: "storage-write-failed" });
+  assert.notProperty(diagnostics[0] as object, "expectedPromptHash");
+});
+
+it("isolates a throwing persistence reporter from delivery behavior", async () => {
+  const submit = vi.fn(async () => ({
+    kind: "turn-dispatched" as const,
+    messageId: MessageId.make("must-not-dispatch-after-reporter-failure"),
+  }));
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  try {
+    const coordinator = createTestCoordinator({
+      append: async () => ({
+        ok: false,
+        reason: "persistence-failed",
+        stage: "storage-read-failed",
+        persistedBytes: 0,
+      }),
+      submit,
+      reportPersistenceFailure: () => {
+        throw new Error("reporter unavailable");
+      },
+    });
+    coordinator.registerComposer({ target: targetA, projectName: "Project A", handle: null });
+    await coordinator.reserve(reserveRequest);
+
+    const receipt = await coordinator.deliver(deliver("submit"));
+
+    assert.equal(receipt.outcome, "failed");
+    if (receipt.outcome !== "failed") return;
+    assert.equal(receipt.code, "persistence_failed");
+    assert.include(receipt.detail, "storage-read-failed");
+    assert.equal(submit.mock.calls.length, 0);
+    assert.equal(
+      consoleError.mock.calls[0]?.[0],
+      "symmetria.dictation.persistence.reporter-failed",
+    );
+  } finally {
+    consoleError.mockRestore();
+  }
 });
 
 it("retries provider start with one persisted append and the original message identity", async () => {
