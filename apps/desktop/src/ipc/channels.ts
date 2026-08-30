@@ -5,11 +5,16 @@ export const CONTEXT_MENU_CHANNEL = "desktop:context-menu";
 export const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
 export const PROBE_REMOTE_EDITORS_CHANNEL = "desktop:probe-remote-editors";
 export const MENU_ACTION_CHANNEL = "desktop:menu-action";
-// Dictation delivered from Symmetria Shell through the main process. A pair,
-// because the socket must not answer the shell until the window has actually
-// placed the text — same round-trip shape as the ssh password prompt below.
-export const STT_DELIVER_CHANNEL = "desktop:stt-deliver";
-export const RESOLVE_STT_DELIVER_CHANNEL = "desktop:resolve-stt-deliver";
+export const DICTATION_RENDERER_REQUEST_CHANNEL = "desktop:dictation-renderer-request";
+export const RESOLVE_DICTATION_RENDERER_REQUEST_CHANNEL =
+  "desktop:resolve-dictation-renderer-request";
+export const GET_DICTATION_SNAPSHOT_CHANNEL = "desktop:get-dictation-snapshot";
+export const GET_DICTATION_CONFIRMATION_RECOVERY_CHANNEL =
+  "desktop:get-dictation-confirmation-recovery";
+export const GET_DICTATION_SHELL_AVAILABILITY_CHANNEL = "desktop:get-dictation-shell-availability";
+export const DICTATION_COMMAND_CHANNEL = "desktop:dictation-command";
+export const DICTATION_SNAPSHOT_CHANNEL = "desktop:dictation-snapshot";
+export const DICTATION_SHELL_AVAILABILITY_CHANNEL = "desktop:dictation-shell-availability";
 // The renderer forwards its projected thread list here, and the main process
 // republishes it on the Symmetria socket. Renderer→main, unlike the dictation
 // pair above: the renderer already holds the read model, so a second

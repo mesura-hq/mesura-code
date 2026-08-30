@@ -1,0 +1,367 @@
+{
+  "$comment": "Generated from SymmetriaDictationSession by scripts/emit-json-schema.ts. Do not hand-edit.",
+  "$defs": {
+    "SymmetriaDictationDraftTarget": {
+      "additionalProperties": true,
+      "properties": {
+        "draftId": {
+          "allOf": [
+            {
+              "minLength": 1
+            },
+            {
+              "pattern": "\\S"
+            }
+          ],
+          "type": "string"
+        },
+        "futureThreadRef": {
+          "$ref": "#/$defs/SymmetriaScopedThreadRef"
+        },
+        "kind": {
+          "enum": [
+            "draft"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "draftId",
+        "futureThreadRef"
+      ],
+      "type": "object"
+    },
+    "SymmetriaDictationPresentation": {
+      "additionalProperties": true,
+      "properties": {
+        "leaseExpiresAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mesuraOwnsPresentation": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "mesuraOwnsPresentation",
+        "leaseExpiresAt"
+      ],
+      "type": "object"
+    },
+    "SymmetriaDictationSession": {
+      "additionalProperties": true,
+      "properties": {
+        "audioLevel": {
+          "anyOf": [
+            {
+              "allOf": [
+                {
+                  "maximum": 1,
+                  "minimum": 0
+                }
+              ],
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "elapsedMs": {
+          "allOf": [
+            {
+              "minimum": 0
+            }
+          ],
+          "type": "integer"
+        },
+        "graceRemainingMs": {
+          "anyOf": [
+            {
+              "allOf": [
+                {
+                  "minimum": 0
+                }
+              ],
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastControl": {
+          "additionalProperties": true,
+          "properties": {
+            "action": {
+              "enum": [
+                "start",
+                "pause",
+                "resume",
+                "cancel",
+                "restart",
+                "stop",
+                "retry",
+                "send-now"
+              ],
+              "type": "string"
+            },
+            "commandId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "commandId",
+            "action"
+          ],
+          "type": "object"
+        },
+        "lastVocabulary": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "properties": {
+                "action": {
+                  "enum": [
+                    "add"
+                  ],
+                  "type": "string"
+                },
+                "commandId": {
+                  "type": "string"
+                },
+                "word": {
+                  "allOf": [
+                    {
+                      "minLength": 1
+                    },
+                    {
+                      "pattern": "\\S"
+                    }
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "commandId",
+                "action",
+                "word"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": true,
+              "properties": {
+                "action": {
+                  "enum": [
+                    "remove"
+                  ],
+                  "type": "string"
+                },
+                "commandId": {
+                  "type": "string"
+                },
+                "index": {
+                  "allOf": [
+                    {
+                      "minimum": 0
+                    }
+                  ],
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "commandId",
+                "action",
+                "index"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": true,
+              "properties": {
+                "action": {
+                  "enum": [
+                    "toggle"
+                  ],
+                  "type": "string"
+                },
+                "commandId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "commandId",
+                "action"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "mode": {
+          "enum": [
+            "clipboard",
+            "inject",
+            "submit"
+          ],
+          "type": "string"
+        },
+        "phase": {
+          "enum": [
+            "recording",
+            "paused",
+            "processing",
+            "grace",
+            "delivering",
+            "confirming",
+            "completed",
+            "failed",
+            "cancelled"
+          ],
+          "type": "string"
+        },
+        "presentation": {
+          "$ref": "#/$defs/SymmetriaDictationPresentation"
+        },
+        "projectName": {
+          "anyOf": [
+            {
+              "allOf": [
+                {
+                  "minLength": 1
+                },
+                {
+                  "pattern": "\\S"
+                }
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "protocolVersion": {
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "enum": [
+                1
+              ],
+              "type": "number"
+            },
+            "minor": {
+              "allOf": [
+                {
+                  "minimum": 0
+                }
+              ],
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
+        },
+        "sessionId": {
+          "allOf": [
+            {
+              "minLength": 1
+            },
+            {
+              "pattern": "\\S"
+            }
+          ],
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "shell",
+            "mesura"
+          ],
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SymmetriaDictationThreadTarget"
+            },
+            {
+              "$ref": "#/$defs/SymmetriaDictationDraftTarget"
+            }
+          ]
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "sessionId",
+        "target",
+        "source",
+        "phase",
+        "mode",
+        "projectName",
+        "startedAt",
+        "elapsedMs",
+        "audioLevel",
+        "graceRemainingMs",
+        "presentation"
+      ],
+      "type": "object"
+    },
+    "SymmetriaDictationThreadTarget": {
+      "additionalProperties": true,
+      "properties": {
+        "environmentId": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "thread"
+          ],
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "environmentId",
+        "threadId"
+      ],
+      "type": "object"
+    },
+    "SymmetriaScopedThreadRef": {
+      "additionalProperties": true,
+      "properties": {
+        "environmentId": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environmentId",
+        "threadId"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "dictationSession.schema.json",
+  "$ref": "#/$defs/SymmetriaDictationSession",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SymmetriaDictationSession"
+}

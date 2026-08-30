@@ -1,16 +1,14 @@
 /**
  * The Unix socket Symmetria Shell writes a dictation to.
  *
- * One line in, one line out, on the same connection, written only after the
- * delivery attempt resolves. The ordering is the contract rather than a detail:
- * the shell reads that line to decide whether the dictation survived, and in
- * socket mode it keeps no clipboard copy, so a receipt written before the
- * attempt is a lie it has no way to detect.
+ * One line in, one line out, on the same connection. Current Mesura uses this
+ * server only for the legacy refusal endpoint. The generic request callback
+ * remains asynchronous so the endpoint writes one answer after its decision.
  *
  * Only `node:net` here. The filesystem side lives in `socketFiles.ts`, which
  * uses Effect's own APIs as the repository requires, and binding lives in
  * `unixSocket.ts` — both shared with the thread publisher's socket. What stays
- * here is the shape that is dictation's alone: one line in, one line out.
+ * here is the legacy request shape: one line in, one line out.
  */
 import * as NodeNet from "node:net";
 

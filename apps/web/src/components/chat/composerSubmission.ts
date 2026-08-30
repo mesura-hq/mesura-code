@@ -1,4 +1,22 @@
-import { PROVIDER_SEND_TURN_MAX_INPUT_CHARS } from "@t3tools/contracts";
+import {
+  PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
+  type ProviderDriverKind,
+  type ServerProvider,
+} from "@t3tools/contracts";
+import { applyClaudePromptEffortPrefix, resolvePromptInjectedEffort } from "@t3tools/shared/model";
+import { getProviderModelCapabilities } from "../../providerModels";
+
+export function formatOutgoingComposerPrompt(params: {
+  provider: ProviderDriverKind;
+  model: string | null;
+  models: ReadonlyArray<ServerProvider["models"][number]>;
+  effort: string | null;
+  text: string;
+}): string {
+  const capabilities = getProviderModelCapabilities(params.models, params.model, params.provider);
+  const promptEffort = resolvePromptInjectedEffort(capabilities, params.effort);
+  return applyClaudePromptEffortPrefix(params.text, promptEffort);
+}
 
 type ComposerSubmitEvent = { preventDefault: () => void };
 

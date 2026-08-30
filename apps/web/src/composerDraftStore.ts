@@ -1,4 +1,5 @@
 import {
+  type CommandId,
   DEFAULT_MODEL,
   DEFAULT_MODEL_BY_PROVIDER,
   defaultInstanceIdForDriver,
@@ -54,6 +55,7 @@ import { getDefaultServerModel } from "./providerModels";
 import { UnifiedSettings } from "@t3tools/contracts/settings";
 import { ReviewCommentContextSchema, type ReviewCommentContext } from "./reviewCommentContext";
 import type { ComposerAttachmentUpload } from "./components/chat/composerAttachments";
+import { appendComposerTextAtEnd } from "./symmetria/dictationTarget";
 const isRuntimeMode = Schema.is(RuntimeMode);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
 const isReviewCommentContext = Schema.is(ReviewCommentContextSchema);
@@ -237,6 +239,17 @@ const PersistedComposerDraftStoreState = Schema.Struct({
     Schema.Record(ProviderInstanceId, ModelSelection),
   ),
   stickyActiveProvider: Schema.optionalKey(Schema.NullOr(ProviderInstanceId)),
+  appliedDictationCommandsByTargetKey: Schema.optionalKey(
+    Schema.Record(
+      Schema.String,
+      Schema.Array(
+        Schema.Struct({
+          commandId: Schema.String,
+          version: Schema.Number,
+        }),
+      ),
+    ),
+  ),
 });
 type PersistedComposerDraftStoreState = typeof PersistedComposerDraftStoreState.Type;
 
@@ -244,6 +257,9 @@ const PersistedComposerDraftStoreStorage = Schema.Struct({
   version: Schema.Number,
   state: PersistedComposerDraftStoreState,
 });
+const decodePersistedComposerDraftStoreStorage = Schema.decodeUnknownSync(
+  Schema.fromJsonString(PersistedComposerDraftStoreStorage),
+);
 
 /**
  * Composer content keyed by either a draft session (`DraftId`) or a real server
@@ -344,7 +360,7 @@ interface ProjectDraftSession extends DraftSessionState {
  * Raw `ThreadId` is intentionally excluded so callers cannot drop environment
  * identity for real threads.
  */
-type ComposerThreadTarget = ScopedThreadRef | DraftId;
+export type ComposerThreadTarget = ScopedThreadRef | DraftId;
 
 /**
  * Persisted store for composer content plus draft-session metadata.
@@ -359,6 +375,10 @@ interface ComposerDraftStoreState {
   logicalProjectDraftThreadKeyByLogicalProjectKey: Record<string, string>;
   stickyModelSelectionByProvider: Partial<Record<ProviderInstanceId, ModelSelection>>;
   stickyActiveProvider: ProviderInstanceId | null;
+  appliedDictationCommandsByTargetKey: Record<
+    string,
+    ReadonlyArray<{ readonly commandId: string; readonly version: number }>
+  >;
   /** Returns the editable composer content for a draft session or server thread. */
   getComposerDraft: (target: ComposerThreadTarget) => ComposerThreadDraftState | null;
   /** Looks up the active draft session for a logical project identity. */
@@ -618,6 +638,7 @@ const EMPTY_PERSISTED_DRAFT_STORE_STATE = Object.freeze<PersistedComposerDraftSt
   logicalProjectDraftThreadKeyByLogicalProjectKey: {},
   stickyModelSelectionByProvider: {},
   stickyActiveProvider: null,
+  appliedDictationCommandsByTargetKey: {},
 });
 
 const EMPTY_IMAGES: ComposerImageAttachment[] = [];
@@ -1481,6 +1502,7 @@ function removeDraftThreadReferences(
     | "draftThreadsByThreadKey"
     | "draftsByThreadKey"
     | "logicalProjectDraftThreadKeyByLogicalProjectKey"
+    | "appliedDictationCommandsByTargetKey"
   >,
   threadKey: string,
 ): Pick<
@@ -1488,6 +1510,7 @@ function removeDraftThreadReferences(
   | "draftThreadsByThreadKey"
   | "draftsByThreadKey"
   | "logicalProjectDraftThreadKeyByLogicalProjectKey"
+  | "appliedDictationCommandsByTargetKey"
 > {
   const nextLogicalMappings = Object.fromEntries(
     Object.entries(state.logicalProjectDraftThreadKeyByLogicalProjectKey).filter(
@@ -1497,11 +1520,14 @@ function removeDraftThreadReferences(
   const { [threadKey]: _removedDraftThread, ...restDraftThreadsByThreadKey } =
     state.draftThreadsByThreadKey;
   const { [threadKey]: removedComposerDraft, ...restDraftsByThreadKey } = state.draftsByThreadKey;
+  const { [threadKey]: _removedDictationCommands, ...restAppliedDictationCommands } =
+    state.appliedDictationCommandsByTargetKey;
   revokeDraftThreadPreviewUrls(removedComposerDraft);
   return {
     draftsByThreadKey: restDraftsByThreadKey,
     draftThreadsByThreadKey: restDraftThreadsByThreadKey,
     logicalProjectDraftThreadKeyByLogicalProjectKey: nextLogicalMappings,
+    appliedDictationCommandsByTargetKey: restAppliedDictationCommands,
   };
 }
 
@@ -1886,7 +1912,41 @@ function migratePersistedComposerDraftStoreState(
     logicalProjectDraftThreadKeyByLogicalProjectKey,
     stickyModelSelectionByProvider: compactModelSelectionByProvider(stickyModelSelectionByProvider),
     stickyActiveProvider,
+    appliedDictationCommandsByTargetKey: normalizeAppliedDictationCommands(
+      candidate.appliedDictationCommandsByTargetKey,
+    ),
   };
+}
+
+const MAX_PERSISTED_DICTATION_COMMANDS_PER_TARGET = 64;
+const MAX_PERSISTED_DICTATION_TARGETS = 128;
+
+function normalizeAppliedDictationCommands(
+  raw: unknown,
+): Record<string, ReadonlyArray<{ readonly commandId: string; readonly version: number }>> {
+  if (!raw || typeof raw !== "object") return {};
+  const normalized: Record<
+    string,
+    ReadonlyArray<{ readonly commandId: string; readonly version: number }>
+  > = {};
+  for (const [targetKey, entries] of Object.entries(raw as Record<string, unknown>)) {
+    if (targetKey.length === 0 || !Array.isArray(entries)) continue;
+    const valid = entries.flatMap((entry) => {
+      if (!entry || typeof entry !== "object") return [];
+      const candidate = entry as Record<string, unknown>;
+      return typeof candidate.commandId === "string" &&
+        candidate.commandId.length > 0 &&
+        typeof candidate.version === "number" &&
+        Number.isInteger(candidate.version) &&
+        candidate.version >= 0
+        ? [{ commandId: candidate.commandId, version: candidate.version }]
+        : [];
+    });
+    if (valid.length > 0) {
+      normalized[targetKey] = valid.slice(-MAX_PERSISTED_DICTATION_COMMANDS_PER_TARGET);
+    }
+  }
+  return normalized;
 }
 
 function partializeComposerDraftStoreState(
@@ -2013,6 +2073,15 @@ function partializeComposerDraftStoreState(
       state.stickyModelSelectionByProvider,
     ),
     stickyActiveProvider: state.stickyActiveProvider,
+    appliedDictationCommandsByTargetKey: Object.fromEntries(
+      Object.entries(state.appliedDictationCommandsByTargetKey)
+        .filter(([targetKey]) => persistedDraftsByThreadKey[targetKey] !== undefined)
+        .map(([targetKey, entries]) => [
+          targetKey,
+          entries.slice(-MAX_PERSISTED_DICTATION_COMMANDS_PER_TARGET),
+        ])
+        .slice(-MAX_PERSISTED_DICTATION_TARGETS),
+    ),
   };
 }
 
@@ -2083,6 +2152,9 @@ function normalizeCurrentPersistedComposerDraftStoreState(
     logicalProjectDraftThreadKeyByLogicalProjectKey,
     stickyModelSelectionByProvider: compactModelSelectionByProvider(stickyModelSelectionByProvider),
     stickyActiveProvider,
+    appliedDictationCommandsByTargetKey: normalizeAppliedDictationCommands(
+      normalizedPersistedState.appliedDictationCommandsByTargetKey,
+    ),
   };
 }
 
@@ -2284,6 +2356,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
         logicalProjectDraftThreadKeyByLogicalProjectKey: {},
         stickyModelSelectionByProvider: {},
         stickyActiveProvider: null,
+        appliedDictationCommandsByTargetKey: {},
         getComposerDraft: (target) => getComposerDraftState(get(), target),
         getDraftThreadByLogicalProjectKey: (logicalProjectKey) => {
           return get().getDraftSessionByLogicalProjectKey(logicalProjectKey);
@@ -2544,6 +2617,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               draftThreadsByThreadKey: state.draftThreadsByThreadKey,
               logicalProjectDraftThreadKeyByLogicalProjectKey:
                 state.logicalProjectDraftThreadKeyByLogicalProjectKey,
+              appliedDictationCommandsByTargetKey: state.appliedDictationCommandsByTargetKey,
             };
             for (const threadKey of matchingThreadKeys) {
               nextState = removeDraftThreadReferences(nextState, threadKey);
@@ -2618,7 +2692,14 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               state.logicalProjectDraftThreadKeyByLogicalProjectKey,
             ).includes(threadKey);
             const hasComposerDraft = state.draftsByThreadKey[threadKey] !== undefined;
-            if (!hasDraftThread && !hasLogicalProjectMapping && !hasComposerDraft) {
+            const hasDictationCommands =
+              state.appliedDictationCommandsByTargetKey[threadKey] !== undefined;
+            if (
+              !hasDraftThread &&
+              !hasLogicalProjectMapping &&
+              !hasComposerDraft &&
+              !hasDictationCommands
+            ) {
               return state;
             }
             return removeDraftThreadReferences(state, threadKey);
@@ -3696,6 +3777,8 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             normalizedPersisted.logicalProjectDraftThreadKeyByLogicalProjectKey,
           stickyModelSelectionByProvider: normalizedPersisted.stickyModelSelectionByProvider ?? {},
           stickyActiveProvider: normalizedPersisted.stickyActiveProvider ?? null,
+          appliedDictationCommandsByTargetKey:
+            normalizedPersisted.appliedDictationCommandsByTargetKey ?? {},
         };
       },
     },
@@ -3703,6 +3786,113 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
 );
 
 export const useComposerDraftStore = composerDraftStore;
+
+export type PersistedDictationAppendResult =
+  | {
+      readonly ok: true;
+      readonly application: "first" | "replay";
+      readonly prompt: string;
+      readonly version: number;
+      readonly targetKey: string;
+    }
+  | { readonly ok: false; readonly reason: "missing-target" | "persistence-failed" };
+
+export async function readPersistedDictationTarget(targetKey: string): Promise<{
+  readonly prompt: string;
+  readonly applications: ReadonlyArray<{ readonly commandId: string; readonly version: number }>;
+} | null> {
+  const raw = await composerDebouncedStorage.getItem(COMPOSER_DRAFT_STORAGE_KEY);
+  if (!raw) return null;
+  const persisted = decodePersistedComposerDraftStoreStorage(raw);
+  const normalized = normalizeCurrentPersistedComposerDraftStoreState(persisted.state);
+  const prompt = normalized.draftsByThreadKey[targetKey]?.prompt;
+  if (prompt === undefined) return null;
+  return {
+    prompt,
+    applications: normalized.appliedDictationCommandsByTargetKey?.[targetKey] ?? [],
+  };
+}
+
+/** Atomically appends one dictated command, flushes persistence, and verifies exact readback. */
+export async function appendPersistedDictation(
+  target: ComposerThreadTarget,
+  commandId: CommandId,
+  transcript: string,
+  sourceTargetKey: string | null = null,
+): Promise<PersistedDictationAppendResult> {
+  const targetKey = typeof target === "string" ? target : scopedThreadKey(target);
+  const appendState: {
+    applied?: {
+      readonly application: "first" | "replay";
+      readonly prompt: string;
+      readonly version: number;
+    };
+  } = {};
+
+  useComposerDraftStore.setState((state) => {
+    if (targetKey.length === 0) return state;
+    if (typeof target === "string" && state.draftThreadsByThreadKey[targetKey] === undefined) {
+      return state;
+    }
+    const priorApplications = state.appliedDictationCommandsByTargetKey[targetKey] ?? [];
+    const replay = priorApplications.find((entry) => entry.commandId === commandId);
+    const currentDraft = state.draftsByThreadKey[targetKey] ?? createEmptyThreadDraft();
+    if (replay !== undefined) {
+      appendState.applied = {
+        application: "replay",
+        prompt: currentDraft.prompt,
+        version: replay.version,
+      };
+      return state;
+    }
+
+    const version = (priorApplications.at(-1)?.version ?? 0) + 1;
+    const sourceDraft =
+      sourceTargetKey && sourceTargetKey !== targetKey
+        ? state.draftsByThreadKey[sourceTargetKey]
+        : undefined;
+    const prompt = appendComposerTextAtEnd(
+      sourceDraft?.prompt ?? currentDraft.prompt,
+      `[voiced] ${transcript}`,
+    );
+    appendState.applied = { application: "first", prompt, version };
+    const nextApplications = {
+      ...state.appliedDictationCommandsByTargetKey,
+      [targetKey]: [...priorApplications, { commandId, version }].slice(
+        -MAX_PERSISTED_DICTATION_COMMANDS_PER_TARGET,
+      ),
+    };
+    return {
+      draftsByThreadKey: {
+        ...state.draftsByThreadKey,
+        [targetKey]: { ...currentDraft, prompt },
+        ...(sourceDraft && sourceTargetKey
+          ? { [sourceTargetKey]: { ...sourceDraft, prompt } }
+          : {}),
+      },
+      appliedDictationCommandsByTargetKey: Object.fromEntries(
+        Object.entries(nextApplications).slice(-MAX_PERSISTED_DICTATION_TARGETS),
+      ),
+    };
+  });
+
+  const applied = appendState.applied;
+  if (applied === undefined) return { ok: false, reason: "missing-target" };
+  try {
+    composerDebouncedStorage.flush();
+    const persisted = await readPersistedDictationTarget(targetKey);
+    if (!persisted) return { ok: false, reason: "persistence-failed" };
+    const storedApplication = persisted.applications.find(
+      (entry) => entry.commandId === commandId && entry.version === applied?.version,
+    );
+    if (storedApplication === undefined || persisted.prompt !== applied.prompt) {
+      return { ok: false, reason: "persistence-failed" };
+    }
+    return { ok: true, targetKey, ...applied };
+  } catch {
+    return { ok: false, reason: "persistence-failed" };
+  }
+}
 
 export function clearComposerDraftsEnvironment(environmentId: EnvironmentId): void {
   useComposerDraftStore.setState((state) => {
@@ -3748,11 +3938,19 @@ export function clearComposerDraftsEnvironment(environmentId: EnvironmentId): vo
         return false;
       }),
     ) as Record<string, ComposerThreadDraftState>;
+    const nextAppliedDictationCommands = Object.fromEntries(
+      Object.entries(state.appliedDictationCommandsByTargetKey).filter(
+        ([targetKey]) =>
+          !removedThreadKeys.has(targetKey) &&
+          parseScopedThreadKey(targetKey)?.environmentId !== environmentId,
+      ),
+    );
 
     return {
       draftsByThreadKey: nextDrafts,
       draftThreadsByThreadKey: nextDraftThreads,
       logicalProjectDraftThreadKeyByLogicalProjectKey: nextLogicalMappings,
+      appliedDictationCommandsByTargetKey: nextAppliedDictationCommands,
     };
   });
   composerDebouncedStorage.flush();

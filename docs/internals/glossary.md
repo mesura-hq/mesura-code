@@ -10,6 +10,7 @@ This is a living glossary for T3 Code. It explains what common terms mean in thi
 - [Thread timeline](#thread-timeline)
 - [Orchestration](#orchestration)
 - [Provider runtime](#provider-runtime)
+- [Symmetria integration](#symmetria-integration)
 - [Checkpointing](#checkpointing)
 
 ## Concepts
@@ -80,7 +81,7 @@ The current materialized view of orchestration state. In [the contracts][1], it 
 
 A side-effecting service that handles follow-up work after events or runtime signals. Examples include [CheckpointReactor.ts][6], [ProviderCommandReactor.ts][12], and [ProviderRuntimeIngestion.ts][5].
 
-#### Receipt
+#### Runtime receipt
 
 A typed signal emitted when an async milestone completes, such as `checkpoint.baseline.captured`, `checkpoint.diff.finalized`, or `turn.processing.quiesced`. Receipts are a test-only mechanism: the production `RuntimeReceiptBusLive` publish is a no-op and only the test layer is PubSub-backed. Do not build production behavior on them. See [RuntimeReceiptBus.ts][13] and [CheckpointReactor.ts][6].
 
@@ -116,6 +117,31 @@ Controls how assistant text reaches the thread timeline. In [the contracts][1], 
 
 A point-in-time view of state. The word is used in multiple layers, including orchestration, provider, and checkpointing. See [ProjectionSnapshotQuery.ts][10], [ProviderAdapter.ts][15], and [CheckpointStore.ts][19].
 
+### Symmetria integration
+
+#### Dictation session
+
+One Shell-owned recording and delivery lifecycle. The session carries phase, mode, immutable target,
+and presentation ownership. It does not carry partial transcript text. See
+[symmetria-dictation.md][25] and [the dictation contract][26].
+
+#### Reserved target
+
+The immutable Mesura destination captured before Shell starts audio. A server target contains an
+`environmentId` and `threadId`. A draft target contains a `draftId` and `futureThreadRef`.
+
+#### Presentation lease
+
+A short claim that lets a focused Mesura renderer show the dictation controls for the reserved
+target. Shell shows the controls when the lease is absent or expired. The lease changes only the
+presentation owner; it does not pause, cancel, or retarget the dictation session.
+
+#### Dictation receipt
+
+A production protocol result that confirms the effect of one dictation command. This term does not
+mean a test-only runtime receipt. A dictation receipt can confirm clipboard copy, persisted insert,
+provider-turn start, pending confirmation, refusal, or failure.
+
 ### Checkpointing
 
 Checkpointing captures workspace state over time so the app can diff turns and restore earlier points. The main pieces are [CheckpointStore.ts][19], [CheckpointDiffQuery.ts][20], and [CheckpointReactor.ts][6].
@@ -144,7 +170,8 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 
 - If you see `requested`, think "intent recorded".
 - If you see `completed`, think "result applied".
-- If you see `receipt`, think "async milestone signal, for tests".
+- If you see `RuntimeReceiptBus`, think "async milestone signal, for tests".
+- If you see `SymmetriaDictationReceipt`, think "confirmed production delivery result".
 - If you see `checkpoint`, think "workspace snapshot for diff/restore".
 - If you see `quiesced`, think "all relevant follow-up work has gone idle".
 
@@ -179,3 +206,5 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 [22]: ../../apps/server/src/checkpointing/Utils.ts
 [23]: ../../apps/server/src/checkpointing/Diffs.ts
 [24]: ./overview.md
+[25]: ./symmetria-dictation.md
+[26]: ../../packages/symmetria-broker-contract/src/dictation.ts

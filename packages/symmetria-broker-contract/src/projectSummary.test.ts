@@ -198,12 +198,14 @@ describe("the stream carries projects", () => {
   });
 });
 
-describe("the addition is announced as a minor bump", () => {
-  it("raises the protocol minor", () => {
-    expect(SYMMETRIA_PROTOCOL_MINOR).toBe(1);
+describe("additive contract changes advance the minor version", () => {
+  // Projects introduced 1.1. Dictation started at 1.2 and evolves additively.
+  // These assertions move only when the published protocol surface moves.
+  it("announces the latest additive protocol surface", () => {
+    expect(SYMMETRIA_PROTOCOL_MINOR).toBe(5);
   });
 
-  it("raises the contract version to match", () => {
-    expect(SYMMETRIA_CONTRACT_VERSION).toBe("1.1.0");
+  it("keeps the semantic contract version in step", () => {
+    expect(SYMMETRIA_CONTRACT_VERSION).toBe("1.5.0");
   });
 });

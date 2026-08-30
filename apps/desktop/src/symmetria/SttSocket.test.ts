@@ -31,18 +31,18 @@ const exchange = (socketPath: string, line: string): Promise<string> =>
     client.on("connect", () => client.write(`${line}\n`));
   });
 
-// Acceptance: the client receives one receipt line on the same connection,
-// written after delivery was attempted and not before. The ordering is the
-// whole contract: the shell decides whether the dictation survived by reading
-// this line, so a receipt written before the attempt is a lie it cannot detect.
-it("answers with one receipt line, written after the delivery attempt resolves", async () => {
+it("answers with one refusal line after the compatibility endpoint resolves", async () => {
   const socketPath = tempSocketPath();
   const order: Array<string> = [];
   const server = createSttServer({
     deliver: async (request: SttRequest): Promise<SttOutcome> => {
       await Promise.resolve();
-      order.push(`delivered:${request.text}`);
-      return { kind: "placed" };
+      order.push(`refused:${request.text}`);
+      return {
+        kind: "error",
+        code: "reserved-session-required",
+        detail: "Mesura requires a reserved dictation session",
+      };
     },
   });
   await listenOnPath(server, socketPath);
@@ -53,8 +53,12 @@ it("answers with one receipt line, written after the delivery attempt resolves",
   );
   order.push("replied");
 
-  assert.deepEqual(order, ["delivered:hola", "replied"]);
-  assert.deepEqual(JSON.parse(reply), { ok: true, outcome: "placed" });
+  assert.deepEqual(order, ["refused:hola", "replied"]);
+  assert.deepEqual(JSON.parse(reply), {
+    ok: false,
+    outcome: "reserved-session-required",
+    detail: "Mesura requires a reserved dictation session",
+  });
 
   await closeServer(server);
 });
@@ -67,7 +71,11 @@ it("answers malformed input instead of closing the connection", async () => {
   const server = createSttServer({
     deliver: async () => {
       delivered = true;
-      return { kind: "placed" };
+      return {
+        kind: "error",
+        code: "reserved-session-required",
+        detail: "Mesura requires a reserved dictation session",
+      };
     },
   });
   await listenOnPath(server, socketPath);
@@ -82,19 +90,32 @@ it("answers malformed input instead of closing the connection", async () => {
   await closeServer(server);
 });
 
-// Acceptance: the absence of a conversation reaches the shell as its own
-// outcome rather than as a fault.
-it("passes a no-conversation outcome through to the receipt", async () => {
+it("can refuse a destination-less request without applying an effect", async () => {
   const socketPath = tempSocketPath();
-  const server = createSttServer({ deliver: async () => ({ kind: "no-conversation" }) });
+  let refusalAttempts = 0;
+  const server = createSttServer({
+    deliver: async () => {
+      refusalAttempts += 1;
+      return {
+        kind: "error",
+        code: "reserved-session-required",
+        detail: "Mesura requires a reserved dictation session",
+      };
+    },
+  });
   await listenOnPath(server, socketPath);
 
   const reply = await exchange(
     socketPath,
-    JSON.stringify({ type: "stt_inject", text: "hola", submit: false }),
+    JSON.stringify({ type: "stt_inject", text: "hola", submit: true }),
   );
 
-  assert.deepEqual(JSON.parse(reply), { ok: false, outcome: "no-conversation" });
+  assert.equal(refusalAttempts, 1);
+  assert.deepEqual(JSON.parse(reply), {
+    ok: false,
+    outcome: "reserved-session-required",
+    detail: "Mesura requires a reserved dictation session",
+  });
 
   await closeServer(server);
 });

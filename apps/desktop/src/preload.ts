@@ -8,6 +8,7 @@ import { exposeClerkBridge } from "@clerk/electron/preload";
 import { contextBridge, ipcRenderer } from "electron";
 
 import * as IpcChannels from "./ipc/channels.ts";
+import { subscribeToOrderedRendererFrames } from "./symmetria/rendererFrameSubscription.ts";
 
 exposeClerkBridge({ passkeys: true });
 
@@ -123,26 +124,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.removeListener(IpcChannels.MENU_ACTION_CHANNEL, wrappedListener);
     };
   },
-  onSttDelivery: (listener) => {
-    const wrappedListener = (_event: Electron.IpcRendererEvent, delivery: unknown) => {
-      if (typeof delivery !== "object" || delivery === null) return;
-      const { requestId, text, submit } = delivery as Record<string, unknown>;
-      if (typeof requestId !== "string" || typeof text !== "string") return;
-      listener({ requestId, text, submit: submit === true });
-    };
-
-    ipcRenderer.on(IpcChannels.STT_DELIVER_CHANNEL, wrappedListener);
-    return () => {
-      ipcRenderer.removeListener(IpcChannels.STT_DELIVER_CHANNEL, wrappedListener);
-    };
-  },
   publishThreads: (payload) => ipcRenderer.invoke(IpcChannels.PUBLISH_THREADS_CHANNEL, payload),
-  resolveSttDelivery: (requestId, outcome) => {
-    // invoke rather than send: DesktopIpc exposes `handle` and `handleSync` and
-    // no plain listener, so the request/response channel is the one that needs
-    // no new plumbing. The renderer has nothing to do with the answer.
-    void ipcRenderer.invoke(IpcChannels.RESOLVE_STT_DELIVER_CHANNEL, { requestId, outcome });
-  },
   onQuitShortcut: (listener) => {
     const wrappedListener = (_event: Electron.IpcRendererEvent, state: unknown) => {
       if (state !== "down" && state !== "up") return;
@@ -293,3 +275,50 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     },
   },
 } satisfies DesktopBridge);
+
+// Fork-owned bridge kept separate from upstream's DesktopBridge. Phase three
+// gives the renderer its typed facade when the coordinator starts consuming it.
+contextBridge.exposeInMainWorld("symmetriaDictationBridge", {
+  sendCommand: (command: unknown) =>
+    ipcRenderer.invoke(IpcChannels.DICTATION_COMMAND_CHANNEL, command),
+  resolveRequest: (requestId: string, result: unknown) =>
+    ipcRenderer.invoke(IpcChannels.RESOLVE_DICTATION_RENDERER_REQUEST_CHANNEL, {
+      requestId,
+      result,
+    }),
+  onRequest: (listener: (request: unknown) => void) => {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, request: unknown) =>
+      listener(request);
+    ipcRenderer.on(IpcChannels.DICTATION_RENDERER_REQUEST_CHANNEL, wrappedListener);
+    return () =>
+      ipcRenderer.removeListener(IpcChannels.DICTATION_RENDERER_REQUEST_CHANNEL, wrappedListener);
+  },
+  subscribe: (listener: (snapshot: unknown) => void) =>
+    subscribeToOrderedRendererFrames({
+      load: () => ipcRenderer.invoke(IpcChannels.GET_DICTATION_SNAPSHOT_CHANNEL),
+      attach: (onFrame) => {
+        const wrappedListener = (_event: Electron.IpcRendererEvent, frame: unknown) => {
+          if (typeof frame !== "object" || frame === null) return;
+          const candidate = frame as Record<string, unknown>;
+          if (typeof candidate["revision"] !== "number") return;
+          onFrame(frame as Parameters<typeof onFrame>[0]);
+        };
+        ipcRenderer.on(IpcChannels.DICTATION_SNAPSHOT_CHANNEL, wrappedListener);
+        return () =>
+          ipcRenderer.removeListener(IpcChannels.DICTATION_SNAPSHOT_CHANNEL, wrappedListener);
+      },
+      listener,
+    }),
+  getShellAvailability: () =>
+    ipcRenderer.invoke(IpcChannels.GET_DICTATION_SHELL_AVAILABILITY_CHANNEL),
+  getConfirmationRecovery: () =>
+    ipcRenderer.invoke(IpcChannels.GET_DICTATION_CONFIRMATION_RECOVERY_CHANNEL),
+  subscribeShellAvailability: (listener: (available: boolean) => void) => {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, available: unknown) => {
+      if (typeof available === "boolean") listener(available);
+    };
+    ipcRenderer.on(IpcChannels.DICTATION_SHELL_AVAILABILITY_CHANNEL, wrappedListener);
+    return () =>
+      ipcRenderer.removeListener(IpcChannels.DICTATION_SHELL_AVAILABILITY_CHANNEL, wrappedListener);
+  },
+});

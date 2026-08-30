@@ -1,7 +1,7 @@
 /**
  * Serves the projected thread list to Symmetria Shell.
  *
- * A thin shell, like `SttDelivery.ts` next door: the projection lives in
+ * A thin shell: the projection lives in
  * `threadProjection.ts`, the socket in `threadStream.ts`, the filesystem in
  * `socketFiles.ts` and the binding in `unixSocket.ts`. This module supplies
  * only what needs the application — where the socket goes, what state is

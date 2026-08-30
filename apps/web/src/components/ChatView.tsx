@@ -39,11 +39,7 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
-import {
-  applyClaudePromptEffortPrefix,
-  createModelSelection,
-  resolvePromptInjectedEffort,
-} from "@t3tools/shared/model";
+import { createModelSelection } from "@t3tools/shared/model";
 import { CHAT_LIST_ANCHOR_OFFSET } from "@t3tools/shared/chatList";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { truncate } from "@t3tools/shared/String";
@@ -189,10 +185,10 @@ import {
   nextProjectScriptId,
   projectScriptIdFromCommand,
 } from "~/projectScripts";
-import { newDraftId, newMessageId, newThreadId } from "~/lib/utils";
+import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { useBrowserHistoryStore } from "~/browserHistoryStore";
 import { registerFaviconProjectForThread } from "~/browserFaviconStore";
-import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
+import { resolveSelectableProvider } from "../providerModels";
 import { NO_PROVIDER_MODEL_SELECTION } from "../providerInstances";
 import {
   useClientSettings,
@@ -222,8 +218,11 @@ import {
   useComposerDraftStore,
   type DraftId,
 } from "../composerDraftStore";
-import { submitComposerDraft } from "./chat/composerSubmission";
-import { useSttDelivery } from "../symmetria/useSttDelivery";
+import { formatOutgoingComposerPrompt } from "./chat/composerSubmission";
+import { dictationCoordinator } from "../symmetria/dictationCoordinator";
+import { captureDictationTarget } from "../symmetria/dictationTarget";
+import { buildDirectedTurnStartInput } from "../symmetria/directedComposerSubmission";
+import { DictationMicrophoneButton, DictationStrip } from "../symmetria/DictationStrip";
 import {
   appendTerminalContextsToPrompt,
   formatTerminalContextLabel,
@@ -519,17 +518,6 @@ function shouldTypeToFocusComposer(event: KeyboardEvent): boolean {
   return true;
 }
 
-function formatOutgoingPrompt(params: {
-  provider: ProviderDriverKind;
-  model: string | null;
-  models: ReadonlyArray<ServerProvider["models"][number]>;
-  effort: string | null;
-  text: string;
-}): string {
-  const caps = getProviderModelCapabilities(params.models, params.model, params.provider);
-  const promptEffort = resolvePromptInjectedEffort(caps, params.effort);
-  return applyClaudePromptEffortPrefix(params.text, promptEffort);
-}
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
 
@@ -5251,7 +5239,7 @@ function ChatViewContent(props: ChatViewProps) {
         draftText: trimmed,
         planMarkdown: activeProposedPlan.planMarkdown,
       });
-      const outgoingFollowUpText = formatOutgoingPrompt({
+      const outgoingFollowUpText = formatOutgoingComposerPrompt({
         provider: ctxSelectedProvider,
         model: ctxSelectedModel,
         models: ctxSelectedProviderModels,
@@ -5349,7 +5337,7 @@ function ChatViewContent(props: ChatViewProps) {
       messageTextWithPreviewAnnotations,
       composerReviewCommentsSnapshot,
     );
-    const outgoingMessageText = formatOutgoingPrompt({
+    const outgoingMessageText = formatOutgoingComposerPrompt({
       provider: ctxSelectedProvider,
       model: ctxSelectedModel,
       models: ctxSelectedProviderModels,
@@ -5579,21 +5567,21 @@ function ChatViewContent(props: ChatViewProps) {
       beginLocalDispatch({ preparingWorktree: false });
       const startResult = await startThreadTurn({
         environmentId,
-        input: {
+        input: buildDirectedTurnStartInput({
+          environmentId,
+          commandId: newCommandId(),
           threadId: threadIdForSend,
-          message: {
-            messageId: messageIdForSend,
-            role: "user",
-            text: outgoingMessageText,
-            attachments: turnAttachmentsResult.value,
-          },
+          messageId: messageIdForSend,
+          createdAt: messageCreatedAt,
+          prompt: outgoingMessageText,
           modelSelection: ctxSelectedModelSelection,
           titleSeed: title,
           runtimeMode,
           interactionMode,
-          ...(bootstrap ? { bootstrap } : {}),
-          createdAt: messageCreatedAt,
-        },
+          attachments: turnAttachmentsResult.value,
+          bootstrap,
+          pendingAction: { kind: "composer" },
+        }),
       });
       if (startResult._tag === "Failure") {
         failure = startResult;
@@ -5700,105 +5688,66 @@ function ChatViewContent(props: ChatViewProps) {
     setThreadError,
   ]);
 
-  // Dictation from Symmetria Shell. It lives here rather than beside
-  // `composerDraftTarget` because it needs `onSend`, which is defined above.
-  //
-  // The target must be `composerDraftTarget` and not `routeThreadRef`: on a
-  // draft route those are different keys, and writing to the second one puts
-  // the text where the composer does not read it.
-  //
-  // Submitting goes through `submitComposerDraft`, the same entry point the
-  // composer's own send button uses, so its validation and its dispatch rule
-  // stay one implementation. Reaching past it to `startThreadTurn` would work
-  // today and drift the moment sending changes.
-  const onSendRef = useRef(onSend);
-  useEffect(() => {
-    onSendRef.current = onSend;
-  });
-  const sttWriter = useMemo(
-    () => ({
-      placePrompt: (text: string) => {
-        // Go through the composer's own handle, not a store write.
-        //
-        // Measured live on 2026-08-22: writing the store put the text on
-        // screen but left the caret at position 0, and — worse — `onSend`
-        // reads `promptRef`, which the composer maintains through its own
-        // change path and a store write never reaches. So a dictation with
-        // submit enabled hit `!hasSendableContent`, returned through a bare
-        // guard, and was reported to the shell as sent. `insertTextAtEnd` is
-        // the same entry point the composer's own typeahead uses.
-        //
-        // It APPENDS rather than replaces, which is the better behaviour
-        // anyway: dictating on top of text the user already typed should add
-        // to it, not destroy it.
-        const composer = composerRef.current;
-        if (composer?.insertTextAtEnd(text, { ensureLeadingBoundary: true })) return;
-        // No composer mounted — fall back to the store so the words are at
-        // least recoverable, even though the caret and `promptRef` will not
-        // agree with it.
-        useComposerDraftStore.getState().setPrompt(composerDraftTarget, text);
-      },
-      // ⚠ What `true` means here, exactly: the send was DISPATCHED without
-      // throwing. It does not mean the turn started.
-      //
-      // `onSend` returns `Promise<void>` — it computes `turnStartSucceeded`
-      // internally (declared around line 5381) but returns it from nowhere, and
-      // its dozen refusal guards are bare `return;`. So a send that is refused,
-      // or one whose `startThreadTurn` fails outright, resolves exactly like a
-      // send that worked. Closing that gap means having `onSend` return its own
-      // result, which changes a function the composer's send button also uses
-      // and was outside this change's approved scope; it is reported rather
-      // than guessed at here.
-      //
-      // An earlier version wrote `(await sending) !== false` with `sending`
-      // typed `unknown`. That comparison is meaningless against `Promise<void>`
-      // and the widening is the only reason it compiled — typed honestly, the
-      // compiler rejects it with TS2367. Do not widen it back.
-      submit: async (text: string) => {
-        // Wait for the composer to actually hold the text before sending.
-        // `onSend` reads `promptRef`, which the composer updates through its
-        // own change path — a render after the insert. Submitting immediately
-        // read an empty prompt, bailed on `!hasSendableContent`, and reported
-        // success. Waiting on the composer's own snapshot rather than on a
-        // guessed delay is what makes this observable instead of a race.
-        const composer = composerRef.current;
-        if (composer) {
-          let seen = false;
-          for (let attempt = 0; attempt < 30 && !seen; attempt += 1) {
-            seen = composer.getSendContext().prompt.includes(text);
-            if (!seen) await new Promise((resolve) => requestAnimationFrame(resolve));
-          }
-          // Never send a turn the composer cannot see. The words are in it —
-          // `placePrompt` ran — so this is `placed-not-submitted`, which is
-          // exactly what the shell needs to hear.
-          if (!seen) return false;
-        }
-
-        let sending: ReturnType<typeof onSend> | undefined;
-        const { didDispatch } = submitComposerDraft({
-          prompt: text,
-          submissionTarget: "provider-turn",
-          event: undefined,
-          onSend: (event) => {
-            sending = onSendRef.current(event);
-          },
-        });
-        // Refused by the prompt-length validation, before any send happened.
-        if (!didDispatch) return false;
-        try {
-          await sending;
-          return true;
-        } catch {
-          return false;
-        }
-      },
-    }),
-    // `onSend` is redefined every render, so it is read through the ref rather
-    // than depended on — otherwise the delivery effect would resubscribe on
-    // every render.
-    [composerDraftTarget],
+  const registeredDictationTarget = useMemo(
+    () =>
+      captureDictationTarget(
+        composerDraftTarget,
+        typeof composerDraftTarget === "string" ? draftThread : null,
+      ),
+    [composerDraftTarget, draftThread],
   );
-  useSttDelivery(sttWriter);
+  useEffect(() => {
+    if (registeredDictationTarget === null) return;
+    return dictationCoordinator.registerComposer({
+      target: registeredDictationTarget,
+      projectName: activeProject?.title ?? null,
+      handle: {
+        replacePrompt: (prompt) => composerRef.current?.replacePrompt(prompt) ?? false,
+      },
+      readSubmissionContext: () => {
+        const sendContext = composerRef.current?.getSendContext();
+        if (!sendContext) return null;
+        const pendingAction = activePendingUserInput
+          ? {
+              kind: "text-question" as const,
+              requestId: activePendingUserInput.requestId,
+              questionId:
+                activePendingUserInput.questions[activePendingQuestionIndex]?.id ??
+                activePendingUserInput.questions[0]!.id,
+              questions: activePendingUserInput.questions,
+              draftAnswers: activePendingDraftAnswers,
+              questionIndex: activePendingQuestionIndex,
+            }
+          : activePendingApproval
+            ? { kind: "button-approval" as const }
+            : showPlanFollowUpPrompt && activeProposedPlan
+              ? {
+                  kind: "plan-follow-up" as const,
+                  planId: activeProposedPlan.id,
+                  planMarkdown: activeProposedPlan.planMarkdown,
+                }
+              : { kind: "composer" as const };
+        return {
+          providerAvailable: sendContext.providerAvailable,
+          provider: sendContext.selectedProvider,
+          model: sendContext.selectedModel,
+          models: sendContext.selectedProviderModels,
+          effort: sendContext.selectedPromptEffort,
+          pendingAction,
+        };
+      },
+    });
+  }, [
+    activePendingApproval,
+    activePendingDraftAnswers,
+    activePendingQuestionIndex,
+    activePendingUserInput,
+    activeProject?.title,
+    activeProposedPlan,
+    composerRef,
+    registeredDictationTarget,
+    showPlanFollowUpPrompt,
+  ]);
 
   const onInterrupt = async () => {
     if (!activeThread) return;
@@ -6039,7 +5988,7 @@ function ChatViewContent(props: ChatViewProps) {
       const threadIdForSend = activeThread.id;
       const messageIdForSend = newMessageId();
       const messageCreatedAt = new Date().toISOString();
-      const outgoingMessageText = formatOutgoingPrompt({
+      const outgoingMessageText = formatOutgoingComposerPrompt({
         provider: ctxSelectedProvider,
         model: ctxSelectedModel,
         models: ctxSelectedProviderModels,
@@ -6196,7 +6145,7 @@ function ChatViewContent(props: ChatViewProps) {
     const nextThreadId = newThreadId();
     const planMarkdown = activeProposedPlan.planMarkdown;
     const implementationPrompt = buildPlanImplementationPrompt(planMarkdown);
-    const outgoingImplementationPrompt = formatOutgoingPrompt({
+    const outgoingImplementationPrompt = formatOutgoingComposerPrompt({
       provider: ctxSelectedProvider,
       model: ctxSelectedModel,
       models: ctxSelectedProviderModels,
@@ -6857,6 +6806,9 @@ function ChatViewContent(props: ChatViewProps) {
                         showComposerContextStrip && "chat-composer-glass-shell-with-context",
                       )}
                     >
+                      {registeredDictationTarget ? (
+                        <DictationStrip displayedTarget={registeredDictationTarget} />
+                      ) : null}
                       <div className="chat-composer-glass-host relative z-10 w-full rounded-[22px]">
                         <div ref={attachDraftHeroComposerAnchorRef} className="relative z-10">
                           <ChatComposer
@@ -6907,6 +6859,7 @@ function ChatViewContent(props: ChatViewProps) {
                             keybindings={keybindings}
                             terminalOpen={Boolean(terminalUiState.terminalOpen)}
                             gitCwd={gitCwd}
+                            dictationStartControl={<DictationMicrophoneButton />}
                             promptRef={promptRef}
                             composerImagesRef={composerImagesRef}
                             composerTerminalContextsRef={composerTerminalContextsRef}

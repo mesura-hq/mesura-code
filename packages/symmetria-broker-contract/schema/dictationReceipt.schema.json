@@ -1,0 +1,498 @@
+{
+  "$comment": "Generated from SymmetriaDictationReceipt by scripts/emit-json-schema.ts. Do not hand-edit.",
+  "$defs": {
+    "Objects_": {
+      "additionalProperties": true,
+      "properties": {
+        "major": {
+          "enum": [
+            1
+          ],
+          "type": "number"
+        },
+        "minor": {
+          "allOf": [
+            {
+              "minimum": 0
+            }
+          ],
+          "type": "integer"
+        }
+      },
+      "required": [
+        "major",
+        "minor"
+      ],
+      "type": "object"
+    },
+    "SymmetriaDictationConfirmationPendingReceipt": {
+      "additionalProperties": true,
+      "properties": {
+        "application": {
+          "enum": [
+            "first",
+            "replay"
+          ],
+          "type": "string"
+        },
+        "commandId": {
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "confirmation-pending"
+          ],
+          "type": "string"
+        },
+        "protocolVersion": {
+          "$ref": "#/$defs/Objects_"
+        },
+        "sessionId": {
+          "allOf": [
+            {
+              "minLength": 1
+            },
+            {
+              "pattern": "\\S"
+            }
+          ],
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/Union_"
+        }
+      },
+      "required": [
+        "outcome",
+        "protocolVersion",
+        "sessionId",
+        "commandId",
+        "target",
+        "application"
+      ],
+      "type": "object"
+    },
+    "SymmetriaDictationCopiedReceipt": {
+      "additionalProperties": true,
+      "properties": {
+        "application": {
+          "enum": [
+            "first",
+            "replay"
+          ],
+          "type": "string"
+        },
+        "commandId": {
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "copied"
+          ],
+          "type": "string"
+        },
+        "protocolVersion": {
+          "$ref": "#/$defs/Objects_"
+        },
+        "sessionId": {
+          "allOf": [
+            {
+              "minLength": 1
+            },
+            {
+              "pattern": "\\S"
+            }
+          ],
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/Union_"
+        }
+      },
+      "required": [
+        "outcome",
+        "protocolVersion",
+        "sessionId",
+        "commandId",
+        "target",
+        "application"
+      ],
+      "type": "object"
+    },
+    "SymmetriaDictationDraftTarget": {
+      "additionalProperties": true,
+      "properties": {
+        "draftId": {
+          "allOf": [
+            {
+              "minLength": 1
+            },
+            {
+              "pattern": "\\S"
+            }
+          ],
+          "type": "string"
+        },
+        "futureThreadRef": {
+          "$ref": "#/$defs/SymmetriaScopedThreadRef"
+        },
+        "kind": {
+          "enum": [
+            "draft"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "draftId",
+        "futureThreadRef"
+      ],
+      "type": "object"
+    },
+    "SymmetriaDictationFailedReceipt": {
+      "additionalProperties": true,
+      "properties": {
+        "application": {
+          "enum": [
+            "first",
+            "replay"
+          ],
+          "type": "string"
+        },
+        "code": {
+          "enum": [
+            "renderer_lost",
+            "provider_start_failed",
+            "provider_turn_failed",
+            "persistence_failed",
+            "deadline_exceeded",
+            "malformed_input"
+          ],
+          "type": "string"
+        },
+        "commandId": {
+          "type": "string"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "allOf": [
+                {
+                  "minLength": 1
+                },
+                {
+                  "pattern": "\\S"
+                }
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "enum": [
+            "failed"
+          ],
+          "type": "string"
+        },
+        "protocolVersion": {
+          "$ref": "#/$defs/Objects_"
+        },
+        "sessionId": {
+          "allOf": [
+            {
+              "minLength": 1
+            },
+            {
+              "pattern": "\\S"
+            }
+          ],
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/Union_"
+        }
+      },
+      "required": [
+        "outcome",
+        "protocolVersion",
+        "sessionId",
+        "commandId",
+        "target",
+        "application",
+        "code",
+        "detail"
+      ],
+      "type": "object"
+    },
+    "SymmetriaDictationInsertedReceipt": {
+      "additionalProperties": true,
+      "properties": {
+        "action": {
+          "enum": [
+            "insert",
+            "answer"
+          ],
+          "type": "string"
+        },
+        "application": {
+          "enum": [
+            "first",
+            "replay"
+          ],
+          "type": "string"
+        },
+        "commandId": {
+          "type": "string"
+        },
+        "draftVersion": {
+          "allOf": [
+            {
+              "minimum": 0
+            }
+          ],
+          "type": "integer"
+        },
+        "outcome": {
+          "enum": [
+            "inserted"
+          ],
+          "type": "string"
+        },
+        "protocolVersion": {
+          "$ref": "#/$defs/Objects_"
+        },
+        "sessionId": {
+          "allOf": [
+            {
+              "minLength": 1
+            },
+            {
+              "pattern": "\\S"
+            }
+          ],
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/Union_"
+        }
+      },
+      "required": [
+        "outcome",
+        "protocolVersion",
+        "sessionId",
+        "commandId",
+        "target",
+        "application",
+        "draftVersion"
+      ],
+      "type": "object"
+    },
+    "SymmetriaDictationRefusedReceipt": {
+      "additionalProperties": true,
+      "properties": {
+        "application": {
+          "enum": [
+            "first",
+            "replay"
+          ],
+          "type": "string"
+        },
+        "code": {
+          "enum": [
+            "shell_unavailable",
+            "target_missing",
+            "unsupported_composer_action",
+            "unsupported_protocol"
+          ],
+          "type": "string"
+        },
+        "commandId": {
+          "type": "string"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "allOf": [
+                {
+                  "minLength": 1
+                },
+                {
+                  "pattern": "\\S"
+                }
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "enum": [
+            "refused"
+          ],
+          "type": "string"
+        },
+        "protocolVersion": {
+          "$ref": "#/$defs/Objects_"
+        },
+        "sessionId": {
+          "allOf": [
+            {
+              "minLength": 1
+            },
+            {
+              "pattern": "\\S"
+            }
+          ],
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/Union_"
+        }
+      },
+      "required": [
+        "outcome",
+        "protocolVersion",
+        "sessionId",
+        "commandId",
+        "target",
+        "application",
+        "code",
+        "detail"
+      ],
+      "type": "object"
+    },
+    "SymmetriaDictationThreadTarget": {
+      "additionalProperties": true,
+      "properties": {
+        "environmentId": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "thread"
+          ],
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "environmentId",
+        "threadId"
+      ],
+      "type": "object"
+    },
+    "SymmetriaDictationTurnRunningReceipt": {
+      "additionalProperties": true,
+      "properties": {
+        "application": {
+          "enum": [
+            "first",
+            "replay"
+          ],
+          "type": "string"
+        },
+        "commandId": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "turn-running"
+          ],
+          "type": "string"
+        },
+        "protocolVersion": {
+          "$ref": "#/$defs/Objects_"
+        },
+        "sessionId": {
+          "allOf": [
+            {
+              "minLength": 1
+            },
+            {
+              "pattern": "\\S"
+            }
+          ],
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/Union_"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "protocolVersion",
+        "sessionId",
+        "commandId",
+        "target",
+        "application",
+        "messageId",
+        "turnId"
+      ],
+      "type": "object"
+    },
+    "SymmetriaScopedThreadRef": {
+      "additionalProperties": true,
+      "properties": {
+        "environmentId": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environmentId",
+        "threadId"
+      ],
+      "type": "object"
+    },
+    "Union_": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SymmetriaDictationThreadTarget"
+        },
+        {
+          "$ref": "#/$defs/SymmetriaDictationDraftTarget"
+        }
+      ]
+    }
+  },
+  "$id": "dictationReceipt.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/SymmetriaDictationCopiedReceipt"
+    },
+    {
+      "$ref": "#/$defs/SymmetriaDictationInsertedReceipt"
+    },
+    {
+      "$ref": "#/$defs/SymmetriaDictationTurnRunningReceipt"
+    },
+    {
+      "$ref": "#/$defs/SymmetriaDictationConfirmationPendingReceipt"
+    },
+    {
+      "$ref": "#/$defs/SymmetriaDictationRefusedReceipt"
+    },
+    {
+      "$ref": "#/$defs/SymmetriaDictationFailedReceipt"
+    }
+  ],
+  "title": "SymmetriaDictationReceipt"
+}
