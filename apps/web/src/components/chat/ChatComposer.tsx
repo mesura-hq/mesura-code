@@ -464,6 +464,8 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   onImplementPlanInNewThread: () => void;
   onAttachFiles: () => void;
   attachDisabled: boolean;
+  /** Rendered between attach and send, so the row reads context, attach, microphone, send. */
+  dictationStartControl?: ReactNode;
 }) {
   return (
     <>
@@ -495,6 +497,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         />
         <TooltipPopup side="top">Attach files · Alt+A</TooltipPopup>
       </Tooltip>
+      {props.dictationStartControl}
       <ComposerPrimaryActions
         compact={props.compact}
         pendingAction={props.pendingAction}
@@ -3852,9 +3855,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 >
                   {showMobilePendingAnswerActions ? null : inlineTasksBadge}
                   {showMobilePendingAnswerActions ? null : inlineStashBadge}
-                  {dictationStartControl}
                   <ComposerFooterPrimaryActions
                     compact={isComposerPrimaryActionsCompact}
+                    dictationStartControl={dictationStartControl}
                     activeContextWindow={activeContextWindow}
                     activeThreadModelDisplayName={activeThreadModelDisplayName}
                     pendingAction={pendingPrimaryAction}
