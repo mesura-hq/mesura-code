@@ -170,7 +170,9 @@ An empty database is a bad test. Seed your worktree's `.t3` with a copy of real 
 - **`pnpm test` can take the machine down, and this is measured, not theoretical.** The root config's `test.maxWorkers` reaches only `apps/server`, because it is the one package that composes the root config; `apps/web`, `apps/mobile`, `apps/desktop` and `infra/relay` each open their own default-sized pool. A full run reached load 38 with swap fully exhausted and had to be killed. If a full run is genuinely asked for, run it package by package with an explicit bound — `vp test run --max-workers=3` from inside each package — and never in parallel with another. Tracked as issue #3.
 - Backend behavior changes ship with focused tests for that behavior.
 - The server is event-sourced and its async flows emit typed receipts. Wait on receipts and worker drains, never on sleeps or polling. A test that needs a timeout to pass is wrong.
-- Upon request, user-visible frontend changes should get one integrated pass in a real client: `test-t3-app` for web, `test-t3-mobile` for mobile. The primary agent does this once after integrating. Subagents do not launch their own dev servers. Ask permission before doing computer use or spinning up browsers.
+- **Verify a user-visible frontend change before reporting it done**, so what reaches the developer differs on taste rather than on whether it works. The preview tool needs no permission and shows nothing on screen with `open: false`. Its automation channel does not reach Mesura Code's own web app today (issue #36); until it does, this app's own UI is proved by targeted tests plus the instance below. `test-t3-app` and `test-t3-mobile` set the clients up.
+- **Then leave that instance running.** `vp run dev` in the background, handing over the pairing URL with its token — the developer tests from a browser, so that is the default. When only the desktop shell shows the change, do every step up to the window and hand over the exact command; opening a window is theirs to run. Stop only what you started, by the PID you captured.
+- Subagents do not launch their own dev servers. A headed browser still needs asking — Playwright `--headed` and headed chrome-devtools put windows on the developer's desktop, which the preview tool never does.
 
 ## Pull requests
 
@@ -215,5 +217,5 @@ Full glossary with file links: `docs/internals/glossary.md`
 
 ## Additional tips
 
-- Don't verify with browsers or computer use unless the user explicitly agrees or requests it.
+- Computer use and headed browsers need the developer's agreement. The preview tool does not, and verifying with it is expected rather than optional — see _Verifying_.
 - Security is important, but should not be over-indexed on, especially for dev mode/maintainer-only features.
