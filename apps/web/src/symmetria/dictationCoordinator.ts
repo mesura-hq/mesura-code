@@ -377,23 +377,38 @@ export function createDictationCoordinator(options: CoordinatorOptions = {}) {
         }
         const confirmationKey = `${command.sessionId}:${command.commandId}`;
         resumedConfirmationKey = confirmationKey;
-        try {
-          return await confirm(
-            {
-              protocolVersion: command.protocolVersion,
-              sessionId: command.sessionId,
-              commandId: command.commandId,
-              target: reserved.target,
-              environmentId: confirmationRef.environmentId,
-              threadId: confirmationRef.threadId,
-              messageId: submission.messageId,
-            },
-            { onLateReceipt: reportLateReceipt },
-          );
-        } catch (cause) {
-          if (resumedConfirmationKey === confirmationKey) resumedConfirmationKey = null;
-          throw cause;
-        }
+        const confirmationIdentity = {
+          protocolVersion: command.protocolVersion,
+          sessionId: command.sessionId,
+          commandId: command.commandId,
+          target: reserved.target,
+          environmentId: confirmationRef.environmentId,
+          threadId: confirmationRef.threadId,
+          messageId: submission.messageId,
+        } as const;
+        void Promise.resolve()
+          .then(() => confirm(confirmationIdentity, { onLateReceipt: reportLateReceipt }))
+          .then((receipt) => {
+            if (receipt.outcome !== "confirmation-pending") reportLateReceipt(receipt);
+          })
+          .catch((cause: unknown) => {
+            reportLateReceipt(
+              failedReceipt(
+                command,
+                reserved.target,
+                "renderer_lost",
+                cause instanceof Error ? cause.message : String(cause),
+              ),
+            );
+          });
+        return {
+          outcome: "confirmation-pending",
+          protocolVersion: command.protocolVersion,
+          sessionId: command.sessionId,
+          commandId: command.commandId,
+          target: reserved.target,
+          application: result.application,
+        };
       }
 
       return {

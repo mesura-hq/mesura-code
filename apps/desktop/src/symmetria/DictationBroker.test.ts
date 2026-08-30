@@ -71,7 +71,7 @@ const makeTurnRunningReceipt = () =>
     commandId: "command-deliver",
     target: targetA,
     application: "first",
-    messageId: "message-a",
+    messageId: "dictation-command-deliver",
     turnId: "turn-a",
   });
 
@@ -403,6 +403,113 @@ it("forwards a correlated late receipt to connected Shell clients", async () => 
   assert.isTrue(reported);
   assert.equal(broker.snapshot()?.phase, "completed");
   assert.deepEqual(receipts, [makeTurnRunningReceipt()]);
+});
+
+it("promotes a correlated late success over an uncertain renderer deadline", async () => {
+  let deliveryCount = 0;
+  const broker = createDictationBroker({
+    reserveTarget: async () => ({ target: targetA, projectName: "Project A" }),
+    deliver: async () => {
+      deliveryCount += 1;
+      return decodeReceipt({
+        outcome: "failed",
+        protocolVersion: { major: 1, minor: 5 },
+        sessionId: "session-a",
+        commandId: "command-deliver",
+        target: targetA,
+        application: "first",
+        code: "deadline_exceeded",
+        detail: "the renderer response deadline expired",
+      });
+    },
+  });
+  await broker.reserve(reserveRequest);
+  await broker.command(makeDeliverCommand());
+  const receipts: Array<unknown> = [];
+  const unsubscribe = broker.watchReceipts((receipt) => receipts.push(receipt));
+
+  const reported = broker.reportLateReceipt(makeTurnRunningReceipt());
+  const replay = await broker.command(makeDeliverCommand());
+  unsubscribe();
+
+  assert.isTrue(reported);
+  assert.equal(broker.snapshot()?.phase, "completed");
+  assert.equal(deliveryCount, 1);
+  assert.equal(replay?.outcome, "turn-running");
+  assert.deepEqual(receipts, [makeTurnRunningReceipt()]);
+});
+
+it.each([
+  "persistence_failed",
+  "provider_start_failed",
+  "provider_turn_failed",
+  "malformed_input",
+] as const)("does not replace definitive %s failure with late success", async (code) => {
+  let deliveryCount = 0;
+  const broker = createDictationBroker({
+    reserveTarget: async () => ({ target: targetA, projectName: "Project A" }),
+    deliver: async () => {
+      deliveryCount += 1;
+      return decodeReceipt({
+        outcome: "failed",
+        protocolVersion: { major: 1, minor: 5 },
+        sessionId: "session-a",
+        commandId: "command-deliver",
+        target: targetA,
+        application: "first",
+        code,
+        detail: `${code} detail`,
+      });
+    },
+  });
+  await broker.reserve(reserveRequest);
+  await broker.command(makeDeliverCommand());
+  const receipts: Array<unknown> = [];
+  const unsubscribe = broker.watchReceipts((receipt) => receipts.push(receipt));
+
+  const reported = broker.reportLateReceipt(makeTurnRunningReceipt());
+  const replay = await broker.command(makeDeliverCommand());
+  unsubscribe();
+
+  assert.isFalse(reported);
+  assert.equal(broker.snapshot()?.phase, "failed");
+  assert.equal(deliveryCount, 1);
+  assert.equal(replay?.outcome, "failed");
+  if (replay?.outcome === "failed") assert.equal(replay.code, code);
+  assert.deepEqual(receipts, []);
+});
+
+it("rejects every mismatched late turn identity while confirmation remains pending", async () => {
+  const broker = createDictationBroker({
+    reserveTarget: async () => ({ target: targetA, projectName: "Project A" }),
+    deliver: async () =>
+      decodeReceipt({
+        outcome: "confirmation-pending",
+        protocolVersion: { major: 1, minor: 5 },
+        sessionId: "session-a",
+        commandId: "command-deliver",
+        target: targetA,
+        application: "first",
+      }),
+  });
+  await broker.reserve(reserveRequest);
+  await broker.command(makeDeliverCommand());
+  const receipts: Array<unknown> = [];
+  const unsubscribe = broker.watchReceipts((receipt) => receipts.push(receipt));
+  const valid = makeTurnRunningReceipt();
+  const mismatches = [
+    decodeReceipt({ ...valid, sessionId: "session-other" }),
+    decodeReceipt({ ...valid, commandId: "command-other" }),
+    decodeReceipt({ ...valid, target: targetB }),
+    decodeReceipt({ ...valid, messageId: "dictation-command-other" }),
+  ];
+
+  const reported = mismatches.map((receipt) => broker.reportLateReceipt(receipt));
+  unsubscribe();
+
+  assert.deepEqual(reported, [false, false, false, false]);
+  assert.equal(broker.snapshot()?.phase, "confirming");
+  assert.deepEqual(receipts, []);
 });
 
 it("does not let a pending delivery response overwrite an earlier final receipt", async () => {

@@ -129,6 +129,13 @@ const phaseForControl = (
 const isTerminalPhase = (phase: SymmetriaDictationSession["phase"]): boolean =>
   phase === "completed" || phase === "failed" || phase === "cancelled";
 
+const isUncertainDeliveryFailure = (receipt: SymmetriaDictationReceipt): boolean =>
+  receipt.outcome === "failed" &&
+  (receipt.code === "deadline_exceeded" || receipt.code === "renderer_lost");
+
+const isAuthoritativeTurnRunningReceipt = (receipt: SymmetriaDictationReceipt): boolean =>
+  receipt.outcome === "turn-running" && receipt.messageId === `dictation-${receipt.commandId}`;
+
 export function createDictationBroker(options: DictationBrokerOptions): LocalDictationBroker {
   let session: SymmetriaDictationSession | null = null;
   let revision = 0;
@@ -461,10 +468,23 @@ export function createDictationBroker(options: DictationBrokerOptions): LocalDic
     ) {
       return false;
     }
+    if (receipt.outcome === "turn-running" && !isAuthoritativeTurnRunningReceipt(receipt)) {
+      return false;
+    }
     const commandKey = `${receipt.sessionId}:${receipt.commandId}`;
     if (isTerminalPhase(session.phase)) {
       const recorded = appliedDeliveryReceipts.get(commandKey);
-      return recorded !== undefined && JSON.stringify(recorded) === JSON.stringify(receipt);
+      if (recorded !== undefined && JSON.stringify(recorded) === JSON.stringify(receipt)) {
+        return true;
+      }
+      if (
+        session.phase !== "failed" ||
+        recorded === undefined ||
+        !isUncertainDeliveryFailure(recorded) ||
+        !isAuthoritativeTurnRunningReceipt(receipt)
+      ) {
+        return false;
+      }
     }
     const phase =
       receipt.outcome === "confirmation-pending"
