@@ -260,7 +260,7 @@ export const SymmetriaDictationInsertedReceipt = Schema.Struct({
   outcome: Schema.Literal("inserted"),
   ...DictationReceiptBaseFields,
   draftVersion: SymmetriaDraftVersion,
-  action: Schema.optionalKey(Schema.Literals(["insert", "answer"])),
+  action: Schema.optionalKey(Schema.Literals(["insert", "answer", "submit"])),
 }).annotate({ identifier: "SymmetriaDictationInsertedReceipt" });
 
 export const SymmetriaDictationTurnRunningReceipt = Schema.Struct({

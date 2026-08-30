@@ -6,7 +6,6 @@ import {
 } from "@symmetria/broker-contract";
 import {
   CheckIcon,
-  CircleAlertIcon,
   MicIcon,
   PauseIcon,
   PlayIcon,
@@ -282,14 +281,11 @@ export const DictationStrip = memo(function DictationStrip(props: {
     session.phase === "paused" ||
     session.phase === "processing" ||
     session.phase === "grace";
-  const canDismiss =
-    session.phase === "confirming" || session.phase === "completed" || session.phase === "failed";
+  const canDismiss = session.phase === "confirming" || session.phase === "completed";
   const terminalPresentation =
     session.phase === "completed"
       ? { icon: CheckIcon, label: "Delivered", className: "text-success" }
-      : session.phase === "failed"
-        ? { icon: CircleAlertIcon, label: "Delivery failed", className: "text-destructive" }
-        : null;
+      : null;
 
   return (
     <div

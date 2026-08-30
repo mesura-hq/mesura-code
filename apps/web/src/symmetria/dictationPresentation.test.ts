@@ -72,7 +72,7 @@ it("presents only the exact focused visible target", () => {
       visible: true,
     }),
   );
-  assert.isTrue(
+  assert.isFalse(
     shouldPresentDictationInMesura({
       session: { ...session, phase: "failed" },
       displayedTarget: session.target,

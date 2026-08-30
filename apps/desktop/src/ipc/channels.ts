@@ -9,8 +9,6 @@ export const DICTATION_RENDERER_REQUEST_CHANNEL = "desktop:dictation-renderer-re
 export const RESOLVE_DICTATION_RENDERER_REQUEST_CHANNEL =
   "desktop:resolve-dictation-renderer-request";
 export const GET_DICTATION_SNAPSHOT_CHANNEL = "desktop:get-dictation-snapshot";
-export const GET_DICTATION_CONFIRMATION_RECOVERY_CHANNEL =
-  "desktop:get-dictation-confirmation-recovery";
 export const GET_DICTATION_SHELL_AVAILABILITY_CHANNEL = "desktop:get-dictation-shell-availability";
 export const DICTATION_COMMAND_CHANNEL = "desktop:dictation-command";
 export const DICTATION_SNAPSHOT_CHANNEL = "desktop:dictation-snapshot";

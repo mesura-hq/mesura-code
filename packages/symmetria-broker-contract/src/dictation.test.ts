@@ -261,6 +261,7 @@ describe("SymmetriaDictationReceipt", () => {
       { ...receiptBase, outcome: "copied" },
       { ...receiptBase, outcome: "inserted", draftVersion: 3 },
       { ...receiptBase, outcome: "inserted", draftVersion: 4, action: "answer" },
+      { ...receiptBase, outcome: "inserted", draftVersion: 5, action: "submit" },
       running,
       { ...receiptBase, outcome: "confirmation-pending" },
       {
@@ -290,7 +291,7 @@ describe("SymmetriaDictationReceipt", () => {
     expect(Result.isFailure(decodeReceipt(omit(running, "turnId")))).toBe(true);
     expect(
       Result.isFailure(
-        decodeReceipt({ ...receiptBase, outcome: "inserted", draftVersion: 4, action: "submit" }),
+        decodeReceipt({ ...receiptBase, outcome: "inserted", draftVersion: 4, action: "unknown" }),
       ),
     ).toBe(true);
   });

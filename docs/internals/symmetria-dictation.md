@@ -37,8 +37,8 @@ replacement target.
 4. Shell runs the existing STT job and publishes phase, elapsed time, audio level, and grace time.
 5. Shell sends one `dictation.deliver` command with the final transcript and selected mode.
 6. The renderer appends the transcript to the reserved draft with the delivery `commandId`.
-7. Insert mode confirms persisted readback. Submit mode starts the directed composer action and waits
-   for the exact user message to correlate with a running turn.
+7. Insert mode completes after the exact append. Submit mode completes after Mesura accepts the
+   normal thread submission command.
 8. The broker records the receipt and Shell shows the final toast.
 
 The transcript crosses the broker only in `dictation.deliver`. Session snapshots never contain it.
@@ -62,30 +62,24 @@ prove no provider effect started. A successful dispatch stays cached and cannot 
 Receipts describe an observed effect:
 
 - `copied`: Shell owns clipboard success. Mesura does not mutate a draft.
-- `inserted`: the exact draft append passed persistent readback.
-- `turn-running`: the projected running turn names the dictated `messageId` and a non-null `turnId`.
-- `confirmation-pending`: provider dispatch was accepted and the correlated background watcher is
-  still waiting for projected turn evidence.
+- `inserted`: Mesura applied the exact draft append. `action: submit` means Mesura also accepted the
+  normal thread submission command. `action: answer` means Mesura accepted a pending answer.
+- `turn-running` and `confirmation-pending`: legacy outcomes retained for protocol compatibility.
 - `refused`: the target or composer action is invalid.
-- `failed`: persistence, renderer, deadline, or provider start failed.
+- `failed`: the renderer or provider start failed before Mesura accepted the submission.
 
-A correlated turn that reaches the provider `error` state reports `provider_turn_failed`. That code
-is not retryable because the directed executor already recorded the dispatch. A pre-dispatch
-`provider_start_failed` remains retryable with the original identities.
+Provider execution is outside the dictation delivery boundary. A later provider error does not
+change an accepted dictation into a delivery failure. The legacy retry control and retryable failure
+codes remain only for compatibility with an older Shell during rollout.
 
-The renderer returns `confirmation-pending` without holding the Desktop renderer request open for
-the confirmation window. This separates dispatch acceptance from projected-turn evidence. Shell
-keeps the session in `Still confirming` and does not retry while that evidence is unknown.
+Persistence flush and readback remain best-effort safeguards. Mesura reports their failures through
+safe diagnostics, but it does not discard an append that already exists in the client store. The
+exact composer and Shell Transcriptions retain the recovery paths.
 
-Late receipt precedence is narrow. A canonical `turn-running` receipt can replace only
-`deadline_exceeded` or `renderer_lost`, because those codes do not prove whether dispatch took
-effect. The receipt must match the active session, command, target, and deterministic
-`dictation-<commandId>` message identity. Persistence, provider-start, provider-turn, malformed
-input, cancellation, and unrelated identities remain terminal. Reapplying an identical final
-receipt is a no-op and does not notify Shell twice.
-
-Only Shell emits final toasts. `Message sent successfully` requires `turn-running`; a dispatched
-command or a renderer response is not sufficient.
+Only Shell emits final toasts. A submit success uses the additive `action: submit` field on the
+existing `inserted` outcome. Older Shell builds already treat `inserted` as success, but they show
+the generic inserted toast. An updated Shell uses `action: submit` to show the sent-message toast.
+Mesura and Shell can therefore roll out independently without showing a false failure.
 
 ## Presentation ownership
 
@@ -103,11 +97,8 @@ job. Progress snapshots do not restart the lease timer.
 ## Recovery and compatibility
 
 The broker and draft store apply delivery commands idempotently. Renderer reconnect restores the
-session. If the session is confirming, the renderer also reads the broker's active delivery
-`commandId` and reattaches the watcher with the deterministic dictated `messageId`. Draft promotion
-resolves through `futureThreadRef`. A late confirmation receipt updates the same broker session and
-reaches Shell after the Mesura strip closes. A final late receipt wins over a concurrent stale
-`confirmation-pending` response, so the broker phase cannot regress from completed to confirming.
+session. Draft promotion resolves through `futureThreadRef`. Mesura does not restore a provider-turn
+watcher because provider execution does not control dictation delivery.
 
 The old destination-less renderer subscription is removed. Mesura still binds the legacy
 `symmetria-mesura-<pid>.sock` endpoint during Shell rollout, but that endpoint always returns
@@ -118,16 +109,13 @@ use `symmetria-mesura-dictation-<pid>.sock` and the reserved-session protocol.
 
 Desktop traces record renderer request dispatch, resolution, abandonment, and send failure. Each
 event includes the request kind, request ID, session ID, command ID, and elapsed milliseconds when
-the request ended. Receipt-transition events include the session ID, command ID, source, decision,
-outcome, optional code, elapsed milliseconds, and phase before and after the transition. Rejected
-late receipts also include an allowlisted reason such as session, command, target, or deterministic
-message mismatch; no-session events use null phases instead of inventing state.
+the request ended. Receipt-transition events include the session ID, command ID, outcome, optional
+code, elapsed milliseconds, and phase before and after the transition.
 
-Shell logs the normalized final receipt with peer PID, session ID, command ID, outcome, code, and
-retryability. These diagnostics use an allowlist. They never contain transcript text, composer
-prompt text, receipt detail, attachment data, or serialized draft state. Composer persistence
-diagnostics can add serialized byte counts and non-reversible prompt hashes when hashing is
-available.
+Shell logs the normalized final receipt with peer PID, session ID, command ID, outcome, and code.
+These diagnostics use an allowlist. They never contain transcript text, composer prompt text,
+receipt detail, attachment data, or serialized draft state. Composer persistence diagnostics can
+add serialized byte counts and non-reversible prompt hashes when hashing is available.
 
 Focused coverage lives in the `symmetria` test directories under `apps/web/src` and
 `apps/desktop/src`. The integration guard in `tests/unit/symmetria-dictation-integration.test.ts`

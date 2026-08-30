@@ -3796,12 +3796,9 @@ export type PersistedDictationAppendResult =
       readonly targetKey: string;
       readonly persistedBytes: number;
       readonly promptHash?: string | undefined;
+      readonly persistenceFailure?: DictationPersistenceFailure | undefined;
     }
-  | { readonly ok: false; readonly reason: "missing-target" }
-  | ({
-      readonly ok: false;
-      readonly reason: "persistence-failed";
-    } & DictationPersistenceFailure);
+  | { readonly ok: false; readonly reason: "missing-target" };
 
 export type DictationPersistenceFailureStage =
   | "storage-write-failed"
@@ -3927,7 +3924,7 @@ export async function readPersistedDictationTarget(targetKey: string): Promise<{
   };
 }
 
-/** Atomically appends one dictated command, flushes persistence, and verifies exact readback. */
+/** Atomically appends one dictated command and attempts a verified durable snapshot. */
 export async function appendPersistedDictation(
   target: ComposerThreadTarget,
   commandId: CommandId,
@@ -3996,30 +3993,36 @@ export async function appendPersistedDictation(
 
   const applied = appendState.applied;
   if (applied === undefined) return { ok: false, reason: "missing-target" };
+  const appliedResult = (
+    persistedBytes: number,
+    persistenceFailure?: DictationPersistenceFailure,
+  ): PersistedDictationAppendResult => ({
+    ok: true,
+    targetKey,
+    ...applied,
+    persistedBytes,
+    ...(persistenceFailure ? { persistenceFailure } : {}),
+  });
   const safePromptHash = (prompt: string) =>
     safeHashPersistedDictationText(prompt, persistence.hashText);
   try {
     persistence.flush();
   } catch {
-    return {
-      ok: false,
-      reason: "persistence-failed",
+    return appliedResult(0, {
       stage: "storage-write-failed",
       persistedBytes: 0,
       expectedPromptHash: await safePromptHash(applied.prompt),
-    };
+    });
   }
   let raw: string | null;
   try {
     raw = await persistence.readRaw();
   } catch {
-    return {
-      ok: false,
-      reason: "persistence-failed",
+    return appliedResult(0, {
       stage: "storage-read-failed",
       persistedBytes: 0,
       expectedPromptHash: await safePromptHash(applied.prompt),
-    };
+    });
   }
   const readback = await verifyPersistedDictationReadback(
     {
@@ -4033,7 +4036,7 @@ export async function appendPersistedDictation(
   );
   if (!readback.ok) {
     const { ok: _readbackFailed, ...failure } = readback;
-    return { ok: false, reason: "persistence-failed", ...failure };
+    return appliedResult(failure.persistedBytes, failure);
   }
   const { ok: _readbackSucceeded, ...verification } = readback;
   return { ok: true, targetKey, ...applied, ...verification };

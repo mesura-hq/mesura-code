@@ -2113,9 +2113,8 @@ describe("dictation persistence verification", () => {
     });
 
     expect(result).toMatchObject({
-      ok: false,
-      reason: "persistence-failed",
-      stage: "storage-write-failed",
+      ok: true,
+      persistenceFailure: { stage: "storage-write-failed" },
     });
     expect(useComposerDraftStore.getState().getComposerDraft(target)?.prompt).toBe(
       "[voiced] dictated words",
@@ -2136,9 +2135,8 @@ describe("dictation persistence verification", () => {
     });
 
     expect(result).toMatchObject({
-      ok: false,
-      reason: "persistence-failed",
-      stage: "storage-read-failed",
+      ok: true,
+      persistenceFailure: { stage: "storage-read-failed" },
     });
     expect(useComposerDraftStore.getState().getComposerDraft(target)?.prompt).toBe(
       "[voiced] dictated words",

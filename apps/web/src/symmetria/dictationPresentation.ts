@@ -58,6 +58,7 @@ export function shouldPresentDictationInMesura(input: {
   return Boolean(
     input.session &&
     input.session.phase !== "cancelled" &&
+    input.session.phase !== "failed" &&
     input.focused &&
     input.visible &&
     dictationTargetsEqual(input.session.target, input.displayedTarget),
@@ -107,7 +108,7 @@ export function dictationPhaseLabel(phase: SymmetriaDictationPhase): string {
     case "completed":
       return "Delivered";
     case "failed":
-      return "Delivery failed";
+      return "Dictation ended";
     case "cancelled":
       return "Cancelled";
   }
