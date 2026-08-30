@@ -65,6 +65,12 @@ Commands are IDs like `terminal.toggle`, `commandPalette.toggle`, `preview.refre
 `projectSearch.toggle` searches inside the active project's files and defaults to `mod+shift+g`.
 Repeating either shortcut closes that search, and switching shortcuts replaces the open search.
 `projectScope.toggle` filters the thread list to one project and defaults to `mod+shift+f`.
+`threadSearch.toggle` searches every thread in every project and defaults to `mod+shift+k`. Type
+words in any order: each one is matched against the project name, the thread title and the branch,
+so `mesura rename` finds **Rename the sidebar** in the **Mesura Code** project. A word is also
+matched against what was said inside a thread. The project filter does not narrow this search — it
+always reaches every project. With the field empty it lists recent threads, so it doubles as a way
+back to what you were reading.
 `themeEditor.toggle` opens or closes the floating theme editor and defaults to
 `mod+alt+shift+t`. Select a color label to spotlight the elements that use it; select the label
 again to clear the spotlight. The swatch and hex field keep that color selected while you edit it.

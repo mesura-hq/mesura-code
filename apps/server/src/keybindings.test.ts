@@ -1124,3 +1124,37 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
 });
+
+it("binds threadSearch.toggle to mod+shift+k outside terminal focus", () => {
+  const rules = Keybindings.DEFAULT_KEYBINDINGS.filter(
+    (rule) => rule.command === "threadSearch.toggle",
+  );
+  assert.strictEqual(rules.length, 1, "expected exactly one default for threadSearch.toggle");
+  assert.strictEqual(rules[0]?.key, "mod+shift+k");
+  assert.strictEqual(rules[0]?.when, "!terminalFocus");
+});
+
+it("gives the thread search a chord no other default claims in the same context", () => {
+  const clashes = Keybindings.DEFAULT_KEYBINDINGS.filter(
+    (rule) =>
+      rule.key === "mod+shift+k" &&
+      rule.command !== "threadSearch.toggle" &&
+      rule.when === "!terminalFocus",
+  );
+  assert.deepEqual(clashes, []);
+});
+
+it("needs no retired or added entry for threadSearch.toggle, a new command on a free chord", () => {
+  assert.deepEqual(
+    Keybindings.RETIRED_KEYBINDING_DEFAULTS.filter(
+      (entry) => entry.from.command === "threadSearch.toggle",
+    ),
+    [],
+  );
+  assert.deepEqual(
+    Keybindings.ADDED_KEYBINDING_DEFAULTS.filter(
+      (entry) => entry.rule.command === "threadSearch.toggle",
+    ),
+    [],
+  );
+});

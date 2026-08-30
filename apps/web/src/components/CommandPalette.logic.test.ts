@@ -489,3 +489,40 @@ describe("filterPinnedBrowseEntries", () => {
     });
   });
 });
+
+describe("the thread search mode", () => {
+  const closed = { open: false, mode: "command" as const, openIntent: null };
+
+  it("opens the overlay on the threads mode", () => {
+    expect(reduceCommandPaletteUiState(closed, { _tag: "ToggleMode", mode: "threads" })).toEqual({
+      open: true,
+      mode: "threads",
+      openIntent: null,
+    });
+  });
+
+  it("closes on a second press of the same chord", () => {
+    const open = reduceCommandPaletteUiState(closed, { _tag: "ToggleMode", mode: "threads" });
+    expect(reduceCommandPaletteUiState(open, { _tag: "ToggleMode", mode: "threads" })).toEqual({
+      open: false,
+      mode: "threads",
+      openIntent: null,
+    });
+  });
+
+  it("goes back to the command palette rather than closing, which is what Escape does", () => {
+    const open = reduceCommandPaletteUiState(closed, { _tag: "ToggleMode", mode: "threads" });
+    expect(reduceCommandPaletteUiState(open, { _tag: "ToggleMode", mode: "command" })).toEqual({
+      open: true,
+      mode: "command",
+      openIntent: null,
+    });
+  });
+
+  it("never stacks with another overlay mode", () => {
+    const files = reduceCommandPaletteUiState(closed, { _tag: "ToggleMode", mode: "files" });
+    const threads = reduceCommandPaletteUiState(files, { _tag: "ToggleMode", mode: "threads" });
+    expect(threads.mode).toBe("threads");
+    expect(threads.open).toBe(true);
+  });
+});

@@ -668,6 +668,79 @@ describe("buildHomeThreadGroups", () => {
     );
   });
 
+  it("finds a thread from its project name plus a word of its title, in either order", () => {
+    const environmentId = EnvironmentId.make("environment-1");
+    const project = makeProject({
+      environmentId,
+      id: ProjectId.make("project-1"),
+      title: "Mesura Code",
+    });
+    const wanted = makeThread({
+      environmentId,
+      id: ThreadId.make("thread-rename"),
+      projectId: project.id,
+      title: "Rename the sidebar",
+    });
+    const other = makeThread({
+      environmentId,
+      id: ThreadId.make("thread-deploy"),
+      projectId: project.id,
+      title: "Deploy the relay",
+    });
+
+    // The words come from two different fields and in the reverse order, which
+    // a contiguous substring match cannot span.
+    for (const searchQuery of ["rename mesura", "mesura rename"]) {
+      const groups = buildGroups([project], [wanted, other], { searchQuery });
+      expect(groups[0]?.threads.map((thread) => thread.id)).toEqual(["thread-rename"]);
+    }
+  });
+
+  it("requires every word of the query to match something", () => {
+    const environmentId = EnvironmentId.make("environment-1");
+    const project = makeProject({
+      environmentId,
+      id: ProjectId.make("project-1"),
+      title: "Mesura Code",
+    });
+    const thread = makeThread({
+      environmentId,
+      id: ThreadId.make("thread-rename"),
+      projectId: project.id,
+      title: "Rename the sidebar",
+    });
+
+    expect(buildGroups([project], [thread], { searchQuery: "mesura ausente" })).toEqual([]);
+  });
+
+  // Guard. The review found mobile passing the branch into the matcher with no
+  // test behind it, on the one file in this change that no live app exercised.
+  it("finds a thread by a word that only its branch carries", () => {
+    const environmentId = EnvironmentId.make("environment-1");
+    const project = makeProject({
+      environmentId,
+      id: ProjectId.make("project-1"),
+      title: "Mesura Code",
+    });
+    const wanted = makeThread({
+      environmentId,
+      id: ThreadId.make("thread-oauth"),
+      projectId: project.id,
+      title: "Arreglar el acceso",
+      branch: "feat/oauth-google",
+    });
+    const other = makeThread({
+      environmentId,
+      id: ThreadId.make("thread-other"),
+      projectId: project.id,
+      title: "Deploy the relay",
+    });
+
+    const groups = buildGroups([project], [wanted, other], { searchQuery: "oauth" });
+
+    expect(groups[0]?.threads.map((thread) => thread.id)).toEqual(["thread-oauth"]);
+  });
+
   it("includes a thread matched by message content", () => {
     const environmentId = EnvironmentId.make("environment-1");
     const project = makeProject({

@@ -83,6 +83,13 @@ export const STATIC_KEYBINDING_COMMANDS = [
   // id too: RETIRED_KEYBINDING_DEFAULTS matches on the command, so it can move a
   // rule's key but never carry it to a new command name.
   "projectScope.toggle",
+  // Opens the thread search picker: every thread, in every project and every
+  // environment, found by words that may come from the project name, the title
+  // or the branch in any order. The command palette lists threads too, but it
+  // matches one contiguous substring over those fields joined, so it cannot
+  // find a thread from its project plus a word of its title. The rename
+  // warning below applies to this id too.
+  "threadSearch.toggle",
   "themeEditor.toggle",
   "composer.stash",
   "usage.peek",

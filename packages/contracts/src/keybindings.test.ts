@@ -294,3 +294,14 @@ it.effect("drops unknown fields in resolved keybinding rules", () =>
     }),
   ),
 );
+
+it.effect("accepts threadSearch.toggle as a command", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decode(KeybindingRule, {
+      key: "mod+shift+k",
+      command: "threadSearch.toggle",
+      when: "!terminalFocus",
+    });
+    assert.strictEqual(parsed.command, "threadSearch.toggle");
+  }),
+);

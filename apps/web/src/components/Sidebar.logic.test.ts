@@ -23,7 +23,7 @@ import {
   resolveSidebarThreadStatus,
   resolveThreadStatusPill,
   resolveWorkingStartedAt,
-  searchSidebarThreadsByTitle,
+  searchSidebarThreads,
   formatWorkingDurationLabel,
   shouldNavigateAfterProjectRemoval,
   shouldClearThreadSelectionOnMouseDown,
@@ -766,23 +766,51 @@ describe("resolveSidebarThreadStatus", () => {
   });
 });
 
-describe("searchSidebarThreadsByTitle", () => {
+describe("searchSidebarThreads", () => {
+  const PROJECT_TITLE_BY_ID = new Map([
+    ["p-alpha", "Alpha"],
+    ["p-workspace", "Workspace"],
+    ["p-beta", "Beta"],
+  ]);
   const threads = [
-    { id: "thread-1", title: "Fix workspace search", project: "Alpha" },
-    { id: "thread-2", title: "Review providers", project: "Workspace" },
-    { id: "thread-3", title: "WORKTREE cleanup", project: "Beta" },
+    { id: "thread-1", title: "Fix workspace search", projectId: "p-alpha", branch: "feat/search" },
+    { id: "thread-2", title: "Review providers", projectId: "p-workspace", branch: null },
+    { id: "thread-3", title: "WORKTREE cleanup", projectId: "p-beta", branch: null },
   ];
+  const search = (query: string) => searchSidebarThreads(threads, query, PROJECT_TITLE_BY_ID);
 
-  it("matches thread titles case-insensitively and preserves their order", () => {
-    expect(searchSidebarThreadsByTitle(threads, "work")).toEqual([threads[0], threads[2]]);
+  it("matches case-insensitively and preserves the order it was given", () => {
+    // All three match "work": two through their titles ("workspace",
+    // "WORKTREE") and one through its project, which is named "Workspace".
+    expect(search("work")).toEqual([threads[0], threads[1], threads[2]]);
   });
 
-  it("does not match project metadata", () => {
-    expect(searchSidebarThreadsByTitle(threads, "workspace")).toEqual([threads[0]]);
+  it("matches the project name too, which it deliberately did not before", () => {
+    // The sidebar used to search titles alone, so "workspace" found only the
+    // thread whose title contains it. It now also finds the thread that lives
+    // in the project of that name.
+    expect(search("workspace")).toEqual([threads[0], threads[1]]);
+  });
+
+  it("matches the branch", () => {
+    expect(search("feat")).toEqual([threads[0]]);
+  });
+
+  it("takes each word on its own, in any order, across the fields", () => {
+    expect(search("alpha workspace")).toEqual([threads[0]]);
+    expect(search("workspace alpha")).toEqual([threads[0]]);
+  });
+
+  it("requires every word to match something", () => {
+    expect(search("alpha absent")).toEqual([]);
   });
 
   it("returns no results for an empty query", () => {
-    expect(searchSidebarThreadsByTitle(threads, "   ")).toEqual([]);
+    expect(search("   ")).toEqual([]);
+  });
+
+  it("returns only threads it was given, so the caller keeps deciding the scope", () => {
+    expect(searchSidebarThreads([threads[1]!], "work", PROJECT_TITLE_BY_ID)).toEqual([threads[1]]);
   });
 });
 
