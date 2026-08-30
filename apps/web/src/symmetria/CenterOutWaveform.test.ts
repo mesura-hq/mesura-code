@@ -4,8 +4,11 @@ import { assert, it } from "vite-plus/test";
 
 import {
   CenterOutWaveform,
+  advanceWaveformHistory,
   mirroredBarXPositions,
   recordingAmplitudeAtDistance,
+  shouldDrawStaticAudioUpdate,
+  shouldDrawWaveformFrame,
   waveformSmoothingAlpha,
 } from "./CenterOutWaveform";
 
@@ -23,6 +26,54 @@ it("keeps waveform smoothing stable across display refresh rates", () => {
 
   assert.closeTo(sixtyHertz, oneTwentyHertz, 0.015);
   assert.isAbove(sixtyHertz, 0.95);
+});
+
+it("keeps history sampling independent of display refresh rate", () => {
+  const run = (frameDurationMs: number) => {
+    let history: ReadonlyArray<number> = [];
+    let lastSampleAt = -54;
+    for (let timestamp = 0; timestamp <= 540; timestamp += frameDurationMs) {
+      const advanced = advanceWaveformHistory({
+        history,
+        currentAmplitude: 0.75,
+        lastSampleAt,
+        timestamp,
+      });
+      history = advanced.history;
+      lastSampleAt = advanced.lastSampleAt;
+    }
+    return { history, lastSampleAt };
+  };
+
+  assert.deepEqual(run(1000 / 60), run(1000 / 120));
+});
+
+it("caps canvas drawing at sixty frames per second", () => {
+  let lastDrawAt = 0;
+  const drawTimes = [lastDrawAt];
+  for (let timestamp = 1000 / 240; timestamp <= 1000; timestamp += 1000 / 240) {
+    if (!shouldDrawWaveformFrame(timestamp, lastDrawAt)) continue;
+    lastDrawAt = timestamp;
+    drawTimes.push(timestamp);
+  }
+
+  assert.isAtMost(drawTimes.length, 61);
+  assert.isAbove(drawTimes.length, 55);
+  for (let index = 1; index < drawTimes.length; index += 1) {
+    assert.isAtLeast(drawTimes[index]! - drawTimes[index - 1]!, 1000 / 60 - 0.01);
+  }
+});
+
+it("redraws audio updates without recurring motion when reduced motion is enabled", () => {
+  assert.isTrue(
+    shouldDrawStaticAudioUpdate({ active: true, phase: "recording", reducedMotion: true }),
+  );
+  assert.isFalse(
+    shouldDrawStaticAudioUpdate({ active: false, phase: "recording", reducedMotion: true }),
+  );
+  assert.isFalse(
+    shouldDrawStaticAudioUpdate({ active: true, phase: "processing", reducedMotion: true }),
+  );
 });
 
 it("keeps each bar pair symmetric around the center gap", () => {

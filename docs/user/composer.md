@@ -22,9 +22,9 @@ The Linux desktop app can use Symmetria Shell for voice dictation. The microphon
 one Shell recording for the chat that is open at that moment. Mesura Code keeps that chat as the
 destination if you open another chat while recording or transcription continues.
 
-The strip above the composer shows elapsed time, a white center-out live waveform, and the recording
-controls. The mode button cycles through Copy, Insert, and Send. You can change the mode while recording, while
-processing, and during the three-second delay before delivery.
+The strip above the composer shows elapsed time, a high-contrast center-out live waveform, and the
+recording controls. The mode button cycles through Copy, Insert, and Send. You can change the mode
+while recording, while processing, and during the three-second delay before delivery.
 
 Mesura Code shows the strip only while its window is focused on the destination chat. Symmetria Shell
 shows its recorder widget everywhere else. The two surfaces control the same recording.

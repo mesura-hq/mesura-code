@@ -10,6 +10,8 @@ const INPUT_GAIN = 15;
 const ATTACK_TIME_MS = 42;
 const RELEASE_TIME_MS = 150;
 const HISTORY_SAMPLE_INTERVAL_MS = 54;
+const FRAME_INTERVAL_MS = 1000 / 60;
+const FRAME_EPSILON_MS = 0.01;
 const BAR_WIDTH = 2;
 const BAR_GAP = 2;
 const CENTER_GAP = 2;
@@ -46,6 +48,39 @@ export function recordingAmplitudeAtDistance(input: {
   return from + (to - from) * progress;
 }
 
+export function advanceWaveformHistory(input: {
+  readonly history: ReadonlyArray<number>;
+  readonly currentAmplitude: number;
+  readonly lastSampleAt: number;
+  readonly timestamp: number;
+}): { readonly history: ReadonlyArray<number>; readonly lastSampleAt: number } {
+  const elapsedSteps = Math.max(
+    0,
+    Math.floor((input.timestamp - input.lastSampleAt) / HISTORY_SAMPLE_INTERVAL_MS),
+  );
+  if (elapsedSteps === 0) return input;
+  const retainedSampleCount = Math.min(HALF_BAR_COUNT, elapsedSteps);
+  return {
+    history: [
+      ...Array.from({ length: retainedSampleCount }, () => input.currentAmplitude),
+      ...input.history,
+    ].slice(0, HALF_BAR_COUNT),
+    lastSampleAt: input.lastSampleAt + elapsedSteps * HISTORY_SAMPLE_INTERVAL_MS,
+  };
+}
+
+export function shouldDrawWaveformFrame(timestamp: number, lastDrawAt: number): boolean {
+  return timestamp - lastDrawAt + FRAME_EPSILON_MS >= FRAME_INTERVAL_MS;
+}
+
+export function shouldDrawStaticAudioUpdate(input: {
+  readonly active: boolean;
+  readonly phase: SymmetriaDictationPhase;
+  readonly reducedMotion: boolean;
+}): boolean {
+  return input.active && input.phase === "recording" && input.reducedMotion;
+}
+
 export function mirroredBarXPositions(centerX: number, distance: number) {
   const offset = distance * (BAR_WIDTH + BAR_GAP);
   return {
@@ -66,6 +101,7 @@ export const CenterOutWaveform = memo(function CenterOutWaveform(props: {
   const historyRef = useRef<Array<number>>([]);
   const currentAmplitudeRef = useRef(0);
   const targetAmplitudeRef = useRef(0);
+  const staticRedrawRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     historyRef.current = [];
@@ -80,9 +116,12 @@ export const CenterOutWaveform = memo(function CenterOutWaveform(props: {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const context = canvas.getContext("2d");
+    if (!context) return;
 
     let animationFrame = 0;
     let lastFrameAt = performance.now();
+    let lastDrawAt = lastFrameAt;
     let lastSampleAt = lastFrameAt - HISTORY_SAMPLE_INTERVAL_MS;
     let width = 0;
     let height = 0;
@@ -99,13 +138,12 @@ export const CenterOutWaveform = memo(function CenterOutWaveform(props: {
         canvas.width = nextWidth;
         canvas.height = nextHeight;
       }
-      canvas.getContext("2d")?.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
       waveformColor = getComputedStyle(canvas).color;
     };
 
     const draw = (timestamp: number) => {
-      const context = canvas.getContext("2d");
-      if (!context || width <= 0 || height <= 0) return;
+      if (width <= 0 || height <= 0) return;
 
       const deltaMs = Math.min(50, Math.max(0, timestamp - lastFrameAt));
       lastFrameAt = timestamp;
@@ -115,11 +153,14 @@ export const CenterOutWaveform = memo(function CenterOutWaveform(props: {
         (target - currentAmplitudeRef.current) * waveformSmoothingAlpha(deltaMs, timeConstant);
 
       if (props.phase === "recording" && timestamp - lastSampleAt >= HISTORY_SAMPLE_INTERVAL_MS) {
-        historyRef.current = [currentAmplitudeRef.current, ...historyRef.current].slice(
-          0,
-          HALF_BAR_COUNT,
-        );
-        lastSampleAt = timestamp;
+        const advanced = advanceWaveformHistory({
+          history: historyRef.current,
+          currentAmplitude: currentAmplitudeRef.current,
+          lastSampleAt,
+          timestamp,
+        });
+        historyRef.current = [...advanced.history];
+        lastSampleAt = advanced.lastSampleAt;
       }
 
       context.clearRect(0, 0, width, height);
@@ -164,7 +205,10 @@ export const CenterOutWaveform = memo(function CenterOutWaveform(props: {
     };
 
     const animate = (timestamp: number) => {
-      draw(timestamp);
+      if (shouldDrawWaveformFrame(timestamp, lastDrawAt)) {
+        lastDrawAt = timestamp;
+        draw(timestamp);
+      }
       animationFrame = window.requestAnimationFrame(animate);
     };
 
@@ -183,6 +227,8 @@ export const CenterOutWaveform = memo(function CenterOutWaveform(props: {
     });
     resize();
     draw(lastFrameAt);
+    lastDrawAt = lastFrameAt;
+    staticRedrawRef.current = () => draw(performance.now());
 
     if (shouldAnimateDictationWaveform(props)) {
       animationFrame = window.requestAnimationFrame(animate);
@@ -192,8 +238,13 @@ export const CenterOutWaveform = memo(function CenterOutWaveform(props: {
       resizeObserver.disconnect();
       themeObserver.disconnect();
       window.cancelAnimationFrame(animationFrame);
+      staticRedrawRef.current = null;
     };
   }, [props.active, props.phase, props.reducedMotion, props.sessionId]);
+
+  useEffect(() => {
+    if (shouldDrawStaticAudioUpdate(props)) staticRedrawRef.current?.();
+  }, [props.active, props.audioLevel, props.phase, props.reducedMotion]);
 
   return (
     <canvas
