@@ -47,11 +47,11 @@ describe("Symmetria dictation integration guards", () => {
     const normalizedInternals = internals.replaceAll(/\s+/g, " ");
 
     expect(bridge).toContain("dictationCoordinator.restoreSession(decoded.success)");
-    expect(bridge).toContain("getConfirmationRecovery()");
-    expect(bridge).toContain("resumeConfirmation(");
+    expect(bridge).not.toContain("getConfirmationRecovery()");
+    expect(bridge).not.toContain("resumeConfirmation(");
     expect(coordinator).toContain("const restoreSession =");
     expect(normalizedInternals).toContain("Delivery resolves only the reservation");
     expect(normalizedInternals).toContain("never selects a replacement target");
-    expect(normalizedInternals).toContain("Message sent successfully");
+    expect(normalizedInternals).toContain("accepted the normal thread submission command");
   });
 });

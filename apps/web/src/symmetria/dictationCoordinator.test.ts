@@ -1,7 +1,5 @@
 import {
   SymmetriaDictationCommand,
-  type SymmetriaDictationReceipt,
-  SymmetriaDictationSessionId,
   SymmetriaDictationSession,
   type SymmetriaDictationTarget,
 } from "@symmetria/broker-contract";
@@ -12,7 +10,6 @@ import {
   ProjectId,
   ProviderDriverKind,
   ThreadId,
-  TurnId,
 } from "@t3tools/contracts";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import * as Schema from "effect/Schema";
@@ -208,114 +205,16 @@ it("marks a submitted pending answer for the Shell toast", async () => {
   assert.equal(receipt.action, "answer");
 });
 
-it("reports a late correlated turn receipt after visible confirmation times out", async () => {
-  const lateReceipts: Array<unknown> = [];
-  let confirmations = 0;
+it("marks an accepted provider submission without waiting for provider execution", async () => {
   const messageId = MessageId.make("dictation-command-deliver");
   const coordinator = createTestCoordinator({
     submit: async () => ({ kind: "turn-dispatched", messageId }),
-    confirm: async (identity, options) => {
-      confirmations += 1;
-      options?.onLateReceipt?.({
-        outcome: "turn-running",
-        protocolVersion: identity.protocolVersion,
-        sessionId: identity.sessionId,
-        commandId: identity.commandId,
-        target: identity.target,
-        application: "first",
-        messageId,
-        turnId: TurnId.make("turn-late"),
-      });
-      return {
-        outcome: "confirmation-pending",
-        protocolVersion: identity.protocolVersion,
-        sessionId: identity.sessionId,
-        commandId: identity.commandId,
-        target: identity.target,
-        application: "first",
-      };
-    },
-    reportLateReceipt: (receipt) => lateReceipts.push(receipt),
   });
   coordinator.registerComposer({ target: targetA, projectName: "Project A", handle: null });
   await coordinator.reserve(reserveRequest);
 
   const receipt = await coordinator.deliver(deliver("submit"));
-  const confirmingSession = decodeSession({
-    protocolVersion: { major: 1, minor: 5 },
-    sessionId: "session-a",
-    target: targetA,
-    source: "shell",
-    phase: "confirming",
-    mode: "submit",
-    projectName: "Project A",
-    startedAt: "2026-08-29T12:00:00.000Z",
-    elapsedMs: 17_000,
-    audioLevel: null,
-    graceRemainingMs: null,
-    presentation: { mesuraOwnsPresentation: false, leaseExpiresAt: null },
-  });
-  await coordinator.resumeConfirmation(confirmingSession, CommandId.make("command-deliver"));
-
-  assert.equal(receipt.outcome, "confirmation-pending");
-  assert.equal(confirmations, 1);
-  assert.equal(lateReceipts.length, 1);
-  assert.deepInclude(lateReceipts[0] as object, { outcome: "turn-running", turnId: "turn-late" });
-});
-
-it("returns confirmation-pending without waiting for the turn watcher", async () => {
-  const messageId = MessageId.make("dictation-command-deliver");
-  let resolveConfirmation: ((receipt: SymmetriaDictationReceipt) => void) | undefined;
-  let markConfirmationStarted: (() => void) | undefined;
-  const confirmationStarted = new Promise<void>((resolve) => {
-    markConfirmationStarted = resolve;
-  });
-  const lateReceipts: Array<unknown> = [];
-  let submissions = 0;
-  const coordinator = createTestCoordinator({
-    submit: async () => {
-      submissions += 1;
-      return { kind: "turn-dispatched", messageId };
-    },
-    confirm: (_identity) => {
-      markConfirmationStarted?.();
-      return new Promise((resolve) => {
-        resolveConfirmation = resolve;
-      });
-    },
-    reportLateReceipt: (receipt) => lateReceipts.push(receipt),
-  });
-  coordinator.registerComposer({ target: targetA, projectName: "Project A", handle: null });
-  await coordinator.reserve(reserveRequest);
-
-  let deliveredReceipt: unknown;
-  const delivery = coordinator.deliver(deliver("submit")).then((receipt) => {
-    deliveredReceipt = receipt;
-    return receipt;
-  });
-  await confirmationStarted;
-  await Promise.resolve();
-  await Promise.resolve();
-  const receiptBeforeConfirmation = deliveredReceipt;
-  resolveConfirmation?.({
-    outcome: "turn-running",
-    protocolVersion: { major: 1, minor: 2 },
-    sessionId: SymmetriaDictationSessionId.make("session-a"),
-    commandId: CommandId.make("command-deliver"),
-    target: targetA,
-    application: "first",
-    messageId,
-    turnId: TurnId.make("turn-delayed"),
-  });
-  await delivery;
-  await Promise.resolve();
-
-  assert.deepInclude(receiptBeforeConfirmation as object, { outcome: "confirmation-pending" });
-  assert.equal(submissions, 1);
-  assert.deepInclude(lateReceipts[0] as object, {
-    outcome: "turn-running",
-    turnId: "turn-delayed",
-  });
+  assert.deepInclude(receipt as object, { outcome: "inserted", action: "submit" });
 });
 
 // Acceptance: replay after a renderer reconnect cannot append a second copy.
@@ -410,60 +309,7 @@ it("does not erase captured submission context when its own broker snapshot retu
   assert.deepEqual(observedContext, capturedContext);
 });
 
-it("reattaches one confirmation watcher after a renderer reload", async () => {
-  let confirmations = 0;
-  const lateReceipts: Array<unknown> = [];
-  const commandId = CommandId.make("command-deliver");
-  const messageId = MessageId.make("dictation-command-deliver");
-  const coordinator = createTestCoordinator({
-    confirm: async (identity) => {
-      confirmations += 1;
-      return {
-        outcome: "turn-running",
-        protocolVersion: identity.protocolVersion,
-        sessionId: identity.sessionId,
-        commandId: identity.commandId,
-        target: identity.target,
-        application: "first",
-        messageId,
-        turnId: TurnId.make("turn-recovered"),
-      };
-    },
-    reportLateReceipt: (receipt) => lateReceipts.push(receipt),
-  });
-  const confirmingSession = decodeSession({
-    protocolVersion: { major: 1, minor: 5 },
-    sessionId: "session-a",
-    target: targetA,
-    source: "shell",
-    phase: "confirming",
-    mode: "submit",
-    projectName: "Project A",
-    startedAt: "2026-08-29T12:00:00.000Z",
-    elapsedMs: 17_000,
-    audioLevel: null,
-    graceRemainingMs: null,
-    presentation: { mesuraOwnsPresentation: false, leaseExpiresAt: null },
-  });
-
-  await Promise.all([
-    coordinator.resumeConfirmation(confirmingSession, commandId),
-    coordinator.resumeConfirmation(confirmingSession, commandId),
-  ]);
-
-  assert.equal(confirmations, 1);
-  assert.equal(lateReceipts.length, 1);
-  assert.deepInclude(lateReceipts[0] as object, {
-    outcome: "turn-running",
-    commandId,
-    messageId,
-    turnId: "turn-recovered",
-  });
-});
-
-// Acceptance: inserted is earned only after the forced persisted readback sees
-// the exact command and resulting prompt.
-it("emits inserted only after persistence confirms the exact append", async () => {
+it("emits inserted after applying the exact append", async () => {
   const order: Array<string> = [];
   const coordinator = createTestCoordinator({
     append: async (target, commandId, text) => {
@@ -486,16 +332,16 @@ it("emits inserted only after persistence confirms the exact append", async () =
   assert.equal(persisted?.applications[0]?.commandId, "command-deliver");
 });
 
-it("reports persistence failure without writing to another composer", async () => {
+it("reports persistence failure without blocking the exact composer append", async () => {
+  const diagnostics: Array<unknown> = [];
   useComposerDraftStore.getState().setPrompt(threadB, "visible chat");
   const coordinator = createTestCoordinator({
-    append: async () => ({
-      ok: false,
-      reason: "persistence-failed",
-      stage: "persisted-state-missing",
-      persistedBytes: 0,
-    }),
-    reportPersistenceFailure: () => undefined,
+    append: (target, commandId, text, sourceTargetKey) =>
+      appendPersistedDictation(target, commandId, text, sourceTargetKey, {
+        flush: () => undefined,
+        readRaw: () => null,
+      }),
+    reportPersistenceFailure: (event) => diagnostics.push(event),
   });
   coordinator.registerComposer({ target: targetA, projectName: "Project A", handle: null });
   await coordinator.reserve(reserveRequest);
@@ -503,25 +349,31 @@ it("reports persistence failure without writing to another composer", async () =
 
   const receipt = await coordinator.deliver(deliver());
 
-  assert.equal(receipt.outcome, "failed");
-  if (receipt.outcome === "failed") assert.equal(receipt.code, "persistence_failed");
-  assert.isUndefined(promptAt(threadA));
+  assert.equal(receipt.outcome, "inserted");
+  assert.equal(promptAt(threadA), "[voiced] dictated words");
   assert.equal(promptAt(threadB), "visible chat");
+  assert.deepInclude(diagnostics[0] as object, { stage: "persisted-state-missing" });
 });
 
-it("maps a precise persistence stage without starting the provider", async () => {
+it("maps a precise persistence stage and continues provider submission", async () => {
   const submit = vi.fn(async () => ({
     kind: "turn-dispatched" as const,
-    messageId: MessageId.make("must-not-dispatch"),
+    messageId: MessageId.make("dictation-command-deliver"),
   }));
   const reportPersistenceFailure = vi.fn();
   const coordinator = createTestCoordinator({
     append: async () => ({
-      ok: false,
-      reason: "persistence-failed",
-      stage: "command-missing",
+      ok: true,
+      application: "first",
+      prompt: "[voiced] dictated words",
+      version: 1,
+      targetKey: scopedThreadKey(threadA),
       persistedBytes: 512,
-      expectedPromptHash: "a".repeat(64),
+      persistenceFailure: {
+        stage: "command-missing",
+        persistedBytes: 512,
+        expectedPromptHash: "a".repeat(64),
+      },
     }),
     submit,
     reportPersistenceFailure,
@@ -531,11 +383,8 @@ it("maps a precise persistence stage without starting the provider", async () =>
 
   const receipt = await coordinator.deliver(deliver("submit"));
 
-  assert.equal(receipt.outcome, "failed");
-  if (receipt.outcome !== "failed") return;
-  assert.equal(receipt.code, "persistence_failed");
-  assert.equal(receipt.detail, "dictation persistence verification failed at command-missing");
-  assert.equal(submit.mock.calls.length, 0);
+  assert.deepInclude(receipt as object, { outcome: "inserted", action: "submit" });
+  assert.equal(submit.mock.calls.length, 1);
   assert.deepEqual(reportPersistenceFailure.mock.calls[0]?.[0], {
     event: "symmetria.dictation.persistence.failed",
     sessionId: "session-a",
@@ -551,12 +400,18 @@ it("keeps transcript and draft text out of persistence diagnostics", async () =>
   const diagnostics: Array<unknown> = [];
   const coordinator = createTestCoordinator({
     append: async () => ({
-      ok: false,
-      reason: "persistence-failed",
-      stage: "prompt-mismatch",
+      ok: true,
+      application: "first",
+      prompt: "[voiced] dictated words",
+      version: 1,
+      targetKey: scopedThreadKey(threadA),
       persistedBytes: 128,
-      expectedPromptHash: "b".repeat(64),
-      actualPromptHash: "c".repeat(64),
+      persistenceFailure: {
+        stage: "prompt-mismatch",
+        persistedBytes: 128,
+        expectedPromptHash: "b".repeat(64),
+        actualPromptHash: "c".repeat(64),
+      },
     }),
     reportPersistenceFailure: (event) => diagnostics.push(event),
   });
@@ -575,7 +430,7 @@ it("keeps transcript and draft text out of persistence diagnostics", async () =>
 it("keeps the persistence result stable when diagnostic hashing fails", async () => {
   const submit = vi.fn(async () => ({
     kind: "turn-dispatched" as const,
-    messageId: MessageId.make("must-not-dispatch-after-hash-failure"),
+    messageId: MessageId.make("dictation-command-deliver"),
   }));
   const diagnostics: Array<unknown> = [];
   const coordinator = createTestCoordinator({
@@ -597,11 +452,8 @@ it("keeps the persistence result stable when diagnostic hashing fails", async ()
 
   const receipt = await coordinator.deliver(deliver("submit"));
 
-  assert.equal(receipt.outcome, "failed");
-  if (receipt.outcome !== "failed") return;
-  assert.equal(receipt.code, "persistence_failed");
-  assert.include(receipt.detail, "storage-write-failed");
-  assert.equal(submit.mock.calls.length, 0);
+  assert.deepInclude(receipt as object, { outcome: "inserted", action: "submit" });
+  assert.equal(submit.mock.calls.length, 1);
   assert.deepInclude(diagnostics[0] as object, { stage: "storage-write-failed" });
   assert.notProperty(diagnostics[0] as object, "expectedPromptHash");
 });
@@ -609,16 +461,19 @@ it("keeps the persistence result stable when diagnostic hashing fails", async ()
 it("isolates a throwing persistence reporter from delivery behavior", async () => {
   const submit = vi.fn(async () => ({
     kind: "turn-dispatched" as const,
-    messageId: MessageId.make("must-not-dispatch-after-reporter-failure"),
+    messageId: MessageId.make("dictation-command-deliver"),
   }));
   const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
   try {
     const coordinator = createTestCoordinator({
       append: async () => ({
-        ok: false,
-        reason: "persistence-failed",
-        stage: "storage-read-failed",
+        ok: true,
+        application: "first",
+        prompt: "[voiced] dictated words",
+        version: 1,
+        targetKey: scopedThreadKey(threadA),
         persistedBytes: 0,
+        persistenceFailure: { stage: "storage-read-failed", persistedBytes: 0 },
       }),
       submit,
       reportPersistenceFailure: () => {
@@ -630,11 +485,8 @@ it("isolates a throwing persistence reporter from delivery behavior", async () =
 
     const receipt = await coordinator.deliver(deliver("submit"));
 
-    assert.equal(receipt.outcome, "failed");
-    if (receipt.outcome !== "failed") return;
-    assert.equal(receipt.code, "persistence_failed");
-    assert.include(receipt.detail, "storage-read-failed");
-    assert.equal(submit.mock.calls.length, 0);
+    assert.deepInclude(receipt as object, { outcome: "inserted", action: "submit" });
+    assert.equal(submit.mock.calls.length, 1);
     assert.equal(
       consoleError.mock.calls[0]?.[0],
       "symmetria.dictation.persistence.reporter-failed",
@@ -646,11 +498,6 @@ it("isolates a throwing persistence reporter from delivery behavior", async () =
 
 it("retries provider start with one persisted append and the original message identity", async () => {
   let submissions = 0;
-  const lateReceipts: Array<SymmetriaDictationReceipt> = [];
-  let resolveLateReceipt: (() => void) | undefined;
-  const lateReceiptObserved = new Promise<void>((resolve) => {
-    resolveLateReceipt = resolve;
-  });
   const messageId = MessageId.make("dictation-command-deliver");
   const coordinator = createTestCoordinator({
     submit: async () => {
@@ -659,20 +506,6 @@ it("retries provider start with one persisted append and the original message id
         ? { kind: "provider-start-failed", messageId }
         : { kind: "turn-dispatched", messageId };
     },
-    confirm: async (identity) => ({
-      outcome: "turn-running",
-      protocolVersion: identity.protocolVersion,
-      sessionId: identity.sessionId,
-      commandId: identity.commandId,
-      target: identity.target,
-      application: "first",
-      messageId,
-      turnId: TurnId.make("turn-retry"),
-    }),
-    reportLateReceipt: (receipt) => {
-      lateReceipts.push(receipt);
-      resolveLateReceipt?.();
-    },
   });
   coordinator.registerComposer({ target: targetA, projectName: "Project A", handle: null });
   await coordinator.reserve(reserveRequest);
@@ -680,14 +513,12 @@ it("retries provider start with one persisted append and the original message id
 
   const failed = await coordinator.deliver(command);
   const retried = await coordinator.deliver(command);
-  await lateReceiptObserved;
 
   assert.equal(failed.outcome, "failed");
-  assert.equal(retried.outcome, "confirmation-pending");
+  assert.deepInclude(retried as object, { outcome: "inserted", action: "submit" });
   assert.equal(submissions, 2);
   assert.equal(promptAt(threadA), "[voiced] dictated words");
   assert.equal(retried.commandId, command.commandId);
-  assert.deepInclude(lateReceipts[0] as object, { outcome: "turn-running", messageId });
 });
 
 it("carries the latest draft text across promotion before appending", async () => {
@@ -754,43 +585,22 @@ it("submits a promoted draft through its preallocated thread identity", async ()
     draftThreadsByThreadKey: { [draftId]: draftSession },
   });
   const submissions: Array<{ composerTarget: unknown; sourceComposerTarget?: unknown }> = [];
-  const lateReceipts: Array<SymmetriaDictationReceipt> = [];
-  let resolveLateReceipt: (() => void) | undefined;
-  const lateReceiptObserved = new Promise<void>((resolve) => {
-    resolveLateReceipt = resolve;
-  });
   const messageId = MessageId.make("dictation-command-deliver");
   const coordinator = createTestCoordinator({
     submit: async (input) => {
       submissions.push(input);
       return { kind: "turn-dispatched", messageId };
     },
-    confirm: async (identity) => ({
-      outcome: "turn-running",
-      protocolVersion: identity.protocolVersion,
-      sessionId: identity.sessionId,
-      commandId: identity.commandId,
-      target: identity.target,
-      application: "first",
-      messageId,
-      turnId: TurnId.make("turn-promoted"),
-    }),
-    reportLateReceipt: (receipt) => {
-      lateReceipts.push(receipt);
-      resolveLateReceipt?.();
-    },
   });
   coordinator.registerComposer({ target, projectName: "Project A", handle: null });
   await coordinator.reserve(reserveRequest);
 
   const receipt = await coordinator.deliver(deliver("submit", "session-a", target));
-  await lateReceiptObserved;
 
-  assert.equal(receipt.outcome, "confirmation-pending");
+  assert.deepInclude(receipt as object, { outcome: "inserted", action: "submit" });
   assert.deepEqual(submissions[0]?.composerTarget, threadA);
   assert.equal(submissions[0]?.sourceComposerTarget, draftId);
   assert.equal(promptAt(threadA), "typed before promotion [voiced] dictated words");
-  assert.deepInclude(lateReceipts[0] as object, { outcome: "turn-running", messageId });
 });
 
 it("bounds command history across targets and removes an environment ledger", async () => {

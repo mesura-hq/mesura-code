@@ -311,8 +311,6 @@ contextBridge.exposeInMainWorld("symmetriaDictationBridge", {
     }),
   getShellAvailability: () =>
     ipcRenderer.invoke(IpcChannels.GET_DICTATION_SHELL_AVAILABILITY_CHANNEL),
-  getConfirmationRecovery: () =>
-    ipcRenderer.invoke(IpcChannels.GET_DICTATION_CONFIRMATION_RECOVERY_CHANNEL),
   subscribeShellAvailability: (listener: (available: boolean) => void) => {
     const wrappedListener = (_event: Electron.IpcRendererEvent, available: unknown) => {
       if (typeof available === "boolean") listener(available);

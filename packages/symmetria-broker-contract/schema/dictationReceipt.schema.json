@@ -234,7 +234,8 @@
         "action": {
           "enum": [
             "insert",
-            "answer"
+            "answer",
+            "submit"
           ],
           "type": "string"
         },

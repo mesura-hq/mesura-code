@@ -22,7 +22,6 @@ import {
   type DirectedComposerSubmissionResult,
   type DirectedSubmissionContext,
 } from "./directedComposerSubmission";
-import { confirmDirectedDictationTurn } from "./dictationTurnConfirmation";
 
 export type DictationReservationRequest = {
   readonly protocolVersion: { readonly major: 1; readonly minor: number };
@@ -52,8 +51,6 @@ type CoordinatorOptions = {
   ) => Promise<PersistedDictationAppendResult>;
   readonly threadExists?: (threadRef: ScopedThreadRef) => boolean;
   readonly submit?: typeof submitDirectedDictation;
-  readonly confirm?: typeof confirmDirectedDictationTurn;
-  readonly reportLateReceipt?: (receipt: SymmetriaDictationReceipt) => void;
   readonly reportPersistenceFailure?: (event: DictationPersistenceDiagnosticEvent) => void;
 };
 
@@ -87,16 +84,6 @@ export function createDictationCoordinator(options: CoordinatorOptions = {}) {
     ((threadRef: ScopedThreadRef) =>
       appAtomRegistry.get(environmentThreadShells.threadShellAtom(threadRef)) !== null);
   const submit = options.submit ?? submitDirectedDictation;
-  const confirm = options.confirm ?? confirmDirectedDictationTurn;
-  const reportLateReceipt =
-    options.reportLateReceipt ??
-    ((receipt: SymmetriaDictationReceipt) => {
-      if (typeof window === "undefined") return;
-      void window.symmetriaDictationBridge?.sendCommand({
-        type: "dictation.late-receipt",
-        receipt,
-      });
-    });
   const reportPersistenceFailure =
     options.reportPersistenceFailure ??
     ((event: DictationPersistenceDiagnosticEvent) => {
@@ -125,12 +112,10 @@ export function createDictationCoordinator(options: CoordinatorOptions = {}) {
     readonly projectName: string | null;
     readonly submissionContext: DirectedSubmissionContext | null;
   } | null = null;
-  let resumedConfirmationKey: string | null = null;
 
   const restoreSession = (session: SymmetriaDictationSession | null): void => {
     if (session === null) {
       reservation = null;
-      resumedConfirmationKey = null;
       return;
     }
     if (
@@ -145,44 +130,10 @@ export function createDictationCoordinator(options: CoordinatorOptions = {}) {
       projectName: session.projectName,
       submissionContext: null,
     };
-    resumedConfirmationKey = null;
-  };
-
-  const resumeConfirmation = async (
-    session: SymmetriaDictationSession,
-    commandId: CommandId,
-  ): Promise<void> => {
-    restoreSession(session);
-    if (session.phase !== "confirming") return;
-    const recoveryKey = `${session.sessionId}:${commandId}`;
-    if (resumedConfirmationKey === recoveryKey) return;
-    resumedConfirmationKey = recoveryKey;
-    const threadRef =
-      session.target.kind === "draft" ? session.target.futureThreadRef : session.target;
-    const messageId = MessageId.make(`dictation-${commandId}`);
-    try {
-      const receipt = await confirm(
-        {
-          protocolVersion: session.protocolVersion,
-          sessionId: session.sessionId,
-          commandId,
-          target: session.target,
-          environmentId: threadRef.environmentId,
-          threadId: threadRef.threadId,
-          messageId,
-        },
-        { onLateReceipt: reportLateReceipt },
-      );
-      if (receipt.outcome !== "confirmation-pending") reportLateReceipt(receipt);
-    } catch (cause) {
-      if (resumedConfirmationKey === recoveryKey) resumedConfirmationKey = null;
-      throw cause;
-    }
   };
 
   return {
     restoreSession,
-    resumeConfirmation,
     registerComposer: (next: DictationComposerRegistration): (() => void) => {
       const token = Symbol("dictation-composer-registration");
       registration = { ...next, token };
@@ -259,26 +210,20 @@ export function createDictationCoordinator(options: CoordinatorOptions = {}) {
         resolved.sourceTargetKey,
       );
       if (!result.ok) {
-        if (result.reason === "persistence-failed") {
-          safelyReportPersistenceFailure({
-            event: "symmetria.dictation.persistence.failed",
-            sessionId: command.sessionId,
-            commandId: command.commandId,
-            target: reserved.target,
-            stage: result.stage,
-            persistedBytes: result.persistedBytes,
-            ...(result.expectedPromptHash ? { expectedPromptHash: result.expectedPromptHash } : {}),
-            ...(result.actualPromptHash ? { actualPromptHash: result.actualPromptHash } : {}),
-          });
-        }
-        return failedReceipt(
-          command,
-          reserved.target,
-          result.reason === "persistence-failed" ? "persistence_failed" : "renderer_lost",
-          result.reason === "persistence-failed"
-            ? `dictation persistence verification failed at ${result.stage}`
-            : result.reason,
-        );
+        return failedReceipt(command, reserved.target, "renderer_lost", result.reason);
+      }
+      if (result.persistenceFailure) {
+        const failure = result.persistenceFailure;
+        safelyReportPersistenceFailure({
+          event: "symmetria.dictation.persistence.failed",
+          sessionId: command.sessionId,
+          commandId: command.commandId,
+          target: reserved.target,
+          stage: failure.stage,
+          persistedBytes: failure.persistedBytes,
+          ...(failure.expectedPromptHash ? { expectedPromptHash: failure.expectedPromptHash } : {}),
+          ...(failure.actualPromptHash ? { actualPromptHash: failure.actualPromptHash } : {}),
+        });
       }
 
       if (
@@ -361,53 +306,15 @@ export function createDictationCoordinator(options: CoordinatorOptions = {}) {
             action: "answer",
           };
         }
-        const confirmationRef =
-          typeof resolved.target === "string"
-            ? reserved.target.kind === "draft"
-              ? reserved.target.futureThreadRef
-              : null
-            : resolved.target;
-        if (confirmationRef === null) {
-          return failedReceipt(
-            command,
-            reserved.target,
-            "provider_start_failed",
-            "the submitted thread identity is unavailable",
-          );
-        }
-        const confirmationKey = `${command.sessionId}:${command.commandId}`;
-        resumedConfirmationKey = confirmationKey;
-        const confirmationIdentity = {
-          protocolVersion: command.protocolVersion,
-          sessionId: command.sessionId,
-          commandId: command.commandId,
-          target: reserved.target,
-          environmentId: confirmationRef.environmentId,
-          threadId: confirmationRef.threadId,
-          messageId: submission.messageId,
-        } as const;
-        void Promise.resolve()
-          .then(() => confirm(confirmationIdentity, { onLateReceipt: reportLateReceipt }))
-          .then((receipt) => {
-            if (receipt.outcome !== "confirmation-pending") reportLateReceipt(receipt);
-          })
-          .catch((cause: unknown) => {
-            reportLateReceipt(
-              failedReceipt(
-                command,
-                reserved.target,
-                "renderer_lost",
-                cause instanceof Error ? cause.message : String(cause),
-              ),
-            );
-          });
         return {
-          outcome: "confirmation-pending",
+          outcome: "inserted",
           protocolVersion: command.protocolVersion,
           sessionId: command.sessionId,
           commandId: command.commandId,
           target: reserved.target,
           application: result.application,
+          draftVersion: SymmetriaDraftVersion.make(result.version),
+          action: "submit",
         };
       }
 
