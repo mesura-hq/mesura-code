@@ -124,26 +124,24 @@ describe("buildBranchNamePrompt", () => {
     expect(result.prompt).not.toContain("Attachment metadata:");
   });
 
-  it("includes generic attachment metadata and its readable path", () => {
+  it("includes attachment metadata when attachments are provided", () => {
     const result = buildBranchNamePrompt({
-      message: "Name the branch from the requirements",
+      message: "Fix the layout from screenshot",
       attachments: [
         {
-          type: "file" as const,
+          type: "image" as const,
           id: "att-123",
-          name: "requirements.pdf",
-          mimeType: "application/pdf",
+          name: "screenshot.png",
+          mimeType: "image/png",
           sizeBytes: 12345,
         },
       ],
-      attachmentPaths: { "att-123": "/var/lib/mesura/attachments/att-123.bin" },
     });
 
     expect(result.prompt).toContain("Attachment metadata:");
-    expect(result.prompt).toContain("requirements.pdf");
-    expect(result.prompt).toContain("application/pdf");
+    expect(result.prompt).toContain("screenshot.png");
+    expect(result.prompt).toContain("image/png");
     expect(result.prompt).toContain("12345 bytes");
-    expect(result.prompt).toContain("path: /var/lib/mesura/attachments/att-123.bin");
   });
 });
 
@@ -170,7 +168,7 @@ describe("buildThreadTitlePrompt", () => {
     );
   });
 
-  it("includes attachment metadata and its readable path", () => {
+  it("includes attachment metadata when attachments are provided", () => {
     const result = buildThreadTitlePrompt({
       message: "Name this thread from the screenshot",
       attachments: [
@@ -182,14 +180,12 @@ describe("buildThreadTitlePrompt", () => {
           sizeBytes: 67890,
         },
       ],
-      attachmentPaths: { "att-456": "/var/lib/mesura/attachments/att-456.png" },
     });
 
     expect(result.prompt).toContain("Attachment metadata:");
     expect(result.prompt).toContain("thread.png");
     expect(result.prompt).toContain("image/png");
     expect(result.prompt).toContain("67890 bytes");
-    expect(result.prompt).toContain("path: /var/lib/mesura/attachments/att-456.png");
   });
 
   it("regenerates from recent thread contents and identifies the previous title", () => {

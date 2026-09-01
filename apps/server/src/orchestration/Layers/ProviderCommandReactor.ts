@@ -16,7 +16,6 @@ import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shar
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
-import * as Data from "effect/Data";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
@@ -29,7 +28,6 @@ import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
-import { resolveReadableAttachmentDeliveries } from "../../provider/attachmentDelivery.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
@@ -48,17 +46,8 @@ import {
 } from "../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
-import { ServerConfig } from "../../config.ts";
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
-
-class TextGenerationAttachmentPathError extends Data.TaggedError(
-  "TextGenerationAttachmentPathError",
-)<{
-  readonly attachmentId: string;
-  readonly issue: string;
-  readonly cause?: unknown;
-}> {}
 
 type ProviderIntentEvent = Extract<
   OrchestrationEvent,
@@ -320,7 +309,6 @@ const make = Effect.gen(function* () {
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const textGeneration = yield* TextGeneration;
   const serverSettingsService = yield* ServerSettingsService;
-  const serverConfig = yield* ServerConfig;
   const serverCommandId = (tag: string) =>
     crypto.randomUUIDv4.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
   const serverEventId = () => crypto.randomUUIDv4.pipe(Effect.map(EventId.make));
@@ -338,28 +326,6 @@ const make = Effect.gen(function* () {
     );
 
   const threadModelSelections = new Map<string, ModelSelection>();
-
-  const resolveTextGenerationAttachmentPaths = Effect.fn(
-    "ProviderCommandReactor.resolveTextGenerationAttachmentPaths",
-  )(function* (attachments: ReadonlyArray<ChatAttachment>) {
-    const resolution = resolveReadableAttachmentDeliveries({
-      attachmentsDir: serverConfig.attachmentsDir,
-      attachments,
-    });
-    if (!resolution.ok) {
-      return yield* new TextGenerationAttachmentPathError({
-        attachmentId: resolution.attachment.id,
-        issue: resolution.issue,
-        ...(resolution.cause !== undefined ? { cause: resolution.cause } : {}),
-      });
-    }
-    return Object.fromEntries(
-      resolution.deliveries.map(({ attachment, attachmentPath }) => [
-        attachment.id,
-        attachmentPath,
-      ]),
-    );
-  });
 
   const appendProviderFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -850,9 +816,6 @@ const make = Effect.gen(function* () {
         cwd,
         message: input.messageText,
         ...(attachments.length > 0 ? { attachments } : {}),
-        ...(attachments.length > 0
-          ? { attachmentPaths: yield* resolveTextGenerationAttachmentPaths(attachments) }
-          : {}),
         modelSelection,
       });
       if (!generated) return;
@@ -898,9 +861,6 @@ const make = Effect.gen(function* () {
           cwd: input.cwd,
           message: input.messageText,
           ...(attachments.length > 0 ? { attachments } : {}),
-          ...(attachments.length > 0
-            ? { attachmentPaths: yield* resolveTextGenerationAttachmentPaths(attachments) }
-            : {}),
           modelSelection,
         });
         if (!generated) return;
@@ -964,9 +924,6 @@ const make = Effect.gen(function* () {
       message,
       previousTitle,
       ...(attachments.length > 0 ? { attachments } : {}),
-      ...(attachments.length > 0
-        ? { attachmentPaths: yield* resolveTextGenerationAttachmentPaths(attachments) }
-        : {}),
       modelSelection,
     });
     if (generated.title === DEFAULT_THREAD_TITLE || generated.title === previousTitle) {

@@ -21,10 +21,10 @@ layer("ProjectionThreadMessageRepository", (it) => {
       const updatedAt = "2026-02-28T19:00:01.000Z";
       const persistedAttachments = [
         {
-          type: "file" as const,
+          type: "image" as const,
           id: "thread-preserve-attachments-att-1",
-          name: "requirements.pdf",
-          mimeType: "application/pdf",
+          name: "example.png",
+          mimeType: "image/png",
           sizeBytes: 5,
         },
       ];

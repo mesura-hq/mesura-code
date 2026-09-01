@@ -2,31 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { PROVIDER_SEND_TURN_MAX_ATTACHMENTS } from "@t3tools/contracts";
 
 const files = new Map<string, { base64: string; deleted: boolean }>();
-let pickedResult: unknown = { canceled: true };
 
 vi.mock("expo-file-system", () => ({
-  Paths: { document: "file:///documents" },
-  Directory: class {
-    readonly uri: string;
-
-    constructor(base: string, name: string) {
-      this.uri = `${base}/${name}`;
-    }
-
-    create(): void {}
-  },
   File: class {
     readonly uri: string;
 
-    constructor(uriOrDirectory: string | { readonly uri: string }, name?: string) {
-      this.uri =
-        typeof uriOrDirectory === "string"
-          ? uriOrDirectory
-          : `${uriOrDirectory.uri}/${name ?? "attachment.bin"}`;
-    }
-
-    static pickFileAsync(): Promise<unknown> {
-      return Promise.resolve(pickedResult);
+    constructor(uri: string) {
+      this.uri = uri;
     }
 
     get exists(): boolean {
@@ -57,8 +39,6 @@ vi.mock("./uuid", () => ({
 import {
   convertPastedImagesToAttachments,
   isOwnedPastedImageUri,
-  pickComposerAttachments,
-  removeOwnedComposerAttachment,
   toUploadChatImageAttachments,
 } from "./composerImages";
 
@@ -91,7 +71,6 @@ describe("toUploadChatImageAttachments", () => {
 describe("native pasted image cleanup", () => {
   beforeEach(() => {
     files.clear();
-    pickedResult = { canceled: true };
   });
 
   it("recognizes only files created in the native composer paste directory", () => {
@@ -141,72 +120,5 @@ describe("native pasted image cleanup", () => {
     expect(files.get(rejected)?.deleted).toBe(true);
     expect(files.get(overflow)?.deleted).toBe(true);
     expect(files.get(userOwned)?.deleted).toBe(false);
-  });
-});
-
-describe("owned generic attachment cleanup", () => {
-  it("copies a generic selection into app-owned storage without base64", async () => {
-    const copy = vi.fn(async (destination: { readonly uri: string }) => {
-      files.set(destination.uri, { base64: "", deleted: false });
-    });
-    pickedResult = {
-      canceled: false,
-      result: [
-        {
-          name: "notes.pdf",
-          type: "application/pdf",
-          size: 42,
-          copy,
-        },
-      ],
-    };
-
-    const result = await pickComposerAttachments({ existingCount: 0 });
-
-    expect(result.error).toBeNull();
-    expect(result.attachments).toEqual([
-      {
-        id: "attachment-id",
-        type: "file",
-        name: "notes.pdf",
-        mimeType: "application/pdf",
-        sizeBytes: 42,
-        uri: "file:///documents/composer-attachments/attachment-id-notes.pdf",
-      },
-    ]);
-    expect(copy).toHaveBeenCalledOnce();
-  });
-
-  it("deletes an app-owned queued video after delivery", async () => {
-    const uri = "file:///documents/composer-attachments/video-recording.mp4";
-    files.set(uri, { base64: "", deleted: false });
-
-    await removeOwnedComposerAttachment({
-      id: "video",
-      type: "file",
-      name: "recording.mp4",
-      mimeType: "video/mp4",
-      sizeBytes: 1,
-      uri,
-    });
-
-    expect(files.get(uri)?.deleted).toBe(true);
-  });
-
-  it("deletes an app-owned native paste file retained in a draft", async () => {
-    const uri = "file:///documents/t3-composer-paste/pasted.png";
-    files.set(uri, { base64: "", deleted: false });
-
-    await removeOwnedComposerAttachment({
-      id: "pasted",
-      type: "image",
-      name: "pasted.png",
-      mimeType: "image/png",
-      sizeBytes: 1,
-      dataUrl: "data:image/png;base64,AA==",
-      previewUri: uri,
-    });
-
-    expect(files.get(uri)?.deleted).toBe(true);
   });
 });

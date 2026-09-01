@@ -18,7 +18,6 @@ const runtimeMock = {
   state: {
     startCalls: [] as string[],
     promptUrls: [] as string[],
-    promptBodies: [] as unknown[],
     authHeaders: [] as Array<string | null>,
     closeCalls: [] as string[],
     sessionCreateError: undefined as unknown,
@@ -31,7 +30,6 @@ const runtimeMock = {
   reset() {
     this.state.startCalls.length = 0;
     this.state.promptUrls.length = 0;
-    this.state.promptBodies.length = 0;
     this.state.authHeaders.length = 0;
     this.state.closeCalls.length = 0;
     this.state.sessionCreateError = undefined;
@@ -75,9 +73,8 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntime.OpenCodeRuntimeShape = {
           }
           return runtimeMock.state.sessionResult ?? { data: { id: `${baseUrl}/session` } };
         },
-        prompt: async (input: unknown) => {
+        prompt: async () => {
           runtimeMock.state.promptUrls.push(baseUrl);
-          runtimeMock.state.promptBodies.push(input);
           runtimeMock.state.authHeaders.push(
             serverPassword ? `Basic ${btoa(`opencode:${serverPassword}`)}` : null,
           );
@@ -190,47 +187,6 @@ const advanceIdleClock = Effect.gen(function* () {
 });
 
 it.layer(OpenCodeTextGenerationTestLayer)("OpenCodeTextGeneration", (it) => {
-  it.effect("includes a generic attachment path in thread-title generation", () =>
-    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
-      Effect.gen(function* () {
-        runtimeMock.state.promptResult = {
-          data: {
-            parts: [
-              {
-                type: "text",
-                // @effect-diagnostics-next-line preferSchemaOverJson:off
-                text: JSON.stringify({ title: "Review requirements" }),
-              },
-            ],
-          },
-        };
-        const generated = yield* textGeneration.generateThreadTitle({
-          cwd: process.cwd(),
-          message: "Review the requirements",
-          attachments: [
-            {
-              type: "file",
-              id: "opencode-title-file",
-              name: "requirements.pdf",
-              mimeType: "application/pdf",
-              sizeBytes: 10,
-            },
-          ],
-          attachmentPaths: {
-            "opencode-title-file": "/var/lib/mesura/attachments/requirements.bin",
-          },
-          modelSelection: DEFAULT_TEST_MODEL_SELECTION,
-        });
-
-        expect(generated.title).toBe("Review requirements");
-        // @effect-diagnostics-next-line preferSchemaOverJson:off
-        expect(JSON.stringify(runtimeMock.state.promptBodies)).toContain(
-          "/var/lib/mesura/attachments/requirements.bin",
-        );
-      }),
-    ),
-  );
-
   it.effect("reuses a warm server across back-to-back requests and closes it after idling", () =>
     withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
       Effect.gen(function* () {

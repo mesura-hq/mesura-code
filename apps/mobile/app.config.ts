@@ -145,15 +145,12 @@ const sharingPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
         supportsText: true,
         supportsWebUrlWithMaxCount: 1,
         supportsImageWithMaxCount: 8,
-        supportsMovieWithMaxCount: 8,
-        supportsFileWithMaxCount: 8,
-        supportsAttachmentsWithMaxCount: 8,
       },
     },
     android: {
       enabled: true,
-      singleShareMimeTypes: ["text/plain", "*/*"],
-      multipleShareMimeTypes: ["*/*"],
+      singleShareMimeTypes: ["text/plain", "image/*"],
+      multipleShareMimeTypes: ["image/*"],
     },
   },
 ];

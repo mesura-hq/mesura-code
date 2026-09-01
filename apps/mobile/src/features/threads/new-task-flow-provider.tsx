@@ -27,10 +27,7 @@ import { pipe } from "effect/Function";
 
 import { useEnvironmentServerConfig, useProjects, useThreadShells } from "../../state/entities";
 import type { TurnCommandMetadata } from "../../lib/commandMetadata";
-import {
-  removeOwnedComposerAttachment,
-  type DraftComposerAttachment,
-} from "../../lib/composerImages";
+import type { DraftComposerImageAttachment } from "../../lib/composerImages";
 import type { ModelOption, ProviderGroup } from "../../lib/modelOptions";
 import {
   buildModelOptions,
@@ -135,7 +132,7 @@ type NewTaskFlowContextValue = {
   readonly draftKey: string | null;
   readonly editingPendingTask: QueuedThreadMessage | null;
   readonly prompt: string;
-  readonly attachments: ReadonlyArray<DraftComposerAttachment>;
+  readonly attachments: ReadonlyArray<DraftComposerImageAttachment>;
   readonly submitting: boolean;
   readonly branchQuery: string;
   readonly branchesLoading: boolean;
@@ -174,8 +171,8 @@ type NewTaskFlowContextValue = {
   readonly cancelEditingPendingTask: () => void;
   readonly buildPendingTaskMessage: (metadata: TurnCommandMetadata) => QueuedThreadMessage | null;
   readonly setPrompt: (value: string) => void;
-  readonly replaceAttachments: (attachments: ReadonlyArray<DraftComposerAttachment>) => void;
-  readonly appendAttachments: (attachments: ReadonlyArray<DraftComposerAttachment>) => void;
+  readonly replaceAttachments: (attachments: ReadonlyArray<DraftComposerImageAttachment>) => void;
+  readonly appendAttachments: (attachments: ReadonlyArray<DraftComposerImageAttachment>) => void;
   readonly removeAttachment: (imageId: string) => void;
   readonly clearAttachments: () => void;
   readonly setSubmitting: (value: boolean) => void;
@@ -500,7 +497,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     [selectedProjectDraftKey],
   );
   const replaceAttachments = useCallback(
-    (nextAttachments: ReadonlyArray<DraftComposerAttachment>) => {
+    (nextAttachments: ReadonlyArray<DraftComposerImageAttachment>) => {
       if (!selectedProjectDraftKey) {
         return;
       }
@@ -509,7 +506,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     [selectedProjectDraftKey],
   );
   const appendAttachments = useCallback(
-    (nextAttachments: ReadonlyArray<DraftComposerAttachment>) => {
+    (nextAttachments: ReadonlyArray<DraftComposerImageAttachment>) => {
       if (!selectedProjectDraftKey) {
         return;
       }
@@ -522,11 +519,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       if (!selectedProjectDraftKey) {
         return;
       }
-      const attachment = getComposerDraftSnapshot(selectedProjectDraftKey).attachments.find(
-        (candidate) => candidate.id === imageId,
-      );
       removeComposerDraftAttachment(selectedProjectDraftKey, imageId);
-      if (attachment) void removeOwnedComposerAttachment(attachment);
     },
     [selectedProjectDraftKey],
   );
@@ -921,9 +914,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       if (activeEditingMessageId === editing.messageId) {
         activeEditingMessageId = null;
       }
-      clearComposerDraft(pendingTaskDraftKey(editing.messageId), {
-        preserveRemovedAttachments: true,
-      });
+      clearComposerDraft(pendingTaskDraftKey(editing.messageId));
       releaseEditingQueuedMessage(editing.messageId);
     }
     setEditingPendingTask(null);
@@ -986,9 +977,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
           if (activeEditingMessageId === editing.messageId) {
             return;
           }
-          clearComposerDraft(pendingTaskDraftKey(editing.messageId), {
-            preserveRemovedAttachments: true,
-          });
+          clearComposerDraft(pendingTaskDraftKey(editing.messageId));
           releaseEditingQueuedMessage(editing.messageId);
         })
         .catch((error) => {

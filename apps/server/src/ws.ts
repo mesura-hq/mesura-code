@@ -70,11 +70,7 @@ import {
   projectActivityEvent,
   projectThreadDetailSnapshot,
 } from "./orchestration/ActivityPayloadProjection.ts";
-import {
-  commitDispatchCommandAttachments,
-  normalizeDispatchCommand,
-  rollbackDispatchCommandAttachments,
-} from "./orchestration/Normalizer.ts";
+import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import {
@@ -1103,10 +1099,7 @@ const makeWsRpcLayer = (
                     ),
                   )
                 : false;
-              const result = yield* dispatchNormalizedCommand(normalizedCommand).pipe(
-                Effect.tap(() => commitDispatchCommandAttachments(command)),
-                Effect.onError(() => rollbackDispatchCommandAttachments(command)),
-              );
+              const result = yield* dispatchNormalizedCommand(normalizedCommand);
               if (parkingCommand) {
                 const parkingKind = parkingCommand.type === "thread.archive" ? "archive" : "settle";
                 if (shouldStopSessionAfterCommand) {

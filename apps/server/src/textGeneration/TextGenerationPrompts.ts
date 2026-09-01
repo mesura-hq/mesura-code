@@ -144,7 +144,6 @@ export function buildPrContentPrompt(input: PrContentPromptInput) {
 export interface BranchNamePromptInput {
   message: string;
   attachments?: ReadonlyArray<ChatAttachment> | undefined;
-  attachmentPaths?: Readonly<Record<string, string>> | undefined;
   policy?: TextGenerationPolicy | undefined;
 }
 
@@ -154,22 +153,13 @@ interface PromptFromMessageInput {
   rules: ReadonlyArray<string>;
   message: string;
   attachments?: ReadonlyArray<ChatAttachment> | undefined;
-  attachmentPaths?: Readonly<Record<string, string>> | undefined;
   additionalInstructions?: string | undefined;
 }
 
-function formatAttachmentMetadataLines(
-  attachments: ReadonlyArray<ChatAttachment> | undefined,
-  attachmentPaths: Readonly<Record<string, string>> | undefined,
-): ReadonlyArray<string> {
-  return (attachments ?? []).map((attachment) => {
-    const path = attachmentPaths?.[attachment.id];
-    return `- ${attachment.name} (${attachment.mimeType}, ${attachment.sizeBytes} bytes${path ? `, path: ${path}` : ""})`;
-  });
-}
-
 function buildPromptFromMessage(input: PromptFromMessageInput): string {
-  const attachmentLines = formatAttachmentMetadataLines(input.attachments, input.attachmentPaths);
+  const attachmentLines = (input.attachments ?? []).map(
+    (attachment) => `- ${attachment.name} (${attachment.mimeType}, ${attachment.sizeBytes} bytes)`,
+  );
 
   const promptSections = [
     input.instruction,
@@ -204,7 +194,6 @@ export function buildBranchNamePrompt(input: BranchNamePromptInput) {
     ],
     message: input.message,
     attachments: input.attachments,
-    attachmentPaths: input.attachmentPaths,
     additionalInstructions: input.policy?.branchInstructions,
   });
   const outputSchema = Schema.Struct({
@@ -222,7 +211,6 @@ export interface ThreadTitlePromptInput {
   message: string;
   previousTitle?: string | undefined;
   attachments?: ReadonlyArray<ChatAttachment> | undefined;
-  attachmentPaths?: Readonly<Record<string, string>> | undefined;
   policy?: TextGenerationPolicy | undefined;
 }
 
@@ -299,7 +287,9 @@ function preserveMessageEnd(message: string): string {
 
 function threadTitlePromptSuffix(input: ThreadTitlePromptInput): string {
   const additionalInstructions = policyInstruction(input.policy?.threadTitleInstructions);
-  const attachmentLines = formatAttachmentMetadataLines(input.attachments, input.attachmentPaths);
+  const attachmentLines = (input.attachments ?? []).map(
+    (attachment) => `- ${attachment.name} (${attachment.mimeType}, ${attachment.sizeBytes} bytes)`,
+  );
 
   let suffix = "";
   if (additionalInstructions.length > 0) {

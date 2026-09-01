@@ -73,7 +73,6 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
-import { selectNativeImageAttachments } from "../attachmentDelivery.ts";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
@@ -1268,7 +1267,11 @@ const buildUserMessageEffect = Effect.fn("buildUserMessageEffect")(function* (
     sdkContent.push({ type: "text", text });
   }
 
-  for (const attachment of selectNativeImageAttachments(input.attachments)) {
+  for (const attachment of input.attachments ?? []) {
+    if (attachment.type !== "image") {
+      continue;
+    }
+
     if (!SUPPORTED_CLAUDE_IMAGE_MIME_TYPES.has(attachment.mimeType)) {
       return yield* new ProviderAdapterRequestError({
         provider: PROVIDER,

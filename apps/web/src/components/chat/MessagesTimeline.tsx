@@ -36,7 +36,7 @@ import {
   workEntryDisplayIndicatesToolFailure,
   workLogEntryIsToolLike,
 } from "../../session-logic";
-import { type ChatImageAttachment, type TurnDiffSummary } from "../../types";
+import { type TurnDiffSummary } from "../../types";
 import {
   getRenderablePatch,
   resolveDiffThemeName,
@@ -50,7 +50,6 @@ import {
   ChevronRightIcon,
   CircleAlertIcon,
   EyeIcon,
-  FileIcon,
   GlobeIcon,
   HammerIcon,
   MessageCircleIcon,
@@ -912,6 +911,8 @@ function TimelineMinimap({
 // TimelineRowContent — the actual row component
 // ---------------------------------------------------------------------------
 
+type TimelineEntry = ReturnType<typeof deriveTimelineEntries>[number];
+type TimelineMessage = Extract<TimelineEntry, { kind: "message" }>["message"];
 type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"][number];
 type TimelineRow = MessagesTimelineRow;
 
@@ -973,11 +974,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
 
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
-  const userAttachments = row.message.attachments ?? [];
-  const userImages = userAttachments.filter(
-    (attachment): attachment is ChatImageAttachment => attachment.type === "image",
-  );
-  const userFiles = userAttachments.filter((attachment) => attachment.type === "file");
+  const userImages = row.message.attachments ?? [];
   const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
   const terminalContexts = displayedUserMessage.contexts;
   const previewAnnotations: ParsedPreviewAnnotation[] = [];
@@ -1000,38 +997,9 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   return (
     <div className="group flex flex-col items-end gap-1">
       <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
-        {userFiles.length > 0 && (
-          <div className="mb-2 grid gap-1.5">
-            {userFiles.map((file) => {
-              const content = (
-                <>
-                  <FileIcon className="size-4 shrink-0 text-secondary-label" />
-                  <span className="min-w-0 flex-1 truncate text-xs font-medium">{file.name}</span>
-                </>
-              );
-              return file.downloadUrl ? (
-                <a
-                  key={file.id}
-                  href={file.downloadUrl}
-                  download={file.name}
-                  className="flex min-w-0 items-center gap-2 rounded-lg border border-border/70 bg-background/65 px-2.5 py-2 hover:bg-background"
-                >
-                  {content}
-                </a>
-              ) : (
-                <div
-                  key={file.id}
-                  className="flex min-w-0 items-center gap-2 rounded-lg border border-border/70 bg-background/65 px-2.5 py-2"
-                >
-                  {content}
-                </div>
-              );
-            })}
-          </div>
-        )}
         {regularImages.length > 0 && (
           <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
-            {regularImages.map((image) => (
+            {regularImages.map((image: NonNullable<TimelineMessage["attachments"]>[number]) => (
               <div
                 key={image.id}
                 className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
@@ -1752,7 +1720,7 @@ const UserMessageElementContextChip = memo(function UserMessageElementContextChi
 
 function UserMessagePreviewAnnotationCard(props: {
   annotation: ParsedPreviewAnnotation;
-  image: ChatImageAttachment | null;
+  image: NonNullable<TimelineMessage["attachments"]>[number] | null;
 }) {
   const ctx = use(TimelineRowCtx);
   return (

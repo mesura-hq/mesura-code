@@ -12,6 +12,7 @@ import type {
 } from "@t3tools/contracts";
 import {
   ApprovalRequestId,
+  EnvironmentId,
   EventId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -296,9 +297,8 @@ function makeProviderServiceLayer() {
         Layer.provide(providerAdapterLayer),
         Layer.provide(directoryLayer),
         Layer.provide(defaultServerSettingsLayer),
-        Layer.provideMerge(serverConfigTestLayer),
+        Layer.provide(serverConfigTestLayer),
         Layer.provideMerge(AnalyticsService.layerTest),
-        Layer.provide(NodeServices.layer),
         Layer.provide(
           Layer.succeed(
             ProviderEventLoggers.ProviderEventLoggers,
@@ -944,7 +944,6 @@ routing.layer("ProviderServiceLive routing", (it) => {
   it.effect("appends attachment file paths to the turn input text", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService.ProviderService;
-      const config = yield* ServerConfig.ServerConfig;
 
       const session = yield* provider.startSession(asThreadId("thread-attach"), {
         provider: ProviderDriverKind.make("codex"),
@@ -961,10 +960,6 @@ routing.layer("ProviderServiceLive routing", (it) => {
         mimeType: "image/png",
         sizeBytes: 123,
       };
-      const attachmentPath = NodePath.join(config.attachmentsDir, `${attachment.id}.png`);
-      NodeFS.mkdirSync(NodePath.dirname(attachmentPath), { recursive: true });
-      NodeFS.writeFileSync(attachmentPath, "image");
-      yield* Effect.addFinalizer(() => Effect.sync(() => NodeFS.rmSync(attachmentPath)));
 
       routing.codex.sendTurn.mockClear();
       yield* provider.sendTurn({
@@ -990,118 +985,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
       const imageOnlyInput = routing.codex.sendTurn.mock.calls[0]?.[0] as ProviderSendTurnInput;
       assert.equal(imageOnlyInput.input?.startsWith('[Attached image "screenshot.png"'), true);
 
-      const fileAttachment = {
-        type: "file" as const,
-        id: "thread-attach-12345678-1234-1234-1234-123456789abd",
-        name: "recording.mp4",
-        mimeType: "video/mp4",
-        sizeBytes: 5,
-      };
-      const filePath = NodePath.join(config.attachmentsDir, `${fileAttachment.id}.bin`);
-      NodeFS.writeFileSync(filePath, "video");
-      yield* Effect.addFinalizer(() => Effect.sync(() => NodeFS.rmSync(filePath)));
-      routing.codex.sendTurn.mockClear();
-      yield* provider.sendTurn({
-        threadId: session.threadId,
-        input: "inspect the recording",
-        attachments: [fileAttachment],
-      });
-      const fileInput = routing.codex.sendTurn.mock.calls[0]?.[0] as ProviderSendTurnInput;
-      assert.include(fileInput.input ?? "", `[Attached file "recording.mp4" is saved at: `);
-      assert.equal(fileInput.input?.endsWith(`${fileAttachment.id}.bin]`), true);
-
       yield* provider.stopSession({ threadId: session.threadId });
-    }),
-  );
-
-  it.effect("rejects a missing generic attachment before calling an adapter", () =>
-    Effect.gen(function* () {
-      const provider = yield* ProviderService.ProviderService;
-      const session = yield* provider.startSession(asThreadId("thread-missing-file"), {
-        provider: ProviderDriverKind.make("codex"),
-        providerInstanceId: codexInstanceId,
-        threadId: asThreadId("thread-missing-file"),
-        cwd: "/tmp/project",
-        runtimeMode: "full-access",
-      });
-      routing.codex.sendTurn.mockClear();
-
-      const result = yield* provider
-        .sendTurn({
-          threadId: session.threadId,
-          input: "inspect the missing file",
-          attachments: [
-            {
-              type: "file",
-              id: "thread-missing-file-00000000-0000-4000-8000-000000000001",
-              name: "missing.pdf",
-              mimeType: "application/pdf",
-              sizeBytes: 10,
-            },
-          ],
-        })
-        .pipe(Effect.result);
-
-      assert.equal(result._tag, "Failure");
-      assert.equal(routing.codex.sendTurn.mock.calls.length, 0);
-    }),
-  );
-
-  it.effect("rejects symlinked and unreadable attachments before calling an adapter", () =>
-    Effect.gen(function* () {
-      const provider = yield* ProviderService.ProviderService;
-      const config = yield* ServerConfig.ServerConfig;
-      const session = yield* provider.startSession(asThreadId("thread-unsafe-files"), {
-        provider: ProviderDriverKind.make("codex"),
-        providerInstanceId: codexInstanceId,
-        threadId: asThreadId("thread-unsafe-files"),
-        cwd: "/tmp/project",
-        runtimeMode: "full-access",
-      });
-      const targetDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "provider-file-target-"));
-      const targetPath = NodePath.join(targetDir, "target.pdf");
-      NodeFS.writeFileSync(targetPath, "target");
-      const symlinkAttachment = {
-        type: "file" as const,
-        id: "thread-unsafe-files-00000000-0000-4000-8000-000000000001",
-        name: "linked.pdf",
-        mimeType: "application/pdf",
-        sizeBytes: 6,
-      };
-      const symlinkPath = NodePath.join(config.attachmentsDir, `${symlinkAttachment.id}.bin`);
-      NodeFS.mkdirSync(config.attachmentsDir, { recursive: true });
-      NodeFS.symlinkSync(targetPath, symlinkPath);
-      const unreadableAttachment = {
-        type: "file" as const,
-        id: "thread-unsafe-files-00000000-0000-4000-8000-000000000002",
-        name: "unreadable.pdf",
-        mimeType: "application/pdf",
-        sizeBytes: 6,
-      };
-      const unreadablePath = NodePath.join(config.attachmentsDir, `${unreadableAttachment.id}.bin`);
-      NodeFS.writeFileSync(unreadablePath, "secret");
-      NodeFS.chmodSync(unreadablePath, 0o000);
-      yield* Effect.addFinalizer(() =>
-        Effect.sync(() => {
-          NodeFS.chmodSync(unreadablePath, 0o600);
-          NodeFS.rmSync(symlinkPath, { force: true });
-          NodeFS.rmSync(unreadablePath, { force: true });
-          NodeFS.rmSync(targetDir, { recursive: true, force: true });
-        }),
-      );
-
-      for (const attachment of [symlinkAttachment, unreadableAttachment]) {
-        routing.codex.sendTurn.mockClear();
-        const result = yield* provider
-          .sendTurn({
-            threadId: session.threadId,
-            input: "inspect the unsafe file",
-            attachments: [attachment],
-          })
-          .pipe(Effect.result);
-        assert.equal(result._tag, "Failure");
-        assert.equal(routing.codex.sendTurn.mock.calls.length, 0);
-      }
     }),
   );
 

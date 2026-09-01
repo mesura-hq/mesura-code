@@ -41,7 +41,6 @@ import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
-import { selectNativeImageAttachments } from "../attachmentDelivery.ts";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import {
@@ -971,9 +970,8 @@ export function makeCursorAdapter(
           if (input.input?.trim()) {
             promptParts.push({ type: "text", text: input.input.trim() });
           }
-          const nativeImageAttachments = selectNativeImageAttachments(input.attachments);
-          if (nativeImageAttachments.length > 0) {
-            for (const attachment of nativeImageAttachments) {
+          if (input.attachments && input.attachments.length > 0) {
+            for (const attachment of input.attachments) {
               const attachmentPath = resolveAttachmentPath({
                 attachmentsDir: serverConfig.attachmentsDir,
                 attachment,

@@ -1,6 +1,5 @@
 import Mime from "@effect/platform-node/Mime";
 import {
-  ATTACHMENT_UPLOAD_ROUTE_PREFIX,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   EnvironmentHttpApi,
@@ -29,8 +28,6 @@ import { OtlpTracer } from "effect/unstable/observability";
 
 import * as ServerConfig from "./config.ts";
 import { ASSET_ROUTE_PREFIX, resolveAsset } from "./assets/AssetAccess.ts";
-import { handleAttachmentUploadRequest } from "./attachmentUploadHttp.ts";
-import { type AttachmentUploadStore, makeAttachmentUploadStore } from "./attachmentUploadStore.ts";
 import * as BrowserTraceCollector from "./observability/BrowserTraceCollector.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import { traceRelayRequest } from "./cloud/traceRelayRequest.ts";
@@ -41,11 +38,7 @@ import {
   failEnvironmentInternal,
 } from "./auth/http.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
-import {
-  browserApiCorsAllowedHeaders,
-  browserApiCorsAllowedMethods,
-  browserApiCorsExposedHeaders,
-} from "./httpCors.ts";
+import { browserApiCorsAllowedHeaders, browserApiCorsAllowedMethods } from "./httpCors.ts";
 
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
@@ -90,7 +83,6 @@ export const browserApiCorsLayer = Layer.unwrap(
         : {}),
       allowedMethods: browserApiCorsAllowedMethods,
       allowedHeaders: browserApiCorsAllowedHeaders,
-      exposedHeaders: browserApiCorsExposedHeaders,
       maxAge: 600,
     });
   }),
@@ -205,41 +197,6 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
     }),
   ),
 );
-
-export const attachmentUploadRouteLayer = Layer.unwrap(
-  Effect.gen(function* () {
-    const config = yield* ServerConfig.ServerConfig;
-    const store = yield* makeAttachmentUploadStore({
-      uploadsDir: config.attachmentUploadsDir,
-      attachmentsDir: config.attachmentsDir,
-    });
-    const handler = handleAuthenticatedAttachmentUploadRequest(store);
-    return Layer.mergeAll(
-      HttpRouter.add("OPTIONS", ATTACHMENT_UPLOAD_ROUTE_PREFIX, handler),
-      HttpRouter.add("POST", ATTACHMENT_UPLOAD_ROUTE_PREFIX, handler),
-      // Effect's router dispatches HEAD through the matching GET route while
-      // preserving request.method, so the handler still executes HEAD logic.
-      HttpRouter.add("GET", `${ATTACHMENT_UPLOAD_ROUTE_PREFIX}/*`, handler),
-      HttpRouter.add("PATCH", `${ATTACHMENT_UPLOAD_ROUTE_PREFIX}/*`, handler),
-      HttpRouter.add("DELETE", `${ATTACHMENT_UPLOAD_ROUTE_PREFIX}/*`, handler),
-    );
-  }),
-);
-
-export const handleAuthenticatedAttachmentUploadRequest = (store: AttachmentUploadStore) =>
-  Effect.gen(function* () {
-    const request = yield* HttpServerRequest.HttpServerRequest;
-    if (request.method !== "OPTIONS") {
-      yield* authenticateRawRouteWithScope(AuthOrchestrationOperateScope);
-    }
-    return yield* handleAttachmentUploadRequest({ request, store });
-  }).pipe(
-    Effect.catchTags({
-      EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
-      EnvironmentInternalError: HttpServerRespondable.toResponse,
-      EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
-    }),
-  );
 
 export const assetRouteLayer = HttpRouter.add(
   "GET",

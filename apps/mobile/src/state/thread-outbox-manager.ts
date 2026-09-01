@@ -35,7 +35,6 @@ export interface ThreadOutboxManagerOptions {
   readonly registry: AtomRegistry.AtomRegistry;
   readonly storage: ThreadOutboxStorage;
   readonly warn?: (message: string, error: unknown) => void;
-  readonly onMessagesRemoved?: (messages: ReadonlyArray<QueuedThreadMessage>) => Promise<void>;
 }
 
 export function createThreadOutboxManager(options: ThreadOutboxManagerOptions) {
@@ -129,10 +128,10 @@ export function createThreadOutboxManager(options: ThreadOutboxManagerOptions) {
   // flush can never resurrect it. Returns whether the message was updated.
   const update = (message: QueuedThreadMessage): Promise<boolean> =>
     serialize(async () => {
-      const previous = currentMessages().find(
+      const exists = currentMessages().some(
         (candidate) => candidate.messageId === message.messageId,
       );
-      if (!previous) {
+      if (!exists) {
         return false;
       }
       try {
@@ -150,13 +149,6 @@ export function createThreadOutboxManager(options: ThreadOutboxManagerOptions) {
         ...currentMessages().filter((candidate) => candidate.messageId !== message.messageId),
         message,
       ]);
-      const retainedAttachmentIds = new Set(message.attachments.map((attachment) => attachment.id));
-      const removedAttachments = previous.attachments.filter(
-        (attachment) => !retainedAttachmentIds.has(attachment.id),
-      );
-      if (removedAttachments.length > 0) {
-        await options.onMessagesRemoved?.([{ ...previous, attachments: removedAttachments }]);
-      }
       return true;
     });
 
@@ -176,7 +168,6 @@ export function createThreadOutboxManager(options: ThreadOutboxManagerOptions) {
       setMessages(
         currentMessages().filter((candidate) => candidate.messageId !== message.messageId),
       );
-      await options.onMessagesRemoved?.([message]);
     });
 
   const clearEnvironment = (environmentId: EnvironmentId): Promise<void> =>
@@ -222,9 +213,6 @@ export function createThreadOutboxManager(options: ThreadOutboxManagerOptions) {
       );
 
       setMessages(allMessages.filter((message) => !removedMessageIds.has(message.messageId)));
-      await options.onMessagesRemoved?.(
-        allMessages.filter((message) => removedMessageIds.has(message.messageId)),
-      );
     });
 
   return {

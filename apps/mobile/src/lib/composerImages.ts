@@ -2,37 +2,16 @@ import {
   isProviderSendTurnSupportedImageMimeType,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
-  PROVIDER_SEND_TURN_MAX_FILE_BYTES,
-  type AttachmentUploadId,
   type UploadChatImageAttachment,
 } from "@t3tools/contracts";
 import { estimateBase64ByteSize } from "./base64";
 import { beginForegroundHandoff } from "./foreground-handoff";
 import { uuidv4 } from "./uuid";
 
-export interface DraftComposerRemoteUpload {
-  readonly uploadId: AttachmentUploadId;
-  readonly uploadPath: string;
-  readonly completed: boolean;
-}
-
 export interface DraftComposerImageAttachment extends UploadChatImageAttachment {
   readonly id: string;
   readonly previewUri: string;
-  readonly remoteUpload?: DraftComposerRemoteUpload;
 }
-
-export interface DraftComposerFileAttachment {
-  readonly id: string;
-  readonly type: "file";
-  readonly name: string;
-  readonly mimeType: string;
-  readonly sizeBytes: number;
-  readonly uri: string;
-  readonly remoteUpload?: DraftComposerRemoteUpload;
-}
-
-export type DraftComposerAttachment = DraftComposerImageAttachment | DraftComposerFileAttachment;
 
 /** Wire shape for startTurn: pure uploads without client draft id / previewUri. */
 export function toUploadChatImageAttachments(
@@ -47,87 +26,7 @@ export function toUploadChatImageAttachments(
   }));
 }
 
-const OWNED_COMPOSER_ATTACHMENT_DIRECTORY = "composer-attachments";
 const OWNED_PASTED_IMAGE_DIRECTORY = "t3-composer-paste";
-
-function safeAttachmentFileName(name: string): string {
-  const normalized = name.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
-  return normalized || "attachment.bin";
-}
-
-export async function pickComposerAttachments(input: { readonly existingCount: number }): Promise<{
-  readonly attachments: ReadonlyArray<DraftComposerAttachment>;
-  readonly error: string | null;
-}> {
-  const remainingSlots = PROVIDER_SEND_TURN_MAX_ATTACHMENTS - input.existingCount;
-  if (remainingSlots <= 0) {
-    return {
-      attachments: [],
-      error: `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} files per message.`,
-    };
-  }
-  const { Directory, File, Paths } = await import("expo-file-system");
-  const endHandoff = beginForegroundHandoff();
-  const pickMultipleFiles = () => File.pickFileAsync({ multipleFiles: true, mimeTypes: ["*/*"] });
-  let picked: Awaited<ReturnType<typeof pickMultipleFiles>> | null = null;
-  try {
-    picked = await pickMultipleFiles();
-  } catch (error) {
-    return {
-      attachments: [],
-      error: error instanceof Error ? error.message : "The file picker is unavailable.",
-    };
-  } finally {
-    endHandoff();
-  }
-  if (picked === null || picked.canceled) {
-    return { attachments: [], error: null };
-  }
-  const directory = new Directory(Paths.document, OWNED_COMPOSER_ATTACHMENT_DIRECTORY);
-  directory.create({ idempotent: true, intermediates: true });
-  const attachments: DraftComposerAttachment[] = [];
-  let error: string | null = null;
-  for (const source of picked.result.slice(0, remainingSlots)) {
-    const sizeBytes = source.size;
-    const mimeType = source.type || "application/octet-stream";
-    const name = source.name || "attachment.bin";
-    const maximum = mimeType.startsWith("image/")
-      ? PROVIDER_SEND_TURN_MAX_IMAGE_BYTES
-      : PROVIDER_SEND_TURN_MAX_FILE_BYTES;
-    if (sizeBytes <= 0 || sizeBytes > maximum) {
-      error = `'${name}' exceeds the attachment limit.`;
-      continue;
-    }
-    const id = uuidv4();
-    const ownedFile = new File(directory, `${id}-${safeAttachmentFileName(name)}`);
-    try {
-      await source.copy(ownedFile, { overwrite: true });
-      if (mimeType.startsWith("image/") && isProviderSendTurnSupportedImageMimeType(mimeType)) {
-        const base64 = await ownedFile.base64();
-        attachments.push({
-          id,
-          type: "image",
-          name,
-          mimeType,
-          sizeBytes,
-          dataUrl: `data:${mimeType};base64,${base64}`,
-          previewUri: ownedFile.uri,
-        });
-      } else {
-        attachments.push({ id, type: "file", name, mimeType, sizeBytes, uri: ownedFile.uri });
-      }
-    } catch {
-      if (ownedFile.exists) ownedFile.delete();
-      error = `Could not copy '${name}' into the draft.`;
-    }
-  }
-  if (picked.result.length > remainingSlots) {
-    error = `Only the first ${remainingSlots} selected files were attached.`;
-  }
-  return { attachments, error };
-}
-
-export { removeOwnedComposerAttachment } from "./composerAttachmentFiles";
 
 async function loadImagePicker() {
   try {

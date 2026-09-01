@@ -4,31 +4,12 @@ import { appAtomRegistry } from "./atom-registry";
 import { createThreadOutboxManager } from "./thread-outbox-manager";
 import type { QueuedThreadMessage } from "./thread-outbox-model";
 import { expoThreadOutboxStorage, flushThreadOutboxWrites } from "./thread-outbox-storage";
-import { removeOwnedComposerAttachment } from "../lib/composerAttachmentFiles";
-import { cancelMobileComposerAttachmentUploads } from "../lib/attachmentUpload";
-import { clearAttachmentUploadProgress } from "./attachment-upload-progress";
 
 export * from "./thread-outbox-model";
 
 export const threadOutboxManager = createThreadOutboxManager({
   registry: appAtomRegistry,
   storage: expoThreadOutboxStorage,
-  onMessagesRemoved: async (messages) => {
-    clearAttachmentUploadProgress(
-      messages.flatMap((message) => message.attachments.map((attachment) => attachment.id)),
-    );
-    await Promise.allSettled(
-      messages.map((message) =>
-        cancelMobileComposerAttachmentUploads({
-          environmentId: message.environmentId,
-          attachments: message.attachments,
-        }),
-      ),
-    );
-    await Promise.allSettled(
-      messages.flatMap((message) => message.attachments).map(removeOwnedComposerAttachment),
-    );
-  },
 });
 
 /**
@@ -60,8 +41,8 @@ export function updateThreadOutboxMessage(message: QueuedThreadMessage): Promise
   return threadOutboxManager.update(message);
 }
 
-export async function removeThreadOutboxMessage(message: QueuedThreadMessage): Promise<void> {
-  await threadOutboxManager.remove(message);
+export function removeThreadOutboxMessage(message: QueuedThreadMessage): Promise<void> {
+  return threadOutboxManager.remove(message);
 }
 
 export function clearThreadOutboxEnvironment(environmentId: EnvironmentId): Promise<void> {

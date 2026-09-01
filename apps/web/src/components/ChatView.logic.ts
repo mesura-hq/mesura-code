@@ -208,23 +208,10 @@ export function revokeUserMessagePreviewUrls(message: ChatMessage): void {
     return;
   }
   for (const attachment of message.attachments) {
-    revokeBlobPreviewUrl(
-      attachment.type === "image" ? attachment.previewUrl : attachment.downloadUrl,
-    );
-  }
-}
-
-export function revokeUserMessageImagePreviewUrls(message: ChatMessage): void {
-  if (message.role !== "user" || !message.attachments) return;
-  for (const attachment of message.attachments) {
-    if (attachment.type === "image") revokeBlobPreviewUrl(attachment.previewUrl);
-  }
-}
-
-export function revokeUserMessageFileDownloadUrls(message: ChatMessage): void {
-  if (message.role !== "user" || !message.attachments) return;
-  for (const attachment of message.attachments) {
-    if (attachment.type === "file") revokeBlobPreviewUrl(attachment.downloadUrl);
+    if (attachment.type !== "image") {
+      continue;
+    }
+    revokeBlobPreviewUrl(attachment.previewUrl);
   }
 }
 

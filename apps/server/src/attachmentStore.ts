@@ -63,8 +63,6 @@ export function attachmentRelativePath(attachment: ChatAttachment): string {
       });
       return `${attachment.id}${extension}`;
     }
-    case "file":
-      return `${attachment.id}.bin`;
   }
 }
 

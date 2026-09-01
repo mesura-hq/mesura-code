@@ -223,7 +223,6 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
       const { prompt, outputSchema } = buildBranchNamePrompt({
         message: input.message,
         attachments: input.attachments,
-        attachmentPaths: input.attachmentPaths,
       });
 
       const generated = yield* runCursorJson({
@@ -245,7 +244,6 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
         message: input.message,
         previousTitle: input.previousTitle,
         attachments: input.attachments,
-        attachmentPaths: input.attachmentPaths,
       });
 
       const generated = yield* runCursorJson({

@@ -26,7 +26,6 @@ import {
 } from "@t3tools/contracts";
 
 import { ServerConfig } from "../../config.ts";
-import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { grokPromptSettlementBelongsToContext, makeGrokAdapter } from "./GrokAdapter.ts";
 const decodeGrokSettings = Schema.decodeSync(GrokSettings);
 
@@ -124,74 +123,6 @@ it("requires a settlement to match the live Grok turn", () => {
 });
 
 it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
-  it.effect("keeps a generic video out of Grok image content blocks", () =>
-    Effect.gen(function* () {
-      const threadId = ThreadId.make("grok-generic-video");
-      const tempDir = yield* Effect.promise(() =>
-        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "grok-generic-video-")),
-      );
-      const requestLogPath = NodePath.join(tempDir, "requests.ndjson");
-      const wrapperPath = yield* Effect.promise(() =>
-        makeMockGrokWrapper({ T3_ACP_REQUEST_LOG_PATH: requestLogPath }),
-      );
-      yield* Effect.addFinalizer(() =>
-        Effect.promise(() =>
-          Promise.all([
-            NodeFSP.rm(tempDir, { recursive: true, force: true }),
-            NodeFSP.rm(NodePath.dirname(wrapperPath), { recursive: true, force: true }),
-          ]),
-        ).pipe(Effect.asVoid),
-      );
-      const adapter = yield* makeTestAdapter(wrapperPath);
-      const { attachmentsDir } = yield* ServerConfig;
-      yield* adapter.startSession({
-        threadId,
-        provider: ProviderDriverKind.make("grok"),
-        cwd: process.cwd(),
-        runtimeMode: "full-access",
-      });
-      const image = {
-        type: "image" as const,
-        id: "grok-generic-video-00000000-0000-4000-8000-000000000002",
-        name: "reference.png",
-        mimeType: "image/png",
-        sizeBytes: 4,
-      };
-      const imagePath = NodePath.join(attachmentsDir, attachmentRelativePath(image));
-      yield* Effect.promise(() =>
-        NodeFSP.mkdir(NodePath.dirname(imagePath), { recursive: true }).then(() =>
-          NodeFSP.writeFile(imagePath, new Uint8Array([1, 2, 3, 4])),
-        ),
-      );
-
-      yield* adapter.sendTurn({
-        threadId,
-        input: "[Attached file recording.mp4 is saved at: /tmp/recording.bin]",
-        attachments: [
-          {
-            type: "file",
-            id: "grok-generic-video-00000000-0000-4000-8000-000000000001",
-            name: "recording.mp4",
-            mimeType: "video/mp4",
-            sizeBytes: 10,
-          },
-          image,
-        ],
-      });
-
-      const requests = yield* Effect.promise(() => readJsonLines(requestLogPath));
-      const promptRequest = requests.find((request) => request.method === "session/prompt");
-      assert.isDefined(promptRequest);
-      // @effect-diagnostics-next-line preferSchemaOverJson:off
-      const serializedPrompt = JSON.stringify(promptRequest);
-      assert.include(serializedPrompt, '"type":"image"');
-      assert.include(serializedPrompt, '"mimeType":"image/png"');
-      assert.notInclude(serializedPrompt, "video/mp4");
-      assert.include(serializedPrompt, "/tmp/recording.bin");
-      yield* adapter.stopSession(threadId);
-    }),
-  );
-
   it.effect("starts a session and maps mock ACP prompt flow to runtime events", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("grok-mock-thread");

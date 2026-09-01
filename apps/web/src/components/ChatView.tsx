@@ -329,13 +329,12 @@ import {
   PullRequestDialogState,
   cloneComposerImageForRetry,
   deriveLockedProvider,
+  readFileAsDataUrl,
   reconcileMountedTerminalThreadIds,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
-  revokeUserMessageImagePreviewUrls,
-  revokeUserMessageFileDownloadUrls,
   shouldWriteThreadErrorToCurrentServerThread,
   startNewThreadForProject,
   waitForStartedServerThread,
@@ -346,8 +345,6 @@ import { useComposerHandleContext } from "../composerHandleContext";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 import { RightPanelSheet } from "./RightPanelSheet";
 import { previewEnvironment } from "../state/preview";
-import { verifyComposerFileUpload } from "../lib/attachmentUpload";
-import { failedAttachmentIdsFromSettled } from "./chat/composerAttachments";
 import { useAtomCommand } from "../state/use-atom-command";
 import { Button } from "./ui/button";
 import {
@@ -2476,10 +2473,7 @@ function ChatViewContent(props: ChatViewProps) {
         ...message,
         attachments: message.attachments.map((attachment) => {
           const previewUrl = serverAttachmentUrlById.get(attachment.id);
-          if (!previewUrl) return attachment;
-          return attachment.type === "image"
-            ? { ...attachment, previewUrl }
-            : { ...attachment, downloadUrl: previewUrl };
+          return previewUrl ? { ...attachment, previewUrl } : attachment;
         }),
       };
     });
@@ -4164,7 +4158,6 @@ function ChatViewContent(props: ChatViewProps) {
     }, 0);
     for (const removedMessage of removedMessages) {
       const previewUrls = collectUserMessageBlobPreviewUrls(removedMessage);
-      revokeUserMessageFileDownloadUrls(removedMessage);
       if (previewUrls.length > 0) {
         handoffAttachmentPreviews(removedMessage.id, previewUrls);
         continue;
@@ -5174,7 +5167,6 @@ function ChatViewContent(props: ChatViewProps) {
     }
     const {
       images: sendContextImages,
-      fileUploads: sendContextFileUploads,
       terminalContexts: composerTerminalContexts,
       elementContexts: composerElementContexts,
       previewAnnotations: sendContextPreviewAnnotations,
@@ -5185,20 +5177,6 @@ function ChatViewContent(props: ChatViewProps) {
       selectedPromptEffort: ctxSelectedPromptEffort,
       selectedModelSelection: ctxSelectedModelSelection,
     } = sendCtx;
-    if (
-      sendContextFileUploads.some(
-        (attachment) => attachment.status !== "ready" || !attachment.uploadId,
-      )
-    ) {
-      toastManager.add(
-        stackedThreadToast({
-          type: "warning",
-          title: "Attachments are not ready",
-          description: "Wait for uploads to finish, or retry or remove failed files.",
-        }),
-      );
-      return;
-    }
     const composerImages =
       directAnnotation?.image &&
       !sendContextImages.some((image) => image.id === directAnnotation.image?.id)
@@ -5227,7 +5205,7 @@ function ChatViewContent(props: ChatViewProps) {
       hasSendableContent,
     } = deriveComposerSendState({
       prompt: promptForSend,
-      imageCount: sendContextFileUploads.length,
+      imageCount: composerImages.length,
       terminalContexts: composerTerminalContexts,
       elementContextCount:
         composerElementContexts.length +
@@ -5263,7 +5241,6 @@ function ChatViewContent(props: ChatViewProps) {
     const standaloneSlashCommand =
       settings.planModeEnabled &&
       composerImages.length === 0 &&
-      sendContextFileUploads.length === 0 &&
       sendableComposerTerminalContexts.length === 0 &&
       composerElementContexts.length === 0 &&
       composerPreviewAnnotations.length === 0 &&
@@ -5320,7 +5297,6 @@ function ChatViewContent(props: ChatViewProps) {
     }
 
     const composerImagesSnapshot = [...composerImages];
-    const composerFileUploadsSnapshot = [...sendContextFileUploads];
     const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts];
     const composerElementContextsSnapshot = [...composerElementContexts];
     const composerPreviewAnnotationsSnapshot = [...composerPreviewAnnotations];
@@ -5349,32 +5325,6 @@ function ChatViewContent(props: ChatViewProps) {
     }
 
     sendInFlightRef.current = true;
-    const attachmentVerificationResults = await Promise.allSettled(
-      composerFileUploadsSnapshot.map((attachment) =>
-        attachment.uploadPath
-          ? verifyComposerFileUpload({ environmentId, uploadPath: attachment.uploadPath })
-          : Promise.reject(new Error("The attachment has no upload path.")),
-      ),
-    );
-    const failedAttachmentIds = failedAttachmentIdsFromSettled(
-      composerFileUploadsSnapshot,
-      attachmentVerificationResults,
-    );
-    if (failedAttachmentIds.length > 0) {
-      composerRef.current?.markFileUploadsFailed(
-        failedAttachmentIds,
-        "The staged upload expired or is unavailable. Retry this attachment.",
-      );
-      sendInFlightRef.current = false;
-      toastManager.add(
-        stackedThreadToast({
-          type: "warning",
-          title: "An attachment needs to be uploaded again",
-          description: "Retry the failed attachment. Other ready attachments were preserved.",
-        }),
-      );
-      return;
-    }
     if (isDraftHeroState && activeThreadKey) {
       let resolveDockStarted: (() => void) | undefined;
       const dockStarted = new Promise<void>((resolve) => {
@@ -5394,34 +5344,23 @@ function ChatViewContent(props: ChatViewProps) {
 
     const messageIdForSend = newMessageId();
     const messageCreatedAt = new Date().toISOString();
-    const turnAttachmentsPromise = Promise.resolve(
-      composerFileUploadsSnapshot.map((attachment) => {
-        if (!attachment.uploadId) {
-          throw new Error(`Attachment '${attachment.name}' has no completed upload.`);
-        }
-        return { type: "uploaded" as const, uploadId: attachment.uploadId };
-      }),
-    );
-    const optimisticAttachments = [
-      ...composerImagesSnapshot.map((image) => ({
+    const turnAttachmentsPromise = Promise.all(
+      composerImagesSnapshot.map(async (image) => ({
         type: "image" as const,
-        id: image.id,
         name: image.name,
         mimeType: image.mimeType,
         sizeBytes: image.sizeBytes,
-        previewUrl: image.previewUrl,
+        dataUrl: await readFileAsDataUrl(image.file),
       })),
-      ...composerFileUploadsSnapshot
-        .filter((attachment) => attachment.kind === "file")
-        .map((attachment) => ({
-          type: "file" as const,
-          id: attachment.id,
-          name: attachment.name,
-          mimeType: attachment.mimeType,
-          sizeBytes: attachment.sizeBytes,
-          ...(attachment.objectUrl ? { downloadUrl: attachment.objectUrl } : {}),
-        })),
-    ];
+    );
+    const optimisticAttachments = composerImagesSnapshot.map((image) => ({
+      type: "image" as const,
+      id: image.id,
+      name: image.name,
+      mimeType: image.mimeType,
+      sizeBytes: image.sizeBytes,
+      previewUrl: image.previewUrl,
+    }));
     // Sending always returns to the live edge. The new row becomes the
     // anchored end-space target so it lands near the top while the response
     // streams into the reserved space below it.
@@ -5479,8 +5418,6 @@ function ChatViewContent(props: ChatViewProps) {
     if (!titleSeed) {
       if (firstComposerImageName) {
         titleSeed = `Image: ${firstComposerImageName}`;
-      } else if (composerFileUploadsSnapshot[0]) {
-        titleSeed = `File: ${composerFileUploadsSnapshot[0].name}`;
       } else if (composerTerminalContextsSnapshot.length > 0) {
         titleSeed = formatTerminalContextLabel(composerTerminalContextsSnapshot[0]!);
       } else if (composerElementContextsSnapshot.length > 0) {
@@ -5587,9 +5524,6 @@ function ChatViewContent(props: ChatViewProps) {
         failure = startResult;
       } else {
         turnStartSucceeded = true;
-        composerRef.current?.clearFileUploads(
-          composerFileUploadsSnapshot.map((attachment) => attachment.id),
-        );
         acknowledgeActiveThreadWoke();
       }
     }
@@ -5608,7 +5542,7 @@ function ChatViewContent(props: ChatViewProps) {
         setOptimisticUserMessages((existing) => {
           const removed = existing.filter((message) => message.id === messageIdForSend);
           for (const message of removed) {
-            revokeUserMessageImagePreviewUrls(message);
+            revokeUserMessagePreviewUrls(message);
           }
           const next = existing.filter((message) => message.id !== messageIdForSend);
           return next.length === existing.length ? existing : next;

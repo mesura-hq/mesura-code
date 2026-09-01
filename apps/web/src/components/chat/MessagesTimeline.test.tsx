@@ -480,33 +480,6 @@ describe("MessagesTimeline", () => {
     expect(onAnchorReady).toHaveBeenCalledWith(secondEntry.message.id, 1);
   });
 
-  it("renders an optimistic generic file as a download", () => {
-    const entry = {
-      ...buildUserTimelineEntry("Inspect this recording."),
-      message: {
-        ...buildUserTimelineEntry("Inspect this recording.").message,
-        attachments: [
-          {
-            type: "file" as const,
-            id: "attachment-video",
-            name: "recording.mp4",
-            mimeType: "video/mp4",
-            sizeBytes: 42,
-            downloadUrl: "blob:recording-preview",
-          },
-        ],
-      },
-    };
-
-    const markup = renderToStaticMarkup(
-      <MessagesTimeline {...buildProps()} timelineEntries={[entry]} />,
-    );
-
-    expect(markup).toContain('href="blob:recording-preview"');
-    expect(markup).toContain('download="recording.mp4"');
-    expect(markup).toContain("recording.mp4");
-  });
-
   it("hands end-following back to the list once the send anchor is released", () => {
     const firstEntry = buildUserTimelineEntry("First prompt.");
     const secondEntry = {

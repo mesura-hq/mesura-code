@@ -26,7 +26,6 @@ import {
 } from "@t3tools/contracts";
 
 import { ServerConfig } from "../../config.ts";
-import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import type { CursorAdapterShape } from "../Services/CursorAdapter.ts";
 import { makeCursorAdapter } from "./CursorAdapter.ts";
@@ -169,77 +168,6 @@ const cursorAdapterTestLayer = it.layer(
 );
 
 cursorAdapterTestLayer("CursorAdapterLive", (it) => {
-  it.effect("keeps a generic PDF out of Cursor image content blocks", () =>
-    Effect.gen(function* () {
-      const adapter = yield* CursorAdapter;
-      const settings = yield* ServerSettingsService;
-      const { attachmentsDir } = yield* ServerConfig;
-      const threadId = ThreadId.make("cursor-generic-pdf");
-      const tempDir = yield* Effect.promise(() =>
-        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "cursor-generic-pdf-")),
-      );
-      const requestLogPath = NodePath.join(tempDir, "requests.ndjson");
-      const argvLogPath = NodePath.join(tempDir, "argv.txt");
-      const wrapperPath = yield* Effect.promise(() =>
-        makeProbeWrapper(requestLogPath, argvLogPath),
-      );
-      yield* Effect.addFinalizer(() =>
-        Effect.promise(() =>
-          Promise.all([
-            NodeFSP.rm(tempDir, { recursive: true, force: true }),
-            NodeFSP.rm(NodePath.dirname(wrapperPath), { recursive: true, force: true }),
-          ]),
-        ).pipe(Effect.asVoid),
-      );
-      yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
-      yield* adapter.startSession({
-        threadId,
-        provider: ProviderDriverKind.make("cursor"),
-        cwd: process.cwd(),
-        runtimeMode: "full-access",
-      });
-      const image = {
-        type: "image" as const,
-        id: "cursor-generic-pdf-00000000-0000-4000-8000-000000000002",
-        name: "reference.png",
-        mimeType: "image/png",
-        sizeBytes: 4,
-      };
-      const imagePath = NodePath.join(attachmentsDir, attachmentRelativePath(image));
-      yield* Effect.promise(() =>
-        NodeFSP.mkdir(NodePath.dirname(imagePath), { recursive: true }).then(() =>
-          NodeFSP.writeFile(imagePath, new Uint8Array([1, 2, 3, 4])),
-        ),
-      );
-
-      yield* adapter.sendTurn({
-        threadId,
-        input: "[Attached file requirements.pdf is saved at: /tmp/requirements.bin]",
-        attachments: [
-          {
-            type: "file",
-            id: "cursor-generic-pdf-00000000-0000-4000-8000-000000000001",
-            name: "requirements.pdf",
-            mimeType: "application/pdf",
-            sizeBytes: 10,
-          },
-          image,
-        ],
-      });
-
-      const requests = yield* Effect.promise(() => readJsonLines(requestLogPath));
-      const promptRequest = requests.find((request) => request.method === "session/prompt");
-      assert.isDefined(promptRequest);
-      // @effect-diagnostics-next-line preferSchemaOverJson:off
-      const serializedPrompt = JSON.stringify(promptRequest);
-      assert.include(serializedPrompt, '"type":"image"');
-      assert.include(serializedPrompt, '"mimeType":"image/png"');
-      assert.notInclude(serializedPrompt, "application/pdf");
-      assert.include(serializedPrompt, "/tmp/requirements.bin");
-      yield* adapter.stopSession(threadId);
-    }),
-  );
-
   it.effect("starts a session and maps mock ACP prompt flow to runtime events", () =>
     Effect.gen(function* () {
       const adapter = yield* CursorAdapter;

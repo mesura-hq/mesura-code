@@ -126,52 +126,23 @@ it.layer(GrokTextGenerationTestLayer)("GrokTextGeneration", (it) => {
   });
 
   it.effect("extracts the JSON object when Grok wraps it in conversational text", () =>
-    Effect.gen(function* () {
-      const requestLogDir = NodeFS.mkdtempSync(
-        NodePath.join(NodeOS.tmpdir(), "t3code-grok-title-path-"),
-      );
-      const requestLogPath = NodePath.join(requestLogDir, "requests.ndjson");
-      yield* Effect.addFinalizer(() =>
-        Effect.sync(() => NodeFS.rmSync(requestLogDir, { recursive: true, force: true })),
-      );
-      return yield* withFakeAcpGrok(
-        {
-          T3_ACP_REQUEST_LOG_PATH: requestLogPath,
-          T3_ACP_PROMPT_RESPONSE_TEXT:
-            "Sure! Here's a thread title:\n\n" +
-            // @effect-diagnostics-next-line preferSchemaOverJson:off
-            JSON.stringify({ title: "Investigate failing CI" }) +
-            "\n\nLet me know if you need anything else.",
-        },
-        (textGeneration) =>
-          Effect.gen(function* () {
-            const generated = yield* textGeneration.generateThreadTitle({
-              cwd: process.cwd(),
-              message: "the lint job is red",
-              attachments: [
-                {
-                  type: "file",
-                  id: "grok-title-file",
-                  name: "requirements.pdf",
-                  mimeType: "application/pdf",
-                  sizeBytes: 10,
-                },
-              ],
-              attachmentPaths: {
-                "grok-title-file": "/var/lib/mesura/attachments/requirements.bin",
-              },
-              modelSelection: createModelSelection(
-                ProviderInstanceId.make("grok"),
-                "grok-mock-alt",
-              ),
-            });
-            expect(generated.title).toBe("Investigate failing CI");
-            expect(NodeFS.readFileSync(requestLogPath, "utf8")).toContain(
-              "/var/lib/mesura/attachments/requirements.bin",
-            );
-          }),
-      );
-    }),
+    withFakeAcpGrok(
+      {
+        T3_ACP_PROMPT_RESPONSE_TEXT:
+          "Sure! Here's a thread title:\n\n" +
+          JSON.stringify({ title: "Investigate failing CI" }) +
+          "\n\nLet me know if you need anything else.",
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const generated = yield* textGeneration.generateThreadTitle({
+            cwd: process.cwd(),
+            message: "the lint job is red",
+            modelSelection: createModelSelection(ProviderInstanceId.make("grok"), "grok-mock-alt"),
+          });
+          expect(generated.title).toBe("Investigate failing CI");
+        }),
+    ),
   );
 
   it.effect("surfaces ACP request failures as text generation errors", () =>
