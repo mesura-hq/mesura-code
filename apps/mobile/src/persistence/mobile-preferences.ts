@@ -5,7 +5,7 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
-import type { SidebarProjectGroupingMode } from "@t3tools/contracts";
+import type { SidebarProjectGroupingMode, SidebarThreadSortOrder } from "@t3tools/contracts";
 import { MOBILE_THEME_IDS, type MobileThemeId, type MobileThemeMode } from "../lib/mobileTheme";
 
 import * as MobileDatabase from "./mobile-database";
@@ -21,6 +21,14 @@ export interface Preferences {
   readonly lightThemeId?: MobileThemeId;
   readonly darkThemeId?: MobileThemeId;
   readonly themeMode?: MobileThemeMode;
+  /**
+   * Which order the home thread list uses. Upstream holds this in component
+   * state, so it resets on every cold start; mobile has no client settings
+   * sync, so this fork stores it per device. Read through
+   * `resolveMobileThreadSortOrder`, which rejects a value that is no longer a
+   * valid order.
+   */
+  readonly threadSortOrder?: SidebarThreadSortOrder;
   readonly baseFontSize?: number;
   readonly terminalFontSize?: number | null;
   readonly markdownFontSize?: number;
@@ -91,6 +99,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     lightThemeId?: MobileThemeId;
     darkThemeId?: MobileThemeId;
     themeMode?: MobileThemeMode;
+    threadSortOrder?: SidebarThreadSortOrder;
     baseFontSize?: number;
     terminalFontSize?: number | null;
     markdownFontSize?: number;
@@ -133,6 +142,9 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     parsed.themeMode === "dark"
   ) {
     preferences.themeMode = parsed.themeMode;
+  }
+  if (parsed.threadSortOrder === "updated_at" || parsed.threadSortOrder === "created_at") {
+    preferences.threadSortOrder = parsed.threadSortOrder;
   }
   if (typeof parsed.baseFontSize === "number") preferences.baseFontSize = parsed.baseFontSize;
   if (typeof parsed.terminalFontSize === "number" || parsed.terminalFontSize === null) {

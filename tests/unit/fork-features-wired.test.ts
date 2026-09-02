@@ -92,3 +92,32 @@ it("handles the attach shortcut in the composer that owns the file input", () =>
     "the attach shortcut claims alt+a before deciding whether it can open the picker, so the keystroke can be swallowed with nothing opening",
   );
 });
+
+const THREAD_SORT_PERSISTENCE_CONSUMERS = [
+  "apps/mobile/src/features/home/HomeRouteScreen.tsx",
+  "apps/mobile/src/features/threads/ThreadNavigationSidebar.tsx",
+];
+
+for (const consumer of THREAD_SORT_PERSISTENCE_CONSUMERS) {
+  it(`persists the mobile thread sort order from ${consumer}`, () => {
+    assert.include(
+      read(consumer),
+      "useThreadSortOrderPersistence({",
+      `${consumer} no longer persists the thread sort order, so the picker works but the choice resets on the next cold start`,
+    );
+  });
+}
+
+it("keeps the mobile preference store out of home-list-options", () => {
+  // Not a style rule. `home-list-options.ts` is imported by pure-function tests,
+  // and the preference store pulls `react-native` in with it, which the test
+  // runner cannot parse — moving the persistence hook into that module fails
+  // home-list-options.test.ts and home-list-filter-menu.test.ts at collection.
+  // That is why the hook lives in its own file; do not tidy it back in.
+  const options = read("apps/mobile/src/features/home/home-list-options.ts");
+  assert.notInclude(
+    options,
+    "state/preferences",
+    "home-list-options.ts reaches the preference store, which drags react-native into modules that pure tests import",
+  );
+});

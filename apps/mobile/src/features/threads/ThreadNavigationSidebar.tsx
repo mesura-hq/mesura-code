@@ -63,6 +63,7 @@ import { SidebarHeaderActions } from "./sidebar-header-actions";
 import { SidebarFilterButton } from "./sidebar-filter-button";
 import { createSidebarHeaderItems } from "./sidebar-native-header-items";
 import { SidebarNavigationShell } from "./sidebar-navigation-shell";
+import { useThreadSortOrderPersistence } from "../home/use-thread-sort-order-persistence";
 import {
   PendingTaskListRow,
   ThreadListGroupHeader,
@@ -179,6 +180,8 @@ function ThreadNavigationSidebarPane(
   );
   const { options, setSelectedEnvironmentId, setProjectSortOrder, setThreadSortOrder } =
     useHomeListOptions(availableEnvironmentIds);
+  // Fork addition: upstream resets this order on every cold start.
+  useThreadSortOrderPersistence({ threadSortOrder: options.threadSortOrder, setThreadSortOrder });
   const searchEnvironmentIds = useMemo(
     () =>
       options.selectedEnvironmentId === null

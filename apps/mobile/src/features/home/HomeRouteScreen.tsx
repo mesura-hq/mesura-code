@@ -22,6 +22,7 @@ import { buildHomeProjectScopes } from "./homeThreadList";
 import { usePendingTaskListActions } from "./usePendingTaskListActions";
 import { useThreadListActions } from "./useThreadListActions";
 import { getConnectionAwareBrandHeaderOptions } from "./WorkspaceConnectionTitle";
+import { useThreadSortOrderPersistence } from "./use-thread-sort-order-persistence";
 
 /* ─── Route screen ───────────────────────────────────────────────────── */
 
@@ -81,6 +82,11 @@ export function HomeRouteScreen() {
     setProjectSortOrder,
     setThreadSortOrder,
   } = useHomeListOptions(availableEnvironmentIds);
+  // Fork addition: upstream resets this order on every cold start.
+  useThreadSortOrderPersistence({
+    threadSortOrder: listOptions.threadSortOrder,
+    setThreadSortOrder,
+  });
   const selectedEnvironmentId = listOptions.selectedEnvironmentId;
   const [selectedProjectKey, setSelectedProjectKey] = useState<string | null>(null);
   const projectFilterOptions = useMemo(

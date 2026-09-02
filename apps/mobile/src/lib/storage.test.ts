@@ -202,12 +202,11 @@ describe("mobile connection storage", () => {
     await expect(loadPreferences()).resolves.toEqual({});
   });
 
-  // Thread order moved off the device at the 2026-W35 sync: upstream's home list
-  // options own it now, so a stored value has to be dropped rather than loaded.
-  // A device that used the fork's per-device setting still has one on disk.
-  it("drops the removed thread order preference", async () => {
+  // Mobile has no client settings sync, so the thread order is stored per
+  // device. Upstream keeps it in component state, which resets on a cold start.
+  it("loads valid thread order preferences and drops unknown values", async () => {
     mocks.setPreferencesJson(JSON.stringify({ threadSortOrder: "created_at" }), 10);
-    await expect(loadPreferences()).resolves.toEqual({});
+    await expect(loadPreferences()).resolves.toEqual({ threadSortOrder: "created_at" });
 
     mocks.setPreferencesJson(JSON.stringify({ threadSortOrder: "agent_activity" }), 20);
     await expect(loadPreferences()).resolves.toEqual({});
