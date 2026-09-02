@@ -3425,6 +3425,12 @@ describe("ProviderRuntimeIngestion", () => {
         title: "Context compacted",
       },
     });
+    // Drain before reading. The wait below is satisfied by the activity that
+    // item.started writes, which carries no metrics yet, so without this the
+    // assertion could run before item.completed was ingested and read the
+    // started row's detail instead. Do not remove it as redundant: the wait
+    // condition cannot tell the two rows apart.
+    await harness.drain();
     const itemThread = await waitForThread(
       harness.readModel,
       (entry) =>
