@@ -58,11 +58,13 @@ function snapshot(input: {
 }): AccountLimitsSnapshot {
   const observedAt = input.observedAt ?? "2026-08-22T12:09:00.000Z";
   return {
-    providerInstanceId: ProviderInstanceId.make(input.instanceId),
-    driver: ProviderDriverKind.make(input.driver),
-    ...(input.accountKey
-      ? { account: { key: input.accountKey, label: input.accountLabel ?? input.accountKey } }
-      : {}),
+    subscription: input.accountKey
+      ? { key: input.accountKey, label: input.accountLabel ?? input.accountKey }
+      : { key: `#instance:${input.instanceId}`, label: input.instanceId },
+    reader: {
+      providerInstanceId: ProviderInstanceId.make(input.instanceId),
+      driver: ProviderDriverKind.make(input.driver),
+    },
     observation: {
       plan: "pro",
       observedAt,
@@ -358,8 +360,11 @@ describe("projectAccountLimits", () => {
           summary: summary([
             snapshot({ instanceId: "claudeAgent", driver: "claudeAgent", usedPercent: 10 }),
             {
-              providerInstanceId: ProviderInstanceId.make("codex"),
-              driver: ProviderDriverKind.make("codex"),
+              subscription: { key: "#instance:codex", label: "codex" },
+              reader: {
+                providerInstanceId: ProviderInstanceId.make("codex"),
+                driver: ProviderDriverKind.make("codex"),
+              },
               observation: null,
               lastAttempt: {
                 attemptedAt: "2026-08-22T12:09:00.000Z",

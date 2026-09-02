@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
   AccountLimitsSnapshot,
+  isFoldableSubscriptionKey,
   ProviderDriverKind,
   ProviderInstanceId,
   type AccountLimitsAccount,
@@ -96,7 +97,11 @@ it.layer(NodeServices.layer)("AccountLimitsService", (it) => {
       assert.equal(yield* Ref.get(reads), 2);
 
       const summary = yield* service.readSummary();
-      assert.equal(summary.snapshots[0]?.providerInstanceId, "claude_work");
+      assert.equal(summary.snapshots[0]?.reader?.providerInstanceId, "claude_work");
+      // A provider that named no account yields an unfoldable subscription, so
+      // two machines running this same instance id stay two rows.
+      assert.equal(summary.snapshots[0]?.subscription.key, "#instance:claude_work");
+      assert.equal(isFoldableSubscriptionKey(summary.snapshots[0]!.subscription.key), false);
       assert.equal(summary.snapshots[0]?.observation?.windows[0]?.usedPercent, 20);
       assert.equal(yield* fs.exists(cachePath), true);
       assert.match(yield* fs.readFileString(cachePath), /"version":1/);
@@ -268,7 +273,7 @@ it.layer(NodeServices.layer)("AccountLimitsService", (it) => {
       const service = yield* makeTestService(instances, path.join(tempDir, "cache.json"));
       yield* service.refreshStale;
 
-      assert.deepEqual((yield* service.readSummary()).snapshots[0]?.account, {
+      assert.deepEqual((yield* service.readSummary()).snapshots[0]?.subscription, {
         key: "claudeAgent:dev@example.com",
         label: "dev@example.com",
       });
@@ -281,7 +286,7 @@ it.layer(NodeServices.layer)("AccountLimitsService", (it) => {
 
       const failed = (yield* service.readSummary()).snapshots[0];
       assert.equal(failed?.lastAttempt.status, "failed");
-      assert.equal(failed?.account?.key, "claudeAgent:dev@example.com");
+      assert.equal(failed?.subscription.key, "claudeAgent:dev@example.com");
     }).pipe(Effect.scoped),
   );
 
@@ -419,8 +424,8 @@ it.layer(NodeServices.layer)("AccountLimitsService", (it) => {
       assert.equal(yield* Ref.get(personalReads), 1);
       const summary = yield* service.readSummary();
       assert.equal(summary.snapshots.length, 2);
-      assert.equal(summary.snapshots[0]?.providerInstanceId, "codex_personal");
-      assert.equal(summary.snapshots[1]?.providerInstanceId, "codex_work");
+      assert.equal(summary.snapshots[0]?.reader?.providerInstanceId, "codex_personal");
+      assert.equal(summary.snapshots[1]?.reader?.providerInstanceId, "codex_work");
       assert.equal(summary.snapshots[1]?.observation?.windows[0]?.usedPercent, 48);
     }).pipe(Effect.scoped),
   );

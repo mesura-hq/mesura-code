@@ -4,6 +4,7 @@ import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connect
 import {
   ACCOUNT_LIMITS_CONTRACT_VERSION,
   accountLimitsWindowKey,
+  isFoldableSubscriptionKey,
   type AccountLimitsSnapshot,
   type AccountLimitsSummary,
   type AccountLimitsWindow,
@@ -123,7 +124,7 @@ function newestSnapshotsByInstance(
 ): ReadonlyMap<string, AccountLimitsSnapshot> {
   const newest = new Map<string, AccountLimitsSnapshot>();
   for (const snapshot of snapshots) {
-    const key = String(snapshot.providerInstanceId);
+    const key = String(snapshot.reader?.providerInstanceId ?? snapshot.subscription.key);
     const previous = newest.get(key);
     if (
       previous === undefined ||
@@ -307,13 +308,17 @@ export function projectAccountLimits(
     const currentEnvironmentTime = environmentNowMs(environment, nowMs);
     for (const entry of deriveProviderInstanceEntries(environment.providers)) {
       const stored = snapshots.get(String(entry.instanceId));
-      const snapshot = stored?.driver === entry.driverKind ? stored : null;
+      const snapshot = stored?.reader?.driver === entry.driverKind ? stored : null;
       if (!canReportAccountLimits(entry, snapshot)) continue;
+      // A reading the server marked unfoldable keys on where it was read
+      // instead. The `#env:` prefix keeps that apart from real subscription
+      // keys, which always start with a vendor namespace.
+      const foldable =
+        snapshot !== null && isFoldableSubscriptionKey(snapshot.subscription.key)
+          ? snapshot.subscription
+          : null;
       const partial = {
-        // An unnamed account cannot be folded, so it keys on where it was read.
-        // The `#env:` prefix keeps that namespace apart from the account keys,
-        // which a driver kind always starts.
-        groupKey: snapshot?.account?.key ?? `#env:${environment.environmentId}:${entry.instanceId}`,
+        groupKey: foldable?.key ?? `#env:${environment.environmentId}:${entry.instanceId}`,
         environmentId: environment.environmentId,
         environmentLabel: environment.label,
         environmentNowMs: Number.isFinite(currentEnvironmentTime) ? currentEnvironmentTime : null,
@@ -322,7 +327,7 @@ export function projectAccountLimits(
         accentColor: entry.accentColor,
         snapshot,
         state: rowState(snapshot, currentEnvironmentTime),
-        accountName: snapshot?.account?.label ?? null,
+        accountName: foldable?.label ?? null,
       } satisfies Omit<AccountLimitsCandidate, "windows" | "readingAgeMs">;
       const windows = candidateWindows(partial, currentEnvironmentTime);
       const candidate: AccountLimitsCandidate = {

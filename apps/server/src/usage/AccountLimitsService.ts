@@ -3,6 +3,7 @@ import {
   ACCOUNT_LIMITS_CONTRACT_VERSION,
   accountLimitsWindowKey,
   AccountLimitsSnapshot,
+  unfoldableInstanceSubscription,
   type AccountLimitsAccount,
   type AccountLimitsSummary,
   type AccountLimitsWindow,
@@ -84,6 +85,34 @@ export const layerTest = Layer.succeed(
     run: Effect.never,
   }),
 );
+
+/**
+ * The subscription a per-instance reading belongs to, while the service is
+ * still keyed by provider instance.
+ *
+ * Phase 2 replaces this with the registry's real subscription. Until then a
+ * reading whose provider named no account still needs *some* subscription,
+ * because the contract now requires one — and the instance it was read through
+ * is the only identity available. That keeps today's one-row-per-instance
+ * behaviour exactly as it was rather than folding anything new.
+ */
+function instanceSubscription(
+  instance: ProviderInstance,
+  account: AccountLimitsAccount | undefined,
+): AccountLimitsAccount {
+  return (
+    account ??
+    unfoldableInstanceSubscription({
+      instanceId: String(instance.instanceId),
+      label: instance.displayName,
+    })
+  );
+}
+
+/** The map key a stored snapshot belongs under. Phase 2 makes this the subscription. */
+function snapshotKey(snapshot: AccountLimitsSnapshot): string {
+  return String(snapshot.reader?.providerInstanceId ?? snapshot.subscription.key);
+}
 
 function lastAttemptMillis(snapshot: AccountLimitsSnapshot): number | null {
   const millis = Date.parse(snapshot.lastAttempt.attemptedAt);
@@ -214,7 +243,7 @@ export function makeAccountLimitsService(input: {
           Effect.gen(function* () {
             const storedSnapshots = "version" in stored ? stored.snapshots : stored;
             for (const snapshot of storedSnapshots) {
-              snapshots.set(snapshot.providerInstanceId, snapshot);
+              snapshots.set(snapshotKey(snapshot), snapshot);
             }
             if (!("version" in stored)) {
               const migrated = yield* encodeLimitsCache({
@@ -240,7 +269,7 @@ export function makeAccountLimitsService(input: {
       const serialized = yield* encodeLimitsCache({
         version: ACCOUNT_LIMITS_CACHE_VERSION,
         snapshots: [...snapshots.values()].sort((left, right) =>
-          left.providerInstanceId.localeCompare(right.providerInstanceId),
+          snapshotKey(left).localeCompare(snapshotKey(right)),
         ),
       }).pipe(Effect.orDie);
       yield* writeFileStringAtomically({ filePath: input.cachePath, contents: serialized }).pipe(
@@ -271,7 +300,8 @@ export function makeAccountLimitsService(input: {
             const previousSnapshot = snapshots.get(key);
             if (
               (previousInstance !== undefined && previousInstance !== instance) ||
-              (previousSnapshot !== undefined && previousSnapshot.driver !== instance.driverKind)
+              (previousSnapshot?.reader !== undefined &&
+                previousSnapshot.reader.driver !== instance.driverKind)
             ) {
               snapshots.delete(key);
               changed = true;
@@ -308,15 +338,14 @@ export function makeAccountLimitsService(input: {
           if (previous && hasNewerAttempt(previous, attemptedAt)) return;
           // A failed read never clears the account: the subscription a cached
           // observation belongs to does not change because one poll failed.
-          const effectiveAccount = account ?? previous?.account;
+          const effectiveAccount = account ?? previous?.subscription;
           const stamped = normalized === null ? [] : stampWindows(normalized.windows, attemptedAt);
           snapshots.set(
             key,
             normalized === null
               ? {
-                  providerInstanceId: instance.instanceId,
-                  driver: instance.driverKind,
-                  ...(effectiveAccount ? { account: effectiveAccount } : {}),
+                  subscription: instanceSubscription(instance, effectiveAccount),
+                  reader: { providerInstanceId: instance.instanceId, driver: instance.driverKind },
                   observation: previous?.observation ?? null,
                   lastAttempt: {
                     attemptedAt,
@@ -325,9 +354,8 @@ export function makeAccountLimitsService(input: {
                   },
                 }
               : {
-                  providerInstanceId: instance.instanceId,
-                  driver: instance.driverKind,
-                  ...(effectiveAccount ? { account: effectiveAccount } : {}),
+                  subscription: instanceSubscription(instance, effectiveAccount),
+                  reader: { providerInstanceId: instance.instanceId, driver: instance.driverKind },
                   observation: {
                     plan: normalized.plan ?? previous?.observation?.plan ?? null,
                     windows:
@@ -417,9 +445,13 @@ export function makeAccountLimitsService(input: {
           if (reading === null) return;
 
           snapshots.set(key, {
-            providerInstanceId: event.providerInstanceId,
-            driver: event.driver,
-            ...(previous?.account ? { account: previous.account } : {}),
+            subscription:
+              previous?.subscription ??
+              unfoldableInstanceSubscription({
+                instanceId: String(event.providerInstanceId),
+                label: knownInstances.get(String(event.providerInstanceId))?.displayName,
+              }),
+            reader: { providerInstanceId: event.providerInstanceId, driver: event.driver },
             observation: {
               plan: reading.plan ?? previous?.observation?.plan ?? null,
               windows:
@@ -448,15 +480,17 @@ export function makeAccountLimitsService(input: {
         readAt: DateTime.formatIso(DateTime.makeUnsafe(nowMs)),
         snapshots: [...snapshots.values()]
           .filter((snapshot) => {
-            const current = activeInstances.get(snapshot.providerInstanceId);
-            const known = knownInstances.get(snapshot.providerInstanceId);
+            const reader = snapshot.reader;
+            if (reader === undefined) return true;
+            const current = activeInstances.get(String(reader.providerInstanceId));
+            const known = knownInstances.get(String(reader.providerInstanceId));
             return (
               current !== undefined &&
-              current.driverKind === snapshot.driver &&
+              current.driverKind === reader.driver &&
               (known === undefined || known === current)
             );
           })
-          .sort((left, right) => left.providerInstanceId.localeCompare(right.providerInstanceId)),
+          .sort((left, right) => snapshotKey(left).localeCompare(snapshotKey(right))),
       } satisfies AccountLimitsSummary;
     });
 
