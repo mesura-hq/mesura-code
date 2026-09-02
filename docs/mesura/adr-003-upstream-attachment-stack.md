@@ -146,3 +146,34 @@ upload that completes and one that never does.
 The reversal is not "re-apply #38". It is "port resume onto upstream's base",
 which is a different and smaller piece of work — their design is a single XHR to
 a signed URL, so resume is a graft onto that, not a return to a parallel stack.
+
+## As implemented
+
+The decision landed across the 2026-W35 sync. Two details differ from what is
+written above, and both are worth recording because the text would otherwise
+describe something that is not in the tree.
+
+**The `lstat` check moved to a different place than it had.** In the fork's own
+stack it sat on a dedicated provider delivery path, `resolveReadableAttachmentDeliveries`,
+which the revert removed. Upstream has no single delivery path to graft it onto:
+five adapters, `ProviderService`, and both text-generation modules each reach an
+attachment on their own. The check therefore sits inside upstream's
+`resolveAttachmentPath` in `apps/server/src/attachmentStore.ts`, which all of
+them call. Two consequences follow. It now covers every provider rather than the
+one path the fork's version guarded, and a call site upstream adds later is
+covered without anyone remembering to add it. It also had to become narrower:
+`Normalizer` resolves the path of an attachment it is about to write, so a path
+with nothing at it still resolves, and only something that exists and is not a
+regular file is rejected. `apps/server/src/attachmentPathSafety.test.ts` holds
+that line.
+
+`attachmentStore.ts` took three upstream commits in the three months before the
+sync, which is why editing it was the right trade against changing ten call
+sites in eight files.
+
+**Two paths named in the retirement list are upstream's now.** Upstream
+independently chose the same filenames for its own mobile attachment work —
+`apps/mobile/src/lib/attachmentUpload.ts` and `composerAttachmentFiles.ts` — and
+the sync brought their versions in. `tests/unit/attachment-stack-retired.test.ts`
+does not assert on those two, because asserting them would fail on upstream's
+code rather than on a resurrected fork file.

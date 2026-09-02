@@ -3017,6 +3017,30 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           modelPickerOpen: isComposerModelPickerOpen,
         },
       });
+      if (command === "composer.attachFiles") {
+        // Mirrors upstream's attach button rather than adding a route of our
+        // own, so every condition that stops the button doing something stops
+        // this too.
+        //
+        // Claim the chord only once it will open the picker. composer.stash
+        // below always claims mod+s on purpose, because the browser's save
+        // dialog opens otherwise; alt+a has no browser default to suppress, so
+        // claiming it while nothing opens would swallow the keystroke from
+        // whatever else wanted it.
+        if (
+          fileStagingLimit === null ||
+          pendingUserInputs.length > 0 ||
+          isCommandPaletteOpen() ||
+          isComposerApprovalState ||
+          projectSelectionRequired
+        ) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        attachmentInputRef.current?.click();
+        return;
+      }
       if (command !== "composer.stash") return;
       // Always claim the shortcut so the browser save dialog never opens,
       // even when the composer is in a state that can't stash.
@@ -3038,6 +3062,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     return () => window.removeEventListener("keydown", handler, true);
   }, [
     activePendingProgress,
+    fileStagingLimit,
     isComposerApprovalState,
     isComposerModelPickerOpen,
     keybindings,

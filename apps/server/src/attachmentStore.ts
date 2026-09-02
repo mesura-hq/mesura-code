@@ -125,10 +125,36 @@ export function resolveAttachmentPath(input: {
   if (!relativePath) {
     return null;
   }
-  return resolveAttachmentRelativePath({
+  const attachmentPath = resolveAttachmentRelativePath({
     attachmentsDir: input.attachmentsDir,
     relativePath,
   });
+  return attachmentPath === null || isSafeAttachmentTarget(attachmentPath) ? attachmentPath : null;
+}
+
+/**
+ * Fork addition (ADR-003), kept when this fork's own attachment stack was
+ * retired for upstream's. Every provider reaches an attachment through
+ * `resolveAttachmentPath` — five adapters, `ProviderService`, and both
+ * text-generation modules — so the check sits here rather than at each caller,
+ * and a call site added later is covered without being touched.
+ *
+ * It rejects only what is actually on disk. `Normalizer` resolves the path of
+ * an attachment it is about to write, so a path with nothing at it stays valid;
+ * rejecting those would stop attachments from ever being stored.
+ */
+function isSafeAttachmentTarget(attachmentPath: string): boolean {
+  let target: NodeFS.Stats;
+  try {
+    target = NodeFS.lstatSync(attachmentPath);
+  } catch {
+    // Nothing there yet, which is the write path. Anything genuinely unreadable
+    // fails later, at the read, with an error that names the file.
+    return true;
+  }
+  // lstat, not stat: a symbolic link has to be rejected rather than followed,
+  // whatever it points at.
+  return !target.isSymbolicLink() && target.isFile();
 }
 
 export function resolveAttachmentPathById(input: {

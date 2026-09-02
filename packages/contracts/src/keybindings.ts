@@ -99,6 +99,9 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "threadSearch.toggle",
   "themeEditor.toggle",
   "composer.stash",
+  // Fork addition (ADR-003). Upstream ships no keyboard route to attaching at
+  // all, so retiring the fork's attachment stack would have taken the only one.
+  "composer.attachFiles",
   "usage.peek",
   "chat.new",
   "chat.newLocal",
