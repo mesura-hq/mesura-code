@@ -20,9 +20,6 @@ import {
 } from "react";
 
 import type { HomeProjectSortOrder } from "./homeThreadList";
-import { THREAD_SORT_OPTIONS } from "../../state/thread-order";
-
-export { THREAD_SORT_OPTIONS };
 
 export interface HomeListOptions {
   readonly selectedEnvironmentId: EnvironmentId | null;
@@ -36,6 +33,14 @@ export interface ResolvedHomeListOptions extends HomeListOptions {
 
 export const PROJECT_SORT_OPTIONS: ReadonlyArray<{
   readonly value: HomeProjectSortOrder;
+  readonly label: string;
+}> = [
+  { value: "updated_at", label: "Last user message" },
+  { value: "created_at", label: "Created at" },
+];
+
+export const THREAD_SORT_OPTIONS: ReadonlyArray<{
+  readonly value: SidebarThreadSortOrder;
   readonly label: string;
 }> = [
   { value: "updated_at", label: "Last user message" },

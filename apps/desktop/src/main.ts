@@ -35,6 +35,7 @@ import * as DesktopApp from "./app/DesktopApp.ts";
 import * as LegacySttEndpoint from "./symmetria/LegacySttEndpoint.ts";
 import * as DictationBroker from "./symmetria/DictationBroker.ts";
 import * as ThreadPublisher from "./symmetria/ThreadPublisher.ts";
+import * as DesktopAppActivation from "./app/DesktopAppActivation.ts";
 import * as DesktopAppIdentity from "./app/DesktopAppIdentity.ts";
 import * as DesktopConnectionCatalogStore from "./app/DesktopConnectionCatalogStore.ts";
 import * as DesktopClerk from "./app/DesktopClerk.ts";
@@ -165,6 +166,10 @@ const desktopWindowLayer = DesktopWindow.layer.pipe(
   Layer.provideMerge(desktopPreviewLayer),
 );
 
+const desktopAppActivationLayer = DesktopAppActivation.layer.pipe(
+  Layer.provide(desktopWindowLayer),
+);
+
 // Pool layer instantiates the backend factory once for the Windows
 // primary instance and exposes it via pool.primary. Consumers go through
 // the pool now; the legacy DesktopBackendManager service is gone. The
@@ -192,6 +197,7 @@ const desktopLocalEnvironmentAuthLayer = DesktopLocalEnvironmentAuth.layer.pipe(
 
 const desktopApplicationLayer = Layer.mergeAll(
   DesktopLifecycle.layer,
+  desktopAppActivationLayer,
   DesktopApplicationMenu.layer,
   DesktopLinuxUrlHandler.layer,
   DesktopShellEnvironment.layer,

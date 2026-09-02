@@ -154,6 +154,7 @@ const sharingPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
         supportsText: true,
         supportsWebUrlWithMaxCount: 1,
         supportsImageWithMaxCount: 8,
+        supportsMovieWithMaxCount: 8,
         supportsFileWithMaxCount: 8,
       },
     },
@@ -211,6 +212,7 @@ const config: ExpoConfig = {
       },
       NSLocalNetworkUsageDescription:
         "Allow Mesura Code to connect to Mesura Code servers on your local network or tailnet.",
+      NSPhotoLibraryAddUsageDescription: "Allow Mesura Code to save images to your photo library.",
       ITSAppUsesNonExemptEncryption: false,
       // The App Store screenshot harness rotates the iPad interface from
       // inside the app (CI denies osascript the Accessibility access that
@@ -299,6 +301,15 @@ const config: ExpoConfig = {
             backgroundColor: variant.assets.androidAdaptiveBackgroundColor,
           },
         },
+      },
+    ],
+    [
+      "expo-audio",
+      {
+        microphonePermission: "Allow T3 Code to use your microphone for voice input.",
+        recordAudioAndroid: false,
+        enableBackgroundPlayback: false,
+        enableBackgroundRecording: false,
       },
     ],
     [

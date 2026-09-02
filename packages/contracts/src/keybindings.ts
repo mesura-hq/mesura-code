@@ -37,6 +37,7 @@ export type ModelPickerJumpKeybindingCommand =
 export const THREAD_KEYBINDING_COMMANDS = [
   "thread.previous",
   "thread.next",
+  "thread.copyReference",
   "thread.settle",
   // Bound to no chord since the 2026-W35 sync: upstream's thread.settle owns
   // mod+shift+s and does the same thing. The handlers here stay until the two

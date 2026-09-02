@@ -5,7 +5,7 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
-import type { SidebarProjectGroupingMode, SidebarThreadSortOrder } from "@t3tools/contracts";
+import type { SidebarProjectGroupingMode } from "@t3tools/contracts";
 import { MOBILE_THEME_IDS, type MobileThemeId, type MobileThemeMode } from "../lib/mobileTheme";
 
 import * as MobileDatabase from "./mobile-database";
@@ -31,8 +31,6 @@ export interface Preferences {
   /** @deprecated Kept temporarily so older OTA bundles retain the selected mode. */
   readonly projectGroupingEnabled?: boolean;
   readonly projectGroupingMode?: SidebarProjectGroupingMode;
-  readonly autoSettleOnMerge?: boolean;
-  readonly threadSortOrder?: SidebarThreadSortOrder;
   /**
    * Device-local mirror of the web `legacySidebarEnabled` setting. Mobile has
    * no client-settings sync, so the legacy grouped thread list is opted into
@@ -102,8 +100,6 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     collapsedProjectGroups?: readonly string[];
     projectGroupingEnabled?: boolean;
     projectGroupingMode?: SidebarProjectGroupingMode;
-    autoSettleOnMerge?: boolean;
-    threadSortOrder?: SidebarThreadSortOrder;
     legacyThreadListEnabled?: boolean;
     planModeEnabled?: boolean;
     threadListV2SettledShelfExpanded?: boolean;
@@ -168,12 +164,6 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     parsed.projectGroupingMode === "separate"
   ) {
     preferences.projectGroupingMode = parsed.projectGroupingMode;
-  }
-  if (typeof parsed.autoSettleOnMerge === "boolean") {
-    preferences.autoSettleOnMerge = parsed.autoSettleOnMerge;
-  }
-  if (parsed.threadSortOrder === "updated_at" || parsed.threadSortOrder === "created_at") {
-    preferences.threadSortOrder = parsed.threadSortOrder;
   }
   if (typeof parsed.legacyThreadListEnabled === "boolean") {
     preferences.legacyThreadListEnabled = parsed.legacyThreadListEnabled;

@@ -28,10 +28,14 @@ it("tells a user when an attachment is too large instead of failing silently", (
   );
 });
 
+// Upstream moved this table out of `apps/web/src/types.ts` into the shared
+// package when it added mobile video playback (#8919). The capability is the
+// same; only its home changed, so this asserts the shared module rather than the
+// web file it started in.
 it("recognises video attachments so they can be played rather than downloaded", () => {
-  const types = read("apps/web/src/types.ts");
+  const video = read("packages/shared/src/video.ts");
   assert.include(
-    types,
+    video,
     "VIDEO_MIME_TYPE_BY_EXTENSION",
     "upstream's video media-type table is missing, so a video attachment is not recognised as one",
   );

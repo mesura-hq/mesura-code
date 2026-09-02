@@ -51,6 +51,7 @@ import { AccountLimitsService } from "../../usage/AccountLimitsService.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerTaskKey = (threadId: ThreadId, taskId: string) => `${threadId}:${taskId}`;
+const TASK_TITLE_ACTIVITY_KINDS = ["task.started", "task.progress"] as const;
 
 // Fallback when the in-memory description cache no longer has the task name
 // (server restart, session-exit sweep, TTL/capacity eviction): earlier
@@ -1060,9 +1061,12 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const resolveThreadDetail = Effect.fn("resolveThreadDetail")(function* (threadId: ThreadId) {
+  const resolveThreadDetail = Effect.fn("resolveThreadDetail")(function* (
+    threadId: ThreadId,
+    activityKinds: ReadonlyArray<string> = [],
+  ) {
     return yield* projectionSnapshotQuery
-      .getThreadDetailById(threadId)
+      .getThreadDetailById(threadId, { activityKinds })
       .pipe(Effect.map(Option.getOrUndefined));
   });
 
@@ -1606,6 +1610,10 @@ const make = Effect.gen(function* () {
 
   const processRuntimeEvent = (event: ProviderRuntimeEvent) =>
     Effect.gen(function* () {
+      if (event.type === "content.delta" && event.payload.streamKind !== "assistant_text") {
+        return;
+      }
+
       if (event.type === "account.rate-limits.updated") {
         const providerInstanceId =
           event.providerInstanceId ?? defaultInstanceIdForDriver(event.provider);
@@ -1681,9 +1689,17 @@ const make = Effect.gen(function* () {
         contextCompactionMetrics = contextCompactionMetricsByTurn.get(compactionTurnKey(event));
       }
       const activeTurnId = thread.session?.activeTurnId ?? null;
-      const pendingTurnStart = yield* projectionTurnRepository.getPendingTurnStartByThreadId({
-        threadId: thread.id,
-      });
+      const pendingTurnStart =
+        event.type === "session.started" ||
+        event.type === "session.state.changed" ||
+        event.type === "session.exited" ||
+        event.type === "thread.started" ||
+        event.type === "turn.started" ||
+        event.type === "turn.completed"
+          ? yield* projectionTurnRepository.getPendingTurnStartByThreadId({
+              threadId: thread.id,
+            })
+          : Option.none();
       const hasPendingTurnStart =
         Option.isSome(pendingTurnStart) && thread.session?.status === "starting";
 
@@ -2192,7 +2208,7 @@ const make = Effect.gen(function* () {
       if (event.type === "task.completed") {
         taskTitle = yield* lookupTaskDescription(thread.id, event.payload.taskId);
         if (!taskTitle) {
-          const threadDetail = yield* getLoadedThreadDetail();
+          const threadDetail = yield* resolveThreadDetail(thread.id, TASK_TITLE_ACTIVITY_KINDS);
           taskTitle = findTaskTitleInActivities(threadDetail?.activities, event.payload.taskId);
         }
       }

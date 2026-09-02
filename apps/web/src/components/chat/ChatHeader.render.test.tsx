@@ -36,7 +36,6 @@ function renderHeader(rightPanelOpen = false) {
       activeThreadId={"thread-test" as ThreadId}
       activeThreadTitle={THREAD_TITLE}
       isServerThread
-      changeRequest={null}
       activeProjectName="mesura-code"
       activeProjectCwd="/tmp/mesura-code"
       activeProjectFaviconPath={null}
