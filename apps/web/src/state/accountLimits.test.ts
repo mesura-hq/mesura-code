@@ -22,7 +22,7 @@ const NOW = Date.parse("2026-08-22T12:10:00.000Z");
 
 function provider(input: {
   readonly instanceId: string;
-  readonly driver: "claudeAgent" | "codex";
+  readonly driver: "claudeAgent" | "codex" | "cursor";
   readonly displayName?: string;
   readonly accentColor?: string;
   readonly installed?: boolean;
@@ -124,7 +124,7 @@ function percentOf(row: AccountLimitsRow | undefined, windowId = "seven_day"): n
 }
 
 describe("projectAccountLimits", () => {
-  it("keeps several accounts in one environment and uses provider-instance presentation", () => {
+  it("keeps several accounts in one environment and titles each by its subscription", () => {
     const result = projectAccountLimits(
       [
         environment({
@@ -160,10 +160,16 @@ describe("projectAccountLimits", () => {
       NOW,
     );
 
-    expect(result.rows.map((row) => row.providerLabel)).toEqual(["Codex", "Work account"]);
+    // A row is titled by the subscription it shows, not by the agent that read
+    // it: two plans behind one agent would otherwise share a title.
+    expect(result.rows.map((row) => row.providerLabel)).toEqual([
+      "home@example.com",
+      "work@example.com",
+    ]);
+    // The accent still comes from the instance that read it.
     expect(result.rows[1]?.accentColor).toBe("#4ade80");
-    // Two names the user already set apart tell themselves apart; an address
-    // under each would be noise.
+    // Two titles that already differ tell themselves apart; a subtitle under
+    // each would be noise.
     expect(result.rows.map((row) => row.subtitle)).toEqual([null, null]);
   });
 
@@ -483,7 +489,9 @@ describe("projectAccountLimits", () => {
     expect(result.rows).toHaveLength(2);
     expect(result.rows.map((row) => percentOf(row))).toEqual([30, 55]);
     expect(result.rows[1]?.key.startsWith("#env:")).toBe(true);
-    expect(result.rows.map((row) => row.subtitle)).toEqual(["dev@example.com", "Older build"]);
+    // Two rows, two keys: the environment that named no account keeps its own
+    // rather than inheriting the other machine's numbers.
+    expect(new Set(result.rows.map((row) => row.key)).size).toBe(2);
   });
 
   it("chooses the newest duplicate only inside one environment and instance", () => {
@@ -754,5 +762,254 @@ describe("selectVisibleAccountLimitWindows", () => {
 
     expect(selectVisibleAccountLimitWindows(windows)).toEqual([windows[0]]);
     expect(windows).toHaveLength(4);
+  });
+});
+
+describe("projectAccountLimits, one row per subscription", () => {
+  function subscriptionSnapshot(input: {
+    readonly key: string;
+    readonly label: string;
+    readonly reader?: { readonly instanceId: string; readonly driver: "claudeAgent" | "codex" };
+    readonly usedPercent?: number;
+    readonly reason?: "unreachable" | "unauthorized" | "unrecognized" | "unknown";
+  }): AccountLimitsSnapshot {
+    const failed = input.reason !== undefined;
+    return {
+      subscription: { key: input.key, label: input.label },
+      ...(input.reader
+        ? {
+            reader: {
+              providerInstanceId: ProviderInstanceId.make(input.reader.instanceId),
+              driver: ProviderDriverKind.make(input.reader.driver),
+            },
+          }
+        : {}),
+      observation: {
+        plan: "pro",
+        observedAt: "2026-08-22T12:09:00.000Z",
+        source: "poll",
+        windows: [
+          {
+            id: "five_hour",
+            label: "5h",
+            usedPercent: input.usedPercent ?? 10,
+            resetsAt: "2026-08-22T18:00:00.000Z",
+            windowMinutes: 300,
+            observedAt: "2026-08-22T12:09:00.000Z",
+          },
+        ],
+      },
+      lastAttempt: {
+        attemptedAt: "2026-08-22T12:09:00.000Z",
+        status: failed ? "failed" : "succeeded",
+        error: failed ? "Account-limit refresh failed." : null,
+        ...(input.reason ? { reason: input.reason } : {}),
+      },
+    };
+  }
+
+  it("shows a subscription no provider instance read", () => {
+    // The whole point of a directly polled subscription: it has no agent
+    // behind it, and dropping it for that would hide the new rows entirely.
+    const view = projectAccountLimits(
+      [
+        environment({
+          id: "local",
+          label: "Local",
+          providers: [],
+          summary: summary([subscriptionSnapshot({ key: "opencode-go:a", label: "OpenCode Go" })]),
+        }),
+      ],
+      NOW,
+    );
+
+    expect(view.rows.map((row) => row.providerLabel)).toEqual(["OpenCode Go"]);
+    expect(view.rows[0]?.driver).toBeUndefined();
+  });
+
+  it("labels a row by its subscription, not by the agent that read it", () => {
+    // Two plans read through one OpenCode instance would otherwise render as
+    // two rows both titled "OpenCode".
+    const view = projectAccountLimits(
+      [
+        environment({
+          id: "local",
+          label: "Local",
+          providers: [provider({ instanceId: "opencode", driver: "codex" })],
+          summary: summary([
+            // Both read through ONE instance. Keying the dedup by instance
+            // collapsed these into one row, which is the whole point of the
+            // feature lost — so the reader must be present here.
+            subscriptionSnapshot({
+              key: "opencode-go:a",
+              label: "OpenCode Go",
+              reader: { instanceId: "opencode", driver: "codex" },
+            }),
+            subscriptionSnapshot({
+              key: "zai:b",
+              label: "GLM Coding Plan",
+              reader: { instanceId: "opencode", driver: "codex" },
+            }),
+          ]),
+        }),
+      ],
+      NOW,
+    );
+
+    expect(view.rows.map((row) => row.providerLabel).sort()).toEqual([
+      "GLM Coding Plan",
+      "OpenCode Go",
+    ]);
+  });
+
+  it("folds one subscription read through two different agents into one row", () => {
+    // A ChatGPT plan reached through Codex and through another agent is one
+    // plan with one allowance, however many agents report it.
+    const view = projectAccountLimits(
+      [
+        environment({
+          id: "local",
+          label: "Local",
+          providers: [
+            provider({ instanceId: "codex", driver: "codex" }),
+            provider({ instanceId: "other", driver: "claudeAgent" }),
+          ],
+          summary: summary([
+            subscriptionSnapshot({
+              key: "openai:dev@example.com",
+              label: "dev@example.com",
+              reader: { instanceId: "codex", driver: "codex" },
+              usedPercent: 30,
+            }),
+            subscriptionSnapshot({
+              key: "openai:dev@example.com",
+              label: "dev@example.com",
+              reader: { instanceId: "other", driver: "claudeAgent" },
+              usedPercent: 30,
+            }),
+          ]),
+        }),
+      ],
+      NOW,
+    );
+
+    expect(view.rows.length).toBe(1);
+    expect(view.rows[0]?.key).toBe("openai:dev@example.com");
+  });
+
+  it("keeps the reader on a row an agent did report", () => {
+    const view = projectAccountLimits(
+      [
+        environment({
+          id: "local",
+          label: "Local",
+          providers: [provider({ instanceId: "codex", driver: "codex" })],
+          summary: summary([
+            subscriptionSnapshot({
+              key: "openai:dev@example.com",
+              label: "dev@example.com",
+              reader: { instanceId: "codex", driver: "codex" },
+            }),
+          ]),
+        }),
+      ],
+      NOW,
+    );
+
+    expect(view.rows[0]?.driver).toBe("codex");
+  });
+
+  it("names a reading it could not understand as our bug", () => {
+    const view = projectAccountLimits(
+      [
+        environment({
+          id: "local",
+          label: "Local",
+          providers: [],
+          summary: summary([
+            subscriptionSnapshot({
+              key: "zai:b",
+              label: "GLM Coding Plan",
+              reason: "unrecognized",
+            }),
+          ]),
+        }),
+      ],
+      NOW,
+    );
+
+    expect(view.rows[0]?.state).toBe("not-understood");
+  });
+
+  it("keeps an endpoint it could not reach apart from one it could not parse", () => {
+    const view = projectAccountLimits(
+      [
+        environment({
+          id: "local",
+          label: "Local",
+          providers: [],
+          summary: summary([
+            subscriptionSnapshot({ key: "zai:b", label: "GLM", reason: "unreachable" }),
+          ]),
+        }),
+      ],
+      NOW,
+    );
+
+    expect(view.rows[0]?.state).toBe("refresh-failed");
+  });
+  it("keeps two unnamed subscriptions from one agent apart, with unmixed windows", () => {
+    // The same collision as the named case, on the branch the first fix did not
+    // touch. Keying on the instance merged both plans' windows under one label,
+    // which shows one plan's numbers beside the other's name.
+    const view = projectAccountLimits(
+      [
+        environment({
+          id: "local",
+          label: "Local",
+          providers: [provider({ instanceId: "opencode", driver: "codex" })],
+          summary: summary([
+            {
+              ...subscriptionSnapshot({
+                key: "#instance:opencode",
+                label: "OpenCode",
+                reader: { instanceId: "opencode", driver: "codex" },
+                usedPercent: 11,
+              }),
+            },
+            {
+              ...subscriptionSnapshot({
+                key: "#instance:opencode:1",
+                label: "OpenCode",
+                reader: { instanceId: "opencode", driver: "codex" },
+                usedPercent: 77,
+              }),
+            },
+          ]),
+        }),
+      ],
+      NOW,
+    );
+
+    expect(view.rows).toHaveLength(2);
+    expect(view.rows.map((row) => row.windows[0]?.window.usedPercent).sort()).toEqual([11, 77]);
+  });
+
+  it("shows no row for an agent that never reports limits", () => {
+    // A ready Cursor or Grok instance would otherwise hold a "No reading yet"
+    // row for ever, because the thing that clears one is a reading arriving.
+    const view = projectAccountLimits(
+      [
+        environment({
+          id: "local",
+          label: "Local",
+          providers: [provider({ instanceId: "cursor", driver: "cursor" })],
+          summary: summary([]),
+        }),
+      ],
+      NOW,
+    );
+
+    expect(view.rows).toEqual([]);
   });
 });

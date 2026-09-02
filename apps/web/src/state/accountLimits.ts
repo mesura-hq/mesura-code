@@ -57,7 +57,9 @@ export type AccountLimitsRowState =
   | "current"
   | "stale"
   | "refresh-failed"
-  | "stale-refresh-failed";
+  | "stale-refresh-failed"
+  /** The reading arrived and this version could not parse it — our bug. */
+  | "not-understood";
 
 /** One window as it will be rendered, dated by the environment that reported it. */
 export interface AccountLimitsRowWindow {
@@ -79,8 +81,9 @@ export interface AccountLimitsRowEnvironment {
 export interface AccountLimitsRow {
   /** Group identity: the account key when the provider named one. */
   readonly key: string;
-  readonly driver: ProviderDriverKind;
-  /** The provider instance's display name, e.g. "Claude". */
+  /** The agent that read it, when one did. Absent on a directly polled plan. */
+  readonly driver?: ProviderDriverKind | undefined;
+  /** The subscription's own name, e.g. "OpenCode Go" — not the agent's. */
   readonly providerLabel: string;
   readonly accentColor?: string | undefined;
   readonly plan: string | null;
@@ -119,12 +122,20 @@ function timestampMillis(value: string): number {
   return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
 }
 
-function newestSnapshotsByInstance(
+/**
+ * The newest reading of each subscription an environment reported.
+ *
+ * Keyed by the subscription, never by the instance that read it. Keying by the
+ * instance collapses two DIFFERENT subscriptions that one agent reads into one
+ * — which is the whole OpenCode case, where a single instance drives several
+ * plans and the second silently replaced the first.
+ */
+function newestSnapshotsBySubscription(
   snapshots: ReadonlyArray<AccountLimitsSnapshot>,
 ): ReadonlyMap<string, AccountLimitsSnapshot> {
   const newest = new Map<string, AccountLimitsSnapshot>();
   for (const snapshot of snapshots) {
-    const key = String(snapshot.reader?.providerInstanceId ?? snapshot.subscription.key);
+    const key = snapshot.subscription.key;
     const previous = newest.get(key);
     if (
       previous === undefined ||
@@ -138,6 +149,11 @@ function newestSnapshotsByInstance(
 }
 
 function rowState(snapshot: AccountLimitsSnapshot | null, nowMs: number): AccountLimitsRowState {
+  // "We could not understand it" is our bug and reads differently from an
+  // outage, so it outranks the generic failed state rather than hiding inside it.
+  if (snapshot?.lastAttempt.status === "failed" && snapshot.lastAttempt.reason === "unrecognized") {
+    return "not-understood";
+  }
   if (snapshot === null || snapshot.observation === null) {
     return snapshot?.lastAttempt.status === "failed" ? "refresh-failed" : "missing";
   }
@@ -159,6 +175,10 @@ const ROW_STATE_ORDER: ReadonlyArray<AccountLimitsRowState> = [
   "current",
   "stale",
   "refresh-failed",
+  // Above the stale failure on purpose: "we could not parse it" names a bug
+  // somebody can act on, while a stale failure only says the last try missed.
+  // It carries no staleness of its own, so age never demotes it.
+  "not-understood",
   "stale-refresh-failed",
   "missing",
 ];
@@ -188,7 +208,22 @@ function ageMillis(observedAt: string | undefined, currentEnvironmentTime: numbe
   return Math.max(0, currentEnvironmentTime - observed);
 }
 
-function isSupportedDriver(driver: ProviderDriverKind): boolean {
+/**
+ * Whether this agent ever reports account limits, and so deserves a row saying
+ * it has not reported one yet.
+ *
+ * HACK: the client should not know which drivers these are. The honest answer
+ * is a capability on the provider snapshot the server already builds, since the
+ * server is the only side that knows which drivers implement the reader. This
+ * list exists because adding that capability means touching the provider
+ * contract and every driver's snapshot, which is more than this change carries.
+ * Remove it once `ServerProvider` carries the capability.
+ *
+ * Note this gate applies ONLY to the placeholder pass. A reading that actually
+ * arrived is shown whatever produced it — the server does not send one for a
+ * driver it cannot read, so the readings need no allowlist and must not get one.
+ */
+function reportsAccountLimits(driver: ProviderDriverKind): boolean {
   return driver === "claudeAgent" || driver === "codex";
 }
 
@@ -202,10 +237,11 @@ function isSupportedDriver(driver: ProviderDriverKind): boolean {
  * a reading we already hold keeps its row whatever the probe currently says.
  */
 function canReportAccountLimits(
-  entry: ProviderInstanceEntry,
+  entry: ProviderInstanceEntry | undefined,
   snapshot: AccountLimitsSnapshot | null,
 ): boolean {
-  if (!isSupportedDriver(entry.driverKind)) return false;
+  // The reader named an instance this environment no longer lists.
+  if (entry === undefined) return false;
   return isProviderInstancePickerReady(entry) || snapshot?.observation != null;
 }
 
@@ -214,7 +250,8 @@ interface AccountLimitsCandidate {
   readonly environmentId: EnvironmentId;
   readonly environmentLabel: string;
   readonly environmentNowMs: number | null;
-  readonly driver: ProviderDriverKind;
+  readonly driver?: ProviderDriverKind | undefined;
+  /** The subscription's name, which is what the row is titled by. */
   readonly displayName: string;
   readonly accentColor?: string | undefined;
   readonly snapshot: AccountLimitsSnapshot | null;
@@ -304,36 +341,94 @@ export function projectAccountLimits(
 
   for (const environment of environments) {
     if (environment.state !== "ready" || environment.summary === null) continue;
-    const snapshots = newestSnapshotsByInstance(environment.summary.snapshots);
+    const snapshots = newestSnapshotsBySubscription(environment.summary.snapshots);
     const currentEnvironmentTime = environmentNowMs(environment, nowMs);
-    for (const entry of deriveProviderInstanceEntries(environment.providers)) {
-      const stored = snapshots.get(String(entry.instanceId));
-      const snapshot = stored?.reader?.driver === entry.driverKind ? stored : null;
-      if (!canReportAccountLimits(entry, snapshot)) continue;
-      // A reading the server marked unfoldable keys on where it was read
-      // instead. The `#env:` prefix keeps that apart from real subscription
-      // keys, which always start with a vendor namespace.
-      const foldable =
-        snapshot !== null && isFoldableSubscriptionKey(snapshot.subscription.key)
-          ? snapshot.subscription
-          : null;
+    // Walk the subscriptions the environment reported, not the agents it has
+    // configured. An agent is one way a subscription gets read, and some are
+    // read by none — so iterating agents would drop exactly the new rows.
+    const entriesByInstance = new Map(
+      deriveProviderInstanceEntries(environment.providers).map((entry) => [
+        String(entry.instanceId),
+        entry,
+      ]),
+    );
+    // Every instance that reported anything, taken before the dedup: one whose
+    // reading lost to a fresher one for the same subscription still reported,
+    // and giving it a second "no reading yet" row would double the account.
+    const readInstances = new Set(
+      environment.summary.snapshots.flatMap((snapshot) =>
+        snapshot.reader === undefined ? [] : [String(snapshot.reader.providerInstanceId)],
+      ),
+    );
+    for (const snapshot of snapshots.values()) {
+      const reader = snapshot.reader;
+      const entry =
+        reader === undefined ? undefined : entriesByInstance.get(String(reader.providerInstanceId));
+      // A reader this environment no longer lists costs the row its icon, not
+      // its existence: the numbers are still a real subscription's, and
+      // dropping it would blink a row out on a reconnect race.
+      if (entry !== undefined && !canReportAccountLimits(entry, snapshot)) continue;
+      // A reading the server marked unfoldable keys on the environment plus its
+      // own key, never on the instance that read it. The server already tells
+      // several unnamed plans from one instance apart by an ordinal in that
+      // key, and keying on the instance would throw that away and merge two
+      // subscriptions' windows under one label. The `#env:` prefix keeps these
+      // apart from real keys, which always start with a vendor namespace.
+      const foldable = isFoldableSubscriptionKey(snapshot.subscription.key)
+        ? snapshot.subscription
+        : null;
       const partial = {
-        groupKey: foldable?.key ?? `#env:${environment.environmentId}:${entry.instanceId}`,
+        groupKey: foldable?.key ?? `#env:${environment.environmentId}:${snapshot.subscription.key}`,
         environmentId: environment.environmentId,
         environmentLabel: environment.label,
         environmentNowMs: Number.isFinite(currentEnvironmentTime) ? currentEnvironmentTime : null,
-        driver: entry.driverKind,
-        displayName: entry.displayName,
-        accentColor: entry.accentColor,
+        ...(reader && entry ? { driver: reader.driver } : {}),
+        displayName: snapshot.subscription.label,
+        ...(entry?.accentColor ? { accentColor: entry.accentColor } : {}),
         snapshot,
         state: rowState(snapshot, currentEnvironmentTime),
-        accountName: foldable?.label ?? null,
+        // No account name: for a foldable row it is the title already, and for
+        // an unfoldable one the environment is what actually tells two apart.
+        accountName: null,
       } satisfies Omit<AccountLimitsCandidate, "windows" | "readingAgeMs">;
       const windows = candidateWindows(partial, currentEnvironmentTime);
       const candidate: AccountLimitsCandidate = {
         ...partial,
         windows,
         readingAgeMs: smallestAge(windows.map((rowWindow) => rowWindow.ageMs)),
+      };
+      const group = groups.get(candidate.groupKey);
+      if (group) group.push(candidate);
+      else groups.set(candidate.groupKey, [candidate]);
+    }
+
+    // An agent that is configured but has produced no reading yet still gets a
+    // row, saying so. Walking only the subscriptions would drop it, and a
+    // freshly configured Claude vanishing from the panel reads as broken.
+    //
+    // Only agents that actually report limits, though. An agent that never
+    // will — Cursor, Grok — would otherwise hold a "No reading yet" row for
+    // ever, since the thing that clears one is a reading arriving.
+    for (const entry of deriveProviderInstanceEntries(environment.providers)) {
+      if (!reportsAccountLimits(entry.driverKind)) continue;
+      if (readInstances.has(String(entry.instanceId))) continue;
+      if (!canReportAccountLimits(entry, null)) continue;
+      const partial = {
+        groupKey: `#env:${environment.environmentId}:${entry.instanceId}`,
+        environmentId: environment.environmentId,
+        environmentLabel: environment.label,
+        environmentNowMs: Number.isFinite(currentEnvironmentTime) ? currentEnvironmentTime : null,
+        driver: entry.driverKind,
+        displayName: entry.displayName,
+        ...(entry.accentColor ? { accentColor: entry.accentColor } : {}),
+        snapshot: null,
+        state: rowState(null, currentEnvironmentTime),
+        accountName: null,
+      } satisfies Omit<AccountLimitsCandidate, "windows" | "readingAgeMs">;
+      const candidate: AccountLimitsCandidate = {
+        ...partial,
+        windows: [],
+        readingAgeMs: null,
       };
       const group = groups.get(candidate.groupKey);
       if (group) group.push(candidate);
@@ -385,8 +480,8 @@ interface RowDraft extends Omit<AccountLimitsRow, "subtitle"> {
  * for nothing.
  */
 function withSubtitles(rows: ReadonlyArray<RowDraft>): ReadonlyArray<AccountLimitsRow> {
-  const titleOf = (row: { readonly driver: string; readonly providerLabel: string }) =>
-    `${row.driver}:${row.providerLabel}`;
+  const titleOf = (row: { readonly driver?: string | undefined; readonly providerLabel: string }) =>
+    `${row.driver ?? "-"}:${row.providerLabel}`;
   const titles = new Map<string, number>();
   for (const row of rows) {
     titles.set(titleOf(row), (titles.get(titleOf(row)) ?? 0) + 1);

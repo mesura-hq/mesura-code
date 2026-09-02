@@ -171,14 +171,18 @@ function AccountLimitRowView(props: { row: AccountLimitsRow }) {
   return (
     <section className="border-border/60 border-t px-3 py-3 [&:first-of-type]:border-t-0">
       <div className="flex min-w-0 items-center gap-2">
-        <ProviderInstanceIcon
-          accentColor={row.accentColor}
-          className="size-5"
-          displayName={row.providerLabel}
-          driverKind={row.driver}
-          iconClassName="size-4 text-foreground/80"
-          showBadge={Boolean(row.accentColor)}
-        />
+        {/* No icon on a subscription no agent read: the icon says which agent
+            reported it, and there is no honest one to show. */}
+        {row.driver ? (
+          <ProviderInstanceIcon
+            accentColor={row.accentColor}
+            className="size-5"
+            displayName={row.providerLabel}
+            driverKind={row.driver}
+            iconClassName="size-4 text-foreground/80"
+            showBadge={Boolean(row.accentColor)}
+          />
+        ) : null}
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-1.5">
             <span className="truncate text-xs font-medium text-foreground">
@@ -252,6 +256,14 @@ function AccountLimitRowView(props: { row: AccountLimitsRow }) {
       {row.state === "refresh-failed" || row.state === "stale-refresh-failed" ? (
         <div className="mt-1 text-[10px] text-muted-foreground/65">
           Refresh failed{row.windows.length > 0 ? " · showing the last reading" : ""}
+        </div>
+      ) : null}
+      {/* Replaces the refresh-failed line rather than stacking with it: the two
+          say contradictory things about whose fault the failure is. */}
+      {row.state === "not-understood" ? (
+        <div className="mt-1 text-[10px] text-muted-foreground/65">
+          Reading not understood — update Mesura Code
+          {row.windows.length > 0 ? " · showing the last reading" : ""}
         </div>
       ) : null}
     </section>
