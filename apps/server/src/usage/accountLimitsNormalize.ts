@@ -187,6 +187,31 @@ export function normalizeClaudeRateLimitEvent(value: unknown): AccountLimitsWind
   return claudeWindowFromValues(meta, readNumber(info.utilization), resetsAt);
 }
 
+/**
+ * The identity and label of a window of a given length.
+ *
+ * One formula, because the Codex and Z.ai normalizers both need it and two
+ * copies drift: one gets a day-versus-hour formatting fix and the other does
+ * not. `unknown` is what a caller returns when it could not work out a length
+ * at all — Codex always can, Z.ai cannot when the vendor uses a duration unit
+ * this fork has never seen.
+ */
+function windowIdAndLabel(
+  minutes: number | null,
+  unknown: { readonly id: string; readonly label: string } = { id: "window_unknown", label: "?" },
+): { readonly id: string; readonly label: string } {
+  if (minutes === FIVE_HOUR_MINUTES) return { id: "five_hour", label: "5h" };
+  if (minutes === SEVEN_DAY_MINUTES) return { id: "seven_day", label: "7d" };
+  if (minutes === null) return unknown;
+  return {
+    id: `window_${minutes}m`,
+    label:
+      minutes % (24 * 60) === 0
+        ? `${minutes / (24 * 60)}d`
+        : `${Math.max(1, Math.round(minutes / 60))}h`,
+  };
+}
+
 function codexWindow(
   value: unknown,
   slot: "primary" | "secondary",
@@ -206,20 +231,7 @@ function codexWindow(
   if (usedPercent === 0 && resetSeconds === null) return null;
 
   const effectiveMinutes = minutes ?? (slot === "primary" ? FIVE_HOUR_MINUTES : SEVEN_DAY_MINUTES);
-  const id =
-    effectiveMinutes === FIVE_HOUR_MINUTES
-      ? "five_hour"
-      : effectiveMinutes === SEVEN_DAY_MINUTES
-        ? "seven_day"
-        : `window_${effectiveMinutes}m`;
-  const label =
-    id === "five_hour"
-      ? "5h"
-      : id === "seven_day"
-        ? "7d"
-        : effectiveMinutes % (24 * 60) === 0
-          ? `${effectiveMinutes / (24 * 60)}d`
-          : `${Math.max(1, Math.round(effectiveMinutes / 60))}h`;
+  const { id, label } = windowIdAndLabel(effectiveMinutes);
 
   return {
     id,
@@ -253,4 +265,153 @@ export function normalizeCodexAccountLimits(value: unknown): NormalizedAccountLi
     plan: readString(snapshot.planType ?? snapshot.plan_type),
     windows: sortWindows(windows),
   };
+}
+
+const THIRTY_DAY_MINUTES = 30 * 24 * 60;
+
+function isoFromUnixMilliseconds(value: number): string | null {
+  if (!Number.isFinite(value) || value < 0) return null;
+  try {
+    return DateTime.formatIso(DateTime.makeUnsafe(value));
+  } catch {
+    return null;
+  }
+}
+
+interface GoWindowSlot {
+  readonly id: string;
+  readonly label: string;
+  readonly minutes: number;
+  readonly keys: readonly [string, string];
+}
+
+const OPENCODE_GO_SLOTS: readonly GoWindowSlot[] = [
+  { id: "five_hour", label: "5h", minutes: FIVE_HOUR_MINUTES, keys: ["rolling", "rollingUsage"] },
+  { id: "seven_day", label: "7d", minutes: SEVEN_DAY_MINUTES, keys: ["weekly", "weeklyUsage"] },
+  {
+    id: "thirty_day",
+    label: "30d",
+    minutes: THIRTY_DAY_MINUTES,
+    keys: ["monthly", "monthlyUsage"],
+  },
+];
+
+function openCodeGoWindow(
+  slot: GoWindowSlot,
+  entry: unknown,
+  nowMs: number,
+): AccountLimitsWindow | null {
+  if (!isRecord(entry)) return null;
+  // Two spellings, because the endpoint ships one and its own pull request
+  // documents another. A window whose percentage neither spelling yields is
+  // dropped rather than shown as zero.
+  const usedPercent = readNumber(entry.percent ?? entry.usagePercent);
+  if (usedPercent === null) return null;
+
+  const isoReset = readString(entry.resetsAt);
+  const secondsAway = readNumber(entry.resetInSec);
+  const resetsAt =
+    isoReset ?? (secondsAway === null ? null : isoFromUnixMilliseconds(nowMs + secondsAway * 1000));
+
+  return {
+    id: slot.id,
+    label: slot.label,
+    usedPercent: clampPercent(usedPercent),
+    resetsAt,
+    windowMinutes: slot.minutes,
+  };
+}
+
+/**
+ * The OpenCode Go plan's rolling, weekly and monthly windows.
+ *
+ * Its endpoint is three weeks old and already serves a different shape from the
+ * one its own pull request documented, so both spellings are read.
+ *
+ * `nowMs` is the reading's own time, and only the documented spelling needs it:
+ * that one reports a second offset rather than a time. It is a parameter rather
+ * than a clock read so this stays a pure function — the caller already holds
+ * the attempt time.
+ */
+export function normalizeOpenCodeGoAccountLimits(
+  value: unknown,
+  nowMs: number,
+): NormalizedAccountLimits | null {
+  if (!isRecord(value)) return null;
+  const usage = isRecord(value.usage) ? value.usage : value;
+  const windows = OPENCODE_GO_SLOTS.map((slot) =>
+    openCodeGoWindow(slot, usage[slot.keys[0]] ?? usage[slot.keys[1]], nowMs),
+  ).filter((window): window is AccountLimitsWindow => window !== null);
+  if (windows.length === 0) return null;
+  return { plan: "Go", windows: sortWindows(windows) };
+}
+
+/** Z.ai's duration unit codes, proved against the live reset deltas. */
+const ZAI_UNIT_MINUTES: Readonly<Record<number, number>> = {
+  3: 60,
+  6: 7 * 24 * 60,
+};
+
+function zaiWindow(entry: unknown): AccountLimitsWindow | null {
+  if (!isRecord(entry)) return null;
+  // `usage` is the limit and `currentValue` the spend — inverted from the
+  // obvious reading — so the reported percentage is taken verbatim and never
+  // recomputed from them.
+  //
+  // Note the Codex normalizer above rejects a zero percentage with no reset
+  // time, and that guard deliberately does NOT apply here. Codex's windows are
+  // optional nested objects, so there "0 with no reset" is indistinguishable
+  // from an absent payload. Z.ai reports an array of limits where `percentage`
+  // is always explicitly present — and it really does omit `nextResetTime` on a
+  // window at 0%, which was seen live. Copying the guard would drop a real row.
+  const usedPercent = readNumber(entry.percentage);
+  if (usedPercent === null) return null;
+
+  // A window length neither field can produce is unknown, never assumed. A
+  // fabricated "1 unit" would render a specific, confident, wrong duration.
+  const unit = readNumber(entry.unit);
+  const multiplier = readNumber(entry.number);
+  const unitMinutes = unit === null ? undefined : ZAI_UNIT_MINUTES[unit];
+  const minutes =
+    unitMinutes === undefined || multiplier === null ? null : unitMinutes * multiplier;
+
+  // Milliseconds, unlike Claude's and Codex's seconds.
+  const resetMs = readNumber(entry.nextResetTime);
+  const resetsAt = resetMs === null ? null : isoFromUnixMilliseconds(resetMs);
+
+  const { id, label } = windowIdAndLabel(minutes, {
+    id: `window_unknown_${unit ?? "na"}x${multiplier ?? "na"}`,
+    label: `${multiplier ?? "?"}\u00d7unit ${unit ?? "?"}`,
+  });
+
+  return {
+    id,
+    label,
+    usedPercent: clampPercent(usedPercent),
+    resetsAt,
+    windowMinutes: minutes,
+  };
+}
+
+/**
+ * The Z.ai GLM Coding Plan's rolling windows and tier.
+ *
+ * The endpoint answers HTTP 200 for its own errors and carries the real status
+ * in the body, so the transport status decides nothing here — a wrong path
+ * returns 200 with code 404, and trusting it would render an error page as a
+ * confident empty panel.
+ */
+export function normalizeZaiAccountLimits(value: unknown): NormalizedAccountLimits | null {
+  if (!isRecord(value) || value.success !== true) return null;
+  const data = isRecord(value.data) ? value.data : null;
+  if (data === null || !Array.isArray(data.limits)) return null;
+
+  const windows = data.limits
+    .map(zaiWindow)
+    .filter((window): window is AccountLimitsWindow => window !== null);
+  if (windows.length === 0) return null;
+
+  const level = readString(data.level);
+  const plan = level === null ? null : level.charAt(0).toUpperCase() + level.slice(1);
+  return { plan, windows: sortWindows(windows) };
 }

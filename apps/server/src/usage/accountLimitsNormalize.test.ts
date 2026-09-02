@@ -4,6 +4,8 @@ import {
   normalizeClaudeAccountLimits,
   normalizeClaudeRateLimitEvent,
   normalizeCodexAccountLimits,
+  normalizeOpenCodeGoAccountLimits,
+  normalizeZaiAccountLimits,
 } from "./accountLimitsNormalize.ts";
 
 describe("Claude account-limit normalization", () => {
@@ -124,5 +126,204 @@ describe("Codex account-limit normalization", () => {
         },
       })?.windows,
     ).toEqual([]);
+  });
+});
+
+describe("normalizeOpenCodeGoAccountLimits", () => {
+  const NOW_MS = Date.parse("2026-09-02T03:00:00.000Z");
+  // Captured live on 2026-09-02 from GET https://opencode.ai/zen/go/v1/usage.
+  const LIVE = {
+    usage: {
+      rolling: { status: "ok", percent: 0, resetsAt: "2026-09-02T03:41:14.103Z" },
+      weekly: { status: "ok", percent: 40, resetsAt: "2026-09-07T00:00:00.103Z" },
+      monthly: { status: "ok", percent: 72, resetsAt: "2026-09-04T15:36:51.103Z" },
+    },
+  };
+
+  it("reads the rolling, weekly and monthly windows the plan meters", () => {
+    expect(
+      normalizeOpenCodeGoAccountLimits(LIVE, NOW_MS)?.windows.map((w) => [w.id, w.usedPercent]),
+    ).toEqual([
+      ["five_hour", 0],
+      ["seven_day", 40],
+      ["thirty_day", 72],
+    ]);
+  });
+
+  it("keeps each window's reset time", () => {
+    expect(normalizeOpenCodeGoAccountLimits(LIVE, NOW_MS)?.windows[1]?.resetsAt).toBe(
+      "2026-09-07T00:00:00.103Z",
+    );
+  });
+
+  it("accepts the spelling the endpoint's own pull request documented", () => {
+    // The endpoint shipped one shape and documents another, three weeks apart.
+    // Accepting both is what stops the next rename emptying the panel.
+    expect(
+      normalizeOpenCodeGoAccountLimits(
+        {
+          rollingUsage: { status: "ok", usagePercent: 12, resetInSec: 3600 },
+          weeklyUsage: { status: "ok", usagePercent: 34, resetInSec: 7200 },
+          monthlyUsage: { status: "ok", usagePercent: 56, resetInSec: 10800 },
+        },
+        NOW_MS,
+      )?.windows.map((w) => w.usedPercent),
+    ).toEqual([12, 34, 56]);
+  });
+
+  it("drops a window whose percentage it cannot read, rather than calling it zero", () => {
+    expect(
+      normalizeOpenCodeGoAccountLimits(
+        {
+          usage: {
+            rolling: { status: "ok", percentage: 40, resetsAt: "2026-09-07T00:00:00.103Z" },
+            weekly: { status: "ok", percent: 40, resetsAt: "2026-09-07T00:00:00.103Z" },
+          },
+        },
+        NOW_MS,
+      )?.windows.map((w) => w.id),
+    ).toEqual(["seven_day"]);
+  });
+
+  it("normalizes to nothing when it can read no window at all", () => {
+    expect(normalizeOpenCodeGoAccountLimits({ usage: {} }, NOW_MS)).toBeNull();
+    expect(normalizeOpenCodeGoAccountLimits({ nope: true }, NOW_MS)).toBeNull();
+  });
+
+  it("dates an offset-reported reset from the reading's own time", () => {
+    // The documented spelling reports a second offset, not a time. Without the
+    // reading's time it would date the reset from 1970.
+    expect(
+      normalizeOpenCodeGoAccountLimits(
+        { rollingUsage: { status: "ok", usagePercent: 12, resetInSec: 3600 } },
+        NOW_MS,
+      )?.windows[0]?.resetsAt,
+    ).toBe("2026-09-02T04:00:00.000Z");
+  });
+});
+
+describe("normalizeZaiAccountLimits", () => {
+  // Captured live on 2026-09-02 from
+  // GET https://api.z.ai/api/monitor/usage/quota/limit.
+  const LIVE = {
+    code: 200,
+    msg: "Operation successful",
+    success: true,
+    data: {
+      level: "lite",
+      limits: [
+        {
+          type: "CREDIT_LIMIT",
+          unit: 3,
+          number: 5,
+          usage: 2000,
+          currentValue: 1654,
+          remaining: 345,
+          percentage: 82,
+          nextResetTime: 1788325042629,
+        },
+        {
+          type: "CREDIT_LIMIT",
+          unit: 6,
+          number: 1,
+          usage: 10000,
+          currentValue: 2822,
+          remaining: 7177,
+          percentage: 28,
+          nextResetTime: 1788892144998,
+        },
+      ],
+    },
+  };
+
+  it("reads the five-hour and weekly windows from unit and multiplier", () => {
+    expect(normalizeZaiAccountLimits(LIVE)?.windows.map((w) => [w.id, w.windowMinutes])).toEqual([
+      ["five_hour", 300],
+      ["seven_day", 10_080],
+    ]);
+  });
+
+  it("takes the percentage verbatim, because usage is the cap and currentValue the spend", () => {
+    // The field names are inverted from the obvious reading: `usage` is the
+    // cap and `currentValue` the consumption. Recomputing would invert the bar.
+    expect(normalizeZaiAccountLimits(LIVE)?.windows.map((w) => w.usedPercent)).toEqual([82, 28]);
+  });
+
+  it("reads the reset time as epoch milliseconds, not seconds", () => {
+    // Claude and Codex both report seconds. Reusing that helper here would put
+    // the reset fifty thousand years out.
+    expect(normalizeZaiAccountLimits(LIVE)?.windows[0]?.resetsAt).toBe("2026-09-02T04:57:22.629Z");
+  });
+
+  it("reports the plan tier", () => {
+    expect(normalizeZaiAccountLimits(LIVE)?.plan).toBe("Lite");
+  });
+
+  it("rejects a failed response that still answered with HTTP 200", () => {
+    // A wrong path returns HTTP 200 carrying code 404. Trusting the transport
+    // status would turn an error page into an empty, confident panel.
+    expect(
+      normalizeZaiAccountLimits({ code: 404, msg: "not found", success: false, data: null }),
+    ).toBeNull();
+  });
+
+  it("falls back to a generic window for a duration unit it does not know", () => {
+    expect(
+      normalizeZaiAccountLimits({
+        code: 200,
+        success: true,
+        data: {
+          level: "pro",
+          limits: [
+            { unit: 99, number: 2, percentage: 10, nextResetTime: 1788325042629 },
+            { unit: 3, number: 5, percentage: 20, nextResetTime: 1788325042629 },
+          ],
+        },
+      })?.windows.map((w) => w.id),
+    ).toEqual(["five_hour", "window_unknown_99x2"]);
+  });
+
+  it("drops a limit whose percentage it cannot read", () => {
+    expect(
+      normalizeZaiAccountLimits({
+        code: 200,
+        success: true,
+        data: {
+          level: "lite",
+          limits: [
+            { unit: 3, number: 5, percentage: "82", nextResetTime: 1788325042629 },
+            { unit: 6, number: 1, percentage: 28, nextResetTime: 1788892144998 },
+          ],
+        },
+      })?.windows.map((w) => w.id),
+    ).toEqual(["seven_day"]);
+  });
+  it("calls a window length unknown when the multiplier is missing", () => {
+    // A fabricated multiplier would render a specific, confident, wrong
+    // duration — "1h" for a window nobody knows the length of.
+    expect(
+      normalizeZaiAccountLimits({
+        code: 200,
+        success: true,
+        data: {
+          level: "lite",
+          limits: [{ unit: 3, percentage: 40, nextResetTime: 1788325042629 }],
+        },
+      })?.windows.map((w) => [w.id, w.windowMinutes]),
+    ).toEqual([["window_unknown_3xna", null]]);
+  });
+
+  it("keeps a window the vendor reports at zero with no reset time", () => {
+    // Seen live: Z.ai omits nextResetTime on a window at 0%. The Codex
+    // normalizer rejects that shape because there it cannot be told from an
+    // absent payload; here the percentage is explicitly present, so dropping
+    // the window would lose a real row.
+    expect(
+      normalizeZaiAccountLimits({
+        code: 200,
+        success: true,
+        data: { level: "lite", limits: [{ unit: 3, number: 5, percentage: 0 }] },
+      })?.windows.map((w) => [w.id, w.usedPercent, w.resetsAt]),
+    ).toEqual([["five_hour", 0, null]]);
   });
 });
