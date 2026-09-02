@@ -130,6 +130,39 @@ describe("derivePendingApprovals", () => {
     ]);
   });
 
+  it("keeps app access approvals and persistence choices from remote activities", () => {
+    const options = [
+      { decision: "decline", label: "Decline" },
+      { decision: "acceptAlways", label: "Always allow Safari" },
+      { decision: "accept", label: "Approve" },
+    ];
+    const activities = [
+      makeActivity({
+        kind: "approval.requested",
+        summary: "App access approval requested",
+        tone: "approval",
+        payload: {
+          requestId: "req-safari",
+          requestType: "mcp_elicitation_approval",
+          detail: "Allow ChatGPT to use Safari?",
+          appName: "Safari",
+          options,
+        },
+      }),
+    ];
+
+    expect(derivePendingApprovals(activities)).toEqual([
+      {
+        requestId: "req-safari",
+        requestKind: "mcp-elicitation",
+        createdAt: "2026-02-23T00:00:00.000Z",
+        detail: "Allow ChatGPT to use Safari?",
+        appName: "Safari",
+        options,
+      },
+    ]);
+  });
+
   it("derives dynamic tool requests as actionable generic approvals", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
@@ -900,6 +933,28 @@ describe("deriveWorkLogEntries", () => {
 
     const entries = deriveWorkLogEntries(activities);
     expect(entries.map((entry) => entry.id)).toEqual(["tool-complete"]);
+  });
+
+  it("drops runtime warnings with no displayable content, keeps ones with a preview", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "warning-noise",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "runtime.warning",
+        summary: "Claude system message 'background_tasks_changed' (no displayable text content)",
+        tone: "info",
+      }),
+      makeActivity({
+        id: "warning-signal",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "runtime.warning",
+        summary: "Reconnecting... 2/5",
+        tone: "info",
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities);
+    expect(entries.map((entry) => entry.id)).toEqual(["warning-signal"]);
   });
 
   it("omits task.started but shows task.progress and task.completed", () => {
@@ -1855,6 +1910,48 @@ describe("deriveWorkLogEntries context window handling", () => {
     expect(entries[0]?.label).toBe("Ran command");
   });
 
+  it("recomputes compaction detail when an older page supplies the earlier snapshots", () => {
+    // The work-log entry cache is keyed on the activity object, while a
+    // compaction entry's Before/After block is computed from the activities
+    // preceding it. mergeOlderPage prepends an older page while keeping the
+    // loaded rows' identity, so a compaction row cached from the short list
+    // must not keep serving a detail computed without those earlier snapshots.
+    const compaction = makeActivity({
+      id: "compaction-cached",
+      sequence: 3,
+      turnId: "turn-1",
+      kind: "context-compaction",
+      summary: "Context compacted",
+      tone: "info",
+      payload: { detail: "Summary" },
+    });
+    const laterSnapshot = makeActivity({
+      id: "context-after-cached",
+      sequence: 2,
+      kind: "context-window.updated",
+      summary: "Context window updated",
+      tone: "info",
+      payload: { usedTokens: 4_707 },
+    });
+    const olderSnapshot = makeActivity({
+      id: "context-before-cached",
+      sequence: 1,
+      kind: "context-window.updated",
+      summary: "Context window updated",
+      tone: "info",
+      payload: { usedTokens: 26_826 },
+    });
+
+    // First render: no earlier snapshot loaded yet, so no Before/After block.
+    const withoutHistory = deriveWorkLogEntries([laterSnapshot, compaction]);
+    expect(withoutHistory[0]?.detail ?? "").not.toContain("Before:");
+
+    // Older page arrives; the compaction row keeps its object identity.
+    const withHistory = deriveWorkLogEntries([olderSnapshot, laterSnapshot, compaction]);
+    expect(withHistory[0]?.detail ?? "").toContain("Before:");
+    expect(withHistory[0]?.detail ?? "").toContain("After:");
+  });
+
   it("keeps context compaction activities as normal work log entries", () => {
     const entries = deriveWorkLogEntries([
       makeActivity({
@@ -2226,5 +2323,66 @@ describe("rerun workflows", () => {
     const spawnRows = entries.filter((entry) => entry.agentSpawn !== undefined);
     expect(spawnRows.map((row) => row.agentSpawn!.workflowId)).toEqual(["wf-run1", "wf-run2"]);
     expect(spawnRows.map((row) => row.turnId)).toEqual(["turn-1", "turn-2"]);
+  });
+});
+
+describe("session activity performance", () => {
+  it("reuses entries for unchanged activities", () => {
+    const activities = ["status", "diff", "log"].map((command, index) =>
+      makeActivity({
+        id: `stable-tool-${index}`,
+        kind: "tool.completed",
+        sequence: index,
+        payload: {
+          itemType: "command_execution",
+          data: { toolCallId: `stable-tool-${index}`, item: { command: ["git", command] } },
+        },
+      }),
+    );
+
+    const initialEntries = deriveWorkLogEntries(activities.slice(0, 2));
+    const appendedEntries = deriveWorkLogEntries(activities);
+    expect(appendedEntries[0]).toBe(initialEntries[0]);
+    expect(appendedEntries[1]).toBe(initialEntries[1]);
+  });
+
+  it("updates 20,000 ordered tool activities within 100 ms", () => {
+    const activities = Array.from({ length: 20_000 }, (_, index) =>
+      makeActivity({
+        id: `benchmark-tool-${index}`,
+        createdAt: new Date(1_700_000_000_000 + index).toISOString(),
+        kind: "tool.completed",
+        summary: "Ran command",
+        sequence: index,
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          data: {
+            toolCallId: `benchmark-tool-${index}`,
+            item: { command: ["git", "status"] },
+          },
+        },
+      }),
+    );
+    deriveWorkLogEntries(activities);
+    const updatedActivities = [
+      ...activities,
+      makeActivity({
+        id: "benchmark-tool-appended",
+        createdAt: new Date(1_700_000_000_000 + activities.length).toISOString(),
+        kind: "tool.completed",
+        summary: "Ran command",
+        sequence: activities.length,
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          data: { toolCallId: "benchmark-tool-appended", item: { command: ["git", "diff"] } },
+        },
+      }),
+    ];
+
+    const startedAt = performance.now();
+    expect(deriveWorkLogEntries(updatedActivities)).toHaveLength(20_001);
+    expect(performance.now() - startedAt).toBeLessThan(100);
   });
 });

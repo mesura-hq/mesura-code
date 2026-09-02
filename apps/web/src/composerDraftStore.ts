@@ -370,6 +370,7 @@ interface ComposerDraftStoreState {
   draftsByThreadKey: Record<string, ComposerThreadDraftState>;
   draftThreadsByThreadKey: Record<string, DraftThreadState>;
   logicalProjectDraftThreadKeyByLogicalProjectKey: Record<string, string>;
+  backgroundSubmissionThreadKeys: Record<string, true>;
   stickyModelSelectionByProvider: Partial<Record<ProviderInstanceId, ModelSelection>>;
   stickyActiveProvider: ProviderInstanceId | null;
   appliedDictationCommandsByTargetKey: Record<
@@ -2327,6 +2328,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
         draftsByThreadKey: {},
         draftThreadsByThreadKey: {},
         logicalProjectDraftThreadKeyByLogicalProjectKey: {},
+        backgroundSubmissionThreadKeys: {},
         stickyModelSelectionByProvider: {},
         stickyActiveProvider: null,
         appliedDictationCommandsByTargetKey: {},
@@ -3661,6 +3663,40 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
 
 export const useComposerDraftStore = composerDraftStore;
 
+export function beginBackgroundDraftSubmissionByRef(threadRef: ScopedThreadRef): void {
+  const threadKey = scopedThreadKey(threadRef);
+  useComposerDraftStore.setState((state) => {
+    if (state.backgroundSubmissionThreadKeys[threadKey]) {
+      return state;
+    }
+    return {
+      backgroundSubmissionThreadKeys: {
+        ...state.backgroundSubmissionThreadKeys,
+        [threadKey]: true,
+      },
+    };
+  });
+}
+
+export function clearBackgroundDraftSubmissionByRef(threadRef: ScopedThreadRef): void {
+  const threadKey = scopedThreadKey(threadRef);
+  useComposerDraftStore.setState((state) => {
+    if (!state.backgroundSubmissionThreadKeys[threadKey]) {
+      return state;
+    }
+    const backgroundSubmissionThreadKeys = { ...state.backgroundSubmissionThreadKeys };
+    delete backgroundSubmissionThreadKeys[threadKey];
+    return { backgroundSubmissionThreadKeys };
+  });
+}
+
+export function useBackgroundDraftSubmissionPending(threadRef: ScopedThreadRef | null): boolean {
+  const threadKey = threadRef ? scopedThreadKey(threadRef) : null;
+  return useComposerDraftStore(
+    (state) => threadKey !== null && state.backgroundSubmissionThreadKeys[threadKey] === true,
+  );
+}
+
 export type PersistedDictationAppendResult =
   | {
       readonly ok: true;
@@ -3960,6 +3996,11 @@ export function clearComposerDraftsEnvironment(environmentId: EnvironmentId): vo
         return false;
       }),
     ) as Record<string, ComposerThreadDraftState>;
+    const nextBackgroundSubmissionThreadKeys = Object.fromEntries(
+      Object.entries(state.backgroundSubmissionThreadKeys).filter(
+        ([threadKey]) => parseScopedThreadKey(threadKey)?.environmentId !== environmentId,
+      ),
+    ) as Record<string, true>;
     const nextAppliedDictationCommands = Object.fromEntries(
       Object.entries(state.appliedDictationCommandsByTargetKey).filter(
         ([targetKey]) =>
@@ -3973,6 +4014,7 @@ export function clearComposerDraftsEnvironment(environmentId: EnvironmentId): vo
       draftThreadsByThreadKey: nextDraftThreads,
       logicalProjectDraftThreadKeyByLogicalProjectKey: nextLogicalMappings,
       appliedDictationCommandsByTargetKey: nextAppliedDictationCommands,
+      backgroundSubmissionThreadKeys: nextBackgroundSubmissionThreadKeys,
     };
   });
   composerDebouncedStorage.flush();
@@ -4102,6 +4144,7 @@ export function finalizePromotedDraftThreadByRef(threadRef: ScopedThreadRef): vo
       draftStore.finalizePromotedDraftThread(target);
     }
   }
+  clearBackgroundDraftSubmissionByRef(threadRef);
 }
 
 export function finalizePromotedDraftThreadsByRef(

@@ -69,16 +69,6 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // entry: that mechanism exists for a SECOND default on a command a config
   // already binds.
   { key: "alt+q", command: "question.toggleCollapse", when: "!terminalFocus" },
-  // Shipped on alt+s first and moved here, deliberately with no
-  // RETIRED_KEYBINDING_DEFAULTS entry. The backfill is per command, so a config
-  // that never mentioned thread.toggleSettled gets this rule for the same
-  // reason alt+q above needs no entry. The accepted cost is a config written by
-  // a build that did ship alt+s: it keeps that rule and never sees this one.
-  //
-  // mod+s is composer.stash, so this now sits one Shift away from it rather
-  // than on a different modifier. The same-shortcut-context guard in the
-  // server's keybindings tests is what holds the two apart.
-  { key: "mod+shift+s", command: "thread.toggleSettled", when: "!terminalFocus" },
   { key: "mod+u", command: "chat.scrollHalfPageUp", when: "!terminalFocus" },
   { key: "mod+d", command: "chat.scrollHalfPageDown", when: "!terminalFocus" },
   { key: "mod+o", command: "editor.openFavorite" },
@@ -95,6 +85,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "ctrl+tab", command: "thread.next", when: "!terminalFocus" },
   { key: "mod+shift+[", command: "thread.previous" },
   { key: "mod+shift+]", command: "thread.next" },
+  { key: "mod+shift+s", command: "thread.settle", when: "!terminalFocus" },
   ...THREAD_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
     key: `mod+${index + 1}`,
     command,

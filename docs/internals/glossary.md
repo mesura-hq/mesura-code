@@ -142,6 +142,10 @@ A production protocol result that confirms the effect of one dictation command. 
 mean a test-only runtime receipt. A dictation receipt can confirm clipboard copy, persisted insert,
 provider-turn start, pending confirmation, refusal, or failure.
 
+#### Model manifest
+
+The per-driver list of current model slugs that decides which models land in the model picker's legacy section. Bundled at `apps/server/src/provider/model-manifest.json` and refreshed at runtime from the same file on `main`, so classification updates ship as commits instead of releases. See the [provider architecture][16] model manifest section.
+
 ### Checkpointing
 
 Checkpointing captures workspace state over time so the app can diff turns and restore earlier points. The main pieces are [CheckpointStore.ts][19], [CheckpointDiffQuery.ts][20], and [CheckpointReactor.ts][6].

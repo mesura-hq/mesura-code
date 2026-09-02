@@ -228,10 +228,11 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.equal(soleKeyFor("workspacePicker.toggle"), "alt+w");
       assert.equal(soleKeyFor("branchPicker.toggle"), "alt+b");
       assert.equal(soleKeyFor("question.toggleCollapse"), "alt+q");
-      // Moved off alt+s. mod+s is composer.stash, so the settle toggle now sits
-      // one Shift away from it rather than on a different modifier; the
-      // same-shortcut-context guard below is what proves the two stay apart.
-      assert.equal(soleKeyFor("thread.toggleSettled"), "mod+shift+s");
+      // Upstream's thread.settle owns this chord since the 2026-W35 sync; the
+      // fork's thread.toggleSettled does the same thing and is now unbound.
+      // mod+s is composer.stash, so this sits one Shift away from it, and the
+      // same-shortcut-context guard below proves the two stay apart.
+      assert.equal(soleKeyFor("thread.settle"), "mod+shift+s");
       assert.equal(soleKeyFor("chat.scrollHalfPageUp"), "mod+u");
       assert.equal(soleKeyFor("chat.scrollHalfPageDown"), "mod+d");
       // diff.toggle gave mod+d up to the reading scroll. terminal.splitVertical

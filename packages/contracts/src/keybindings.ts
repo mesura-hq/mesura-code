@@ -37,6 +37,11 @@ export type ModelPickerJumpKeybindingCommand =
 export const THREAD_KEYBINDING_COMMANDS = [
   "thread.previous",
   "thread.next",
+  "thread.settle",
+  // Bound to no chord since the 2026-W35 sync: upstream's thread.settle owns
+  // mod+shift+s and does the same thing. The handlers here stay until the two
+  // are unified, which is follow-up work, not part of the merge.
+  "thread.toggleSettled",
   ...THREAD_JUMP_KEYBINDING_COMMANDS,
 ] as const;
 export type ThreadKeybindingCommand = (typeof THREAD_KEYBINDING_COMMANDS)[number];
@@ -117,7 +122,6 @@ export const STATIC_KEYBINDING_COMMANDS = [
   // because that group is traversal, dispatched by the sidebar; this acts on the
   // open thread's lifecycle and is dispatched by the chat view. The rename
   // warning above applies to this id too.
-  "thread.toggleSettled",
   ...CHAT_SCROLL_KEYBINDING_COMMANDS,
   ...MODEL_PICKER_KEYBINDING_COMMANDS,
   ...THREAD_KEYBINDING_COMMANDS,

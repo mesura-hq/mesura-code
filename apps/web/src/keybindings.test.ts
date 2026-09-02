@@ -165,6 +165,11 @@ const DEFAULT_BINDINGS = compile([
   { shortcut: modShortcut("o"), command: "editor.openFavorite" },
   { shortcut: modShortcut("[", { shiftKey: true }), command: "thread.previous" },
   { shortcut: modShortcut("]", { shiftKey: true }), command: "thread.next" },
+  {
+    shortcut: modShortcut("s", { shiftKey: true }),
+    command: "thread.settle",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
   { shortcut: modShortcut("1"), command: "thread.jump.1" },
   { shortcut: modShortcut("2"), command: "thread.jump.2" },
   { shortcut: modShortcut("3"), command: "thread.jump.3" },
@@ -203,6 +208,27 @@ describe("isTerminalToggleShortcut", () => {
   it("matches Ctrl+J on non-macOS while terminalFocus is true", () => {
     assert.isTrue(
       isTerminalToggleShortcut(event({ ctrlKey: true }), DEFAULT_BINDINGS, {
+        platform: "Win32",
+        context: { terminalFocus: true },
+      }),
+    );
+  });
+});
+
+describe("settle thread shortcut", () => {
+  it("resolves outside the terminal", () => {
+    assert.equal(
+      resolveShortcutCommand(event({ key: "s", metaKey: true, shiftKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: false },
+      }),
+      "thread.settle",
+    );
+  });
+
+  it("does not intercept the terminal", () => {
+    assert.isNull(
+      resolveShortcutCommand(event({ key: "s", ctrlKey: true, shiftKey: true }), DEFAULT_BINDINGS, {
         platform: "Win32",
         context: { terminalFocus: true },
       }),
@@ -1038,7 +1064,9 @@ describe("shipped defaults on Linux", () => {
   it("toggles the open thread's settled state on mod+shift+s, and leaves the terminal alone", () => {
     assert.strictEqual(
       resolve(press("s", { ctrlKey: true, shiftKey: true })),
-      "thread.toggleSettled",
+      // Upstream's thread.settle owns this chord since the 2026-W35 sync; the
+      // fork's thread.toggleSettled does the same thing and is now unbound.
+      "thread.settle",
     );
     assert.strictEqual(resolve(press("s", { ctrlKey: true, shiftKey: true }), true), null);
     // mod+s stashes the composer draft and is one Shift away. Asserting it here

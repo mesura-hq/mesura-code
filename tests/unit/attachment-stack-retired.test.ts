@@ -67,10 +67,13 @@ it("keeps upstream's attachment store, which image attachments need", () => {
 
 it("drops the fork's file ceiling and keeps upstream's image ceiling", () => {
   const contracts = read("packages/contracts/src/orchestration.ts");
+  // Upstream owns this constant now, at 50 MB. What must not come back is the
+  // fork's own 2 GB ceiling, which only made sense with the resumable
+  // transport ADR-003 retired.
   assert.notInclude(
     contracts,
-    "PROVIDER_SEND_TURN_MAX_FILE_BYTES",
-    "the fork's 2 GB file ceiling survived; upstream's stack sets its own limit",
+    "PROVIDER_SEND_TURN_MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024",
+    "the fork's 2 GB file ceiling came back; upstream's stack sets its own limit",
   );
   assert.include(
     contracts,

@@ -7,6 +7,7 @@ import {
 } from "@t3tools/client-runtime/state/thread-token-search";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import {
+  activeThreadAnchorTimestampMs,
   getThreadSortTimestamp,
   sortThreads,
   toSortableTimestamp,
@@ -19,7 +20,7 @@ import { isLatestTurnSettled } from "../session-logic";
 import { resolveServerBackedAppStageLabel } from "../branding.logic";
 
 export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
-export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100;
+export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 200;
 // Visible sidebar rows are prewarmed into the thread-detail cache so opening a
 // nearby thread usually reuses an already-hot subscription. Each prewarmed
 // thread holds a live, fully hydrated detail subscription (all messages and
@@ -542,57 +543,25 @@ export function firstValidTimestamp(
   return null;
 }
 
-// Keep the default sidebar on the shared thread-order contract used by the
-// legacy web sidebar and mobile. The lifecycle partition happens before this
-// call, so pinned, snoozed and settled sections retain their own order.
-export function sortThreadsForSidebar<T extends { readonly id: string } & ThreadSortInput>(
-  threads: readonly T[],
-  sortOrder: SidebarThreadSortOrder,
-): T[] {
-  return sortThreads(threads, sortOrder);
-}
-
-export interface ActiveThreadOrderEntry {
-  readonly key: string;
-  readonly latestUserMessageAt: string | null;
-}
-
-/**
- * Reveals only the user-driven promotion that this sort mode promises.
- * Session and agent updates can re-render the list without changing the user
- * timestamp, and preference changes can reorder every row; neither should
- * pull a scrolled sidebar away from what the user was reading.
- */
-export function shouldRevealPromotedActiveThread(input: {
-  readonly activeThreadKey: string | null;
-  readonly sortOrder: SidebarThreadSortOrder;
-  readonly previous: ReadonlyArray<ActiveThreadOrderEntry> | null;
-  readonly next: ReadonlyArray<ActiveThreadOrderEntry>;
-}): boolean {
-  if (input.sortOrder !== "updated_at" || input.activeThreadKey === null) return false;
-  if (input.previous === null) return false;
-
-  const previousIndex = input.previous.findIndex((entry) => entry.key === input.activeThreadKey);
-  const nextIndex = input.next.findIndex((entry) => entry.key === input.activeThreadKey);
-  if (previousIndex <= 0 || nextIndex !== 0) return false;
-
-  const previousTimestamp = input.previous[previousIndex]?.latestUserMessageAt ?? null;
-  const nextTimestamp = input.next[nextIndex]?.latestUserMessageAt ?? null;
-  return previousTimestamp !== nextTimestamp;
-}
-
-export function promotedActiveThreadScrollBehavior(input: {
-  readonly wasVisibleBeforePromotion: boolean;
-  readonly prefersReducedMotion: boolean;
-}): "auto" | "smooth" {
-  return input.wasVisibleBeforePromotion || input.prefersReducedMotion ? "auto" : "smooth";
-}
-
-export function promotedActiveThreadScrollTop(input: {
-  readonly rowLayoutTop: number;
-  readonly viewportLayoutTop: number;
-}): number {
-  return Math.max(0, input.rowLayoutTop - input.viewportLayoutTop);
+// Sidebar sort: static order, newest anchor on top. Activity NEVER reorders
+// the list — a row holds its position between lifecycle transitions, so the
+// screen only moves when a thread enters or leaves the active list. The
+// anchor is creation time until an un-settle re-anchors it (see
+// activeThreadAnchorTimestampMs), so an un-settled thread surfaces at the
+// top instead of sinking back to its creation-order slot. Status (including
+// pending approval) is carried by each card's edge strip, not by position.
+export function sortThreadsForSidebar<
+  T extends {
+    readonly id: string;
+    readonly createdAt: string;
+    readonly unsettledAt?: string | null | undefined;
+  },
+>(threads: readonly T[]): T[] {
+  return [...threads].toSorted(
+    (left, right) =>
+      activeThreadAnchorTimestampMs(right) - activeThreadAnchorTimestampMs(left) ||
+      left.id.localeCompare(right.id),
+  );
 }
 
 // Pinned-reorder key math and the keyed sort live in client-runtime

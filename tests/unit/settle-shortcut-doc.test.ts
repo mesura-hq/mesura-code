@@ -10,7 +10,7 @@ import { repositoryRoot } from "./contractHarness.ts";
 /**
  * The chord a command ships on and the chord the manual tells a user to press
  * are two facts in two files, and nothing but this test makes them agree.
- * Moving `thread.toggleSettled` off `alt+s` needed edits in five places, and a
+ * Moving the settle chord off `alt+s` needed edits in five places, and a
  * review still found a sixth that was wrong.
  *
  * It reads the key out of `DEFAULT_KEYBINDINGS` rather than naming it, so the
@@ -28,9 +28,9 @@ const shippedKeysFor = (command: string) =>
 
 it("documents every chord the settle toggle actually ships on", () => {
   const doc = readDoc();
-  const keys = shippedKeysFor("thread.toggleSettled");
+  const keys = shippedKeysFor("thread.settle");
 
-  assert.isAbove(keys.length, 0, "thread.toggleSettled lost its default binding");
+  assert.isAbove(keys.length, 0, "thread.settle lost its default binding");
   for (const key of keys) {
     assert.include(doc, `\`${key}\``, `docs/user/keybindings.md never names ${key}`);
   }
@@ -42,6 +42,6 @@ it("stops telling anyone to press the chord the settle toggle moved off", () => 
   // the backfill delivers the new chord on its own. A manual that still names
   // alt+s is worse than one that says nothing — the reader presses it, nothing
   // happens, and the manual is what told them to.
-  assert.notInclude(shippedKeysFor("thread.toggleSettled"), "alt+s");
+  assert.notInclude(shippedKeysFor("thread.settle"), "alt+s");
   assert.notMatch(readDoc(), /`alt\+s`/);
 });

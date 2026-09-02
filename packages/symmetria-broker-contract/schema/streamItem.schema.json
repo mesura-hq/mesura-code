@@ -311,6 +311,21 @@
             {
               "additionalProperties": true,
               "properties": {
+                "autoCompactThreshold": {
+                  "anyOf": [
+                    {
+                      "allOf": [
+                        {
+                          "minimum": 1
+                        }
+                      ],
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "cachedInputTokens": {
                   "anyOf": [
                     {
