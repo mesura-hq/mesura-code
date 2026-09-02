@@ -121,3 +121,21 @@ it("keeps the mobile preference store out of home-list-options", () => {
     "home-list-options.ts reaches the preference store, which drags react-native into modules that pure tests import",
   );
 });
+
+it("orders the active sidebar list through the fork's sort setting", () => {
+  // This wiring was lost once already: upstream's v2 sidebar replaced #33's
+  // recency ordering with a static anchor, and the setting kept existing while
+  // nothing on that surface read it. The settings row and the command palette
+  // both kept working, so no suite noticed.
+  const sidebar = read("apps/web/src/components/Sidebar.tsx");
+  assert.include(
+    sidebar,
+    "sortActiveThreadsForSidebar(active, sidebarThreadSortOrder)",
+    "the sidebar sorts the active list without the thread sort setting, so #33's ordering is inert again",
+  );
+  assert.include(
+    sidebar,
+    "sidebarThreadSortOrder,\n    snoozeWakeTick,",
+    "sidebarThreadSortOrder is missing from the memo's dependencies, so changing the setting does not re-sort the list",
+  );
+});
