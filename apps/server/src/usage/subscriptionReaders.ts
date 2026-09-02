@@ -23,6 +23,7 @@ import { AccountLimitsFailureReason } from "@t3tools/contracts";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 
 import {
   normalizeOpenCodeGoAccountLimits,
@@ -173,4 +174,28 @@ export function readZaiUsage(input: ReadInput) {
     normalize: normalizeZaiAccountLimits,
     vendor: "Z.ai",
   });
+}
+
+/**
+ * Adapt Effect's HTTP client to the narrow `get` the readers take.
+ *
+ * The status is reported rather than filtered, because these readers classify
+ * on it: a 401 and a 500 mean different things to the panel. The error detail
+ * carries the vendor's name and nothing from the response, since a body is the
+ * likeliest place a token gets echoed back at us.
+ */
+export function makeSubscriptionHttpGet(
+  httpClient: HttpClient.HttpClient,
+): (
+  request: SubscriptionHttpRequest,
+) => Effect.Effect<SubscriptionHttpResponse, SubscriptionTransportError> {
+  return (request) =>
+    HttpClientRequest.get(request.url).pipe(
+      HttpClientRequest.setHeaders(request.headers),
+      httpClient.execute,
+      Effect.flatMap((response) =>
+        response.text.pipe(Effect.map((body) => ({ status: response.status, body }))),
+      ),
+      Effect.mapError(() => new SubscriptionTransportError({ detail: "usage request failed" })),
+    );
 }

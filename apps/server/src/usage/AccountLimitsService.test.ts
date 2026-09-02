@@ -17,7 +17,8 @@ import * as TestClock from "effect/testing/TestClock";
 
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
 import { ProviderDriverError } from "../provider/Errors.ts";
-import { makeAccountLimitsService } from "./AccountLimitsService.ts";
+import { makeAccountLimitsService, type PolledSubscription } from "./AccountLimitsService.ts";
+import { SubscriptionReadError } from "./subscriptionReaders.ts";
 
 function providerInstance(input: {
   readonly id: string;
@@ -1014,6 +1015,275 @@ it.layer(NodeServices.layer)("AccountLimitsService reading many subscriptions", 
 
       const keys = (yield* service.readSummary()).snapshots.map((s) => s.subscription.key);
       assert.deepEqual(keys, ["opencode-go:a"]);
+    }).pipe(Effect.scoped),
+  );
+});
+
+it.layer(NodeServices.layer)("AccountLimitsService polling subscriptions", (it) => {
+  const goSubscription = {
+    key: "opencode-go:abc",
+    subscription: { key: "opencode-go:abc", label: "OpenCode Go" },
+  };
+
+  function polled(read: PolledSubscription["read"]): PolledSubscription {
+    return { ...goSubscription, read };
+  }
+
+  const goReading = {
+    plan: "Go",
+    windows: [
+      {
+        id: "five_hour",
+        label: "5h",
+        usedPercent: 40,
+        resetsAt: "2026-09-02T08:00:00.000Z",
+        windowMinutes: 300,
+      },
+    ],
+  };
+
+  it.effect("polls a subscription that no provider instance reads", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "limits-sub-poll-" });
+      const service = yield* makeAccountLimitsService({
+        cachePath: path.join(dir, "cache.json"),
+        listInstances: Effect.succeed([]),
+        listSubscriptions: Effect.succeed([polled(() => Effect.succeed(goReading))]),
+        refreshInterval: "1 minute",
+        freshnessTtl: "5 minutes",
+      });
+      yield* service.refreshStale;
+
+      const summary = yield* service.readSummary();
+      assert.equal(summary.snapshots.length, 1);
+      assert.equal(summary.snapshots[0]?.subscription.key, "opencode-go:abc");
+      // Nothing read it through an agent, so it names no reader at all.
+      assert.equal(summary.snapshots[0]?.reader, undefined);
+      assert.equal(summary.snapshots[0]?.observation?.plan, "Go");
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("records why a subscription read failed", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "limits-sub-reason-" });
+      const service = yield* makeAccountLimitsService({
+        cachePath: path.join(dir, "cache.json"),
+        listInstances: Effect.succeed([]),
+        listSubscriptions: Effect.succeed([
+          polled(() =>
+            Effect.fail(
+              new SubscriptionReadError({ reason: "unrecognized", detail: "not understood" }),
+            ),
+          ),
+        ]),
+        refreshInterval: "1 minute",
+        freshnessTtl: "5 minutes",
+      });
+      yield* service.refreshStale;
+
+      const snapshot = (yield* service.readSummary()).snapshots[0];
+      assert.equal(snapshot?.lastAttempt.status, "failed");
+      // "We could not understand it" is our bug, and the panel says so.
+      assert.equal(snapshot?.lastAttempt.reason, "unrecognized");
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("keeps each failure reason apart", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "limits-sub-reasons-" });
+      const service = yield* makeAccountLimitsService({
+        cachePath: path.join(dir, "cache.json"),
+        listInstances: Effect.succeed([]),
+        listSubscriptions: Effect.succeed([
+          {
+            key: "opencode-go:a",
+            subscription: { key: "opencode-go:a", label: "Go" },
+            read: () =>
+              Effect.fail(new SubscriptionReadError({ reason: "unreachable", detail: "down" })),
+          },
+          {
+            key: "zai:b",
+            subscription: { key: "zai:b", label: "GLM" },
+            read: () =>
+              Effect.fail(new SubscriptionReadError({ reason: "unauthorized", detail: "no" })),
+          },
+        ]),
+        refreshInterval: "1 minute",
+        freshnessTtl: "5 minutes",
+      });
+      yield* service.refreshStale;
+
+      const summary = yield* service.readSummary();
+      assert.deepEqual(
+        summary.snapshots.map((s) => [s.subscription.key, s.lastAttempt.reason]),
+        [
+          ["opencode-go:a", "unreachable"],
+          ["zai:b", "unauthorized"],
+        ],
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("respects the same freshness window as a provider instance", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "limits-sub-ttl-" });
+      const reads = yield* Ref.make(0);
+      const service = yield* makeAccountLimitsService({
+        cachePath: path.join(dir, "cache.json"),
+        listInstances: Effect.succeed([]),
+        listSubscriptions: Effect.succeed([
+          polled(() => Ref.update(reads, (count) => count + 1).pipe(Effect.as(goReading))),
+        ]),
+        refreshInterval: "1 minute",
+        freshnessTtl: "5 minutes",
+      });
+
+      yield* service.refreshStale;
+      assert.equal(yield* Ref.get(reads), 1);
+      yield* service.refreshStale;
+      assert.equal(yield* Ref.get(reads), 1);
+      yield* TestClock.adjust("5 minutes");
+      yield* service.refreshStale;
+      assert.equal(yield* Ref.get(reads), 2);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("keeps a subscription's last reading when a later one fails", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "limits-sub-keep-" });
+      const reads = yield* Ref.make(0);
+      const service = yield* makeAccountLimitsService({
+        cachePath: path.join(dir, "cache.json"),
+        listInstances: Effect.succeed([]),
+        listSubscriptions: Effect.succeed([
+          polled(() =>
+            Ref.updateAndGet(reads, (count) => count + 1).pipe(
+              Effect.flatMap((count) =>
+                count === 1
+                  ? Effect.succeed(goReading)
+                  : Effect.fail(
+                      new SubscriptionReadError({ reason: "unreachable", detail: "down" }),
+                    ),
+              ),
+            ),
+          ),
+        ]),
+        refreshInterval: "1 minute",
+        freshnessTtl: "5 minutes",
+      });
+
+      yield* service.refreshStale;
+      yield* TestClock.adjust("5 minutes");
+      yield* service.refreshStale;
+
+      const snapshot = (yield* service.readSummary()).snapshots[0];
+      assert.equal(snapshot?.lastAttempt.status, "failed");
+      assert.equal(snapshot?.observation?.windows[0]?.usedPercent, 40);
+    }).pipe(Effect.scoped),
+  );
+});
+
+it.layer(NodeServices.layer)("AccountLimitsService bounding a hung subscription", (it) => {
+  it.effect("does not let one unbounded subscription wedge the loop", () =>
+    Effect.gen(function* () {
+      // Observed, not imagined: a read that never settles held refreshLock, so
+      // the next scheduled tick blocked forever and Claude and Codex stopped
+      // refreshing too. One row's vendor must not stop every other reader.
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "limits-hung-" });
+      const instanceReads = yield* Ref.make(0);
+      const hungStarted = yield* Deferred.make<void>();
+      const service = yield* makeAccountLimitsService({
+        cachePath: path.join(dir, "cache.json"),
+        listInstances: Effect.succeed([
+          providerInstance({
+            id: "claude",
+            driver: "claudeAgent",
+            read: () =>
+              Ref.update(instanceReads, (count) => count + 1).pipe(Effect.as(claudePayload(20))),
+          }),
+        ]),
+        listSubscriptions: Effect.succeed([
+          {
+            key: "opencode-go:hung",
+            subscription: { key: "opencode-go:hung", label: "Go" },
+            read: () => Deferred.succeed(hungStarted, undefined).pipe(Effect.andThen(Effect.never)),
+          },
+        ]),
+        refreshInterval: "1 minute",
+        freshnessTtl: "5 minutes",
+        subscriptionReadTimeout: "30 seconds",
+      });
+
+      const first = yield* service.refreshStale.pipe(Effect.forkScoped);
+      yield* Deferred.await(hungStarted);
+      yield* TestClock.adjust("30 seconds");
+      yield* Fiber.join(first);
+      assert.equal(yield* Ref.get(instanceReads), 1);
+
+      // The next tick must be able to run at all, which is what the wedge stopped.
+      yield* TestClock.adjust("5 minutes");
+      const second = yield* service.refreshStale.pipe(Effect.forkScoped);
+      yield* TestClock.adjust("30 seconds");
+      yield* Fiber.join(second);
+      assert.equal(yield* Ref.get(instanceReads), 2);
+
+      const hung = (yield* service.readSummary()).snapshots.find(
+        (snapshot) => snapshot.subscription.key === "opencode-go:hung",
+      );
+      assert.equal(hung?.lastAttempt.reason, "unreachable");
+    }).pipe(Effect.scoped),
+  );
+  it.effect("drops a subscription the registry no longer holds", () =>
+    Effect.gen(function* () {
+      // Removing a subscription must take its row with it. A reader-less
+      // snapshot has no instance to prune it, so this is the only path that can.
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "limits-sub-drop-" });
+      const configured = yield* Ref.make<ReadonlyArray<PolledSubscription>>([
+        {
+          key: "zai:gone",
+          subscription: { key: "zai:gone", label: "GLM" },
+          read: () =>
+            Effect.succeed({
+              plan: "Lite",
+              windows: [
+                {
+                  id: "five_hour",
+                  label: "5h",
+                  usedPercent: 10,
+                  resetsAt: null,
+                  windowMinutes: 300,
+                },
+              ],
+            }),
+        },
+      ]);
+      const service = yield* makeAccountLimitsService({
+        cachePath: path.join(dir, "cache.json"),
+        listInstances: Effect.succeed([]),
+        listSubscriptions: Ref.get(configured),
+        refreshInterval: "1 minute",
+        freshnessTtl: "5 minutes",
+      });
+      yield* service.refreshStale;
+      assert.equal((yield* service.readSummary()).snapshots.length, 1);
+
+      yield* Ref.set(configured, []);
+      yield* service.refreshStale;
+      assert.deepEqual((yield* service.readSummary()).snapshots, []);
     }).pipe(Effect.scoped),
   );
 });

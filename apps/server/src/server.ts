@@ -184,11 +184,10 @@ const UsageLayerLive = UsageService.layer.pipe(Layer.provide(ServerSettingsLayer
 const SubscriptionRegistryLayerLive = SubscriptionRegistry.layer.pipe(
   Layer.provide(ServerSecretStore.layer),
 );
-// `AccountLimitsService` does not read `SubscriptionRegistry` from context yet —
-// it starts polling subscriptions in a later phase. Until then this `provide` is
-// what runs credential discovery at boot, and dropping it would stop the
-// discovery pass with no type error and no runtime error: subscriptions would
-// simply never appear, with nothing to point at the cause.
+// `AccountLimitsService` reads `SubscriptionRegistry` from context to build its
+// list of directly polled subscriptions, so this is a real dependency and the
+// type system enforces it. Building the registry is also what runs credential
+// discovery at boot.
 const AccountLimitsLayerLive = AccountLimitsService.layer.pipe(
   Layer.provide(SubscriptionRegistryLayerLive),
 );

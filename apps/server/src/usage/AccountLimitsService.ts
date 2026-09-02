@@ -3,6 +3,7 @@ import {
   ACCOUNT_LIMITS_CONTRACT_VERSION,
   accountLimitsWindowKey,
   AccountLimitsSnapshot,
+  type AccountLimitsFailureReason,
   unfoldableInstanceSubscription,
   type AccountLimitsAccount,
   type AccountLimitsSummary,
@@ -26,6 +27,15 @@ import { writeFileStringAtomically } from "../atomicWrite.ts";
 import { ServerConfig } from "../config.ts";
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
 import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
+import { HttpClient } from "effect/unstable/http";
+
+import * as SubscriptionRegistry from "./SubscriptionRegistry.ts";
+import {
+  makeSubscriptionHttpGet,
+  readOpenCodeGoUsage,
+  readZaiUsage,
+  type SubscriptionReadError,
+} from "./subscriptionReaders.ts";
 import {
   normalizeClaudeAccountLimits,
   normalizeClaudeRateLimitEvent,
@@ -35,6 +45,13 @@ import {
 
 const DEFAULT_REFRESH_INTERVAL = Duration.minutes(1);
 const DEFAULT_FRESHNESS_TTL = Duration.minutes(5);
+/**
+ * The service's own bound on a subscription read.
+ *
+ * Deliberately longer than the vendor readers' own timeout: this is the
+ * backstop for a reader that does not honour one, not the primary limit.
+ */
+const DEFAULT_SUBSCRIPTION_READ_TIMEOUT = Duration.seconds(30);
 const ACCOUNT_LIMITS_CACHE_VERSION = 2 as const;
 
 const LimitsCacheFile = Schema.Struct({
@@ -61,6 +78,18 @@ export interface AccountLimitsIngestInput {
   readonly driver: ProviderDriverKind;
   readonly payload: unknown;
   readonly createdAt: string;
+}
+
+/**
+ * A subscription this environment polls itself, with no agent involved.
+ *
+ * `read` is already bound to its credential by the caller, so the credential
+ * never reaches this service — it authenticates a request and nothing more.
+ */
+export interface PolledSubscription {
+  readonly key: string;
+  readonly subscription: AccountLimitsAccount;
+  readonly read: (nowMs: number) => Effect.Effect<NormalizedAccountLimits, SubscriptionReadError>;
 }
 
 export interface AccountLimitsServiceShape {
@@ -200,9 +229,12 @@ function eventReading(
 export function makeAccountLimitsService(input: {
   readonly cachePath: string;
   readonly listInstances: Effect.Effect<ReadonlyArray<ProviderInstance>>;
+  readonly listSubscriptions?: Effect.Effect<ReadonlyArray<PolledSubscription>>;
   readonly refreshInterval?: Duration.Input;
   readonly freshnessTtl?: Duration.Input;
   readonly registryChanges?: PubSub.Subscription<void>;
+  readonly subscriptionChanges?: PubSub.Subscription<void>;
+  readonly subscriptionReadTimeout?: Duration.Input;
 }): Effect.Effect<AccountLimitsServiceShape, never, FileSystem.FileSystem | Path.Path> {
   return Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
@@ -226,6 +258,9 @@ export function makeAccountLimitsService(input: {
     const refreshLock = yield* Semaphore.make(1);
     const refreshInterval = Duration.fromInputUnsafe(
       input.refreshInterval ?? DEFAULT_REFRESH_INTERVAL,
+    );
+    const subscriptionReadTimeout = Duration.fromInputUnsafe(
+      input.subscriptionReadTimeout ?? DEFAULT_SUBSCRIPTION_READ_TIMEOUT,
     );
     const freshnessTtlMs = Duration.toMillis(
       Duration.fromInputUnsafe(input.freshnessTtl ?? DEFAULT_FRESHNESS_TTL),
@@ -390,7 +425,12 @@ export function makeAccountLimitsService(input: {
                       driver: instance.driverKind,
                     },
                     observation: previous?.observation ?? null,
-                    lastAttempt: { attemptedAt, status: "failed", error: boundedFailure() },
+                    lastAttempt: {
+                      attemptedAt,
+                      status: "failed",
+                      error: boundedFailure(),
+                      reason: "unknown",
+                    },
                   }
                 : {
                     subscription: reading.subscription,
@@ -465,14 +505,124 @@ export function makeAccountLimitsService(input: {
       );
     });
 
+    /**
+     * Drop a snapshot for a subscription the registry no longer holds.
+     *
+     * Only a reader-less snapshot is considered here: one that came through an
+     * agent is the instance reconciler's to prune, and treating it as orphaned
+     * would delete a live row.
+     */
+    const reconcileSubscriptions = Effect.fn("AccountLimitsService.reconcileSubscriptions")(
+      function* (subscriptions: ReadonlyArray<PolledSubscription>) {
+        yield* stateLock.withPermits(1)(
+          Effect.gen(function* () {
+            const configured = new Set(subscriptions.map((subscription) => subscription.key));
+            let changed = false;
+            for (const [key, snapshot] of snapshots) {
+              if (snapshot.reader !== undefined || configured.has(key)) continue;
+              snapshots.delete(key);
+              changed = true;
+            }
+            if (changed) yield* persist().pipe(Effect.catchCause(() => Effect.void));
+          }),
+        );
+      },
+    );
+
+    const listPolledSubscriptions =
+      input.listSubscriptions ?? Effect.succeed([] as ReadonlyArray<PolledSubscription>);
+
+    /**
+     * Commit one directly polled subscription's reading.
+     *
+     * The snapshot carries no reader: nothing read it through an agent, and
+     * inventing one would make it prunable by an instance that never existed.
+     */
+    const commitSubscription = Effect.fn("AccountLimitsService.commitSubscription")(function* (
+      subscription: PolledSubscription,
+      attemptedAt: string,
+      result: NormalizedAccountLimits | { readonly reason: AccountLimitsFailureReason },
+    ) {
+      yield* stateLock.withPermits(1)(
+        Effect.gen(function* () {
+          const key = subscription.key;
+          const previous = snapshots.get(key);
+          if (previous && hasNewerAttempt(previous, attemptedAt)) return;
+          const failed = "reason" in result;
+          snapshots.set(
+            key,
+            failed
+              ? {
+                  subscription: previous?.subscription ?? subscription.subscription,
+                  // A failed read keeps the numbers the last good one gave.
+                  observation: previous?.observation ?? null,
+                  lastAttempt: {
+                    attemptedAt,
+                    status: "failed",
+                    error: boundedFailure(),
+                    reason: result.reason,
+                  },
+                }
+              : {
+                  subscription: subscription.subscription,
+                  observation: {
+                    plan: result.plan ?? previous?.observation?.plan ?? null,
+                    windows: stampWindows(result.windows, attemptedAt),
+                    observedAt: attemptedAt,
+                    source: "poll",
+                  },
+                  lastAttempt: { attemptedAt, status: "succeeded", error: null },
+                },
+          );
+          yield* persist().pipe(Effect.catchCause(() => Effect.void));
+        }),
+      );
+    });
+
+    const refreshSubscription = Effect.fn("AccountLimitsService.refreshSubscription")(function* (
+      subscription: PolledSubscription,
+      nowMs: number,
+    ) {
+      // No in-flight guard here, unlike the instance path, and that is safe
+      // rather than an oversight: `refreshLock` makes `refreshStale`
+      // single-flight, and the registry lists each subscription once, so this
+      // never starts a poll that is already running. Calling it from anywhere
+      // else, or letting `listSubscriptions` repeat a key, would end that and
+      // needs a guard added with it — these reads hit real vendor endpoints.
+      const attemptedAt = DateTime.formatIso(DateTime.makeUnsafe(nowMs));
+      // A second bound, over the one the vendor readers already carry.
+      //
+      // `read` is an interface, and a reader that ignores its own timeout would
+      // otherwise never let this refresh finish — which holds `refreshLock` and
+      // stops every later tick, so one unbounded subscription wedges the whole
+      // loop rather than only its own row. That was observed, not imagined.
+      yield* subscription.read(nowMs).pipe(
+        Effect.timeout(subscriptionReadTimeout),
+        Effect.matchEffect({
+          onFailure: (error) =>
+            commitSubscription(
+              subscription,
+              attemptedAt,
+              // Narrow on the tag, not on a field that TimeoutException happens
+              // to lack: a later member of this union would otherwise be
+              // misclassified silently instead of failing to compile.
+              error._tag === "SubscriptionReadError" ? error : { reason: "unreachable" as const },
+            ),
+          onSuccess: (normalized) => commitSubscription(subscription, attemptedAt, normalized),
+        }),
+      );
+    });
+
     const refreshStale = refreshLock.withPermits(1)(
       Effect.gen(function* () {
         yield* ensureLoaded;
         const nowMs = yield* Clock.currentTimeMillis;
         const eligible = yield* listEligibleInstances;
+        const subscriptions = yield* listPolledSubscriptions;
         yield* reconcileInstances(eligible);
+        yield* reconcileSubscriptions(subscriptions);
 
-        yield* Effect.forEach(
+        const instancePass = Effect.forEach(
           eligible,
           (instance) => {
             // An instance is due when its oldest reading is due. Reading one
@@ -500,7 +650,24 @@ export function makeAccountLimitsService(input: {
             return refreshInstance(instance, nowMs);
           },
           { concurrency: 2 },
-        ).pipe(Effect.asVoid);
+        );
+
+        const subscriptionPass = Effect.forEach(
+          subscriptions,
+          (subscription) => {
+            const previous = snapshots.get(subscription.key);
+            const attemptedAtMs = previous ? lastAttemptMillis(previous) : null;
+            const elapsed =
+              attemptedAtMs === null ? Number.POSITIVE_INFINITY : nowMs - attemptedAtMs;
+            if (elapsed >= 0 && elapsed < freshnessTtlMs) return Effect.void;
+            return refreshSubscription(subscription, nowMs);
+          },
+          { concurrency: 2 },
+        );
+
+        // Run both passes together. A network reader must not sit in front of a
+        // local one: they answer on completely different timescales.
+        yield* Effect.all([instancePass, subscriptionPass], { concurrency: 2 }).pipe(Effect.asVoid);
       }),
     );
 
@@ -603,20 +770,67 @@ export function makeAccountLimitsService(input: {
     const registryRefresh = input.registryChanges
       ? Effect.forever(PubSub.take(input.registryChanges).pipe(Effect.andThen(refreshStale)))
       : Effect.never;
-    const run = Effect.raceFirst(scheduledRefresh, registryRefresh);
+    // Adding or removing a subscription refreshes at once rather than waiting
+    // out the tick, the same way a provider instance change does.
+    const subscriptionRefresh = input.subscriptionChanges
+      ? Effect.forever(PubSub.take(input.subscriptionChanges).pipe(Effect.andThen(refreshStale)))
+      : Effect.never;
+    const run = Effect.raceFirst(
+      scheduledRefresh,
+      Effect.raceFirst(registryRefresh, subscriptionRefresh),
+    );
     return { readSummary, ingest, refreshStale, run } satisfies AccountLimitsServiceShape;
   });
 }
 
+/**
+ * Bind each configured subscription to the reader that meters it.
+ *
+ * The credential is fetched here and closed over, so it reaches the request and
+ * nothing else — the service never holds one, and a subscription whose
+ * credential has gone is simply not polled rather than polled with nothing.
+ */
+const listSubscriptionsFrom = (
+  subscriptions: SubscriptionRegistry.SubscriptionRegistryShape,
+  httpClient: HttpClient.HttpClient,
+) =>
+  Effect.gen(function* () {
+    const get = makeSubscriptionHttpGet(httpClient);
+    const records = yield* subscriptions.list;
+    const polled: PolledSubscription[] = [];
+    for (const record of records) {
+      const credential = yield* subscriptions.credential(record);
+      if (credential === null) continue;
+      const read =
+        record.namespace === "opencode-go"
+          ? (nowMs: number) => readOpenCodeGoUsage({ credential, get, nowMs })
+          : record.namespace === "zai"
+            ? (nowMs: number) => readZaiUsage({ credential, get, nowMs })
+            : null;
+      if (read === null) continue;
+      polled.push({
+        key: record.key,
+        subscription: { key: record.key, label: record.label },
+        read,
+      });
+    }
+    return polled as ReadonlyArray<PolledSubscription>;
+  });
+
 export const make = Effect.gen(function* () {
   const config = yield* ServerConfig;
   const registry = yield* ProviderInstanceRegistry;
+  const subscriptions = yield* SubscriptionRegistry.SubscriptionRegistry;
+  const httpClient = yield* HttpClient.HttpClient;
   const path = yield* Path.Path;
   const registryChanges = yield* registry.subscribeChanges;
+  const subscriptionChanges = yield* subscriptions.subscribeChanges;
   return yield* makeAccountLimitsService({
     cachePath: path.join(config.stateDir, "account-limits.json"),
     listInstances: registry.listInstances,
+    listSubscriptions: listSubscriptionsFrom(subscriptions, httpClient),
     registryChanges,
+    subscriptionChanges,
   });
 });
 
