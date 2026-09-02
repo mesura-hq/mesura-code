@@ -42,8 +42,12 @@ const RETIRED_STACK_FILES = [
   "apps/web/src/lib/attachmentUpload.ts",
   "apps/web/src/components/chat/composerAttachments.ts",
   "apps/web/src/components/chat/ComposerAttachmentList.tsx",
-  "apps/mobile/src/lib/attachmentUpload.ts",
-  "apps/mobile/src/lib/composerAttachmentFiles.ts",
+  // Two paths the fork's stack owned are deliberately absent from this list:
+  // apps/mobile/src/lib/attachmentUpload.ts and composerAttachmentFiles.ts.
+  // Upstream independently chose the same filenames for its own mobile
+  // attachment work, and the 2026-W35 merge brought their versions in
+  // byte-identically. Asserting on those paths would now fail on upstream's
+  // code rather than on a resurrected fork file.
   "apps/mobile/src/state/attachment-upload-progress.ts",
   "packages/client-runtime/src/state/attachmentUploadHttp.ts",
 ];

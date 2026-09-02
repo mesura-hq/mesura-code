@@ -126,15 +126,6 @@ export function buildPendingUserInputAnswers(
   return answers;
 }
 
-export function countAnsweredPendingUserInputQuestions(
-  questions: ReadonlyArray<UserInputQuestion>,
-  draftAnswers: Record<string, PendingUserInputDraftAnswer>,
-): number {
-  return questions.reduce((count, question) => {
-    return resolvePendingUserInputAnswer(question, draftAnswers[question.id]) ? count + 1 : count;
-  }, 0);
-}
-
 export function findFirstUnansweredPendingUserInputQuestionIndex(
   questions: ReadonlyArray<UserInputQuestion>,
   draftAnswers: Record<string, PendingUserInputDraftAnswer>,
@@ -144,6 +135,15 @@ export function findFirstUnansweredPendingUserInputQuestionIndex(
   );
 
   return unansweredIndex === -1 ? Math.max(questions.length - 1, 0) : unansweredIndex;
+}
+
+export function countAnsweredPendingUserInputQuestions(
+  questions: ReadonlyArray<UserInputQuestion>,
+  draftAnswers: Record<string, PendingUserInputDraftAnswer>,
+): number {
+  return questions.reduce((count, question) => {
+    return resolvePendingUserInputAnswer(question, draftAnswers[question.id]) ? count + 1 : count;
+  }, 0);
 }
 
 /**

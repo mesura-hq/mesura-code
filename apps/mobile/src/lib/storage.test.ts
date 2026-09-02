@@ -196,6 +196,12 @@ describe("mobile connection storage", () => {
     });
   });
 
+  it("drops the removed theme transition preference", async () => {
+    mocks.setPreferencesJson(JSON.stringify({ themeTransition: "circle-bottom-left" }), 10);
+
+    await expect(loadPreferences()).resolves.toEqual({});
+  });
+
   it("loads valid thread order preferences and drops unknown values", async () => {
     mocks.setPreferencesJson(JSON.stringify({ threadSortOrder: "created_at" }), 10);
     await expect(loadPreferences()).resolves.toEqual({ threadSortOrder: "created_at" });

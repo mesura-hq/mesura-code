@@ -42,6 +42,7 @@ export const THREAD_KEYBINDING_COMMANDS = [
   // mod+shift+s and does the same thing. The handlers here stay until the two
   // are unified, which is follow-up work, not part of the merge.
   "thread.toggleSettled",
+  "thread.pin",
   ...THREAD_JUMP_KEYBINDING_COMMANDS,
 ] as const;
 export type ThreadKeybindingCommand = (typeof THREAD_KEYBINDING_COMMANDS)[number];

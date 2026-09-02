@@ -33,7 +33,6 @@ import { hasCloudPublicConfig, resolveRelayClerkTokenOptions } from "../cloud/pu
 import { withNativeGlassHeaderItem } from "../layout/native-glass-header-items";
 import { WorkspaceSidebarToolbar } from "../layout/workspace-sidebar-toolbar";
 import { runtime } from "../../lib/runtime";
-import { useThemeColor } from "../../lib/useThemeColor";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import { useThreadListV2Enabled } from "../threads/use-thread-list-v2-enabled";
 import {
@@ -543,10 +542,10 @@ function GeneralSettingsSection() {
           in the one mode it appeared in. See ADR-003's sibling decision on
           sidebar ordering.
 
-          SettingsThreadOrderRouteScreen and its "SettingsThreadOrder" target
-          are deliberately left registered in Stack.tsx: this row was their only
-          navigator, so the screen is now unreachable rather than deleted, which
-          is the cheaper thing to undo if the preference is ever wired back. */}
+          SettingsThreadOrderRouteScreen went with it: the screen was the fork's
+          own, created by #33, and this row was its only navigator. Upstream's
+          Uniwind migration also bans the theme hook it used, so leaving it
+          registered would have been dead code that fails lint. */}
       <SettingsSwitchRow
         icon="arrow.triangle.branch"
         label="Auto-settle merged threads"
@@ -595,7 +594,6 @@ function LegacySettingsSection() {
 }
 
 function AppSettingsSection() {
-  const icon = useThemeColor("--color-icon");
   const [updateState, setUpdateState] = useState<AppUpdateCheckState>("idle");
   const updateInFlight = useRef(false);
   const hiddenUpdateTapCount = useRef(0);
@@ -665,7 +663,7 @@ function AppSettingsSection() {
       <SymbolView
         name="info.circle"
         size={22}
-        tintColor={icon}
+        tintColorClassName={"accent-icon"}
         type="monochrome"
         weight="regular"
       />

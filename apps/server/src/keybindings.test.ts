@@ -233,6 +233,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       // mod+s is composer.stash, so this sits one Shift away from it, and the
       // same-shortcut-context guard below proves the two stay apart.
       assert.equal(soleKeyFor("thread.settle"), "mod+shift+s");
+      assert.equal(soleKeyFor("thread.pin"), "mod+shift+p");
       assert.equal(soleKeyFor("chat.scrollHalfPageUp"), "mod+u");
       assert.equal(soleKeyFor("chat.scrollHalfPageDown"), "mod+d");
       // diff.toggle gave mod+d up to the reading scroll. terminal.splitVertical
