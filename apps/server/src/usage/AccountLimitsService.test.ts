@@ -1,7 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
-  AccountLimitsSnapshot,
   isFoldableSubscriptionKey,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -14,16 +13,11 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
-import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
 import { ProviderDriverError } from "../provider/Errors.ts";
 import { makeAccountLimitsService } from "./AccountLimitsService.ts";
-
-const encodeLegacyLimitsCache = Schema.encodeEffect(
-  Schema.fromJsonString(Schema.Array(AccountLimitsSnapshot)),
-);
 
 function providerInstance(input: {
   readonly id: string;
@@ -104,7 +98,7 @@ it.layer(NodeServices.layer)("AccountLimitsService", (it) => {
       assert.equal(isFoldableSubscriptionKey(summary.snapshots[0]!.subscription.key), false);
       assert.equal(summary.snapshots[0]?.observation?.windows[0]?.usedPercent, 20);
       assert.equal(yield* fs.exists(cachePath), true);
-      assert.match(yield* fs.readFileString(cachePath), /"version":1/);
+      assert.match(yield* fs.readFileString(cachePath), /"version":2/);
     }).pipe(Effect.scoped),
   );
 
@@ -123,14 +117,11 @@ it.layer(NodeServices.layer)("AccountLimitsService", (it) => {
       ]);
       const first = yield* makeTestService(instances, cachePath);
       yield* first.refreshStale;
-      const firstSummary = yield* first.readSummary();
-      const legacyCache = yield* encodeLegacyLimitsCache(firstSummary.snapshots);
-      yield* fs.writeFileString(cachePath, legacyCache);
 
       const restarted = yield* makeTestService(instances, cachePath);
       const summary = yield* restarted.readSummary();
       assert.equal(summary.snapshots[0]?.observation?.windows[0]?.usedPercent, 37);
-      assert.match(yield* fs.readFileString(cachePath), /"version":1/);
+      assert.match(yield* fs.readFileString(cachePath), /"version":2/);
     }).pipe(Effect.scoped),
   );
 
@@ -708,6 +699,203 @@ it.layer(NodeServices.layer)("AccountLimitsService", (it) => {
       yield* Deferred.await(pollInterrupted);
 
       assert.equal(yield* fs.exists(cachePath), false);
+    }).pipe(Effect.scoped),
+  );
+});
+
+it.layer(NodeServices.layer)("AccountLimitsService keyed by subscription", (it) => {
+  const account = (key: string, label?: string): AccountLimitsAccount => ({
+    key,
+    label: label ?? key,
+  });
+
+  it.effect("folds two readers of one subscription into a single entry", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "limits-fold-" });
+      const cachePath = path.join(tempDir, "account-limits.json");
+      const shared = account("openai:dev@example.com", "dev@example.com");
+      const instances = yield* Ref.make<ReadonlyArray<ProviderInstance>>([
+        providerInstance({
+          id: "codex_a",
+          driver: "claudeAgent",
+          account: shared,
+          read: () => Effect.succeed(claudePayload(10)),
+        }),
+        providerInstance({
+          id: "codex_b",
+          driver: "claudeAgent",
+          account: shared,
+          read: () => Effect.succeed(claudePayload(20)),
+        }),
+      ]);
+      const service = yield* makeTestService(instances, cachePath);
+      yield* service.refreshStale;
+
+      const summary = yield* service.readSummary();
+      assert.equal(summary.snapshots.length, 1);
+      assert.equal(summary.snapshots[0]?.subscription.key, "openai:dev@example.com");
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("marks only the subscription whose read failed", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "limits-partial-" });
+      const cachePath = path.join(tempDir, "account-limits.json");
+      const badReads = yield* Ref.make(0);
+      const instances = yield* Ref.make<ReadonlyArray<ProviderInstance>>([
+        providerInstance({
+          id: "good",
+          driver: "claudeAgent",
+          account: account("openai:good@example.com"),
+          read: () => Effect.succeed(claudePayload(30)),
+        }),
+        providerInstance({
+          id: "bad",
+          driver: "claudeAgent",
+          account: account("anthropic:bad@example.com"),
+          read: () =>
+            Ref.updateAndGet(badReads, (count) => count + 1).pipe(
+              Effect.flatMap((count) =>
+                count === 1
+                  ? Effect.succeed(claudePayload(60))
+                  : Effect.fail(
+                      new ProviderDriverError({
+                        driver: ProviderDriverKind.make("claudeAgent"),
+                        instanceId: ProviderInstanceId.make("bad"),
+                        detail: "nope",
+                      }),
+                    ),
+              ),
+            ),
+        }),
+      ]);
+      const service = yield* makeTestService(instances, cachePath);
+      // The first pass establishes which subscription each instance reads, so
+      // the second pass's failure has a subscription to be attributed to.
+      yield* service.refreshStale;
+      yield* TestClock.adjust("5 minutes");
+      yield* service.refreshStale;
+
+      const summary = yield* service.readSummary();
+      const good = summary.snapshots.find((s) => s.subscription.key === "openai:good@example.com");
+      const bad = summary.snapshots.find((s) => s.subscription.key === "anthropic:bad@example.com");
+      assert.equal(good?.lastAttempt.status, "succeeded");
+      assert.equal(bad?.lastAttempt.status, "failed");
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("keeps a subscription whose read failed, and drops one a success omitted", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "limits-prune-" });
+      const cachePath = path.join(tempDir, "account-limits.json");
+      const failing = yield* Ref.make(false);
+      const instances = yield* Ref.make<ReadonlyArray<ProviderInstance>>([
+        providerInstance({
+          id: "codex_a",
+          driver: "claudeAgent",
+          account: account("openai:dev@example.com"),
+          read: () =>
+            Ref.get(failing).pipe(
+              Effect.flatMap((fails) =>
+                fails
+                  ? Effect.fail(
+                      new ProviderDriverError({
+                        driver: ProviderDriverKind.make("claudeAgent"),
+                        instanceId: ProviderInstanceId.make("codex_a"),
+                        detail: "nope",
+                      }),
+                    )
+                  : Effect.succeed(claudePayload(40)),
+              ),
+            ),
+        }),
+      ]);
+      const service = yield* makeTestService(instances, cachePath);
+      yield* service.refreshStale;
+      assert.equal((yield* service.readSummary()).snapshots.length, 1);
+
+      // A failed read is not evidence that the subscription is gone.
+      yield* Ref.set(failing, true);
+      yield* TestClock.adjust("5 minutes");
+      yield* service.refreshStale;
+      const afterFailure = yield* service.readSummary();
+      assert.equal(afterFailure.snapshots.length, 1);
+      assert.equal(afterFailure.snapshots[0]?.lastAttempt.status, "failed");
+      assert.equal(afterFailure.snapshots[0]?.observation !== null, true);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("persists a version 2 cache and reads a version 1 file as empty", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "limits-cache-" });
+      const cachePath = path.join(tempDir, "account-limits.json");
+      // A version 1 file keys its snapshots by provider instance, so every key
+      // in it is wrong now. Reading it as empty is what stops those keys being
+      // trusted; migrating them would invent subscriptions that were never read.
+      yield* fs.writeFileString(
+        cachePath,
+        '{"version":1,"snapshots":[{"providerInstanceId":"codex_personal","driver":"codex",' +
+          '"observation":null,"lastAttempt":{"attemptedAt":"2026-08-22T12:00:00.000Z",' +
+          '"status":"succeeded","error":null}}]}',
+      );
+      const instances = yield* Ref.make<ReadonlyArray<ProviderInstance>>([
+        providerInstance({
+          id: "codex_a",
+          driver: "claudeAgent",
+          account: account("openai:dev@example.com"),
+          read: () => Effect.succeed(claudePayload(50)),
+        }),
+      ]);
+      const service = yield* makeTestService(instances, cachePath);
+      yield* service.refreshStale;
+
+      const summary = yield* service.readSummary();
+      assert.equal(summary.snapshots.length, 1);
+      assert.equal(summary.snapshots[0]?.subscription.key, "openai:dev@example.com");
+      assert.match(yield* fs.readFileString(cachePath), /"version":2/);
+    }).pipe(Effect.scoped),
+  );
+  it.effect("keeps a shared subscription visible when one of its readers is removed", () =>
+    Effect.gen(function* () {
+      // Two readers of one subscription share one entry, and `reader` records
+      // only whichever wrote last. Removing that one must not hide a row the
+      // other still maintains, and must not delete it either.
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "limits-shared-" });
+      const cachePath = path.join(tempDir, "account-limits.json");
+      const shared = account("anthropic:dev@example.com", "dev@example.com");
+      const stays = providerInstance({
+        id: "stays",
+        driver: "claudeAgent",
+        account: shared,
+        read: () => Effect.succeed(claudePayload(11)),
+      });
+      const goes = providerInstance({
+        id: "goes",
+        driver: "claudeAgent",
+        account: shared,
+        read: () => Effect.succeed(claudePayload(12)),
+      });
+      const instances = yield* Ref.make<ReadonlyArray<ProviderInstance>>([stays, goes]);
+      const service = yield* makeTestService(instances, cachePath);
+      yield* service.refreshStale;
+      assert.equal((yield* service.readSummary()).snapshots.length, 1);
+
+      yield* Ref.set(instances, [stays]);
+      yield* service.refreshStale;
+
+      const summary = yield* service.readSummary();
+      assert.equal(summary.snapshots.length, 1);
+      assert.equal(summary.snapshots[0]?.subscription.key, "anthropic:dev@example.com");
     }).pipe(Effect.scoped),
   );
 });

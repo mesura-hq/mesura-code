@@ -35,18 +35,22 @@ import {
 
 const DEFAULT_REFRESH_INTERVAL = Duration.minutes(1);
 const DEFAULT_FRESHNESS_TTL = Duration.minutes(5);
-const ACCOUNT_LIMITS_CACHE_VERSION = 1 as const;
+const ACCOUNT_LIMITS_CACHE_VERSION = 2 as const;
 
-const LegacyLimitsCacheFile = Schema.Array(AccountLimitsSnapshot);
 const LimitsCacheFile = Schema.Struct({
   version: Schema.Literal(ACCOUNT_LIMITS_CACHE_VERSION),
   snapshots: Schema.Array(AccountLimitsSnapshot),
 });
-const DecodableLimitsCacheFile = Schema.Union([LimitsCacheFile, LegacyLimitsCacheFile]);
+/**
+ * Version 1 files are read as empty rather than migrated.
+ *
+ * Every key in a version 1 file is a provider instance id, and a subscription
+ * cannot be recovered from one — migrating would invent subscriptions that were
+ * never read. The decode fails, the caller's `catchCause` yields an empty cache,
+ * and the next poll repopulates it from the providers themselves.
+ */
 const decodeLimitsCache = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(
-    DecodableLimitsCacheFile as unknown as Schema.Codec<typeof DecodableLimitsCacheFile.Type>,
-  ),
+  Schema.fromJsonString(LimitsCacheFile as unknown as Schema.Codec<typeof LimitsCacheFile.Type>),
 );
 const encodeLimitsCache = Schema.encodeEffect(
   Schema.fromJsonString(LimitsCacheFile as unknown as Schema.Codec<typeof LimitsCacheFile.Type>),
@@ -87,31 +91,19 @@ export const layerTest = Layer.succeed(
 );
 
 /**
- * The subscription a per-instance reading belongs to, while the service is
- * still keyed by provider instance.
+ * The subscription of a reading whose provider named no account.
  *
- * Phase 2 replaces this with the registry's real subscription. Until then a
+ * The subscription registry replaces this in a later phase. Until then a
  * reading whose provider named no account still needs *some* subscription,
  * because the contract now requires one — and the instance it was read through
  * is the only identity available. That keeps today's one-row-per-instance
  * behaviour exactly as it was rather than folding anything new.
  */
-function instanceSubscription(
-  instance: ProviderInstance,
-  account: AccountLimitsAccount | undefined,
-): AccountLimitsAccount {
-  return (
-    account ??
-    unfoldableInstanceSubscription({
-      instanceId: String(instance.instanceId),
-      label: instance.displayName,
-    })
-  );
-}
-
-/** The map key a stored snapshot belongs under. Phase 2 makes this the subscription. */
-function snapshotKey(snapshot: AccountLimitsSnapshot): string {
-  return String(snapshot.reader?.providerInstanceId ?? snapshot.subscription.key);
+function instanceSubscription(instance: ProviderInstance): AccountLimitsAccount {
+  return unfoldableInstanceSubscription({
+    instanceId: String(instance.instanceId),
+    label: instance.displayName,
+  });
 }
 
 function lastAttemptMillis(snapshot: AccountLimitsSnapshot): number | null {
@@ -217,6 +209,15 @@ export function makeAccountLimitsService(input: {
     const snapshots = new Map<string, AccountLimitsSnapshot>();
     const inFlight = new Set<ProviderInstance>();
     const knownInstances = new Map<string, ProviderInstance>();
+    /**
+     * Which subscription each instance last reported, by instance id.
+     *
+     * A failed read does not name a subscription, so this is how the failure is
+     * attributed to the right one. It is also what pruning reads: a snapshot no
+     * live instance claims is orphaned, and a failed read leaves the claim
+     * standing precisely so one blip cannot delete a row.
+     */
+    const claimedSubscriptions = new Map<string, string>();
     const stateLock = yield* Semaphore.make(1);
     const refreshLock = yield* Semaphore.make(1);
     const refreshInterval = Duration.fromInputUnsafe(
@@ -240,24 +241,16 @@ export function makeAccountLimitsService(input: {
           Effect.succeed({ version: ACCOUNT_LIMITS_CACHE_VERSION, snapshots: [] }),
         ),
         Effect.tap((stored) =>
-          Effect.gen(function* () {
-            const storedSnapshots = "version" in stored ? stored.snapshots : stored;
-            for (const snapshot of storedSnapshots) {
-              snapshots.set(snapshotKey(snapshot), snapshot);
-            }
-            if (!("version" in stored)) {
-              const migrated = yield* encodeLimitsCache({
-                version: ACCOUNT_LIMITS_CACHE_VERSION,
-                snapshots: storedSnapshots,
-              }).pipe(Effect.orDie);
-              yield* writeFileStringAtomically({
-                filePath: input.cachePath,
-                contents: migrated,
-              }).pipe(
-                Effect.provideService(FileSystem.FileSystem, fileSystem),
-                Effect.provideService(Path.Path, path),
-                Effect.catchCause(() => Effect.void),
-              );
+          Effect.sync(() => {
+            for (const snapshot of stored.snapshots) {
+              snapshots.set(snapshot.subscription.key, snapshot);
+              const reader = snapshot.reader;
+              if (reader !== undefined) {
+                claimedSubscriptions.set(
+                  String(reader.providerInstanceId),
+                  snapshot.subscription.key,
+                );
+              }
             }
           }),
         ),
@@ -269,7 +262,7 @@ export function makeAccountLimitsService(input: {
       const serialized = yield* encodeLimitsCache({
         version: ACCOUNT_LIMITS_CACHE_VERSION,
         snapshots: [...snapshots.values()].sort((left, right) =>
-          snapshotKey(left).localeCompare(snapshotKey(right)),
+          left.subscription.key.localeCompare(right.subscription.key),
         ),
       }).pipe(Effect.orDie);
       yield* writeFileStringAtomically({ filePath: input.cachePath, contents: serialized }).pipe(
@@ -286,33 +279,46 @@ export function makeAccountLimitsService(input: {
           const activeIds = new Set(eligible.map((instance) => String(instance.instanceId)));
           let changed = false;
 
-          for (const key of snapshots.keys()) {
-            if (activeIds.has(key)) continue;
-            snapshots.delete(key);
-            changed = true;
-          }
           for (const key of knownInstances.keys()) {
             if (!activeIds.has(key)) knownInstances.delete(key);
+          }
+          for (const key of claimedSubscriptions.keys()) {
+            if (!activeIds.has(key)) claimedSubscriptions.delete(key);
           }
           for (const instance of eligible) {
             const key = String(instance.instanceId);
             const previousInstance = knownInstances.get(key);
-            const previousSnapshot = snapshots.get(key);
-            if (
-              (previousInstance !== undefined && previousInstance !== instance) ||
-              (previousSnapshot?.reader !== undefined &&
-                previousSnapshot.reader.driver !== instance.driverKind)
-            ) {
-              snapshots.delete(key);
+            // A replaced instance may have been reconfigured onto another
+            // account, so its old claim is not evidence about the new one.
+            if (previousInstance !== undefined && previousInstance !== instance) {
+              claimedSubscriptions.delete(key);
               changed = true;
             }
             knownInstances.set(key, instance);
+          }
+
+          // A snapshot no live instance claims is orphaned. A directly polled
+          // subscription has no instance to claim it and is never orphaned this
+          // way — its own source decides whether it still exists.
+          const claimed = new Set(claimedSubscriptions.values());
+          for (const [key, snapshot] of snapshots) {
+            if (snapshot.reader === undefined || claimed.has(key)) continue;
+            snapshots.delete(key);
+            changed = true;
           }
 
           if (changed) yield* persist().pipe(Effect.catchCause(() => Effect.void));
         }),
       );
     });
+
+    /** Whether any instance still reads this subscription. */
+    const isClaimed = (subscriptionKey: string) => {
+      for (const claimed of claimedSubscriptions.values()) {
+        if (claimed === subscriptionKey) return true;
+      }
+      return false;
+    };
 
     const isCurrentInstance = (instance: ProviderInstance) =>
       listEligibleInstances.pipe(
@@ -332,19 +338,36 @@ export function makeAccountLimitsService(input: {
       if (!(yield* isCurrentInstance(instance))) return;
       yield* stateLock.withPermits(1)(
         Effect.gen(function* () {
-          const key = instance.instanceId;
-          if (knownInstances.get(key) !== instance) return;
+          const instanceId = String(instance.instanceId);
+          if (knownInstances.get(instanceId) !== instance) return;
+          // A read that failed named no subscription, so it is attributed to
+          // the one this instance last reported. Without that memory a failure
+          // would open a second row rather than mark the row it belongs to.
+          const claimedKey = claimedSubscriptions.get(instanceId);
+          const subscription =
+            account ??
+            (claimedKey !== undefined ? snapshots.get(claimedKey)?.subscription : undefined) ??
+            instanceSubscription(instance);
+          const key = subscription.key;
           const previous = snapshots.get(key);
           if (previous && hasNewerAttempt(previous, attemptedAt)) return;
-          // A failed read never clears the account: the subscription a cached
-          // observation belongs to does not change because one poll failed.
-          const effectiveAccount = account ?? previous?.subscription;
+          // Only a successful read moves the claim. A failed one leaves it
+          // standing, which is what stops one blip pruning the subscription.
+          if (normalized !== null) {
+            claimedSubscriptions.set(instanceId, key);
+            // Only drop the subscription this instance moved off when no other
+            // instance still reads it. A shared subscription belongs to every
+            // reader of it, and this one's move omits nothing on their behalf.
+            if (claimedKey !== undefined && claimedKey !== key && !isClaimed(claimedKey)) {
+              snapshots.delete(claimedKey);
+            }
+          }
           const stamped = normalized === null ? [] : stampWindows(normalized.windows, attemptedAt);
           snapshots.set(
             key,
             normalized === null
               ? {
-                  subscription: instanceSubscription(instance, effectiveAccount),
+                  subscription,
                   reader: { providerInstanceId: instance.instanceId, driver: instance.driverKind },
                   observation: previous?.observation ?? null,
                   lastAttempt: {
@@ -354,7 +377,7 @@ export function makeAccountLimitsService(input: {
                   },
                 }
               : {
-                  subscription: instanceSubscription(instance, effectiveAccount),
+                  subscription,
                   reader: { providerInstanceId: instance.instanceId, driver: instance.driverKind },
                   observation: {
                     plan: normalized.plan ?? previous?.observation?.plan ?? null,
@@ -414,7 +437,8 @@ export function makeAccountLimitsService(input: {
         yield* Effect.forEach(
           eligible,
           (instance) => {
-            const previous = snapshots.get(instance.instanceId);
+            const claimedKey = claimedSubscriptions.get(String(instance.instanceId));
+            const previous = claimedKey === undefined ? undefined : snapshots.get(claimedKey);
             const attemptedAtMs = previous ? lastAttemptMillis(previous) : null;
             const elapsed =
               attemptedAtMs === null ? Number.POSITIVE_INFINITY : nowMs - attemptedAtMs;
@@ -432,7 +456,13 @@ export function makeAccountLimitsService(input: {
       yield* ensureLoaded;
       yield* stateLock.withPermits(1)(
         Effect.gen(function* () {
-          const key = event.providerInstanceId;
+          const instanceId = String(event.providerInstanceId);
+          const claimedKey = claimedSubscriptions.get(instanceId);
+          const fallbackSubscription = unfoldableInstanceSubscription({
+            instanceId,
+            label: knownInstances.get(instanceId)?.displayName,
+          });
+          const key = claimedKey ?? fallbackSubscription.key;
           const previous = snapshots.get(key);
           if (
             previous?.observation &&
@@ -445,12 +475,7 @@ export function makeAccountLimitsService(input: {
           if (reading === null) return;
 
           snapshots.set(key, {
-            subscription:
-              previous?.subscription ??
-              unfoldableInstanceSubscription({
-                instanceId: String(event.providerInstanceId),
-                label: knownInstances.get(String(event.providerInstanceId))?.displayName,
-              }),
+            subscription: previous?.subscription ?? fallbackSubscription,
             reader: { providerInstanceId: event.providerInstanceId, driver: event.driver },
             observation: {
               plan: reading.plan ?? previous?.observation?.plan ?? null,
@@ -463,6 +488,7 @@ export function makeAccountLimitsService(input: {
             },
             lastAttempt: { attemptedAt: event.createdAt, status: "succeeded", error: null },
           });
+          claimedSubscriptions.set(instanceId, key);
           yield* persist().pipe(Effect.catchCause(() => Effect.void));
         }),
       );
@@ -480,17 +506,31 @@ export function makeAccountLimitsService(input: {
         readAt: DateTime.formatIso(DateTime.makeUnsafe(nowMs)),
         snapshots: [...snapshots.values()]
           .filter((snapshot) => {
-            const reader = snapshot.reader;
-            if (reader === undefined) return true;
-            const current = activeInstances.get(String(reader.providerInstanceId));
-            const known = knownInstances.get(String(reader.providerInstanceId));
-            return (
-              current !== undefined &&
-              current.driverKind === reader.driver &&
-              (known === undefined || known === current)
-            );
+            // A directly polled subscription has no instance behind it.
+            if (snapshot.reader === undefined) return true;
+            const liveInstance = (instanceId: string) => {
+              const current = activeInstances.get(instanceId);
+              if (current === undefined) return false;
+              const known = knownInstances.get(instanceId);
+              return known === undefined || known === current;
+            };
+            // Two kinds of evidence, and both are needed. `reader` is the only
+            // one an instance whose every read failed ever produces, since a
+            // claim is moved by success alone. The claims are the only one that
+            // survives the last writer of a shared subscription being removed.
+            if (
+              liveInstance(String(snapshot.reader.providerInstanceId)) &&
+              activeInstances.get(String(snapshot.reader.providerInstanceId))?.driverKind ===
+                snapshot.reader.driver
+            ) {
+              return true;
+            }
+            for (const [instanceId, claimedKey] of claimedSubscriptions) {
+              if (claimedKey === snapshot.subscription.key && liveInstance(instanceId)) return true;
+            }
+            return false;
           })
-          .sort((left, right) => snapshotKey(left).localeCompare(snapshotKey(right))),
+          .sort((left, right) => left.subscription.key.localeCompare(right.subscription.key)),
       } satisfies AccountLimitsSummary;
     });
 
