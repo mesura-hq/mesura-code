@@ -229,6 +229,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         textGeneration,
         readAccountLimits: () =>
           readClaudeAccountLimits(effectiveConfig, processEnv, cwd).pipe(
+            // Claude reports exactly one subscription; the list is the SPI's.
+            Effect.map((read) => [read]),
             Effect.provideService(Path.Path, path),
             Effect.mapError(
               (cause) =>

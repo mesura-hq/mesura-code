@@ -73,13 +73,23 @@ export interface ProviderInstance {
   readonly snapshot: ServerProviderShape;
   readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
   readonly textGeneration: TextGeneration.TextGeneration["Service"];
-  /** Read provider-owned account limits without starting a user turn. */
-  readonly readAccountLimits?: () => Effect.Effect<AccountLimitsRead, ProviderDriverError>;
+  /**
+   * Read provider-owned account limits without starting a user turn.
+   *
+   * A list, because one reader can see more than one subscription: an OpenCode
+   * instance drives every plan it is logged into. Claude and Codex each report
+   * exactly one and return a single-element list.
+   */
+  readonly readAccountLimits?: () => Effect.Effect<
+    ReadonlyArray<AccountLimitsRead>,
+    ProviderDriverError
+  >;
 }
 
 /**
  * One account-limit reading: the driver-native payload the usage normalizers
- * parse, plus the subscription it was read from. `account` is absent when the
+ * parse, plus the subscription it was read from. A reader returns a list of
+ * these, one per subscription it can see. `account` is absent when the
  * provider does not name an account, which keeps that reading unfoldable
  * against another environment's.
  */

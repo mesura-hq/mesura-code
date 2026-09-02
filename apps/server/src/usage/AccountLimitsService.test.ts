@@ -32,12 +32,16 @@ function providerInstance(input: {
     enabled: input.enabled ?? true,
     readAccountLimits: () =>
       input.read().pipe(
-        Effect.map((payload) => ({
-          payload,
-          ...(input.account ? { account: input.account } : {}),
-        })),
+        Effect.map((payload) => [
+          {
+            payload,
+            ...(input.account ? { account: input.account } : {}),
+          },
+        ]),
       ),
-  } as ProviderInstance;
+    // Through `unknown` because a list-shaped `readAccountLimits` no longer
+    // structurally overlaps `ProviderInstance` closely enough for one cast.
+  } as unknown as ProviderInstance;
 }
 
 function claudePayload(usedPercent: number) {
@@ -896,6 +900,120 @@ it.layer(NodeServices.layer)("AccountLimitsService keyed by subscription", (it) 
       const summary = yield* service.readSummary();
       assert.equal(summary.snapshots.length, 1);
       assert.equal(summary.snapshots[0]?.subscription.key, "anthropic:dev@example.com");
+    }).pipe(Effect.scoped),
+  );
+});
+
+it.layer(NodeServices.layer)("AccountLimitsService reading many subscriptions", (it) => {
+  it.effect("records one snapshot per reading when an instance reports several", () =>
+    Effect.gen(function* () {
+      // A reader reports the subscriptions it can see, which is a list. One
+      // OpenCode instance drives two paid plans, and each is its own row.
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "limits-many-" });
+      const many = {
+        instanceId: ProviderInstanceId.make("opencode"),
+        driverKind: ProviderDriverKind.make("claudeAgent"),
+        enabled: true,
+        readAccountLimits: () =>
+          Effect.succeed([
+            {
+              payload: claudePayload(21),
+              account: { key: "opencode-go:aaa", label: "OpenCode Go" },
+            },
+            {
+              payload: claudePayload(22),
+              account: { key: "zai:bbb", label: "GLM Coding Plan" },
+            },
+          ]),
+      } as unknown as ProviderInstance;
+      const instances = yield* Ref.make<ReadonlyArray<ProviderInstance>>([many]);
+      const service = yield* makeTestService(instances, path.join(tempDir, "cache.json"));
+      yield* service.refreshStale;
+
+      const keys = (yield* service.readSummary()).snapshots.map((s) => s.subscription.key).sort();
+      assert.deepEqual(keys, ["opencode-go:aaa", "zai:bbb"]);
+    }).pipe(Effect.scoped),
+  );
+  it.effect("marks every subscription an instance was reading when its read fails", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "limits-manyfail-" });
+      const reads = yield* Ref.make(0);
+      const instance = {
+        instanceId: ProviderInstanceId.make("opencode"),
+        driverKind: ProviderDriverKind.make("claudeAgent"),
+        enabled: true,
+        readAccountLimits: () =>
+          Ref.updateAndGet(reads, (count) => count + 1).pipe(
+            Effect.flatMap((count) =>
+              count === 1
+                ? Effect.succeed([
+                    { payload: claudePayload(31), account: { key: "opencode-go:a", label: "Go" } },
+                    { payload: claudePayload(32), account: { key: "zai:b", label: "GLM" } },
+                  ])
+                : Effect.fail(
+                    new ProviderDriverError({
+                      driver: ProviderDriverKind.make("claudeAgent"),
+                      instanceId: ProviderInstanceId.make("opencode"),
+                      detail: "nope",
+                    }),
+                  ),
+            ),
+          ),
+      } as unknown as ProviderInstance;
+      const instances = yield* Ref.make<ReadonlyArray<ProviderInstance>>([instance]);
+      const service = yield* makeTestService(instances, path.join(tempDir, "cache.json"));
+      yield* service.refreshStale;
+      yield* TestClock.adjust("5 minutes");
+      yield* service.refreshStale;
+
+      const snapshots = (yield* service.readSummary()).snapshots;
+      assert.equal(snapshots.length, 2);
+      // Both were being read, so both are marked — and both keep the numbers
+      // the successful pass gave them.
+      for (const snapshot of snapshots) {
+        assert.equal(snapshot.lastAttempt.status, "failed");
+        assert.equal(snapshot.observation !== null, true);
+      }
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("drops a subscription an instance stopped reporting, and keeps the rest", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "limits-shrink-" });
+      const reads = yield* Ref.make(0);
+      const instance = {
+        instanceId: ProviderInstanceId.make("opencode"),
+        driverKind: ProviderDriverKind.make("claudeAgent"),
+        enabled: true,
+        readAccountLimits: () =>
+          Ref.updateAndGet(reads, (count) => count + 1).pipe(
+            Effect.map((count) =>
+              count === 1
+                ? [
+                    { payload: claudePayload(41), account: { key: "opencode-go:a", label: "Go" } },
+                    { payload: claudePayload(42), account: { key: "zai:b", label: "GLM" } },
+                  ]
+                : [{ payload: claudePayload(43), account: { key: "opencode-go:a", label: "Go" } }],
+            ),
+          ),
+      } as unknown as ProviderInstance;
+      const instances = yield* Ref.make<ReadonlyArray<ProviderInstance>>([instance]);
+      const service = yield* makeTestService(instances, path.join(tempDir, "cache.json"));
+      yield* service.refreshStale;
+      assert.equal((yield* service.readSummary()).snapshots.length, 2);
+
+      // Logging out of one plan drops that row, and only that one.
+      yield* TestClock.adjust("5 minutes");
+      yield* service.refreshStale;
+
+      const keys = (yield* service.readSummary()).snapshots.map((s) => s.subscription.key);
+      assert.deepEqual(keys, ["opencode-go:a"]);
     }).pipe(Effect.scoped),
   );
 });

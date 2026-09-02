@@ -128,9 +128,18 @@ const UNFOLDABLE_SUBSCRIPTION_PREFIX = "#";
 export function unfoldableInstanceSubscription(input: {
   readonly instanceId: string;
   readonly label?: string | undefined;
+  /**
+   * Which of the instance's readings this is, when it produced several.
+   *
+   * A reader that reports several subscriptions and names none of them would
+   * otherwise give every one of them the same key, and each would overwrite the
+   * last. Omit it for a reader that reports exactly one.
+   */
+  readonly ordinal?: number | undefined;
 }): AccountLimitsAccount {
+  const suffix = input.ordinal === undefined || input.ordinal === 0 ? "" : `:${input.ordinal}`;
   return {
-    key: `${UNFOLDABLE_SUBSCRIPTION_PREFIX}instance:${input.instanceId}`,
+    key: `${UNFOLDABLE_SUBSCRIPTION_PREFIX}instance:${input.instanceId}${suffix}`,
     label: input.label ?? input.instanceId,
   };
 }
