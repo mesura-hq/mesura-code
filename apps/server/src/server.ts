@@ -113,6 +113,7 @@ import * as ResourceMonitorBinary from "./resourceTelemetry/ResourceMonitorBinar
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as AccountLimitsService from "./usage/AccountLimitsService.ts";
+import * as SubscriptionRegistry from "./usage/SubscriptionRegistry.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import {
   clearPersistedServerRuntimeState,
@@ -180,7 +181,17 @@ const BackgroundLayerLive = BackgroundPolicy.layer.pipe(
 );
 
 const UsageLayerLive = UsageService.layer.pipe(Layer.provide(ServerSettingsLayerLive));
-const AccountLimitsLayerLive = AccountLimitsService.layer;
+const SubscriptionRegistryLayerLive = SubscriptionRegistry.layer.pipe(
+  Layer.provide(ServerSecretStore.layer),
+);
+// `AccountLimitsService` does not read `SubscriptionRegistry` from context yet —
+// it starts polling subscriptions in a later phase. Until then this `provide` is
+// what runs credential discovery at boot, and dropping it would stop the
+// discovery pass with no type error and no runtime error: subscriptions would
+// simply never appear, with nothing to point at the cause.
+const AccountLimitsLayerLive = AccountLimitsService.layer.pipe(
+  Layer.provide(SubscriptionRegistryLayerLive),
+);
 
 const ResourceDiagnosticsLayerLive = Layer.mergeAll(
   ResourceTelemetryLayerLive,
