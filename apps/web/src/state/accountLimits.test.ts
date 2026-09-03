@@ -1012,4 +1012,83 @@ describe("projectAccountLimits, one row per subscription", () => {
 
     expect(view.rows).toEqual([]);
   });
+  it("titles a vendor's subscription by the vendor, not by the address", () => {
+    // "Claude" is what a person recognises at a glance; the address is a
+    // disambiguator, and only earns space when something needs disambiguating.
+    const view = projectAccountLimits(
+      [
+        environment({
+          id: "local",
+          label: "Local",
+          providers: [provider({ instanceId: "claude", driver: "claudeAgent" })],
+          summary: summary([
+            subscriptionSnapshot({
+              key: "anthropic:dev@example.com",
+              label: "dev@example.com",
+              reader: { instanceId: "claude", driver: "claudeAgent" },
+            }),
+          ]),
+        }),
+      ],
+      NOW,
+    );
+
+    expect(view.rows[0]?.providerLabel).toBe("Claude");
+    expect(view.rows[0]?.subtitle).toBeNull();
+  });
+
+  it("names ChatGPT and the two plans by their vendor too", () => {
+    const view = projectAccountLimits(
+      [
+        environment({
+          id: "local",
+          label: "Local",
+          providers: [],
+          summary: summary([
+            subscriptionSnapshot({ key: "openai:dev@example.com", label: "dev@example.com" }),
+            subscriptionSnapshot({ key: "opencode-go:a", label: "OpenCode Go" }),
+            subscriptionSnapshot({ key: "zai:b", label: "GLM Coding Plan" }),
+          ]),
+        }),
+      ],
+      NOW,
+    );
+
+    expect(view.rows.map((row) => row.providerLabel).sort()).toEqual([
+      "ChatGPT",
+      "GLM Coding Plan",
+      "OpenCode Go",
+    ]);
+  });
+
+  it("shows the address only when two of one vendor would read alike", () => {
+    const view = projectAccountLimits(
+      [
+        environment({
+          id: "local",
+          label: "Local",
+          providers: [provider({ instanceId: "claude", driver: "claudeAgent" })],
+          summary: summary([
+            subscriptionSnapshot({
+              key: "anthropic:home@example.com",
+              label: "home@example.com",
+              reader: { instanceId: "claude", driver: "claudeAgent" },
+            }),
+            subscriptionSnapshot({
+              key: "anthropic:work@example.com",
+              label: "work@example.com",
+              reader: { instanceId: "claude", driver: "claudeAgent" },
+            }),
+          ]),
+        }),
+      ],
+      NOW,
+    );
+
+    expect(view.rows.map((row) => row.providerLabel)).toEqual(["Claude", "Claude"]);
+    expect(view.rows.map((row) => row.subtitle).sort()).toEqual([
+      "home@example.com",
+      "work@example.com",
+    ]);
+  });
 });

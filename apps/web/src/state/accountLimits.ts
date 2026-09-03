@@ -3,8 +3,10 @@ import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 import {
   ACCOUNT_LIMITS_CONTRACT_VERSION,
+  accountLimitsNamespaceOf,
   accountLimitsWindowKey,
   isFoldableSubscriptionKey,
+  type AccountLimitsNamespace,
   type AccountLimitsSnapshot,
   type AccountLimitsSummary,
   type AccountLimitsWindow,
@@ -209,6 +211,36 @@ function ageMillis(observedAt: string | undefined, currentEnvironmentTime: numbe
 }
 
 /**
+ * What a subscription is called, and the account it belongs to.
+ *
+ * The vendor names the row — "Claude", not the address it is registered to —
+ * because that is what a person recognises at a glance. The address is a
+ * disambiguator, so it becomes the subtitle and only shows when two rows of the
+ * same vendor would otherwise read alike.
+ *
+ * A subscription the vendor named itself, like a plan, already carries the
+ * right title in its label and keeps it.
+ */
+const VENDOR_NAME: Readonly<Record<AccountLimitsNamespace, string>> = {
+  anthropic: "Claude",
+  openai: "ChatGPT",
+  "opencode-go": "OpenCode Go",
+  zai: "GLM Coding Plan",
+};
+
+function subscriptionPresentation(subscription: { readonly key: string; readonly label: string }): {
+  readonly title: string;
+  readonly accountName: string | null;
+} {
+  const namespace = accountLimitsNamespaceOf(subscription.key);
+  if (namespace === null) return { title: subscription.label, accountName: null };
+  const title = VENDOR_NAME[namespace];
+  // The label repeats the title for a plan the vendor named, and only differs
+  // when it is an account address — which is exactly when it is worth showing.
+  return { title, accountName: subscription.label === title ? null : subscription.label };
+}
+
+/**
  * Whether this agent ever reports account limits, and so deserves a row saying
  * it has not reported one yet.
  *
@@ -377,19 +409,18 @@ export function projectAccountLimits(
       const foldable = isFoldableSubscriptionKey(snapshot.subscription.key)
         ? snapshot.subscription
         : null;
+      const presentation = subscriptionPresentation(snapshot.subscription);
       const partial = {
         groupKey: foldable?.key ?? `#env:${environment.environmentId}:${snapshot.subscription.key}`,
         environmentId: environment.environmentId,
         environmentLabel: environment.label,
         environmentNowMs: Number.isFinite(currentEnvironmentTime) ? currentEnvironmentTime : null,
         ...(reader && entry ? { driver: reader.driver } : {}),
-        displayName: snapshot.subscription.label,
+        displayName: presentation.title,
         ...(entry?.accentColor ? { accentColor: entry.accentColor } : {}),
         snapshot,
         state: rowState(snapshot, currentEnvironmentTime),
-        // No account name: for a foldable row it is the title already, and for
-        // an unfoldable one the environment is what actually tells two apart.
-        accountName: null,
+        accountName: presentation.accountName,
       } satisfies Omit<AccountLimitsCandidate, "windows" | "readingAgeMs">;
       const windows = candidateWindows(partial, currentEnvironmentTime);
       const candidate: AccountLimitsCandidate = {

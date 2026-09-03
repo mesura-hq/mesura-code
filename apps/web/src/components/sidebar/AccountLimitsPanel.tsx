@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import { accountLimitsWindowKey } from "@t3tools/contracts";
+import { accountLimitsNamespaceOf, accountLimitsWindowKey } from "@t3tools/contracts";
 // A single circular arrow, not one of the two-arrow refresh glyphs: this panel
 // already says "Refresh failed" about the reading itself, and a window resetting
 // is a different event from Mesura Code re-reading it.
@@ -15,6 +15,7 @@ import {
 } from "../../state/accountLimits";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
+import { SUBSCRIPTION_ICON_BY_NAMESPACE } from "../chat/providerIconUtils";
 import { Popover, PopoverPopup } from "../ui/popover";
 import {
   closeHeldUsagePeek,
@@ -168,12 +169,17 @@ function readingAgeLabel(readingAgeMs: number | null): string | null {
 function AccountLimitRowView(props: { row: AccountLimitsRow }) {
   const { row } = props;
   const ageLabel = readingAgeLabel(row.readingAgeMs);
+  const namespace = accountLimitsNamespaceOf(row.key);
+  const SubscriptionIcon = namespace ? SUBSCRIPTION_ICON_BY_NAMESPACE[namespace] : undefined;
   return (
     <section className="border-border/60 border-t px-3 py-3 [&:first-of-type]:border-t-0">
       <div className="flex min-w-0 items-center gap-2">
-        {/* No icon on a subscription no agent read: the icon says which agent
-            reported it, and there is no honest one to show. */}
-        {row.driver ? (
+        {/* The vendor's mark, which a directly polled plan has as much as an
+            agent-read one. Only a reading that names no vendor at all falls
+            back to the agent's icon, and one that names neither shows none. */}
+        {SubscriptionIcon ? (
+          <SubscriptionIcon aria-hidden className="size-4 shrink-0 text-foreground/80" />
+        ) : row.driver ? (
           <ProviderInstanceIcon
             accentColor={row.accentColor}
             className="size-5"

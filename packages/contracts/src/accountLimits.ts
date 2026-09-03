@@ -144,6 +144,20 @@ export function unfoldableInstanceSubscription(input: {
   };
 }
 
+/**
+ * The vendor a subscription key names, or null when the key names no vendor.
+ *
+ * The namespace is already in the key, so reading it back is cheaper and
+ * steadier than carrying it a second time on the wire. An unfoldable key names
+ * an instance rather than a vendor and yields null.
+ */
+export function accountLimitsNamespaceOf(key: string): AccountLimitsNamespace | null {
+  const namespace = key.slice(0, key.indexOf(":"));
+  return AccountLimitsNamespace.literals.includes(namespace as AccountLimitsNamespace)
+    ? (namespace as AccountLimitsNamespace)
+    : null;
+}
+
 /** Whether two readings carrying this key may be folded into one row. */
 export function isFoldableSubscriptionKey(key: string): boolean {
   return !key.startsWith(UNFOLDABLE_SUBSCRIPTION_PREFIX);
