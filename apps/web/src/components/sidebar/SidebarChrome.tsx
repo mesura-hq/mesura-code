@@ -206,6 +206,15 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     // sitting directly in it would hold eight pixels open for ever. Nested,
     // the dock contributes nothing while closed and its lower rule lands
     // against the row while open, which is the delimiter doing its job.
+    //
+    // ACCEPTED MERGE COST. This wrapper re-indents the whole return block of
+    // an upstream component. Six upstream commits in the last six months
+    // touched this exact block, so expect roughly one whitespace conflict a
+    // month here, each resolved by taking upstream's line and re-indenting it.
+    // The cheaper shape — dock in `SidebarChromeFooter`, controller passed
+    // down — was measured and rejected: `currentFooterPage` is computed here,
+    // so the footer would need its own copy of the route test, and two copies
+    // of a gate drift. A recurring whitespace conflict is the smaller cost.
     <div className="flex flex-col">
       {accountLimitsEnabled ? <AccountLimitsDock controller={accountLimitsController} /> : null}
       <SidebarMenu className="flex-row items-center">

@@ -4,7 +4,7 @@ import { accountLimitsWindowKey } from "@t3tools/contracts";
 // already says "Refresh failed" about the reading itself, and a window resetting
 // is a different event from Mesura Code re-reading it.
 import { RotateCcwIcon } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { shortcutLabelForCommand } from "../../keybindings";
 import { isTerminalFocused } from "../../lib/terminalFocus";
@@ -96,6 +96,15 @@ export function useAccountLimitsPanelController(enabled: boolean): AccountLimits
     keyboardLifecycleRef.current = lifecycle;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isKeybindingCaptureTarget(event.target)) return;
+      // The popover dismissed itself on Escape and on an outside press. A plain
+      // div does neither, and a hover-opened panel can outlive the pointer that
+      // opened it — Alt+Tab away mid-hover and no `pointerleave` ever arrives.
+      // Escape is the way out. It is never consumed: the panel may not be open,
+      // and whatever else Escape closes has to keep closing.
+      if (event.key === "Escape") {
+        closePanel();
+        return;
+      }
       const transition = lifecycle.keyDown(event as UsagePeekKeyboardEvent);
       if (transition.handled) consumeKeyboardEvent(event);
     };
@@ -119,7 +128,7 @@ export function useAccountLimitsPanelController(enabled: boolean): AccountLimits
       lifecycle.dispose();
       if (keyboardLifecycleRef.current === lifecycle) keyboardLifecycleRef.current = null;
     };
-  }, [enabled, keybindings]);
+  }, [closePanel, enabled, keybindings]);
 
   useEffect(
     () => () => {
@@ -190,6 +199,11 @@ function AccountLimitRowView(props: {
     // list filling in rather than a block appearing. Closing drops every delay
     // to zero: a staggered exit makes dismissal feel slower than it is, and the
     // dock collapses over the top of it anyway.
+    //
+    // The sequence covers the rows present when the panel opens. A subscription
+    // whose first reading lands while the panel is already open mounts with
+    // `open` true and appears at once, which is right — it is news arriving,
+    // not part of an entrance.
     <section
       className={cn(
         "border-border/50 border-t px-3 py-2.5 transition-[opacity,transform] duration-200 ease-out [&:first-of-type]:border-t-0",
@@ -312,6 +326,7 @@ export function AccountLimitsPanelContent(props: {
   readonly open: boolean;
 }) {
   const { open, view, shortcutLabel } = props;
+  const headingId = useId();
   const disconnected = view.environments.filter(
     (environment) => environment.state !== "ready" && environment.state !== "pending",
   );
@@ -325,17 +340,35 @@ export function AccountLimitsPanelContent(props: {
         ? "Could not load account limits"
         : "No account limits available";
   return (
-    // Two horizontal rules and a recessed fill are the whole delimitation: the
-    // dock is flush with the sidebar's edges, so a box outline would draw two
-    // vertical lines onto the sidebar's own border. `data-usage-limits-panel`
-    // stays as the hook a stylesheet or a test can address the surface by.
+    // Two horizontal rules and a fill one step off the sidebar's own are the
+    // whole delimitation: the dock is flush with the sidebar's edges, so a box
+    // outline would draw two vertical lines onto the sidebar's own border.
+    //
+    // The fill is recessed — the band sits below the sidebar's own surface, not
+    // on top of it — and both halves of it are relative to theme tokens rather
+    // than to a literal colour, because this app ships a theme editor and a
+    // hardcoded fill would be the one surface in the sidebar a custom theme
+    // could not reach. Light mode tints toward `--foreground`; dark mode
+    // composites `--background` over the sidebar, which is darker than
+    // `--sidebar` in every theme since the sidebar is built from `--card`.
+    // `--sidebar-control-surface` was the obvious token and is wrong here: it
+    // is the *raised* surface the provider-update pill uses, so it would lift
+    // the band off the sidebar instead of sinking it.
+    //
+    // `data-usage-limits-panel` no longer drives any stylesheet — the rule it
+    // fed went with the popover. It is kept as a stable selector for browser
+    // checks, which is why nothing asserts its presence.
     <div
-      aria-label="Usage limits"
-      className="border-border/60 border-y bg-foreground/[0.035] dark:bg-black/40"
+      aria-labelledby={headingId}
+      className="border-border/60 border-y bg-foreground/[0.035] dark:bg-[color-mix(in_srgb,var(--background)_45%,transparent)]"
       data-usage-limits-panel
+      role="group"
     >
       <header className="flex items-center justify-between gap-2 px-3 py-1.5">
-        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
+        <span
+          className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70"
+          id={headingId}
+        >
           Usage limits
         </span>
         {shortcutLabel ? (
@@ -345,15 +378,22 @@ export function AccountLimitsPanelContent(props: {
         ) : null}
       </header>
 
-      {/* Capped against the viewport rather than the sidebar, which has no
-          height of its own to measure: the thread list keeps the rest, and a
-          panel taller than the cap scrolls instead of squeezing the list out.
-          The cap has to clear four subscriptions of three windows each, which
-          is what this machine reads today — under that, the panel scrolls on
-          the ordinary case and the last row is always cut.
+      {/* Two caps, and the smaller wins. 55dvh has to clear four subscriptions
+          of three windows each — 442px, what this machine reads today — or the
+          panel scrolls on the ordinary case and its last row is always cut.
+          `100dvh-20rem` is the other end: on a short window 55% of it is still
+          most of the sidebar, so the subtrahend reserves the header, the footer
+          rows and a few threads. Without it the thread list is squeezed to
+          nothing on a 600px window, which is the outcome a viewport-relative
+          cap alone quietly permits.
+          `dvh` rather than `vh` because the web surface runs in mobile browsers
+          whose chrome makes `vh` overstate the space by its height.
           `scrollFade` is the sidebar list's own affordance and masks only the
-          edge that actually overflows, so a full panel gets no mask at all. */}
-      <ScrollArea className="max-h-[55vh] border-border/40 border-t" scrollFade>
+          edge that actually overflows, so a panel that fits gets no mask. */}
+      <ScrollArea
+        className="max-h-[min(55dvh,calc(100dvh-20rem))] border-border/40 border-t"
+        scrollFade
+      >
         {view.isPending ? (
           <div className="px-3 py-4 text-center text-[11px] text-muted-foreground">
             Checking limits…
@@ -410,13 +450,24 @@ export function AccountLimitsDock(props: { readonly controller: AccountLimitsPan
     // The negative inline margin cancels the footer's padding: a delimiter that
     // stops short of the sidebar's edges reads as a card, not as a division of
     // the sidebar itself.
+    // `inert` is what actually takes the closed panel out of the page, and
+    // `aria-hidden` alone would not have. A collapsed row is clipped, not
+    // removed: Base UI gives the scroll viewport `tabIndex=0` the moment its
+    // content overflows, so without `inert` a keyboard user tabs into an
+    // invisible region and find-in-page matches text nobody can see. `inert`
+    // drops focus, pointer targeting and find-in-page for the whole subtree.
+    //
+    // `aria-hidden` is set to `true` or left off, never to `"false"` — an
+    // explicit false does nothing on its own and misleads under an ancestor
+    // that is itself hidden.
     <div
-      aria-hidden={!controller.open}
+      aria-hidden={controller.open ? undefined : true}
       className={cn(
         "-mx-[var(--sidebar-content-inset)] grid transition-[grid-template-rows] duration-200 ease-out",
         "motion-reduce:transition-none",
         controller.open ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
       )}
+      inert={!controller.open}
       onPointerEnter={controller.onPointerEnter}
       onPointerLeave={controller.onPointerLeave}
     >

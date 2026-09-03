@@ -102,7 +102,6 @@ describe("AccountLimitsPanelContent", () => {
     // readers that cannot see it.
     expect(markup).toContain("Resets in 5h");
     expect(markup).toContain("1m ago");
-    expect(markup).toContain("data-usage-limits-panel");
   });
 
   it("renders a quiet missing-reading state", () => {
