@@ -7,7 +7,7 @@
  *
  * @module usage/openCodeCredentialDiscovery
  */
-import type { AccountLimitsNamespace } from "@t3tools/contracts";
+import { ACCOUNT_LIMITS_VENDOR_NAME, type AccountLimitsNamespace } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -36,11 +36,6 @@ export interface DiscoveredCredential {
   readonly label: string;
   readonly credential: string;
 }
-
-const LABEL_BY_NAMESPACE: Readonly<Record<string, string>> = {
-  "opencode-go": "OpenCode Go",
-  zai: "GLM Coding Plan",
-};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -99,7 +94,7 @@ export const discoverOpenCodeCredentials = Effect.fn("discoverOpenCodeCredential
       if (key === null) return;
       found.set(namespace, {
         namespace,
-        label: LABEL_BY_NAMESPACE[namespace] ?? serviceId,
+        label: ACCOUNT_LIMITS_VENDOR_NAME[namespace],
         credential: key,
       });
     };

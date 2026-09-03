@@ -145,6 +145,21 @@ export function unfoldableInstanceSubscription(input: {
 }
 
 /**
+ * What each vendor is called, wherever a subscription of theirs is shown.
+ *
+ * One map, because the server labels a discovered subscription with it and the
+ * client titles the row with it. Two copies would drift, and the client decides
+ * whether to repeat the label as a subtitle by comparing the two — a comparison
+ * that is only sound while both sides say exactly the same thing.
+ */
+export const ACCOUNT_LIMITS_VENDOR_NAME: Readonly<Record<AccountLimitsNamespace, string>> = {
+  anthropic: "Claude",
+  openai: "ChatGPT",
+  "opencode-go": "OpenCode Go",
+  zai: "GLM Coding Plan",
+};
+
+/**
  * The vendor a subscription key names, or null when the key names no vendor.
  *
  * The namespace is already in the key, so reading it back is cheaper and
@@ -152,7 +167,12 @@ export function unfoldableInstanceSubscription(input: {
  * an instance rather than a vendor and yields null.
  */
 export function accountLimitsNamespaceOf(key: string): AccountLimitsNamespace | null {
-  const namespace = key.slice(0, key.indexOf(":"));
+  // Guard the separator explicitly. `indexOf` returns -1 when there is none,
+  // and `slice(0, -1)` would then drop the last character rather than take the
+  // whole string — which is how "openais" would answer "openai".
+  const separator = key.indexOf(":");
+  if (separator === -1) return null;
+  const namespace = key.slice(0, separator);
   return AccountLimitsNamespace.literals.includes(namespace as AccountLimitsNamespace)
     ? (namespace as AccountLimitsNamespace)
     : null;

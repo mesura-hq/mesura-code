@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 
 import {
   ACCOUNT_LIMITS_CONTRACT_VERSION,
+  accountLimitsNamespaceOf,
   accountLimitsSubscriptionKey,
   AccountLimitsSummary,
   isFoldableSubscriptionKey,
@@ -356,5 +357,26 @@ describe("a subscription is the identity", () => {
         ],
       }),
     ).toThrow();
+  });
+});
+
+describe("accountLimitsNamespaceOf", () => {
+  it("reads the vendor back out of a subscription key", () => {
+    expect(accountLimitsNamespaceOf("anthropic:dev@example.com")).toBe("anthropic");
+    expect(accountLimitsNamespaceOf("opencode-go:9f2ab1")).toBe("opencode-go");
+  });
+
+  it("names no vendor for a key that names an instance", () => {
+    expect(accountLimitsNamespaceOf("#instance:claude")).toBeNull();
+    expect(accountLimitsNamespaceOf("#instance:claude:1")).toBeNull();
+  });
+
+  it("names no vendor for a key carrying no separator at all", () => {
+    // `indexOf` returns -1 without one, and slicing to -1 drops the last
+    // character rather than taking the whole string — which is how "openais"
+    // used to answer "openai".
+    expect(accountLimitsNamespaceOf("openais")).toBeNull();
+    expect(accountLimitsNamespaceOf("anthropics")).toBeNull();
+    expect(accountLimitsNamespaceOf("")).toBeNull();
   });
 });

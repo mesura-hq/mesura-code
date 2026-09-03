@@ -3,6 +3,7 @@ import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 import {
   ACCOUNT_LIMITS_CONTRACT_VERSION,
+  ACCOUNT_LIMITS_VENDOR_NAME,
   accountLimitsNamespaceOf,
   accountLimitsWindowKey,
   isFoldableSubscriptionKey,
@@ -85,6 +86,8 @@ export interface AccountLimitsRow {
   readonly key: string;
   /** The agent that read it, when one did. Absent on a directly polled plan. */
   readonly driver?: ProviderDriverKind | undefined;
+  /** The vendor this subscription is metered by, when its key names one. */
+  readonly namespace?: AccountLimitsNamespace | undefined;
   /** The subscription's own name, e.g. "OpenCode Go" — not the agent's. */
   readonly providerLabel: string;
   readonly accentColor?: string | undefined;
@@ -221,23 +224,23 @@ function ageMillis(observedAt: string | undefined, currentEnvironmentTime: numbe
  * A subscription the vendor named itself, like a plan, already carries the
  * right title in its label and keeps it.
  */
-const VENDOR_NAME: Readonly<Record<AccountLimitsNamespace, string>> = {
-  anthropic: "Claude",
-  openai: "ChatGPT",
-  "opencode-go": "OpenCode Go",
-  zai: "GLM Coding Plan",
-};
-
 function subscriptionPresentation(subscription: { readonly key: string; readonly label: string }): {
   readonly title: string;
   readonly accountName: string | null;
+  readonly namespace: AccountLimitsNamespace | null;
 } {
   const namespace = accountLimitsNamespaceOf(subscription.key);
-  if (namespace === null) return { title: subscription.label, accountName: null };
-  const title = VENDOR_NAME[namespace];
+  if (namespace === null) return { title: subscription.label, accountName: null, namespace };
+  const title = ACCOUNT_LIMITS_VENDOR_NAME[namespace];
   // The label repeats the title for a plan the vendor named, and only differs
   // when it is an account address — which is exactly when it is worth showing.
-  return { title, accountName: subscription.label === title ? null : subscription.label };
+  return {
+    title,
+    // Both sides now name a vendor from one map, so a label that still differs
+    // is a real account address rather than a wording drift.
+    accountName: subscription.label === title ? null : subscription.label,
+    namespace,
+  };
 }
 
 /**
@@ -283,6 +286,7 @@ interface AccountLimitsCandidate {
   readonly environmentLabel: string;
   readonly environmentNowMs: number | null;
   readonly driver?: ProviderDriverKind | undefined;
+  readonly namespace?: AccountLimitsNamespace | undefined;
   /** The subscription's name, which is what the row is titled by. */
   readonly displayName: string;
   readonly accentColor?: string | undefined;
@@ -416,6 +420,7 @@ export function projectAccountLimits(
         environmentLabel: environment.label,
         environmentNowMs: Number.isFinite(currentEnvironmentTime) ? currentEnvironmentTime : null,
         ...(reader && entry ? { driver: reader.driver } : {}),
+        ...(presentation.namespace ? { namespace: presentation.namespace } : {}),
         displayName: presentation.title,
         ...(entry?.accentColor ? { accentColor: entry.accentColor } : {}),
         snapshot,
@@ -473,6 +478,7 @@ export function projectAccountLimits(
     return {
       key,
       driver: lead.driver,
+      ...(lead.namespace ? { namespace: lead.namespace } : {}),
       providerLabel: lead.displayName,
       accentColor: lead.accentColor,
       plan: lead.snapshot?.observation?.plan ?? null,

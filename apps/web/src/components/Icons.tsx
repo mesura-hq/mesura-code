@@ -672,7 +672,9 @@ export const OpenCodeIcon: Icon = (props) => (
  * Their own mark, taken from the logo the site links as its icon: a rounded
  * tile carrying a three-piece Z. The tile inverts between themes because the
  * brand lockup is a dark tile on light, which would disappear against this
- * app's dark surfaces — the same treatment `OpenCodeIcon` already uses.
+ * app's dark surfaces. `OpenCodeIcon` solves the same problem by duplicating
+ * its paths behind `dark:hidden` pairs; this does it with theme-conditional
+ * fills on one set of paths, which needs no duplicated markup.
  */
 export const ZaiIcon: Icon = (props) => (
   <svg {...props} viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg">

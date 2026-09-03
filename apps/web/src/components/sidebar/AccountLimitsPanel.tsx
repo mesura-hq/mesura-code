@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import { accountLimitsNamespaceOf, accountLimitsWindowKey } from "@t3tools/contracts";
+import { accountLimitsWindowKey } from "@t3tools/contracts";
 // A single circular arrow, not one of the two-arrow refresh glyphs: this panel
 // already says "Refresh failed" about the reading itself, and a window resetting
 // is a different event from Mesura Code re-reading it.
@@ -169,26 +169,32 @@ function readingAgeLabel(readingAgeMs: number | null): string | null {
 function AccountLimitRowView(props: { row: AccountLimitsRow }) {
   const { row } = props;
   const ageLabel = readingAgeLabel(row.readingAgeMs);
-  const namespace = accountLimitsNamespaceOf(row.key);
-  const SubscriptionIcon = namespace ? SUBSCRIPTION_ICON_BY_NAMESPACE[namespace] : undefined;
+  const SubscriptionIcon = row.namespace
+    ? SUBSCRIPTION_ICON_BY_NAMESPACE[row.namespace]
+    : undefined;
   return (
     <section className="border-border/60 border-t px-3 py-3 [&:first-of-type]:border-t-0">
       <div className="flex min-w-0 items-center gap-2">
-        {/* The vendor's mark, which a directly polled plan has as much as an
-            agent-read one. Only a reading that names no vendor at all falls
-            back to the agent's icon, and one that names neither shows none. */}
-        {SubscriptionIcon ? (
-          <SubscriptionIcon aria-hidden className="size-4 shrink-0 text-foreground/80" />
-        ) : row.driver ? (
-          <ProviderInstanceIcon
-            accentColor={row.accentColor}
-            className="size-5"
-            displayName={row.providerLabel}
-            driverKind={row.driver}
-            iconClassName="size-4 text-foreground/80"
-            showBadge={Boolean(row.accentColor)}
-          />
-        ) : null}
+        {/* One slot whichever branch fills it, or rows sit a unit apart.
+            The vendor's mark comes first, because a directly polled plan has a
+            vendor as much as an agent-read one does. Only a reading that names
+            no vendor falls back to the agent's icon — and that is also the only
+            row an accent colour belongs to, since an accent is set on an agent
+            and a subscription several agents read has no one agent's colour. */}
+        <span className="flex size-5 shrink-0 items-center justify-center">
+          {SubscriptionIcon ? (
+            <SubscriptionIcon aria-hidden className="size-4 text-foreground/80" />
+          ) : row.driver ? (
+            <ProviderInstanceIcon
+              accentColor={row.accentColor}
+              className="size-5"
+              displayName={row.providerLabel}
+              driverKind={row.driver}
+              iconClassName="size-4 text-foreground/80"
+              showBadge={Boolean(row.accentColor)}
+            />
+          ) : null}
+        </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-1.5">
             <span className="truncate text-xs font-medium text-foreground">
