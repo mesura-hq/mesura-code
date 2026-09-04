@@ -72,6 +72,19 @@ const runShell = (script: string) => {
 
 const sh = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
+// Backgrounds a process whose argv holds a runtime path, which is the only
+// thing runtime_in_use can see: it greps /proc/[0-9]*/cmdline for the path.
+//
+// The trailing `; :` is load-bearing. `sh -c "sleep 30" PATH` passes PATH as
+// $0, but a shell given one simple command exec's it instead of forking, so
+// the process argv becomes `sleep 30` and $0 is gone from cmdline. The scan
+// then reports the runtime as unused and the test exercises the wrong branch.
+// A second command leaves the shell with nothing to exec into, so it stays
+// alive as itself and keeps $0. Takes a shell expression, not a value: every
+// call site interpolates a shell variable that must expand inside the script.
+const holdingRuntimePath = (shellPathExpression: string) =>
+  `sh -c "sleep 30; :" ${shellPathExpression} >/dev/null 2>&1 &`;
+
 const readField = (stdout: string, field: string) => {
   const line = stdout.split("\n").find((candidate) => candidate.startsWith(`${field}:`));
   if (line === undefined) throw new Error(`missing ${field} in fixture output: ${stdout}`);
@@ -679,7 +692,7 @@ describe.skipIf(posixShellRunner === null)("WSL runtime install script (executed
         `runtime_root=${sh(fixture.runtimeRoot)}`,
         `runtime_parent=${sh(fixture.runtimeParent)}`,
         'rm "$runtime_root/.t3code-wsl-runtime-ready"',
-        'sh -c "sleep 30" "$runtime_root/apps/server/dist/bin.mjs" >/dev/null 2>&1 &',
+        holdingRuntimePath('"$runtime_root/apps/server/dist/bin.mjs"'),
         "active_pid=$!",
         "sleep 0.1",
         fixture.installScript(),
@@ -717,7 +730,7 @@ describe.skipIf(posixShellRunner === null)("WSL runtime install script (executed
         'touch -d "4 minutes ago" "$runtime_parent/sha256-active"',
         'touch -d "3 minutes ago" "$runtime_parent/sha256-old"',
         'touch -d "2 minutes ago" "$runtime_parent/sha256-locked"',
-        'sh -c "sleep 30" "$runtime_parent/sha256-active/apps/server/dist/bin.mjs" >/dev/null 2>&1 &',
+        holdingRuntimePath('"$runtime_parent/sha256-active/apps/server/dist/bin.mjs"'),
         "active_pid=$!",
         "(",
         '  exec 9> "$runtime_parent/.sha256-locked.install.lock"',
