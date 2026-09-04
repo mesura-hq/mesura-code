@@ -22,11 +22,7 @@ import type {
   ServerProviderModel,
   ServerProviderSkill,
 } from "@t3tools/contracts";
-import {
-  PREFERRED_DEFAULT_CODEX_MODELS,
-  ProviderDriverKind,
-  ServerSettingsError,
-} from "@t3tools/contracts";
+import { PREFERRED_DEFAULT_CODEX_MODELS, ServerSettingsError } from "@t3tools/contracts";
 
 import { createModelCapabilities } from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
@@ -404,7 +400,7 @@ interface CodexAccountLimitsClient {
 function codexAccountIdentity(response: CodexSchema.V2GetAccountResponse) {
   const account = response.account;
   if (!account || account.type !== "chatgpt") return undefined;
-  return accountIdentityFromEmail(ProviderDriverKind.make("codex"), account.email);
+  return accountIdentityFromEmail("openai", account.email);
 }
 
 export const requestCodexAccountLimits = Effect.fn("requestCodexAccountLimits")(function* (

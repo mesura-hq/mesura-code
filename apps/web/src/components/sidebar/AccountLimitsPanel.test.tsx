@@ -3,10 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { AccountLimitsView } from "../../state/accountLimits";
-import {
-  ACCOUNT_LIMITS_POPOVER_FOCUS_PROPS,
-  AccountLimitsPanelContent,
-} from "./AccountLimitsPanel";
+import { AccountLimitsPanelContent, rowEntranceDelayMs } from "./AccountLimitsPanel";
 
 const environmentId = EnvironmentId.make("local");
 
@@ -68,17 +65,30 @@ function view(): AccountLimitsView {
   };
 }
 
-describe("AccountLimitsPanelContent", () => {
-  it("keeps focus on the composer or terminal for hover and held-key opens", () => {
-    expect(ACCOUNT_LIMITS_POPOVER_FOCUS_PROPS).toEqual({
-      initialFocus: false,
-      finalFocus: false,
-    });
+describe("rowEntranceDelayMs", () => {
+  it("starts each row a beat after the one above it", () => {
+    expect(rowEntranceDelayMs(0, true)).toBe(0);
+    expect(rowEntranceDelayMs(1, true)).toBeGreaterThan(rowEntranceDelayMs(0, true));
+    expect(rowEntranceDelayMs(2, true)).toBeGreaterThan(rowEntranceDelayMs(1, true));
   });
 
+  // Without the cap the last row of a long panel waits on every row above it,
+  // which stops reading as a sequence and starts reading as that row lagging.
+  it("stops adding delay once the sequence is established", () => {
+    expect(rowEntranceDelayMs(20, true)).toBe(rowEntranceDelayMs(50, true));
+  });
+
+  // A staggered exit makes dismissal feel slower than it is, and the dock
+  // collapses over the top of the rows anyway.
+  it("gives closing rows no delay at all", () => {
+    for (const index of [0, 1, 5, 20]) expect(rowEntranceDelayMs(index, false)).toBe(0);
+  });
+});
+
+describe("AccountLimitsPanelContent", () => {
   it("renders account meters, reset time, reading age, and shortcut", () => {
     const markup = renderToStaticMarkup(
-      <AccountLimitsPanelContent shortcutLabel="Alt+U" view={view()} />,
+      <AccountLimitsPanelContent open shortcutLabel="Alt+U" view={view()} />,
     );
 
     expect(markup).toContain("Usage limits");
@@ -92,16 +102,13 @@ describe("AccountLimitsPanelContent", () => {
     // readers that cannot see it.
     expect(markup).toContain("Resets in 5h");
     expect(markup).toContain("1m ago");
-    // `mesura.css` matches this attribute to give the popover the composer's
-    // glass. Losing it drops the panel back to the default dropdown surface,
-    // which is a look, not an error, so nothing else would catch it.
-    expect(markup).toContain("data-usage-limits-panel");
   });
 
   it("renders a quiet missing-reading state", () => {
     const missing = view();
     const markup = renderToStaticMarkup(
       <AccountLimitsPanelContent
+        open
         shortcutLabel={null}
         view={{
           ...missing,

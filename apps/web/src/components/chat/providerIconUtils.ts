@@ -1,5 +1,5 @@
 import { ProviderDriverKind } from "@t3tools/contracts";
-import { ClaudeAI, CursorIcon, GrokIcon, Icon, OpenAI, OpenCodeIcon } from "../Icons";
+import { ClaudeAI, CursorIcon, GrokIcon, Icon, OpenAI, OpenCodeIcon, ZaiIcon } from "../Icons";
 import { PROVIDER_OPTIONS } from "../../session-logic";
 
 export const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ProviderDriverKind, Icon>> = {
@@ -8,6 +8,20 @@ export const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ProviderDriverKind, Icon>
   [ProviderDriverKind.make("opencode")]: OpenCodeIcon,
   [ProviderDriverKind.make("cursor")]: CursorIcon,
   [ProviderDriverKind.make("grok")]: GrokIcon,
+};
+
+/**
+ * The mark for a subscription, keyed by the vendor that meters it.
+ *
+ * Keyed by vendor rather than by driver on purpose: a subscription this
+ * environment polls itself has no agent behind it, so a driver-keyed map leaves
+ * exactly the new rows without an icon.
+ */
+export const SUBSCRIPTION_ICON_BY_NAMESPACE: Readonly<Record<string, Icon>> = {
+  anthropic: ClaudeAI,
+  openai: OpenAI,
+  "opencode-go": OpenCodeIcon,
+  zai: ZaiIcon,
 };
 
 function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): option is {

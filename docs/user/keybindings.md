@@ -84,7 +84,9 @@ successful pick; its hover glow and badge preview the element and color family t
 so add one in **Settings** → **Keybindings** if you want to use it.
 
 `usage.peek` shows the subscription-limit panel while you hold its shortcut. It defaults to
-`alt+u`. Releasing the main key or a required modifier closes the panel.
+`alt+u`. Releasing the main key or a required modifier closes the panel, and `Escape` closes it too.
+The panel opens from the thread list's sidebar footer, so the shortcut does nothing on the Settings,
+Usage and Pull requests pages, where that footer shows a Back button instead.
 
 `thread.copyReference` copies the active thread's pull request link, or its thread ID when no pull
 request is available. Its default shortcut is `mod+shift+c`, and it does not replace terminal copy

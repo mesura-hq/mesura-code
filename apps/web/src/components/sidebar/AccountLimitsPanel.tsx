@@ -4,10 +4,11 @@ import { accountLimitsWindowKey } from "@t3tools/contracts";
 // already says "Refresh failed" about the reading itself, and a window resetting
 // is a different event from Mesura Code re-reading it.
 import { RotateCcwIcon } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { shortcutLabelForCommand } from "../../keybindings";
 import { isTerminalFocused } from "../../lib/terminalFocus";
+import { cn } from "../../lib/utils";
 import {
   useAccountLimits,
   type AccountLimitsRow,
@@ -15,7 +16,8 @@ import {
 } from "../../state/accountLimits";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
-import { Popover, PopoverPopup } from "../ui/popover";
+import { SUBSCRIPTION_ICON_BY_NAMESPACE } from "../chat/providerIconUtils";
+import { ScrollArea } from "../ui/scroll-area";
 import {
   closeHeldUsagePeek,
   createUsagePeekHoverBridge,
@@ -29,10 +31,18 @@ import {
 } from "./AccountLimitsPanel.logic";
 
 const HOVER_BRIDGE_DELAY_MS = 120;
-export const ACCOUNT_LIMITS_POPOVER_FOCUS_PROPS = {
-  initialFocus: false,
-  finalFocus: false,
-} as const;
+/**
+ * How far apart two rows start their entrance, and how many rows still get a
+ * later start than the one above. Past the cap the stagger stops reading as
+ * sequence and starts reading as the last row lagging.
+ */
+const ROW_ENTRANCE_STEP_MS = 45;
+const ROW_ENTRANCE_MAX_STEPS = 5;
+
+export function rowEntranceDelayMs(index: number, open: boolean): number {
+  if (!open) return 0;
+  return Math.min(index, ROW_ENTRANCE_MAX_STEPS) * ROW_ENTRANCE_STEP_MS;
+}
 
 export interface AccountLimitsPanelController {
   readonly open: boolean;
@@ -86,6 +96,15 @@ export function useAccountLimitsPanelController(enabled: boolean): AccountLimits
     keyboardLifecycleRef.current = lifecycle;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isKeybindingCaptureTarget(event.target)) return;
+      // The popover dismissed itself on Escape and on an outside press. A plain
+      // div does neither, and a hover-opened panel can outlive the pointer that
+      // opened it — Alt+Tab away mid-hover and no `pointerleave` ever arrives.
+      // Escape is the way out. It is never consumed: the panel may not be open,
+      // and whatever else Escape closes has to keep closing.
+      if (event.key === "Escape") {
+        closePanel();
+        return;
+      }
       const transition = lifecycle.keyDown(event as UsagePeekKeyboardEvent);
       if (transition.handled) consumeKeyboardEvent(event);
     };
@@ -109,7 +128,7 @@ export function useAccountLimitsPanelController(enabled: boolean): AccountLimits
       lifecycle.dispose();
       if (keyboardLifecycleRef.current === lifecycle) keyboardLifecycleRef.current = null;
     };
-  }, [enabled, keybindings]);
+  }, [closePanel, enabled, keybindings]);
 
   useEffect(
     () => () => {
@@ -165,20 +184,55 @@ function readingAgeLabel(readingAgeMs: number | null): string | null {
   return `Updated ${formatCompactDuration(readingAgeMs)} ago`;
 }
 
-function AccountLimitRowView(props: { row: AccountLimitsRow }) {
-  const { row } = props;
+function AccountLimitRowView(props: {
+  readonly row: AccountLimitsRow;
+  readonly index: number;
+  readonly open: boolean;
+}) {
+  const { index, open, row } = props;
   const ageLabel = readingAgeLabel(row.readingAgeMs);
+  const SubscriptionIcon = row.namespace
+    ? SUBSCRIPTION_ICON_BY_NAMESPACE[row.namespace]
+    : undefined;
   return (
-    <section className="border-border/60 border-t px-3 py-3 [&:first-of-type]:border-t-0">
+    // Each row arrives a beat after the one above it, so the panel reads as a
+    // list filling in rather than a block appearing. Closing drops every delay
+    // to zero: a staggered exit makes dismissal feel slower than it is, and the
+    // dock collapses over the top of it anyway.
+    //
+    // The sequence covers the rows present when the panel opens. A subscription
+    // whose first reading lands while the panel is already open mounts with
+    // `open` true and appears at once, which is right — it is news arriving,
+    // not part of an entrance.
+    <section
+      className={cn(
+        "border-border/50 border-t px-3 py-2.5 transition-[opacity,transform] duration-200 ease-out [&:first-of-type]:border-t-0",
+        "motion-reduce:transform-none motion-reduce:transition-none",
+        open ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0",
+      )}
+      style={{ transitionDelay: `${rowEntranceDelayMs(index, open)}ms` }}
+    >
       <div className="flex min-w-0 items-center gap-2">
-        <ProviderInstanceIcon
-          accentColor={row.accentColor}
-          className="size-5"
-          displayName={row.providerLabel}
-          driverKind={row.driver}
-          iconClassName="size-4 text-foreground/80"
-          showBadge={Boolean(row.accentColor)}
-        />
+        {/* One slot whichever branch fills it, or rows sit a unit apart.
+            The vendor's mark comes first, because a directly polled plan has a
+            vendor as much as an agent-read one does. Only a reading that names
+            no vendor falls back to the agent's icon — and that is also the only
+            row an accent colour belongs to, since an accent is set on an agent
+            and a subscription several agents read has no one agent's colour. */}
+        <span className="flex size-5 shrink-0 items-center justify-center">
+          {SubscriptionIcon ? (
+            <SubscriptionIcon aria-hidden className="size-4 text-foreground/80" />
+          ) : row.driver ? (
+            <ProviderInstanceIcon
+              accentColor={row.accentColor}
+              className="size-5"
+              displayName={row.providerLabel}
+              driverKind={row.driver}
+              iconClassName="size-4 text-foreground/80"
+              showBadge={Boolean(row.accentColor)}
+            />
+          ) : null}
+        </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-1.5">
             <span className="truncate text-xs font-medium text-foreground">
@@ -202,7 +256,7 @@ function AccountLimitRowView(props: { row: AccountLimitsRow }) {
       </div>
 
       {row.windows.length > 0 ? (
-        <div className="mt-2.5 space-y-2.5">
+        <div className="mt-2 space-y-2">
           {row.windows.map((rowWindow) => {
             const { window } = rowWindow;
             const usedPercent = Math.round(window.usedPercent);
@@ -254,6 +308,14 @@ function AccountLimitRowView(props: { row: AccountLimitsRow }) {
           Refresh failed{row.windows.length > 0 ? " · showing the last reading" : ""}
         </div>
       ) : null}
+      {/* Replaces the refresh-failed line rather than stacking with it: the two
+          say contradictory things about whose fault the failure is. */}
+      {row.state === "not-understood" ? (
+        <div className="mt-1 text-[10px] text-muted-foreground/65">
+          Reading not understood — update Mesura Code
+          {row.windows.length > 0 ? " · showing the last reading" : ""}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -261,8 +323,10 @@ function AccountLimitRowView(props: { row: AccountLimitsRow }) {
 export function AccountLimitsPanelContent(props: {
   readonly view: AccountLimitsView;
   readonly shortcutLabel: string | null;
+  readonly open: boolean;
 }) {
-  const { view, shortcutLabel } = props;
+  const { open, view, shortcutLabel } = props;
+  const headingId = useId();
   const disconnected = view.environments.filter(
     (environment) => environment.state !== "ready" && environment.state !== "pending",
   );
@@ -276,53 +340,100 @@ export function AccountLimitsPanelContent(props: {
         ? "Could not load account limits"
         : "No account limits available";
   return (
-    // `data-usage-limits-panel` is the hook `mesura.css` matches to give this
-    // popover an opaque surface of its own instead of the default dropdown
-    // glass. It sits here, on a plain div we own, rather than on the popup
-    // itself, so the selector cannot break on how Base UI forwards props.
+    // Two horizontal rules and a fill one step off the sidebar's own are the
+    // whole delimitation: the dock is flush with the sidebar's edges, so a box
+    // outline would draw two vertical lines onto the sidebar's own border.
+    //
+    // The fill is recessed — the band sits below the sidebar's own surface, not
+    // on top of it — and both halves of it are relative to theme tokens rather
+    // than to a literal colour, because this app ships a theme editor and a
+    // hardcoded fill would be the one surface in the sidebar a custom theme
+    // could not reach. Light mode tints toward `--foreground`; dark mode
+    // composites `--background` over the sidebar, which is darker than
+    // `--sidebar` in every theme since the sidebar is built from `--card`.
+    // `--sidebar-control-surface` was the obvious token and is wrong here: it
+    // is the *raised* surface the provider-update pill uses, so it would lift
+    // the band off the sidebar instead of sinking it.
+    //
+    // `data-usage-limits-panel` no longer drives any stylesheet — the rule it
+    // fed went with the popover. It is kept as a stable selector for browser
+    // checks, which is why nothing asserts its presence.
     <div
-      className="w-[21rem] max-w-[calc(100vw-1rem)]"
-      aria-label="Usage limits"
+      aria-labelledby={headingId}
+      className="border-border/60 border-y bg-foreground/[0.035] dark:bg-[color-mix(in_srgb,var(--background)_45%,transparent)]"
       data-usage-limits-panel
+      role="group"
     >
-      <header className="flex items-center justify-between gap-3 border-border/60 border-b px-3 py-2.5">
-        <div>
-          <div className="text-xs font-medium text-foreground">Usage limits</div>
-          <div className="mt-0.5 text-[10px] text-muted-foreground/60">Subscription windows</div>
-        </div>
+      <header className="flex items-center justify-between gap-2 px-3 py-1.5">
+        <span
+          className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70"
+          id={headingId}
+        >
+          Usage limits
+        </span>
         {shortcutLabel ? (
-          <kbd className="rounded border border-border/70 bg-muted/45 px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground">
+          <kbd className="rounded border border-border/60 bg-muted/40 px-1 py-px font-mono text-[9px] text-muted-foreground/80">
             {shortcutLabel}
           </kbd>
         ) : null}
       </header>
 
-      {view.isPending ? (
-        <div className="px-3 py-5 text-center text-[11px] text-muted-foreground">
-          Checking limits…
-        </div>
-      ) : view.rows.length === 0 ? (
-        <div className="px-3 py-5 text-center text-[11px] text-muted-foreground">
-          {emptyMessage}
-        </div>
-      ) : (
-        view.rows.map((row) => <AccountLimitRowView key={row.key} row={row} />)
-      )}
+      {/* Two caps, and the smaller wins. 55dvh has to clear four subscriptions
+          of three windows each — 442px, what this machine reads today — or the
+          panel scrolls on the ordinary case and its last row is always cut.
+          `100dvh-20rem` is the other end: on a short window 55% of it is still
+          most of the sidebar, so the subtrahend reserves the header, the footer
+          rows and a few threads. Without it the thread list is squeezed to
+          nothing on a 600px window, which is the outcome a viewport-relative
+          cap alone quietly permits.
+          `dvh` rather than `vh` because the web surface runs in mobile browsers
+          whose chrome makes `vh` overstate the space by its height.
+          `scrollFade` is the sidebar list's own affordance and masks only the
+          edge that actually overflows, so a panel that fits gets no mask. */}
+      <ScrollArea
+        className="max-h-[min(55dvh,calc(100dvh-20rem))] border-border/40 border-t"
+        scrollFade
+      >
+        {view.isPending ? (
+          <div className="px-3 py-4 text-center text-[11px] text-muted-foreground">
+            Checking limits…
+          </div>
+        ) : view.rows.length === 0 ? (
+          <div className="px-3 py-4 text-center text-[11px] text-muted-foreground">
+            {emptyMessage}
+          </div>
+        ) : (
+          view.rows.map((row, index) => (
+            <AccountLimitRowView index={index} key={row.key} open={open} row={row} />
+          ))
+        )}
 
-      {view.isPartial || disconnected.length > 0 ? (
-        <footer className="border-border/60 border-t px-3 py-2 text-[9px] text-muted-foreground/55">
-          Some environments are unavailable
-        </footer>
-      ) : null}
+        {view.isPartial || disconnected.length > 0 ? (
+          <footer className="border-border/50 border-t px-3 py-1.5 text-[9px] text-muted-foreground/55">
+            Some environments are unavailable
+          </footer>
+        ) : null}
+      </ScrollArea>
     </div>
   );
 }
 
-export function AccountLimitsPopover(props: {
-  readonly anchor: HTMLElement | null;
-  readonly controller: AccountLimitsPanelController;
-}) {
-  const { anchor, controller } = props;
+/**
+ * The panel as a band of the sidebar, sitting directly above the row that
+ * opens it.
+ *
+ * This replaced a popover. A popover floated over the chat canvas whenever the
+ * sidebar was narrower than it, which put two surfaces of different shades
+ * under one sheet of glass and printed their boundary through it. A band that
+ * belongs to the sidebar cannot cross onto anything, so the whole problem —
+ * and the stylesheet that fought it — goes away.
+ *
+ * It also takes no focus and traps none, so the composer or the terminal keeps
+ * the caret while the panel is open. The popover needed two explicit props to
+ * get that; a plain div needs none.
+ */
+export function AccountLimitsDock(props: { readonly controller: AccountLimitsPanelController }) {
+  const { controller } = props;
   const view = useAccountLimits();
   const wasOpen = useRef(false);
   useEffect(() => {
@@ -331,26 +442,42 @@ export function AccountLimitsPopover(props: {
   }, [controller.open, view.refresh]);
 
   return (
-    <Popover
-      onOpenChange={(open) => {
-        if (!open) controller.close();
-      }}
-      open={controller.open && anchor !== null}
+    // Height comes from `grid-template-rows` going `0fr` to `1fr`, so the panel
+    // opens to whatever it measures without anything measuring it. Browsers
+    // that cannot interpolate that property snap open instead of sliding, which
+    // is the correct degradation and is not the desktop app's engine.
+    //
+    // The negative inline margin cancels the footer's padding: a delimiter that
+    // stops short of the sidebar's edges reads as a card, not as a division of
+    // the sidebar itself.
+    // `inert` is what actually takes the closed panel out of the page, and
+    // `aria-hidden` alone would not have. A collapsed row is clipped, not
+    // removed: Base UI gives the scroll viewport `tabIndex=0` the moment its
+    // content overflows, so without `inert` a keyboard user tabs into an
+    // invisible region and find-in-page matches text nobody can see. `inert`
+    // drops focus, pointer targeting and find-in-page for the whole subtree.
+    //
+    // `aria-hidden` is set to `true` or left off, never to `"false"` — an
+    // explicit false does nothing on its own and misleads under an ancestor
+    // that is itself hidden.
+    <div
+      aria-hidden={controller.open ? undefined : true}
+      className={cn(
+        "-mx-[var(--sidebar-content-inset)] grid transition-[grid-template-rows] duration-200 ease-out",
+        "motion-reduce:transition-none",
+        controller.open ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+      )}
+      inert={!controller.open}
+      onPointerEnter={controller.onPointerEnter}
+      onPointerLeave={controller.onPointerLeave}
     >
-      <PopoverPopup
-        aria-label="Usage limits"
-        align="start"
-        anchor={anchor}
-        className="p-0"
-        {...ACCOUNT_LIMITS_POPOVER_FOCUS_PROPS}
-        onPointerEnter={controller.onPointerEnter}
-        onPointerLeave={controller.onPointerLeave}
-        side="top"
-        sideOffset={8}
-        viewportClassName="p-0"
-      >
-        <AccountLimitsPanelContent shortcutLabel={controller.shortcutLabel} view={view} />
-      </PopoverPopup>
-    </Popover>
+      <div className="min-h-0 overflow-hidden">
+        <AccountLimitsPanelContent
+          open={controller.open}
+          shortcutLabel={controller.shortcutLabel}
+          view={view}
+        />
+      </div>
+    </div>
   );
 }

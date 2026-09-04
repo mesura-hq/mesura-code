@@ -57,7 +57,7 @@ describe("Claude account-limit reader", () => {
       // The identity folds two environments on one subscription into one row,
       // so it must not vary with how the address was typed.
       assert.deepEqual(result.account, {
-        key: "claudeAgent:dev@example.com",
+        key: "anthropic:dev@example.com",
         label: "Dev@Example.com",
       });
       assert.equal(input.options.cwd, "/workspace/work");
@@ -172,7 +172,7 @@ describe("Codex account-limit reader", () => {
           .limitId,
         "codex",
       );
-      assert.deepEqual(result.account, { key: "codex:dev@example.com", label: "Dev@Example.com" });
+      assert.deepEqual(result.account, { key: "openai:dev@example.com", label: "Dev@Example.com" });
     }),
   );
 

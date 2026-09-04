@@ -221,6 +221,8 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
             cwd,
             environment: processEnv,
           }).pipe(
+            // Codex reports exactly one subscription; the list is the SPI's.
+            Effect.map((read) => [read]),
             Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
             Effect.mapError(
               (cause) =>

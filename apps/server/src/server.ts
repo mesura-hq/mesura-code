@@ -113,6 +113,7 @@ import * as ResourceMonitorBinary from "./resourceTelemetry/ResourceMonitorBinar
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as AccountLimitsService from "./usage/AccountLimitsService.ts";
+import * as SubscriptionRegistry from "./usage/SubscriptionRegistry.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import {
   clearPersistedServerRuntimeState,
@@ -180,7 +181,16 @@ const BackgroundLayerLive = BackgroundPolicy.layer.pipe(
 );
 
 const UsageLayerLive = UsageService.layer.pipe(Layer.provide(ServerSettingsLayerLive));
-const AccountLimitsLayerLive = AccountLimitsService.layer;
+const SubscriptionRegistryLayerLive = SubscriptionRegistry.layer.pipe(
+  Layer.provide(ServerSecretStore.layer),
+);
+// `AccountLimitsService` reads `SubscriptionRegistry` from context to build its
+// list of directly polled subscriptions, so this is a real dependency and the
+// type system enforces it. Building the registry is also what runs credential
+// discovery at boot.
+const AccountLimitsLayerLive = AccountLimitsService.layer.pipe(
+  Layer.provide(SubscriptionRegistryLayerLive),
+);
 
 const ResourceDiagnosticsLayerLive = Layer.mergeAll(
   ResourceTelemetryLayerLive,

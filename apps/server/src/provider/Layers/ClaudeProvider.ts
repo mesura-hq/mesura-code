@@ -1,5 +1,4 @@
 import {
-  ProviderDriverKind,
   type AccountLimitsAccount,
   type ClaudeSettings,
   type ModelCapabilities,
@@ -400,10 +399,7 @@ function claudeAccountIdentity(initializationResult: unknown): AccountLimitsAcco
   // other's.
   const apiProvider = (account as { readonly apiProvider?: unknown }).apiProvider;
   if (apiProvider !== undefined && apiProvider !== "firstParty") return undefined;
-  return accountIdentityFromEmail(
-    ProviderDriverKind.make("claudeAgent"),
-    (account as { readonly email?: unknown }).email,
-  );
+  return accountIdentityFromEmail("anthropic", (account as { readonly email?: unknown }).email);
 }
 
 type ClaudeAccountLimitsQueryFactory = (

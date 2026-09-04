@@ -36,11 +36,12 @@ const STYLED_FORK_COMPONENTS = [
     stylesheet: "apps/web/src/mesura.css",
     hooks: ["mesura-dictation-strip", "data-phase", "data-dictation-mode-control"],
   },
-  {
-    component: "apps/web/src/components/sidebar/AccountLimitsPanel.tsx",
-    stylesheet: "apps/web/src/mesura.css",
-    hooks: ["data-usage-limits-panel"],
-  },
+  // AccountLimitsPanel is deliberately absent. It still sets
+  // `data-usage-limits-panel`, but that attribute stopped being a styling hook
+  // when the panel became a band inside the sidebar: the rule it fed existed to
+  // strip upstream's popover glass, and it went with the popover. The attribute
+  // is kept as a stable selector for browser checks, so it has nothing to land
+  // on by design. Listing it here asserts the opposite and fails.
 ] as const;
 
 for (const entry of STYLED_FORK_COMPONENTS) {

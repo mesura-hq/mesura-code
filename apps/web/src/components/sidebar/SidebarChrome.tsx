@@ -5,7 +5,7 @@ import {
   SettingsIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback } from "react";
 import { Link, useCanGoBack, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
@@ -32,7 +32,7 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
-import { AccountLimitsPopover, useAccountLimitsPanelController } from "./AccountLimitsPanel";
+import { AccountLimitsDock, useAccountLimitsPanelController } from "./AccountLimitsPanel";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
@@ -158,8 +158,11 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
               : null,
   });
   const { environments } = useEnvironments();
-  const accountLimitsController = useAccountLimitsPanelController(!isMobile);
-  const [footerAnchor, setFooterAnchor] = useState<HTMLUListElement | null>(null);
+  // The dock takes sidebar height, so it only exists where the Usage entry that
+  // opens it does. On a settings or usage page the row shows Back instead, and
+  // a keyboard-only panel there would have no way to say it was there.
+  const accountLimitsEnabled = !isMobile && currentFooterPage === null;
+  const accountLimitsController = useAccountLimitsPanelController(accountLimitsEnabled);
   // The page reads every connected server, so one of them offering pull requests is enough for
   // the link to lead somewhere.
   const pullRequestsSupported = environments.some(
@@ -197,52 +200,58 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   }, [canGoBack, closeMobileSidebar, navigate]);
 
   return (
-    <SidebarMenu className="flex-row items-center" ref={setFooterAnchor}>
-      {currentFooterPage ? (
-        <SidebarMenuItem className="min-w-0 flex-1">
-          <SidebarMenuButton onClick={handleBackClick}>
-            <ArrowLeftIcon />
-            <span>Back</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      ) : (
-        <>
-          <SidebarUtilityItem
-            icon={<SettingsIcon />}
-            label="Settings"
-            onClick={handleSettingsClick}
-          />
-          {pullRequestsSupported ? (
+    // The dock and the row it opens from share a column of their own rather
+    // than being two items of the footer's. The footer sets `gap-2`, and a gap
+    // is drawn between adjacent items whatever their size — so a collapsed dock
+    // sitting directly in it would hold eight pixels open for ever. Nested,
+    // the dock contributes nothing while closed and its lower rule lands
+    // against the row while open, which is the delimiter doing its job.
+    //
+    // ACCEPTED MERGE COST. This wrapper re-indents the whole return block of
+    // an upstream component. Six upstream commits in the last six months
+    // touched this exact block, so expect roughly one whitespace conflict a
+    // month here, each resolved by taking upstream's line and re-indenting it.
+    // The cheaper shape — dock in `SidebarChromeFooter`, controller passed
+    // down — was measured and rejected: `currentFooterPage` is computed here,
+    // so the footer would need its own copy of the route test, and two copies
+    // of a gate drift. A recurring whitespace conflict is the smaller cost.
+    <div className="flex flex-col">
+      {accountLimitsEnabled ? <AccountLimitsDock controller={accountLimitsController} /> : null}
+      <SidebarMenu className="flex-row items-center">
+        {currentFooterPage ? (
+          <SidebarMenuItem className="min-w-0 flex-1">
+            <SidebarMenuButton onClick={handleBackClick}>
+              <ArrowLeftIcon />
+              <span>Back</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        ) : (
+          <>
             <SidebarUtilityItem
-              icon={<GitPullRequestIcon />}
-              label="Pull Requests"
-              onClick={handlePullRequestsClick}
+              icon={<SettingsIcon />}
+              label="Settings"
+              onClick={handleSettingsClick}
             />
-          ) : null}
-          <SidebarUtilityItem
-            icon={<ChartNoAxesColumnIcon />}
-            label="Usage"
-            onClick={handleUsageClick}
-            onPointerEnter={accountLimitsController.onPointerEnter}
-            onPointerLeave={accountLimitsController.onPointerLeave}
-            suppressTooltip={accountLimitsController.open}
-          />
-        </>
-      )}
-      <SidebarUpdatePill />
-      {/*
-       * Anchored to the footer row, not to the Usage button inside it. Aligning
-       * to the button lines the panel up with the third icon, which leaves it
-       * hanging over the middle of the sidebar; the row's left edge is the
-       * sidebar's content column, so aligning to it reads as flush. It also
-       * survives the Pull Requests item appearing and disappearing, which moves
-       * the button by its own width and would break any fixed offset tuned for
-       * one of the two cases.
-       */}
-      {!isMobile ? (
-        <AccountLimitsPopover anchor={footerAnchor} controller={accountLimitsController} />
-      ) : null}
-    </SidebarMenu>
+            {pullRequestsSupported ? (
+              <SidebarUtilityItem
+                icon={<GitPullRequestIcon />}
+                label="Pull Requests"
+                onClick={handlePullRequestsClick}
+              />
+            ) : null}
+            <SidebarUtilityItem
+              icon={<ChartNoAxesColumnIcon />}
+              label="Usage"
+              onClick={handleUsageClick}
+              onPointerEnter={accountLimitsController.onPointerEnter}
+              onPointerLeave={accountLimitsController.onPointerLeave}
+              suppressTooltip={accountLimitsController.open}
+            />
+          </>
+        )}
+        <SidebarUpdatePill />
+      </SidebarMenu>
+    </div>
   );
 });
 
