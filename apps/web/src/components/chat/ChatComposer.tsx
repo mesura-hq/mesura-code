@@ -529,6 +529,15 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   onCompactContext?: (() => void) | undefined;
   compactDisabled: boolean;
   compactDisabledReason: string | null;
+  /**
+   * The four footer controls render here, in one place, so their order is read
+   * off one list instead of being split across this group and its caller.
+   * Both nodes below sit between the context meter and send deliberately: the
+   * row reads context, attach, microphone, send.
+   */
+  showAttachControl: boolean;
+  onAttachFiles: () => void;
+  dictationStartControl?: ReactNode;
 }) {
   return (
     <>
@@ -541,6 +550,26 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
           compactDisabledReason={props.compactDisabledReason}
         />
       ) : null}
+      {props.showAttachControl ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={props.onAttachFiles}
+                aria-label="Attach files"
+              />
+            }
+          >
+            <PaperclipIcon />
+          </TooltipTrigger>
+          <TooltipPopup>Attach files</TooltipPopup>
+        </Tooltip>
+      ) : null}
+      {props.dictationStartControl}
       <ComposerPrimaryActions
         compact={props.compact}
         pendingAction={props.pendingAction}
@@ -848,6 +877,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     supportsAttachmentUploads,
     maxFileAttachmentBytes,
   });
+  // Gates the hidden input and its button together. They render in different
+  // components now, so the condition is named rather than repeated.
+  const showAttachControl = fileStagingLimit !== null && pendingUserInputs.length === 0;
   const fileCapabilityBlockReason = fileAttachmentCapabilityBlockReason({
     files: composerFiles,
     attachmentUploadsCapabilityKnown,
@@ -1239,6 +1271,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // ------------------------------------------------------------------
   const composerEditorRef = useRef<ComposerPromptEditorHandle>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
+  // Both the footer button and the alt+a keybinding open the picker, and the
+  // button's handler crosses a memo boundary, so it has to keep one identity.
+  const openAttachmentPicker = useCallback(() => {
+    attachmentInputRef.current?.click();
+  }, []);
   const composerFormRef = useRef<HTMLFormElement>(null);
   const composerSurfaceRef = useRef<HTMLDivElement>(null);
   const providerInputRejectedRef = useRef(false);
@@ -3038,7 +3075,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         }
         event.preventDefault();
         event.stopPropagation();
-        attachmentInputRef.current?.click();
+        openAttachmentPicker();
         return;
       }
       if (command !== "composer.stash") return;
@@ -4300,41 +4337,30 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   }
                   className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
                 >
-                  {fileStagingLimit !== null && pendingUserInputs.length === 0 ? (
-                    <>
-                      <input
-                        ref={attachmentInputRef}
-                        type="file"
-                        multiple
-                        className="hidden"
-                        onChange={(event) => {
-                          const files = Array.from(event.currentTarget.files ?? []);
-                          event.currentTarget.value = "";
-                          void addComposerAttachments(files);
-                          focusComposer();
-                        }}
-                      />
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-sm"
-                              onPointerDown={(event) => event.preventDefault()}
-                              onClick={() => attachmentInputRef.current?.click()}
-                              aria-label="Attach files"
-                            />
-                          }
-                        >
-                          <PaperclipIcon />
-                        </TooltipTrigger>
-                        <TooltipPopup>Attach files</TooltipPopup>
-                      </Tooltip>
-                    </>
+                  {/*
+                    Hidden, so its position in the row does not matter. It stays
+                    here rather than moving with its button because the change
+                    handler closes over composer-local state that would have to
+                    cross the memo boundary to follow it.
+                  */}
+                  {showAttachControl ? (
+                    <input
+                      ref={attachmentInputRef}
+                      type="file"
+                      multiple
+                      className="hidden"
+                      onChange={(event) => {
+                        const files = Array.from(event.currentTarget.files ?? []);
+                        event.currentTarget.value = "";
+                        void addComposerAttachments(files);
+                        focusComposer();
+                      }}
+                    />
                   ) : null}
-                  {dictationStartControl}
                   <ComposerFooterPrimaryActions
+                    showAttachControl={showAttachControl}
+                    onAttachFiles={openAttachmentPicker}
+                    dictationStartControl={dictationStartControl}
                     compact={isComposerPrimaryActionsCompact}
                     activeContextWindow={activeContextWindow}
                     activeThreadModelDisplayName={activeThreadModelDisplayName}

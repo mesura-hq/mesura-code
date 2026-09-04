@@ -443,6 +443,10 @@ const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+// Built once. The composer forwards this into a memoized footer group, and an
+// element created inline here would take a new identity on every ChatView
+// render, re-rendering that group on every keystroke and every streaming delta.
+const DICTATION_START_CONTROL = <DictationMicrophoneButton />;
 function useDraftHeroLayoutTransition(isDraftHeroState: boolean) {
   const transitionGroupRef = useRef<HTMLDivElement | null>(null);
   const composerAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -7614,7 +7618,7 @@ function ChatViewContent(props: ChatViewProps) {
                             keybindings={keybindings}
                             terminalOpen={Boolean(terminalUiState.terminalOpen)}
                             gitCwd={gitCwd}
-                            dictationStartControl={<DictationMicrophoneButton />}
+                            dictationStartControl={DICTATION_START_CONTROL}
                             promptRef={promptRef}
                             composerImagesRef={composerImagesRef}
                             composerFilesRef={composerFilesRef}

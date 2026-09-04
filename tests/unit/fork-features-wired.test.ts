@@ -79,8 +79,17 @@ it("handles the attach shortcut in the composer that owns the file input", () =>
   const body = composer.slice(branchStart, branchEnd);
   assert.include(
     body,
-    "attachmentInputRef.current?.click()",
+    "openAttachmentPicker()",
     "the attach shortcut no longer opens upstream's file input",
+  );
+  // Following the indirection rather than accepting it. The shortcut and the
+  // footer button share this one helper, which is what makes a second attach
+  // route impossible; a helper that stopped clicking the input would leave
+  // both routes dead and the assertion above still passing.
+  assert.match(
+    composer,
+    /const openAttachmentPicker = useCallback\(\(\) => \{\s*attachmentInputRef\.current\?\.click\(\);\s*\}, \[\]\);/,
+    "openAttachmentPicker no longer clicks upstream's file input, so neither alt+a nor the attach button opens it",
   );
   // The chord must be claimed only once it will open the picker. Claiming it
   // first and returning afterwards swallows alt+a in every state where the
@@ -138,4 +147,40 @@ it("orders the active sidebar list through the fork's sort setting", () => {
     "sidebarThreadSortOrder,\n    snoozeWakeTick,",
     "sidebarThreadSortOrder is missing from the memo's dependencies, so changing the setting does not re-sort the list",
   );
+});
+
+// The four footer controls are one row a user reads left to right, but nothing
+// in a build or a behavioural test knows what order they belong in: each one
+// renders correctly wherever it is put. The 2026-W35 sync moved upstream's
+// attach button out of this group, which silently reordered the row and left
+// the microphone separated from send. Asserting the order here is what makes
+// that visible, and the group is the one place that decides it.
+it("renders the composer footer controls in one group, in order", () => {
+  const composer = read("apps/web/src/components/chat/ChatComposer.tsx");
+  const groupStart = composer.indexOf("const ComposerFooterPrimaryActions = memo(");
+  const groupEnd = composer.indexOf("export interface ChatComposerHandle", groupStart);
+  assert.isAbove(groupStart, -1, "ComposerFooterPrimaryActions is gone, so nothing owns the order");
+  assert.isAbove(groupEnd, groupStart, "the declaration that delimits the group is gone");
+  const group = composer.slice(groupStart, groupEnd);
+
+  const row = [
+    ["context meter", "<ContextWindowMeter"],
+    ["attach button", "props.showAttachControl"],
+    ["dictation microphone", "props.dictationStartControl"],
+    ["send button", "<ComposerPrimaryActions"],
+  ] as const;
+
+  let previousIndex = -1;
+  let previousLabel = "the start of the group";
+  for (const [label, marker] of row) {
+    const index = group.indexOf(marker);
+    assert.isAbove(index, -1, `the ${label} no longer renders inside ComposerFooterPrimaryActions`);
+    assert.isAbove(
+      index,
+      previousIndex,
+      `the composer footer reads ${label} before ${previousLabel}; the row must read context, attach, microphone, send`,
+    );
+    previousIndex = index;
+    previousLabel = label;
+  }
 });
