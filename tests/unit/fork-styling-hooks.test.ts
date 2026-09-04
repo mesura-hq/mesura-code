@@ -19,9 +19,11 @@ import { repositoryRoot } from "./contractHarness.ts";
  * and `data-dictation-mode-control` hooks with nothing driving them: the strip
  * lost its surface and the delivery pulse never fired.
  *
- * The rules live in `mesura.css` now, which upstream never touches, so the same
- * deletion cannot reach them again. What this guards is the other direction —
- * that the hooks a fork component sets still have somewhere to land.
+ * The strip's surface now comes from upstream's `ComposerBanner` primitives;
+ * what remains in `mesura.css` — which upstream never touches — is the
+ * confirmation pulse, and that is what these hooks feed. What this guards is
+ * the other direction from the W35 deletion — that the hooks a fork component
+ * sets still have somewhere to land.
  */
 
 const read = (relativePath: string) =>
@@ -62,6 +64,19 @@ for (const entry of STYLED_FORK_COMPONENTS) {
     }
   });
 }
+
+it("mounts the dictation strip directly before the composer host", () => {
+  // ComposerBanner's Attachment fuses with the composer's first banner through
+  // the next-sibling selector `[&+:has([data-chat-composer-form])...]`, so the
+  // strip must be the immediate previous sibling of ComposerSurface.Host. An
+  // element inserted between them breaks the glass seam, and CSS reports that
+  // as silence.
+  assert.match(
+    read("apps/web/src/components/ChatView.tsx"),
+    /<DictationStrip[\s\S]{0,200}?\/>\s*\)\s*:\s*null}\s*<ComposerSurface\.Host>/,
+    "DictationStrip is no longer the immediate previous sibling of ComposerSurface.Host in ChatView",
+  );
+});
 
 it("keeps the fork's stylesheet loaded after upstream's", () => {
   // Unlayered rules in mesura.css outrank upstream's layered ones whatever the

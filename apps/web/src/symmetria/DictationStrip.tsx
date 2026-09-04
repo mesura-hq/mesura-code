@@ -1,4 +1,5 @@
 import {
+  SYMMETRIA_DICTATION_CONTROL_ACTIONS,
   SYMMETRIA_PROTOCOL_MAJOR,
   SYMMETRIA_PROTOCOL_MINOR,
   type SymmetriaDictationSession,
@@ -39,6 +40,8 @@ const LEASE_DURATION_MS = 3_500;
 const LEASE_RENEWAL_MS = 1_500;
 
 const newIdentity = (kind: string): string => `mesura-${kind}-${randomUUID()}`;
+
+type DictationControlAction = (typeof SYMMETRIA_DICTATION_CONTROL_ACTIONS)[number];
 
 function useDocumentPresence() {
   const read = () => ({
@@ -222,7 +225,7 @@ export const DictationStrip = memo(function DictationStrip(props: {
   });
 
   const sendControl = useCallback(
-    (action: string) => {
+    (action: DictationControlAction) => {
       if (!session) return;
       void sendBridgeCommand({
         type: "dictation.control",
@@ -265,6 +268,11 @@ export const DictationStrip = memo(function DictationStrip(props: {
     return () => window.clearTimeout(timer);
   }, [session]);
 
+  const dismissPresentedSession = useCallback(() => {
+    const current = useDictationSessionStore.getState().session;
+    if (current) setDismissedSessionId(current.sessionId);
+  }, []);
+
   const changeMode = useCallback(() => {
     if (!session) return;
     void sendBridgeCommand({
@@ -282,7 +290,7 @@ export const DictationStrip = memo(function DictationStrip(props: {
       reducedMotion={reducedMotion}
       onControl={sendControl}
       onChangeMode={changeMode}
-      onDismiss={() => setDismissedSessionId(session.sessionId)}
+      onDismiss={dismissPresentedSession}
     />
   );
 });
@@ -292,14 +300,14 @@ export const DictationStrip = memo(function DictationStrip(props: {
  * `DictationStrip` so tests can render the markup directly: the wrapper reads
  * zustand, and server rendering only sees a zustand store's initial state.
  */
-export function DictationStripBanner(props: {
+export const DictationStripBanner = memo(function DictationStripBanner(props: {
   session: SymmetriaDictationSession;
   reducedMotion: boolean;
-  onControl: (action: string) => void;
+  onControl: (action: DictationControlAction) => void;
   onChangeMode: () => void;
   onDismiss: () => void;
 }) {
-  const { session, onControl } = props;
+  const { session, reducedMotion, onControl, onChangeMode, onDismiss } = props;
   const canRecordControl = session.phase === "recording" || session.phase === "paused";
   const canChangeMode =
     session.phase === "recording" ||
@@ -312,11 +320,13 @@ export function DictationStripBanner(props: {
       ? { icon: CheckIcon, label: "Delivered", className: "text-success" }
       : null;
 
-  // Rendered as an upstream attached composer banner, not a hand-styled
-  // surface. The composer shell hides its shared glass whenever any attached
-  // banner is present, so a sibling that draws its own glass shows a
-  // see-through band at the overlap. Joining the attachment system gives the
-  // strip the same glass, seam, and adjacency fusing as every other notice.
+  // Attached composer banner, never a hand-styled surface — the dictation
+  // strip block in mesura.css records why. Placement contract: the strip must
+  // render as the immediate previous sibling of `ComposerSurface.Host` inside
+  // `ComposerSurface.Shell`. ComposerBanner's Attachment fuses with the form's
+  // first banner through the next-sibling selector
+  // `[&+:has([data-chat-composer-form])...]`, so any element inserted between
+  // them breaks the seam — and CSS reports that as silence.
   return (
     <ComposerBanner.Attachment
       className="mesura-dictation-strip pointer-events-auto relative z-0"
@@ -326,7 +336,7 @@ export function DictationStripBanner(props: {
         role="group"
         aria-label={`Voice dictation: ${dictationPhaseLabel(session.phase)}`}
       >
-        <div className="flex min-h-8 items-center gap-2 px-2">
+        <div className="flex min-h-7 items-center gap-2 px-2">
           <span className="w-12 shrink-0 font-mono text-[11px] text-secondary-label tabular-nums">
             {formatDictationTime(session)}
           </span>
@@ -346,8 +356,10 @@ export function DictationStripBanner(props: {
               sessionId={session.sessionId}
               phase={session.phase}
               audioLevel={session.audioLevel}
+              // Always active here: the wrapper unmounts the banner whenever
+              // this window does not own the presentation.
               active
-              reducedMotion={props.reducedMotion}
+              reducedMotion={reducedMotion}
             />
           )}
           <span className="sr-only" role="status">
@@ -390,12 +402,12 @@ export function DictationStripBanner(props: {
               label={`Delivery mode: ${session.mode}`}
               disabled={!canChangeMode}
               modeControl
-              onClick={props.onChangeMode}
+              onClick={onChangeMode}
             >
               <MaterialDictationModeIcon mode={session.mode} className="size-3.5" />
             </StripButton>
             {canDismiss ? (
-              <StripButton label="Hide dictation status" onClick={props.onDismiss}>
+              <StripButton label="Hide dictation status" onClick={onDismiss}>
                 <XIcon className="size-3.5" />
               </StripButton>
             ) : null}
@@ -404,4 +416,4 @@ export function DictationStripBanner(props: {
       </ComposerBanner.Root>
     </ComposerBanner.Attachment>
   );
-}
+});

@@ -88,8 +88,11 @@
   }
 }
 
+/* Must repeat the pulse rule's exact selector: a media query adds no
+   specificity, so a shorter selector here loses to the pulse above. */
 @media (prefers-reduced-motion: reduce) {
-  .mesura-dictation-strip [data-dictation-mode-control="true"] {
+  .mesura-dictation-strip:is([data-phase="delivering"], [data-phase="confirming"])
+    [data-dictation-mode-control="true"] {
     animation: none;
   }
 }
