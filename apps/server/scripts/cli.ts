@@ -155,6 +155,26 @@ const buildCmd = Command.make(
       const repoRoot = yield* RepoRoot;
       const serverDir = path.join(repoRoot, "apps/server");
 
+      const webDist = path.join(repoRoot, "apps/web/dist");
+      const clientTarget = path.join(serverDir, "dist/client");
+      // The server gates on the file, not the directory: resolveStaticDir in
+      // src/config.ts accepts a client directory only when it holds index.html. An
+      // interrupted web build leaves a directory that passes a bare existence check
+      // and still serves 503.
+      const webClientIndex = path.join(webDist, "index.html");
+
+      // Resolved before tsdown runs. `vp pack` is configured with `clean: true`, so a
+      // build that is going to fail would otherwise delete a previously good
+      // dist/client on its way to exiting non-zero.
+      const clientAction = resolveWebClientBundleAction({
+        webClientExists: yield* fs.exists(webClientIndex),
+        allowMissingClient: config.allowMissingClient,
+      });
+
+      if (clientAction === "fail") {
+        return yield* new ServerCliWebClientMissingError({ webClientPath: webClientIndex });
+      }
+
       yield* Effect.log("[cli] Running tsdown...");
       yield* runCommand(
         ChildProcess.make(process.execPath, ["--run", "build:bundle"], {
@@ -165,26 +185,14 @@ const buildCmd = Command.make(
         }),
       );
 
-      const webDist = path.join(repoRoot, "apps/web/dist");
-      const clientTarget = path.join(serverDir, "dist/client");
-
-      const clientAction = resolveWebClientBundleAction({
-        webDistExists: yield* fs.exists(webDist),
-        allowMissingClient: config.allowMissingClient,
-      });
-
-      if (clientAction === "fail") {
-        return yield* new ServerCliWebClientMissingError({ webDistPath: webDist });
-      }
-
-      if (clientAction === "bundle") {
+      if (clientAction === "skip") {
+        yield* Effect.logWarning(
+          "[cli] --allow-missing-client was set and no web client is built — producing a server-only package. Browser and mobile clients will receive 503 from it.",
+        );
+      } else {
         yield* fs.copy(webDist, clientTarget);
         yield* applyDevelopmentIconOverrides(repoRoot, serverDir);
         yield* Effect.log("[cli] Bundled web app into dist/client");
-      } else {
-        yield* Effect.logWarning(
-          "[cli] Web dist not found — skipping client bundle (--allow-missing-client). This package cannot serve a web UI.",
-        );
       }
     }),
 ).pipe(Command.withDescription("Build the server package (tsdown + bundle web client)."));

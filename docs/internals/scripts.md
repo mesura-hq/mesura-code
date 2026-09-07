@@ -61,6 +61,12 @@ authenticated.
 - `vp run typecheck`: Strict TypeScript checks for all packages.
 - `vp run test`: Runs workspace tests.
 - `vp run lint:mobile`: Mobile native static analysis (`scripts/mobile-native-static-check.ts`).
+- `node apps/server/scripts/cli.ts build`: Builds the server package directly, bypassing the task
+  runner and its web dependency. It fails when `apps/web/dist/index.html` is absent, because a server
+  package with no bundled client still installs, starts, and answers its whole API while serving 503
+  to every browser and mobile client — and the desktop app hides that, since it ships its own
+  renderer. Prefer `vp run --filter t3 build`, which builds the web client first. Pass
+  `--allow-missing-client` for a deliberate server-only bundle.
 - `node apps/server/scripts/t3-sqlite-state.ts <query|exec> --base-dir <path> ...`: Inspects or seeds
   an isolated T3 SQLite database; writes create a private backup first.
 
