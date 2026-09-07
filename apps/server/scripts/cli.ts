@@ -20,6 +20,7 @@ import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
 import { fromYaml } from "@t3tools/shared/schemaYaml";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import serverPackageJson from "../package.json" with { type: "json" };
+import { resolveWebClientBundleAction } from "./cliBuildPolicy.ts";
 import {
   ServerCliBuildAssetMissingError,
   ServerCliCommandExitError,
@@ -27,6 +28,7 @@ import {
   ServerCliDevelopmentIconTargetMissingError,
   ServerCliPublishIconSourceMissingError,
   ServerCliPublishIconTargetMissingError,
+  ServerCliWebClientMissingError,
 } from "./cliErrors.ts";
 
 interface PackageJson {
@@ -144,6 +146,7 @@ const buildCmd = Command.make(
   "build",
   {
     verbose: Flag.boolean("verbose").pipe(Flag.withDefault(false)),
+    allowMissingClient: Flag.boolean("allow-missing-client").pipe(Flag.withDefault(false)),
   },
   (config) =>
     Effect.gen(function* () {
@@ -165,12 +168,23 @@ const buildCmd = Command.make(
       const webDist = path.join(repoRoot, "apps/web/dist");
       const clientTarget = path.join(serverDir, "dist/client");
 
-      if (yield* fs.exists(webDist)) {
+      const clientAction = resolveWebClientBundleAction({
+        webDistExists: yield* fs.exists(webDist),
+        allowMissingClient: config.allowMissingClient,
+      });
+
+      if (clientAction === "fail") {
+        return yield* new ServerCliWebClientMissingError({ webDistPath: webDist });
+      }
+
+      if (clientAction === "bundle") {
         yield* fs.copy(webDist, clientTarget);
         yield* applyDevelopmentIconOverrides(repoRoot, serverDir);
         yield* Effect.log("[cli] Bundled web app into dist/client");
       } else {
-        yield* Effect.logWarning("[cli] Web dist not found — skipping client bundle.");
+        yield* Effect.logWarning(
+          "[cli] Web dist not found — skipping client bundle (--allow-missing-client). This package cannot serve a web UI.",
+        );
       }
     }),
 ).pipe(Command.withDescription("Build the server package (tsdown + bundle web client)."));

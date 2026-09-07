@@ -68,3 +68,20 @@ export class ServerCliBuildAssetMissingError extends Schema.TaggedErrorClass<Ser
     return `Missing build asset: ${this.assetPath}. Run the build subcommand first.`;
   }
 }
+
+export class ServerCliWebClientMissingError extends Schema.TaggedErrorClass<ServerCliWebClientMissingError>()(
+  "ServerCliWebClientMissingError",
+  {
+    webDistPath: Schema.String,
+  },
+) {
+  override get message(): string {
+    return [
+      `Missing web client build: ${this.webDistPath}.`,
+      "Bundling it is what lets the server package serve a UI; without it the package still installs,",
+      "starts, and answers its API, while every browser client receives 503 and only the desktop app",
+      "keeps working. Build the web app first (vp run --filter @t3tools/web build), or pass",
+      "--allow-missing-client to accept a server-only bundle.",
+    ].join(" ");
+  }
+}
