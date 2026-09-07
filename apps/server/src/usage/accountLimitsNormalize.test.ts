@@ -50,6 +50,24 @@ describe("Claude account-limit normalization", () => {
     });
   });
 
+  it("reads utilization and reset time from a unified allowed window", () => {
+    const window = normalizeClaudeRateLimitEvent({
+      rate_limit_info: {
+        status: "allowed",
+        rateLimitType: "five_hour",
+        unifiedWindows: {
+          five_hour: { utilization: 0.76, resetsAt: 1_788_750_600 },
+        },
+      },
+    });
+
+    expect(window).toMatchObject({
+      id: "five_hour",
+      usedPercent: 76,
+      resetsAt: "2026-09-07T03:10:00.000Z",
+    });
+  });
+
   it("shows a rejected window as fully used when Claude omits utilization", () => {
     expect(
       normalizeClaudeRateLimitEvent({
