@@ -20,7 +20,7 @@ describe("Claude account-limit normalization", () => {
     const single = normalizeClaudeRateLimitEvent({
       rate_limit_info: {
         rateLimitType: "five_hour",
-        utilization: 62,
+        utilization: 0.62,
         resetsAt: 1_777_044_800,
       },
     });
@@ -29,6 +29,37 @@ describe("Claude account-limit normalization", () => {
     expect(full?.windows.map((window) => window.id)).toEqual(["five_hour", "seven_day"]);
     expect(single).toMatchObject({ id: "five_hour", label: "5h", usedPercent: 62 });
     expect(single?.resetsAt).toBe("2026-04-24T15:33:20.000Z");
+  });
+
+  it("reads a rejected window from the unified event payload", () => {
+    const window = normalizeClaudeRateLimitEvent({
+      rate_limit_info: {
+        status: "rejected",
+        rateLimitType: "five_hour",
+        unifiedWindows: {
+          five_hour: { utilization: 1.02, resetsAt: 1_788_750_600 },
+          seven_day: { utilization: 0.76, resetsAt: 1_788_786_000 },
+        },
+      },
+    });
+
+    expect(window).toMatchObject({
+      id: "five_hour",
+      usedPercent: 100,
+      resetsAt: "2026-09-07T03:10:00.000Z",
+    });
+  });
+
+  it("shows a rejected window as fully used when Claude omits utilization", () => {
+    expect(
+      normalizeClaudeRateLimitEvent({
+        rate_limit_info: {
+          status: "rejected",
+          rateLimitType: "five_hour",
+          resetsAt: 1_788_750_600,
+        },
+      })?.usedPercent,
+    ).toBe(100);
   });
 
   it("drops windows without utilization even when a reset is present", () => {
@@ -44,7 +75,7 @@ describe("Claude account-limit normalization", () => {
   it.each([-1, Number.MAX_VALUE])("ignores an invalid event reset timestamp: %s", (resetsAt) => {
     expect(
       normalizeClaudeRateLimitEvent({
-        rate_limit_info: { rateLimitType: "five_hour", utilization: 10, resetsAt },
+        rate_limit_info: { rateLimitType: "five_hour", utilization: 0.1, resetsAt },
       }),
     ).toBeNull();
   });
