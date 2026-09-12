@@ -145,6 +145,7 @@ import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolve
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
+import * as WorkspaceFileWatcher from "./workspace/WorkspaceFileWatcher.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as VcsDriver from "./vcs/VcsDriver.ts";
@@ -627,13 +628,15 @@ const buildAppUnderTest = (options?: {
       Layer.provide(WorkspacePaths.layer),
       Layer.provideMerge(vcsDriverRegistryLayer),
     );
+    const workspaceFileSystemLayer = WorkspaceFileSystem.layer.pipe(
+      Layer.provide(WorkspacePaths.layer),
+      Layer.provide(workspaceEntriesLayer),
+    );
     const workspaceAndProjectServicesLayer = Layer.mergeAll(
       WorkspacePaths.layer,
       workspaceEntriesLayer,
-      WorkspaceFileSystem.layer.pipe(
-        Layer.provide(WorkspacePaths.layer),
-        Layer.provide(workspaceEntriesLayer),
-      ),
+      workspaceFileSystemLayer,
+      WorkspaceFileWatcher.layer.pipe(Layer.provide(workspaceFileSystemLayer)),
       ProjectFaviconResolver.layer.pipe(
         Layer.provide(WorkspacePaths.layer),
         Layer.provide(T3ProjectFileLoader.layer),

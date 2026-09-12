@@ -205,6 +205,26 @@ export const ProjectReadFileResult = Schema.Struct({
 });
 export type ProjectReadFileResult = typeof ProjectReadFileResult.Type;
 
+/**
+ * One change to a watched project file.
+ *
+ * The event carries a revision rather than contents: the client re-reads
+ * through `projects.readFile`, so truncation, binary detection and the
+ * path-escape checks stay in one place and the stream stays small.
+ */
+export const ProjectFileWatchEvent = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("changed"),
+    relativePath: TrimmedNonEmptyString,
+    revision: Schema.String,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("removed"),
+    relativePath: TrimmedNonEmptyString,
+  }),
+]);
+export type ProjectFileWatchEvent = typeof ProjectFileWatchEvent.Type;
+
 export const ProjectFileFailure = Schema.Literals([
   "workspace_path_outside_root",
   "resolved_path_outside_root",
@@ -223,6 +243,7 @@ export const ProjectFileOperation = Schema.Literals([
   "close",
   "make-directory",
   "write-file",
+  "watch",
 ]);
 export type ProjectFileOperation = typeof ProjectFileOperation.Type;
 

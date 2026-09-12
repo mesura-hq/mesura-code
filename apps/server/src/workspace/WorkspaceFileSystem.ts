@@ -43,6 +43,7 @@ export class WorkspaceFileSystemOperationError extends Schema.TaggedErrorClass<W
       "close",
       "make-directory",
       "write-file",
+      "watch",
     ]),
     cause: Schema.Defect(),
   },
@@ -104,6 +105,21 @@ export type WorkspaceFileSystemError = typeof WorkspaceFileSystemError.Type;
 export class WorkspaceFileSystem extends Context.Service<
   WorkspaceFileSystem,
   {
+    /**
+     * Resolve a workspace-relative path to its real location, rejecting one
+     * that escapes the workspace root once symlinks are followed.
+     *
+     * Shared with the file watcher so the escape checks have one definition.
+     */
+    readonly resolveRealFilePath: (input: ProjectReadFileInput) => Effect.Effect<
+      {
+        readonly realWorkspaceRoot: string;
+        readonly realTargetPath: string;
+        /** The root-relative path as `WorkspacePaths` normalised it. */
+        readonly relativePath: string;
+      },
+      WorkspaceFileSystemError | WorkspacePaths.WorkspacePathOutsideRootError
+    >;
     /** Read a UTF-8 text file relative to the workspace root. */
     readonly readFile: (
       input: ProjectReadFileInput,
@@ -132,8 +148,8 @@ export const make = Effect.gen(function* () {
   const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
 
-  const readFile: WorkspaceFileSystem["Service"]["readFile"] = Effect.fn(
-    "WorkspaceFileSystem.readFile",
+  const resolveRealFilePath: WorkspaceFileSystem["Service"]["resolveRealFilePath"] = Effect.fn(
+    "WorkspaceFileSystem.resolveRealFilePath",
   )(function* (input) {
     const target = yield* workspacePaths.resolveRelativePathWithinRoot({
       workspaceRoot: input.cwd,
@@ -177,6 +193,14 @@ export const make = Effect.gen(function* () {
         resolvedPath: realTargetPath,
       });
     }
+
+    return { realWorkspaceRoot, realTargetPath, relativePath: target.relativePath };
+  });
+
+  const readFile: WorkspaceFileSystem["Service"]["readFile"] = Effect.fn(
+    "WorkspaceFileSystem.readFile",
+  )(function* (input) {
+    const { realTargetPath, relativePath } = yield* resolveRealFilePath(input);
 
     return yield* Effect.acquireUseRelease(
       Effect.tryPromise({
@@ -237,7 +261,7 @@ export const make = Effect.gen(function* () {
           }
 
           return {
-            relativePath: target.relativePath,
+            relativePath,
             contents: new TextDecoder("utf-8").decode(fileBytes),
             byteLength: stat.size,
             truncated: stat.size > PROJECT_READ_FILE_MAX_BYTES,
@@ -297,7 +321,7 @@ export const make = Effect.gen(function* () {
     return { relativePath: target.relativePath };
   });
 
-  return WorkspaceFileSystem.of({ readFile, writeFile });
+  return WorkspaceFileSystem.of({ resolveRealFilePath, readFile, writeFile });
 });
 
 export const layer = Layer.effect(WorkspaceFileSystem, make);
