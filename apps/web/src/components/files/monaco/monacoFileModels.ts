@@ -158,3 +158,9 @@ export function monacoFileModelKey(
 ): string {
   return `mesura-file:///${environmentId}/${encodeURIComponent(cwd)}/${relativePath}`;
 }
+
+/** The cache as the file panel and the surface pass it around. */
+export type MonacoFileModels = MonacoFileModelCache<
+  import("monaco-editor").editor.ITextModel,
+  import("monaco-editor").editor.ICodeEditorViewState
+>;

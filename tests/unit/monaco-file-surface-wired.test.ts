@@ -12,9 +12,15 @@ import { repositoryRoot } from "./contractHarness.ts";
  * stack, selection and scroll position alive underneath it.
  *
  * Undo survives a switch to another file and back, because the undo stack
- * belongs to the Monaco text model and a cache keeps one model per file. That
- * makes ownership the thing to be careful about: the cache disposes the models,
- * so nothing else may.
+ * belongs to the Monaco text model and a cache keeps one model per file. Two
+ * things have to hold for that, and both were got wrong first:
+ *
+ * - The cache disposes the models, so nothing else may.
+ * - The cache has to outlive the surface, and the surface is unmounted more
+ *   often than it looks. Reading a file the client has not seen takes a round
+ *   trip, and the panel used to draw its spinner *instead of* the editor for
+ *   that moment. Every switch to a new file therefore tore the editor down, so
+ *   no amount of care inside the editor could have kept the undo stack.
  *
  * Every assertion below marks something that broke at least once while it was
  * built, and not one of those breakages is reachable from a test that runs the
@@ -199,9 +205,45 @@ it("leaves every model for the cache to dispose", () => {
     "getModel()?.dispose()",
     "the editor disposes its model again; the cache owns every model and disposes them all on unmount",
   );
+  // Disposal of the cache itself belongs to the panel, which owns it. That is
+  // asserted separately, against the panel.
   assert.include(
+    editorCleanup,
+    "saveViewState",
+    "the surface no longer puts the open file's caret and scroll away before the editor goes, so returning to that file lands at the top",
+  );
+});
+
+it("keeps the editor mounted while the next file is read", () => {
+  const panel = panelSource();
+
+  // The spinner drawn in place of the editor is what unmounted it on every
+  // switch. It may only replace the editor when there is no file to show.
+  assert.include(
+    panel,
+    "file.data === null && editorFile === null",
+    "the reading spinner can replace the editor again, which unmounts it on every file switch and takes the undo stack with it",
+  );
+  assert.include(
+    panel,
+    "relativePath && (file.data || editorFile)",
+    "the editor is only rendered when the query has data, so it cannot outlast a read",
+  );
+});
+
+it("owns the models above the surface that uses them", () => {
+  const panel = panelSource();
+  const surface = surfaceSource();
+
+  assert.include(
+    panel,
+    "createMonacoFileModels()",
+    "the panel no longer owns the model cache; owned by the surface, it dies every time the surface is unmounted",
+  );
+  assert.include(panel, "models.disposeAll()", "nothing disposes the cached models");
+  assert.notInclude(
     surface,
-    "models.disposeAll()",
-    "nothing disposes the cached models, so every file the user opened leaks until the page goes",
+    "createMonacoFileModels",
+    "the surface builds its own cache again, which makes the cache exactly as short-lived as the component it exists to outlive",
   );
 });

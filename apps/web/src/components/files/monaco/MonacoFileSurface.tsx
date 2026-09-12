@@ -10,10 +10,11 @@ import type { FileEditorRetention } from "../fileEditorRetention";
 import { installFileEditorDismissal } from "../fileEditorDismissal";
 import { setProjectFileQueryData } from "../projectFilesQueryState";
 import { useFileSaveCoordinator } from "../useFileSaveCoordinator";
+import { minimalTextEdit } from "./monacoFileEdit";
 import { ensureMonacoEnvironment } from "./monacoEnvironment";
 import { useMonacoFileComments } from "./monacoFileComments";
 import { languageIdForPath } from "./monacoFileLanguage";
-import { MonacoFileModelCache, monacoFileModelKey, type ModelStore } from "./monacoFileModels";
+import { monacoFileModelKey, type MonacoFileModels } from "./monacoFileModels";
 import { resolveRevealLine } from "./monacoFileReveal";
 import {
   defineMesuraMonacoThemes,
@@ -26,16 +27,6 @@ import "./monacoFileSurface.css";
 
 const REVEAL_LINE_CLASS = "mesura-file-reveal-line";
 
-/**
- * Builds the real Monaco models the cache hands out.
- *
- * The cache key is the model's URI, so this needs nothing else to build one.
- */
-const MONACO_MODEL_STORE: ModelStore<monaco.editor.ITextModel> = {
-  create: (key, contents, languageId) =>
-    monaco.editor.createModel(contents, languageId, monaco.Uri.parse(key)),
-};
-
 export interface MonacoFileSurfaceProps {
   readonly environmentId: EnvironmentId;
   readonly cwd: string;
@@ -46,6 +37,15 @@ export interface MonacoFileSurfaceProps {
   readonly revealLine: number | null;
   readonly revealRequestId: number;
   readonly retention: FileEditorRetention;
+  /**
+   * The models, owned by the panel rather than by this component.
+   *
+   * The undo stack lives in the model, so it survives exactly as long as the
+   * cache does. This component is unmounted whenever the panel shows something
+   * else in its place — the spinner while a file is read, the rendered markdown
+   * view — and a cache that died with it would take every file's history along.
+   */
+  readonly models: MonacoFileModels;
   readonly composerDraftTarget: ScopedThreadRef | DraftId;
   readonly onPendingChange: (relativePath: string, pending: boolean) => void;
 }
@@ -67,6 +67,7 @@ export function MonacoFileSurface({
   revealLine,
   revealRequestId,
   retention,
+  models,
   composerDraftTarget,
   onPendingChange,
 }: MonacoFileSurfaceProps) {
@@ -80,19 +81,15 @@ export function MonacoFileSurface({
   const [editor, setEditor] = useState<monaco.editor.IStandaloneCodeEditor | null>(null);
   const [model, setModel] = useState<monaco.editor.ITextModel | null>(null);
 
-  // One cache per mounted surface, which ChatView keys per project. It holds
-  // the undo stack of every file the user has been in, so it must outlive a
-  // file switch and die with the panel.
-  const [models] = useState(
-    () =>
-      new MonacoFileModelCache<monaco.editor.ITextModel, monaco.editor.ICodeEditorViewState>(
-        MONACO_MODEL_STORE,
-      ),
-  );
-  useEffect(() => () => models.disposeAll(), [models]);
   // The file the editor is showing, so a switch can put its view state away
   // before the new one arrives.
   const openKeyRef = useRef<string | null>(null);
+  // The editor is created once and torn down from a layout effect, which cannot
+  // depend on a prop, so the cache is reached through a ref there.
+  const modelsRef = useRef(models);
+  useEffect(() => {
+    modelsRef.current = models;
+  }, [models]);
   const decorationsRef = useRef<monaco.editor.IEditorDecorationsCollection | null>(null);
   const fontFamilyCode = useClientSettings((settings) => settings.fontFamilyCode);
   const fontSizeCode = useClientSettings((settings) => settings.fontSizeCode);
@@ -165,9 +162,18 @@ export function MonacoFileSurface({
       decorationsRef.current = null;
       editorRef.current = null;
       setEditor(null);
-      // The model belongs to the cache, which disposes every one it holds when
-      // the surface unmounts. Disposing it here as well would pull it out from
-      // under the cache.
+      // Put the open file away before the editor goes. This runs while the
+      // editor is still alive, which a passive effect could not promise: React
+      // flushes layout-effect cleanups first, so anything reading the editor
+      // from a plain effect would be reaching through a disposed handle.
+      const openKey = openKeyRef.current;
+      if (openKey !== null) {
+        modelsRef.current.saveViewState(openKey, editor.saveViewState());
+        modelsRef.current.release(openKey);
+        openKeyRef.current = null;
+      }
+      // The model belongs to the cache. Disposing it here would pull it out
+      // from under the cache, which still holds it for the next visit.
       editor.dispose();
     };
     // Created once. Theme, font and wrap are applied by the effects below so a
@@ -229,6 +235,13 @@ export function MonacoFileSurface({
     // it already said would move the caret for nothing.
     if (retention.canReuse(relativePath, contents)) return;
 
+    // Only the part that actually differs. Replacing the whole range produces
+    // the right text and the wrong caret: every position maps through an edit
+    // that covered everything, so a caret well below an agent's change does not
+    // come back where it was.
+    const edit = minimalTextEdit(model.getValue(), contents);
+    if (edit === null) return;
+
     applyingExternalEditRef.current = true;
     try {
       // The edit gets its own undo element, on both sides. Without these,
@@ -237,16 +250,17 @@ export function MonacoFileSurface({
       // last few keystrokes together. Measured, not guessed: undoing a
       // merged group left a half-typed line on screen.
       model.pushStackElement();
-      // The caret goes in and comes back out again. Monaco remaps a selection
-      // it is given across the edit, so handing it the current one and
-      // returning it keeps the user where they were when an agent rewrites the
-      // part of the file above them; without it the caret lands wherever the
-      // full-range replacement leaves it.
-      const selections = editor.getSelections() ?? [];
+      const range = monaco.Range.fromPositions(
+        model.getPositionAt(edit.startOffset),
+        model.getPositionAt(edit.endOffset),
+      );
+      // The selection goes in so undo restores it, and the computer returns
+      // null so Monaco maps the caret through the edit itself rather than
+      // being told where to put it.
       model.pushEditOperations(
-        selections,
-        [{ range: model.getFullModelRange(), text: contents }],
-        () => selections,
+        editor.getSelections() ?? [],
+        [{ range, text: edit.text }],
+        () => null,
       );
       model.pushStackElement();
     } finally {

@@ -156,3 +156,63 @@ describe("nextProjectFileWatchAction", () => {
     expect(result.state.handledRevision).toBe("z");
   });
 });
+
+describe("returning to a file that changed while it was in the background", () => {
+  const changed = (revision: string) =>
+    ({ type: "changed", relativePath: "src/a.ts", revision }) as const;
+
+  it("re-reads when the new subscription's baseline is not the revision last handled", () => {
+    // Nothing watches a file the user is not looking at, so this baseline is
+    // the only notice that an agent rewrote it in the meantime.
+    const action = nextProjectFileWatchAction(
+      initialProjectFileWatchState,
+      changed("rev-2"),
+      true,
+      "rev-1",
+    );
+
+    expect(action.refresh).toBe(true);
+    expect(action.state.handledRevision).toBe("rev-2");
+  });
+
+  it("stays quiet when the baseline is the revision it already had", () => {
+    const action = nextProjectFileWatchAction(
+      initialProjectFileWatchState,
+      changed("rev-1"),
+      true,
+      "rev-1",
+    );
+
+    expect(action.refresh).toBe(false);
+    expect(action.state.baselineTaken).toBe(true);
+  });
+
+  it("stays quiet on a file it has never watched", () => {
+    // The panel read this file to show it, so its baseline says nothing new.
+    const action = nextProjectFileWatchAction(
+      initialProjectFileWatchState,
+      changed("rev-1"),
+      true,
+      null,
+    );
+
+    expect(action.refresh).toBe(false);
+  });
+
+  it("defers a changed-while-away baseline that lands during a save", () => {
+    const action = nextProjectFileWatchAction(
+      initialProjectFileWatchState,
+      changed("rev-2"),
+      false,
+      "rev-1",
+    );
+
+    expect(action.refresh).toBe(false);
+    expect(action.state.pending).toEqual({ type: "changed", revision: "rev-2" });
+
+    // And it is applied once the save confirms.
+    const applied = nextProjectFileWatchAction(action.state, null, true);
+    expect(applied.refresh).toBe(true);
+    expect(applied.state.handledRevision).toBe("rev-2");
+  });
+});

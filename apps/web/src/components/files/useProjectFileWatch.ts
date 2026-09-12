@@ -46,6 +46,15 @@ export function useProjectFileWatch(input: {
   const stateRef = useRef<ProjectFileWatchState>(initialProjectFileWatchState);
   const lastResourceKeyRef = useRef<string>(resourceKey);
   const lastEventRef = useRef<ProjectFileWatchEvent | null>(null);
+  /**
+   * The last revision handled for each path, kept across subscriptions.
+   *
+   * A file the user leaves and returns to gets a fresh subscription whose
+   * baseline is the only report of anything that happened while it was in the
+   * background. Comparing it against this decides whether that baseline is news.
+   * One short string per file opened, released with the panel.
+   */
+  const seenRevisionsRef = useRef(new Map<string, string>());
 
   useEffect(() => {
     // A different file is a different subscription, so nothing carried over
@@ -70,8 +79,16 @@ export function useProjectFileWatch(input: {
     const isNewEvent = event !== null && event !== lastEventRef.current;
     if (isNewEvent) lastEventRef.current = event;
 
-    const action = nextProjectFileWatchAction(stateRef.current, isNewEvent ? event : null, enabled);
+    const action = nextProjectFileWatchAction(
+      stateRef.current,
+      isNewEvent ? event : null,
+      enabled,
+      seenRevisionsRef.current.get(resourceKey) ?? null,
+    );
     stateRef.current = action.state;
+    if (action.state.handledRevision !== null) {
+      seenRevisionsRef.current.set(resourceKey, action.state.handledRevision);
+    }
     if (action.refresh) refresh();
   }, [enabled, event, refresh, resourceKey]);
 }

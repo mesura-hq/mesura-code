@@ -44,8 +44,12 @@ disturbing what you were doing:
 Switching to another file and back returns you to where you were: the same scroll position, the same
 cursor, and the same undo history. This holds for the last few dozen files you opened.
 
-A file you return to shows what is on disk now. If it changed while you were away, you see the new
-contents, and undo still reaches the version you left.
+A file you return to shows what is on disk now. If an agent rewrote it while you were reading
+something else, you see the new contents, and undo still reaches the version you left.
+
+Leaving the thread entirely — opening Settings, or moving to another thread — does start the editor
+again. Your files are saved, so nothing is lost, but the undo history from before you left is not
+available when you come back.
 
 ## Files you cannot edit
 

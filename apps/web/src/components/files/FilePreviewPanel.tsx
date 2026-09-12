@@ -52,6 +52,7 @@ import { projectFileCacheKey } from "./fileContentRevision";
 import { FileEditorRetention } from "./fileEditorRetention";
 import { useProjectFileWatch } from "./useProjectFileWatch";
 import { MonacoFileSurface } from "./monaco/MonacoFileSurface";
+import { createMonacoFileModels } from "./monaco/monacoFileModelStore";
 import { useFileSaveCoordinator, type FileSaveCoordinatorInput } from "./useFileSaveCoordinator";
 import { fileBreadcrumbs } from "./filePath";
 import { isMarkdownPreviewFile, setMarkdownTaskChecked } from "./filePreviewMode";
@@ -525,6 +526,16 @@ export default function FilePreviewPanel({
   // lives in the surface below and is created once, for the same reason.
   const [retention] = useState(() => new FileEditorRetention());
   useEffect(() => () => retention.clear(), [retention]);
+  // The editor's models live here, above the surface that uses them.
+  //
+  // The surface is unmounted for anything this panel draws in its place, and
+  // the most ordinary of those is the spinner shown while a file is read: every
+  // switch to a file this client has not read yet tears the editor down for the
+  // length of the round trip. The undo stack lives in the model, so a cache
+  // owned by the surface would be destroyed by exactly the action it exists to
+  // survive.
+  const [models] = useState(() => createMonacoFileModels());
+  useEffect(() => () => models.disposeAll(), [models]);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const remoteOpenState = useRemoteOpenState(environmentId);
   const environmentHttpBaseUrl = useEnvironmentHttpBaseUrl(environmentId);
@@ -552,6 +563,22 @@ export default function FilePreviewPanel({
   const [handledReveal, setHandledReveal] = useState<{ path: string; requestId: number } | null>(
     null,
   );
+  /**
+   * The file the editor is showing, which lags the selected one by a read.
+   *
+   * Reading a file this client has not seen takes a round trip, and during it
+   * the query has no data. Rendering the spinner *instead of* the editor for
+   * that moment unmounts it, which throws away the undo stack, the caret and
+   * the scroll position of the file being left — so undo never survived a
+   * switch, however carefully the editor itself was written.
+   *
+   * Holding the last loaded file keeps the editor mounted and showing it while
+   * the next one is read. The spinner is drawn over the top instead.
+   */
+  const [editorFile, setEditorFile] = useState<{
+    readonly relativePath: string;
+    readonly contents: string;
+  } | null>(null);
   const breadcrumbRef = useRef<HTMLDivElement>(null);
   const isMarkdown = relativePath ? isMarkdownPreviewFile(relativePath) : false;
   // A reveal still wins over the preference: the line only exists in the source.
@@ -560,6 +587,28 @@ export default function FilePreviewPanel({
     renderMarkdownPreferred &&
     (revealLine === null ||
       (handledReveal?.path === relativePath && handledReveal.requestId === revealRequestId));
+
+  // What the editor is allowed to show: a text file that has been read. Media,
+  // a rendered markdown view and an over-sized file all draw something else, so
+  // the editor is released rather than held behind them.
+  const editorEligible = relativePath !== null && !isMedia && !renderMarkdown;
+  const loadedContents =
+    editorEligible && file.data !== null && !file.data.truncated ? file.data.contents : null;
+  useEffect(() => {
+    if (!editorEligible) {
+      setEditorFile(null);
+      return;
+    }
+    if (loadedContents === null || relativePath === null) return;
+    setEditorFile((current) =>
+      current !== null &&
+      current.relativePath === relativePath &&
+      current.contents === loadedContents
+        ? current
+        : { relativePath, contents: loadedContents },
+    );
+  }, [editorEligible, relativePath, loadedContents]);
+
   const canOpenInBrowser =
     relativePath !== null &&
     !isVideo &&
@@ -770,7 +819,9 @@ export default function FilePreviewPanel({
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <div
           className={cn(
-            "min-w-0 flex-1 flex-col overflow-hidden",
+            // `relative` positions the reading spinner over the editor rather than in
+            // place of it.
+            "relative min-w-0 flex-1 flex-col overflow-hidden",
             relativePath ? "flex" : "hidden",
           )}
         >
@@ -798,12 +849,12 @@ export default function FilePreviewPanel({
             <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-xs leading-relaxed text-destructive">
               {file.error}
             </div>
-          ) : relativePath && file.data === null ? (
+          ) : relativePath && file.data === null && editorFile === null ? (
             <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
               <LoaderCircle className="size-5 animate-spin" />
             </div>
-          ) : relativePath && file.data ? (
-            isMarkdown && renderMarkdown ? (
+          ) : relativePath && (file.data || editorFile) ? (
+            file.data && isMarkdown && renderMarkdown ? (
               <RenderedMarkdownSurface
                 environmentId={environmentId}
                 cwd={cwd}
@@ -812,7 +863,7 @@ export default function FilePreviewPanel({
                 contents={file.data.contents}
                 onPendingChange={onPendingChange}
               />
-            ) : file.data.truncated ? (
+            ) : file.data?.truncated ? (
               <Virtualizer
                 key={`${relativePath}:${resolvedTheme}:${file.data.byteLength}`}
                 className="file-preview-virtualizer min-h-0 flex-1 overflow-auto"
@@ -839,25 +890,47 @@ export default function FilePreviewPanel({
                   className="min-h-full"
                 />
               </Virtualizer>
+            ) : editorFile ? (
+              <>
+                {/*
+                 * No key at all, deliberately. A key here — on the path, on the
+                 * theme, on anything — remounts the surface, and a remount
+                 * rebuilds the Monaco editor and throws away the undo stack.
+                 * The surface is told about a new file rather than rebuilt for
+                 * one, and it is given the held file rather than the query's,
+                 * so it stays mounted while the next file is read.
+                 * `tests/unit/monaco-file-surface-wired.test.ts` holds this.
+                 */}
+                <MonacoFileSurface
+                  environmentId={environmentId}
+                  cwd={cwd}
+                  relativePath={editorFile.relativePath}
+                  contents={editorFile.contents}
+                  resolvedTheme={resolvedTheme}
+                  wordWrap={wordWrap}
+                  // A reveal belongs to the file that was asked for. While the
+                  // editor is still showing the previous one, it has nothing to
+                  // reveal.
+                  revealLine={editorFile.relativePath === relativePath ? revealLine : null}
+                  revealRequestId={revealRequestId}
+                  retention={retention}
+                  models={models}
+                  composerDraftTarget={composerDraftTarget}
+                  onPendingChange={onPendingChange}
+                />
+                {file.data === null ? (
+                  <div
+                    className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/40 text-muted-foreground"
+                    aria-hidden="true"
+                  >
+                    <LoaderCircle className="size-5 animate-spin" />
+                  </div>
+                ) : null}
+              </>
             ) : (
-              // No key at all, deliberately. A key here — on the path, on the
-              // theme, on anything — remounts the surface, and a remount
-              // rebuilds the Monaco editor and throws away the undo stack. The
-              // surface is written to be told about a new file, not rebuilt for
-              // one. `tests/unit/monaco-file-surface-wired.test.ts` holds this.
-              <MonacoFileSurface
-                environmentId={environmentId}
-                cwd={cwd}
-                relativePath={relativePath}
-                contents={file.data.contents}
-                resolvedTheme={resolvedTheme}
-                wordWrap={wordWrap}
-                revealLine={revealLine}
-                revealRequestId={revealRequestId}
-                retention={retention}
-                composerDraftTarget={composerDraftTarget}
-                onPendingChange={onPendingChange}
-              />
+              <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
+                <LoaderCircle className="size-5 animate-spin" />
+              </div>
             )
           ) : null}
         </div>
