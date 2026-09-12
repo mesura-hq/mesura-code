@@ -1,30 +1,21 @@
 interface FileEditorDismissalOptions {
   root: HTMLElement;
   editor: {
-    setSelections: (selections: []) => void;
+    hasTextFocus: () => boolean;
+    collapseSelection: () => void;
+    blur: () => void;
   };
   isBlocked: () => boolean;
   onDismiss: () => void;
 }
 
 function dismissFileEditorInteraction({
-  root,
   editor,
   onDismiss,
-}: Pick<FileEditorDismissalOptions, "root" | "editor" | "onDismiss">): void {
+}: Pick<FileEditorDismissalOptions, "editor" | "onDismiss">): void {
   onDismiss();
-  editor.setSelections([]);
-
-  const file = root.querySelector<HTMLElement>("diffs-container");
-  const activeElement = file?.shadowRoot?.activeElement;
-  if (activeElement instanceof HTMLElement) {
-    activeElement.blur();
-  }
-}
-
-function isFileEditorFocused(root: HTMLElement): boolean {
-  const file = root.querySelector<HTMLElement>("diffs-container");
-  return file?.shadowRoot?.activeElement?.hasAttribute("data-content") === true;
+  editor.collapseSelection();
+  editor.blur();
 }
 
 export function installFileEditorDismissal({
@@ -35,13 +26,15 @@ export function installFileEditorDismissal({
 }: FileEditorDismissalOptions): () => void {
   const handlePointerDown = (event: PointerEvent) => {
     if (isBlocked() || event.composedPath().includes(root)) return;
-    dismissFileEditorInteraction({ root, editor, onDismiss });
+    dismissFileEditorInteraction({ editor, onDismiss });
   };
   const handleKeyDown = (event: KeyboardEvent) => {
-    if (event.key !== "Escape" || isBlocked() || !isFileEditorFocused(root)) return;
+    // Capture phase, and stopped immediately: Monaco binds Escape itself, and
+    // without taking it first the editor would keep focus after dismissing.
+    if (event.key !== "Escape" || isBlocked() || !editor.hasTextFocus()) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    dismissFileEditorInteraction({ root, editor, onDismiss });
+    dismissFileEditorInteraction({ editor, onDismiss });
   };
 
   document.addEventListener("pointerdown", handlePointerDown, true);

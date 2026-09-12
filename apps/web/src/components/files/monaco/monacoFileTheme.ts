@@ -16,6 +16,62 @@ export interface CodeFont {
 const FALLBACK_FONT_SIZE_PX = 13;
 
 /**
+ * The scratch surface `toMonacoColor` paints on.
+ *
+ * One canvas for the process, because every colour the app resolves goes
+ * through it: `willReadFrequently` asks the browser for a software-backed
+ * surface, which is the right trade for many one-pixel reads and the wrong one
+ * for a canvas that is thrown away after a single read.
+ */
+let colorProbe: CanvasRenderingContext2D | null | undefined;
+
+function colorProbeContext(): CanvasRenderingContext2D | null {
+  if (colorProbe === undefined) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    colorProbe = canvas.getContext("2d", { willReadFrequently: true });
+  }
+  return colorProbe;
+}
+
+/**
+ * Resolves any CSS colour to the `#rrggbb` Monaco insists on.
+ *
+ * This app's computed colours come back as `oklch(...)`, which Monaco's theme
+ * registry rejects outright — it throws "Illegal value for token color", and
+ * because the theme is defined while the editor mounts, the throw takes the
+ * whole panel down rather than degrading to a wrong colour.
+ *
+ * A one-pixel canvas is the conversion: the browser already knows how to paint
+ * every colour syntax it accepts, so painting one and reading the bytes back
+ * needs no colour-space arithmetic here and cannot drift from what the rest of
+ * the interface actually shows.
+ *
+ * Every failure answers with the fallback rather than throwing. This function
+ * exists because a bad colour crashed the panel on mount, and a conversion that
+ * can itself throw would reintroduce exactly that.
+ */
+function toMonacoColor(cssColor: string, fallback: string): string {
+  const context = colorProbeContext();
+  if (context === null) return fallback;
+  // An unparseable value leaves `fillStyle` untouched, so seeding it with the
+  // fallback means a bad colour paints the fallback rather than black.
+  context.fillStyle = fallback;
+  context.fillStyle = cssColor;
+  context.fillRect(0, 0, 1, 1);
+  try {
+    const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
+    return `#${[red, green, blue].map((channel) => (channel ?? 0).toString(16).padStart(2, "0")).join("")}`;
+  } catch {
+    // `getImageData` is the one call here that throws: a tainted canvas, or a
+    // browser that treats a pixel read as a fingerprinting attempt and blocks
+    // it. Neither is recoverable, and neither is worth a crash.
+    return fallback;
+  }
+}
+
+/**
  * Reads the app's code-surface colours off a mounted element.
  *
  * Taken from the element rather than from the token names because the tokens
@@ -26,7 +82,10 @@ const FALLBACK_FONT_SIZE_PX = 13;
  */
 export function readCodeSurfaceColors(element: Element): CodeSurfaceColors {
   const computed = getComputedStyle(element);
-  return { background: computed.backgroundColor, foreground: computed.color };
+  return {
+    background: toMonacoColor(computed.backgroundColor, "#ffffff"),
+    foreground: toMonacoColor(computed.color, "#000000"),
+  };
 }
 
 /** Reads the configured code font, which the appearance settings write to the root. */

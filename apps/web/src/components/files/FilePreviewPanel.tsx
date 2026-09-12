@@ -8,9 +8,8 @@ import {
   isWorkspaceImagePreviewPath,
   isWorkspaceVideoPreviewPath,
 } from "@t3tools/shared/filePreview";
-import { VirtualizedFile, type SelectedLineRange } from "@pierre/diffs";
-import { Editor, type EditorOptions } from "@pierre/diffs/editor";
-import { EditProvider, File, type FileOptions, Virtualizer } from "@pierre/diffs/react";
+import { VirtualizedFile } from "@pierre/diffs";
+import { File, type FileOptions, Virtualizer } from "@pierre/diffs/react";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -39,37 +38,24 @@ import { ScrollArea } from "~/components/ui/scroll-area";
 import { Toggle } from "~/components/ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
-import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
-import { buildFileReviewComment } from "~/reviewCommentContext";
+import { type DraftId } from "~/composerDraftStore";
 import { assetEnvironment } from "~/state/assets";
 import { useEnvironmentHttpBaseUrl, usePrimaryEnvironmentId } from "~/state/environments";
 import { previewEnvironment } from "~/state/preview";
-import { projectEnvironment } from "~/state/projects";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
 
 import FileBrowserPanel from "./FileBrowserPanel";
 import { FileMarkdownPreview } from "./FileMarkdownPreview";
-import {
-  type FileCommentAnnotationEntry,
-  type FileCommentAnnotationGroup,
-  type FileCommentLineAnnotation,
-  formatFileCommentRange,
-  nextFileCommentId,
-  normalizeFileCommentRange,
-  remapFileCommentAnnotations,
-} from "./fileCommentAnnotations";
-import { installFileEditorDismissal } from "./fileEditorDismissal";
 import { resolveCenteredFileLineScrollTop } from "./fileLineReveal";
-import { DiffCommentAnnotation } from "../diffs/DiffCommentAnnotation";
-import { projectFileCacheKey, projectFileEditorCacheKey } from "./fileContentRevision";
+import { projectFileCacheKey } from "./fileContentRevision";
 import { FileEditorRetention } from "./fileEditorRetention";
 import { useProjectFileWatch } from "./useProjectFileWatch";
+import { MonacoFileSurface } from "./monaco/MonacoFileSurface";
+import { useFileSaveCoordinator, type FileSaveCoordinatorInput } from "./useFileSaveCoordinator";
 import { fileBreadcrumbs } from "./filePath";
 import { isMarkdownPreviewFile, setMarkdownTaskChecked } from "./filePreviewMode";
-import { FileSaveCoordinator } from "./fileSaveCoordinator";
 import {
-  confirmProjectFileQueryData,
   getOptimisticProjectFileQueryData,
   setProjectFileQueryData,
   useProjectFileQuery,
@@ -94,7 +80,6 @@ interface FilePreviewPanelProps {
 
 const FILE_EXPLORER_STORAGE_KEY = "t3code.fileExplorerOpen";
 const RENDER_MARKDOWN_STORAGE_KEY = "t3code.renderMarkdown";
-const FILE_SAVE_DEBOUNCE_MS = 500;
 const FILE_LINK_REVEAL_ATTRIBUTE = "data-file-link-reveal";
 const FILE_LINK_REVEAL_UNSAFE_CSS = `
   ${DIFF_SURFACE_THEME_UNSAFE_CSS}
@@ -470,360 +455,6 @@ function useFileLineReveal(
   );
 }
 
-interface EditableFileSurfaceProps {
-  environmentId: EnvironmentId;
-  cwd: string;
-  relativePath: string;
-  composerDraftTarget: ScopedThreadRef | DraftId;
-  contents: string;
-  resolvedTheme: "light" | "dark";
-  revealRequestId: number;
-  wordWrap: boolean;
-  /**
-   * Owned by the panel, not by this component. This component is remounted per
-   * file, so an editor created here could never keep a document across a switch.
-   */
-  editor: Editor<FileCommentAnnotationGroup>;
-  retention: FileEditorRetention;
-  onPostRender: FilePostRender;
-  onPendingChange: (relativePath: string, pending: boolean) => void;
-}
-
-interface FileSelectionOverride {
-  revealRequestId: number;
-  range: SelectedLineRange | null;
-}
-
-function useFileSaveCoordinator({
-  environmentId,
-  cwd,
-  relativePath,
-  onPendingChange,
-}: Pick<
-  EditableFileSurfaceProps,
-  "environmentId" | "cwd" | "relativePath" | "onPendingChange"
->): FileSaveCoordinator {
-  const writeFile = useAtomCommand(projectEnvironment.writeFile);
-  const coordinator = useMemo(
-    () =>
-      new FileSaveCoordinator({
-        debounceMs: FILE_SAVE_DEBOUNCE_MS,
-        onPendingChange: (pending) => onPendingChange(relativePath, pending),
-        persist: (nextContents) =>
-          writeFile({
-            environmentId,
-            input: { cwd, relativePath, contents: nextContents },
-          }),
-        onConfirmed: (confirmedContents) => {
-          confirmProjectFileQueryData(environmentId, cwd, relativePath, confirmedContents);
-        },
-      }),
-    [cwd, environmentId, onPendingChange, relativePath, writeFile],
-  );
-
-  useEffect(() => () => coordinator.dispose(), [coordinator]);
-  return coordinator;
-}
-
-function EditableFileSurface({
-  environmentId,
-  cwd,
-  relativePath,
-  composerDraftTarget,
-  contents,
-  resolvedTheme,
-  revealRequestId,
-  wordWrap,
-  editor,
-  retention,
-  onPostRender,
-  onPendingChange,
-}: EditableFileSurfaceProps) {
-  const addReviewComment = useComposerDraftStore((store) => store.addReviewComment);
-  const removeReviewComment = useComposerDraftStore((store) => store.removeReviewComment);
-  const [lineAnnotations, setLineAnnotations] = useState<FileCommentLineAnnotation[]>([]);
-  const [selectionOverride, setSelectionOverride] = useState<FileSelectionOverride | null>(null);
-  const selectedRange =
-    selectionOverride?.revealRequestId === revealRequestId ? selectionOverride.range : null;
-  const setSelectedRange = useCallback(
-    (range: SelectedLineRange | null) => {
-      setSelectionOverride({ revealRequestId, range });
-    },
-    [revealRequestId],
-  );
-  const surfaceRef = useRef<HTMLDivElement>(null);
-  const selectionFrameRef = useRef<number | null>(null);
-  const saveCoordinator = useFileSaveCoordinator({
-    environmentId,
-    cwd,
-    relativePath,
-    onPendingChange,
-  });
-  const handleEditorChange = useCallback<
-    NonNullable<EditorOptions<FileCommentAnnotationGroup>["onChange"]>
-  >(
-    (file, nextLineAnnotations) => {
-      // Remember what this path's document holds, so returning to it can reuse
-      // the document instead of loading a fresh one and losing the undo stack.
-      // The key is spread rather than assigned: under `exactOptionalPropertyTypes`
-      // an explicit `undefined` is not the same as an absent field, and keeping
-      // it absent is what lets the retained shape stay compatible with the
-      // upstream `projectFileEditorCacheKey` without editing that file.
-      retention.noteEditorFile(relativePath, {
-        ...(file.cacheKey === undefined ? {} : { cacheKey: file.cacheKey }),
-        contents: file.contents,
-      });
-      setProjectFileQueryData(environmentId, cwd, relativePath, file.contents);
-      saveCoordinator.change(file.contents);
-      if (nextLineAnnotations) {
-        const remapped = remapFileCommentAnnotations(
-          nextLineAnnotations as FileCommentLineAnnotation[],
-        );
-        setLineAnnotations(remapped);
-        for (const annotation of remapped) {
-          for (const entry of annotation.metadata.entries) {
-            if (entry.kind !== "comment") continue;
-            addReviewComment(
-              composerDraftTarget,
-              buildFileReviewComment({
-                id: entry.id,
-                filePath: relativePath,
-                startLine: entry.startLine,
-                endLine: entry.endLine,
-                text: entry.text,
-                contents: file.contents,
-              }),
-            );
-          }
-        }
-      }
-    },
-    [
-      addReviewComment,
-      composerDraftTarget,
-      cwd,
-      environmentId,
-      relativePath,
-      retention,
-      saveCoordinator,
-    ],
-  );
-
-  // The editor outlives this component, so the handler is installed rather than
-  // passed at construction: each mounted file owns `onChange` while it is open.
-  useEffect(() => {
-    editor.setOptions({ onChange: handleEditorChange });
-    return () => {
-      // A no-op rather than `undefined`: this project runs
-      // `exactOptionalPropertyTypes`, so an optional callback cannot be cleared
-      // by assigning undefined. The next mounted file installs its own handler.
-      editor.setOptions({ onChange: () => {} });
-    };
-  }, [editor, handleEditorChange]);
-
-  const removeAnnotationEntry = useCallback(
-    (entryId: string) => {
-      setSelectedRange(null);
-      removeReviewComment(composerDraftTarget, entryId);
-      setLineAnnotations((current) => {
-        return current.flatMap((annotation) => {
-          const entries = annotation.metadata.entries.filter((entry) => entry.id !== entryId);
-          return entries.length > 0 ? [{ ...annotation, metadata: { entries } }] : [];
-        });
-      });
-    },
-    [composerDraftTarget, removeReviewComment, setSelectedRange],
-  );
-
-  const submitAnnotationEntry = useCallback(
-    (entryId: string, text: string) => {
-      setSelectedRange(null);
-      const entry = lineAnnotations
-        .flatMap((annotation) => annotation.metadata.entries)
-        .find((candidate) => candidate.id === entryId);
-      if (entry) {
-        addReviewComment(
-          composerDraftTarget,
-          buildFileReviewComment({
-            id: entry.id,
-            filePath: relativePath,
-            startLine: entry.startLine,
-            endLine: entry.endLine,
-            text,
-            contents,
-          }),
-        );
-      }
-      setLineAnnotations((current) =>
-        current.map((annotation) => ({
-          ...annotation,
-          metadata: {
-            entries: annotation.metadata.entries.map((annotationEntry) =>
-              annotationEntry.id === entryId
-                ? { ...annotationEntry, kind: "comment", text }
-                : annotationEntry,
-            ),
-          },
-        })),
-      );
-    },
-    [
-      addReviewComment,
-      composerDraftTarget,
-      contents,
-      lineAnnotations,
-      relativePath,
-      setSelectedRange,
-    ],
-  );
-
-  const beginComment = useCallback((range: SelectedLineRange) => {
-    const { startLine, endLine } = normalizeFileCommentRange(range);
-    const draftEntry: FileCommentAnnotationEntry = {
-      id: nextFileCommentId(),
-      kind: "draft",
-      startLine,
-      endLine,
-      text: "",
-    };
-    setLineAnnotations((current) => {
-      const withoutDraft = current.flatMap((annotation) => {
-        const entries = annotation.metadata.entries.filter((entry) => entry.kind !== "draft");
-        return entries.length > 0 ? [{ ...annotation, metadata: { entries } }] : [];
-      });
-      const existingIndex = withoutDraft.findIndex(
-        (annotation) => annotation.lineNumber === endLine,
-      );
-      if (existingIndex < 0) {
-        return [
-          ...withoutDraft,
-          {
-            lineNumber: endLine,
-            metadata: { entries: [draftEntry] },
-          },
-        ];
-      }
-      return withoutDraft.map((annotation, index) =>
-        index === existingIndex
-          ? {
-              ...annotation,
-              metadata: { entries: [...annotation.metadata.entries, draftEntry] },
-            }
-          : annotation,
-      );
-    });
-  }, []);
-  const hasOpenCommentForm = lineAnnotations.some((annotation) =>
-    annotation.metadata.entries.some((entry) => entry.kind === "draft"),
-  );
-  useEffect(() => {
-    const root = surfaceRef.current;
-    if (!root) return;
-    return installFileEditorDismissal({
-      root,
-      editor,
-      isBlocked: () => hasOpenCommentForm,
-      onDismiss: () => setSelectedRange(null),
-    });
-  }, [editor, hasOpenCommentForm, setSelectedRange]);
-  const handleLineSelectionEnd = useCallback(
-    (range: SelectedLineRange | null) => {
-      setSelectedRange(range);
-      if (range) {
-        beginComment(range);
-      }
-    },
-    [beginComment, setSelectedRange],
-  );
-
-  const handlePostRender = useCallback<FilePostRender>(
-    (fileContainer, instance, phase) => {
-      onPostRender(fileContainer, instance, phase);
-
-      if (selectionFrameRef.current !== null) {
-        cancelAnimationFrame(selectionFrameRef.current);
-        selectionFrameRef.current = null;
-      }
-      if (phase === "unmount") return;
-
-      selectionFrameRef.current = requestAnimationFrame(() => {
-        selectionFrameRef.current = null;
-        if (!fileContainer.isConnected) return;
-        instance.setSelectedLines(selectedRange, { notify: false });
-      });
-    },
-    [onPostRender, selectedRange],
-  );
-
-  return (
-    <EditProvider editor={editor}>
-      <div ref={surfaceRef} className="flex min-h-0 flex-1">
-        <Virtualizer
-          className="file-preview-virtualizer min-h-0 flex-1 overflow-auto"
-          config={{
-            overscrollSize: 600,
-            intersectionObserverMargin: 1200,
-          }}
-        >
-          <File<FileCommentAnnotationGroup>
-            file={{
-              name: relativePath,
-              contents,
-              cacheKey: projectFileEditorCacheKey(
-                environmentId,
-                cwd,
-                relativePath,
-                contents,
-                // Not `editor.getFile()`: the editor now spans files, so its
-                // current file is whichever one was open last, not this one.
-                // `canReuse` states the decision here, where it is read; the
-                // retained identity is withheld when the file changed
-                // underneath, so Pierre loads a fresh document.
-                retention.canReuse(relativePath, contents)
-                  ? retention.identityFor(relativePath)
-                  : undefined,
-              ),
-            }}
-            options={{
-              disableFileHeader: true,
-              enableGutterUtility: !hasOpenCommentForm,
-              enableLineSelection: !hasOpenCommentForm,
-              onGutterUtilityClick: setSelectedRange,
-              onLineSelectionChange: setSelectedRange,
-              onLineSelectionEnd: handleLineSelectionEnd,
-              overflow: wordWrap ? "wrap" : "scroll",
-              theme: resolveDiffThemeName(resolvedTheme),
-              preferredHighlighter: PREFERRED_HIGHLIGHTER,
-              themeType: resolvedTheme,
-              unsafeCSS: FILE_LINK_REVEAL_UNSAFE_CSS,
-              onPostRender: handlePostRender,
-            }}
-            selectedLines={selectedRange}
-            lineAnnotations={lineAnnotations}
-            renderAnnotation={(annotation) => (
-              <div className="py-1">
-                {annotation.metadata.entries.map((entry) => (
-                  <DiffCommentAnnotation
-                    key={entry.id}
-                    kind={entry.kind}
-                    rangeLabel={formatFileCommentRange(entry.startLine, entry.endLine)}
-                    text={entry.text}
-                    onCancel={() => removeAnnotationEntry(entry.id)}
-                    onComment={(text) => submitAnnotationEntry(entry.id, text)}
-                    onDelete={() => removeAnnotationEntry(entry.id)}
-                  />
-                ))}
-              </div>
-            )}
-            className="min-h-full"
-            contentEditable
-          />
-        </Virtualizer>
-      </div>
-    </EditProvider>
-  );
-}
-
 function RenderedMarkdownSurface({
   environmentId,
   cwd,
@@ -831,17 +462,8 @@ function RenderedMarkdownSurface({
   contents,
   threadRef,
   onPendingChange,
-}: Omit<
-  EditableFileSurfaceProps,
-  | "resolvedTheme"
-  | "composerDraftTarget"
-  | "revealLine"
-  | "revealRequestId"
-  | "wordWrap"
-  | "editor"
-  | "retention"
-  | "onPostRender"
-> & {
+}: FileSaveCoordinatorInput & {
+  contents: string;
   threadRef: ScopedThreadRef;
 }) {
   const saveCoordinator = useFileSaveCoordinator({
@@ -887,7 +509,8 @@ export default function FilePreviewPanel({
   projectName,
   relativePath,
   threadRef,
-  composerDraftTarget,
+  // composerDraftTarget is unused while the editing surface carries no comment
+  // affordance. It stays on the props because the comment port needs it back.
   keybindings,
   availableEditors,
   revealLine,
@@ -899,24 +522,10 @@ export default function FilePreviewPanel({
 }: FilePreviewPanelProps) {
   const { resolvedTheme } = useTheme();
   const wordWrap = useClientSettings((settings) => settings.wordWrap);
-  // One editor for as long as this panel lives, so a document — and its undo
-  // stack — survives a file switch. ChatView keys the panel per project, so
-  // this is one editor per project.
-  const [editor] = useState(
-    () =>
-      new Editor<FileCommentAnnotationGroup>({
-        persistState: true,
-        persistStateStorage: "inMemory",
-      }),
-  );
+  // Retention outlives every file the panel shows. The editor that reads it
+  // lives in the surface below and is created once, for the same reason.
   const [retention] = useState(() => new FileEditorRetention());
-  useEffect(
-    () => () => {
-      editor.cleanUp();
-      retention.clear();
-    },
-    [editor, retention],
-  );
+  useEffect(() => () => retention.clear(), [retention]);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const remoteOpenState = useRemoteOpenState(environmentId);
   const environmentHttpBaseUrl = useEnvironmentHttpBaseUrl(environmentId);
@@ -1232,27 +841,21 @@ export default function FilePreviewPanel({
                 />
               </Virtualizer>
             ) : (
-              // Keyed by path only. The theme used to be in this key, which
-              // remounted the surface on every theme switch and dropped the
-              // file's undo stack with it — Pierre rebuilds the document when
-              // it is re-attached, and a rebuilt document has no history. The
-              // theme reaches Pierre through the `theme` and `themeType`
-              // options below, which it applies without a remount.
-              // Remounting per file is still fine: `editor` lives above this
-              // component, so the document survives that.
-              <EditableFileSurface
-                key={relativePath}
+              // No key at all, deliberately. A key here — on the path, on the
+              // theme, on anything — remounts the surface, and a remount
+              // rebuilds the Monaco editor and throws away the undo stack. The
+              // surface is written to be told about a new file, not rebuilt for
+              // one. `tests/unit/monaco-file-surface-wired.test.ts` holds this.
+              <MonacoFileSurface
                 environmentId={environmentId}
                 cwd={cwd}
                 relativePath={relativePath}
-                composerDraftTarget={composerDraftTarget}
                 contents={file.data.contents}
                 resolvedTheme={resolvedTheme}
-                revealRequestId={revealRequestId}
                 wordWrap={wordWrap}
-                editor={editor}
+                revealLine={revealLine}
+                revealRequestId={revealRequestId}
                 retention={retention}
-                onPostRender={onFilePostRender}
                 onPendingChange={onPendingChange}
               />
             )

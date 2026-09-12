@@ -1,0 +1,21 @@
+/*
+ * The file surface sits on the app's own code background rather than Monaco's,
+ * which the theme also sets; this covers the gap Monaco leaves around the
+ * editor while it measures on first paint.
+ */
+[data-monaco-file-surface] {
+  background-color: var(--code-background, var(--background));
+  color: var(--code-foreground, var(--foreground));
+}
+
+/*
+ * The line a link or a search hit asked for. Mixed against the editor's own
+ * line background rather than set flat, so it reads as a highlight in both
+ * light and dark instead of a block of colour.
+ */
+.mesura-file-reveal-line {
+  background-color: light-dark(
+    color-mix(in lab, var(--code-background, transparent) 82%, var(--primary)),
+    color-mix(in lab, var(--code-background, transparent) 75%, var(--primary))
+  );
+}
