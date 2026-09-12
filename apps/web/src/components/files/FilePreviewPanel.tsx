@@ -64,6 +64,7 @@ import { resolveCenteredFileLineScrollTop } from "./fileLineReveal";
 import { DiffCommentAnnotation } from "../diffs/DiffCommentAnnotation";
 import { projectFileCacheKey, projectFileEditorCacheKey } from "./fileContentRevision";
 import { FileEditorRetention } from "./fileEditorRetention";
+import { useProjectFileWatch } from "./useProjectFileWatch";
 import { fileBreadcrumbs } from "./filePath";
 import { isMarkdownPreviewFile, setMarkdownTaskChecked } from "./filePreviewMode";
 import { FileSaveCoordinator } from "./fileSaveCoordinator";
@@ -967,6 +968,21 @@ export default function FilePreviewPanel({
     mutationId: workspaceMutationId,
     refresh: file.refresh,
     resourceKey: `file:${environmentId}:${cwd}:${relativePath ?? ""}`,
+  });
+  // Watches the open file on disk. This sits beside the mutation heuristic
+  // above rather than replacing it: the heuristic also refreshes the tree, and
+  // the refresh button stays as the way out when either is wrong.
+  //
+  // Our own save produces an event too. It arrives while `selectedFilePending`
+  // is true, so it waits and refreshes once the write confirms — one extra read
+  // per save, accepted because it is also what makes somebody else's write
+  // during that same window visible.
+  useProjectFileWatch({
+    environmentId,
+    cwd,
+    relativePath: relativePath !== null && !isMedia ? relativePath : null,
+    enabled: relativePath !== null && !isMedia && !selectedFilePending,
+    refresh: file.refresh,
   });
 
   useEffect(() => {
