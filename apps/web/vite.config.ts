@@ -178,6 +178,12 @@ export default defineConfig(() => {
         "@pierre/diffs/worker/worker.js",
         "effect/Array",
         "effect/Order",
+        // The file panel is lazy-loaded, so the dependency scanner never sees
+        // Monaco before the first file is opened. Monaco is roughly two
+        // thousand ESM modules: without pre-bundling, that first open
+        // waterfalls request by request, which is minutes over a tailnet
+        // origin. Same reasoning as the warmup list below.
+        "monaco-editor",
         "react-dom/client",
       ],
     },
