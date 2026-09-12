@@ -1,10 +1,11 @@
-import { EnvironmentId, WS_METHODS } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId, WS_METHODS } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 
 import {
   onRetainedMobileBackgroundScopesChange,
   observeMobileBackgroundActivitySubscription,
+  retainMobileBackgroundScope,
   retainedMobileBackgroundScopes,
 } from "./background-activity-scopes";
 
@@ -74,4 +75,77 @@ describe("mobile background activity", () => {
       removeListener();
     }),
   );
+});
+
+describe("mobile thread background scope", () => {
+  it("retains a thread scope until the returned release runs", () => {
+    const environmentId = EnvironmentId.make("mobile-thread-retain");
+    const release = retainMobileBackgroundScope(environmentId, {
+      type: "thread",
+      threadId: ThreadId.make("mobile-thread-one"),
+    });
+
+    expect(retainedMobileBackgroundScopes(environmentId)).toEqual([
+      { type: "thread", threadId: "mobile-thread-one" },
+    ]);
+
+    release();
+    expect(retainedMobileBackgroundScopes(environmentId)).toEqual([]);
+  });
+
+  it("needs one release per retain of the same thread", () => {
+    const environmentId = EnvironmentId.make("mobile-thread-refcount");
+    const scope = { type: "thread" as const, threadId: ThreadId.make("mobile-thread-two") };
+    const releaseFirst = retainMobileBackgroundScope(environmentId, scope);
+    const releaseSecond = retainMobileBackgroundScope(environmentId, scope);
+
+    expect(retainedMobileBackgroundScopes(environmentId)).toEqual([scope]);
+
+    releaseFirst();
+    expect(retainedMobileBackgroundScopes(environmentId)).toEqual([scope]);
+
+    releaseSecond();
+    expect(retainedMobileBackgroundScopes(environmentId)).toEqual([]);
+  });
+
+  it("keeps two threads in the same environment distinct", () => {
+    const environmentId = EnvironmentId.make("mobile-two-threads");
+    const releaseA = retainMobileBackgroundScope(environmentId, {
+      type: "thread",
+      threadId: ThreadId.make("mobile-thread-a"),
+    });
+    const releaseB = retainMobileBackgroundScope(environmentId, {
+      type: "thread",
+      threadId: ThreadId.make("mobile-thread-b"),
+    });
+
+    expect(retainedMobileBackgroundScopes(environmentId)).toHaveLength(2);
+
+    releaseA();
+    expect(retainedMobileBackgroundScopes(environmentId)).toEqual([
+      { type: "thread", threadId: "mobile-thread-b" },
+    ]);
+
+    releaseB();
+    expect(retainedMobileBackgroundScopes(environmentId)).toEqual([]);
+  });
+
+  it("notifies listeners when a thread scope is retained and released", () => {
+    const environmentId = EnvironmentId.make("mobile-thread-notify");
+    let notifications = 0;
+    const unsubscribe = onRetainedMobileBackgroundScopesChange(() => {
+      notifications += 1;
+    });
+
+    const release = retainMobileBackgroundScope(environmentId, {
+      type: "thread",
+      threadId: ThreadId.make("mobile-thread-three"),
+    });
+    expect(notifications).toBe(1);
+
+    release();
+    expect(notifications).toBe(2);
+
+    unsubscribe();
+  });
 });
