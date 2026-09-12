@@ -20,6 +20,7 @@ import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
 import { fromYaml } from "@t3tools/shared/schemaYaml";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import serverPackageJson from "../package.json" with { type: "json" };
+import { resolveWebClientBundleAction } from "./cliBuildPolicy.ts";
 import {
   ServerCliBuildAssetMissingError,
   ServerCliCommandExitError,
@@ -27,6 +28,7 @@ import {
   ServerCliDevelopmentIconTargetMissingError,
   ServerCliPublishIconSourceMissingError,
   ServerCliPublishIconTargetMissingError,
+  ServerCliWebClientMissingError,
 } from "./cliErrors.ts";
 
 interface PackageJson {
@@ -144,6 +146,7 @@ const buildCmd = Command.make(
   "build",
   {
     verbose: Flag.boolean("verbose").pipe(Flag.withDefault(false)),
+    allowMissingClient: Flag.boolean("allow-missing-client").pipe(Flag.withDefault(false)),
   },
   (config) =>
     Effect.gen(function* () {
@@ -151,6 +154,26 @@ const buildCmd = Command.make(
       const fs = yield* FileSystem.FileSystem;
       const repoRoot = yield* RepoRoot;
       const serverDir = path.join(repoRoot, "apps/server");
+
+      const webDist = path.join(repoRoot, "apps/web/dist");
+      const clientTarget = path.join(serverDir, "dist/client");
+      // The server gates on the file, not the directory: resolveStaticDir in
+      // src/config.ts accepts a client directory only when it holds index.html. An
+      // interrupted web build leaves a directory that passes a bare existence check
+      // and still serves 503.
+      const webClientIndex = path.join(webDist, "index.html");
+
+      // Resolved before tsdown runs. `vp pack` is configured with `clean: true`, so a
+      // build that is going to fail would otherwise delete a previously good
+      // dist/client on its way to exiting non-zero.
+      const clientAction = resolveWebClientBundleAction({
+        webClientExists: yield* fs.exists(webClientIndex),
+        allowMissingClient: config.allowMissingClient,
+      });
+
+      if (clientAction === "fail") {
+        return yield* new ServerCliWebClientMissingError({ webClientPath: webClientIndex });
+      }
 
       yield* Effect.log("[cli] Running tsdown...");
       yield* runCommand(
@@ -162,15 +185,14 @@ const buildCmd = Command.make(
         }),
       );
 
-      const webDist = path.join(repoRoot, "apps/web/dist");
-      const clientTarget = path.join(serverDir, "dist/client");
-
-      if (yield* fs.exists(webDist)) {
+      if (clientAction === "skip") {
+        yield* Effect.logWarning(
+          "[cli] --allow-missing-client was set and no web client is built — producing a server-only package. Browser and mobile clients will receive 503 from it.",
+        );
+      } else {
         yield* fs.copy(webDist, clientTarget);
         yield* applyDevelopmentIconOverrides(repoRoot, serverDir);
         yield* Effect.log("[cli] Bundled web app into dist/client");
-      } else {
-        yield* Effect.logWarning("[cli] Web dist not found — skipping client bundle.");
       }
     }),
 ).pipe(Command.withDescription("Build the server package (tsdown + bundle web client)."));

@@ -68,3 +68,14 @@ export class ServerCliBuildAssetMissingError extends Schema.TaggedErrorClass<Ser
     return `Missing build asset: ${this.assetPath}. Run the build subcommand first.`;
   }
 }
+
+export class ServerCliWebClientMissingError extends Schema.TaggedErrorClass<ServerCliWebClientMissingError>()(
+  "ServerCliWebClientMissingError",
+  {
+    webClientPath: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Missing web client build: ${this.webClientPath}. Without it the server package serves 503 to every browser and mobile client. Run \`vp run --filter t3 build\`, which builds the web client first, or pass --allow-missing-client for a deliberate server-only bundle.`;
+  }
+}
