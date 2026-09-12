@@ -323,7 +323,7 @@ it.layer(NodeServices.layer)("AccountLimitsService", (it) => {
         payload: {
           rate_limit_info: {
             rateLimitType: "five_hour",
-            utilization: 55,
+            utilization: 0.55,
             resetsAt: 1_787_000_000,
           },
         },

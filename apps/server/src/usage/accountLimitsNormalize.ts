@@ -26,6 +26,10 @@ function clampPercent(value: number): number {
   return Math.min(100, Math.max(0, value));
 }
 
+function percentFromRatio(value: number): number {
+  return Math.round(value * 10_000) / 100;
+}
+
 function isoFromUnixSeconds(value: number): string | null {
   const milliseconds = value * 1000;
   if (!Number.isFinite(milliseconds) || milliseconds < 0) return null;
@@ -181,10 +185,30 @@ export function normalizeClaudeRateLimitEvent(value: unknown): AccountLimitsWind
   if (key === null) return null;
   const meta = claudeWindowMeta(key);
   if (meta === null) return null;
-  const resetSeconds = readNumber(info.resetsAt);
+
+  // Claude's full account-limits response reports utilization as a percentage,
+  // but its passive rate-limit event reports a 0-1 ratio. Reusing the full
+  // response's number directly made 0.99 render as 1% instead of 99%.
+  //
+  // Newer events also repeat every window under `unifiedWindows`. A rejected
+  // event can omit the top-level utilization, so use the named window there
+  // before falling back to the status itself.
+  const unifiedWindows = isRecord(info.unifiedWindows) ? info.unifiedWindows : null;
+  const unifiedWindow =
+    unifiedWindows && isRecord(unifiedWindows[key]) ? unifiedWindows[key] : null;
+  const utilizationRatio =
+    readNumber(info.utilization) ??
+    readNumber(unifiedWindow?.utilization) ??
+    (info.status === "rejected" ? 1 : null);
+  const rawResetSeconds = info.resetsAt ?? unifiedWindow?.resetsAt;
+  const resetSeconds = readNumber(rawResetSeconds);
   const resetsAt = resetSeconds === null ? null : isoFromUnixSeconds(resetSeconds);
-  if (info.resetsAt != null && resetsAt === null) return null;
-  return claudeWindowFromValues(meta, readNumber(info.utilization), resetsAt);
+  if (rawResetSeconds != null && resetsAt === null) return null;
+  return claudeWindowFromValues(
+    meta,
+    utilizationRatio === null ? null : percentFromRatio(utilizationRatio),
+    resetsAt,
+  );
 }
 
 /**
