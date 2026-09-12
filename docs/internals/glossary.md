@@ -30,6 +30,14 @@ The root filesystem path for a project. In [the orchestration model][1], it is t
 
 A Git worktree used as an isolated workspace for a thread. If a thread has a `worktreePath` in [the contracts][1], it runs there instead of in the main working tree. Git operations live behind the VCS driver contract in `apps/server/src/vcs/VcsDriver.ts`, implemented by [GitVcsDriverCore.ts][3].
 
+#### Project file watch
+
+A server-side watch on the one file a client currently has open, which streams a revision token to that client whenever the file changes on disk. It watches the file's directory rather than the file, because an editor or a `git` operation that replaces a file by rename leaves a watch on the old inode. The token is the file's modification time and size, so a rewrite with identical bytes still produces a new token and still costs the client a re-read; the editor then compares contents and applies nothing. See [WorkspaceFileWatcher.ts][25]. The client side is in `apps/web/src/components/files/projectFileWatchRefresh.ts`, which decides when a revision is worth acting on.
+
+#### Background scope
+
+A declared interest a client reports while it is looking at something: version-control status, diagnostics, or a thread. Scopes travel in the client's activity lease and are read by the server's background policy, which uses them to decide what work is worth doing while nobody is waiting on it. A scope is explicitly retained by the view that shows the thing, not derived from whether a subscription is open: subscriptions outlive the view that opened them, so deriving the scope would report a thread as watched for minutes after the user left it. See `apps/web/src/lib/backgroundActivityReporter.ts` and its mobile twin in `apps/mobile/src/connection/background-activity-scopes.ts`.
+
 ### Thread timeline
 
 #### Thread
@@ -201,6 +209,7 @@ ships T3 Code already matching it.
 - [Provider architecture][16]
 - [Permission modes][18]
 - [Workspace layout][2]
+- [Reading and editing files](../user/file-panel.md)
 
 [1]: ../../packages/contracts/src/orchestration.ts
 [2]: ./workspace-layout.md
@@ -213,6 +222,7 @@ ships T3 Code already matching it.
 [9]: ../../apps/server/src/orchestration/commandInvariants.ts
 [10]: ../../apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts
 [11]: ../../apps/server/src/orchestration/Layers/ProjectionPipeline.ts
+[25]: ../../apps/server/src/workspace/WorkspaceFileWatcher.ts
 [12]: ../../apps/server/src/orchestration/Layers/ProviderCommandReactor.ts
 [13]: ../../apps/server/src/orchestration/Services/RuntimeReceiptBus.ts
 [14]: ../../apps/server/src/provider/Layers/ProviderService.ts

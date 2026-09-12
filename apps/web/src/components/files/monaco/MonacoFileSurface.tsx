@@ -13,6 +13,7 @@ import { useFileSaveCoordinator } from "../useFileSaveCoordinator";
 import { ensureMonacoEnvironment } from "./monacoEnvironment";
 import { useMonacoFileComments } from "./monacoFileComments";
 import { languageIdForPath } from "./monacoFileLanguage";
+import { MonacoFileModelCache, monacoFileModelKey, type ModelStore } from "./monacoFileModels";
 import { resolveRevealLine } from "./monacoFileReveal";
 import {
   defineMesuraMonacoThemes,
@@ -24,6 +25,16 @@ import {
 import "./monacoFileSurface.css";
 
 const REVEAL_LINE_CLASS = "mesura-file-reveal-line";
+
+/**
+ * Builds the real Monaco models the cache hands out.
+ *
+ * The cache key is the model's URI, so this needs nothing else to build one.
+ */
+const MONACO_MODEL_STORE: ModelStore<monaco.editor.ITextModel> = {
+  create: (key, contents, languageId) =>
+    monaco.editor.createModel(contents, languageId, monaco.Uri.parse(key)),
+};
 
 export interface MonacoFileSurfaceProps {
   readonly environmentId: EnvironmentId;
@@ -68,6 +79,20 @@ export function MonacoFileSurface({
   // on them.
   const [editor, setEditor] = useState<monaco.editor.IStandaloneCodeEditor | null>(null);
   const [model, setModel] = useState<monaco.editor.ITextModel | null>(null);
+
+  // One cache per mounted surface, which ChatView keys per project. It holds
+  // the undo stack of every file the user has been in, so it must outlive a
+  // file switch and die with the panel.
+  const [models] = useState(
+    () =>
+      new MonacoFileModelCache<monaco.editor.ITextModel, monaco.editor.ICodeEditorViewState>(
+        MONACO_MODEL_STORE,
+      ),
+  );
+  useEffect(() => () => models.disposeAll(), [models]);
+  // The file the editor is showing, so a switch can put its view state away
+  // before the new one arrives.
+  const openKeyRef = useRef<string | null>(null);
   const decorationsRef = useRef<monaco.editor.IEditorDecorationsCollection | null>(null);
   const fontFamilyCode = useClientSettings((settings) => settings.fontFamilyCode);
   const fontSizeCode = useClientSettings((settings) => settings.fontSizeCode);
@@ -140,7 +165,9 @@ export function MonacoFileSurface({
       decorationsRef.current = null;
       editorRef.current = null;
       setEditor(null);
-      editor.getModel()?.dispose();
+      // The model belongs to the cache, which disposes every one it holds when
+      // the surface unmounts. Disposing it here as well would pull it out from
+      // under the cache.
       editor.dispose();
     };
     // Created once. Theme, font and wrap are applied by the effects below so a
@@ -148,24 +175,31 @@ export function MonacoFileSurface({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // One model per open file. Phase 8 replaces this with a cache that keeps a
-  // model per path; today a switch disposes the outgoing one.
+  // The open file's model, kept in a cache so leaving a file and coming back
+  // finds its undo stack, caret and scroll where they were.
   useEffect(() => {
     const editor = editorRef.current;
     if (editor === null) return;
 
-    const previous = editor.getModel();
-    const uri = monaco.Uri.parse(
-      `mesura-file:///${environmentId}/${encodeURIComponent(cwd)}/${relativePath}`,
-    );
-    const model = monaco.editor.createModel(
+    const key = monacoFileModelKey(environmentId, cwd, relativePath);
+    const previousKey = openKeyRef.current;
+    if (previousKey !== null && previousKey !== key) {
+      models.saveViewState(previousKey, editor.saveViewState());
+      models.release(previousKey);
+    }
+    openKeyRef.current = key;
+
+    const { model, reused } = models.acquire(
+      key,
       contents,
       languageIdForPath(relativePath, monaco.languages.getLanguages()),
-      uri,
     );
     editor.setModel(model);
     setModel(model);
-    previous?.dispose();
+    if (reused) {
+      const viewState = models.viewStateFor(key);
+      if (viewState !== null) editor.restoreViewState(viewState);
+    }
 
     const subscription = model.onDidChangeContent(() => {
       if (applyingExternalEditRef.current) return;
@@ -177,16 +211,19 @@ export function MonacoFileSurface({
     return () => subscription.dispose();
     // `contents` is deliberately absent: a change to it for the SAME path is an
     // external edit and is applied by the effect below, not by rebuilding the
-    // model, which would discard the undo stack.
+    // model, which would discard the undo stack. A reused model whose file
+    // changed while it was away is caught by that same effect, which runs after
+    // this one on the same render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [environmentId, cwd, relativePath, retention]);
+  }, [environmentId, cwd, relativePath, retention, models]);
 
   // An external change to the open file: the watcher pushed one, or a save
   // confirmed. Applied as an edit, never `setValue`, because `setValue` clears
   // the undo stack.
   useEffect(() => {
-    const model = editorRef.current?.getModel();
-    if (!model) return;
+    const editor = editorRef.current;
+    const model = editor?.getModel();
+    if (!editor || !model) return;
     if (model.getValue() === contents) return;
     // Our own text coming back as a confirmation. Rewriting the model with what
     // it already said would move the caret for nothing.
@@ -200,10 +237,16 @@ export function MonacoFileSurface({
       // last few keystrokes together. Measured, not guessed: undoing a
       // merged group left a half-typed line on screen.
       model.pushStackElement();
+      // The caret goes in and comes back out again. Monaco remaps a selection
+      // it is given across the edit, so handing it the current one and
+      // returning it keeps the user where they were when an agent rewrites the
+      // part of the file above them; without it the caret lands wherever the
+      // full-range replacement leaves it.
+      const selections = editor.getSelections() ?? [];
       model.pushEditOperations(
-        [],
+        selections,
         [{ range: model.getFullModelRange(), text: contents }],
-        () => null,
+        () => selections,
       );
       model.pushStackElement();
     } finally {

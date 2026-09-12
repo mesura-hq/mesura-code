@@ -11,10 +11,10 @@ import { repositoryRoot } from "./contractHarness.ts";
  * opens, and these assertions hold the wiring that keeps the open file's undo
  * stack, selection and scroll position alive underneath it.
  *
- * Note what is NOT claimed here: undo does not yet survive a switch to another
- * file and back. The undo stack belongs to the Monaco text model, and the
- * surface disposes the outgoing model on a path change, so the stack goes with
- * it. A model cache per path is the next piece of work and restores that.
+ * Undo survives a switch to another file and back, because the undo stack
+ * belongs to the Monaco text model and a cache keeps one model per file. That
+ * makes ownership the thing to be careful about: the cache disposes the models,
+ * so nothing else may.
  *
  * Every assertion below marks something that broke at least once while it was
  * built, and not one of those breakages is reachable from a test that runs the
@@ -132,15 +132,21 @@ it("applies an external change as its own undo element", () => {
   const edit = surface.indexOf("model.pushEditOperations(");
   assert.notStrictEqual(edit, -1, "the surface no longer applies external changes as an edit");
 
-  const before = surface.slice(0, edit);
-  const after = surface.slice(edit);
+  // Bounded by the block that applies the edit, rather than by a character
+  // count: a comment added between the undo stop and the edit once pushed the
+  // stop out of a fixed window and failed this for no reason.
+  const blockStart = surface.lastIndexOf("applyingExternalEditRef.current = true;", edit);
+  assert.notStrictEqual(blockStart, -1, "the external edit is no longer flagged as external");
+  const blockEnd = surface.indexOf("} finally {", edit);
+  assert.notStrictEqual(blockEnd, -1, "the external-edit flag is no longer cleared in a finally");
+
   assert.include(
-    before.slice(-300),
+    surface.slice(blockStart, edit),
     "model.pushStackElement();",
     "no undo stop before the external edit, so it merges into the user's open typing group and one undo reverts both",
   );
   assert.include(
-    after.slice(0, 300),
+    surface.slice(edit, blockEnd),
     "model.pushStackElement();",
     "no undo stop after the external edit, so the next keystrokes merge into it",
   );
@@ -157,4 +163,45 @@ it("blurs whatever the document says is focused, not a textarea by tag name", ()
     "dismissal is reaching for a textarea again; Monaco 0.56 has no textarea to blur, so Escape does nothing",
   );
   assert.include(surface, "document.activeElement");
+});
+
+it("takes the open file's model from the cache instead of building one per switch", () => {
+  const surface = surfaceSource();
+
+  assert.include(
+    surface,
+    "models.acquire(",
+    "the surface builds its own model again, so switching files drops the undo stack the cache exists to keep",
+  );
+  assert.include(
+    surface,
+    "models.saveViewState(",
+    "the outgoing file's caret and scroll are not saved",
+  );
+  assert.include(
+    surface,
+    "models.release(",
+    "the outgoing file is never released, so nothing is ever evictable",
+  );
+});
+
+it("leaves every model for the cache to dispose", () => {
+  const surface = surfaceSource();
+
+  const create = surface.indexOf("monaco.editor.create(");
+  const cleanupEnd = surface.indexOf("}, []);", create);
+  const editorCleanup = surface.slice(create, cleanupEnd);
+
+  // Disposing here as well pulls the model out from under the cache, which
+  // still holds it and will hand it back on the next visit to that file.
+  assert.notInclude(
+    editorCleanup,
+    "getModel()?.dispose()",
+    "the editor disposes its model again; the cache owns every model and disposes them all on unmount",
+  );
+  assert.include(
+    surface,
+    "models.disposeAll()",
+    "nothing disposes the cached models, so every file the user opened leaks until the page goes",
+  );
 });
