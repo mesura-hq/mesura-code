@@ -9,7 +9,7 @@ import {
   isWorkspaceVideoPreviewPath,
 } from "@t3tools/shared/filePreview";
 import { VirtualizedFile, type SelectedLineRange } from "@pierre/diffs";
-import { Editor } from "@pierre/diffs/editor";
+import { Editor, type EditorOptions } from "@pierre/diffs/editor";
 import { EditProvider, File, type FileOptions, Virtualizer } from "@pierre/diffs/react";
 import {
   isAtomCommandInterrupted,
@@ -63,6 +63,7 @@ import { installFileEditorDismissal } from "./fileEditorDismissal";
 import { resolveCenteredFileLineScrollTop } from "./fileLineReveal";
 import { DiffCommentAnnotation } from "../diffs/DiffCommentAnnotation";
 import { projectFileCacheKey, projectFileEditorCacheKey } from "./fileContentRevision";
+import { FileEditorRetention } from "./fileEditorRetention";
 import { fileBreadcrumbs } from "./filePath";
 import { isMarkdownPreviewFile, setMarkdownTaskChecked } from "./filePreviewMode";
 import { FileSaveCoordinator } from "./fileSaveCoordinator";
@@ -477,6 +478,12 @@ interface EditableFileSurfaceProps {
   resolvedTheme: "light" | "dark";
   revealRequestId: number;
   wordWrap: boolean;
+  /**
+   * Owned by the panel, not by this component. This component is remounted per
+   * file, so an editor created here could never keep a document across a switch.
+   */
+  editor: Editor<FileCommentAnnotationGroup>;
+  retention: FileEditorRetention;
   onPostRender: FilePostRender;
   onPendingChange: (relativePath: string, pending: boolean) => void;
 }
@@ -526,6 +533,8 @@ function EditableFileSurface({
   resolvedTheme,
   revealRequestId,
   wordWrap,
+  editor,
+  retention,
   onPostRender,
   onPendingChange,
 }: EditableFileSurfaceProps) {
@@ -549,47 +558,67 @@ function EditableFileSurface({
     relativePath,
     onPendingChange,
   });
-  const editor = useMemo(
-    () =>
-      new Editor<FileCommentAnnotationGroup>({
-        persistState: true,
-        persistStateStorage: "inMemory",
-        onChange: (file, nextLineAnnotations) => {
-          setProjectFileQueryData(environmentId, cwd, relativePath, file.contents);
-          saveCoordinator.change(file.contents);
-          if (nextLineAnnotations) {
-            const remapped = remapFileCommentAnnotations(
-              nextLineAnnotations as FileCommentLineAnnotation[],
+  const handleEditorChange = useCallback<
+    NonNullable<EditorOptions<FileCommentAnnotationGroup>["onChange"]>
+  >(
+    (file, nextLineAnnotations) => {
+      // Remember what this path's document holds, so returning to it can reuse
+      // the document instead of loading a fresh one and losing the undo stack.
+      // The key is spread rather than assigned: under `exactOptionalPropertyTypes`
+      // an explicit `undefined` is not the same as an absent field, and keeping
+      // it absent is what lets the retained shape stay compatible with the
+      // upstream `projectFileEditorCacheKey` without editing that file.
+      retention.noteEditorFile(relativePath, {
+        ...(file.cacheKey === undefined ? {} : { cacheKey: file.cacheKey }),
+        contents: file.contents,
+      });
+      setProjectFileQueryData(environmentId, cwd, relativePath, file.contents);
+      saveCoordinator.change(file.contents);
+      if (nextLineAnnotations) {
+        const remapped = remapFileCommentAnnotations(
+          nextLineAnnotations as FileCommentLineAnnotation[],
+        );
+        setLineAnnotations(remapped);
+        for (const annotation of remapped) {
+          for (const entry of annotation.metadata.entries) {
+            if (entry.kind !== "comment") continue;
+            addReviewComment(
+              composerDraftTarget,
+              buildFileReviewComment({
+                id: entry.id,
+                filePath: relativePath,
+                startLine: entry.startLine,
+                endLine: entry.endLine,
+                text: entry.text,
+                contents: file.contents,
+              }),
             );
-            setLineAnnotations(remapped);
-            for (const annotation of remapped) {
-              for (const entry of annotation.metadata.entries) {
-                if (entry.kind !== "comment") continue;
-                addReviewComment(
-                  composerDraftTarget,
-                  buildFileReviewComment({
-                    id: entry.id,
-                    filePath: relativePath,
-                    startLine: entry.startLine,
-                    endLine: entry.endLine,
-                    text: entry.text,
-                    contents: file.contents,
-                  }),
-                );
-              }
-            }
           }
-        },
-      }),
-    [addReviewComment, composerDraftTarget, cwd, environmentId, relativePath, saveCoordinator],
+        }
+      }
+    },
+    [
+      addReviewComment,
+      composerDraftTarget,
+      cwd,
+      environmentId,
+      relativePath,
+      retention,
+      saveCoordinator,
+    ],
   );
 
-  useEffect(
-    () => () => {
-      editor.cleanUp();
-    },
-    [editor],
-  );
+  // The editor outlives this component, so the handler is installed rather than
+  // passed at construction: each mounted file owns `onChange` while it is open.
+  useEffect(() => {
+    editor.setOptions({ onChange: handleEditorChange });
+    return () => {
+      // A no-op rather than `undefined`: this project runs
+      // `exactOptionalPropertyTypes`, so an optional callback cannot be cleared
+      // by assigning undefined. The next mounted file installs its own handler.
+      editor.setOptions({ onChange: () => {} });
+    };
+  }, [editor, handleEditorChange]);
 
   const removeAnnotationEntry = useCallback(
     (entryId: string) => {
@@ -744,7 +773,14 @@ function EditableFileSurface({
                 cwd,
                 relativePath,
                 contents,
-                editor.getFile(),
+                // Not `editor.getFile()`: the editor now spans files, so its
+                // current file is whichever one was open last, not this one.
+                // `canReuse` states the decision here, where it is read; the
+                // retained identity is withheld when the file changed
+                // underneath, so Pierre loads a fresh document.
+                retention.canReuse(relativePath, contents)
+                  ? retention.identityFor(relativePath)
+                  : undefined,
               ),
             }}
             options={{
@@ -801,6 +837,8 @@ function RenderedMarkdownSurface({
   | "revealLine"
   | "revealRequestId"
   | "wordWrap"
+  | "editor"
+  | "retention"
   | "onPostRender"
 > & {
   threadRef: ScopedThreadRef;
@@ -860,6 +898,24 @@ export default function FilePreviewPanel({
 }: FilePreviewPanelProps) {
   const { resolvedTheme } = useTheme();
   const wordWrap = useClientSettings((settings) => settings.wordWrap);
+  // One editor for as long as this panel lives, so a document — and its undo
+  // stack — survives a file switch. ChatView keys the panel per project, so
+  // this is one editor per project.
+  const [editor] = useState(
+    () =>
+      new Editor<FileCommentAnnotationGroup>({
+        persistState: true,
+        persistStateStorage: "inMemory",
+      }),
+  );
+  const [retention] = useState(() => new FileEditorRetention());
+  useEffect(
+    () => () => {
+      editor.cleanUp();
+      retention.clear();
+    },
+    [editor, retention],
+  );
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const remoteOpenState = useRemoteOpenState(environmentId);
   const environmentHttpBaseUrl = useEnvironmentHttpBaseUrl(environmentId);
@@ -1160,8 +1216,16 @@ export default function FilePreviewPanel({
                 />
               </Virtualizer>
             ) : (
+              // Keyed by path only. The theme used to be in this key, which
+              // remounted the surface on every theme switch and dropped the
+              // file's undo stack with it — Pierre rebuilds the document when
+              // it is re-attached, and a rebuilt document has no history. The
+              // theme reaches Pierre through the `theme` and `themeType`
+              // options below, which it applies without a remount.
+              // Remounting per file is still fine: `editor` lives above this
+              // component, so the document survives that.
               <EditableFileSurface
-                key={`${relativePath}:${resolvedTheme}`}
+                key={relativePath}
                 environmentId={environmentId}
                 cwd={cwd}
                 relativePath={relativePath}
@@ -1170,6 +1234,8 @@ export default function FilePreviewPanel({
                 resolvedTheme={resolvedTheme}
                 revealRequestId={revealRequestId}
                 wordWrap={wordWrap}
+                editor={editor}
+                retention={retention}
                 onPostRender={onFilePostRender}
                 onPendingChange={onPendingChange}
               />
