@@ -19,3 +19,41 @@
     color-mix(in lab, var(--code-background, transparent) 75%, var(--primary))
   );
 }
+
+/*
+ * The lines a gutter drag is currently covering. Weaker than the reveal
+ * highlight on purpose: the reveal marks one line the user was sent to, while
+ * this follows the pointer and would be noisy at the same strength.
+ */
+.mesura-file-comment-selection {
+  background-color: light-dark(
+    color-mix(in lab, var(--code-background, transparent) 88%, var(--primary)),
+    color-mix(in lab, var(--code-background, transparent) 84%, var(--primary))
+  );
+}
+
+/*
+ * A comment, hanging under the last line of its range.
+ *
+ * The zone's height is set in pixels from the content, so this node must not
+ * add any of its own: no padding, no border, no margin. Anything here is height
+ * Monaco does not know about, and it clips the bottom of the form.
+ */
+.mesura-file-comment-zone {
+  width: 100%;
+  /* Monaco positions the zone; the content decides how tall it is. */
+  overflow: visible;
+  font-family: var(--font-sans);
+  white-space: normal;
+
+  /*
+   * Above the text layer, and taking pointer events.
+   *
+   * Monaco paints `.view-lines` over the view-zone layer, so without this the
+   * topmost element at the Comment button's own coordinates is a syntax token,
+   * and a real mouse click lands on the editor instead of the button. The
+   * buttons looked present and did nothing.
+   */
+  z-index: 1;
+  pointer-events: auto;
+}

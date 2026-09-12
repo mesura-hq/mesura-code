@@ -1,6 +1,8 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import * as monaco from "monaco-editor";
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+
+import type { DraftId } from "~/composerDraftStore";
 
 import { useClientSettings } from "~/hooks/useSettings";
 
@@ -9,6 +11,7 @@ import { installFileEditorDismissal } from "../fileEditorDismissal";
 import { setProjectFileQueryData } from "../projectFilesQueryState";
 import { useFileSaveCoordinator } from "../useFileSaveCoordinator";
 import { ensureMonacoEnvironment } from "./monacoEnvironment";
+import { useMonacoFileComments } from "./monacoFileComments";
 import { languageIdForPath } from "./monacoFileLanguage";
 import { resolveRevealLine } from "./monacoFileReveal";
 import {
@@ -32,6 +35,7 @@ export interface MonacoFileSurfaceProps {
   readonly revealLine: number | null;
   readonly revealRequestId: number;
   readonly retention: FileEditorRetention;
+  readonly composerDraftTarget: ScopedThreadRef | DraftId;
   readonly onPendingChange: (relativePath: string, pending: boolean) => void;
 }
 
@@ -52,10 +56,18 @@ export function MonacoFileSurface({
   revealLine,
   revealRequestId,
   retention,
+  composerDraftTarget,
   onPendingChange,
 }: MonacoFileSurfaceProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  // The same editor and model the refs hold, in state as well. Comments render
+  // React into Monaco view zones, so the pieces that own them have to re-render
+  // when the editor appears and when the open file changes; a ref cannot do
+  // that. The refs stay because the effects below read them without depending
+  // on them.
+  const [editor, setEditor] = useState<monaco.editor.IStandaloneCodeEditor | null>(null);
+  const [model, setModel] = useState<monaco.editor.ITextModel | null>(null);
   const decorationsRef = useRef<monaco.editor.IEditorDecorationsCollection | null>(null);
   const fontFamilyCode = useClientSettings((settings) => settings.fontFamilyCode);
   const fontSizeCode = useClientSettings((settings) => settings.fontSizeCode);
@@ -121,11 +133,13 @@ export function MonacoFileSurface({
       wordWrap: wordWrap ? "on" : "off",
     });
     editorRef.current = editor;
+    setEditor(editor);
     decorationsRef.current = editor.createDecorationsCollection();
 
     return () => {
       decorationsRef.current = null;
       editorRef.current = null;
+      setEditor(null);
       editor.getModel()?.dispose();
       editor.dispose();
     };
@@ -150,6 +164,7 @@ export function MonacoFileSurface({
       uri,
     );
     editor.setModel(model);
+    setModel(model);
     previous?.dispose();
 
     const subscription = model.onDidChangeContent(() => {
@@ -247,6 +262,19 @@ export function MonacoFileSurface({
     // thing that changes between those two asks.
   }, [revealRequestId, revealLine]);
 
+  const comments = useMonacoFileComments({
+    editor,
+    model,
+    relativePath,
+    composerDraftTarget,
+  });
+  // A ref so the dismissal listeners can read the current answer without being
+  // torn down and reinstalled every time a comment form opens or closes.
+  const hasOpenDraftRef = useRef(comments.hasOpenDraft);
+  useEffect(() => {
+    hasOpenDraftRef.current = comments.hasOpenDraft;
+  }, [comments.hasOpenDraft]);
+
   useEffect(() => {
     const host = hostRef.current;
     if (host === null) return;
@@ -271,10 +299,16 @@ export function MonacoFileSurface({
           if (focused instanceof HTMLElement && host.contains(focused)) focused.blur();
         },
       },
-      isBlocked: () => false,
+      // An open comment form owns Escape: it cancels the draft rather than
+      // blurring the editor underneath it.
+      isBlocked: () => hasOpenDraftRef.current,
       onDismiss: () => {},
     });
   }, []);
 
-  return <div ref={hostRef} data-monaco-file-surface className="flex min-h-0 flex-1" />;
+  return (
+    <div ref={hostRef} data-monaco-file-surface className="flex min-h-0 flex-1">
+      {comments.zones}
+    </div>
+  );
 }

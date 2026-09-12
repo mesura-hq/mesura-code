@@ -509,8 +509,7 @@ export default function FilePreviewPanel({
   projectName,
   relativePath,
   threadRef,
-  // composerDraftTarget is unused while the editing surface carries no comment
-  // affordance. It stays on the props because the comment port needs it back.
+  composerDraftTarget,
   keybindings,
   availableEditors,
   revealLine,
@@ -856,6 +855,7 @@ export default function FilePreviewPanel({
                 revealLine={revealLine}
                 revealRequestId={revealRequestId}
                 retention={retention}
+                composerDraftTarget={composerDraftTarget}
                 onPendingChange={onPendingChange}
               />
             )
