@@ -1,4 +1,5 @@
 import {
+  SYMMETRIA_DICTATION_CONTROL_ACTIONS,
   SYMMETRIA_PROTOCOL_MAJOR,
   SYMMETRIA_PROTOCOL_MINOR,
   type SymmetriaDictationSession,
@@ -17,6 +18,7 @@ import {
 import { memo, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 import { cn, randomUUID } from "~/lib/utils";
+import { ComposerBanner } from "../components/chat/ComposerBanner";
 import { Button } from "../components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { CenterOutWaveform } from "./CenterOutWaveform";
@@ -38,6 +40,8 @@ const LEASE_DURATION_MS = 3_500;
 const LEASE_RENEWAL_MS = 1_500;
 
 const newIdentity = (kind: string): string => `mesura-${kind}-${randomUUID()}`;
+
+type DictationControlAction = (typeof SYMMETRIA_DICTATION_CONTROL_ACTIONS)[number];
 
 function useDocumentPresence() {
   const read = () => ({
@@ -221,7 +225,7 @@ export const DictationStrip = memo(function DictationStrip(props: {
   });
 
   const sendControl = useCallback(
-    (action: string) => {
+    (action: DictationControlAction) => {
       if (!session) return;
       void sendBridgeCommand({
         type: "dictation.control",
@@ -264,6 +268,11 @@ export const DictationStrip = memo(function DictationStrip(props: {
     return () => window.clearTimeout(timer);
   }, [session]);
 
+  const dismissPresentedSession = useCallback(() => {
+    const current = useDictationSessionStore.getState().session;
+    if (current) setDismissedSessionId(current.sessionId);
+  }, []);
+
   const changeMode = useCallback(() => {
     if (!session) return;
     void sendBridgeCommand({
@@ -275,6 +284,30 @@ export const DictationStrip = memo(function DictationStrip(props: {
 
   if (!visible || !session) return null;
 
+  return (
+    <DictationStripBanner
+      session={session}
+      reducedMotion={reducedMotion}
+      onControl={sendControl}
+      onChangeMode={changeMode}
+      onDismiss={dismissPresentedSession}
+    />
+  );
+});
+
+/**
+ * The store-free presentation of one dictation session. Split from
+ * `DictationStrip` so tests can render the markup directly: the wrapper reads
+ * zustand, and server rendering only sees a zustand store's initial state.
+ */
+export const DictationStripBanner = memo(function DictationStripBanner(props: {
+  session: SymmetriaDictationSession;
+  reducedMotion: boolean;
+  onControl: (action: DictationControlAction) => void;
+  onChangeMode: () => void;
+  onDismiss: () => void;
+}) {
+  const { session, reducedMotion, onControl, onChangeMode, onDismiss } = props;
   const canRecordControl = session.phase === "recording" || session.phase === "paused";
   const canChangeMode =
     session.phase === "recording" ||
@@ -287,91 +320,100 @@ export const DictationStrip = memo(function DictationStrip(props: {
       ? { icon: CheckIcon, label: "Delivered", className: "text-success" }
       : null;
 
+  // Attached composer banner, never a hand-styled surface — the dictation
+  // strip block in mesura.css records why. Placement contract: the strip must
+  // render as the immediate previous sibling of `ComposerSurface.Host` inside
+  // `ComposerSurface.Shell`. ComposerBanner's Attachment fuses with the form's
+  // first banner through the next-sibling selector
+  // `[&+:has([data-chat-composer-form])...]`, so any element inserted between
+  // them breaks the seam — and CSS reports that as silence.
   return (
-    <div
-      className="mesura-dictation-strip pointer-events-auto relative z-0 mx-auto -mb-4 w-[calc(100%-2.75rem)] max-w-[calc(48rem-2.75rem)] px-2 pt-2 pb-5"
+    <ComposerBanner.Attachment
+      className="mesura-dictation-strip pointer-events-auto relative z-0"
       data-phase={session.phase}
-      role="group"
-      aria-label={`Voice dictation: ${dictationPhaseLabel(session.phase)}`}
     >
-      <div className="relative z-10 flex min-h-8 items-center gap-2">
-        <span className="w-12 shrink-0 font-mono text-[11px] text-secondary-label tabular-nums">
-          {formatDictationTime(session)}
-        </span>
-        {terminalPresentation ? (
-          <div
-            className={cn(
-              "flex min-w-0 flex-1 items-center justify-center gap-1.5 text-xs font-medium",
-              terminalPresentation.className,
-            )}
-          >
-            <terminalPresentation.icon className="size-3.5" />
-            <span>{terminalPresentation.label}</span>
-          </div>
-        ) : (
-          <CenterOutWaveform
-            key={session.sessionId}
-            sessionId={session.sessionId}
-            phase={session.phase}
-            audioLevel={session.audioLevel}
-            active={visible}
-            reducedMotion={reducedMotion}
-          />
-        )}
-        <span className="sr-only" role="status">
-          {dictationPhaseLabel(session.phase)}
-        </span>
-        <div className="flex shrink-0 items-center gap-1">
-          {canRecordControl ? (
-            <StripButton
-              label={session.phase === "paused" ? "Resume recording" : "Pause recording"}
-              onClick={() => sendControl(session.phase === "paused" ? "resume" : "pause")}
-            >
-              {session.phase === "paused" ? (
-                <PlayIcon className="size-3.5" />
-              ) : (
-                <PauseIcon className="size-3.5" />
+      <ComposerBanner.Root
+        role="group"
+        aria-label={`Voice dictation: ${dictationPhaseLabel(session.phase)}`}
+      >
+        <div className="flex min-h-7 items-center gap-2 px-2">
+          <span className="w-12 shrink-0 font-mono text-[11px] text-secondary-label tabular-nums">
+            {formatDictationTime(session)}
+          </span>
+          {terminalPresentation ? (
+            <div
+              className={cn(
+                "flex min-w-0 flex-1 items-center justify-center gap-1.5 text-xs font-medium",
+                terminalPresentation.className,
               )}
-            </StripButton>
-          ) : null}
-          {canRecordControl ? (
-            <StripButton label="Restart recording" onClick={() => sendControl("restart")}>
-              <RotateCcwIcon className="size-3.5" />
-            </StripButton>
-          ) : null}
-          {canRecordControl ? (
-            <StripButton label="Cancel dictation" destructive onClick={() => sendControl("cancel")}>
-              <XIcon className="size-3.5" />
-            </StripButton>
-          ) : null}
-          {canRecordControl ? (
-            <StripButton label="Stop and transcribe" onClick={() => sendControl("stop")}>
-              <SquareIcon className="size-3" />
-            </StripButton>
-          ) : null}
-          {session.phase === "grace" ? (
-            <StripButton label="Send now" onClick={() => sendControl("send-now")}>
-              <SendIcon className="size-3.5" />
-            </StripButton>
-          ) : null}
-          <StripButton
-            label={`Delivery mode: ${session.mode}`}
-            disabled={!canChangeMode}
-            modeControl
-            onClick={changeMode}
-          >
-            <MaterialDictationModeIcon mode={session.mode} className="size-3.5" />
-          </StripButton>
-          {canDismiss ? (
-            <StripButton
-              label="Hide dictation status"
-              onClick={() => setDismissedSessionId(session.sessionId)}
             >
-              <XIcon className="size-3.5" />
+              <terminalPresentation.icon className="size-3.5" />
+              <span>{terminalPresentation.label}</span>
+            </div>
+          ) : (
+            <CenterOutWaveform
+              key={session.sessionId}
+              sessionId={session.sessionId}
+              phase={session.phase}
+              audioLevel={session.audioLevel}
+              // Always active here: the wrapper unmounts the banner whenever
+              // this window does not own the presentation.
+              active
+              reducedMotion={reducedMotion}
+            />
+          )}
+          <span className="sr-only" role="status">
+            {dictationPhaseLabel(session.phase)}
+          </span>
+          <div className="flex shrink-0 items-center gap-1">
+            {canRecordControl ? (
+              <StripButton
+                label={session.phase === "paused" ? "Resume recording" : "Pause recording"}
+                onClick={() => onControl(session.phase === "paused" ? "resume" : "pause")}
+              >
+                {session.phase === "paused" ? (
+                  <PlayIcon className="size-3.5" />
+                ) : (
+                  <PauseIcon className="size-3.5" />
+                )}
+              </StripButton>
+            ) : null}
+            {canRecordControl ? (
+              <StripButton label="Restart recording" onClick={() => onControl("restart")}>
+                <RotateCcwIcon className="size-3.5" />
+              </StripButton>
+            ) : null}
+            {canRecordControl ? (
+              <StripButton label="Cancel dictation" destructive onClick={() => onControl("cancel")}>
+                <XIcon className="size-3.5" />
+              </StripButton>
+            ) : null}
+            {canRecordControl ? (
+              <StripButton label="Stop and transcribe" onClick={() => onControl("stop")}>
+                <SquareIcon className="size-3" />
+              </StripButton>
+            ) : null}
+            {session.phase === "grace" ? (
+              <StripButton label="Send now" onClick={() => onControl("send-now")}>
+                <SendIcon className="size-3.5" />
+              </StripButton>
+            ) : null}
+            <StripButton
+              label={`Delivery mode: ${session.mode}`}
+              disabled={!canChangeMode}
+              modeControl
+              onClick={onChangeMode}
+            >
+              <MaterialDictationModeIcon mode={session.mode} className="size-3.5" />
             </StripButton>
-          ) : null}
+            {canDismiss ? (
+              <StripButton label="Hide dictation status" onClick={onDismiss}>
+                <XIcon className="size-3.5" />
+              </StripButton>
+            ) : null}
+          </div>
         </div>
-      </div>
-    </div>
+      </ComposerBanner.Root>
+    </ComposerBanner.Attachment>
   );
 });

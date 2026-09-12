@@ -52,87 +52,21 @@
  */
 
 /**
- * The voice dictation strip's own surface.
+ * The voice dictation strip.
  *
- * These rules lived in `index.css` until the 2026-W35 sync, inside the block
- * upstream deleted when it moved the composer's glass into `ComposerSurface`.
- * Every other class in that block was upstream's and genuinely superseded;
- * `.mesura-dictation-strip` is this fork's and was not. Deleting it left
- * `DictationStrip.tsx` still setting the class and its `data-phase` and
- * `data-dictation-mode-control` hooks with nothing to drive them — the strip
- * rendered with no surface and the delivery pulse never fired. CSS reports that
- * as silence, so nothing failed.
+ * Only the confirmation pulse lives here. The strip's surface — glass, seam,
+ * outline, overlap — comes from upstream's `ComposerBanner.Attachment` and
+ * `ComposerBanner.Root`, which `DictationStrip.tsx` renders directly.
  *
- * They live here now rather than back in `index.css`, which is the better home
- * anyway: this file is the fork's own, so upstream never conflicts with it.
- *
- * Two selectors had to be translated. Upstream replaced `.chat-composer-glass-shell`
- * and `.chat-composer-glass-host` with `data-slot` attributes on `ComposerSurface`,
- * so the strip couples to those instead. The custom properties the strip reads —
- * `--chat-composer-glass-surface`, `--chat-composer-outline`, `--glass-*` — are set
- * on the shell, and the strip renders inside it, so they still inherit.
- *
- * `@variant dark` is unavailable outside `index.css`, so dark mode is `.dark`.
+ * Do not reintroduce a hand-styled surface for the strip. This file used to
+ * carry a full copy of the attached-banner glass plus rules coupling into
+ * `ComposerSurface`'s shell. That copy broke twice: the 2026-W35 sync deleted
+ * its selectors silently when upstream renamed the composer classes, and later
+ * upstream's shell hid its shared glass whenever any attached banner was
+ * present (`has-data-[composer-banner-surface=attached]:before:hidden`), which
+ * left a see-through band in the strip's masked overlap. Rendering on the
+ * upstream primitives removes the entire class of drift.
  */
-
-.mesura-dictation-strip {
-  isolation: isolate;
-}
-
-/* The strip contributes 2.75rem above the composer after its overlap. Start the
-   shell's shared glass at the composer rather than behind the inset strip. */
-[data-slot="composer-shell"]:has(> .mesura-dictation-strip)::before {
-  inset-block-start: 2.75rem;
-}
-
-/* The strip already draws the seam, so the host must not draw one under it. */
-[data-slot="composer-shell"]:has(.mesura-dictation-strip) [data-slot="composer-host"]::after,
-[data-slot="composer-shell"]:has(.mesura-dictation-strip)
-  [data-slot="composer-host"]
-  [data-chat-composer-main-surface="true"]::after {
-  border-top-color: transparent;
-  box-shadow: none;
-}
-
-.mesura-dictation-strip::before {
-  pointer-events: none;
-  position: absolute;
-  z-index: -1;
-  inset: 0;
-  border: 1px solid var(--chat-composer-outline);
-  border-radius: 16px 16px 0 0;
-  background: color-mix(
-    in srgb,
-    var(--chat-composer-glass-surface) var(--glass-opacity),
-    transparent
-  );
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
-  -webkit-mask-image: linear-gradient(to top, transparent 0 1rem, black 1rem);
-  mask-image: linear-gradient(to top, transparent 0 1rem, black 1rem);
-  box-shadow: 0 -12px 28px -18px rgb(0 0 0 / 40%);
-  content: "";
-}
-
-.dark .mesura-dictation-strip::before {
-  border-color: rgb(255 255 255 / 7%);
-  background:
-    linear-gradient(
-      to top,
-      transparent 0 1rem,
-      rgb(0 0 0 / 18%) 1rem,
-      transparent calc(1rem + 10px)
-    ),
-    linear-gradient(rgb(255 255 255 / 2%), rgb(255 255 255 / 2%)),
-    color-mix(in srgb, var(--chat-composer-glass-surface) var(--glass-opacity), transparent);
-  box-shadow: 0 -14px 32px -18px rgb(0 0 0 / 75%);
-}
-
-@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-  .mesura-dictation-strip::before {
-    background: var(--chat-composer-glass-surface);
-  }
-}
 
 /* Confirms a dictated message reached the composer. Deliberately finite — two
    alternating passes — because a looping animation would repaint forever. */
@@ -154,8 +88,11 @@
   }
 }
 
+/* Must repeat the pulse rule's exact selector: a media query adds no
+   specificity, so a shorter selector here loses to the pulse above. */
 @media (prefers-reduced-motion: reduce) {
-  .mesura-dictation-strip [data-dictation-mode-control="true"] {
+  .mesura-dictation-strip:is([data-phase="delivering"], [data-phase="confirming"])
+    [data-dictation-mode-control="true"] {
     animation: none;
   }
 }
