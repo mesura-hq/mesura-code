@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
   defineMesuraMonacoThemes,
   MESURA_MONACO_DARK,
   MESURA_MONACO_LIGHT,
   readCodeSurfaceColors,
+  resetColorProbeForTest,
 } from "./monacoFileTheme";
 
 interface DefinedTheme {
@@ -88,6 +89,11 @@ describe("defineMesuraMonacoThemes", () => {
  * is the point: a fake that ignored alpha would pass with the defect in place.
  */
 describe("readCodeSurfaceColors", () => {
+  // The canvas is memoised for the life of the process, so without this only
+  // the first test's fake is ever used and all three share one pixel — which
+  // is the very thing they are here to catch.
+  beforeEach(resetColorProbeForTest);
+
   interface Pixel {
     r: number;
     g: number;

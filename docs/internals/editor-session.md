@@ -233,6 +233,34 @@ So `binary-missing` cannot be provoked through the desktop by stripping the laun
 that fallback does when it _is_ reached is proved by `nvimFallback.test.ts` and by
 `NodeNvimAdapter`'s classifier, not by this route.
 
+## Monaco's language services, and the alias that removes them
+
+`apps/web` imports a curated Monaco entry rather than the package's own, so the
+CSS, HTML, JSON and TypeScript language services are never registered and their
+worker chunks are never built. A single `resolve.alias` on the bare
+`monaco-editor` specifier points at it.
+
+`optimizeDeps.include` still names `monaco-editor`, because the file panel is
+lazy-loaded and the dependency scanner would otherwise not see roughly two
+thousand ESM modules until the first file is opened — minutes of waterfall over
+a tailnet origin.
+
+**That entry resolves through the alias, and it was measured rather than
+assumed.** Vite has not always applied `resolve.alias` during the dependency
+scan, and if it did not here, dev would silently pre-bundle the whole package
+while production builds stayed correct. After a real `vp run dev`:
+
+- `apps/web/node_modules/.vite/deps/monaco-editor.js` is 2.1 MB,
+- it contains `createTokenizationSupport`, which exists only in the curated
+  entry's JSON exception,
+- and it contains none of `typescriptDefaults`, `cssDefaults`, `htmlDefaults`,
+  `jsonDefaults`, `monaco-lsp-client`, or the
+  `languages/features/{typescript,css,html}` paths.
+
+Re-check those strings after a Vite bump; the behaviour is Vite's, not ours.
+Kept here rather than in `apps/web/vite.config.ts`, which upstream edits often —
+that file carries the one-line alias and a pointer back to this section.
+
 ## Running the conformance harness
 
 The suite in `apps/server/src/editor/conformance/` drives a real Neovim. It is the only thing in

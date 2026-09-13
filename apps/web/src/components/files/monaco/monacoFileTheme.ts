@@ -25,6 +25,19 @@ const FALLBACK_FONT_SIZE_PX = 13;
  */
 let colorProbe: CanvasRenderingContext2D | null | undefined;
 
+/**
+ * Throws the probe canvas away, so the next read builds a new one.
+ *
+ * For tests only. The canvas is memoised for the life of the process, so a
+ * test that installs its own fake `document` gets the fake built by whichever
+ * test ran first — every case then shares one pixel, and the isolation they
+ * appear to have is not real. That matters here specifically: the defect these
+ * tests exist to catch is a canvas carrying state between reads.
+ */
+export function resetColorProbeForTest(): void {
+  colorProbe = undefined;
+}
+
 function colorProbeContext(): CanvasRenderingContext2D | null {
   if (colorProbe === undefined) {
     const canvas = document.createElement("canvas");
@@ -53,8 +66,26 @@ function colorProbeContext(): CanvasRenderingContext2D | null {
  * can itself throw would reintroduce exactly that.
  */
 function toMonacoColor(cssColor: string, fallback: string): string {
+  return paintedColor(cssColor) ?? fallback;
+}
+
+/**
+ * The colour a CSS value paints, or `null` when it paints nothing.
+ *
+ * `null` rather than a sentinel colour. A sentinel has to be a value no theme
+ * would choose, which is a guess — and an element that genuinely painted it
+ * would be read as transparent and walked past.
+ *
+ * Partial alpha is reported as the colour alone, not composited with whatever
+ * is behind it: `rgba(0, 0, 0, 0.5)` over white answers black rather than the
+ * grey on screen. Only full transparency continues the walk. Every surface
+ * this reads today is opaque or absent, and compositing a chain of
+ * translucent ancestors is more machinery than the case has earned — but it
+ * is a limitation rather than a decision, and this is where it would go.
+ */
+function paintedColor(cssColor: string): string | null {
   const context = colorProbeContext();
-  if (context === null) return fallback;
+  if (context === null) return null;
   // Cleared first, because the canvas outlives the call. A colour with any
   // transparency composites over whatever the previous call left on the pixel,
   // so a fully transparent input used to come back as the last colour read —
@@ -62,9 +93,10 @@ function toMonacoColor(cssColor: string, fallback: string): string {
   // editor took its background from whichever colour happened to be read
   // before it.
   context.clearRect(0, 0, 1, 1);
-  // An unparseable value leaves `fillStyle` untouched, so seeding it with the
-  // fallback means a bad colour paints the fallback rather than black.
-  context.fillStyle = fallback;
+  // An unparseable value leaves `fillStyle` untouched. Seeded transparent, so
+  // a colour the browser cannot read answers "nothing painted" rather than
+  // whatever the seed happened to be.
+  context.fillStyle = "rgba(0, 0, 0, 0)";
   context.fillStyle = cssColor;
   context.fillRect(0, 0, 1, 1);
   try {
@@ -72,13 +104,13 @@ function toMonacoColor(cssColor: string, fallback: string): string {
     // Transparent is not a colour Monaco can use, and it is not an error
     // either: it means the element paints nothing and the answer is somewhere
     // above it. The caller decides what to do with the fallback.
-    if ((alpha ?? 0) === 0) return fallback;
+    if ((alpha ?? 0) === 0) return null;
     return `#${[red, green, blue].map((channel) => (channel ?? 0).toString(16).padStart(2, "0")).join("")}`;
   } catch {
     // `getImageData` is the one call here that throws: a tainted canvas, or a
     // browser that treats a pixel read as a fingerprinting attempt and blocks
     // it. Neither is recoverable, and neither is worth a crash.
-    return fallback;
+    return null;
   }
 }
 
@@ -94,7 +126,7 @@ function toMonacoColor(cssColor: string, fallback: string): string {
 export function readCodeSurfaceColors(element: Element): CodeSurfaceColors {
   const computed = getComputedStyle(element);
   return {
-    background: readPaintedBackground(element),
+    background: readPaintedBackground(element, computed),
     foreground: toMonacoColor(computed.color, "#000000"),
   };
 }
@@ -111,24 +143,22 @@ export function readCodeSurfaceColors(element: Element): CodeSurfaceColors {
  * Walking up is what the browser does to paint it, so it is what this does to
  * read it. The document element is the last stop and has one by construction.
  */
-function readPaintedBackground(element: Element): string {
+function readPaintedBackground(element: Element, computed: CSSStyleDeclaration): string {
   let current: Element | null = element;
+  let style: CSSStyleDeclaration = computed;
   while (current !== null) {
-    const painted = toMonacoColor(getComputedStyle(current).backgroundColor, TRANSPARENT);
-    if (painted !== TRANSPARENT) return painted;
+    const painted = paintedColor(style.backgroundColor);
+    if (painted !== null) return painted;
     current = current.parentElement;
+    if (current === null) break;
+    style = getComputedStyle(current);
   }
-  return "#ffffff";
+  // Nothing in the chain paints anything, which should not happen — the
+  // document element has a background by construction. Answering white
+  // regardless would put a dark app's editor on white, so follow the scheme
+  // the page declares.
+  return document.documentElement.classList.contains("dark") ? "#000000" : "#ffffff";
 }
-
-/**
- * The answer `toMonacoColor` gives for something that paints nothing.
- *
- * A sentinel rather than a real colour, so "this element is transparent" and
- * "this element is white" stay different answers. Picked to be a colour no
- * theme would choose on purpose.
- */
-const TRANSPARENT = "#ff00ff";
 
 /** Reads the configured code font, which the appearance settings write to the root. */
 export function readCodeFont(root: HTMLElement = document.documentElement): CodeFont {

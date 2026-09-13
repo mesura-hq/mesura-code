@@ -28,7 +28,7 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import { ServerConfig } from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
-import { APPLY_EDITS_LUA, SET_VIEWPORT_LUA } from "./hostPlugin.ts";
+import { APPLY_EDITS_LUA, SET_CURSOR_LUA, SET_VIEWPORT_LUA } from "./hostPlugin.ts";
 import { NvimAdapter } from "./NvimAdapter.ts";
 import { NvimBridge } from "./NvimBridge.ts";
 
@@ -416,7 +416,17 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         }
 
         session.lastActivityAt = now();
-        session.currentPath = input.relativePath;
+        // Not `session.currentPath` yet. The path is what every snapshot and
+        // every published `lines` event is attributed to, so committing it
+        // before the buffer actually exists means a failure anywhere below
+        // leaves a live session naming the new file while the mirror still
+        // carries the old one's text — and the next attachment gets that pair
+        // and saves it. It is set once the mirror is on the buffer, just
+        // before the snapshot is built. Nothing has to be restored on failure:
+        // leaving it alone *is* the restore, because the old value is still
+        // there. A session created by this very call is dropped by the
+        // `tapCause` below, so its early assignment cannot outlive a failure
+        // either.
         session.buffers.set(absolutePath, {
           relativePath: input.relativePath,
           absolutePath,
@@ -438,18 +448,27 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
           "return mesura.open(...)",
           [absolutePath, [...input.lines]],
         ])) as number;
-        if (typeof openedBuffer === "number") {
-          yield* session.bridge.followBuffer(openedBuffer).pipe(
-            Effect.mapError(
-              (cause) =>
-                new EditorSessionRpcError({
-                  threadId: session.threadId,
-                  method: "open",
-                  detail: cause.message,
-                }),
-            ),
-          );
+        // A hard failure rather than a skipped follow. Skipping put the
+        // snapshot back on whichever buffer the mirror happened to be on,
+        // which is the defect this call exists to fix — re-entered through the
+        // guard added to fix it.
+        if (typeof openedBuffer !== "number") {
+          return yield* new EditorSessionRpcError({
+            threadId: session.threadId,
+            method: "open",
+            detail: "mesura.open did not answer with a buffer number",
+          });
         }
+        yield* session.bridge.followBuffer(openedBuffer).pipe(
+          Effect.mapError(
+            (cause) =>
+              new EditorSessionRpcError({
+                threadId: session.threadId,
+                method: "open",
+                detail: cause.message,
+              }),
+          ),
+        );
         yield* session.bridge.settle.pipe(
           Effect.mapError(
             (cause) =>
@@ -461,6 +480,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
           ),
         );
 
+        session.currentPath = input.relativePath;
         const snapshot = snapshotOf(session);
         // Every attachment is told which file the session now has open, not
         // just the caller. One session serves the whole thread, so a client
@@ -651,7 +671,10 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
             gridId === null ? "nvim_ui_try_resize" : "nvim_ui_try_resize_grid",
             gridId === null ? [input.cols, input.rows] : [gridId, input.cols, input.rows],
           );
-          yield* request(session, "nvim_exec_lua", [SET_VIEWPORT_LUA, [input.topline, input.rows]]);
+          yield* request(session, "nvim_exec_lua", [
+            SET_VIEWPORT_LUA,
+            [session.bridge.attachedBuffer, input.topline, input.rows],
+          ]);
         }),
       ),
     setCursor: (input) =>
@@ -659,7 +682,13 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         input.threadId,
         Effect.gen(function* () {
           const session = yield* requireSession(input.threadId);
-          yield* request(session, "nvim_win_set_cursor", [0, [input.line, input.col - 1]]);
+          // The window showing the mirror's buffer, not the current one. A
+          // plugin can own the window while the mirror is on the file, and
+          // moving the cursor in *that* window moves the plugin's.
+          yield* request(session, "nvim_exec_lua", [
+            SET_CURSOR_LUA,
+            [session.bridge.attachedBuffer, input.line, input.col - 1],
+          ]);
         }),
       ),
     replaceText: (input) =>
@@ -673,6 +702,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
           yield* request(session, "nvim_exec_lua", [
             APPLY_EDITS_LUA,
             [
+              session.bridge.attachedBuffer,
               input.edits.map((edit) => [
                 edit.startLine - 1,
                 edit.startCol - 1,

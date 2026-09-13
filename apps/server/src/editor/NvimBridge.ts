@@ -35,6 +35,56 @@ import { makeNvimRpc, type NvimRpcError } from "./NvimRpc.ts";
  */
 
 /**
+ * What a frame says about whether the cursor is worth asking for.
+ *
+ * Pure and exported so each trigger can be held on its own. Driven through a
+ * real Neovim they overlap — a half-page scroll changes the viewport *and*
+ * redraws every row — so a behavioural test passes with any one of them
+ * deleted, which is the shape of a guard that looks covered and is not.
+ */
+export interface CursorReadTrigger {
+  /** Neovim changed mode in this batch. */
+  readonly hasModeChange: boolean;
+  /** Neovim reported a new viewport in this batch. */
+  readonly hasViewport: boolean;
+  /** How many buffer rows this frame redrew. */
+  readonly changedRows: number;
+  /** The grid's cursor-move count now. */
+  readonly cursorMoves: number;
+  /** The same count as of the last time the cursor was read. */
+  readonly lastCursorMoves: number;
+}
+
+/**
+ * Four triggers, each a class of key the others miss.
+ *
+ * - `cursorMoves` counts a `grid_cursor_goto` that actually moved, which is
+ *   `h`, `j`, `k`, `l` and the arrows.
+ * - `hasModeChange` is the keys that change the mode and move nothing. `i` at
+ *   the start of a line is the one that made this necessary.
+ * - `hasViewport` is the scrolling keys, and it is not redundant: `<C-d>`
+ *   scrolls the text under a cursor that stays on the same screen row, so
+ *   Neovim sends no `grid_cursor_goto` at all even though the buffer cursor
+ *   moved half a page. Measured — the viewport went from 0 to 11 with the move
+ *   count unchanged.
+ * - `changedRows` covers the rest, the awkward one being a long line scrolling
+ *   sideways under a cursor parked at the last column: no new screen position,
+ *   no new topline, new text.
+ *
+ * A real configuration emits about 230 frames a second while completely idle
+ * and nearly all of them draw nothing. An idle frame matches none of these and
+ * costs nothing.
+ */
+export function shouldReadCursor(trigger: CursorReadTrigger): boolean {
+  return (
+    trigger.hasModeChange ||
+    trigger.hasViewport ||
+    trigger.changedRows > 0 ||
+    trigger.cursorMoves !== trigger.lastCursorMoves
+  );
+}
+
+/**
  * What a session tells whoever is watching it.
  *
  * Deliberately close to what Neovim said rather than to what a client wants:
@@ -43,6 +93,17 @@ import { makeNvimRpc, type NvimRpcError } from "./NvimRpc.ts";
  * differently for the next surface.
  */
 export type NvimBridgeEvent =
+  | {
+      /**
+       * The cursor and the mode were re-read, and are now current.
+       *
+       * Its own kind rather than a second `flush`, because it is not a frame:
+       * nothing was drawn. The read is forked off the notification fiber — see
+       * the comment at its trigger — so it finishes after the frame that
+       * caused it, and this is what says it has.
+       */
+      readonly kind: "cursor";
+    }
   | {
       readonly kind: "lines";
       readonly first: number;
@@ -306,6 +367,17 @@ export declare namespace NvimBridge {
      */
     readonly followBuffer: (buffer: number) => Effect.Effect<void, NvimRpcError>;
     /**
+     * The buffer the mirror is on.
+     *
+     * Every write has to name it. Since the host announces nothing and follows
+     * only what it opened, the mirror and Neovim's *current* buffer are allowed
+     * to disagree — a plugin owning the window is the ordinary case — so a
+     * write aimed at buffer `0` lands in the plugin's buffer instead of the
+     * file. Silently: the edit is lost, and the lines event it causes is
+     * dropped by the guard in `applyLinesEvent`, so nothing reports it.
+     */
+    readonly attachedBuffer: number;
+    /**
      * Types keys and returns once Neovim has executed them.
      *
      * `nvim_feedkeys` with the `m`, `t` and `x` flags: remapped, treated as
@@ -490,6 +562,12 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
   let frames = 0;
   /** The grid's cursor-move count as of the last time the cursor was read. */
   let lastCursorMoves = 0;
+  /** Whether a forked cursor read is already on its way. */
+  let cursorRefreshPending = false;
+  /** A `mode_change` seen since the last frame was judged. */
+  let pendingModeChange = false;
+  /** A `win_viewport` seen since the last frame was judged. */
+  let pendingViewport = false;
   /** The command line as it stands, so `cmdline_pos` has something to move. */
   let lastCmdline: NvimCmdline | null = null;
   let visual: NvimVisual | null = null;
@@ -655,23 +733,15 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
           }
           return;
         }
-        if (notification.method === "mesura_buffer_changed") {
-          const [buffer] = notification.params as [number];
-          if (typeof buffer === "number") {
-            yield* attachTo(buffer).pipe(
-              Effect.tapCause((cause) =>
-                Effect.logWarning("could not follow a buffer change", { buffer, cause }),
-              ),
-              Effect.catchCause(() => Effect.void),
-            );
-          }
-          return;
-        }
         if (notification.method === "nvim_buf_lines_event") {
-          bufferEvents += 1;
           const applied = applyLinesEvent(notification.params);
+          // Counted past the guards, not before them. The metric is documented
+          // as a key's text traffic, and an `:s` preview or a burst from a
+          // buffer the mirror has left is neither.
+          if (applied === null) return;
+          bufferEvents += 1;
           grid.setBufferLines(lines);
-          if (applied !== null) tell(applied);
+          tell(applied);
           return;
         }
         if (notification.method !== "redraw") {
@@ -691,59 +761,70 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
         grid.applyRedraw(notification.params as ReadonlyArray<ReadonlyArray<unknown>>);
         const batch = notification.params as ReadonlyArray<ReadonlyArray<unknown>>;
         const hasFlush = batch.some((event) => event[0] === "flush");
-        const hasModeChange = batch.some((event) => event[0] === "mode_change");
-        const hasViewport = batch.some((event) => event[0] === "win_viewport");
+        // Accumulated across batches, not read off the one carrying the flush.
+        // Neovim is free to split a redraw: `mode_change` can arrive in one
+        // notification and the `flush` that ends the frame in the next, and a
+        // flag read only at the flush is then false for a mode change that
+        // certainly happened. Cleared once the frame it belongs to is handled.
+        if (batch.some((event) => event[0] === "mode_change")) pendingModeChange = true;
+        if (batch.some((event) => event[0] === "win_viewport")) pendingViewport = true;
         if (!hasFlush) return;
         frames += 1;
         const collected = grid.collect();
         overlays = collected.overlays;
         highlightRuns = collected.highlightRuns;
 
-        // The cursor and the mode are re-read here, and this is the only place
-        // a key a person pressed can update them. `input` is `nvim_input`,
-        // which is asynchronous and answers nothing, so a motion that changes
-        // no text — `j`, `l`, an arrow key — leaves every other channel
-        // silent: the buffer did not change, and on a file that fits the
-        // window the viewport did not either. Without this the session
-        // reported the cursor it was spawned with for as long as it lived, the
-        // manager compared that unchanged value against itself and published
-        // nothing, and the caret on screen never moved.
+        // The cursor and the mode are re-read after a frame that could have
+        // moved them, and this is the only place a key a person pressed can
+        // update them. `input` is `nvim_input`, which is asynchronous and
+        // answers nothing, so a motion that changes no text — `j`, `l`, an
+        // arrow key — leaves every other channel silent: the buffer did not
+        // change, and on a file that fits the window the viewport did not
+        // either. Without this the session reported the cursor it was spawned
+        // with for as long as it lived, the manager compared that unchanged
+        // value against itself and published nothing, and the caret on screen
+        // never moved.
         //
-        // Asked for rather than taken from the grid, for a reason the grid
-        // cannot fix: with `wrap` off a long line scrolls sideways, so the
-        // cursor's grid column is its screen column and not its column in the
-        // buffer. The grid is only the trigger.
+        // Forked, never awaited here. This is the one fiber consuming
+        // notifications, so awaiting a response inside it stops the whole
+        // stream until Neovim answers — and Neovim does not always answer.
+        // `:!make`, a `press ENTER` prompt and `vim.fn.input()` all hold the
+        // main loop with drawing already on screen. Awaiting here made every
+        // frame wait behind that, `mesura_settled` markers never arrived, and
+        // `settle` — which has no timeout and is called under the thread's
+        // lock — would never resolve, taking the thread with it.
         //
-        // Guarded, because a real configuration emits about 230 frames a
-        // second while completely idle and nearly all of them draw nothing.
-        // Four triggers, and each one is a class of key the others miss:
-        //
-        // - `cursorMoves` counts a `grid_cursor_goto` that actually moved,
-        //   which is `h`, `j`, `k`, `l` and the arrows.
-        // - `mode_change` is the keys that change the mode and move nothing.
-        //   `i` at the start of a line is the one that made this necessary.
-        // - `win_viewport` is the scrolling keys, and it is not redundant:
-        //   `<C-d>` scrolls the text under a cursor that stays on the same
-        //   screen row, so Neovim sends no `grid_cursor_goto` at all even
-        //   though the buffer cursor moved half a page. Measured — the
-        //   viewport went from 0 to 11 with the move count unchanged.
-        // - a row that was redrawn covers the rest, the awkward one being a
-        //   long line scrolling sideways under a cursor parked at the last
-        //   column: no new screen position, no new topline, new text.
-        //
-        // An idle frame matches none of them and costs nothing.
-        if (
-          hasModeChange ||
-          hasViewport ||
-          collected.changedRows.length > 0 ||
-          grid.cursorMoves !== lastCursorMoves
-        ) {
+        // One in flight at a time. A second trigger arriving while a refresh
+        // is pending is dropped rather than queued, which is what keeps a
+        // burst of typing to one round trip rather than one per frame.
+        const trigger: CursorReadTrigger = {
+          hasModeChange: pendingModeChange,
+          hasViewport: pendingViewport,
+          changedRows: collected.changedRows.length,
+          cursorMoves: grid.cursorMoves,
+          lastCursorMoves,
+        };
+        pendingModeChange = false;
+        pendingViewport = false;
+        if (!cursorRefreshPending && shouldReadCursor(trigger)) {
           lastCursorMoves = grid.cursorMoves;
-          yield* refreshCursorAndMode.pipe(
-            Effect.tapCause((cause) =>
-              Effect.logWarning("could not read the cursor after a frame", { cause }),
+          cursorRefreshPending = true;
+          yield* Effect.forkScoped(
+            refreshCursorAndMode.pipe(
+              Effect.tapCause((cause) =>
+                Effect.logWarning("could not read the cursor after a frame", { cause }),
+              ),
+              Effect.catchCause(() => Effect.void),
+              // A `cursor` event carries the freshly read values to the
+              // manager, which reads them the same way it reads them from a
+              // frame. The drawing frame below has already gone out by then.
+              Effect.ensuring(
+                Effect.sync(() => {
+                  cursorRefreshPending = false;
+                  tell({ kind: "cursor" });
+                }),
+              ),
             ),
-            Effect.catchCause(() => Effect.void),
           );
         }
 
@@ -910,7 +991,10 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
     },
     setLines: (next) =>
       settleAfter(rpc.request("nvim_buf_set_lines", [0, 0, -1, false, [...next]])),
-    followBuffer: (buffer: number) => attachTo(buffer),
+    followBuffer: (buffer) => attachTo(buffer),
+    get attachedBuffer() {
+      return attachedBuffer;
+    },
     awaitFrame: awaitFlush,
     nextFrame: Effect.gen(function* () {
       const waiter = yield* Deferred.make<void>();

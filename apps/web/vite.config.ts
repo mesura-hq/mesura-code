@@ -184,15 +184,8 @@ export default defineConfig(() => {
         // thousand ESM modules: without pre-bundling, that first open
         // waterfalls request by request, which is minutes over a tailnet
         // origin. Same reasoning as the warmup list below.
-        //
-        // This name goes through the `resolve.alias` above, so what gets
-        // pre-bundled is the curated entry rather than the package. Measured
-        // rather than assumed, because Vite has not always applied aliases
-        // during the dependency scan: `node_modules/.vite/deps/monaco-editor.js`
-        // from a real dev run is 2.1 MB, carries `createTokenizationSupport`
-        // from the JSON exception, and holds no `typescriptDefaults`,
-        // `cssDefaults`, `htmlDefaults`, `jsonDefaults` or `monaco-lsp-client`.
-        // Check those strings again after a Vite bump.
+        // Resolves through the alias above; how that was verified, and what
+        // to re-check after a Vite bump, is in docs/internals/editor-session.md.
         "monaco-editor",
         "react-dom/client",
       ],

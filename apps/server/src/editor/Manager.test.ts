@@ -169,6 +169,64 @@ const collect = (manager: EditorSessionManager.EditorSessionManager["Service"], 
 const layer = NodeServices.layer;
 
 it.layer(layer, { excludeTestServices: true })("EditorSessionManager", (it) => {
+  it.effect("points the mirror at the buffer it opened, before it answers", () =>
+    Effect.gen(function* () {
+      const { manager, fake, root } = yield* createManager();
+
+      // Nothing else moves the mirror. The `BufEnter` announcement that used
+      // to was removed — Neovim announces a plugin's picker exactly the way it
+      // announces a file — so this call is the *only* thing that puts the
+      // mirror on the file the client asked for. Without it `open` answers
+      // with a snapshot built from whichever buffer the mirror was left on:
+      // the new file's name over the previous file's text, which the client
+      // then writes to disk. That happened to three real files.
+      //
+      // The conformance suite cannot hold this. Its own helper does the
+      // following itself, so deleting this call from the manager leaves every
+      // conformance test green.
+      yield* manager.open({
+        threadId: "thread-1",
+        cwd: root,
+        relativePath: "a.ts",
+        lines: ["const a = 1;"],
+      });
+
+      const openAt = fake.calls.findIndex(
+        (call) => call.method === "nvim_exec_lua" && String(call.params[0]).includes("mesura.open"),
+      );
+      assert.notStrictEqual(openAt, -1, "the file was never opened through the host plugin");
+
+      // Counted from the open, because the session also attaches once at
+      // startup — to whatever buffer Neovim happens to be on, which under a
+      // real configuration is a dashboard.
+      const attachOffset = fake.calls
+        .slice(openAt)
+        .findIndex((call) => call.method === "nvim_buf_attach");
+      assert.notStrictEqual(attachOffset, -1, "the mirror was never pointed at the opened buffer");
+      const attachAt = openAt + attachOffset;
+      const settleAt = fake.calls.findIndex(
+        (call, index) =>
+          index > openAt &&
+          call.method === "nvim_exec_lua" &&
+          String(call.params[0]).includes("mesura_settled"),
+      );
+      assert.isBelow(
+        attachAt,
+        settleAt,
+        "the mirror is pointed at the buffer after the settle, so the snapshot can be built from the previous buffer",
+      );
+
+      // The buffer the plugin answered with, not whatever was current. The
+      // fake hands back a new number for every `mesura.open`.
+      const attached = fake.calls[attachAt]?.params[0];
+      assert.strictEqual(
+        attached,
+        2,
+        "the mirror followed a buffer other than the one just opened",
+      );
+    }),
+  );
+
   it.effect("spawns one Neovim for a thread and reuses it for a second file", () =>
     Effect.gen(function* () {
       const { manager, fake, root } = yield* createManager();

@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import { NodeNvimAdapter } from "../NodeNvimAdapter.ts";
+import { APPLY_EDITS_LUA } from "../hostPlugin.ts";
 import { NvimBridge, type NvimBridgeError } from "../NvimBridge.ts";
 
 /**
@@ -49,9 +50,24 @@ const withNvim = <A>(
 
 const THE_FILE = ["first", "second", "third"];
 
-/** Opens a file the way the manager does, through the host plugin. */
+/**
+ * Opens a file exactly the way the manager does.
+ *
+ * Both halves, because both are load-bearing: `mesura.open` puts the buffer in
+ * the window, and `followBuffer` points the mirror at the buffer it answered
+ * with. Nothing else moves the mirror — the `BufEnter` announcement that used
+ * to is gone, because Neovim announces a plugin's window the same way it
+ * announces a file.
+ */
 const openFile = (bridge: NvimBridge.Session, path: string, lines: ReadonlyArray<string>) =>
-  bridge.request("nvim_exec_lua", ["return _G.mesura.open(...)", [path, [...lines]]]);
+  Effect.gen(function* () {
+    const buffer = (yield* bridge.request("nvim_exec_lua", [
+      "return _G.mesura.open(...)",
+      [path, [...lines]],
+    ])) as number;
+    yield* bridge.followBuffer(buffer);
+    return buffer;
+  });
 
 it.layer(layer)("a buffer the host did not open", (it) => {
   it.effect.skipIf(!nvimAvailable)("does not become the file the client is shown", () =>
@@ -103,7 +119,7 @@ it.layer(layer)("a buffer the host did not open", (it) => {
           "/tmp/mesura-mirror-test/opened.txt",
           THE_FILE,
         )) as number;
-        yield* bridge.followBuffer(buffer);
+        void buffer;
 
         assert.deepStrictEqual(
           bridge.lines,
@@ -112,6 +128,44 @@ it.layer(layer)("a buffer the host did not open", (it) => {
         );
       }),
     ),
+  );
+
+  it.effect.skipIf(!nvimAvailable)(
+    "takes an agent's write to the file, not to whatever holds the window",
+    () =>
+      withNvim((bridge) =>
+        Effect.gen(function* () {
+          yield* openFile(bridge, "/tmp/mesura-mirror-test/written.txt", THE_FILE);
+
+          // A plugin takes the window. The mirror stays on the file, which is
+          // the whole point of the rule above — and it is also what makes the
+          // mirror's buffer and Neovim's *current* buffer disagree.
+          yield* bridge.request("nvim_exec_lua", [
+            `local buffer = vim.api.nvim_create_buf(false, true)
+           vim.bo[buffer].buftype = "nofile"
+           vim.api.nvim_buf_set_lines(buffer, 0, -1, false, { "PLUGIN UI" })
+           vim.api.nvim_set_current_buf(buffer)`,
+            [],
+          ]);
+          yield* bridge.settle;
+
+          // What an agent's write does. Aimed at buffer `0` it lands in the
+          // plugin's buffer: the edit never reaches the file, and the lines
+          // event it causes is dropped by the mirror's own buffer guard, so
+          // nothing anywhere reports that the write was lost.
+          yield* bridge.request("nvim_exec_lua", [
+            APPLY_EDITS_LUA,
+            [bridge.attachedBuffer, [[0, 0, 0, 5, ["FIRST"]]]],
+          ]);
+          yield* bridge.settle;
+
+          assert.deepStrictEqual(
+            bridge.lines,
+            ["FIRST", "second", "third"],
+            "the write went somewhere other than the file the mirror is on",
+          );
+        }),
+      ),
   );
 
   it.effect.skipIf(!nvimAvailable)("still lets the host move between its own files", () =>

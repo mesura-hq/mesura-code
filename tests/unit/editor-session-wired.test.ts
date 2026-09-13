@@ -249,10 +249,24 @@ it("never opens a file in the session with another file's text", () => {
     "monacoFileModelKey(environmentId, cwd, relativePath)",
     "the open effect no longer checks that the model belongs to the path: it will hand the session the previous file's text under this file's name, and that text reaches disk",
   );
-  assert.match(
+  assert.include(
     driver,
-    /if \(model\.uri\.toString\(\) !== expected\.toString\(\)\) return;/,
-    "the model and the path are no longer compared as normalised URIs: comparing the raw key against a parsed one never matches, and the session never opens at all",
+    "monaco.Uri.parse(monacoFileModelKey(",
+    "the model and the path are no longer compared as normalised URIs: the model's URI is the key put through `monaco.Uri.parse`, so comparing the raw key against it never matches and the session never opens at all",
+  );
+
+  // Position, not just presence. The two assertions above pass with the check
+  // moved below the call it guards, or lifted into an effect that runs after
+  // it — either of which reintroduces the defect in full while the guard stays
+  // green.
+  const checkAt = driver.indexOf("model.uri.toString() !== expected.toString()");
+  const openAt = driver.indexOf("openFile(model.getLinesContent())");
+  assert.notStrictEqual(checkAt, -1, "the model-belongs-to-path check is gone");
+  assert.notStrictEqual(openAt, -1, "the driver no longer opens the file in the session");
+  assert.isBelow(
+    checkAt,
+    openAt,
+    "the check no longer runs before the open it guards, so the session is still handed the previous file's text",
   );
 });
 

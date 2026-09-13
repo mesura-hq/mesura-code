@@ -231,7 +231,20 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
     // against the parsed one never matches and the session would never open
     // at all.
     const expected = monaco.Uri.parse(monacoFileModelKey(environmentId, cwd, relativePath));
-    if (model.uri.toString() !== expected.toString()) return;
+    if (model.uri.toString() !== expected.toString()) {
+      // Normally true for exactly one render while the panel switches file,
+      // and the effect runs again when the model catches up. If it is true
+      // forever — a `cwd` or `environmentId` the panel and the driver disagree
+      // about, a model some other path created — then modal editing never
+      // starts and looks exactly like the setting being off.
+      if (import.meta.env.DEV) {
+        console.warn("nvim: the model does not belong to the open path, so no session was opened", {
+          model: model.uri.toString(),
+          expected: expected.toString(),
+        });
+      }
+      return;
+    }
 
     // Nothing the session said about the previous file applies to this one, so
     // the next state this driver sees is reconciled in full.
@@ -465,6 +478,22 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   // taken out and put back flickers, and flash rewrites its labels on every
   // keystroke of a search — so a label that was already in the right place
   // keeps its node and only its text changes.
+  // The decorations collection, and the one place everything drawn is taken
+  // down: a file switch, the driver going quiet, the surface going away.
+  useEffect(() => {
+    if (!enabled || editor === null) return;
+    decorationsRef.current = editor.createDecorationsCollection([]);
+    return () => {
+      decorationsRef.current?.clear();
+      decorationsRef.current = null;
+      for (const { widget } of widgetNodesRef.current.values()) {
+        editor.removeContentWidget(widget);
+      }
+      widgetNodesRef.current.clear();
+      renderedWidgetsRef.current = new Map();
+    };
+  }, [enabled, editor, model]);
+
   useEffect(() => {
     if (!enabled || editor === null) return;
 
@@ -553,22 +582,6 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
     if (style === null) return;
     style.textContent = highlightStylesheet(highlightScope, state.hlDefs);
   }, [highlightScope, state.hlDefs]);
-
-  // The decorations collection, and the one place everything drawn is taken
-  // down: a file switch, the driver going quiet, the surface going away.
-  useEffect(() => {
-    if (!enabled || editor === null) return;
-    decorationsRef.current = editor.createDecorationsCollection([]);
-    return () => {
-      decorationsRef.current?.clear();
-      decorationsRef.current = null;
-      for (const { widget } of widgetNodesRef.current.values()) {
-        editor.removeContentWidget(widget);
-      }
-      widgetNodesRef.current.clear();
-      renderedWidgetsRef.current = new Map();
-    };
-  }, [enabled, editor, model]);
 
   // Visual mode is Monaco's selection, not a decoration. Neovim's own `Visual`
   // group is on the classifier's deny list for the same reason: two things

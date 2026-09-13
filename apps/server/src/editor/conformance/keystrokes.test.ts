@@ -315,6 +315,7 @@ it.layer(layer, { excludeTestServices: true })("conformance: an agent's write", 
         yield* bridge.request("nvim_exec_lua", [
           APPLY_EDITS_LUA,
           [
+            bridge.attachedBuffer,
             [
               [0, 0, 0, 5, ["ALPHA"]],
               [2, 0, 2, 5, ["GAMMA"]],
@@ -350,6 +351,7 @@ it.layer(layer, { excludeTestServices: true })("conformance: an agent's write", 
         yield* bridge.request("nvim_exec_lua", [
           APPLY_EDITS_LUA,
           [
+            bridge.attachedBuffer,
             [
               [0, 6, 0, 9, ["Z"]],
               [0, 0, 0, 3, ["XXXXXXXXXX"]],
@@ -383,6 +385,7 @@ it.layer(layer, { excludeTestServices: true })("conformance: an agent's write", 
         yield* bridge.request("nvim_exec_lua", [
           APPLY_EDITS_LUA,
           [
+            bridge.attachedBuffer,
             [
               [0, 3, 0, 3, ["", ""]],
               [2, 0, 2, 5, ["THREE"]],
@@ -405,6 +408,7 @@ it.layer(layer, { excludeTestServices: true })("conformance: an agent's write", 
         yield* bridge.request("nvim_exec_lua", [
           APPLY_EDITS_LUA,
           [
+            bridge.attachedBuffer,
             [
               [0, 6, 0, 10, ["BETA"]],
               [0, 5, 0, 5, [" and"]],
@@ -433,7 +437,10 @@ it.layer(layer, { excludeTestServices: true })("conformance: the viewport", (it)
           // back — and the snap is invisible from inside the same Lua call,
           // which is what made it survive a first round of testing.
           yield* bridge.request("nvim_ui_try_resize_grid", [2, 120, 10]);
-          yield* bridge.request("nvim_exec_lua", [SET_VIEWPORT_LUA, [50, 10]]);
+          yield* bridge.request("nvim_exec_lua", [
+            SET_VIEWPORT_LUA,
+            [bridge.attachedBuffer, 50, 10],
+          ]);
           yield* bridge.settle;
 
           const view = (yield* bridge.request("nvim_exec_lua", [
@@ -454,7 +461,10 @@ it.layer(layer, { excludeTestServices: true })("conformance: the viewport", (it)
         Effect.gen(function* () {
           yield* bridge.request("nvim_ui_try_resize_grid", [2, 120, 10]);
           yield* bridge.request("nvim_win_set_cursor", [0, [52, 2]]);
-          yield* bridge.request("nvim_exec_lua", [SET_VIEWPORT_LUA, [50, 10]]);
+          yield* bridge.request("nvim_exec_lua", [
+            SET_VIEWPORT_LUA,
+            [bridge.attachedBuffer, 50, 10],
+          ]);
           yield* bridge.settle;
 
           const cursor = (yield* bridge.request("nvim_win_get_cursor", [0])) as [number, number];
@@ -476,7 +486,10 @@ it.layer(layer, { excludeTestServices: true })("conformance: the viewport", (it)
           // the cursor where it was and let Neovim snap the view back.
           yield* bridge.request("nvim_ui_try_resize_grid", [2, 120, 10]);
           yield* bridge.request("nvim_win_set_cursor", [0, [150, 0]]);
-          yield* bridge.request("nvim_exec_lua", [SET_VIEWPORT_LUA, [50, 10]]);
+          yield* bridge.request("nvim_exec_lua", [
+            SET_VIEWPORT_LUA,
+            [bridge.attachedBuffer, 50, 10],
+          ]);
           yield* bridge.settle;
 
           const view = (yield* bridge.request("nvim_exec_lua", [
@@ -498,7 +511,10 @@ it.layer(layer, { excludeTestServices: true })("conformance: the viewport", (it)
         // these, and what matters is that the answer is a line that exists.
         const toplineAfter = (topline: number) =>
           Effect.gen(function* () {
-            yield* bridge.request("nvim_exec_lua", [SET_VIEWPORT_LUA, [topline, 10]]);
+            yield* bridge.request("nvim_exec_lua", [
+              SET_VIEWPORT_LUA,
+              [bridge.attachedBuffer, topline, 10],
+            ]);
             yield* bridge.settle;
             const view = (yield* bridge.request("nvim_exec_lua", [
               "return vim.fn.winsaveview()",

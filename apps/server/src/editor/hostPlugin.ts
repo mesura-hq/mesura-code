@@ -140,47 +140,23 @@ vim.api.nvim_create_autocmd({ "FileType", "BufWinEnter" }, {
   end,
 })
 
---- Tells the host which buffer is current.
+--- The mirror follows only the buffer the host opened, and only because the
+--- host told it to.
 ---
---- The host attaches to a buffer when it connects, and under a real
---- configuration that is very often not the buffer the developer will edit:
---- the developer's own configuration opens a dashboard at startup, on a
---- scratch buffer that is not even modifiable. Without this the mirror stays
---- on the dashboard and reads empty for the rest of the session.
+--- There was a 'BufEnter' announcement here that told the host whenever the
+--- current buffer changed. It is gone, and deliberately. Neovim announces a
+--- plugin's picker, git status, prompt or terminal exactly the way it
+--- announces a file, so the host followed plugins into their own buffers,
+--- sent their contents to the client as the open file, and the save that
+--- followed wrote a plugin's window over the source. Marking the host's own
+--- buffers narrowed that, but left a second fault with no self-healing path:
+--- a switch between two host buffers moved the mirror and told the manager
+--- nothing, so 'currentPath' named one file while the mirror carried another.
 ---
---- The channel number arrives as \`vim.g.mesura_channel\`, which the host sets
---- once it knows its own channel. Until then this stays quiet rather than
---- guessing a channel and writing to somebody else's.
-local function announce_buffer()
-  local channel = vim.g.mesura_channel
-  if type(channel) ~= "number" then
-    return
-  end
-  local buffer = vim.api.nvim_get_current_buf()
-  -- Only a buffer the host opened. Every other buffer that enters a window
-  -- belongs to a plugin — a picker, a git status, a prompt, a terminal — and
-  -- the mirror must not follow it anywhere.
-  --
-  -- This destroyed a file before it was here. The host followed Neovim into
-  -- whatever buffer a mapping opened, sent that buffer's lines to the client
-  -- as though they were the file's, the panel replaced the editor's contents
-  -- with them, and the save that followed wrote a plugin's UI over the source.
-  -- Reproduced: '<C-f>' in the developer's configuration left a one-line
-  -- buffer reading a single emoji, and the file on disk became that emoji.
-  --
-  -- Marked when the host creates it rather than inferred from 'buftype' or
-  -- the name, because both are things a plugin is free to choose and this is
-  -- the one question being asked: did we open this?
-  if vim.b[buffer].mesura_file == nil then
-    return
-  end
-  pcall(vim.rpcnotify, channel, "mesura_buffer_changed", buffer)
-end
-
-vim.api.nvim_create_autocmd({ "BufEnter", "BufWinEnter" }, {
-  group = group,
-  callback = announce_buffer,
-})
+--- The dashboard this was written for needs no announcement either: the host
+--- opens the file into a buffer it owns, and 'Manager.open' follows the buffer
+--- 'mesura.open' answers with. That is the only switch the host ever makes,
+--- and nothing else may move the mirror.
 
 --- The buffers the host opens, keyed by the file they stand for.
 ---
@@ -222,9 +198,6 @@ function mesura.open(abs_path, lines)
     vim.bo[buffer].buftype = "acwrite"
     vim.bo[buffer].swapfile = false
     vim.bo[buffer].undofile = false
-    -- What 'announce_buffer' above tests. It is the host's own mark, so no
-    -- plugin's buffer can carry it by accident.
-    vim.b[buffer].mesura_file = abs_path
 
     -- ':w' is a request, never a write. The host owns the file and saves it
     -- the way the editor's own autosave does, so one path writes it and one
@@ -310,14 +283,14 @@ export const HOST_PLUGIN_RELATIVE_PATH = "mesura_host.lua";
  * Exported because the conformance harness drives this exact string. A test
  * with its own copy of the Lua proves the copy works.
  */
-export const APPLY_EDITS_LUA = `local edits = ...
+export const APPLY_EDITS_LUA = `local buffer, edits = ...
 table.sort(edits, function(left, right)
   if left[1] ~= right[1] then return left[1] < right[1] end
   return left[2] < right[2]
 end)
 for index = #edits, 1, -1 do
   local edit = edits[index]
-  vim.api.nvim_buf_set_text(0, edit[1], edit[2], edit[3], edit[4], edit[5])
+  vim.api.nvim_buf_set_text(buffer, edit[1], edit[2], edit[3], edit[4], edit[5])
 end`;
 
 /**
@@ -334,10 +307,33 @@ end`;
  * be outside it. That is what Vim's own mouse wheel does, and it is the
  * behaviour a developer who chose modal editing already has in their editor.
  */
-export const SET_VIEWPORT_LUA = `local topline, rows = ...
-local last = vim.api.nvim_buf_line_count(0)
+/**
+ * Puts the cursor where the client put it, in the window showing the file.
+ *
+ * Not `nvim_win_set_cursor(0, ...)`. Window `0` is whichever window is
+ * current, and a plugin owning the window while the mirror is on the file is
+ * the ordinary case — so the current window is regularly the wrong one.
+ * A buffer with no window is not an error: the client is describing a file
+ * nothing is showing, and there is nothing to move.
+ */
+export const SET_CURSOR_LUA = `local buffer, line, col = ...
+local window = vim.fn.bufwinid(buffer)
+if window == -1 then
+  return
+end
+local last = vim.api.nvim_buf_line_count(buffer)
+vim.api.nvim_win_set_cursor(window, { math.max(1, math.min(line, last)), col })`;
+
+export const SET_VIEWPORT_LUA = `local buffer, topline, rows = ...
+local window = vim.fn.bufwinid(buffer)
+if window == -1 then
+  return
+end
+local last = vim.api.nvim_buf_line_count(buffer)
 local top = math.max(1, math.min(topline, last))
 local bottom = math.max(top, math.min(last, top + rows - 1))
-local view = vim.fn.winsaveview()
-local lnum = math.min(math.max(view.lnum, top), bottom)
-vim.fn.winrestview({ topline = top, lnum = lnum, col = view.col })`;
+vim.api.nvim_win_call(window, function()
+  local view = vim.fn.winsaveview()
+  local lnum = math.min(math.max(view.lnum, top), bottom)
+  vim.fn.winrestview({ topline = top, lnum = lnum, col = view.col })
+end)`;
