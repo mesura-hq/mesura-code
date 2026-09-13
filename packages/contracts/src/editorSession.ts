@@ -130,6 +130,17 @@ const EditorHighlightDefinition = Schema.Struct({
   bold: Schema.optional(Schema.Boolean),
   italic: Schema.optional(Schema.Boolean),
   underline: Schema.optional(Schema.Boolean),
+  /**
+   * A wavy underline rather than a straight one. Diagnostics use it, and a
+   * client that folded it into `underline` would draw an error like a link.
+   */
+  undercurl: Schema.optional(Schema.Boolean),
+  /**
+   * The two colours swapped. Vim's own `Search` and `IncSearch` are usually
+   * defined this way rather than as a pair, so dropping it paints a match in
+   * the colours of the text around it and shows nothing.
+   */
+  reverse: Schema.optional(Schema.Boolean),
   groups: Schema.Array(Schema.String),
 });
 export type EditorHighlightDefinition = typeof EditorHighlightDefinition.Type;
@@ -194,6 +205,26 @@ const EditorModeEvent = Schema.Struct({
   /** Neovim is waiting for a key a plugin asked for, so it will not answer. */
   blocking: Schema.Boolean,
 });
+
+/**
+ * The selection Neovim is showing.
+ *
+ * Both ends, because neither is "the start": a selection made upwards has its
+ * anchor below its cursor. `kind` is the mode itself, so `v`, `V` and the
+ * literal Ctrl-V of a block stay distinguishable, and the client draws each as
+ * the selection Monaco has for it rather than as a decoration.
+ */
+const EditorVisualEvent = Schema.Struct({
+  type: Schema.Literal("visual"),
+  visual: Schema.NullOr(
+    Schema.Struct({
+      anchor: EditorCursor,
+      cursor: EditorCursor,
+      kind: Schema.String,
+    }),
+  ),
+});
+export type EditorVisual = NonNullable<typeof EditorVisualEvent.Type.visual>;
 
 const EditorViewportEvent = Schema.Struct({
   type: Schema.Literal("viewport"),
@@ -266,6 +297,7 @@ export const EditorSessionEvent = Schema.Union([
   EditorCursorEvent,
   EditorModeEvent,
   EditorViewportEvent,
+  EditorVisualEvent,
   EditorDecorationsEvent,
   EditorHighlightDefinitionsEvent,
   EditorCmdlineEvent,

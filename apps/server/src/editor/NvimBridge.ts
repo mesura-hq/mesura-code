@@ -7,6 +7,8 @@ import type * as PlatformError from "effect/PlatformError";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
+import type { EditorHighlightDefinition } from "@t3tools/contracts";
+
 import { GridModel, type GridOverlay, type HighlightRun } from "./GridModel.ts";
 import { HOST_PLUGIN_LUA, HOST_PLUGIN_RELATIVE_PATH } from "./hostPlugin.ts";
 import { NvimAdapter, type NvimSpawnError } from "./NvimAdapter.ts";
@@ -47,7 +49,17 @@ export type NvimBridgeEvent =
       readonly last: number;
       readonly lines: ReadonlyArray<string>;
     }
-  | { readonly kind: "flush" }
+  | {
+      readonly kind: "flush";
+      /**
+       * The buffer lines whose drawing moved since the last frame.
+       *
+       * Buffer lines rather than grid rows, because a row means nothing on its
+       * own: the same row is a different line the moment the window scrolls,
+       * and a client that took rows would move every label one row per scroll.
+       */
+      readonly changedLines: ReadonlyArray<number>;
+    }
   | {
       readonly kind: "cmdline";
       /** `null` when the command line closed. */
@@ -180,6 +192,39 @@ function tellCmdlineAndMessages(
   return { events, cmdline };
 }
 
+/**
+ * Neovim's highlight attributes, in the shape the wire carries.
+ *
+ * `reverse` and `undercurl` are kept because dropping them is visible: Vim's
+ * own `Search` is commonly a reversed pair rather than two colours, and a
+ * diagnostic's wavy underline read as a straight one looks like a link.
+ */
+const wireHighlightDefinitions = (
+  definitions: ReadonlyMap<
+    number,
+    { attributes: Record<string, unknown>; groups: ReadonlySet<string> }
+  >,
+): ReadonlyMap<number, EditorHighlightDefinition> => {
+  const wire = new Map<number, EditorHighlightDefinition>();
+  for (const [id, definition] of definitions) {
+    const attributes = definition.attributes;
+    const flag = (name: string) => (attributes[name] === true ? true : undefined);
+    const colour = (name: string) =>
+      typeof attributes[name] === "number" ? (attributes[name] as number) : undefined;
+    wire.set(id, {
+      fg: colour("foreground"),
+      bg: colour("background"),
+      bold: flag("bold"),
+      italic: flag("italic"),
+      underline: flag("underline"),
+      undercurl: flag("undercurl"),
+      reverse: flag("reverse"),
+      groups: [...definition.groups],
+    });
+  }
+  return wire;
+};
+
 /** The command line as Neovim draws it, with `ext_cmdline` on. */
 export interface NvimCmdline {
   readonly content: string;
@@ -187,6 +232,20 @@ export interface NvimCmdline {
   /** `:` for a command, `/` or `?` for a search. */
   readonly firstc: string;
   readonly prompt: string;
+}
+
+/**
+ * A visual selection, in Neovim's own terms.
+ *
+ * Both ends are given because neither is "the start": a selection made upwards
+ * has its anchor below its cursor, and a client that assumed otherwise would
+ * draw nothing for half of them. `kind` is the mode itself, so `v`, `V` and
+ * the literal Ctrl-V stay distinguishable.
+ */
+export interface NvimVisual {
+  readonly anchor: NvimCursor;
+  readonly cursor: NvimCursor;
+  readonly kind: string;
 }
 
 export interface NvimCursor {
@@ -201,12 +260,23 @@ export declare namespace NvimBridge {
     readonly lines: ReadonlyArray<string>;
     readonly cursor: NvimCursor;
     readonly mode: string;
+    /** The selection Neovim is showing, `null` outside visual mode. */
+    readonly visual: NvimVisual | null;
     readonly topLine: number;
     /** One past the last buffer line drawn, as `win_viewport` reports it. */
     readonly botLine: number;
     /** The grid the developer's window is drawn on, `null` until Neovim says. */
     readonly bufferGridId: number | null;
     readonly overlays: ReadonlyArray<GridOverlay>;
+    /**
+     * The colours Neovim has defined, by id.
+     *
+     * Kept as the wire's own shape rather than Neovim's raw attribute bag: the
+     * bag carries terminal colour indexes and blend levels this host has no
+     * use for, and passing it whole would make every client decide again which
+     * parts mean something.
+     */
+    readonly highlightDefinitions: ReadonlyMap<number, EditorHighlightDefinition>;
     readonly highlightRuns: ReadonlyArray<HighlightRun>;
     readonly request: (
       method: string,
@@ -408,6 +478,7 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
   let frames = 0;
   /** The command line as it stands, so `cmdline_pos` has something to move. */
   let lastCmdline: NvimCmdline | null = null;
+  let visual: NvimVisual | null = null;
   const watchers = new Set<(event: NvimBridgeEvent) => void>();
 
   const tell = (event: NvimBridgeEvent) => {
@@ -567,7 +638,10 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
         const collected = grid.collect();
         overlays = collected.overlays;
         highlightRuns = collected.highlightRuns;
-        tell({ kind: "flush" });
+        tell({
+          kind: "flush",
+          changedLines: collected.changedRows.map((row) => grid.topLine + row + 1),
+        });
         releaseFlushWaiters();
       }),
     ),
@@ -647,17 +721,38 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
    */
   const refreshCursorAndMode = Effect.gen(function* () {
     const state = (yield* rpc.request("nvim_exec_lua", [
+      // The visual anchor comes back in the same round trip as the cursor and
+      // the mode, because it is only meaningful read with them: `getpos("v")`
+      // answers wherever the cursor is when no selection is running, so the
+      // mode is what says whether the answer means anything.
       `local position = vim.api.nvim_win_get_cursor(0)
+       local mode = vim.api.nvim_get_mode().mode
+       local anchor = nil
+       if mode:sub(1, 1) == "v" or mode:sub(1, 1) == "V" or mode:byte(1) == 22 then
+         local other = vim.fn.getpos("v")
+         anchor = { line = other[2], col = other[3] }
+       end
        return {
          line = position[1],
          col = position[2] + 1,
-         mode = vim.api.nvim_get_mode().mode,
+         mode = mode,
+         anchor = anchor,
          window = vim.api.nvim_get_current_win(),
        }`,
       [],
-    ])) as { line: number; col: number; mode: string; window: number };
+    ])) as {
+      line: number;
+      col: number;
+      mode: string;
+      anchor?: { line: number; col: number };
+      window: number;
+    };
     cursor = { line: state.line, col: state.col };
     mode = state.mode;
+    visual =
+      state.anchor === undefined
+        ? null
+        : { anchor: state.anchor, cursor: { line: state.line, col: state.col }, kind: state.mode };
     grid.setCurrentWindow(state.window);
   });
 
@@ -706,6 +801,12 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
     pid: child.pid,
     get lines() {
       return lines;
+    },
+    get visual() {
+      return visual;
+    },
+    get highlightDefinitions() {
+      return wireHighlightDefinitions(grid.highlightDefinitions);
     },
     get botLine() {
       return grid.botLine;

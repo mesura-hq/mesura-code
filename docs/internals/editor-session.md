@@ -243,8 +243,50 @@ and is stopped before Monaco's keybinding service sees it, and every edit from N
 activation with `setValue`, which is the only public way to clear it — and which destroys every
 decoration on the model first, taking the file comments' anchors with it.
 
+## What Neovim draws, and how it reaches the screen
+
+Everything on the buffer grid that is not the file's own text is classified by phase 1's rule — a
+cell whose character differs from the buffer's is a drawing, a cell that matches but carries a
+highlight is the text marked — and reaches Monaco as one of two things.
+
+- **Overlays are content widgets**, one per cell, named by their position so the same node survives
+  a label changing. Flash rewrites its labels on every keystroke of a search, and a widget removed
+  and added again flickers.
+- **Highlight runs are decorations** with an inline class, and the class is the highlight id. The
+  colours are the developer's own colourscheme, written as one CSS rule per id into a stylesheet
+  scoped to that editor — two file panels on two threads are two Neovims, and id 7 means something
+  different in each.
+- **A visual selection is Monaco's selection**, not a decoration, which is why `Visual` is on the
+  classifier's deny list. Both ends come from Neovim because either can be the earlier one, and the
+  three modes are three different shapes: character-wise gains a column because Vim's selection
+  includes the character under the cursor, line-wise takes whole lines, and a block is one range per
+  line because that is the only way Monaco draws a column.
+
+**`rows` on a decorations event names the lines it replaces, and nothing else.** A host that took
+each event as the whole picture would clear every flash label the moment one unrelated row redrew,
+and under the developer's configuration a row redraws constantly.
+
+**A client reads state, never the last event.** Every event the fold receives lands in a named field
+that survives a coalesced render: the lines themselves, the cursor, the selection, the drawing per
+row — and a _count_ for `:w`, because a write request has no state to summarise and reading it off
+the latest event loses it whenever anything else arrives in the same render. That has now been the
+same defect three times in this cycle, in three different places, and the shape is always a consumer
+asking what just happened instead of what is true.
+
 ## Known limitations
 
+- **`exited` is in the wire contract and nothing sends it.** The event exists for a Neovim that dies
+  or is killed, and the server never constructs one, so no client can react to a session ending
+  unexpectedly. The fallback that needs it is phase 8's.
+- **A visual selection assumes `selection=inclusive`.** His configuration uses the default, measured,
+  and `virtualedit` is empty. Under `selection=exclusive` the drawn selection would be one character
+  too long, and under `virtualedit=block` a block past the end of a short line would be clipped where
+  Vim would not clip it. Neither is plumbed through, deliberately: the option would have to be read
+  per buffer and carried on the wire for a setting he does not use.
+- **`/` does not leave a search highlight under his configuration.** flash owns the key and clears
+  `hlsearch` when its jump finishes, so a search that moved the cursor leaves nothing marked. The
+  run-reporting path is real and is exercised by setting the search register directly; what is
+  absent is Vim's own after-the-fact highlight, and it is absent because he replaced it.
 - **The command-line window is not drawn in the strip.** `q:` and `<C-f>` from the command line open
   a real window, and `ext_cmdline` reports it as the command line closing. The text is visible
   because the window draws like any other, but the strip shows nothing while the developer edits a

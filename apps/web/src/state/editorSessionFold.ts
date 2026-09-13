@@ -1,4 +1,20 @@
-import type { EditorCmdline, EditorSessionEvent } from "@t3tools/contracts";
+import type {
+  EditorCmdline,
+  EditorHighlightDefinition,
+  EditorSessionEvent,
+  EditorVisual,
+} from "@t3tools/contracts";
+
+// Reaching into the Monaco folder for one pure module, which is the wrong
+// direction and the right trade. The row bookkeeping has to happen in the fold
+// — an event lost to a coalesced render is a flash label that never goes away
+// — and it is the same arithmetic the renderer needs, so the alternative is
+// two copies of it drifting apart.
+import {
+  applyDecorationEvent,
+  EMPTY_DECORATION_STATE,
+  type DecorationState,
+} from "../components/files/monaco/nvim/nvimDecorations.ts";
 
 /**
  * The thread's editor session, folded into the state a client renders.
@@ -37,6 +53,22 @@ export interface EditorSessionState {
   readonly cmdline: EditorCmdline | null;
   /** The last message Neovim wrote, and its kind. `null` once cleared. */
   readonly message: { readonly kind: string; readonly text: string } | null;
+  /** Everything drawn over the text, by row. */
+  readonly decorations: DecorationState;
+  /** The colours those drawings refer to, by highlight id. */
+  readonly hlDefs: Readonly<Record<string, EditorHighlightDefinition>>;
+  /** The selection Neovim is showing, `null` outside visual mode. */
+  readonly visual: EditorVisual | null;
+  /**
+   * How many times Neovim has asked the host to write the file.
+   *
+   * A count rather than a flag on the latest event, for the same reason the
+   * lines are kept rather than the last delta: a `:w` immediately followed by
+   * any other event shares one render, and a consumer reading the latest event
+   * sees the other one. The write is then never flushed and the developer is
+   * told their file is saved.
+   */
+  readonly writeRequests: number;
   readonly latestEvent: EditorSessionEvent | null;
   readonly sequence: number;
 }
@@ -49,6 +81,10 @@ export const EMPTY_EDITOR_SESSION_STATE: EditorSessionState = {
   topline: 1,
   cmdline: null,
   message: null,
+  decorations: EMPTY_DECORATION_STATE,
+  hlDefs: {},
+  visual: null,
+  writeRequests: 0,
   latestEvent: null,
   sequence: 0,
 };
@@ -92,6 +128,11 @@ export function applyEditorSessionEvent(
     case "snapshot":
       return {
         ...base,
+        // A snapshot is a new file or a new attachment, so nothing drawn over
+        // the old one survives it.
+        decorations: EMPTY_DECORATION_STATE,
+        hlDefs: { ...state.hlDefs, ...event.snapshot.hlDefs },
+        visual: null,
         relativePath: event.snapshot.relativePath,
         lines: event.snapshot.lines,
         cursor: event.snapshot.cursor,
@@ -116,6 +157,16 @@ export function applyEditorSessionEvent(
         ...base,
         message: event.text === "" ? null : { kind: event.kind, text: event.text },
       };
+    case "decorations":
+      return { ...base, decorations: applyDecorationEvent(state.decorations, event).state };
+    case "hlDefs":
+      // Additions only. Neovim never redefines an id it has already sent, and
+      // a session that was reattached sends them all again.
+      return { ...base, hlDefs: { ...state.hlDefs, ...event.hlDefs } };
+    case "visual":
+      return { ...base, visual: event.visual };
+    case "writeRequested":
+      return { ...base, writeRequests: state.writeRequests + 1 };
     default:
       return base;
   }

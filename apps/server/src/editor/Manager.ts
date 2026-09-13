@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off - the home directory a launch defaults to.
 import * as NodeOS from "node:os";
 import {
+  type EditorHighlightDefinition,
   EditorSessionLookupError,
   EditorSessionRpcError,
   EditorSessionSpawnError,
@@ -471,6 +472,8 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
     let lastCursorCol = -1;
     let lastMode = "";
     let lastTopline = -1;
+    const sentHighlightIds = new Set<number>();
+    let lastVisual = "";
 
     const unsubscribe = session.bridge.subscribe((event) => {
       if (event.kind === "lines") {
@@ -516,6 +519,44 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       if (session.bridge.mode !== lastMode) {
         lastMode = session.bridge.mode;
         publish(session, { type: "mode", mode: lastMode, blocking: false });
+      }
+
+      // The selection. Sent whenever it moves or ends, and compared as a whole
+      // rather than end by end: a selection grows from either end, and the one
+      // that did not move is not evidence that nothing happened.
+      const visual = session.bridge.visual;
+      const visualKey =
+        visual === null
+          ? ""
+          : `${visual.kind}:${visual.anchor.line}:${visual.anchor.col}:${visual.cursor.line}:${visual.cursor.col}`;
+      if (visualKey !== lastVisual) {
+        lastVisual = visualKey;
+        publish(session, { type: "visual", visual });
+      }
+
+      // Everything drawn over the text: flash's labels, the search highlight,
+      // a plugin's virtual text. Sent per frame and only for the lines whose
+      // drawing moved, because the alternative is the whole window on every
+      // one of the two hundred frames a second an idle session produces.
+      if (event.kind === "flush" && event.changedLines.length > 0) {
+        const changed = new Set(event.changedLines);
+        // The definitions first, in the same frame. A run that arrives naming
+        // a colour the client has never been given is drawn in no colour at
+        // all, and the id is the only thing the drawing refers to.
+        const unseen: Record<string, EditorHighlightDefinition> = {};
+        for (const [id, definition] of session.bridge.highlightDefinitions) {
+          if (sentHighlightIds.has(id)) continue;
+          sentHighlightIds.add(id);
+          unseen[String(id)] = definition;
+        }
+        if (Object.keys(unseen).length > 0) publish(session, { type: "hlDefs", hlDefs: unseen });
+
+        publish(session, {
+          type: "decorations",
+          overlays: session.bridge.overlays.filter((overlay) => changed.has(overlay.line)),
+          highlightRuns: session.bridge.highlightRuns.filter((run) => changed.has(run.line)),
+          rows: [...changed],
+        });
       }
 
       // The window Neovim is showing. Half the viewport agreement lives here:

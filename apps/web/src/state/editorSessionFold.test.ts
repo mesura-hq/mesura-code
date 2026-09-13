@@ -7,6 +7,7 @@ import {
   EMPTY_EDITOR_SESSION_STATE,
   type EditorSessionState,
 } from "./editorSessionFold.ts";
+import { widgetsFor } from "../components/files/monaco/nvim/nvimDecorations.ts";
 
 /**
  * Folding a thread's editor session into the state the driver reconciles to.
@@ -181,6 +182,100 @@ describe("applyEditorSessionEvent", () => {
     ]);
     const afterClose = applyEditorSessionEvent(withError, { type: "cmdline", cmdline: null });
     expect(afterClose.message).toBeNull();
+  });
+
+  it("draws what Neovim drew, and keeps the rows an event did not name", () => {
+    // The guard for a defect that shipped once and was invisible: the three
+    // events this phase added fell through to the default branch, so every
+    // flash label, every search highlight and every selection was dropped on
+    // the way to the screen while the suite stayed green.
+    const state = fold(EMPTY_EDITOR_SESSION_STATE, [
+      snapshot(["one", "two", "three"]),
+      {
+        type: "decorations",
+        overlays: [{ line: 1, col: 2, text: "a", hl: 7 }],
+        highlightRuns: [],
+        rows: [1],
+      },
+      {
+        type: "decorations",
+        overlays: [{ line: 3, col: 1, text: "b", hl: 7 }],
+        highlightRuns: [],
+        rows: [3],
+      },
+    ]);
+    expect([...widgetsFor(state.decorations).values()].map((widget) => widget.text).sort()).toEqual(
+      ["a", "b"],
+    );
+  });
+
+  it("keeps the colours a drawing refers to", () => {
+    const state = fold(EMPTY_EDITOR_SESSION_STATE, [
+      snapshot(["one"]),
+      { type: "hlDefs", hlDefs: { "7": { fg: 0xff0000, groups: ["Search"] } } },
+      { type: "hlDefs", hlDefs: { "8": { bg: 0x00ff00, groups: [] } } },
+    ]);
+    expect(Object.keys(state.hlDefs).sort()).toEqual(["7", "8"]);
+    expect(state.hlDefs["7"]?.fg).toBe(0xff0000);
+  });
+
+  it("follows the selection into and out of visual mode", () => {
+    const selected = fold(EMPTY_EDITOR_SESSION_STATE, [
+      snapshot(["one", "two"]),
+      {
+        type: "visual",
+        visual: { anchor: { line: 1, col: 1 }, cursor: { line: 2, col: 3 }, kind: "v" },
+      },
+    ]);
+    expect(selected.visual?.cursor).toEqual({ line: 2, col: 3 });
+
+    const cleared = applyEditorSessionEvent(selected, { type: "visual", visual: null });
+    expect(cleared.visual).toBeNull();
+  });
+
+  it("drops everything drawn over the file it just left", () => {
+    const drawn = fold(EMPTY_EDITOR_SESSION_STATE, [
+      snapshot(["one"]),
+      {
+        type: "decorations",
+        overlays: [{ line: 1, col: 1, text: "a", hl: 7 }],
+        highlightRuns: [],
+        rows: [1],
+      },
+    ]);
+    const switched = applyEditorSessionEvent(drawn, {
+      type: "snapshot",
+      snapshot: {
+        relativePath: "src/b.ts",
+        lines: ["other"],
+        cursor: { line: 1, col: 1 },
+        mode: "n",
+        topline: 1,
+        hlDefs: {},
+      },
+    });
+    expect([...widgetsFor(switched.decorations).values()]).toEqual([]);
+  });
+
+  it("counts every write Neovim asks for, even when another event lands with it", () => {
+    // `:w` produces a write request and then, in the same burst, the redraw
+    // and the command line closing. A consumer reading the latest event sees
+    // one of those instead and never flushes the save — and the developer has
+    // already been told the file was written.
+    const state = fold(EMPTY_EDITOR_SESSION_STATE, [
+      snapshot(["one"]),
+      { type: "writeRequested", relativePath: "src/a.ts" },
+      { type: "cmdline", cmdline: null },
+      { type: "cursor", line: 1, col: 1 },
+    ]);
+    expect(state.writeRequests).toBe(1);
+    expect(state.latestEvent?.type).toBe("cursor");
+
+    const twice = applyEditorSessionEvent(state, {
+      type: "writeRequested",
+      relativePath: "src/a.ts",
+    });
+    expect(twice.writeRequests).toBe(2);
   });
 
   it("counts an event that changes nothing else", () => {

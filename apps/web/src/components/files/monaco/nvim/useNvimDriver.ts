@@ -1,16 +1,26 @@
 import type {
   EditorCmdline,
+  EditorHighlightDefinition,
   EditorSessionEvent,
+  EditorVisual,
   EditorTextEdit,
   EnvironmentId,
   ScopedThreadRef,
 } from "@t3tools/contracts";
 import * as monaco from "monaco-editor";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { editsForLinesEvent, editsForSnapshot, type MonacoEdit } from "./nvimModelSync.ts";
 import { toNvimKey } from "./nvimKeymap.ts";
 import { caretStyleFor } from "./nvimMode.ts";
+import {
+  diffWidgets,
+  runsFor,
+  widgetsFor,
+  type DecorationState,
+  type OverlayWidget,
+} from "./nvimDecorations.ts";
+import { highlightClassName, highlightStylesheet } from "./nvimHighlightStyles.ts";
 import {
   EMPTY_VIEWPORT_HISTORY,
   rememberTopline,
@@ -110,6 +120,10 @@ export interface NvimDriverState {
   readonly topline: number;
   readonly cmdline: EditorCmdline | null;
   readonly message: { readonly kind: string; readonly text: string } | null;
+  readonly decorations: DecorationState;
+  readonly hlDefs: Readonly<Record<string, EditorHighlightDefinition>>;
+  readonly visual: EditorVisual | null;
+  readonly writeRequests: number;
   readonly latestEvent: EditorSessionEvent | null;
   readonly sequence: number;
 }
@@ -158,6 +172,19 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   /** The toplines each side sent recently, which is what makes one an echo. */
   const viewportRef = useRef<ViewportHistory>(EMPTY_VIEWPORT_HISTORY);
   const pendingViewportFrameRef = useRef<number | null>(null);
+  const renderedWidgetsRef = useRef<ReadonlyMap<string, OverlayWidget>>(new Map());
+  const widgetNodesRef = useRef(
+    new Map<string, { widget: monaco.editor.IContentWidget; node: HTMLElement }>(),
+  );
+  const decorationsRef = useRef<monaco.editor.IEditorDecorationsCollection | null>(null);
+  const styleRef = useRef<HTMLStyleElement | null>(null);
+  const hadSelectionRef = useRef(false);
+  const flushedWriteRequestsRef = useRef(0);
+  const reactId = useId();
+  const highlightScope = useMemo(
+    () => `mesura-nvim-scope-${reactId.replaceAll(":", "")}`,
+    [reactId],
+  );
 
   // Hand the file over whenever the model changes identity. The lines come
   // from the model rather than from the `contents` prop, because the model is
@@ -344,11 +371,19 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   }, [enabled, editor, model, sendViewport]);
 
   // `:w`. Neovim asks the host to write, because the host owns the file.
+  //
+  // Counted rather than read off the latest event. A write request followed in
+  // the same render by anything at all — a cursor move, the mode leaving the
+  // command line, the redraw the write itself caused — leaves the latest event
+  // pointing at that other thing, and the save is never flushed while the
+  // developer has been told it was.
   useEffect(() => {
     if (!enabled) return;
-    if (state.latestEvent?.type !== "writeRequested") return;
+    if (state.writeRequests === flushedWriteRequestsRef.current) return;
+    flushedWriteRequestsRef.current = state.writeRequests;
+    if (state.writeRequests === 0) return;
     flushSave();
-  }, [enabled, state.sequence, state.latestEvent, flushSave]);
+  }, [enabled, state.writeRequests, flushSave]);
 
   // The window Neovim is showing, told to Monaco.
   //
@@ -382,6 +417,130 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   // comments' anchors are decorations. Toggling modal editing on a file with
   // comments silently detached every one of them. Do not put it back: the
   // history it removed was inert, and the decorations it removed were not.
+  // Everything Neovim drew over the text, as Monaco's own furniture: the
+  // labels as content widgets, the highlight runs as decorations.
+  //
+  // Diffed against what is on screen rather than rebuilt. A content widget
+  // taken out and put back flickers, and flash rewrites its labels on every
+  // keystroke of a search — so a label that was already in the right place
+  // keeps its node and only its text changes.
+  useEffect(() => {
+    if (!enabled || editor === null) return;
+    if (state.relativePath !== relativePath) return;
+
+    const desired = widgetsFor(state.decorations);
+    const { addedWidgets, changedWidgets, removedWidgetIds } = diffWidgets(
+      renderedWidgetsRef.current,
+      desired,
+    );
+
+    for (const id of removedWidgetIds) {
+      const existing = widgetNodesRef.current.get(id);
+      if (existing === undefined) continue;
+      editor.removeContentWidget(existing.widget);
+      widgetNodesRef.current.delete(id);
+    }
+    for (const overlay of changedWidgets) {
+      const existing = widgetNodesRef.current.get(overlay.id);
+      if (existing === undefined) continue;
+      existing.node.textContent = overlay.text;
+      existing.node.className = `mesura-nvim-overlay ${highlightClassName(overlay.hl)}`;
+    }
+    for (const overlay of addedWidgets) {
+      const node = document.createElement("div");
+      node.textContent = overlay.text;
+      node.className = `mesura-nvim-overlay ${highlightClassName(overlay.hl)}`;
+      const widget: monaco.editor.IContentWidget = {
+        getId: () => overlay.id,
+        getDomNode: () => node,
+        getPosition: () => ({
+          position: { lineNumber: overlay.line, column: overlay.col },
+          preference: [monaco.editor.ContentWidgetPositionPreference.EXACT],
+        }),
+      };
+      editor.addContentWidget(widget);
+      widgetNodesRef.current.set(overlay.id, { widget, node });
+    }
+    renderedWidgetsRef.current = new Map(desired);
+
+    decorationsRef.current?.set(
+      runsFor(state.decorations).map((run) => ({
+        range: {
+          startLineNumber: run.line,
+          startColumn: run.startCol,
+          endLineNumber: run.line,
+          endColumn: run.endCol,
+        },
+        options: { inlineClassName: highlightClassName(run.hl) },
+      })),
+    );
+    // `state.decorations`, not `state.sequence`. The sequence moves for every
+    // event of any kind — a cursor, a mode, a viewport — and keying on it
+    // would rebuild Monaco's decorations collection on each one, which is a
+    // repaint per wire message for a drawing that did not change.
+  }, [enabled, editor, relativePath, state.relativePath, state.decorations]);
+
+  // The colours those drawings refer to, as one stylesheet per surface.
+  //
+  // Scoped by a class on the editor's own container, because two file panels
+  // on two threads are two Neovims and highlight id 7 means something
+  // different in each.
+  useEffect(() => {
+    if (!enabled || editor === null) return;
+    const container = editor.getContainerDomNode();
+    container.classList.add(highlightScope);
+    const style = document.createElement("style");
+    style.setAttribute("data-nvim-hl-scope", highlightScope);
+    document.head.append(style);
+    styleRef.current = style;
+    return () => {
+      style.remove();
+      styleRef.current = null;
+      container.classList.remove(highlightScope);
+    };
+  }, [enabled, editor, highlightScope]);
+
+  useEffect(() => {
+    const style = styleRef.current;
+    if (style === null) return;
+    style.textContent = highlightStylesheet(highlightScope, state.hlDefs);
+  }, [highlightScope, state.hlDefs]);
+
+  // The decorations collection, and the one place everything drawn is taken
+  // down: a file switch, the driver going quiet, the surface going away.
+  useEffect(() => {
+    if (!enabled || editor === null) return;
+    decorationsRef.current = editor.createDecorationsCollection([]);
+    return () => {
+      decorationsRef.current?.clear();
+      decorationsRef.current = null;
+      for (const { widget } of widgetNodesRef.current.values()) {
+        editor.removeContentWidget(widget);
+      }
+      widgetNodesRef.current.clear();
+      renderedWidgetsRef.current = new Map();
+    };
+  }, [enabled, editor, model]);
+
+  // Visual mode is Monaco's selection, not a decoration. Neovim's own `Visual`
+  // group is on the classifier's deny list for the same reason: two things
+  // painting one selection disagree about its edges.
+  useEffect(() => {
+    if (!enabled || editor === null || model === null) return;
+    if (state.relativePath !== relativePath) return;
+    const visual = state.visual;
+    if (visual === null) {
+      if (!hadSelectionRef.current) return;
+      hadSelectionRef.current = false;
+      const position = editor.getPosition();
+      if (position !== null) editor.setSelection({ ...position, ...positionAsRange(position) });
+      return;
+    }
+    hadSelectionRef.current = true;
+    editor.setSelections(selectionsForVisual(visual, model));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, editor, model, relativePath, state.relativePath, state.visual]);
+
   // The mouse is the one place the client tells Neovim where the caret is.
   // Every other cursor movement here is Neovim's own echo coming back.
   useEffect(() => {
@@ -440,3 +599,89 @@ function modelAgreesAbout(
   if (model.getLineCount() !== lines.length) return false;
   return event.lines.every((line, index) => model.getLineContent(event.first + 1 + index) === line);
 }
+
+/** A collapsed range at a position, which is what leaving visual mode leaves. */
+function positionAsRange(position: monaco.IPosition) {
+  return {
+    startLineNumber: position.lineNumber,
+    startColumn: position.column,
+    endLineNumber: position.lineNumber,
+    endColumn: position.column,
+  };
+}
+
+/**
+ * Neovim's selection, as Monaco's.
+ *
+ * Three shapes, and the differences are not cosmetic. Vim's character-wise
+ * selection includes the character under the cursor, so the later end gains a
+ * column; a line-wise selection is whole lines whatever the columns say; and a
+ * block is not one range at all but one per line, which is the only way Monaco
+ * can draw a column.
+ *
+ * Either end can be the earlier one: a selection made upwards has its anchor
+ * below its cursor, and taking the anchor as the start would draw nothing.
+ */
+function selectionsForVisual(
+  visual: EditorVisual,
+  model: monaco.editor.ITextModel,
+): monaco.ISelection[] {
+  const anchor = visual.anchor;
+  const cursor = visual.cursor;
+  const forwards =
+    anchor.line < cursor.line || (anchor.line === cursor.line && anchor.col <= cursor.col);
+  const start = forwards ? anchor : cursor;
+  const end = forwards ? cursor : anchor;
+
+  if (visual.kind.startsWith("V")) {
+    return [
+      {
+        selectionStartLineNumber: start.line,
+        selectionStartColumn: 1,
+        positionLineNumber: end.line,
+        positionColumn: model.getLineMaxColumn(Math.min(end.line, model.getLineCount())),
+      },
+    ];
+  }
+
+  if (visual.kind.charCodeAt(0) === VISUAL_BLOCK_CODE) {
+    const left = Math.min(start.col, end.col);
+    const right = Math.max(start.col, end.col) + 1;
+    const selections: monaco.ISelection[] = [];
+    for (let line = start.line; line <= end.line; line += 1) {
+      if (line > model.getLineCount()) break;
+      const maxColumn = model.getLineMaxColumn(line);
+      selections.push({
+        selectionStartLineNumber: line,
+        selectionStartColumn: Math.min(left, maxColumn),
+        positionLineNumber: line,
+        positionColumn: Math.min(right, maxColumn),
+      });
+    }
+    return selections.length === 0
+      ? [
+          {
+            selectionStartLineNumber: start.line,
+            selectionStartColumn: start.col,
+            positionLineNumber: start.line,
+            positionColumn: start.col,
+          },
+        ]
+      : selections;
+  }
+
+  return [
+    {
+      selectionStartLineNumber: start.line,
+      selectionStartColumn: start.col,
+      positionLineNumber: end.line,
+      positionColumn: Math.min(
+        end.col + 1,
+        model.getLineMaxColumn(Math.min(end.line, model.getLineCount())),
+      ),
+    },
+  ];
+}
+
+/** Neovim reports visual block as the literal Ctrl-V character. */
+const VISUAL_BLOCK_CODE = 22;

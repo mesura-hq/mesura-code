@@ -57,3 +57,22 @@
   z-index: 1;
   pointer-events: auto;
 }
+
+/*
+ * What Neovim drew over the text.
+ *
+ * `position: relative` with a `z-index` because Monaco's `.view-lines` paints
+ * above a content widget that has neither, and a flash label painted under the
+ * text it labels is a label nobody can read. `pointer-events: none` because the
+ * label is not a target: the developer presses its key, they do not click it.
+ * The font is inherited so a label sits on the character grid rather than
+ * beside it — a label in a different font shifts the text it covers.
+ */
+.mesura-nvim-overlay {
+  position: relative;
+  z-index: 2;
+  pointer-events: none;
+  font: inherit;
+  line-height: inherit;
+  white-space: pre;
+}

@@ -148,9 +148,133 @@ if (enabled)
           // did not load or the host's column equality broke.
           assert.isAbove(bridge.overlays.length, 0, "flash drew labels");
 
+          // A label the client cannot colour is a label it draws in the text's
+          // own colours, which is one nobody can see. The id has to resolve to
+          // a definition the wire can carry.
+          const definitions = bridge.highlightDefinitions;
+          const labelled = bridge.overlays.filter((overlay) => overlay.hl !== 0);
+          assert.isNotEmpty(labelled, "the labels carry a highlight id, not the default");
+          for (const overlay of labelled) {
+            const definition = definitions.get(overlay.hl);
+            assert.isDefined(definition, `highlight ${overlay.hl} is defined`);
+            assert.isTrue(
+              definition?.fg !== undefined ||
+                definition?.bg !== undefined ||
+                definition?.reverse === true,
+              `highlight ${overlay.hl} resolves to a colour`,
+            );
+          }
+
           yield* bridge.input("<Esc>");
           yield* bridge.settle;
           yield* assertMirrored(bridge);
+        }).pipe(Effect.orDie),
+      ),
+    );
+
+    it.effect("keeps the labels when an unrelated line changes under them", () =>
+      withRealConfig(
+        [
+          "function alpha() {}",
+          "function beta() {}",
+          "function gamma() {}",
+          "const untouched = 1;",
+        ],
+        "rows.lua",
+        (bridge) =>
+          Effect.gen(function* () {
+            yield* bridge.input("sf");
+            let frames = 0;
+            while (bridge.overlays.length === 0 && frames < 40) {
+              yield* bridge.awaitFrame;
+              frames += 1;
+            }
+            const labelled = bridge.overlays.map(
+              (overlay) => `${overlay.line}:${overlay.col}:${overlay.text}`,
+            );
+            assert.isNotEmpty(labelled, "flash drew labels");
+
+            // A direct API write rather than a key, because flash is blocking
+            // on a label and would take a keystroke as one. This is what an
+            // agent's write looks like from Neovim's side, and it is the case
+            // the per-row bookkeeping exists for: a line redrawing must not
+            // take the labels off every other line with it.
+            yield* bridge.request("nvim_buf_set_lines", [0, 3, 4, false, ["const changed = 2;"]]);
+            yield* bridge.awaitFrame;
+
+            const stillThere = bridge.overlays.map(
+              (overlay) => `${overlay.line}:${overlay.col}:${overlay.text}`,
+            );
+            for (const label of labelled) {
+              assert.include(stillThere, label, "a label on an untouched line survived");
+            }
+
+            yield* bridge.input("<Esc>");
+            yield* bridge.settle;
+          }).pipe(Effect.orDie),
+      ),
+    );
+
+    it.effect("draws a search as highlight runs over the text it matched", () =>
+      withRealConfig(["alpha target beta", "gamma delta", "target again"], "search.lua", (bridge) =>
+        Effect.gen(function* () {
+          // The search register directly, rather than the `/` key. Measured:
+          // under his configuration `/target<CR>` moves the cursor onto the
+          // match and leaves nothing highlighted, because flash owns `/` and
+          // clears `hlsearch` when its jump finishes. Pressing the key here
+          // would test flash's behaviour and call it this host's.
+          yield* bridge.type(':let @/ = "target"<CR>');
+          yield* bridge.type(":set hlsearch<CR>");
+          yield* bridge.settle;
+
+          // Frames, bounded, not one frame and a hope. Under a configuration
+          // this size the redraw that paints the matches is not reliably the
+          // next one — measured: one run in four reported nothing when this
+          // waited for a single frame, which is a test that lies a quarter of
+          // the time about a feature that works.
+          let frames = 0;
+          while (bridge.highlightRuns.length === 0 && frames < 40) {
+            yield* bridge.awaitFrame;
+            frames += 1;
+          }
+
+          const runs = bridge.highlightRuns;
+          assert.isNotEmpty(runs, "the matches are marked");
+          // Marked rather than drawn over: the characters are the file's own,
+          // so they are runs and not overlays. A host that reported them as
+          // overlays would draw the text twice.
+          for (const run of runs) {
+            assert.isAbove(run.endCol, run.startCol, "a run covers something");
+          }
+
+          yield* bridge.type(":noh<CR>");
+          yield* bridge.settle;
+          yield* assertMirrored(bridge);
+        }).pipe(Effect.orDie),
+      ),
+    );
+
+    it.effect("reports a selection for each of the three visual modes", () =>
+      withRealConfig(["alpha beta", "gamma delta", "epsilon zeta"], "visual.lua", (bridge) =>
+        Effect.gen(function* () {
+          yield* bridge.type("ggv2j");
+          yield* bridge.settle;
+          const characterwise = bridge.visual;
+          assert.isNotNull(characterwise, "a character-wise selection is reported");
+          assert.strictEqual(characterwise?.anchor.line, 1, "anchored where it started");
+          assert.strictEqual(characterwise?.cursor.line, 3, "and the cursor is where it is now");
+
+          yield* bridge.type("<Esc>V");
+          yield* bridge.settle;
+          assert.strictEqual(bridge.visual?.kind.startsWith("V"), true, "line-wise says so");
+
+          yield* bridge.type("<Esc><C-v>j");
+          yield* bridge.settle;
+          assert.strictEqual(bridge.visual?.kind.charCodeAt(0), 22, "and a block says so");
+
+          yield* bridge.type("<Esc>");
+          yield* bridge.settle;
+          assert.isNull(bridge.visual, "leaving visual mode ends the selection");
         }).pipe(Effect.orDie),
       ),
     );
