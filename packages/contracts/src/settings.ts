@@ -711,6 +711,18 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(true)),
   ),
   addProjectBaseDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  /**
+   * Where the embedded Neovim reads its configuration from.
+   *
+   * Machine-local, so it is deliberately absent from the shared server keys:
+   * the value is a path on one machine's disk, and pushed to another
+   * environment it would name a directory that is not there. Unexpanded on
+   * purpose — the schema keeps what the developer typed and the server
+   * expands `~` when it launches.
+   */
+  neovimConfigDirectory: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("~/.neovim")),
+  ),
   textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(
       Effect.succeed({
@@ -918,6 +930,7 @@ export const ServerSettingsPatch = Schema.Struct({
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
   addProjectBaseDirectory: Schema.optionalKey(TrimmedString),
+  neovimConfigDirectory: Schema.optionalKey(TrimmedString),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   sourceControlWritingStyle: Schema.optionalKey(
     Schema.Struct({

@@ -105,3 +105,16 @@ describe("findSharedSettingsMismatches", () => {
     expect(mismatches).toEqual([]);
   });
 });
+
+describe("machine-local server settings", () => {
+  it("keeps the Neovim configuration directory out of the shared keys", () => {
+    // The path names a directory on one machine's disk. Pushed to every
+    // connected environment it would point at a directory that is not there,
+    // and the editor would fail to start on the machine that never set it.
+    const { sharedPatch, localPatch } = splitSharedServerPatch({
+      neovimConfigDirectory: "~/.neovim",
+    });
+    expect(sharedPatch).toEqual({});
+    expect(localPatch).toEqual({ neovimConfigDirectory: "~/.neovim" });
+  });
+});

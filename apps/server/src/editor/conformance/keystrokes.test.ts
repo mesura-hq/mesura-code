@@ -4,6 +4,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Result from "effect/Result";
 
 import { NodeNvimAdapter } from "../NodeNvimAdapter.ts";
 import { NvimBridge, type NvimBridgeError } from "../NvimBridge.ts";
@@ -47,16 +48,19 @@ const withNvim = <A>(
   }).pipe(Effect.scoped);
 
 /**
- * Sends keys and waits for the redraw they cause, never for a clock.
+ * Types keys and returns once Neovim has executed them, never waiting on a
+ * clock.
  *
- * Every sequence here must actually change the screen. A key that changes
- * nothing produces no redraw, so waiting for one waits forever — which is why
- * a no-op `gg` at the top of a buffer does not belong in a case.
+ * `type` rather than `input`: `nvim_input` is asynchronous and nothing says
+ * when it has been consumed, so a harness built on it asserts against whatever
+ * state happens to exist. `awaitFlush` is not the answer either — waiting for
+ * the next frame assumes the key is the only thing drawing, which holds for
+ * `--clean` and fails the moment a real configuration is loaded.
  */
 const send = (bridge: NvimBridge.Session, keys: string) =>
   Effect.gen(function* () {
-    yield* bridge.input(keys);
-    yield* bridge.awaitFlush;
+    yield* bridge.type(keys);
+    yield* bridge.settle;
   });
 
 /** What Neovim itself says, to compare the mirror against. */
@@ -101,9 +105,11 @@ const KEYSTROKE_CASES: ReadonlyArray<KeystrokeCase> = [
     lines: ["one", "two", "three"],
     keys: ["ggVGd"],
   },
-  // The cursor already sits on line 1, so `gg` is left out: a key that changes
-  // nothing draws nothing, and `send` waits for the frame a key caused.
   { name: "dG from the top empties the buffer the same way", lines: ["a", "b"], keys: ["dG"] },
+  // A sequence that changes nothing. It belongs here precisely because it is
+  // the case a flush-based settle could not express: no redraw follows, so
+  // waiting for a frame waits forever, while draining the typeahead returns.
+  { name: "gg at the top of the buffer is a no-op", lines: ["one", "two"], keys: ["gg"] },
 ];
 
 if (!nvimAvailable) {
@@ -183,15 +189,106 @@ it.layer(layer, { excludeTestServices: true })("conformance: the mirror equals N
     ),
   );
 
+  it.effect("follows a buffer switch instead of mirroring the buffer it left", () =>
+    withNvim(["first buffer"], (bridge) =>
+      Effect.gen(function* () {
+        // A session does not stay on the buffer it attached to. Under a real
+        // configuration it starts on a dashboard; here `:enew` stands in for
+        // the same move. A mirror that does not follow reads the old buffer's
+        // text for the rest of the session and nothing reports it.
+        yield* bridge.request("nvim_command", ["enew"]);
+        yield* bridge.settle;
+        const now = yield* bridge.request("nvim_exec_lua", [
+          "return vim.api.nvim_get_current_buf()",
+          [],
+        ]);
+        require("node:fs").appendFileSync("/tmp/probe-attach.txt", `after-enew=${now}\n`);
+        yield* bridge.setLines(["second buffer"]);
+        yield* send(bridge, "A!");
+        yield* send(bridge, "<Esc>");
+
+        const expected = yield* truth(bridge);
+        assert.deepStrictEqual(expected.lines, ["second buffer!"], "Neovim's own buffer");
+        assert.deepStrictEqual(bridge.lines, ["second buffer!"], "the mirror");
+      }),
+    ),
+  );
+
+  it.effect("keeps following the buffer it has when an attach fails", () =>
+    withNvim(["first buffer"], (bridge) =>
+      Effect.gen(function* () {
+        // An announcement naming a buffer that is not there. The attach fails,
+        // and failing is right — the buffer really is gone. What must not
+        // happen is the mirror giving up the buffer it was already following:
+        // recording the new buffer before the attach succeeded detaches from
+        // the good one and then leaves the mirror pointed at a buffer that
+        // will never send an event, so every later edit is dropped and the
+        // text goes stale with nothing reporting it.
+        const gone = (yield* bridge.request("nvim_exec_lua", [
+          `local buffer = vim.api.nvim_create_buf(true, false)
+           vim.api.nvim_buf_delete(buffer, { force = true })
+           return buffer`,
+          [],
+        ])) as number;
+
+        yield* bridge.request("nvim_exec_lua", [
+          "vim.rpcnotify(vim.g.mesura_channel, 'mesura_buffer_changed', ...)",
+          [gone],
+        ]);
+        yield* bridge.settle;
+
+        yield* send(bridge, "A!");
+        yield* send(bridge, "<Esc>");
+
+        const expected = yield* truth(bridge);
+        assert.deepStrictEqual(expected.lines, ["first buffer!"], "Neovim's own buffer");
+        assert.deepStrictEqual(bridge.lines, ["first buffer!"], "the mirror");
+      }),
+    ),
+  );
+
+  it.effect("fails the settle when the host channel is gone, rather than waiting for ever", () =>
+    withNvim(["one"], (bridge) =>
+      Effect.gen(function* () {
+        // `settle` waits for a notification it asks Neovim to send back. If the
+        // channel it names is not there, the notification is never sent and
+        // nothing arrives — so the wait has to be a failure rather than a
+        // silence. A hung settle stops a whole session with no message.
+        yield* bridge.request("nvim_command", ["unlet g:mesura_channel"]);
+
+        const outcome = yield* bridge.settle.pipe(Effect.result);
+        assert.isTrue(Result.isFailure(outcome), "the settle reported the missing channel");
+
+        // And the session is still usable afterwards: the failure is the
+        // settle's, not the bridge's.
+        yield* bridge.request("nvim_exec_lua", ["vim.g.mesura_channel = ...", [1]]);
+        yield* send(bridge, "A!");
+        yield* send(bridge, "<Esc>");
+        assert.deepStrictEqual(bridge.lines, ["one!"]);
+      }),
+    ),
+  );
+
   it.effect("drops no character under fifty insert-mode keystrokes", () =>
     withNvim([""], (bridge) =>
       Effect.gen(function* () {
         const typed = Array.from({ length: 50 }, (_, index) => String(index % 10)).join("");
-        yield* send(bridge, "i");
+
+        // `input` one character at a time, because per-key delivery is the
+        // whole subject here and `type` would defeat it twice over: it sends
+        // the sequence in one call, and its `x` flag aborts an incomplete
+        // command, so a lone `i` never reaches insert mode at all. Settling on
+        // the frame is sound in this file and only in this file — a character
+        // typed in insert mode always redraws, and `--clean` has nothing else
+        // drawing to be confused with.
+        yield* bridge.input("i");
+        yield* bridge.awaitFlush;
         for (const character of typed) {
-          yield* send(bridge, character);
+          yield* bridge.input(character);
+          yield* bridge.awaitFlush;
         }
-        yield* send(bridge, "<Esc>");
+        yield* bridge.input("<Esc>");
+        yield* bridge.awaitFlush;
 
         const expected = yield* truth(bridge);
         assert.deepStrictEqual(expected.lines, [typed], "Neovim's own buffer");

@@ -468,3 +468,21 @@ describe("ServerSettingsPatch string normalization", () => {
     expect(encoded.providers?.codex?.launchArgs).toBe("--strict-config");
   });
 });
+
+describe("ServerSettings.neovimConfigDirectory", () => {
+  it("defaults to the directory the developer clones their configuration into", () => {
+    expect(decodeServerSettings({}).neovimConfigDirectory).toBe("~/.neovim");
+  });
+
+  it("keeps a configured directory and trims it", () => {
+    expect(
+      decodeServerSettings({ neovimConfigDirectory: "  ~/dotfiles/nvim  " }).neovimConfigDirectory,
+    ).toBe("~/dotfiles/nvim");
+  });
+
+  it("accepts the directory in a patch", () => {
+    expect(
+      decodeServerSettingsPatch({ neovimConfigDirectory: "  /srv/nvim  " }).neovimConfigDirectory,
+    ).toBe("/srv/nvim");
+  });
+});

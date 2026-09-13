@@ -1,3 +1,4 @@
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
@@ -11,6 +12,23 @@ import {
   type NvimProcess,
   type NvimSpawnInput,
 } from "./NvimAdapter.ts";
+
+/**
+ * How long Neovim gets to stop on its own before it is killed outright.
+ *
+ * Measured, not defensive: sent a plain `SIGTERM` on its own process id, a
+ * Neovim with a UI attached and the developer's configuration loaded prints
+ * `Caught deadly signal` and then stays alive — lazy.nvim's update checker and
+ * its change-detection file watchers leave libuv handles open, and the exit
+ * path never finishes. The same Neovim with `--clean`, or with those two
+ * features off, exits in a millisecond.
+ *
+ * In practice this grace has not been seen to elapse, because the spawner
+ * signals the whole process group rather than one process id, and that does
+ * stop it. The escalation stays for the case where it does not: a session that
+ * ends has to be able to end whatever a plugin is doing.
+ */
+const KILL_GRACE = Duration.seconds(2);
 
 /**
  * The real Neovim, spawned through Effect's process service.
@@ -68,7 +86,13 @@ const spawnWith = (
       ),
       kill: (signal?: string) =>
         child
-          .kill(signal === undefined ? undefined : { killSignal: signal as never })
+          .kill({
+            killSignal: (signal ?? "SIGTERM") as never,
+            // The spawner already knows how to escalate, so this is one option
+            // rather than a second implementation of it standing beside the
+            // first and drifting from it.
+            forceKillAfter: KILL_GRACE,
+          })
           .pipe(Effect.catchCause(() => Effect.void)),
     } satisfies NvimProcess;
   });
