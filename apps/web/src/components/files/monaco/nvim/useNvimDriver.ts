@@ -198,6 +198,12 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   // from the model rather than from the `contents` prop, because the model is
   // what the developer is looking at — it may already carry edits the prop
   // does not.
+  //
+  // This also covers coming back to a model that was kept while the developer
+  // was somewhere else. The model outlives the panel now, so a return finds it
+  // with its undo stack intact, and the session answers the open with a
+  // snapshot that the driver reconciles against — no reset, and nothing that
+  // would empty a stack the whole registry exists to keep.
   useEffect(() => {
     if (!enabled || model === null) return;
     // Nothing the session said about the previous file applies to this one, so

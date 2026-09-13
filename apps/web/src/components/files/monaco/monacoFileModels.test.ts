@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   MonacoFileModelCache,
   monacoFileModelKey,
+  relativePathFromModelKey,
   type CachedModel,
   type ModelStore,
 } from "./monacoFileModels";
@@ -201,5 +202,36 @@ describe("monacoFileModelKey", () => {
     expect(monacoFileModelKey("local", "/a", "b/c.ts")).not.toBe(
       monacoFileModelKey("local", "/a/b", "c.ts"),
     );
+  });
+});
+
+describe("eviction listener", () => {
+  it("tells whoever else is keyed by the same path", () => {
+    // What bounds the retention record now that it lives as long as the
+    // project rather than as long as a panel: without this it holds one string
+    // per file ever opened, for the whole session.
+    const { cache } = makeCache(2);
+    const evicted: string[] = [];
+    cache.onEvict((key) => evicted.push(key));
+
+    visit(cache, "a");
+    visit(cache, "b");
+    cache.acquire("c", "three", "plaintext");
+
+    expect(evicted).toEqual(["a"]);
+  });
+});
+
+describe("relativePathFromModelKey", () => {
+  it("reads the path back out of a key it built", () => {
+    const key = monacoFileModelKey("env-1", "/home/dev/project", "src/a/b.ts");
+    expect(relativePathFromModelKey(key)).toBe("src/a/b.ts");
+  });
+
+  it("survives a working directory with separators in it", () => {
+    // The `cwd` is encoded on the way in, which is what leaves the separators
+    // in the key belonging to the file's own path and nothing else.
+    const key = monacoFileModelKey("env-1", "/home/dev/a/deep/place", "one.ts");
+    expect(relativePathFromModelKey(key)).toBe("one.ts");
   });
 });

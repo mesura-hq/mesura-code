@@ -49,10 +49,9 @@ import FileBrowserPanel from "./FileBrowserPanel";
 import { FileMarkdownPreview } from "./FileMarkdownPreview";
 import { resolveCenteredFileLineScrollTop } from "./fileLineReveal";
 import { projectFileCacheKey } from "./fileContentRevision";
-import { FileEditorRetention } from "./fileEditorRetention";
+import { useProjectEditorModels } from "./monaco/useProjectEditorModels";
 import { useProjectFileWatch } from "./useProjectFileWatch";
 import { MonacoFileSurface } from "./monaco/MonacoFileSurface";
-import { createMonacoFileModels } from "./monaco/monacoFileModelStore";
 import { useFileSaveCoordinator, type FileSaveCoordinatorInput } from "./useFileSaveCoordinator";
 import { fileBreadcrumbs } from "./filePath";
 import { isMarkdownPreviewFile, setMarkdownTaskChecked } from "./filePreviewMode";
@@ -524,19 +523,15 @@ export default function FilePreviewPanel({
   const wordWrap = useClientSettings((settings) => settings.wordWrap);
   const modalEditing = useClientSettings((settings) => settings.modalEditing);
   // Retention outlives every file the panel shows. The editor that reads it
-  // lives in the surface below and is created once, for the same reason.
-  const [retention] = useState(() => new FileEditorRetention());
-  useEffect(() => () => retention.clear(), [retention]);
-  // The editor's models live here, above the surface that uses them.
+  // The editor's models and the retention record that goes with them.
   //
-  // The surface is unmounted for anything this panel draws in its place, and
-  // the most ordinary of those is the spinner shown while a file is read: every
-  // switch to a file this client has not read yet tears the editor down for the
-  // length of the round trip. The undo stack lives in the model, so a cache
-  // owned by the surface would be destroyed by exactly the action it exists to
-  // survive.
-  const [models] = useState(() => createMonacoFileModels());
-  useEffect(() => () => models.disposeAll(), [models]);
+  // Held by a registry outside React rather than by this panel, because the
+  // undo stack lives in the Monaco model and this panel unmounts for three
+  // ordinary things: the spinner while a file is read, opening Settings, and
+  // switching to a thread in another project. The first was already survived
+  // by hoisting the cache here from the surface; the other two are route
+  // changes, which no component survives.
+  const { models, retention } = useProjectEditorModels(environmentId, cwd);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const remoteOpenState = useRemoteOpenState(environmentId);
   const environmentHttpBaseUrl = useEnvironmentHttpBaseUrl(environmentId);

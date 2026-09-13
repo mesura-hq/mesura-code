@@ -86,6 +86,19 @@ it("hands the surface the retention record it needs to tell our edits from the a
   assert.match(element, /\bretention=\{retention\}/);
 });
 
+it("does not own the editor models it uses, so a route change cannot take them", () => {
+  const source = panelSource();
+
+  // The undo stack lives in the Monaco model, and this panel unmounts for
+  // three ordinary things: the spinner while a file is read, opening Settings,
+  // and switching to a thread in another project. A panel that built the cache
+  // would destroy the stack on exactly the actions it exists to survive.
+  assert.include(source, "useProjectEditorModels(environmentId, cwd)");
+  assert.notInclude(source, "createMonacoFileModels");
+  assert.notInclude(source, "disposeAll");
+  assert.notInclude(source, "new FileEditorRetention()");
+});
+
 it("no longer builds an editable surface out of Pierre", () => {
   const source = panelSource();
 
@@ -231,16 +244,25 @@ it("keeps the editor mounted while the next file is read", () => {
   );
 });
 
-it("owns the models above the surface that uses them", () => {
+it("keeps the models further from the surface than the surface can reach", () => {
   const panel = panelSource();
   const surface = surfaceSource();
 
+  // This guard used to say the *panel* owns the cache, which was right when
+  // the only thing it had to survive was the spinner shown while a file is
+  // read. It does not say that any more, because the panel unmounts for two
+  // more ordinary things — opening Settings, and switching to a thread in
+  // another project — and both are route changes. What has to stay true is the
+  // property rather than the place: whoever holds the cache must outlive
+  // whoever draws the editor.
+  // The call, not the identifier: an import that is still there while the
+  // call has gone back to building a cache satisfies a looser assertion and
+  // proves nothing.
   assert.include(
     panel,
-    "createMonacoFileModels()",
-    "the panel no longer owns the model cache; owned by the surface, it dies every time the surface is unmounted",
+    "useProjectEditorModels(environmentId, cwd)",
+    "the panel builds its own cache again, which dies on every route change",
   );
-  assert.include(panel, "models.disposeAll()", "nothing disposes the cached models");
   assert.notInclude(
     surface,
     "createMonacoFileModels",

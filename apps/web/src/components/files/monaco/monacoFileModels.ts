@@ -55,9 +55,23 @@ export class MonacoFileModelCache<Model extends CachedModel, ViewState> {
    */
   readonly #entries = new Map<string, CacheEntry<Model, ViewState>>();
 
+  /**
+   * Told when a key is dropped, so whatever else is keyed by the same path can
+   * be dropped with it.
+   *
+   * The retention record is the one that needs this: it lives beside this
+   * cache for as long as the project does, and without a hook it keeps one
+   * string per file ever opened, for the whole session.
+   */
+  #onEvict: ((key: string) => void) | null = null;
+
   constructor(store: ModelStore<Model>, limit: number = RETAINED_MODEL_LIMIT) {
     this.#store = store;
     this.#limit = limit;
+  }
+
+  onEvict(listener: (key: string) => void): void {
+    this.#onEvict = listener;
   }
 
   /**
@@ -136,6 +150,7 @@ export class MonacoFileModelCache<Model extends CachedModel, ViewState> {
       if (entry === undefined) continue;
       if (!entry.model.isDisposed()) entry.model.dispose();
       this.#entries.delete(key);
+      this.#onEvict?.(key);
     }
   }
 }
@@ -157,6 +172,18 @@ export function monacoFileModelKey(
   relativePath: string,
 ): string {
   return `mesura-file:///${environmentId}/${encodeURIComponent(cwd)}/${relativePath}`;
+}
+
+/**
+ * The path back out of a model key.
+ *
+ * Beside the function that builds the key, so the two cannot drift. The `cwd`
+ * is encoded on the way in precisely so it holds no separator, which is what
+ * makes everything after it the file's own path however many segments it has.
+ */
+export function relativePathFromModelKey(key: string): string {
+  const parts = key.split("/");
+  return parts.slice(5).join("/");
 }
 
 /** The cache as the file panel and the surface pass it around. */

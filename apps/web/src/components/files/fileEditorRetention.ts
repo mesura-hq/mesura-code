@@ -1,9 +1,12 @@
 /**
  * Remembers, per file path, the text the editor last held for it.
  *
- * The record lives above the editing surface, for as long as the file panel
- * does, and answers one question: when a `contents` prop arrives for a path,
- * did this editor produce that text, or did something outside write it?
+ * The record lives beside the models it describes, in the registry that holds
+ * a project's editor state, and lasts exactly as long as they do — which is
+ * longer than any panel, because opening Settings or another project unmounts
+ * the panel and the undo stack has to survive that. It answers one question:
+ * when a `contents` prop arrives for a path, did this editor produce that
+ * text, or did something outside write it?
  *
  * The distinction is the whole point. Our own text coming back — a save the
  * server confirmed — must not be re-applied to the model, because rewriting a
@@ -42,11 +45,12 @@ export class FileEditorRetention {
   /**
    * Drops one path's record.
    *
-   * Nothing calls this yet, and that is deliberate rather than an oversight:
-   * the map holds one string per file opened and is released whole when the
-   * panel unmounts, so its growth is bounded by one panel's lifetime. The
-   * eviction policy belongs with the Monaco model cache, which is where a cap
-   * can be sized against real documents instead of guessed at here.
+   * Called when the model cache beside this one evicts the same path, which is
+   * what bounds this map. It has to be: the record lives as long as the
+   * project rather than as long as a panel, so without this it would hold one
+   * string per file ever opened for the whole session. The policy stays with
+   * the cache, where a cap can be sized against real documents rather than
+   * guessed at here — this only follows it.
    */
   forget(relativePath: string): void {
     this.#byPath.delete(relativePath);
