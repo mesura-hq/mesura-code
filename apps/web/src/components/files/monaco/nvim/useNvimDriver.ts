@@ -440,9 +440,16 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   // keeps its node and only its text changes.
   useEffect(() => {
     if (!enabled || editor === null) return;
-    if (state.relativePath !== relativePath) return;
 
-    const desired = widgetsFor(state.decorations);
+    // Nothing is drawn for a file the session is not on, and — the part that
+    // was missing — whatever was drawn for the last one comes down. Returning
+    // early left the previous file's labels on screen, anchored to line and
+    // column numbers that now mean something else entirely, which is how a
+    // hint belonging to another file came to sit in the middle of this one.
+    const desired =
+      state.relativePath === relativePath
+        ? widgetsFor(state.decorations)
+        : new Map<string, OverlayWidget>();
     const { addedWidgets, changedWidgets, removedWidgetIds } = diffWidgets(
       renderedWidgetsRef.current,
       desired,
@@ -478,7 +485,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
     renderedWidgetsRef.current = new Map(desired);
 
     decorationsRef.current?.set(
-      runsFor(state.decorations).map((run) => ({
+      (state.relativePath === relativePath ? runsFor(state.decorations) : []).map((run) => ({
         range: {
           startLineNumber: run.line,
           startColumn: run.startCol,

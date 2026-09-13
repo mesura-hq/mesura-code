@@ -55,13 +55,24 @@ function colorProbeContext(): CanvasRenderingContext2D | null {
 function toMonacoColor(cssColor: string, fallback: string): string {
   const context = colorProbeContext();
   if (context === null) return fallback;
+  // Cleared first, because the canvas outlives the call. A colour with any
+  // transparency composites over whatever the previous call left on the pixel,
+  // so a fully transparent input used to come back as the last colour read —
+  // and an element with no background of its own is exactly that input. The
+  // editor took its background from whichever colour happened to be read
+  // before it.
+  context.clearRect(0, 0, 1, 1);
   // An unparseable value leaves `fillStyle` untouched, so seeding it with the
   // fallback means a bad colour paints the fallback rather than black.
   context.fillStyle = fallback;
   context.fillStyle = cssColor;
   context.fillRect(0, 0, 1, 1);
   try {
-    const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
+    const [red, green, blue, alpha] = context.getImageData(0, 0, 1, 1).data;
+    // Transparent is not a colour Monaco can use, and it is not an error
+    // either: it means the element paints nothing and the answer is somewhere
+    // above it. The caller decides what to do with the fallback.
+    if ((alpha ?? 0) === 0) return fallback;
     return `#${[red, green, blue].map((channel) => (channel ?? 0).toString(16).padStart(2, "0")).join("")}`;
   } catch {
     // `getImageData` is the one call here that throws: a tainted canvas, or a
@@ -83,10 +94,41 @@ function toMonacoColor(cssColor: string, fallback: string): string {
 export function readCodeSurfaceColors(element: Element): CodeSurfaceColors {
   const computed = getComputedStyle(element);
   return {
-    background: toMonacoColor(computed.backgroundColor, "#ffffff"),
+    background: readPaintedBackground(element),
     foreground: toMonacoColor(computed.color, "#000000"),
   };
 }
+
+/**
+ * The colour actually behind an element.
+ *
+ * `backgroundColor` is not inherited, so an element that paints nothing
+ * answers `rgba(0, 0, 0, 0)` however dark the page behind it is. The editor's
+ * host is one of those — it is a flex box with no background of its own — so
+ * asking it directly never described what the developer sees, and the editor
+ * ended up on a colour of Monaco's choosing rather than the app's.
+ *
+ * Walking up is what the browser does to paint it, so it is what this does to
+ * read it. The document element is the last stop and has one by construction.
+ */
+function readPaintedBackground(element: Element): string {
+  let current: Element | null = element;
+  while (current !== null) {
+    const painted = toMonacoColor(getComputedStyle(current).backgroundColor, TRANSPARENT);
+    if (painted !== TRANSPARENT) return painted;
+    current = current.parentElement;
+  }
+  return "#ffffff";
+}
+
+/**
+ * The answer `toMonacoColor` gives for something that paints nothing.
+ *
+ * A sentinel rather than a real colour, so "this element is transparent" and
+ * "this element is white" stay different answers. Picked to be a colour no
+ * theme would choose on purpose.
+ */
+const TRANSPARENT = "#ff00ff";
 
 /** Reads the configured code font, which the appearance settings write to the root. */
 export function readCodeFont(root: HTMLElement = document.documentElement): CodeFont {

@@ -168,7 +168,7 @@ export function MonacoFileSurface({
       theme: resolvedTheme === "dark" ? MESURA_MONACO_DARK : MESURA_MONACO_LIGHT,
       fontFamily: font.family,
       fontSize: font.sizePx,
-      lineNumbers: "on",
+      lineNumbers: modalEditing ? "relative" : "on",
       scrollBeyondLastLine: false,
       cursorSmoothCaretAnimation: "explicit",
       smoothScrolling: true,
@@ -326,6 +326,24 @@ export function MonacoFileSurface({
   useEffect(() => {
     editorRef.current?.updateOptions({ wordWrap: wordWrap ? "on" : "off" });
   }, [wordWrap]);
+
+  // Relative while Neovim is driving, absolute otherwise.
+  //
+  // The numbers are what `3j` and `d5k` are counted off, so they belong to the
+  // modal editing they serve rather than to the panel: with the setting off
+  // there is nothing to count and a relative gutter is only harder to read.
+  // Monaco's `relative` is Vim's hybrid — the cursor's own line keeps its
+  // absolute number — which is what the developer's `number` plus
+  // `relativenumber` already gives them.
+  //
+  // Applied here rather than only at creation because the editor is created
+  // once on purpose and outlives every setting change. Adding `modalEditing`
+  // to the creating hook's dependencies would remount the editor and take the
+  // undo stack with it, which is the defect `monaco-file-surface-wired` exists
+  // to prevent.
+  useEffect(() => {
+    editorRef.current?.updateOptions({ lineNumbers: modalEditing ? "relative" : "on" });
+  }, [modalEditing]);
 
   // Redefined rather than only re-selected: an environment theme changes the
   // code-surface custom properties without changing light or dark, and the
