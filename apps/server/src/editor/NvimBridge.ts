@@ -476,6 +476,8 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
   let flushWaiters: Array<Deferred.Deferred<void>> = [];
   let bufferEvents = 0;
   let frames = 0;
+  /** The grid's cursor-move count as of the last time the cursor was read. */
+  let lastCursorMoves = 0;
   /** The command line as it stands, so `cmdline_pos` has something to move. */
   let lastCmdline: NvimCmdline | null = null;
   let visual: NvimVisual | null = null;
@@ -584,6 +586,51 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
     }
   });
 
+  /**
+   * Asks for the cursor, the mode and the current window in one round trip.
+   *
+   * Asked for rather than read out of the redraw stream, because the stream's
+   * own cursor lags behind what a mapping has already done. The window comes
+   * along because the grid model cannot work it out: `win_pos` says where
+   * every window is and never which one the developer is in.
+   */
+  const refreshCursorAndMode = Effect.gen(function* () {
+    const state = (yield* rpc.request("nvim_exec_lua", [
+      // The visual anchor comes back in the same round trip as the cursor and
+      // the mode, because it is only meaningful read with them: `getpos("v")`
+      // answers wherever the cursor is when no selection is running, so the
+      // mode is what says whether the answer means anything.
+      `local position = vim.api.nvim_win_get_cursor(0)
+       local mode = vim.api.nvim_get_mode().mode
+       local anchor = nil
+       if mode:sub(1, 1) == "v" or mode:sub(1, 1) == "V" or mode:byte(1) == 22 then
+         local other = vim.fn.getpos("v")
+         anchor = { line = other[2], col = other[3] }
+       end
+       return {
+         line = position[1],
+         col = position[2] + 1,
+         mode = mode,
+         anchor = anchor,
+         window = vim.api.nvim_get_current_win(),
+       }`,
+      [],
+    ])) as {
+      line: number;
+      col: number;
+      mode: string;
+      anchor?: { line: number; col: number };
+      window: number;
+    };
+    cursor = { line: state.line, col: state.col };
+    mode = state.mode;
+    visual =
+      state.anchor === undefined
+        ? null
+        : { anchor: state.anchor, cursor: { line: state.line, col: state.col }, kind: state.mode };
+    grid.setCurrentWindow(state.window);
+  });
+
   yield* rpc.notifications.pipe(
     Stream.runForEach((notification: { method: string; params: ReadonlyArray<unknown> }) =>
       Effect.gen(function* () {
@@ -630,14 +677,64 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
         lastCmdline = external.cmdline;
         for (const event of external.events) tell(event);
         grid.applyRedraw(notification.params as ReadonlyArray<ReadonlyArray<unknown>>);
-        const hasFlush = (notification.params as ReadonlyArray<ReadonlyArray<unknown>>).some(
-          (event) => event[0] === "flush",
-        );
+        const batch = notification.params as ReadonlyArray<ReadonlyArray<unknown>>;
+        const hasFlush = batch.some((event) => event[0] === "flush");
+        const hasModeChange = batch.some((event) => event[0] === "mode_change");
+        const hasViewport = batch.some((event) => event[0] === "win_viewport");
         if (!hasFlush) return;
         frames += 1;
         const collected = grid.collect();
         overlays = collected.overlays;
         highlightRuns = collected.highlightRuns;
+
+        // The cursor and the mode are re-read here, and this is the only place
+        // a key a person pressed can update them. `input` is `nvim_input`,
+        // which is asynchronous and answers nothing, so a motion that changes
+        // no text — `j`, `l`, an arrow key — leaves every other channel
+        // silent: the buffer did not change, and on a file that fits the
+        // window the viewport did not either. Without this the session
+        // reported the cursor it was spawned with for as long as it lived, the
+        // manager compared that unchanged value against itself and published
+        // nothing, and the caret on screen never moved.
+        //
+        // Asked for rather than taken from the grid, for a reason the grid
+        // cannot fix: with `wrap` off a long line scrolls sideways, so the
+        // cursor's grid column is its screen column and not its column in the
+        // buffer. The grid is only the trigger.
+        //
+        // Guarded, because a real configuration emits about 230 frames a
+        // second while completely idle and nearly all of them draw nothing.
+        // Four triggers, and each one is a class of key the others miss:
+        //
+        // - `cursorMoves` counts a `grid_cursor_goto` that actually moved,
+        //   which is `h`, `j`, `k`, `l` and the arrows.
+        // - `mode_change` is the keys that change the mode and move nothing.
+        //   `i` at the start of a line is the one that made this necessary.
+        // - `win_viewport` is the scrolling keys, and it is not redundant:
+        //   `<C-d>` scrolls the text under a cursor that stays on the same
+        //   screen row, so Neovim sends no `grid_cursor_goto` at all even
+        //   though the buffer cursor moved half a page. Measured — the
+        //   viewport went from 0 to 11 with the move count unchanged.
+        // - a row that was redrawn covers the rest, the awkward one being a
+        //   long line scrolling sideways under a cursor parked at the last
+        //   column: no new screen position, no new topline, new text.
+        //
+        // An idle frame matches none of them and costs nothing.
+        if (
+          hasModeChange ||
+          hasViewport ||
+          collected.changedRows.length > 0 ||
+          grid.cursorMoves !== lastCursorMoves
+        ) {
+          lastCursorMoves = grid.cursorMoves;
+          yield* refreshCursorAndMode.pipe(
+            Effect.tapCause((cause) =>
+              Effect.logWarning("could not read the cursor after a frame", { cause }),
+            ),
+            Effect.catchCause(() => Effect.void),
+          );
+        }
+
         tell({
           kind: "flush",
           changedLines: collected.changedRows.map((row) => grid.topLine + row + 1),
@@ -709,51 +806,6 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
       );
     yield* Deferred.await(waiter);
     yield* refreshCursorAndMode;
-  });
-
-  /**
-   * Asks for the cursor, the mode and the current window in one round trip.
-   *
-   * Asked for rather than read out of the redraw stream, because the stream's
-   * own cursor lags behind what a mapping has already done. The window comes
-   * along because the grid model cannot work it out: `win_pos` says where
-   * every window is and never which one the developer is in.
-   */
-  const refreshCursorAndMode = Effect.gen(function* () {
-    const state = (yield* rpc.request("nvim_exec_lua", [
-      // The visual anchor comes back in the same round trip as the cursor and
-      // the mode, because it is only meaningful read with them: `getpos("v")`
-      // answers wherever the cursor is when no selection is running, so the
-      // mode is what says whether the answer means anything.
-      `local position = vim.api.nvim_win_get_cursor(0)
-       local mode = vim.api.nvim_get_mode().mode
-       local anchor = nil
-       if mode:sub(1, 1) == "v" or mode:sub(1, 1) == "V" or mode:byte(1) == 22 then
-         local other = vim.fn.getpos("v")
-         anchor = { line = other[2], col = other[3] }
-       end
-       return {
-         line = position[1],
-         col = position[2] + 1,
-         mode = mode,
-         anchor = anchor,
-         window = vim.api.nvim_get_current_win(),
-       }`,
-      [],
-    ])) as {
-      line: number;
-      col: number;
-      mode: string;
-      anchor?: { line: number; col: number };
-      window: number;
-    };
-    cursor = { line: state.line, col: state.col };
-    mode = state.mode;
-    visual =
-      state.anchor === undefined
-        ? null
-        : { anchor: state.anchor, cursor: { line: state.line, col: state.col }, kind: state.mode };
-    grid.setCurrentWindow(state.window);
   });
 
   // The version is read before the UI is attached, so a Neovim too old to
