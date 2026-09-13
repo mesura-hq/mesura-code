@@ -87,6 +87,38 @@ export declare namespace NvimBridge {
      */
     readonly awaitFrame: Effect.Effect<void>;
     /**
+     * Subscribes to the next frame now, and hands back the wait for it.
+     *
+     * Two steps because one is a race. A caller that sends a key and then
+     * waits can lose: the frame the key caused can land in the gap between the
+     * two, and the wait then belongs to a frame that has not been asked for —
+     * which, on an idle Neovim, never arrives. Subscribing first closes the
+     * gap, and it is the only way to time a key honestly.
+     *
+     * It resolves on the next frame, not on the next frame *this* caller
+     * caused — nothing in the redraw stream says which key a frame belongs to.
+     * A caller that needs to know its number is not contaminated has to bound
+     * that itself, by measuring how often frames arrive with no key in flight.
+     *
+     * A subscription abandoned after a timeout stays in the queue and is
+     * resolved by the next frame with nobody listening. That is harmless and
+     * deliberate: dropping it would need a handle this returns no room for.
+     */
+    readonly nextFrame: Effect.Effect<Effect.Effect<void>>;
+    /**
+     * Monotonic counters, for measuring what a keystroke costs.
+     *
+     * Read either side of a key: the difference is that key's drawing and text
+     * traffic. `frames` counts flushes, so a difference of zero says the key
+     * caused no frame at all rather than a cheap one.
+     */
+    readonly metrics: {
+      readonly gridCells: number;
+      readonly cursorMoves: number;
+      readonly bufferEvents: number;
+      readonly frames: number;
+    };
+    /**
      * Waits until every key given has been executed and the mirror has caught
      * up with it.
      *
@@ -203,6 +235,8 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
   let overlays: ReadonlyArray<GridOverlay> = [];
   let highlightRuns: ReadonlyArray<HighlightRun> = [];
   let flushWaiters: Array<Deferred.Deferred<void>> = [];
+  let bufferEvents = 0;
+  let frames = 0;
   /** Markers handed out by `settle`, resolved when Neovim sends them back. */
   let settleSequence = 0;
   const settleWaiters = new Map<number, Deferred.Deferred<void>>();
@@ -301,6 +335,7 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
           return;
         }
         if (notification.method === "nvim_buf_lines_event") {
+          bufferEvents += 1;
           applyLinesEvent(notification.params);
           grid.setBufferLines(lines);
           return;
@@ -311,6 +346,7 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
           (event) => event[0] === "flush",
         );
         if (!hasFlush) return;
+        frames += 1;
         const collected = grid.collect();
         overlays = collected.overlays;
         highlightRuns = collected.highlightRuns;
@@ -482,6 +518,14 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
     setLines: (next) =>
       settleAfter(rpc.request("nvim_buf_set_lines", [0, 0, -1, false, [...next]])),
     awaitFrame: awaitFlush,
+    nextFrame: Effect.gen(function* () {
+      const waiter = yield* Deferred.make<void>();
+      flushWaiters.push(waiter);
+      return Deferred.await(waiter);
+    }),
+    get metrics() {
+      return { gridCells: grid.cellsDrawn, cursorMoves: grid.cursorMoves, bufferEvents, frames };
+    },
     awaitFlush: Effect.gen(function* () {
       yield* awaitFlush;
       // Said out loud rather than swallowed. A Neovim that has died fails this

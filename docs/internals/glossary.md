@@ -209,6 +209,7 @@ ships T3 Code already matching it.
 - [Provider architecture][16]
 - [Permission modes][18]
 - [Workspace layout][2]
+- [Editor session](./editor-session.md)
 - [Reading and editing files](../user/file-panel.md)
 
 [1]: ../../packages/contracts/src/orchestration.ts

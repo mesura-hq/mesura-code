@@ -80,6 +80,10 @@ export class GridModel {
   #bufferLines: readonly string[] = [];
   #topLine = 0;
   #rowHashes: string[] = [];
+  #cellsDrawn = 0;
+  #cursorRow = -1;
+  #cursorColumn = -1;
+  #cursorMoves = 0;
 
   /** The highlight definitions seen so far, for the client's own palette. */
   get highlightDefinitions(): ReadonlyMap<number, HighlightDefinition> {
@@ -88,6 +92,34 @@ export class GridModel {
 
   get topLine(): number {
     return this.#topLine;
+  }
+
+  /**
+   * How many cells Neovim has drawn since this model was made.
+   *
+   * Monotonic, and counted across every grid rather than only the buffer's,
+   * because what it measures is how much work a keystroke caused — a float
+   * that repaints costs the same as a line that does. Two samples either side
+   * of a key give that key's cost, and a sample that did not move says the
+   * frame drew nothing, which is how the bench tells a key's own frame from a
+   * status line redrawing on its own.
+   */
+  /**
+   * How often the cursor has moved, counted only when it actually moved.
+   *
+   * The companion to `cellsDrawn`, and needed because a great many keys draw
+   * no cells at all: with autopairs on, typing the `)` it already inserted
+   * only steps the cursor over it. Between them the two counters answer "did
+   * anything happen", which is what tells a key's own frame from the steady
+   * stream of empty ones a real configuration emits — measured at about one
+   * every four milliseconds, nearly all of them drawing nothing.
+   */
+  get cursorMoves(): number {
+    return this.#cursorMoves;
+  }
+
+  get cellsDrawn(): number {
+    return this.#cellsDrawn;
   }
 
   setBufferLines(lines: readonly string[]): void {
@@ -174,6 +206,15 @@ export class GridModel {
         if (gridId === this.#bufferGridId) this.#topLine = topLine;
         return;
       }
+      case "grid_cursor_goto": {
+        const [gridId, row, column] = batch as [number, number, number];
+        if (gridId !== this.#bufferGridId) return;
+        if (row === this.#cursorRow && column === this.#cursorColumn) return;
+        this.#cursorRow = row;
+        this.#cursorColumn = column;
+        this.#cursorMoves += 1;
+        return;
+      }
       case "grid_line": {
         this.#applyGridLine(batch);
         return;
@@ -202,6 +243,11 @@ export class GridModel {
         if (column < grid.width) {
           grid.cells[row]![column] = text;
           grid.highlights[row]![column] = highlight;
+          // Counted here rather than beside `column += 1`: a `grid_line` run
+          // routinely pads past the end of the row, and a cell that was never
+          // written was never drawn. Counting the padding inflated every
+          // figure derived from this by an amount nothing bounded.
+          this.#cellsDrawn += 1;
         }
         column += 1;
       }
