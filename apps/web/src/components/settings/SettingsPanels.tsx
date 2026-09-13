@@ -519,6 +519,10 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["Auto-settle merged threads"]
         : []),
       ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
+      ...(settings.modalEditing !== DEFAULT_UNIFIED_SETTINGS.modalEditing ? ["Modal editing"] : []),
+      ...(settings.neovimConfigDirectory !== DEFAULT_UNIFIED_SETTINGS.neovimConfigDirectory
+        ? ["Neovim configuration directory"]
+        : []),
       ...getChangedTypographySettingLabels(settings),
       ...(settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace
         ? ["Diff whitespace changes"]
@@ -599,6 +603,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.showSkillsInSlashMenu,
       settings.timestampFormat,
       settings.wordWrap,
+      settings.modalEditing,
+      settings.neovimConfigDirectory,
       followSystem,
       theme,
       themeHalves,
@@ -671,6 +677,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       appearanceContrast: DEFAULT_UNIFIED_SETTINGS.appearanceContrast,
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
+      modalEditing: DEFAULT_UNIFIED_SETTINGS.modalEditing,
+      neovimConfigDirectory: DEFAULT_UNIFIED_SETTINGS.neovimConfigDirectory,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       showSkillsInSlashMenu: DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu,
       environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
@@ -1411,6 +1419,65 @@ function WordWrapRow() {
   );
 }
 
+function ModalEditingRow() {
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
+  return (
+    <SettingsRow
+      {...searchableSetting("modal-editing")}
+      description="Edit files in the file panel with the Neovim on this machine, using your own configuration. Off gives the panel a plain editor with its own undo."
+      resetAction={
+        settings.modalEditing !== DEFAULT_UNIFIED_SETTINGS.modalEditing ? (
+          <SettingResetButton
+            label="modal editing"
+            onClick={() => updateSettings({ modalEditing: DEFAULT_UNIFIED_SETTINGS.modalEditing })}
+          />
+        ) : null
+      }
+      control={
+        <Switch
+          checked={settings.modalEditing}
+          onCheckedChange={(checked) => updateSettings({ modalEditing: Boolean(checked) })}
+          aria-label="Edit files with Neovim"
+        />
+      }
+    />
+  );
+}
+
+function NeovimConfigDirectoryRow() {
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
+  return (
+    <SettingsRow
+      {...searchableSetting("neovim-config-directory")}
+      description="Where the Neovim that edits files in the file panel reads its configuration. Leave empty to use ~/.neovim."
+      resetAction={
+        settings.neovimConfigDirectory !== DEFAULT_UNIFIED_SETTINGS.neovimConfigDirectory ? (
+          <SettingResetButton
+            label="Neovim configuration directory"
+            onClick={() =>
+              updateSettings({
+                neovimConfigDirectory: DEFAULT_UNIFIED_SETTINGS.neovimConfigDirectory,
+              })
+            }
+          />
+        ) : null
+      }
+      control={
+        <DraftInput
+          className="w-full sm:w-72"
+          value={settings.neovimConfigDirectory}
+          onCommit={(next) => updateSettings({ neovimConfigDirectory: next })}
+          placeholder="~/.neovim"
+          spellCheck={false}
+          aria-label="Neovim configuration directory"
+        />
+      }
+    />
+  );
+}
+
 function FontSettingsGroup() {
   return (
     <>
@@ -1508,6 +1575,8 @@ function TypographySection() {
     >
       {advanced ? <FontSettingsGroup /> : <SimpleFontRows />}
       <WordWrapRow />
+      <ModalEditingRow />
+      <NeovimConfigDirectoryRow />
     </SettingsSection>
   );
 }

@@ -275,6 +275,11 @@ asking what just happened instead of what is true.
 
 ## Known limitations
 
+- **The `version` reason is never driven by a test.** Proving it needs a Neovim older than the floor,
+  and there is one Neovim on this machine. The comparison is field by field over
+  `{major, minor, patch}` rather than a string match, which is the shape that does not rot — but it
+  is read rather than measured, and the classifier beside it that _was_ a string match had been
+  broken since it was written.
 - **`exited` is in the wire contract and nothing sends it.** The event exists for a Neovim that dies
   or is killed, and the server never constructs one, so no client can react to a session ending
   unexpectedly. The fallback that needs it is phase 8's.

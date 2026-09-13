@@ -60,8 +60,18 @@ const spawnWith = (
             new NvimSpawnError({
               executable: input.executable,
               // A missing binary is the ordinary case on a machine with no
-              // Neovim, and it deserves to be told apart from a real failure.
-              reason: /ENOENT|not found/i.test(String(cause)) ? "binary-missing" : "spawn-failed",
+              // Neovim, and it deserves to be told apart from a real failure:
+              // one is fixed by installing Neovim and the other is not fixed
+              // by anything the developer can reach from Settings.
+              //
+              // Measured, because the first version of this could never say
+              // so. Effect reports a missing executable as a `PlatformError`
+              // whose tag is `NotFound` — one word, no space — and the test
+              // was `/ENOENT|not found/i`, which matches neither. Every
+              // missing binary came back as a plain spawn failure, and the
+              // developer was told the one thing they could fix was not
+              // fixable.
+              reason: isMissingBinary(cause) ? "binary-missing" : "spawn-failed",
               message: String(cause),
             }),
         ),
@@ -97,6 +107,23 @@ const spawnWith = (
           .pipe(Effect.catchCause(() => Effect.void)),
     } satisfies NvimProcess;
   });
+
+/**
+ * Whether a spawn failure means the binary is not there.
+ *
+ * Reads the error's own tag first and the rendered string second. The tag is
+ * what Effect actually sets; the string forms are kept because the platform
+ * layer is free to change how it renders, and a classifier that silently
+ * stops matching is exactly what this already did once.
+ */
+const isMissingBinary = (cause: unknown): boolean => {
+  const tag =
+    typeof cause === "object" && cause !== null && "reason" in cause
+      ? String((cause as { reason: unknown }).reason)
+      : "";
+  if (tag === "NotFound") return true;
+  return /ENOENT|NotFound|not found/i.test(String(cause));
+};
 
 export const NodeNvimAdapter = {
   /**

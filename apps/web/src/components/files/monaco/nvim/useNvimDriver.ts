@@ -61,6 +61,14 @@ import {
  * driving, and a Monaco stack with anything on it would let `Ctrl+Z` undo
  * something Neovim still believes is there.
  *
+ * **With `enabled` false, this file has nothing to do with the editor.** That
+ * is the invariant the fallback rests on: every effect below returns before it
+ * touches anything, the cleanups take down the widgets, the decorations and
+ * the stylesheet, and what is left is the plain Monaco the panel was before
+ * modal editing existed — the same code, with no branch added to it. A
+ * developer who turns the setting off, and a Neovim that would not start, land
+ * in exactly the same place.
+ *
  * **Letting composition through.** A dead-key accent is not routed when the
  * browser reports one: those keydowns return null from `toNvimKey`, Monaco
  * inserts the composed character locally, and the resulting model change is

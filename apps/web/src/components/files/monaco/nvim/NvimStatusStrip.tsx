@@ -2,6 +2,7 @@ import type { EditorCmdline } from "@t3tools/contracts";
 
 import { describeMode } from "./nvimMode.ts";
 import { isErrorMessageKind } from "./nvimMessages.ts";
+import { describeFallback, isSettingsFixable, type NvimFallback } from "./nvimFallback.ts";
 
 /**
  * One row under the editor: the mode, the command line, and the last message.
@@ -21,11 +22,41 @@ export function NvimStatusStrip({
   mode,
   cmdline,
   message,
+  fallback,
+  onRetry,
 }: {
   readonly mode: string;
   readonly cmdline: EditorCmdline | null;
   readonly message: { readonly kind: string; readonly text: string } | null;
+  readonly fallback: NvimFallback | null;
+  readonly onRetry: () => void;
 }) {
+  if (fallback !== null) {
+    // The panel still edits — it is the plain editor it was before modal
+    // editing existed — so this says what is not running and how to fix it
+    // rather than reporting a failure the developer cannot act on.
+    return (
+      <div
+        data-nvim-status-strip
+        data-nvim-fallback
+        className="flex h-6 shrink-0 items-center gap-2 border-t border-border/50 px-2 text-[11px] text-muted-foreground"
+      >
+        <span className="font-mono font-medium tracking-wide text-foreground">NEOVIM OFF</span>
+        <span className="truncate">{describeFallback(fallback)}</span>
+        {isSettingsFixable(fallback.reason) ? (
+          <span className="shrink-0 text-muted-foreground/70">Settings → Appearance</span>
+        ) : null}
+        <button
+          type="button"
+          onClick={onRetry}
+          className="shrink-0 rounded px-1 text-foreground underline-offset-2 hover:underline"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div
       data-nvim-status-strip

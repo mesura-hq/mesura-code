@@ -16,6 +16,33 @@ panel shows that a write is pending until the server confirms it.
 Word wrap, the code font, and the font size all follow your appearance settings. Change them in
 **Settings → Appearance** and the open editor follows without losing your place.
 
+## Modal editing
+
+The file panel edits with the Neovim on this machine, using your own configuration. Keys, motions,
+operators, plugins and mappings are the ones you already have; the panel draws them.
+
+**Modal editing** in Settings → Appearance turns it on and off. It is on to begin with. Off gives
+the panel a plain editor with its own undo and its own keys, which is what it was before.
+
+**Neovim configuration directory** in the same place says where that Neovim reads its configuration.
+Leave it empty to use `~/.neovim`.
+
+The row under the editor shows the mode, the command line while you type one, and the last message
+Neovim wrote.
+
+`:w` writes the file now rather than waiting for the automatic save.
+
+Your configuration can tell it is running here: `vim.g.mesura` is set before anything of yours
+loads, in the same way `vim.g.neovide` is. Use it to turn off what does not belong in an editor
+inside another application — an update checker, a file-change watcher, a start screen.
+
+**When Neovim cannot start**, the row says so and why: a configuration directory that is not there,
+a Neovim too old, or one that is not installed. The panel still edits, exactly as it does with the
+setting off. Fix the setting and press **Retry**.
+
+Two things are not drawn: completion menus and any other floating window Neovim opens. Completion
+in the panel is the editor's own.
+
 ## Leaving a comment for the agent
 
 Press on a line number and drag to select a range of lines. When you release, a comment form opens

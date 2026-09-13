@@ -3,7 +3,7 @@ import type { EditorTextEdit, EnvironmentId, ScopedThreadRef } from "@t3tools/co
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import type * as monaco from "monaco-editor";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { resolveShortcutCommand } from "~/keybindings";
 import { primaryServerKeybindingsAtom } from "~/state/server";
@@ -18,6 +18,7 @@ import {
   EMPTY_EDITOR_SESSION_STATE,
   type EditorSessionState,
 } from "~/state/editorSession";
+import { fallbackFromCause, type NvimFallback } from "./nvimFallback.ts";
 import { useNvimDriver, type NvimDriverResult } from "./useNvimDriver.ts";
 
 /**
@@ -47,6 +48,13 @@ const IDLE_SESSION_ATOM = Atom.make(AsyncResult.initial<EditorSessionState, neve
  */
 const APP_SHORTCUTS_THAT_OUTRANK_NEOVIM: ReadonlySet<string> = new Set(["filePicker.toggle"]);
 
+export interface NvimFileEditorResult extends NvimDriverResult {
+  /** Why Neovim is not running, when the developer asked for it and it is not. */
+  readonly fallback: NvimFallback | null;
+  /** Tries again, after the setting that broke it has been fixed. */
+  readonly retry: () => void;
+}
+
 export interface NvimFileEditorInput {
   readonly editor: monaco.editor.IStandaloneCodeEditor | null;
   readonly model: monaco.editor.ITextModel | null;
@@ -64,9 +72,22 @@ export interface NvimFileEditorInput {
   readonly flushSave: () => void;
 }
 
-export function useNvimFileEditor(input: NvimFileEditorInput): NvimDriverResult {
-  const { editor, model, environmentId, threadRef, cwd, relativePath, enabled } = input;
+export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorResult {
+  const { editor, model, environmentId, threadRef, cwd, relativePath } = input;
   const threadId = threadRef.threadId;
+
+  /**
+   * Why Neovim is not running, when it is not.
+   *
+   * Held here rather than in the driver because it decides whether the driver
+   * runs at all: a session that could not start leaves the panel as the plain
+   * editor it was before, and the driver is the thing that must not be in the
+   * way. `retryToken` is what a Retry changes, so the effect that opens the
+   * file runs again after the developer has fixed the setting.
+   */
+  const [fallback, setFallback] = useState<NvimFallback | null>(null);
+  const [retryToken, setRetryToken] = useState(0);
+  const enabled = input.enabled && fallback === null;
 
   // Not subscribed at all while modal editing is off, so a developer who does
   // not use it never starts a Neovim.
@@ -103,10 +124,22 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimDriverResult 
       void openCommand({
         environmentId,
         input: { threadId, cwd, relativePath, lines: [...lines] },
+      }).then((result) => {
+        if (result._tag !== "Failure") return;
+        const failure = fallbackFromCause(result.cause);
+        if (failure === null) return;
+        setFallback(failure);
       });
     },
-    [openCommand, environmentId, threadId, cwd, relativePath],
+    // `retryToken` is in here on purpose: a Retry has to make this callback a
+    // new one, or the effect that calls it will not run again.
+    [openCommand, environmentId, threadId, cwd, relativePath, retryToken],
   );
+
+  const retry = useCallback(() => {
+    setFallback(null);
+    setRetryToken((token) => token + 1);
+  }, []);
 
   const sendKeys = useCallback(
     (keys: string) => {
@@ -158,7 +191,7 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimDriverResult 
     [state],
   );
 
-  return useNvimDriver({
+  const driver = useNvimDriver({
     editor,
     model,
     environmentId,
@@ -176,4 +209,6 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimDriverResult 
     isAppShortcut,
     state: driverState,
   });
+
+  return { ...driver, fallback, retry };
 }

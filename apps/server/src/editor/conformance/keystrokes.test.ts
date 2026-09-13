@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 
+import { NvimAdapter } from "../NvimAdapter.ts";
 import { NodeNvimAdapter } from "../NodeNvimAdapter.ts";
 import { APPLY_EDITS_LUA, SET_VIEWPORT_LUA } from "../hostPlugin.ts";
 import { NvimBridge, type NvimBridgeError, type NvimBridgeEvent } from "../NvimBridge.ts";
@@ -133,6 +134,36 @@ const collecting = <A>(
     });
     return yield* body(events).pipe(Effect.ensuring(Effect.sync(unsubscribe)));
   });
+
+it.layer(layer, { excludeTestServices: true })("conformance: a Neovim that is not there", (it) => {
+  it.effect("says the binary is missing, rather than that something failed", () =>
+    Effect.gen(function* () {
+      // Driven against the real spawner, because the thing that was wrong was
+      // what the platform layer's error looks like. A classifier tested
+      // against a string somebody wrote by hand is a classifier tested against
+      // a guess: this one matched `ENOENT` and `not found`, and Effect says
+      // `NotFound`, so every missing Neovim was reported as a plain failure
+      // and the developer was told to fix something else.
+      const adapter = yield* NvimAdapter;
+      const result = yield* adapter
+        .spawn({
+          executable: "mesura-nvim-that-does-not-exist",
+          args: ["--embed"],
+          env: {},
+          cwd: undefined,
+        })
+        .pipe(Effect.scoped, Effect.result);
+
+      assert.isTrue(Result.isFailure(result), "spawning something absent fails");
+      const failure = Result.isFailure(result) ? result.failure : null;
+      assert.strictEqual(
+        failure?.reason,
+        "binary-missing",
+        `a missing binary is told apart from a real failure: ${failure?.message ?? ""}`,
+      );
+    }).pipe(Effect.scoped),
+  );
+});
 
 it.layer(layer, { excludeTestServices: true })("conformance: the command line", (it) => {
   if (!nvimAvailable) return;

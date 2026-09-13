@@ -454,8 +454,14 @@ export function MonacoFileSurface({
       <div ref={hostRef} data-monaco-file-surface className="flex min-h-0 flex-1">
         {comments.zones}
       </div>
-      {nvim.active ? (
-        <NvimStatusStrip mode={nvim.mode} cmdline={nvim.cmdline} message={nvim.message} />
+      {nvim.active || nvim.fallback !== null ? (
+        <NvimStatusStrip
+          mode={nvim.mode}
+          cmdline={nvim.cmdline}
+          message={nvim.message}
+          fallback={nvim.fallback}
+          onRetry={nvim.retry}
+        />
       ) : null}
     </div>
   );

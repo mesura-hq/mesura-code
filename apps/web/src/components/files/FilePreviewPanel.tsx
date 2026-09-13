@@ -52,7 +52,6 @@ import { projectFileCacheKey } from "./fileContentRevision";
 import { FileEditorRetention } from "./fileEditorRetention";
 import { useProjectFileWatch } from "./useProjectFileWatch";
 import { MonacoFileSurface } from "./monaco/MonacoFileSurface";
-import { MODAL_EDITING_DEFAULT } from "./monaco/nvim/modalEditingDefault";
 import { createMonacoFileModels } from "./monaco/monacoFileModelStore";
 import { useFileSaveCoordinator, type FileSaveCoordinatorInput } from "./useFileSaveCoordinator";
 import { fileBreadcrumbs } from "./filePath";
@@ -523,6 +522,7 @@ export default function FilePreviewPanel({
 }: FilePreviewPanelProps) {
   const { resolvedTheme } = useTheme();
   const wordWrap = useClientSettings((settings) => settings.wordWrap);
+  const modalEditing = useClientSettings((settings) => settings.modalEditing);
   // Retention outlives every file the panel shows. The editor that reads it
   // lives in the surface below and is created once, for the same reason.
   const [retention] = useState(() => new FileEditorRetention());
@@ -918,9 +918,7 @@ export default function FilePreviewPanel({
                   models={models}
                   composerDraftTarget={composerDraftTarget}
                   threadRef={threadRef}
-                  // A constant until phase 8 makes it a client setting. Named
-                  // in one place so the change is a single line there.
-                  modalEditing={MODAL_EDITING_DEFAULT}
+                  modalEditing={modalEditing}
                   onPendingChange={onPendingChange}
                 />
                 {file.data === null ? (
