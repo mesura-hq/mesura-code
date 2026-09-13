@@ -17,10 +17,21 @@ import type * as Path from "effect/Path";
  * expansion.
  */
 export function expandHomePath(value: string): string {
+  return expandHomePathIn(value, NodeOS.homedir());
+}
+
+/**
+ * Same expansion, against a home directory the caller names.
+ *
+ * Separate from `expandHomePath` so a caller can be tested against a
+ * temporary directory instead of the machine's real home. Callers that have
+ * no reason to override it should use `expandHomePath`.
+ */
+export function expandHomePathIn(value: string, homeDir: string): string {
   if (!value) return value;
-  if (value === "~") return NodeOS.homedir();
+  if (value === "~") return homeDir;
   if (value.startsWith("~/") || value.startsWith("~\\")) {
-    return NodePath.join(NodeOS.homedir(), value.slice(2));
+    return NodePath.join(homeDir, value.slice(2));
   }
   return value;
 }

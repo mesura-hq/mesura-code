@@ -15,12 +15,16 @@ import {
 } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
 import { environmentShell } from "../state/shell";
+import { useThreadBackgroundScope } from "~/hooks/useThreadBackgroundScope";
 
 function ChatThreadRouteView() {
   const navigate = useNavigate();
   const threadRef = Route.useParams({
     select: (params) => resolveThreadRouteRef(params),
   });
+  // Tells the server somebody is looking at this thread, for as long as this
+  // route is mounted. Must sit before any early return so it is unconditional.
+  useThreadBackgroundScope(threadRef);
   const shell = useEnvironmentQuery(
     threadRef === null ? null : environmentShell.stateAtom(threadRef.environmentId),
   );

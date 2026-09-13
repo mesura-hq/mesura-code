@@ -13,6 +13,7 @@ This is a living glossary for T3 Code. It explains what common terms mean in thi
 - [Symmetria integration](#symmetria-integration)
 - [Checkpointing](#checkpointing)
 - [Appearance](#appearance)
+- [Editor delegation](#editor-delegation)
 
 ## Concepts
 
@@ -29,6 +30,14 @@ The root filesystem path for a project. In [the orchestration model][1], it is t
 #### Worktree
 
 A Git worktree used as an isolated workspace for a thread. If a thread has a `worktreePath` in [the contracts][1], it runs there instead of in the main working tree. Git operations live behind the VCS driver contract in `apps/server/src/vcs/VcsDriver.ts`, implemented by [GitVcsDriverCore.ts][3].
+
+#### Project file watch
+
+A server-side watch on the one file a client currently has open, which streams a revision token to that client whenever the file changes on disk. It watches the file's directory rather than the file, because an editor or a `git` operation that replaces a file by rename leaves a watch on the old inode. The token is the file's modification time and size, so a rewrite with identical bytes still produces a new token and still costs the client a re-read; the editor then compares contents and applies nothing. See [WorkspaceFileWatcher.ts][25]. The client side is in `apps/web/src/components/files/projectFileWatchRefresh.ts`, which decides when a revision is worth acting on.
+
+#### Background scope
+
+A declared interest a client reports while it is looking at something: version-control status, diagnostics, or a thread. Scopes travel in the client's activity lease and are read by the server's background policy, which uses them to decide what work is worth doing while nobody is waiting on it. A scope is explicitly retained by the view that shows the thing, not derived from whether a subscription is open: subscriptions outlive the view that opened them, so deriving the scope would report a thread as watched for minutes after the user left it. See `apps/web/src/lib/backgroundActivityReporter.ts` and its mobile twin in `apps/mobile/src/connection/background-activity-scopes.ts`.
 
 ### Thread timeline
 
@@ -186,6 +195,41 @@ theme a user picks in Settings afterwards sticks until the next set; mobile keep
 appearance settings. Naming a published [environment theme](#environment-theme) is how a desktop
 ships T3 Code already matching it.
 
+### Editor delegation
+
+#### Editor session
+
+One headless Neovim process the server runs on behalf of a thread, so the developer's own
+configuration, plugins and remapped keys are what edit the file while Monaco stays the thing on
+screen. A session belongs to a thread rather than to a file — the developer switches file inside one
+Neovim, the way they would in a terminal. Not event-sourced: it follows the terminal's precedent
+rather than the orchestration's, because its state is a live process and not a history. Sixteen
+sessions are kept once nobody is attached, thirty-two buffers inside each. See
+[editor-session.md](./editor-session.md).
+
+#### Host plugin
+
+The Lua the server writes to disk and prepends to Neovim's runtimepath, in
+[hostPlugin.ts][ed-host]. It forces the gutter off, forces syntax and the treesitter highlighter
+off, and turns `:w` into a `BufWriteCmd` that asks the host to save instead of writing the file
+itself. The gutter options are not cosmetic: they keep grid column N equal to buffer column N,
+which is the equality that [virtual cell](#virtual-cell) detection rests on.
+
+#### Virtual cell
+
+A cell on Neovim's drawn grid whose character differs from the buffer's character at that column —
+so it is something drawn _over_ the text rather than the text. It is how flash labels, inline
+diagnostics and any other virtual text are found and sent to the client as decorations, and it is
+why the host plugin forces every option that would shift a column. [GridModel.ts][ed-grid] does the
+comparison.
+
+#### Modal editing
+
+The client setting that turns delegation on, `modalEditing`, on by default. With it off the file
+panel is the plain Monaco editor it was before. With it on and Neovim unavailable, the panel falls
+back to that same plain editor and says in its status strip what is missing and how to fix it,
+rather than failing. See [the file panel](../user/file-panel.md).
+
 ## Practical Shortcuts
 
 - If you see `requested`, think "intent recorded".
@@ -201,7 +245,11 @@ ships T3 Code already matching it.
 - [Provider architecture][16]
 - [Permission modes][18]
 - [Workspace layout][2]
+- [Editor session](./editor-session.md)
+- [Reading and editing files](../user/file-panel.md)
 
+[ed-host]: ../../apps/server/src/editor/hostPlugin.ts
+[ed-grid]: ../../apps/server/src/editor/GridModel.ts
 [1]: ../../packages/contracts/src/orchestration.ts
 [2]: ./workspace-layout.md
 [3]: ../../apps/server/src/vcs/GitVcsDriverCore.ts
@@ -213,6 +261,7 @@ ships T3 Code already matching it.
 [9]: ../../apps/server/src/orchestration/commandInvariants.ts
 [10]: ../../apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts
 [11]: ../../apps/server/src/orchestration/Layers/ProjectionPipeline.ts
+[25]: ../../apps/server/src/workspace/WorkspaceFileWatcher.ts
 [12]: ../../apps/server/src/orchestration/Layers/ProviderCommandReactor.ts
 [13]: ../../apps/server/src/orchestration/Services/RuntimeReceiptBus.ts
 [14]: ../../apps/server/src/provider/Layers/ProviderService.ts

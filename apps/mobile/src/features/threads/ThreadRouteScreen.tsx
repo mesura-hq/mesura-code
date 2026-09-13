@@ -37,6 +37,7 @@ import {
 } from "../../state/use-remote-environment-registry";
 import { useKnownTerminalSessions } from "../../state/use-terminal-session";
 import { useSelectedThreadDetailState } from "../../state/use-thread-detail";
+import { useThreadBackgroundScope } from "../../state/use-thread-background-scope";
 import { useThreadSelection } from "../../state/use-thread-selection";
 import { GitActionProgressOverlay } from "./GitActionProgressOverlay";
 import {
@@ -141,15 +142,25 @@ export function ThreadRouteScreen(props: ThreadRouteScreenProps) {
   const routeEnvironmentRuntime = useRemoteEnvironmentRuntime(environmentId);
   const routeConnectionState =
     routeEnvironmentRuntime?.connectionState ?? (environmentId ? "available" : connectionState);
+  const routeThreadId = threadIdRaw !== null ? ThreadId.make(threadIdRaw) : null;
   const routeThreadKey =
-    environmentId !== null && threadIdRaw !== null
-      ? scopedThreadKey(environmentId, ThreadId.make(threadIdRaw))
+    environmentId !== null && routeThreadId !== null
+      ? scopedThreadKey(environmentId, routeThreadId)
       : null;
   const selectedThreadKey =
     selectedThread === null
       ? null
       : scopedThreadKey(selectedThread.environmentId, selectedThread.id);
   const selectedThreadDetailState = useSelectedThreadDetailState();
+  // Tells the server this phone is looking at the thread. Derived from the route
+  // params rather than from the selection, so it reports the thread the screen
+  // was opened for even while the selection is still hydrating. Must sit above
+  // the early return below so it is called unconditionally.
+  useThreadBackgroundScope(
+    environmentId !== null && routeThreadId !== null
+      ? { environmentId, threadId: routeThreadId }
+      : null,
+  );
 
   if (environmentId === null || threadIdRaw === null) {
     return <OpeningThreadLoadingScreen />;

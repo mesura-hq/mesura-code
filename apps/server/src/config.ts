@@ -49,6 +49,18 @@ export interface ServerDerivedPaths {
   readonly providerLogsDir: string;
   readonly providerEventLogPath: string;
   readonly terminalLogsDir: string;
+  /**
+   * Scratch space for the embedded Neovim: the host plugin's runtime path and
+   * the config home that points Neovim at the developer's own directory.
+   * Derived state, not configuration — safe to delete between runs.
+   *
+   * Deliberately **not** created by `ensureServerDirectories`. A server that
+   * never opens an editor has no use for it, and creating it on every start
+   * made the one directory this server insists on making that does not already
+   * exist — which is enough to fail on a state directory it may only read.
+   * The launch makes it when it needs it.
+   */
+  readonly neovimRuntimeDir: string;
   readonly anonymousIdPath: string;
   readonly environmentIdPath: string;
   readonly serverRuntimeStatePath: string;
@@ -137,6 +149,7 @@ export const deriveServerPaths = Effect.fn(function* (
     providerLogsDir,
     providerEventLogPath: join(providerLogsDir, "events.log"),
     terminalLogsDir: join(logsDir, "terminals"),
+    neovimRuntimeDir: join(stateDir, "neovim"),
     anonymousIdPath: join(stateDir, "anonymous-id"),
     environmentIdPath: join(stateDir, "environment-id"),
     serverRuntimeStatePath: join(stateDir, "server-runtime.json"),

@@ -1,3 +1,4 @@
+import * as NodeURL from "node:url";
 import * as NodeZlib from "node:zlib";
 
 import tailwindcss from "@tailwindcss/vite";
@@ -178,6 +179,14 @@ export default defineConfig(() => {
         "@pierre/diffs/worker/worker.js",
         "effect/Array",
         "effect/Order",
+        // The file panel is lazy-loaded, so the dependency scanner never sees
+        // Monaco before the first file is opened. Monaco is roughly two
+        // thousand ESM modules: without pre-bundling, that first open
+        // waterfalls request by request, which is minutes over a tailnet
+        // origin. Same reasoning as the warmup list below.
+        // Resolves through the alias above; how that was verified, and what
+        // to re-check after a Vite bump, is in docs/internals/editor-session.md.
+        "monaco-editor",
         "react-dom/client",
       ],
     },
@@ -206,6 +215,24 @@ export default defineConfig(() => {
     resolve: {
       tsconfigPaths: true,
       dedupe: ["react", "react-dom"],
+      alias: [
+        {
+          // The bare specifier only, anchored at both ends. Monaco's own entry
+          // pulls in the four language services, and each of those references
+          // its worker through the worker plugin — so the worker chunks are
+          // built whether or not the service is ever switched on. The curated
+          // entry is that import list without them.
+          //
+          // Deep imports must keep resolving to the package: the editor worker
+          // is `monaco-editor/editor/editor.worker.js?worker`, and a pattern
+          // that matched a prefix would send it here and leave the editor with
+          // no worker at all.
+          find: /^monaco-editor$/,
+          replacement: NodeURL.fileURLToPath(
+            new URL("./src/components/files/monaco/monacoEntry.ts", import.meta.url),
+          ),
+        },
+      ],
     },
     experimental: {
       bundledDev,

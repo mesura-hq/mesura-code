@@ -1,0 +1,89 @@
+/*
+ * The file surface sits on the app's own window background rather than
+ * Monaco's, which the theme also sets; this covers the gap Monaco leaves
+ * around the editor while it measures on first paint.
+ *
+ * `--background`, not `--code-background`. The code background mixes 3% white
+ * into the window through `--card` and then mixes that again, which lands on
+ * rgb(17, 17, 17) where the app is rgb(10, 10, 10). That reads as a raised
+ * panel, which is what a snippet inside a message wants and not what a
+ * full-height editor wants — beside the chat it looked like a different
+ * application. The developer asked for the same black, having looked at both.
+ *
+ * This selector is also what decides the editor's own theme, because
+ * `readCodeSurfaceColors` reads the painted colour off this node. Changing the
+ * rule changes both, which is the point of there being one of them.
+ */
+[data-monaco-file-surface] {
+  background-color: var(--background);
+  color: var(--code-foreground, var(--foreground));
+}
+
+/*
+ * The line a link or a search hit asked for. Mixed against the editor's own
+ * line background rather than set flat, so it reads as a highlight in both
+ * light and dark instead of a block of colour.
+ */
+.mesura-file-reveal-line {
+  background-color: light-dark(
+    color-mix(in lab, var(--code-background, transparent) 82%, var(--primary)),
+    color-mix(in lab, var(--code-background, transparent) 75%, var(--primary))
+  );
+}
+
+/*
+ * The lines a gutter drag is currently covering. Weaker than the reveal
+ * highlight on purpose: the reveal marks one line the user was sent to, while
+ * this follows the pointer and would be noisy at the same strength.
+ */
+.mesura-file-comment-selection {
+  background-color: light-dark(
+    color-mix(in lab, var(--code-background, transparent) 88%, var(--primary)),
+    color-mix(in lab, var(--code-background, transparent) 84%, var(--primary))
+  );
+}
+
+/*
+ * A comment, hanging under the last line of its range.
+ *
+ * The zone's height is set in pixels from the content, so this node must not
+ * add any of its own: no padding, no border, no margin. Anything here is height
+ * Monaco does not know about, and it clips the bottom of the form.
+ */
+.mesura-file-comment-zone {
+  width: 100%;
+  /* Monaco positions the zone; the content decides how tall it is. */
+  overflow: visible;
+  font-family: var(--font-sans);
+  white-space: normal;
+
+  /*
+   * Above the text layer, and taking pointer events.
+   *
+   * Monaco paints `.view-lines` over the view-zone layer, so without this the
+   * topmost element at the Comment button's own coordinates is a syntax token,
+   * and a real mouse click lands on the editor instead of the button. The
+   * buttons looked present and did nothing.
+   */
+  z-index: 1;
+  pointer-events: auto;
+}
+
+/*
+ * What Neovim drew over the text.
+ *
+ * `position: relative` with a `z-index` because Monaco's `.view-lines` paints
+ * above a content widget that has neither, and a flash label painted under the
+ * text it labels is a label nobody can read. `pointer-events: none` because the
+ * label is not a target: the developer presses its key, they do not click it.
+ * The font is inherited so a label sits on the character grid rather than
+ * beside it — a label in a different font shifts the text it covers.
+ */
+.mesura-nvim-overlay {
+  position: relative;
+  z-index: 2;
+  pointer-events: none;
+  font: inherit;
+  line-height: inherit;
+  white-space: pre;
+}

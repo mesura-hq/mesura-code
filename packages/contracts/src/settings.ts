@@ -296,6 +296,15 @@ export const ClientSettingsSchema = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_TIMESTAMP_FORMAT)),
   ),
   wordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /**
+   * Whether the file panel's editor is driven by the thread's Neovim.
+   *
+   * On by default, because the developer who maintains this fork edits modally
+   * everywhere else. Off returns the panel to a plain Monaco with its own undo
+   * and its own keys, which is what it was before and what it falls back to
+   * when Neovim cannot start.
+   */
+  modalEditing: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
 });
 export type ClientSettings = typeof ClientSettingsSchema.Type;
 
@@ -711,6 +720,18 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(true)),
   ),
   addProjectBaseDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  /**
+   * Where the embedded Neovim reads its configuration from.
+   *
+   * Machine-local, so it is deliberately absent from the shared server keys:
+   * the value is a path on one machine's disk, and pushed to another
+   * environment it would name a directory that is not there. Unexpanded on
+   * purpose — the schema keeps what the developer typed and the server
+   * expands `~` when it launches.
+   */
+  neovimConfigDirectory: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("~/.neovim")),
+  ),
   textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(
       Effect.succeed({
@@ -918,6 +939,7 @@ export const ServerSettingsPatch = Schema.Struct({
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
   addProjectBaseDirectory: Schema.optionalKey(TrimmedString),
+  neovimConfigDirectory: Schema.optionalKey(TrimmedString),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   sourceControlWritingStyle: Schema.optionalKey(
     Schema.Struct({
@@ -1006,5 +1028,6 @@ export const ClientSettingsPatch = Schema.Struct({
   sidebarThreadPreviewCount: Schema.optionalKey(SidebarThreadPreviewCount),
   timestampFormat: Schema.optionalKey(TimestampFormat),
   wordWrap: Schema.optionalKey(Schema.Boolean),
+  modalEditing: Schema.optionalKey(Schema.Boolean),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;

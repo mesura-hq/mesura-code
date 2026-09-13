@@ -1,9 +1,10 @@
-import { EnvironmentId, WS_METHODS } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId, WS_METHODS } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 
 import {
   observeBackgroundActivitySubscription,
+  retainBackgroundScope,
   retainedBackgroundScopes,
   wasRecentlyInteracted,
 } from "./backgroundActivityReporter.ts";
@@ -60,4 +61,57 @@ describe("wasRecentlyInteracted", () => {
       yield* Effect.all([releaseFirst, releaseSecond]);
     }),
   );
+});
+
+describe("thread background scope", () => {
+  it("retains a thread scope until the returned release runs", () => {
+    const environmentId = EnvironmentId.make("environment-thread-retain");
+    const release = retainBackgroundScope(environmentId, {
+      type: "thread",
+      threadId: ThreadId.make("thread-one"),
+    });
+
+    expect(retainedBackgroundScopes(environmentId)).toEqual([
+      { type: "thread", threadId: "thread-one" },
+    ]);
+
+    release();
+    expect(retainedBackgroundScopes(environmentId)).toEqual([]);
+  });
+
+  it("needs one release per retain of the same thread", () => {
+    const environmentId = EnvironmentId.make("environment-thread-refcount");
+    const scope = { type: "thread" as const, threadId: ThreadId.make("thread-two") };
+    const releaseFirst = retainBackgroundScope(environmentId, scope);
+    const releaseSecond = retainBackgroundScope(environmentId, scope);
+
+    expect(retainedBackgroundScopes(environmentId)).toEqual([scope]);
+
+    releaseFirst();
+    expect(retainedBackgroundScopes(environmentId)).toEqual([scope]);
+
+    releaseSecond();
+    expect(retainedBackgroundScopes(environmentId)).toEqual([]);
+  });
+
+  it("keeps two threads in the same environment distinct", () => {
+    const environmentId = EnvironmentId.make("environment-two-threads");
+    const releaseA = retainBackgroundScope(environmentId, {
+      type: "thread",
+      threadId: ThreadId.make("thread-a"),
+    });
+    const releaseB = retainBackgroundScope(environmentId, {
+      type: "thread",
+      threadId: ThreadId.make("thread-b"),
+    });
+
+    expect(retainedBackgroundScopes(environmentId)).toHaveLength(2);
+
+    releaseA();
+    expect(retainedBackgroundScopes(environmentId)).toEqual([
+      { type: "thread", threadId: "thread-b" },
+    ]);
+
+    releaseB();
+  });
 });

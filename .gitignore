@@ -38,3 +38,6 @@ node_modules/
 *.log
 .env*
 !.env.example
+
+# Measurements written by the editor bench. Machine-specific and not a record.
+apps/server/.editor-bench/

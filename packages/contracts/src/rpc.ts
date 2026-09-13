@@ -112,6 +112,7 @@ import {
   RelayClientStatusSchema,
 } from "./relayClient.ts";
 import {
+  ProjectFileWatchEvent,
   ProjectListEntriesError,
   ProjectListEntriesInput,
   ProjectListEntriesResult,
@@ -128,6 +129,18 @@ import {
   ProjectWriteFileInput,
   ProjectWriteFileResult,
 } from "./project.ts";
+import {
+  EditorSessionAttachInput,
+  EditorSessionCloseInput,
+  EditorSessionError,
+  EditorSessionEvent,
+  EditorSessionInputInput,
+  EditorSessionOpenInput,
+  EditorSessionReplaceTextInput,
+  EditorSessionSetCursorInput,
+  EditorSessionSnapshot,
+  EditorSessionViewportInput,
+} from "./editorSession.ts";
 import {
   TerminalAttachInput,
   TerminalAttachStreamEvent,
@@ -258,6 +271,17 @@ export const WS_METHODS = {
   terminalRestart: "terminal.restart",
   terminalClose: "terminal.close",
 
+  // Editor session methods. One session per thread, not per file: a session is
+  // a whole Neovim, and its registers, marks and undo are what the developer
+  // expects to survive moving between files in one piece of work.
+  editorSessionOpen: "editorSession.open",
+  editorSessionAttach: "editorSession.attach",
+  editorSessionInput: "editorSession.input",
+  editorSessionViewport: "editorSession.viewport",
+  editorSessionSetCursor: "editorSession.setCursor",
+  editorSessionReplaceText: "editorSession.replaceText",
+  editorSessionClose: "editorSession.close",
+
   // Preview methods
   previewOpen: "preview.open",
   previewNavigate: "preview.navigate",
@@ -324,6 +348,7 @@ export const WS_METHODS = {
 
   // Streaming subscriptions
   subscribeVcsStatus: "subscribeVcsStatus",
+  subscribeProjectFile: "subscribeProjectFile",
   subscribeTerminalEvents: "subscribeTerminalEvents",
   subscribeTerminalMetadata: "subscribeTerminalMetadata",
   subscribePreviewEvents: "subscribePreviewEvents",
@@ -715,6 +740,13 @@ export const WsSubscribeVcsStatusRpc = Rpc.make(WS_METHODS.subscribeVcsStatus, {
   stream: true,
 });
 
+export const WsSubscribeProjectFileRpc = Rpc.make(WS_METHODS.subscribeProjectFile, {
+  payload: ProjectReadFileInput,
+  success: ProjectFileWatchEvent,
+  error: Schema.Union([ProjectReadFileError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
 export const WsVcsPullRpc = Rpc.make(WS_METHODS.vcsPull, {
   payload: VcsPullInput,
   success: VcsPullResult,
@@ -795,6 +827,46 @@ export const WsReviewGetDiffFileContentsRpc = Rpc.make(WS_METHODS.reviewGetDiffF
   payload: ReviewDiffFileContentsInput,
   success: ReviewDiffFileContentsResult,
   error: Schema.Union([ReviewDiffPreviewError, EnvironmentAuthorizationError]),
+});
+
+const EditorSessionRpcErrors = Schema.Union([EditorSessionError, EnvironmentAuthorizationError]);
+
+export const WsEditorSessionOpenRpc = Rpc.make(WS_METHODS.editorSessionOpen, {
+  payload: EditorSessionOpenInput,
+  success: EditorSessionSnapshot,
+  error: EditorSessionRpcErrors,
+});
+
+export const WsEditorSessionAttachRpc = Rpc.make(WS_METHODS.editorSessionAttach, {
+  payload: EditorSessionAttachInput,
+  success: EditorSessionEvent,
+  error: EditorSessionRpcErrors,
+  stream: true,
+});
+
+export const WsEditorSessionInputRpc = Rpc.make(WS_METHODS.editorSessionInput, {
+  payload: EditorSessionInputInput,
+  error: EditorSessionRpcErrors,
+});
+
+export const WsEditorSessionViewportRpc = Rpc.make(WS_METHODS.editorSessionViewport, {
+  payload: EditorSessionViewportInput,
+  error: EditorSessionRpcErrors,
+});
+
+export const WsEditorSessionSetCursorRpc = Rpc.make(WS_METHODS.editorSessionSetCursor, {
+  payload: EditorSessionSetCursorInput,
+  error: EditorSessionRpcErrors,
+});
+
+export const WsEditorSessionReplaceTextRpc = Rpc.make(WS_METHODS.editorSessionReplaceText, {
+  payload: EditorSessionReplaceTextInput,
+  error: EditorSessionRpcErrors,
+});
+
+export const WsEditorSessionCloseRpc = Rpc.make(WS_METHODS.editorSessionClose, {
+  payload: EditorSessionCloseInput,
+  error: EditorSessionRpcErrors,
 });
 
 export const WsTerminalOpenRpc = Rpc.make(WS_METHODS.terminalOpen, {
@@ -1091,6 +1163,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsAttachmentsDeleteRpc,
   WsProviderUploadFeedbackRpc,
   WsSubscribeVcsStatusRpc,
+  WsSubscribeProjectFileRpc,
   WsVcsPullRpc,
   WsVcsRefreshStatusRpc,
   WsGitRunStackedActionRpc,
@@ -1111,6 +1184,13 @@ export const WsRpcGroup = RpcGroup.make(
   WsTerminalClearRpc,
   WsTerminalRestartRpc,
   WsTerminalCloseRpc,
+  WsEditorSessionOpenRpc,
+  WsEditorSessionAttachRpc,
+  WsEditorSessionInputRpc,
+  WsEditorSessionViewportRpc,
+  WsEditorSessionSetCursorRpc,
+  WsEditorSessionReplaceTextRpc,
+  WsEditorSessionCloseRpc,
   WsSubscribeTerminalEventsRpc,
   WsSubscribeTerminalMetadataRpc,
   WsPreviewOpenRpc,

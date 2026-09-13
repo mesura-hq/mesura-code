@@ -67,6 +67,28 @@ describe("ClientSettings word wrap", () => {
   });
 });
 
+describe("ClientSettings modal editing", () => {
+  it("defaults modal editing on", () => {
+    expect(decodeClientSettings({}).modalEditing).toBe(true);
+  });
+
+  it("takes it off when the developer says so", () => {
+    expect(decodeClientSettings({ modalEditing: false }).modalEditing).toBe(false);
+  });
+
+  it("carries it in a patch, or a write of it is silently dropped", () => {
+    // A key missing from the patch schema decodes to nothing, the write goes
+    // through with no error, and the switch springs back the next time the
+    // settings are read.
+    expect(decodeClientSettingsPatch({ modalEditing: false }).modalEditing).toBe(false);
+  });
+
+  it("round-trips through the encoder", () => {
+    const encoded = encodeClientSettings(decodeClientSettings({ modalEditing: false }));
+    expect(encoded.modalEditing).toBe(false);
+  });
+});
+
 describe("ClientSettings quit confirmation", () => {
   it("defaults to hold", () => {
     expect(decodeClientSettings({}).confirmQuit).toBe("hold");
@@ -466,5 +488,23 @@ describe("ServerSettingsPatch string normalization", () => {
     expect(encoded.addProjectBaseDirectory).toBe("~/Development");
     expect(encoded.providers?.codex?.binaryPath).toBe("/opt/homebrew/bin/codex");
     expect(encoded.providers?.codex?.launchArgs).toBe("--strict-config");
+  });
+});
+
+describe("ServerSettings.neovimConfigDirectory", () => {
+  it("defaults to the directory the developer clones their configuration into", () => {
+    expect(decodeServerSettings({}).neovimConfigDirectory).toBe("~/.neovim");
+  });
+
+  it("keeps a configured directory and trims it", () => {
+    expect(
+      decodeServerSettings({ neovimConfigDirectory: "  ~/dotfiles/nvim  " }).neovimConfigDirectory,
+    ).toBe("~/dotfiles/nvim");
+  });
+
+  it("accepts the directory in a patch", () => {
+    expect(
+      decodeServerSettingsPatch({ neovimConfigDirectory: "  /srv/nvim  " }).neovimConfigDirectory,
+    ).toBe("/srv/nvim");
   });
 });

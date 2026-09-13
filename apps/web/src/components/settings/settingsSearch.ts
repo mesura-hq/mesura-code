@@ -140,6 +140,18 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["long lines code blocks tables diffs file previews"],
   },
   {
+    id: "neovim-config-directory",
+    title: "Neovim configuration directory",
+    to: "/settings/appearance",
+    searchTerms: ["neovim vim config directory init.lua runtimepath file panel"],
+  },
+  {
+    id: "modal-editing",
+    title: "Modal editing",
+    to: "/settings/appearance",
+    searchTerms: ["neovim vim modal editing file panel keys motions"],
+  },
+  {
     id: "project-grouping",
     title: "Project grouping",
     to: "/settings/general",

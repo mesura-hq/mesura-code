@@ -60,6 +60,8 @@ import {
   RpcClientId,
   EnvironmentAuthorizationError,
   ThreadId,
+  type EditorSessionError,
+  type EditorSessionEvent,
   type TerminalAttachStreamEvent,
   type TerminalError,
   type TerminalEvent,
@@ -100,6 +102,7 @@ import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import * as EditorSessionManager from "./editor/Manager.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -108,6 +111,7 @@ import { deletePendingAttachment, issueAttachmentUploadUrl } from "./assets/Atta
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
+import * as WorkspaceFileWatcher from "./workspace/WorkspaceFileWatcher.ts";
 import { readWorkflowScript } from "./orchestration/workflowScriptQuery.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
@@ -507,6 +511,7 @@ const makeWsRpcLayer = (
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
       const terminalManager = yield* TerminalManager.TerminalManager;
+      const editorSessionManager = yield* EditorSessionManager.EditorSessionManager;
       const previewManager = yield* PreviewManager.PreviewManager;
       const portDiscovery = yield* PortScanner.PortDiscovery;
       const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
@@ -519,6 +524,7 @@ const makeWsRpcLayer = (
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+      const workspaceFileWatcher = yield* WorkspaceFileWatcher.WorkspaceFileWatcher;
       const canReplayPersistedRange = Effect.fnUntraced(function* (
         afterSequence: number,
         headSequence: number,
@@ -1317,6 +1323,12 @@ const makeWsRpcLayer = (
                     ),
                   );
                 }
+
+                // Archive removes the thread from view, so the editor session
+                // it was holding goes with it, the same as its terminals.
+                yield* editorSessionManager.closeThread({
+                  threadId: archiveCommand.threadId,
+                });
 
                 // Archive removes the thread from view, so its user-opened
                 // terminal panes close with it.
@@ -2168,6 +2180,21 @@ const makeWsRpcLayer = (
             }),
             { "rpc.aggregate": "workspace" },
           ),
+        [WS_METHODS.subscribeProjectFile]: (input) =>
+          observeRpcStream(
+            WS_METHODS.subscribeProjectFile,
+            workspaceFileWatcher.watchFile(input).pipe(
+              Stream.mapError(
+                (cause) =>
+                  new ProjectReadFileError({
+                    ...input,
+                    ...projectFileFailureContext(cause),
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
         [WS_METHODS.subscribeVcsStatus]: (input) =>
           observeRpcStream(
             WS_METHODS.subscribeVcsStatus,
@@ -2283,6 +2310,45 @@ const makeWsRpcLayer = (
             review.getDiffFileContents(input),
             { "rpc.aggregate": "review" },
           ),
+        [WS_METHODS.editorSessionOpen]: (input) =>
+          observeRpcEffect(WS_METHODS.editorSessionOpen, editorSessionManager.open(input), {
+            "rpc.aggregate": "editorSession",
+          }),
+        [WS_METHODS.editorSessionAttach]: (input) =>
+          observeRpcStream(
+            WS_METHODS.editorSessionAttach,
+            Stream.callback<EditorSessionEvent, EditorSessionError>((queue) =>
+              Effect.acquireRelease(
+                editorSessionManager.attachStream(input, (event) => Queue.offer(queue, event)),
+                (unsubscribe) => Effect.sync(unsubscribe),
+              ),
+            ),
+            { "rpc.aggregate": "editorSession" },
+          ),
+        [WS_METHODS.editorSessionInput]: (input) =>
+          observeRpcEffect(WS_METHODS.editorSessionInput, editorSessionManager.input(input), {
+            "rpc.aggregate": "editorSession",
+          }),
+        [WS_METHODS.editorSessionViewport]: (input) =>
+          observeRpcEffect(WS_METHODS.editorSessionViewport, editorSessionManager.viewport(input), {
+            "rpc.aggregate": "editorSession",
+          }),
+        [WS_METHODS.editorSessionSetCursor]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.editorSessionSetCursor,
+            editorSessionManager.setCursor(input),
+            { "rpc.aggregate": "editorSession" },
+          ),
+        [WS_METHODS.editorSessionReplaceText]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.editorSessionReplaceText,
+            editorSessionManager.replaceText(input),
+            { "rpc.aggregate": "editorSession" },
+          ),
+        [WS_METHODS.editorSessionClose]: (input) =>
+          observeRpcEffect(WS_METHODS.editorSessionClose, editorSessionManager.close(input), {
+            "rpc.aggregate": "editorSession",
+          }),
         [WS_METHODS.terminalOpen]: (input) =>
           observeRpcEffect(WS_METHODS.terminalOpen, terminalManager.open(input), {
             "rpc.aggregate": "terminal",
