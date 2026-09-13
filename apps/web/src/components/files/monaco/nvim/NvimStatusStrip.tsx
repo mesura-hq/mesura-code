@@ -1,18 +1,31 @@
+import type { EditorCmdline } from "@t3tools/contracts";
+
 import { describeMode } from "./nvimMode.ts";
+import { isErrorMessageKind } from "./nvimMessages.ts";
 
 /**
- * One row under the editor saying which mode Neovim is in.
+ * One row under the editor: the mode, the command line, and the last message.
  *
- * A modal editor that does not show its mode is a trap: the same keystroke
+ * A modal editor that does not show its mode is a trap — the same keystroke
  * deletes a line or types a letter, and the only way to find out which is to
- * press it. Phase 6 adds the command line and messages here; phase 8 adds the
- * notice for when Neovim could not start.
+ * press it. The command line is the same problem one level up: `:` and `/`
+ * take the keyboard entirely, and a host that does not draw them leaves the
+ * developer typing into something they cannot see. Phase 8 adds the notice for
+ * when Neovim could not start.
  *
  * Deliberately still: no transition, no animation. This is driven all day and
- * a mode indicator that moved on every `i` would be the most repetitive thing
- * on the screen.
+ * an indicator that moved on every `i` would be the most repetitive thing on
+ * the screen.
  */
-export function NvimStatusStrip({ mode }: { readonly mode: string }) {
+export function NvimStatusStrip({
+  mode,
+  cmdline,
+  message,
+}: {
+  readonly mode: string;
+  readonly cmdline: EditorCmdline | null;
+  readonly message: { readonly kind: string; readonly text: string } | null;
+}) {
   return (
     <div
       data-nvim-status-strip
@@ -21,6 +34,39 @@ export function NvimStatusStrip({ mode }: { readonly mode: string }) {
       <span className="font-mono font-medium tracking-wide text-foreground">
         {describeMode(mode)}
       </span>
+      {cmdline === null ? null : <NvimCmdlineText cmdline={cmdline} />}
+      {cmdline === null && message !== null ? (
+        <span
+          data-nvim-message
+          className={`truncate font-mono ${
+            isErrorMessageKind(message.kind) ? "text-destructive" : "text-muted-foreground"
+          }`}
+        >
+          {message.text}
+        </span>
+      ) : null}
     </div>
+  );
+}
+
+/**
+ * The command line, with the caret where Neovim says it is.
+ *
+ * Split around `pos` rather than drawn with a real caret: this is a row of
+ * text, not an input, and a blinking caret here would be a second thing on
+ * screen claiming to hold the keyboard.
+ */
+function NvimCmdlineText({ cmdline }: { readonly cmdline: EditorCmdline }) {
+  const before = cmdline.content.slice(0, cmdline.pos);
+  const under = cmdline.content.slice(cmdline.pos, cmdline.pos + 1);
+  const after = cmdline.content.slice(cmdline.pos + 1);
+  return (
+    <span data-nvim-cmdline className="truncate font-mono text-foreground">
+      {cmdline.prompt}
+      {cmdline.firstc}
+      {before}
+      <span className="bg-foreground text-background">{under === "" ? " " : under}</span>
+      {after}
+    </span>
   );
 }

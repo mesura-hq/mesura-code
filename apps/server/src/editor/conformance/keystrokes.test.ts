@@ -7,7 +7,8 @@ import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 
 import { NodeNvimAdapter } from "../NodeNvimAdapter.ts";
-import { NvimBridge, type NvimBridgeError } from "../NvimBridge.ts";
+import { APPLY_EDITS_LUA, SET_VIEWPORT_LUA } from "../hostPlugin.ts";
+import { NvimBridge, type NvimBridgeError, type NvimBridgeEvent } from "../NvimBridge.ts";
 
 /**
  * The conformance harness.
@@ -119,6 +120,402 @@ if (!nvimAvailable) {
     assert.isFalse(nvimAvailable);
   });
 }
+
+/** Everything a bridge tells its listeners, for the life of the body. */
+const collecting = <A>(
+  bridge: NvimBridge.Session,
+  body: (events: ReadonlyArray<NvimBridgeEvent>) => Effect.Effect<A, NvimBridgeError, never>,
+) =>
+  Effect.gen(function* () {
+    const events: NvimBridgeEvent[] = [];
+    const unsubscribe = bridge.subscribe((event) => {
+      events.push(event);
+    });
+    return yield* body(events).pipe(Effect.ensuring(Effect.sync(unsubscribe)));
+  });
+
+it.layer(layer, { excludeTestServices: true })("conformance: the command line", (it) => {
+  if (!nvimAvailable) return;
+
+  it.effect("reports what is being typed, and that it closed", () =>
+    withNvim(["one", "two"], (bridge) =>
+      collecting(bridge, (events) =>
+        Effect.gen(function* () {
+          yield* bridge.input(":");
+          yield* bridge.input("noh");
+          yield* bridge.awaitFlush;
+
+          const shown = events.filter((event) => event.kind === "cmdline");
+          const last = shown[shown.length - 1];
+          assert.isDefined(last, "Neovim reported the command line");
+          assert.strictEqual(last?.kind === "cmdline" ? last.cmdline?.firstc : null, ":");
+          assert.strictEqual(last?.kind === "cmdline" ? last.cmdline?.content : null, "noh");
+
+          yield* bridge.input("<Esc>");
+          yield* bridge.awaitFlush;
+          const closed = events.filter((event) => event.kind === "cmdline");
+          const afterEscape = closed[closed.length - 1];
+          assert.isNull(
+            afterEscape?.kind === "cmdline" ? afterEscape.cmdline : undefined,
+            "and that it closed again",
+          );
+        }),
+      ),
+    ),
+  );
+
+  it.effect("reports a search the same way", () =>
+    withNvim(["alpha", "beta"], (bridge) =>
+      collecting(bridge, (events) =>
+        Effect.gen(function* () {
+          yield* bridge.input("/bet");
+          yield* bridge.awaitFlush;
+          const shown = events.filter((event) => event.kind === "cmdline");
+          const last = shown[shown.length - 1];
+          assert.strictEqual(last?.kind === "cmdline" ? last.cmdline?.firstc : null, "/");
+          assert.strictEqual(last?.kind === "cmdline" ? last.cmdline?.content : null, "bet");
+        }),
+      ),
+    ),
+  );
+
+  it.effect("follows the caret when it moves without the text changing", () =>
+    withNvim(["one"], (bridge) =>
+      collecting(bridge, (events) =>
+        Effect.gen(function* () {
+          yield* bridge.input(":");
+          yield* bridge.input("abcd");
+          yield* bridge.awaitFlush;
+          yield* bridge.input("<Left>");
+          yield* bridge.input("<Left>");
+          yield* bridge.awaitFlush;
+
+          const shown = events.filter((event) => event.kind === "cmdline");
+          const last = shown[shown.length - 1];
+          const cmdline = last?.kind === "cmdline" ? last.cmdline : null;
+          assert.strictEqual(cmdline?.content, "abcd", "the text did not change");
+          // `cmdline_pos` is the only event Neovim sends for this, and it
+          // carries nothing but the position. Ignoring it freezes the caret in
+          // the strip wherever the last `cmdline_show` left it.
+          assert.strictEqual(cmdline?.pos, 2, "and the caret went back two");
+        }),
+      ),
+    ),
+  );
+
+  it.effect("counts the caret in characters, not in Vim's bytes", () =>
+    withNvim(["one"], (bridge) =>
+      collecting(bridge, (events) =>
+        Effect.gen(function* () {
+          // `café` is five bytes and four characters. A client slicing the
+          // content at a byte offset puts the caret inside the `é`.
+          yield* bridge.input("/");
+          yield* bridge.input("café");
+          yield* bridge.awaitFlush;
+          const shown = events.filter((event) => event.kind === "cmdline");
+          const last = shown[shown.length - 1];
+          const cmdline = last?.kind === "cmdline" ? last.cmdline : null;
+          assert.strictEqual(cmdline?.content, "café");
+          assert.strictEqual(cmdline?.pos, 4, "four characters in, not five bytes");
+        }),
+      ),
+    ),
+  );
+
+  it.effect("answers :messages, which arrives under its own name", () =>
+    withNvim(["one"], (bridge) =>
+      collecting(bridge, (events) =>
+        Effect.gen(function* () {
+          yield* bridge.type(':echomsg "first"<CR>');
+          yield* bridge.type(':echomsg "second"<CR>');
+          yield* bridge.type(":messages<CR>");
+          yield* bridge.settle;
+
+          const history = events.filter(
+            (event) => event.kind === "message" && event.messageKind === "history",
+          );
+          const last = history[history.length - 1];
+          const text = last?.kind === "message" ? last.text : "";
+          // Neovim sends the whole history as one `msg_history_show`, not as a
+          // run of `msg_show`s. A host that only knows the latter answers a
+          // developer who asked for every message with nothing at all.
+          assert.include(text, "first");
+          assert.include(text, "second");
+        }),
+      ),
+    ),
+  );
+
+  it.effect("reports the error a bad command produces", () =>
+    withNvim(["one"], (bridge) =>
+      collecting(bridge, (events) =>
+        Effect.gen(function* () {
+          yield* bridge.type(":nosuchcommand<CR>");
+          yield* bridge.settle;
+          const messages = events.filter((event) => event.kind === "message");
+          assert.isTrue(
+            messages.some(
+              (event) =>
+                event.kind === "message" &&
+                event.text.includes("E492") &&
+                (event.messageKind === "emsg" || event.messageKind === "echoerr"),
+            ),
+            // The developer has to be told. Neovim's own answer is on a line
+            // this host never draws, so an error swallowed here is an error
+            // nobody ever sees.
+            `an error message reached the bridge, saw ${messages.length} messages`,
+          );
+        }),
+      ),
+    ),
+  );
+});
+
+it.layer(layer, { excludeTestServices: true })("conformance: an agent's write", (it) => {
+  if (!nvimAvailable) return;
+
+  it.effect("is one undo step however many edits it carries", () =>
+    withNvim(["alpha", "beta", "gamma"], (bridge) =>
+      Effect.gen(function* () {
+        // The developer has to be able to take somebody else's write back with
+        // one `u`. Several edits sent as several calls are several undo
+        // blocks, and undoing half of an agent's change looks exactly like
+        // undoing all of it.
+        yield* bridge.request("nvim_exec_lua", [
+          APPLY_EDITS_LUA,
+          [
+            [
+              [0, 0, 0, 5, ["ALPHA"]],
+              [2, 0, 2, 5, ["GAMMA"]],
+            ],
+          ],
+        ]);
+        yield* bridge.settle;
+        assert.deepStrictEqual([...bridge.lines], ["ALPHA", "beta", "GAMMA"], "both edits landed");
+
+        yield* bridge.type("u");
+        yield* bridge.settle;
+        assert.deepStrictEqual(
+          [...bridge.lines],
+          ["alpha", "beta", "gamma"],
+          "and one undo took the whole write back",
+        );
+
+        yield* bridge.type("<C-r>");
+        yield* bridge.settle;
+        assert.deepStrictEqual([...bridge.lines], ["ALPHA", "beta", "GAMMA"], "redo reapplies it");
+      }),
+    ),
+  );
+
+  it.effect("does not trust the order the edits arrive in", () =>
+    withNvim(["abcdefghij"], (bridge) =>
+      Effect.gen(function* () {
+        // Measured: the late edit listed first, and both edits changing the
+        // line's length. An earlier version applied them in array order from
+        // the end and produced `XXXXXXZXdefghij` — the second edit's columns
+        // read against text the first had already moved. Length-preserving
+        // edits hide this completely, which is why this case changes lengths.
+        yield* bridge.request("nvim_exec_lua", [
+          APPLY_EDITS_LUA,
+          [
+            [
+              [0, 6, 0, 9, ["Z"]],
+              [0, 0, 0, 3, ["XXXXXXXXXX"]],
+            ],
+          ],
+        ]);
+        yield* bridge.settle;
+        assert.deepStrictEqual(
+          [...bridge.lines],
+          ["XXXXXXXXXXdefZj"],
+          "both edits hit their own text",
+        );
+
+        yield* bridge.type("u");
+        yield* bridge.settle;
+        assert.deepStrictEqual([...bridge.lines], ["abcdefghij"], "and it was still one undo step");
+      }),
+    ),
+  );
+
+  it.effect("orders edits across lines, not only within one", () =>
+    withNvim(["one", "two", "three"], (bridge) =>
+      Effect.gen(function* () {
+        // Two edits on different lines, and the first one splits a line, so
+        // applying it early moves the second one's target. The columns are
+        // deliberately opposed to the lines — the later line carries the
+        // smaller column — because a sort that compares only columns then puts
+        // them in exactly the wrong order, and one that compares lines first
+        // does not. An earlier version of this guard put both edits at column
+        // zero and could not tell the two sorts apart at all.
+        yield* bridge.request("nvim_exec_lua", [
+          APPLY_EDITS_LUA,
+          [
+            [
+              [0, 3, 0, 3, ["", ""]],
+              [2, 0, 2, 5, ["THREE"]],
+            ],
+          ],
+        ]);
+        yield* bridge.settle;
+        assert.deepStrictEqual([...bridge.lines], ["one", "", "two", "THREE"]);
+
+        yield* bridge.type("u");
+        yield* bridge.settle;
+        assert.deepStrictEqual([...bridge.lines], ["one", "two", "three"]);
+      }),
+    ),
+  );
+
+  it.effect("applies two edits on one line, and an insertion", () =>
+    withNvim(["alpha beta"], (bridge) =>
+      Effect.gen(function* () {
+        yield* bridge.request("nvim_exec_lua", [
+          APPLY_EDITS_LUA,
+          [
+            [
+              [0, 6, 0, 10, ["BETA"]],
+              [0, 5, 0, 5, [" and"]],
+            ],
+          ],
+        ]);
+        yield* bridge.settle;
+        assert.deepStrictEqual([...bridge.lines], ["alpha and BETA"]);
+      }),
+    ),
+  );
+});
+
+it.layer(layer, { excludeTestServices: true })("conformance: the viewport", (it) => {
+  if (!nvimAvailable) return;
+
+  it.effect("holds the window where the client put it, with the cursor left behind", () =>
+    withNvim(
+      Array.from({ length: 200 }, (_, index) => `line ${index + 1}`),
+      (bridge) =>
+        Effect.gen(function* () {
+          // The wheel-scroll case, and the one that does not work with
+          // `winrestview({ topline })` alone: the cursor is at the top of the
+          // file and the developer is looking at line 50. Neovim refuses to
+          // hold a window that hides the cursor, so the view snapped straight
+          // back — and the snap is invisible from inside the same Lua call,
+          // which is what made it survive a first round of testing.
+          yield* bridge.request("nvim_ui_try_resize_grid", [2, 120, 10]);
+          yield* bridge.request("nvim_exec_lua", [SET_VIEWPORT_LUA, [50, 10]]);
+          yield* bridge.settle;
+
+          const view = (yield* bridge.request("nvim_exec_lua", [
+            "return vim.fn.winsaveview()",
+            [],
+          ])) as { topline: number; lnum: number };
+          assert.strictEqual(view.topline, 50, "the window stayed where it was put");
+          assert.isAtLeast(view.lnum, 50, "and the cursor came with it, as a wheel would");
+          assert.isAtMost(view.lnum, 59);
+        }),
+    ),
+  );
+
+  it.effect("leaves the cursor alone when it is already in the window", () =>
+    withNvim(
+      Array.from({ length: 200 }, (_, index) => `line ${index + 1}`),
+      (bridge) =>
+        Effect.gen(function* () {
+          yield* bridge.request("nvim_ui_try_resize_grid", [2, 120, 10]);
+          yield* bridge.request("nvim_win_set_cursor", [0, [52, 2]]);
+          yield* bridge.request("nvim_exec_lua", [SET_VIEWPORT_LUA, [50, 10]]);
+          yield* bridge.settle;
+
+          const cursor = (yield* bridge.request("nvim_win_get_cursor", [0])) as [number, number];
+          assert.strictEqual(cursor[0], 52, "the caret did not move for a scroll it was inside");
+          assert.strictEqual(cursor[1], 2, "and neither did its column");
+        }),
+    ),
+  );
+
+  it.effect("brings a cursor below the window up into it", () =>
+    withNvim(
+      Array.from({ length: 200 }, (_, index) => `line ${index + 1}`),
+      (bridge) =>
+        Effect.gen(function* () {
+          // The mirror of the case above, and the one that needs the window's
+          // height: the developer scrolls *up*, away from a caret that is now
+          // below what they can see. Only `rows` says where the window ends,
+          // so a clamp that used the buffer's last line instead would leave
+          // the cursor where it was and let Neovim snap the view back.
+          yield* bridge.request("nvim_ui_try_resize_grid", [2, 120, 10]);
+          yield* bridge.request("nvim_win_set_cursor", [0, [150, 0]]);
+          yield* bridge.request("nvim_exec_lua", [SET_VIEWPORT_LUA, [50, 10]]);
+          yield* bridge.settle;
+
+          const view = (yield* bridge.request("nvim_exec_lua", [
+            "return vim.fn.winsaveview()",
+            [],
+          ])) as { topline: number; lnum: number };
+          assert.strictEqual(view.topline, 50, "the window went where it was asked");
+          assert.isAtMost(view.lnum, 59, "and the caret came up to the bottom of it");
+          assert.isAtLeast(view.lnum, 50);
+        }),
+    ),
+  );
+
+  it.effect("answers a topline the buffer cannot reach with one it can", () =>
+    withNvim(["one", "two", "three"], (bridge) =>
+      Effect.gen(function* () {
+        // Behaviour worth pinning even though Neovim does the clamping rather
+        // than this Lua: a client whose model has moved on can ask for any of
+        // these, and what matters is that the answer is a line that exists.
+        const toplineAfter = (topline: number) =>
+          Effect.gen(function* () {
+            yield* bridge.request("nvim_exec_lua", [SET_VIEWPORT_LUA, [topline, 10]]);
+            yield* bridge.settle;
+            const view = (yield* bridge.request("nvim_exec_lua", [
+              "return vim.fn.winsaveview()",
+              [],
+            ])) as { topline: number };
+            return view.topline;
+          });
+
+        assert.strictEqual(yield* toplineAfter(500), 3, "past the end lands on the last line");
+        assert.strictEqual(yield* toplineAfter(0), 1, "zero lands on the first");
+        assert.strictEqual(yield* toplineAfter(-5), 1, "and so does a negative one");
+      }),
+    ),
+  );
+
+  it.effect("reports overlays against buffer lines, not grid rows", () =>
+    withNvim(
+      Array.from({ length: 200 }, (_, index) => `line ${index + 1} has a target here`),
+      (bridge) =>
+        Effect.gen(function* () {
+          // A small window a long way down the file. Everything drawn is then
+          // on grid rows 0..9 while the buffer lines are in the fifties, which
+          // is the arrangement that makes an off-by-topline invisible in a
+          // test that scrolls nowhere.
+          yield* bridge.request("nvim_ui_try_resize_grid", [2, 120, 10]);
+          yield* bridge.request("nvim_exec_lua", [
+            "vim.fn.winrestview({ topline = 50, lnum = 50 })",
+            [],
+          ]);
+          yield* bridge.settle;
+          assert.strictEqual(bridge.topLine + 1, 50, "the window is where it was put");
+
+          // Search highlighting draws over the text without changing it, which
+          // is the cheapest overlay a stock Neovim produces.
+          yield* bridge.type(":set hlsearch<CR>");
+          yield* bridge.type("/target<CR>");
+          yield* bridge.settle;
+
+          const runs = bridge.highlightRuns;
+          assert.isNotEmpty(runs, "something was drawn over the text");
+          for (const run of runs) {
+            assert.isAtLeast(run.line, 50, `a run on buffer line ${run.line}, not a grid row`);
+            assert.isAtMost(run.line, 60, `a run on buffer line ${run.line}, not a grid row`);
+          }
+        }),
+    ),
+  );
+});
 
 it.layer(layer, { excludeTestServices: true })("conformance: a substitute being typed", (it) => {
   if (!nvimAvailable) return;

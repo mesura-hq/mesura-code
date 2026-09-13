@@ -212,8 +212,43 @@ if they are applied. The bridge drops them, which is the one place that has to k
 carries no tick, so a client cannot tell. The committed event arrives with a real tick, and so does
 the initial snapshot `nvim_buf_attach` sends.
 
+## The window, and who decides where it is
+
+Monaco owns the scrolling a pointer or a wheel caused; Neovim owns the scrolling a key caused. Three
+things in that exchange were measured rather than reasoned about, and each one was wrong first.
+
+- **`winrestview({ topline })` on its own does not hold.** Neovim will not keep a window that hides
+  the cursor, so the view snaps back the moment the call returns — and it reads as the requested
+  value from inside the same Lua call, which is what makes it look like it worked. The cursor
+  therefore moves into the window, and only when it would otherwise be outside it. That is what
+  Vim's own mouse wheel does.
+- **The grid to resize is the buffer's, not the outer one.** With `ext_multigrid` the outer grid is
+  the whole screen, and resizing it leaves the window inside it the size it was. The id is assigned
+  by the redraw stream rather than fixed, so the bridge reports it and the manager uses that.
+- **An echo is a topline either side sent recently, not the last one it sent.** A wheel produces
+  scrolls faster than the round trip answers them, so a developer can scroll away and back before
+  the first answer lands; with one slot remembered, the stale echo scrolls the editor back to a
+  position they had already left.
+
+**An agent's write goes to Neovim, not to the model.** One `nvim_exec_lua` applying every edit, so
+the whole write is one undo step — two `nvim_buf_set_text` calls and one `u` leaves the second edit
+in place, which is half of somebody else's change undone and no way to tell. The edits are sorted
+inside that Lua rather than trusted from the caller: they have to be applied from the end backwards,
+and an out-of-order batch that also changes lengths corrupted the text silently while keeping undo a
+single step.
+
+**Undo has one owner and nothing is taken away to keep it that way.** `Ctrl+Z` reaches `toNvimKey`
+and is stopped before Monaco's keybinding service sees it, and every edit from Neovim goes through
+`applyEdits`, which records nothing. An earlier version also cleared the model's history on each
+activation with `setValue`, which is the only public way to clear it — and which destroys every
+decoration on the model first, taking the file comments' anchors with it.
+
 ## Known limitations
 
+- **The command-line window is not drawn in the strip.** `q:` and `<C-f>` from the command line open
+  a real window, and `ext_cmdline` reports it as the command line closing. The text is visible
+  because the window draws like any other, but the strip shows nothing while the developer edits a
+  command in it.
 - **A `flush` does not mean something changed.** Under the developer's configuration Neovim emits
   roughly 230 flushes a second while completely idle, nearly all of them drawing no cells at all.
   Anything downstream that reacts per frame — pushing state over the wire, recomputing a delta —

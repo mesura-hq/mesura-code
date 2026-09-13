@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
+import type { EditorTextEdit, EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import type * as monaco from "monaco-editor";
@@ -12,7 +12,9 @@ import {
   editorSessionAttach,
   editorSessionInput,
   editorSessionOpen,
+  editorSessionReplaceText,
   editorSessionSetCursor,
+  editorSessionViewport,
   EMPTY_EDITOR_SESSION_STATE,
   type EditorSessionState,
 } from "~/state/editorSession";
@@ -53,8 +55,13 @@ export interface NvimFileEditorInput {
   readonly cwd: string;
   readonly relativePath: string;
   readonly enabled: boolean;
-  /** True while the surface is writing an agent's change into the model. */
-  readonly isApplyingExternalEdit: () => boolean;
+  /** The surface's own "this edit is not the developer typing" flag. */
+  readonly externalEdits: {
+    readonly isApplying: () => boolean;
+    readonly run: (body: () => void) => void;
+  };
+  /** Writes the pending save now, which is what `:w` means. */
+  readonly flushSave: () => void;
 }
 
 export function useNvimFileEditor(input: NvimFileEditorInput): NvimDriverResult {
@@ -85,6 +92,11 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimDriverResult 
   const openCommand = useAtomCommand(editorSessionOpen, "editor session open");
   const inputCommand = useAtomCommand(editorSessionInput, "editor session input");
   const setCursorCommand = useAtomCommand(editorSessionSetCursor, "editor session set cursor");
+  const viewportCommand = useAtomCommand(editorSessionViewport, "editor session viewport");
+  const replaceTextCommand = useAtomCommand(
+    editorSessionReplaceText,
+    "editor session replace text",
+  );
 
   const openFile = useCallback(
     (lines: ReadonlyArray<string>) => {
@@ -110,12 +122,32 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimDriverResult 
     [setCursorCommand, environmentId, threadId],
   );
 
+  const sendViewport = useCallback(
+    (viewport: { topline: number; rows: number; cols: number }) => {
+      void viewportCommand({
+        environmentId,
+        input: { threadId, topline: viewport.topline, rows: viewport.rows, cols: viewport.cols },
+      });
+    },
+    [viewportCommand, environmentId, threadId],
+  );
+
+  const replaceText = useCallback(
+    (edits: ReadonlyArray<EditorTextEdit>) => {
+      void replaceTextCommand({ environmentId, input: { threadId, edits: [...edits] } });
+    },
+    [replaceTextCommand, environmentId, threadId],
+  );
+
   const driverState = useMemo(
     () => ({
       relativePath: state.relativePath,
       lines: state.lines,
       cursor: state.cursor,
       mode: state.mode,
+      topline: state.topline,
+      cmdline: state.cmdline,
+      message: state.message,
       latestEvent: state.latestEvent,
       sequence: state.sequence,
     }),
@@ -133,7 +165,10 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimDriverResult 
     sendKeys,
     openFile,
     setCursor,
-    isApplyingExternalEdit: input.isApplyingExternalEdit,
+    sendViewport,
+    flushSave: input.flushSave,
+    externalEdits: input.externalEdits,
+    replaceText,
     isAppShortcut,
     state: driverState,
   });

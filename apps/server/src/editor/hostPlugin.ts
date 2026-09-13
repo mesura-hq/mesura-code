@@ -269,3 +269,54 @@ stop_highlighting(vim.api.nvim_get_current_buf())
  * launch names it directly. See the note at the top of this file.
  */
 export const HOST_PLUGIN_RELATIVE_PATH = "mesura_host.lua";
+
+/**
+ * Applies a batch of text edits as one undo step.
+ *
+ * Sent as one `nvim_exec_lua` rather than one RPC per edit, because a separate
+ * call is a separate undo block: an agent's write would then take several `u`
+ * to take back, and the developer would undo half of somebody else's change
+ * with no way of knowing there was more. Measured, not assumed — two
+ * `nvim_buf_set_text` calls then one `u` left the second edit in place.
+ *
+ * The edits are sorted here rather than trusted from the caller. They have to
+ * be applied from the end of the buffer backwards, because every edit's
+ * positions describe the text as it was before any of them ran; applying an
+ * earlier one first moves the later one's target. An earlier version relied on
+ * the caller passing them in order and corrupted the text silently when it did
+ * not — the undo step stayed single, which is what made it hard to see.
+ *
+ * Exported because the conformance harness drives this exact string. A test
+ * with its own copy of the Lua proves the copy works.
+ */
+export const APPLY_EDITS_LUA = `local edits = ...
+table.sort(edits, function(left, right)
+  if left[1] ~= right[1] then return left[1] < right[1] end
+  return left[2] < right[2]
+end)
+for index = #edits, 1, -1 do
+  local edit = edits[index]
+  vim.api.nvim_buf_set_text(0, edit[1], edit[2], edit[3], edit[4], edit[5])
+end`;
+
+/**
+ * Puts Neovim's window where the client's window is.
+ *
+ * `winrestview({ topline })` on its own does not hold. Neovim will not keep a
+ * window that hides the cursor, so the moment the call returns the view snaps
+ * back — measured: topline reads as the requested value from inside the same
+ * Lua call and as the old one on the very next round trip, with no key sent.
+ * That is exactly the case this exists for, a wheel scroll with the cursor
+ * left where it was, so setting topline alone does nothing at all.
+ *
+ * The cursor therefore moves into the window, and only when it would otherwise
+ * be outside it. That is what Vim's own mouse wheel does, and it is the
+ * behaviour a developer who chose modal editing already has in their editor.
+ */
+export const SET_VIEWPORT_LUA = `local topline, rows = ...
+local last = vim.api.nvim_buf_line_count(0)
+local top = math.max(1, math.min(topline, last))
+local bottom = math.max(top, math.min(last, top + rows - 1))
+local view = vim.fn.winsaveview()
+local lnum = math.min(math.max(view.lnum, top), bottom)
+vim.fn.winrestview({ topline = top, lnum = lnum, col = view.col })`;

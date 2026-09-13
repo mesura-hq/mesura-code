@@ -49,10 +49,145 @@ export type NvimBridgeEvent =
     }
   | { readonly kind: "flush" }
   | {
+      readonly kind: "cmdline";
+      /** `null` when the command line closed. */
+      readonly cmdline: NvimCmdline | null;
+    }
+  | {
+      readonly kind: "message";
+      /** Neovim's own kind: `emsg` and `echoerr` are errors, `""` is plain. */
+      readonly messageKind: string;
+      readonly text: string;
+    }
+  | {
       readonly kind: "notification";
       readonly method: string;
       readonly params: ReadonlyArray<unknown>;
     };
+
+/**
+ * Joins the `[attribute, text]` chunks Neovim writes a line of text as.
+ *
+ * The attributes are its own highlight ids, and this host has no use for them
+ * on the command line or in a message: both are drawn in the status strip's
+ * own colours, and the only distinction that matters — an error — comes from
+ * `msg_show`'s kind rather than from a chunk's attribute.
+ */
+const joinChunks = (chunks: unknown): string =>
+  Array.isArray(chunks)
+    ? chunks.map((chunk) => (Array.isArray(chunk) ? String(chunk[1] ?? "") : "")).join("")
+    : "";
+
+/**
+ * Neovim's byte offset into a string, as an index a client can slice on.
+ *
+ * `cmdline_show` and `cmdline_pos` count bytes, because Vim counts bytes.
+ * Passing that straight to a client puts the caret in the wrong place the
+ * moment a command holds anything outside ASCII — a search for `café`, a
+ * path with an accent — and it is the client that would have to know, which
+ * is knowledge the wire should not be asking it for.
+ */
+function characterIndexForByte(text: string, byteOffset: number): number {
+  if (byteOffset <= 0) return 0;
+  let bytes = 0;
+  let index = 0;
+  while (index < text.length) {
+    if (bytes >= byteOffset) return index;
+    const codePoint = text.codePointAt(index) ?? 0;
+    bytes += codePoint < 0x80 ? 1 : codePoint < 0x800 ? 2 : codePoint < 0x10000 ? 3 : 4;
+    index += codePoint > 0xffff ? 2 : 1;
+  }
+  return text.length;
+}
+
+/**
+ * The command line and the messages, pulled out of a redraw batch.
+ *
+ * They arrive mixed in with the drawing because Neovim externalises them
+ * through the same stream, and they are the two things in it that are already
+ * text rather than cells. Everything else in a redraw is a drawing, and
+ * reading a drawing is `GridModel`'s job.
+ *
+ * `previous` is the command line as it stood, because `cmdline_pos` reports a
+ * caret that moved without the text changing — `Left`, `Home`, `Ctrl-B` — and
+ * carries nothing else. Without it the caret in the strip freezes wherever the
+ * last `cmdline_show` left it.
+ *
+ * `msg_history_show` is the whole of `:messages`, which arrives as one event
+ * under its own name rather than as a run of `msg_show`s.
+ */
+function tellCmdlineAndMessages(
+  batch: ReadonlyArray<ReadonlyArray<unknown>>,
+  previous: NvimCmdline | null,
+): { readonly events: ReadonlyArray<NvimBridgeEvent>; readonly cmdline: NvimCmdline | null } {
+  const events: NvimBridgeEvent[] = [];
+  let cmdline = previous;
+  for (const entry of batch) {
+    const name = entry[0];
+    for (let index = 1; index < entry.length; index += 1) {
+      const args = entry[index];
+      if (!Array.isArray(args)) continue;
+      if (name === "cmdline_show") {
+        const content = joinChunks(args[0]);
+        cmdline = {
+          content,
+          pos: characterIndexForByte(content, typeof args[1] === "number" ? args[1] : 0),
+          firstc: String(args[2] ?? ""),
+          prompt: String(args[3] ?? ""),
+        };
+        events.push({ kind: "cmdline", cmdline });
+        continue;
+      }
+      if (name === "cmdline_pos") {
+        if (cmdline === null) continue;
+        cmdline = {
+          ...cmdline,
+          pos: characterIndexForByte(cmdline.content, typeof args[0] === "number" ? args[0] : 0),
+        };
+        events.push({ kind: "cmdline", cmdline });
+        continue;
+      }
+      if (name === "cmdline_hide") {
+        cmdline = null;
+        events.push({ kind: "cmdline", cmdline: null });
+        continue;
+      }
+      if (name === "msg_show") {
+        const text = joinChunks(args[1]);
+        if (text.length === 0) continue;
+        events.push({ kind: "message", messageKind: String(args[0] ?? ""), text });
+        continue;
+      }
+      if (name === "msg_history_show") {
+        // `:messages`, as one event carrying every remembered message. Sent as
+        // one message of its own rather than replayed one at a time: the strip
+        // shows the last message, and replaying them would show only the last
+        // line of the answer to a command that asked for all of them.
+        const entries = Array.isArray(args[0]) ? args[0] : [];
+        const text = entries
+          .map((remembered) => (Array.isArray(remembered) ? joinChunks(remembered[1]) : ""))
+          .filter((line) => line.length > 0)
+          .join("\n");
+        if (text.length === 0) continue;
+        events.push({ kind: "message", messageKind: "history", text });
+        continue;
+      }
+      if (name === "msg_clear") {
+        events.push({ kind: "message", messageKind: "", text: "" });
+      }
+    }
+  }
+  return { events, cmdline };
+}
+
+/** The command line as Neovim draws it, with `ext_cmdline` on. */
+export interface NvimCmdline {
+  readonly content: string;
+  readonly pos: number;
+  /** `:` for a command, `/` or `?` for a search. */
+  readonly firstc: string;
+  readonly prompt: string;
+}
 
 export interface NvimCursor {
   readonly line: number;
@@ -67,6 +202,10 @@ export declare namespace NvimBridge {
     readonly cursor: NvimCursor;
     readonly mode: string;
     readonly topLine: number;
+    /** One past the last buffer line drawn, as `win_viewport` reports it. */
+    readonly botLine: number;
+    /** The grid the developer's window is drawn on, `null` until Neovim says. */
+    readonly bufferGridId: number | null;
     readonly overlays: ReadonlyArray<GridOverlay>;
     readonly highlightRuns: ReadonlyArray<HighlightRun>;
     readonly request: (
@@ -267,6 +406,8 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
   let flushWaiters: Array<Deferred.Deferred<void>> = [];
   let bufferEvents = 0;
   let frames = 0;
+  /** The command line as it stands, so `cmdline_pos` has something to move. */
+  let lastCmdline: NvimCmdline | null = null;
   const watchers = new Set<(event: NvimBridgeEvent) => void>();
 
   const tell = (event: NvimBridgeEvent) => {
@@ -411,6 +552,12 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
           });
           return;
         }
+        const external = tellCmdlineAndMessages(
+          notification.params as ReadonlyArray<ReadonlyArray<unknown>>,
+          lastCmdline,
+        );
+        lastCmdline = external.cmdline;
+        for (const event of external.events) tell(event);
         grid.applyRedraw(notification.params as ReadonlyArray<ReadonlyArray<unknown>>);
         const hasFlush = (notification.params as ReadonlyArray<ReadonlyArray<unknown>>).some(
           (event) => event[0] === "flush",
@@ -559,6 +706,12 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
     pid: child.pid,
     get lines() {
       return lines;
+    },
+    get botLine() {
+      return grid.botLine;
+    },
+    get bufferGridId() {
+      return grid.bufferGridId;
     },
     get cursor() {
       return cursor;

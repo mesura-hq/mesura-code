@@ -27,6 +27,7 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import { ServerConfig } from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
+import { APPLY_EDITS_LUA, SET_VIEWPORT_LUA } from "./hostPlugin.ts";
 import { NvimAdapter } from "./NvimAdapter.ts";
 import { NvimBridge } from "./NvimBridge.ts";
 
@@ -469,6 +470,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
     let lastCursorLine = -1;
     let lastCursorCol = -1;
     let lastMode = "";
+    let lastTopline = -1;
 
     const unsubscribe = session.bridge.subscribe((event) => {
       if (event.kind === "lines") {
@@ -478,6 +480,16 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
           last: event.last,
           lines: [...event.lines],
         });
+        return;
+      }
+
+      if (event.kind === "cmdline") {
+        publish(session, { type: "cmdline", cmdline: event.cmdline });
+        return;
+      }
+
+      if (event.kind === "message") {
+        publish(session, { type: "message", kind: event.messageKind, text: event.text });
         return;
       }
 
@@ -504,6 +516,17 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       if (session.bridge.mode !== lastMode) {
         lastMode = session.bridge.mode;
         publish(session, { type: "mode", mode: lastMode, blocking: false });
+      }
+
+      // The window Neovim is showing. Half the viewport agreement lives here:
+      // a key that scrolls — `G`, `Ctrl-D`, a search that jumps — moves
+      // Neovim's window and nothing else would ever tell the client, which
+      // would leave the developer's caret somewhere they cannot see.
+      const topline = session.bridge.topLine + 1;
+      const botline = Math.max(topline, session.bridge.botLine);
+      if (topline !== lastTopline) {
+        lastTopline = topline;
+        publish(session, { type: "viewport", topline, botline });
       }
     });
 
@@ -552,11 +575,20 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         input.threadId,
         Effect.gen(function* () {
           const session = yield* requireSession(input.threadId);
-          yield* request(session, "nvim_ui_try_resize", [input.cols, input.rows]);
-          yield* request(session, "nvim_exec_lua", [
-            "vim.fn.winrestview({ topline = ... })",
-            [input.topline],
-          ]);
+          // The buffer's own grid, not the outer one. With `ext_multigrid` the
+          // outer grid is the whole screen and resizing it leaves the window
+          // inside it whatever size it was, so the columns a flash label needs
+          // never reach the grid the label is drawn on. The id is not a
+          // constant: the redraw stream assigns it, and the bridge is what
+          // reads that stream. Before the first `win_pos` there is nothing to
+          // resize but the outer grid.
+          const gridId = session.bridge.bufferGridId;
+          yield* request(
+            session,
+            gridId === null ? "nvim_ui_try_resize" : "nvim_ui_try_resize_grid",
+            gridId === null ? [input.cols, input.rows] : [gridId, input.cols, input.rows],
+          );
+          yield* request(session, "nvim_exec_lua", [SET_VIEWPORT_LUA, [input.topline, input.rows]]);
         }),
       ),
     setCursor: (input) =>
@@ -572,16 +604,21 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         input.threadId,
         Effect.gen(function* () {
           const session = yield* requireSession(input.threadId);
-          for (const edit of input.edits) {
-            yield* request(session, "nvim_buf_set_text", [
-              0,
-              edit.startLine - 1,
-              edit.startCol - 1,
-              edit.endLine - 1,
-              edit.endCol - 1,
-              edit.text.split("\n"),
-            ]);
-          }
+          if (input.edits.length === 0) return;
+          // One Lua call, so the whole write is one undo step. Why that
+          // matters, and why the edits go back to front, is on APPLY_EDITS_LUA.
+          yield* request(session, "nvim_exec_lua", [
+            APPLY_EDITS_LUA,
+            [
+              input.edits.map((edit) => [
+                edit.startLine - 1,
+                edit.startCol - 1,
+                edit.endLine - 1,
+                edit.endCol - 1,
+                edit.text.split("\n"),
+              ]),
+            ],
+          ]);
         }),
       ),
     close: (input) => closeThread(input),

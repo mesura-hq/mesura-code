@@ -148,6 +148,41 @@ describe("applyEditorSessionEvent", () => {
     expect(state.topline).toBe(2);
   });
 
+  it("follows the command line and clears it again", () => {
+    const shown = fold(EMPTY_EDITOR_SESSION_STATE, [
+      snapshot(["one"]),
+      { type: "cmdline", cmdline: { content: "noh", pos: 3, firstc: ":", prompt: "" } },
+    ]);
+    expect(shown.cmdline?.content).toBe("noh");
+    expect(shown.cmdline?.firstc).toBe(":");
+
+    const hidden = applyEditorSessionEvent(shown, { type: "cmdline", cmdline: null });
+    expect(hidden.cmdline).toBeNull();
+  });
+
+  it("keeps the last message, and drops an empty one", () => {
+    const shown = fold(EMPTY_EDITOR_SESSION_STATE, [
+      snapshot(["one"]),
+      { type: "message", kind: "emsg", text: "E492: Not an editor command" },
+    ]);
+    expect(shown.message).toEqual({ kind: "emsg", text: "E492: Not an editor command" });
+
+    // `msg_clear` arrives as an empty message rather than as its own event.
+    const cleared = applyEditorSessionEvent(shown, { type: "message", kind: "", text: "" });
+    expect(cleared.message).toBeNull();
+  });
+
+  it("clears a message when the command line closes", () => {
+    // An error from the last command still on screen under the next one reads
+    // as that command having failed too.
+    const withError = fold(EMPTY_EDITOR_SESSION_STATE, [
+      snapshot(["one"]),
+      { type: "message", kind: "emsg", text: "E492" },
+    ]);
+    const afterClose = applyEditorSessionEvent(withError, { type: "cmdline", cmdline: null });
+    expect(afterClose.message).toBeNull();
+  });
+
   it("counts an event that changes nothing else", () => {
     // The sequence is what tells a component something arrived. An event this
     // fold has no field for still has to move it, or a message the driver does

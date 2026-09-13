@@ -1,6 +1,6 @@
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import * as monaco from "monaco-editor";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { DraftId } from "~/composerDraftStore";
 
@@ -125,6 +125,28 @@ export function MonacoFileSurface({
    * inside the save debounce, the echo of the first one overwrites it.
    */
   const applyingExternalEditRef = useRef(false);
+  /**
+   * The seam the Neovim driver shares with the effect below.
+   *
+   * One flag, two readers: the listener that turns a model change into a save
+   * has to ignore an edit that is not the developer typing, and so does the
+   * driver — for the driver, an agent's write read as typing would be undone
+   * and sent to Neovim one character at a time.
+   */
+  const externalEdits = useMemo(
+    () => ({
+      isApplying: () => applyingExternalEditRef.current,
+      run: (body: () => void) => {
+        applyingExternalEditRef.current = true;
+        try {
+          body();
+        } finally {
+          applyingExternalEditRef.current = false;
+        }
+      },
+    }),
+    [],
+  );
 
   // Layout effect rather than effect: the editor measures the node, and doing
   // that after paint shows one frame of an unsized editor.
@@ -249,6 +271,27 @@ export function MonacoFileSurface({
     const edit = minimalTextEdit(model.getValue(), contents);
     if (edit === null) return;
 
+    // With Neovim driving, the write goes to Neovim rather than to the model.
+    // One `nvim_buf_set_text` is one undo step there, which is what makes a
+    // single `u` take an agent's whole write back — and the `lines` event it
+    // sends afterwards is what puts the text on screen. Writing the model here
+    // as well would show the change twice.
+    const start = model.getPositionAt(edit.startOffset);
+    const end = model.getPositionAt(edit.endOffset);
+    const takenByNeovim = nvimRef.current({
+      startLine: start.lineNumber,
+      startCol: start.column,
+      endLine: end.lineNumber,
+      endCol: end.column,
+      text: edit.text,
+    });
+    if (takenByNeovim) {
+      // The record is still written, exactly as below: the next `contents` prop
+      // equal to this text has to be recognised as ours rather than reloaded.
+      retention.noteEditorFile(relativePath, { contents });
+      return;
+    }
+
     applyingExternalEditRef.current = true;
     try {
       // The edit gets its own undo element, on both sides. Without these,
@@ -345,8 +388,16 @@ export function MonacoFileSurface({
     // Shared with the effect below rather than duplicated: the driver has to
     // know an agent's write from a browser composition, and the difference is
     // this ref being set.
-    isApplyingExternalEdit: () => applyingExternalEditRef.current,
+    externalEdits: externalEdits,
+    flushSave: () => {
+      void saveRef.current.flush();
+    },
   });
+
+  // Through a ref because the effect that applies an external change must not
+  // be torn down and re-run every time the driver's mode changes.
+  const nvimRef = useRef(nvim.takeExternalEdit);
+  nvimRef.current = nvim.takeExternalEdit;
 
   const hasOpenDraftRef = useRef(comments.hasOpenDraft);
   useEffect(() => {
@@ -403,7 +454,9 @@ export function MonacoFileSurface({
       <div ref={hostRef} data-monaco-file-surface className="flex min-h-0 flex-1">
         {comments.zones}
       </div>
-      {nvim.active ? <NvimStatusStrip mode={nvim.mode} /> : null}
+      {nvim.active ? (
+        <NvimStatusStrip mode={nvim.mode} cmdline={nvim.cmdline} message={nvim.message} />
+      ) : null}
     </div>
   );
 }

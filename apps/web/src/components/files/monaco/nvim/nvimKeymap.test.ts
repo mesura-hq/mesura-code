@@ -118,6 +118,19 @@ describe("toNvimKey", () => {
     expect(toNvimKey(event({ key: "\u00f1" }))).toBe("\u00f1");
   });
 
+  it("gives Neovim the chords Monaco would otherwise spend on its own undo", () => {
+    // Undo has one owner while Neovim drives. These reach `toNvimKey`, so the
+    // driver stops them before Monaco's keybinding service sees them, and
+    // Neovim gets a key the developer can map. Monaco's own stack is empty by
+    // construction anyway — the driver only ever calls `applyEdits` — so even
+    // if one leaked through, its `undo` would have nothing to take back.
+    expect(toNvimKey(event({ key: "z", ctrlKey: true }))).toBe("<C-z>");
+    expect(toNvimKey(event({ key: "y", ctrlKey: true }))).toBe("<C-y>");
+    expect(toNvimKey(event({ key: "Z", ctrlKey: true, shiftKey: true }))).toBe("<C-Z>");
+    expect(toNvimKey(event({ key: "r", ctrlKey: true }))).toBe("<C-r>");
+    expect(toNvimKey(event({ key: "u" }))).toBe("u");
+  });
+
   it("refuses a key name it does not know", () => {
     expect(toNvimKey(event({ key: "BrightnessUp" }))).toBeNull();
   });

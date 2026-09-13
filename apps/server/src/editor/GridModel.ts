@@ -77,6 +77,7 @@ export class GridModel {
   readonly #gridWindows = new Map<number, number>();
   #currentWindow: number | null = null;
   #bufferGridId: number | null = null;
+  #botLine = 0;
   #bufferLines: readonly string[] = [];
   #topLine = 0;
   #rowHashes: string[] = [];
@@ -88,6 +89,23 @@ export class GridModel {
   /** The highlight definitions seen so far, for the client's own palette. */
   get highlightDefinitions(): ReadonlyMap<number, HighlightDefinition> {
     return this.#highlightDefinitions;
+  }
+
+  /**
+   * The grid Neovim draws the developer's window on, once it has said so.
+   *
+   * `null` until the first `win_pos`. Resizing a grid needs this number and
+   * there is no API that answers it: with `ext_multigrid` the id is assigned
+   * by the redraw stream, so the only place that knows is whatever has been
+   * reading that stream.
+   */
+  /** One past the last buffer line Neovim drew, zero-based as it reports it. */
+  get botLine(): number {
+    return this.#botLine;
+  }
+
+  get bufferGridId(): number | null {
+    return this.#bufferGridId;
   }
 
   get topLine(): number {
@@ -202,8 +220,13 @@ export class GridModel {
         return;
       }
       case "win_viewport": {
-        const [gridId, , topLine] = batch as [number, unknown, number];
-        if (gridId === this.#bufferGridId) this.#topLine = topLine;
+        // `botline` is one past the last line Neovim drew, and it is the only
+        // place the window's height in *buffer* lines is reported: the grid's
+        // own height counts screen rows, which a wrapped line makes two of.
+        const [gridId, , topLine, botLine] = batch as [number, unknown, number, number];
+        if (gridId !== this.#bufferGridId) return;
+        this.#topLine = topLine;
+        this.#botLine = botLine;
         return;
       }
       case "grid_cursor_goto": {

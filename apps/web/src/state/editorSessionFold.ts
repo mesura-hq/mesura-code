@@ -1,4 +1,4 @@
-import type { EditorSessionEvent } from "@t3tools/contracts";
+import type { EditorCmdline, EditorSessionEvent } from "@t3tools/contracts";
 
 /**
  * The thread's editor session, folded into the state a client renders.
@@ -33,6 +33,10 @@ export interface EditorSessionState {
   readonly cursor: { readonly line: number; readonly col: number } | null;
   readonly mode: string;
   readonly topline: number;
+  /** The command line Neovim is showing, `null` when it is closed. */
+  readonly cmdline: EditorCmdline | null;
+  /** The last message Neovim wrote, and its kind. `null` once cleared. */
+  readonly message: { readonly kind: string; readonly text: string } | null;
   readonly latestEvent: EditorSessionEvent | null;
   readonly sequence: number;
 }
@@ -43,6 +47,8 @@ export const EMPTY_EDITOR_SESSION_STATE: EditorSessionState = {
   cursor: null,
   mode: "n",
   topline: 1,
+  cmdline: null,
+  message: null,
   latestEvent: null,
   sequence: 0,
 };
@@ -100,6 +106,16 @@ export function applyEditorSessionEvent(
       return { ...base, mode: event.mode };
     case "viewport":
       return { ...base, topline: event.topline };
+    case "cmdline":
+      // A closing command line clears the message with it. Neovim's own
+      // `msg_clear` does not always arrive, and a stale error sitting under a
+      // command that has since succeeded is worse than no message at all.
+      return { ...base, cmdline: event.cmdline, message: null };
+    case "message":
+      return {
+        ...base,
+        message: event.text === "" ? null : { kind: event.kind, text: event.text },
+      };
     default:
       return base;
   }
