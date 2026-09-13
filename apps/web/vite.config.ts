@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import * as NodeZlib from "node:zlib";
 
 import tailwindcss from "@tailwindcss/vite";
@@ -212,6 +213,24 @@ export default defineConfig(() => {
     resolve: {
       tsconfigPaths: true,
       dedupe: ["react", "react-dom"],
+      alias: [
+        {
+          // The bare specifier only, anchored at both ends. Monaco's own entry
+          // pulls in the four language services, and each of those references
+          // its worker through the worker plugin — so the worker chunks are
+          // built whether or not the service is ever switched on. The curated
+          // entry is that import list without them.
+          //
+          // Deep imports must keep resolving to the package: the editor worker
+          // is `monaco-editor/editor/editor.worker.js?worker`, and a pattern
+          // that matched a prefix would send it here and leave the editor with
+          // no worker at all.
+          find: /^monaco-editor$/,
+          replacement: fileURLToPath(
+            new URL("./src/components/files/monaco/monacoEntry.ts", import.meta.url),
+          ),
+        },
+      ],
     },
     experimental: {
       bundledDev,
