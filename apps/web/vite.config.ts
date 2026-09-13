@@ -1,4 +1,4 @@
-import { fileURLToPath } from "node:url";
+import * as NodeURL from "node:url";
 import * as NodeZlib from "node:zlib";
 
 import tailwindcss from "@tailwindcss/vite";
@@ -228,7 +228,7 @@ export default defineConfig(() => {
           // that matched a prefix would send it here and leave the editor with
           // no worker at all.
           find: /^monaco-editor$/,
-          replacement: fileURLToPath(
+          replacement: NodeURL.fileURLToPath(
             new URL("./src/components/files/monaco/monacoEntry.ts", import.meta.url),
           ),
         },
