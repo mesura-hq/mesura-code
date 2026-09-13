@@ -130,7 +130,7 @@ describe("EditorSessionEvent", () => {
 
   it.each([
     ["snapshot", { type: "snapshot", snapshot }],
-    ["lines", { type: "lines", first: 0, last: 1, lines: ["changed"] }],
+    ["lines", { type: "lines", relativePath: "src/a.ts", first: 0, last: 1, lines: ["changed"] }],
     ["cursor", { type: "cursor", line: 3, col: 7 }],
     ["mode", { type: "mode", mode: "i", blocking: false }],
     ["viewport", { type: "viewport", topline: 1, botline: 40 }],

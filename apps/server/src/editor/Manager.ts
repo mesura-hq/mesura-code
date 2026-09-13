@@ -519,8 +519,14 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
 
     const unsubscribe = session.bridge.subscribe((event) => {
       if (event.kind === "lines") {
+        // Attributed to the file the session has open. A delta with no name on
+        // it is one the client cannot check, and this is the only place that
+        // knows which file the mirror is on.
+        const relativePath = session.currentPath;
+        if (relativePath === null) return;
         publish(session, {
           type: "lines",
+          relativePath,
           first: event.first,
           last: event.last,
           lines: [...event.lines],

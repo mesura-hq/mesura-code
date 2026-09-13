@@ -186,8 +186,26 @@ const EditorSnapshotEvent = Schema.Struct({
  * past it — because that is what Neovim sends, and translating it here would
  * put the off-by-one somewhere nobody looks.
  */
+/**
+ * One change to the text, and which file it is a change to.
+ *
+ * `relativePath` is not decoration. A delta is meaningless without knowing
+ * what it is a delta *to*, and this event used to carry only the range and the
+ * text — so a change to one buffer applied to another file was undetectable by
+ * construction, on both sides of the wire. Three separate defects reached disk
+ * that way, each one a different route to the same thing: the panel rendered
+ * another file's text as the open file, and the save that followed wrote it.
+ * Each was fixed with a guard reconstructed out of band, and none of those
+ * guards made the next route impossible.
+ *
+ * With the path on the event the client drops a mismatch outright, whatever
+ * route produced it. The guards remain as the cheaper first line; this is what
+ * makes the mistake unrepresentable rather than merely caught.
+ */
 const EditorLinesEvent = Schema.Struct({
   type: Schema.Literal("lines"),
+  /** The file this change belongs to, as the session's snapshot named it. */
+  relativePath: TrimmedNonEmptyString,
   first: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   last: Schema.Int,
   lines: EditorLinesSchema,

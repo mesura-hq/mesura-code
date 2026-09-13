@@ -140,6 +140,19 @@ export function applyEditorSessionEvent(
         topline: event.snapshot.topline,
       };
     case "lines":
+      // A delta for another file is refused rather than applied. The event
+      // names the file it changes, and three separate defects reached disk by
+      // applying one buffer's change to another file's text — the panel then
+      // renders it as the open file and the save writes it. Each of those was
+      // fixed where it arose; this is the place that does not need to know
+      // which route produced the mismatch.
+      //
+      // Dropped silently, and `sequence` still advances: the driver treats a
+      // sequence it cannot account for as a dropped frame and reconciles in
+      // full against `lines`, which is unchanged here and therefore still the
+      // truth. Before the first snapshot there is no file to compare against
+      // and nothing to apply a delta to.
+      if (state.relativePath === null || event.relativePath !== state.relativePath) return base;
       return { ...base, lines: applyLinesEvent(state.lines, event) };
     case "cursor":
       return { ...base, cursor: { line: event.line, col: event.col } };

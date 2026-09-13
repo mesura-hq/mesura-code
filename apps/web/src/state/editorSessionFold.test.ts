@@ -27,7 +27,7 @@ const fold = (state: EditorSessionState, events: ReadonlyArray<EditorSessionEven
 const snapshot = (lines: ReadonlyArray<string>): EditorSessionEvent => ({
   type: "snapshot",
   snapshot: {
-    relativePath: "src/a.ts",
+    relativePath: THE_OPEN_FILE,
     lines,
     cursor: { line: 1, col: 1 },
     mode: "n",
@@ -36,11 +36,49 @@ const snapshot = (lines: ReadonlyArray<string>): EditorSessionEvent => ({
   },
 });
 
+/** The file every event in this file belongs to, unless one says otherwise. */
+const THE_OPEN_FILE = "src/a.ts";
+
 const linesEvent = (
   first: number,
   last: number,
   lines: ReadonlyArray<string>,
-): EditorSessionEvent => ({ type: "lines", first, last, lines });
+  relativePath: string = THE_OPEN_FILE,
+): EditorSessionEvent => ({ type: "lines", relativePath, first, last, lines });
+
+describe("a delta that names another file", () => {
+  it("is refused rather than applied", () => {
+    // The defect this prevents, end to end: a change belonging to one file is
+    // applied to the text of another, the panel renders the result as the open
+    // file, and the save writes it to disk. It happened three times by three
+    // different routes, which is why the check is here — at the one place that
+    // does not have to know which route produced it.
+    const state = fold(EMPTY_EDITOR_SESSION_STATE, [
+      snapshot(["one", "two", "three"]),
+      linesEvent(0, 1, ["WRONG"], "src/somewhere-else.ts"),
+    ]);
+
+    expect(state.lines).toEqual(["one", "two", "three"]);
+  });
+
+  it("still counts as something having happened", () => {
+    // `sequence` advances so the driver treats it as a frame it cannot
+    // account for and reconciles in full against `lines` — which is unchanged
+    // and therefore still the truth. Holding the sequence back would leave the
+    // driver believing it is up to date.
+    const before = fold(EMPTY_EDITOR_SESSION_STATE, [snapshot(["one"])]);
+    const after = applyEditorSessionEvent(before, linesEvent(0, 1, ["WRONG"], "other.ts"));
+
+    expect(after.sequence).toBe(before.sequence + 1);
+  });
+
+  it("is refused before any file is open", () => {
+    // Nothing to compare against and nothing to apply a delta to.
+    const state = applyEditorSessionEvent(EMPTY_EDITOR_SESSION_STATE, linesEvent(0, 1, ["WRONG"]));
+
+    expect(state.lines).toEqual([]);
+  });
+});
 
 describe("applyLinesEvent", () => {
   it("replaces the half-open range Neovim names", () => {
