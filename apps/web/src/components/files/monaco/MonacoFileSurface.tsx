@@ -7,6 +7,8 @@ import type { DraftId } from "~/composerDraftStore";
 import { useClientSettings } from "~/hooks/useSettings";
 
 import type { FileEditorRetention } from "../fileEditorRetention";
+import { NvimStatusStrip } from "./nvim/NvimStatusStrip";
+import { useNvimFileEditor } from "./nvim/useNvimFileEditor";
 import { installFileEditorDismissal } from "../fileEditorDismissal";
 import { setProjectFileQueryData } from "../projectFilesQueryState";
 import { useFileSaveCoordinator } from "../useFileSaveCoordinator";
@@ -47,6 +49,9 @@ export interface MonacoFileSurfaceProps {
    */
   readonly models: MonacoFileModels;
   readonly composerDraftTarget: ScopedThreadRef | DraftId;
+  /** The thread whose Neovim drives this editor, when modal editing is on. */
+  readonly threadRef: ScopedThreadRef;
+  readonly modalEditing: boolean;
   readonly onPendingChange: (relativePath: string, pending: boolean) => void;
 }
 
@@ -69,6 +74,8 @@ export function MonacoFileSurface({
   retention,
   models,
   composerDraftTarget,
+  threadRef,
+  modalEditing,
   onPendingChange,
 }: MonacoFileSurfaceProps) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -327,10 +334,31 @@ export function MonacoFileSurface({
   });
   // A ref so the dismissal listeners can read the current answer without being
   // torn down and reinstalled every time a comment form opens or closes.
+  const nvim = useNvimFileEditor({
+    editor,
+    model,
+    environmentId,
+    threadRef,
+    cwd,
+    relativePath,
+    enabled: modalEditing,
+    // Shared with the effect below rather than duplicated: the driver has to
+    // know an agent's write from a browser composition, and the difference is
+    // this ref being set.
+    isApplyingExternalEdit: () => applyingExternalEditRef.current,
+  });
+
   const hasOpenDraftRef = useRef(comments.hasOpenDraft);
   useEffect(() => {
     hasOpenDraftRef.current = comments.hasOpenDraft;
   }, [comments.hasOpenDraft]);
+
+  // Read through refs because the dismissal listener is installed once, on
+  // mount, and must see the mode as it is now rather than as it was then.
+  const nvimModeRef = useRef(nvim.mode);
+  nvimModeRef.current = nvim.mode;
+  const nvimActiveRef = useRef(nvim.active);
+  nvimActiveRef.current = nvim.active;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -358,14 +386,24 @@ export function MonacoFileSurface({
       },
       // An open comment form owns Escape: it cancels the draft rather than
       // blurring the editor underneath it.
-      isBlocked: () => hasOpenDraftRef.current,
+      //
+      // So does Neovim, whenever it is in any mode but plain normal — Escape
+      // is how a developer leaves insert, visual or an operator, and a host
+      // that blurred the editor instead would strand them in that mode with
+      // the keyboard somewhere else. In plain normal mode there is nothing to
+      // leave, so Escape dismisses as it always did.
+      isBlocked: () =>
+        hasOpenDraftRef.current || (nvimActiveRef.current && nvimModeRef.current !== "n"),
       onDismiss: () => {},
     });
   }, []);
 
   return (
-    <div ref={hostRef} data-monaco-file-surface className="flex min-h-0 flex-1">
-      {comments.zones}
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div ref={hostRef} data-monaco-file-surface className="flex min-h-0 flex-1">
+        {comments.zones}
+      </div>
+      {nvim.active ? <NvimStatusStrip mode={nvim.mode} /> : null}
     </div>
   );
 }

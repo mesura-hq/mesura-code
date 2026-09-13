@@ -171,6 +171,47 @@ cursor. Roughly one key in twelve of ordinary code is such a closer, so an instr
 a frame that _drew something_ puts every one of them in its tail — measured that way the bench
 reported a p50 of 1.8 ms beside a p95 of 515 ms, and the whole tail was its own bug.
 
+## The client, and which keys it keeps
+
+With modal editing on, the file panel routes every key through `toNvimKey` and sends it. Three rules
+decide the exceptions, and each one was measured against the developer's own configuration rather
+than argued.
+
+- **Shift is a modifier for a named key and never for a printable one.** On a Latin-American layout
+  `/` is `Shift+7` and `event.key` already says `/`, so sending `<S-/>` would mean nothing while `/`
+  means search. `Tab` is `Tab` however it was typed, and his configuration maps `<S-Tab>` and
+  `<Tab>` to `vim.snippet.jump` backwards and forwards — two different commands. Escape is the one
+  named key Shift is dropped for: nothing maps `<S-Esc>`, and a Shift held a moment too long would
+  otherwise leave him in insert mode.
+- **One application shortcut outranks Neovim: the file picker.** `<C-p>` is unmapped in his
+  configuration, so the picker costs Neovim nothing. Every other collision goes the other way, and
+  the measurements are why — `<C-k>` is `TmuxNavigateUp`, `<C-b>` is Telescope, `<C-f>` is his file
+  finder, `<C-u>` and `<C-d>` are half the scrolling. The application's own version of those is
+  reached by pressing Escape in normal mode first, which releases the editor.
+- **Escape in plain normal mode belongs to the panel**, and in every other mode to Neovim. Leaving
+  insert, visual or an operator is what Escape is for, and a host that blurred the editor instead
+  would strand him in that mode with the keyboard elsewhere. In normal mode there is nothing to
+  leave, and `<Esc>` is unmapped there in his configuration, so it dismisses as it always did.
+
+**The session state the client holds is absolute, not the last event.** Every event other than
+`snapshot` is a delta, and a client that kept only the latest one would be correct exactly as long
+as every event reached a render — which `useSyncExternalStore` does not promise. Two events landing
+between two renders produce one render carrying the second, and the delta after that is then
+measured against text that has already drifted. So the fold keeps the lines themselves, the way the
+terminal's fold keeps the whole buffer rather than the last chunk, and the driver reconciles Monaco
+to them. The line-range edit is still taken as a shortcut when the driver can see it missed nothing,
+and the result is checked against the state afterwards — a delta is an optimisation over a truth,
+never the truth.
+
+**A `nvim_buf_lines_event` with a null `changedtick` is a preview, not a change.** `inccommand`
+defaults to `nosplit`, so every keystroke of a `:s` replacement being typed makes Neovim report what
+each line _would_ become. The buffer does not move — `nvim_buf_get_lines` answers the old text
+throughout — and every preview names the same range against the original, so they are not deltas and
+they do not compose. `:%s/two/TWO\rMORE/` turns one line into a growing pile of half-typed fragments
+if they are applied. The bridge drops them, which is the one place that has to know: the wire event
+carries no tick, so a client cannot tell. The committed event arrives with a real tick, and so does
+the initial snapshot `nvim_buf_attach` sends.
+
 ## Known limitations
 
 - **A `flush` does not mean something changed.** Under the developer's configuration Neovim emits

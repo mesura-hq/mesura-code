@@ -302,9 +302,9 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
    * `ggVGd`, which none of the ordinary delete sequences reaches.
    */
   const applyLinesEvent = (params: ReadonlyArray<unknown>) => {
-    const [handle, , firstLine, lastLine, replacement] = params as [
+    const [handle, changedtick, firstLine, lastLine, replacement] = params as [
       { id?: number } | undefined,
-      unknown,
+      number | null | undefined,
       number,
       number,
       string[],
@@ -312,6 +312,19 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
     // A buffer the mirror has left can still have events in flight, and
     // applying one of them splices the previous file's text into this one.
     if (typeof handle?.id === "number" && handle.id !== attachedBuffer) return null;
+    // Neovim defines this rather than merely allowing it, in `:help
+    // nvim_buf_lines_event`: "When {changedtick} is |v:null| this means the
+    // screen lines (display) changed but not the buffer contents."
+    //
+    // A null `changedtick` marks a preview rather than a change, and `:s` sends
+    // a stream of them: `inccommand` defaults to `nosplit`, so every keystroke
+    // of a replacement being typed reports what the line *would* become. The
+    // buffer itself does not move — `nvim_buf_get_lines` answers the old text
+    // throughout — and every preview names the same range against the original,
+    // so they are not deltas and do not compose. Applying them turns
+    // `:%s/two/TWO\rMORE/` into a growing pile of half-typed fragments before
+    // Enter is ever pressed. The committed event arrives with a real tick.
+    if (changedtick === null || changedtick === undefined) return null;
     // The trailing `more` flag is deliberately unread. It marks a large update
     // split across several events, and each chunk's splice is self-consistent,
     // so the settled mirror is right either way. Only a `flush` landing between

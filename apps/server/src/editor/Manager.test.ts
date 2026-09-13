@@ -230,6 +230,39 @@ it.layer(layer, { excludeTestServices: true })("EditorSessionManager", (it) => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("tells every attachment which file the session moved to", () =>
+    Effect.gen(function* () {
+      const { manager, root } = yield* createManager();
+      yield* manager.open({
+        threadId: "thread-1",
+        cwd: root,
+        relativePath: "a.ts",
+        lines: ["one", "two"],
+      });
+
+      const events = yield* collect(manager, "thread-1");
+
+      yield* manager.open({
+        threadId: "thread-1",
+        cwd: root,
+        relativePath: "b.ts",
+        lines: ["three"],
+      });
+      yield* manager.settleForTest({ threadId: "thread-1" });
+
+      const seen = yield* Ref.get(events);
+      const snapshots = seen.filter((event) => event.type === "snapshot");
+      const last = snapshots[snapshots.length - 1];
+      assert.strictEqual(
+        last?.type === "snapshot" ? last.snapshot.relativePath : null,
+        "b.ts",
+        // Without this the client keeps applying line events to the file it
+        // still believes is open, which is a different file's text.
+        "and it names the file the session moved to",
+      );
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("replaces a buffer's contents when the file's lines have moved on", () =>
     Effect.gen(function* () {
       const { manager, fake, root } = yield* createManager();

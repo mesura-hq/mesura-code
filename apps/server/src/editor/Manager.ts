@@ -437,7 +437,13 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
           ),
         );
 
-        return snapshotOf(session);
+        const snapshot = snapshotOf(session);
+        // Every attachment is told which file the session now has open, not
+        // just the caller. One session serves the whole thread, so a client
+        // that does not learn about the switch would keep applying this
+        // buffer's line events to the file it still believes is open.
+        publish(session, { type: "snapshot", snapshot });
+        return snapshot;
       }).pipe(
         // A session that could not be opened is not a session. Left in the
         // map it would hold a Neovim, occupy one of the slots, and claim to be

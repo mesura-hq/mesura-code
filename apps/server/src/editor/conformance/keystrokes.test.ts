@@ -120,6 +120,60 @@ if (!nvimAvailable) {
   });
 }
 
+it.layer(layer, { excludeTestServices: true })("conformance: a substitute being typed", (it) => {
+  if (!nvimAvailable) return;
+
+  /**
+   * Live substitute preview must not move the mirror.
+   *
+   * `inccommand` defaults to `nosplit`, so while a `:s` command is being typed
+   * Neovim reports what each line *would* become — on every keystroke of the
+   * replacement, every one of them describing the same range against the
+   * original text, and with the buffer itself untouched throughout. They are
+   * not deltas and they do not compose: applied in order they turn one line
+   * into a growing pile of half-typed fragments.
+   *
+   * The table above cannot catch this, and that is worth saying out loud. Its
+   * `substitute` case types the whole command through `type`, which runs it in
+   * one go, so no preview is ever generated. Only typing it the way a person
+   * does produces one.
+   */
+  it.effect("does not move the mirror until Enter", () =>
+    withNvim(["one two", "three four"], (bridge) =>
+      Effect.gen(function* () {
+        for (const character of ":%s/two/TWO\\rMORE/") {
+          yield* bridge.input(character);
+        }
+        // Neovim answering this at all proves it has read the keys, and the
+        // preview events are emitted while it reads them. No clock involved.
+        const mode = (yield* bridge.request("nvim_get_mode", [])) as { mode: string };
+        assert.strictEqual(mode.mode, "c", "the command line is still open");
+
+        const untouched = (yield* bridge.request("nvim_buf_get_lines", [
+          0,
+          0,
+          -1,
+          false,
+        ])) as string[];
+        assert.deepStrictEqual(untouched, ["one two", "three four"], "Neovim's own text");
+        assert.deepStrictEqual([...bridge.lines], untouched, "and the mirror still agrees");
+
+        yield* bridge.input("<CR>");
+        yield* bridge.settle;
+
+        const committed = (yield* bridge.request("nvim_buf_get_lines", [
+          0,
+          0,
+          -1,
+          false,
+        ])) as string[];
+        assert.deepStrictEqual(committed, ["one TWO", "MORE", "three four"], "the command ran");
+        assert.deepStrictEqual([...bridge.lines], committed, "and the mirror followed it");
+      }),
+    ),
+  );
+});
+
 it.layer(layer, { excludeTestServices: true })("conformance: the mirror equals Neovim", (it) => {
   if (!nvimAvailable) return;
   for (const keystrokeCase of KEYSTROKE_CASES) {
