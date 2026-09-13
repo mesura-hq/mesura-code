@@ -1,10 +1,21 @@
 /*
- * The file surface sits on the app's own code background rather than Monaco's,
- * which the theme also sets; this covers the gap Monaco leaves around the
- * editor while it measures on first paint.
+ * The file surface sits on the app's own window background rather than
+ * Monaco's, which the theme also sets; this covers the gap Monaco leaves
+ * around the editor while it measures on first paint.
+ *
+ * `--background`, not `--code-background`. The code background mixes 3% white
+ * into the window through `--card` and then mixes that again, which lands on
+ * rgb(17, 17, 17) where the app is rgb(10, 10, 10). That reads as a raised
+ * panel, which is what a snippet inside a message wants and not what a
+ * full-height editor wants — beside the chat it looked like a different
+ * application. The developer asked for the same black, having looked at both.
+ *
+ * This selector is also what decides the editor's own theme, because
+ * `readCodeSurfaceColors` reads the painted colour off this node. Changing the
+ * rule changes both, which is the point of there being one of them.
  */
 [data-monaco-file-surface] {
-  background-color: var(--code-background, var(--background));
+  background-color: var(--background);
   color: var(--code-foreground, var(--foreground));
 }
 
