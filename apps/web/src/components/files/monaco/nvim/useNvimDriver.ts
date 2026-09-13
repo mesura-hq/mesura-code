@@ -12,6 +12,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 
 import { editsForLinesEvent, editsForSnapshot, type MonacoEdit } from "./nvimModelSync.ts";
 import { toNvimKey } from "./nvimKeymap.ts";
+import { monacoFileModelKey } from "../monacoFileModels.ts";
 import { caretStyleFor } from "./nvimMode.ts";
 import {
   diffWidgets,
@@ -157,6 +158,8 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   const {
     editor,
     model,
+    environmentId,
+    cwd,
     relativePath,
     enabled,
     state,
@@ -206,6 +209,30 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   // would empty a stack the whole registry exists to keep.
   useEffect(() => {
     if (!enabled || model === null) return;
+
+    // The path and the model come from different hooks and do not land on the
+    // same render. `openFile` closes over the path, so it is new as soon as
+    // the panel switches file, while `model` is still the one the panel was
+    // showing a moment ago — and this effect would then hand the session the
+    // previous file's text under the new file's name.
+    //
+    // That is not a cosmetic race. The server writes those lines into the
+    // buffer it opens, answers with a snapshot carrying the new path and the
+    // old text, and the panel reconciles its model to it and saves. Measured
+    // on the wire: `open` asked for `browserFaviconLogic.test.ts` and carried
+    // `import { v4 as uuid } from "uuid";` as its first line, which belongs to
+    // the file opened before it. A source file was overwritten with another
+    // file's contents this way.
+    //
+    // Waiting costs nothing: the model arrives a render later and this effect
+    // runs again with the pair agreeing.
+    // Both sides parsed the same way. The model's URI is the key put through
+    // `monaco.Uri.parse`, which normalises it, so comparing the raw key
+    // against the parsed one never matches and the session would never open
+    // at all.
+    const expected = monaco.Uri.parse(monacoFileModelKey(environmentId, cwd, relativePath));
+    if (model.uri.toString() !== expected.toString()) return;
+
     // Nothing the session said about the previous file applies to this one, so
     // the next state this driver sees is reconciled in full.
     appliedSequenceRef.current = null;
@@ -215,7 +242,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
     // and never applied.
     viewportRef.current = EMPTY_VIEWPORT_HISTORY;
     openFile(model.getLinesContent());
-  }, [enabled, model, openFile]);
+  }, [enabled, model, openFile, environmentId, cwd, relativePath]);
 
   // Keys.
   useEffect(() => {

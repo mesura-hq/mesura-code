@@ -230,6 +230,32 @@ it("answers `:w` itself rather than letting Neovim write the file", () => {
   );
 });
 
+it("never opens a file in the session with another file's text", () => {
+  const driver = read("apps/web/src/components/files/monaco/nvim/useNvimDriver.ts");
+
+  // The path and the model reach this hook from different places and do not
+  // land on the same render: `openFile` closes over the path and is new the
+  // moment the panel switches file, while `model` is still the previous
+  // file's for one more render. Opening on that render hands the session the
+  // old text under the new name, the server writes it into the buffer it just
+  // opened, and the panel saves it to disk.
+  //
+  // Measured on the wire before the guard existed: `open` asked for
+  // `browserFaviconLogic.test.ts` carrying `import { v4 as uuid } from
+  // "uuid";` as its first line. `NodeNvimAdapter.ts` was found on disk holding
+  // a GitHub workflow, and two other files went the same way.
+  assert.include(
+    driver,
+    "monacoFileModelKey(environmentId, cwd, relativePath)",
+    "the open effect no longer checks that the model belongs to the path: it will hand the session the previous file's text under this file's name, and that text reaches disk",
+  );
+  assert.match(
+    driver,
+    /if \(model\.uri\.toString\(\) !== expected\.toString\(\)\) return;/,
+    "the model and the path are no longer compared as normalised URIs: comparing the raw key against a parsed one never matches, and the session never opens at all",
+  );
+});
+
 it("lets the application keep its own shortcuts", () => {
   const keymap = read("apps/web/src/components/files/monaco/nvim/nvimKeymap.ts");
 
