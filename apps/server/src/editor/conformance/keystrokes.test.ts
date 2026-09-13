@@ -671,27 +671,37 @@ it.layer(layer, { excludeTestServices: true })("conformance: the mirror equals N
     ),
   );
 
-  it.effect("follows a buffer switch instead of mirroring the buffer it left", () =>
+  it.effect("stays on the file when Neovim moves to a buffer the host did not open", () =>
     withNvim(["first buffer"], (bridge) =>
       Effect.gen(function* () {
-        // A session does not stay on the buffer it attached to. Under a real
-        // configuration it starts on a dashboard; here `:enew` stands in for
-        // the same move. A mirror that does not follow reads the old buffer's
-        // text for the rest of the session and nothing reports it.
+        // REGRESSION. This asserted the opposite until it destroyed a file.
+        //
+        // The old rule was "follow the buffer switch", written for a real
+        // configuration that starts on a dashboard, with `:enew` standing in
+        // for that move. It is the wrong rule, because the announcement a
+        // dashboard makes is the announcement every plugin makes: a picker, a
+        // git status, a prompt, a terminal. Following it means the mirror
+        // holds a plugin's window, the client renders that as the file, and
+        // the next save writes it to disk.
+        //
+        // Measured in the running app against the developer's configuration:
+        // `<C-e>` put a git-status window in the panel and `<C-f>` put a
+        // one-line prompt holding a single emoji there.
+        // `apps/server/src/editor/hostPlugin.ts` became that emoji, five bytes
+        // on disk.
+        //
+        // The dashboard case needs no following at all: the host opens the
+        // file with `mesura.open`, which switches to a buffer the host owns
+        // and marks, and that switch is announced and followed. See
+        // `foreignBuffers.test.ts` for both halves of the rule.
         yield* bridge.request("nvim_command", ["enew"]);
         yield* bridge.settle;
-        const now = yield* bridge.request("nvim_exec_lua", [
-          "return vim.api.nvim_get_current_buf()",
-          [],
-        ]);
-        require("node:fs").appendFileSync("/tmp/probe-attach.txt", `after-enew=${now}\n`);
-        yield* bridge.setLines(["second buffer"]);
-        yield* send(bridge, "A!");
-        yield* send(bridge, "<Esc>");
 
-        const expected = yield* truth(bridge);
-        assert.deepStrictEqual(expected.lines, ["second buffer!"], "Neovim's own buffer");
-        assert.deepStrictEqual(bridge.lines, ["second buffer!"], "the mirror");
+        assert.deepStrictEqual(
+          bridge.lines,
+          ["first buffer"],
+          "the mirror followed Neovim into a buffer the host never opened",
+        );
       }),
     ),
   );

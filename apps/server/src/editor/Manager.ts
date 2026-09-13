@@ -424,10 +424,32 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         });
         yield* trimBuffers(session);
 
-        yield* request(session, "nvim_exec_lua", [
+        // The buffer `mesura.open` returns is the one the mirror must follow,
+        // and it is taken here rather than left to the `BufEnter`
+        // announcement. That announcement is a notification and lands whenever
+        // the notification fiber reaches it, which can be after the snapshot
+        // below is built — and a snapshot built from the previous buffer sends
+        // the client somebody else's text as the file it asked for. Under a
+        // configuration that restores a session or opens a picker at start,
+        // that somebody else is a plugin, and the client then saves a plugin's
+        // window over the file. Measured: a workflow file and a source file
+        // were both reduced to a picker's one-line prompt this way.
+        const openedBuffer = (yield* request(session, "nvim_exec_lua", [
           "return mesura.open(...)",
           [absolutePath, [...input.lines]],
-        ]);
+        ])) as number;
+        if (typeof openedBuffer === "number") {
+          yield* session.bridge.followBuffer(openedBuffer).pipe(
+            Effect.mapError(
+              (cause) =>
+                new EditorSessionRpcError({
+                  threadId: session.threadId,
+                  method: "open",
+                  detail: cause.message,
+                }),
+            ),
+          );
+        }
         yield* session.bridge.settle.pipe(
           Effect.mapError(
             (cause) =>

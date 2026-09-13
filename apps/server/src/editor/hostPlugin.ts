@@ -156,7 +156,25 @@ local function announce_buffer()
   if type(channel) ~= "number" then
     return
   end
-  pcall(vim.rpcnotify, channel, "mesura_buffer_changed", vim.api.nvim_get_current_buf())
+  local buffer = vim.api.nvim_get_current_buf()
+  -- Only a buffer the host opened. Every other buffer that enters a window
+  -- belongs to a plugin — a picker, a git status, a prompt, a terminal — and
+  -- the mirror must not follow it anywhere.
+  --
+  -- This destroyed a file before it was here. The host followed Neovim into
+  -- whatever buffer a mapping opened, sent that buffer's lines to the client
+  -- as though they were the file's, the panel replaced the editor's contents
+  -- with them, and the save that followed wrote a plugin's UI over the source.
+  -- Reproduced: '<C-f>' in the developer's configuration left a one-line
+  -- buffer reading a single emoji, and the file on disk became that emoji.
+  --
+  -- Marked when the host creates it rather than inferred from 'buftype' or
+  -- the name, because both are things a plugin is free to choose and this is
+  -- the one question being asked: did we open this?
+  if vim.b[buffer].mesura_file == nil then
+    return
+  end
+  pcall(vim.rpcnotify, channel, "mesura_buffer_changed", buffer)
 end
 
 vim.api.nvim_create_autocmd({ "BufEnter", "BufWinEnter" }, {
@@ -204,6 +222,9 @@ function mesura.open(abs_path, lines)
     vim.bo[buffer].buftype = "acwrite"
     vim.bo[buffer].swapfile = false
     vim.bo[buffer].undofile = false
+    -- What 'announce_buffer' above tests. It is the host's own mark, so no
+    -- plugin's buffer can carry it by accident.
+    vim.b[buffer].mesura_file = abs_path
 
     -- ':w' is a request, never a write. The host owns the file and saves it
     -- the way the editor's own autosave does, so one path writes it and one

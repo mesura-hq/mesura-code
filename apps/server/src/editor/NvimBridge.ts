@@ -294,6 +294,18 @@ export declare namespace NvimBridge {
      */
     readonly input: (keys: string) => Effect.Effect<void, NvimRpcError>;
     /**
+     * Points the mirror at a buffer the host owns, and waits for it.
+     *
+     * The announcement route is a notification, so it lands whenever the
+     * notification fiber gets to it. `open` cannot wait on that: it builds the
+     * snapshot it answers with from the mirror, and a snapshot taken before
+     * the announcement is the *previous* buffer's text sent to the client as
+     * the file it just asked for. Under a configuration that restores a
+     * session or opens a picker at start, that previous buffer is a plugin's,
+     * and the client then saves a plugin's window over the file.
+     */
+    readonly followBuffer: (buffer: number) => Effect.Effect<void, NvimRpcError>;
+    /**
      * Types keys and returns once Neovim has executed them.
      *
      * `nvim_feedkeys` with the `m`, `t` and `x` flags: remapped, treated as
@@ -898,6 +910,7 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
     },
     setLines: (next) =>
       settleAfter(rpc.request("nvim_buf_set_lines", [0, 0, -1, false, [...next]])),
+    followBuffer: (buffer: number) => attachTo(buffer),
     awaitFrame: awaitFlush,
     nextFrame: Effect.gen(function* () {
       const waiter = yield* Deferred.make<void>();
