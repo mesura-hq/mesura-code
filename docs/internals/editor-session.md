@@ -87,9 +87,176 @@ a sidebar read against the file's lines is virtual text on every column.
 
 ## The wire
 
-Not built yet. A client will open a session for a file in a thread, attach to a stream of its state,
-send keys, viewport, cursor and text replacements, and close it. This section is filled in when that
-lands.
+Seven methods, all in `packages/contracts/src/editorSession.ts` and `rpc.ts`. Every one of them
+carries a `threadId`, because a session belongs to a thread rather than to a file: the developer
+switches file inside one Neovim, the way they would in a terminal.
+
+| Method                      | Carries                                 | Answers                 |
+| --------------------------- | --------------------------------------- | ----------------------- |
+| `editorSession.open`        | `cwd`, `relativePath`, the file's lines | `EditorSessionSnapshot` |
+| `editorSession.attach`      | nothing but the thread                  | a **stream** of events  |
+| `editorSession.input`       | `keys`, in Neovim notation              | nothing                 |
+| `editorSession.viewport`    | `topline`, `rows`, `cols`               | nothing                 |
+| `editorSession.setCursor`   | `line`, `col`                           | nothing                 |
+| `editorSession.replaceText` | `edits`, each a range and its text      | nothing                 |
+| `editorSession.close`       | nothing but the thread                  | nothing                 |
+
+`open` hands Neovim the **lines**, never the path. Neovim is told the name so `:w`, `%` and the
+status line say something true, and it never reads or writes the file itself — the host owns the
+disk. The path is still resolved against `cwd` the way a read is, so one that climbs out of the
+project is refused; a name the developer did not ask for is still a name.
+
+Both text-carrying payloads are bounded: `keys` at 1024 characters, `edits` at a thousand entries
+and each entry's `text` at a megabyte, which is where the file-read path truncates and therefore the
+largest replacement that can honestly arrive.
+
+Errors are the union of `EditorSessionError` and `EnvironmentAuthorizationError`. Authorization is
+the terminal's `AuthTerminalOperateScope`, for all seven — a session is a subprocess on the
+developer's machine reading and writing their files, which is the authority the terminal already
+carries rather than a new one to invent.
+
+### The event union
+
+`attach` streams `EditorSessionEvent`, a union of twelve tagged members. The client folds them into
+absolute state in `apps/web/src/state/editorSessionFold.ts`; nothing downstream may read "the last
+event", for the reason under **Traps** below.
+
+| Event            | What it says                                                             |
+| ---------------- | ------------------------------------------------------------------------ |
+| `snapshot`       | the whole session: path, lines, cursor, mode, topline, highlight defs    |
+| `lines`          | one `nvim_buf_lines_event`: zero-based, half-open, `last === -1` for all |
+| `cursor`         | where the caret is                                                       |
+| `mode`           | the short mode name Neovim reports                                       |
+| `viewport`       | the top line Neovim is showing                                           |
+| `visual`         | the selection, or `null` outside visual mode                             |
+| `decorations`    | everything drawn over the text, by row                                   |
+| `hlDefs`         | the colours those drawings refer to, by highlight id                     |
+| `cmdline`        | the command line Neovim is showing, or `null` when it closed             |
+| `message`        | the last message Neovim wrote, and its kind                              |
+| `writeRequested` | Neovim asked the host to write the file — this is what `:w` becomes      |
+| `exited`         | the process ended. In the contract; see **Known limitations**            |
+
+**`rows` on a decorations event is not a hint, it is the erase list.** It names the rows this event
+replaces, so the client drops what it held for those rows and takes these instead. Without it a
+decoration that went away sends nothing at all, and a flash label stays on screen after the jump it
+belonged to is over.
+
+## Who owns what
+
+Three owners, and every defect in this area was one of them reaching into another's half.
+
+- **The host owns the file on disk.** It holds the save coordinator, its debounce and the retention
+  record that tells our own writes from an agent's. The host plugin turns `:w` into a
+  `BufWriteCmd` that notifies rather than writes, so Neovim never lands underneath those three.
+- **Neovim owns the text and the undo stack while it is driving.** The client does not edit the
+  Monaco model directly in modal editing; it reconciles the model to what the fold says Neovim
+  holds. `setValue` is specifically forbidden — see **Traps**.
+- **The host owns the viewport, the gutter, the status line and the selection.** Neovim draws the
+  text and nothing else, which is what the options in `hostPlugin.ts` enforce and why each of them
+  is there.
+
+## Lifetimes
+
+- **A session lives per thread**, evicted once there are more than sixteen with nobody attached
+  (`DEFAULT_MAX_SESSIONS` in `Manager.ts`).
+- **A buffer lives per file inside a session**, capped at thirty-two (`MAX_BUFFERS_PER_SESSION`),
+  oldest first. The cap is what keeps a long session from holding every file the developer opened
+  all day.
+- **On the client the Monaco models live per project**, in a module-level registry that outlives
+  React (`monacoFileModelRegistry.ts`, four projects retained). The undo stack lives in the model,
+  and the panel unmounts for three ordinary things — the spinner while a file is read, opening
+  Settings, and switching to a thread in another project — so a cache owned by any component would
+  be destroyed by exactly the actions it exists to survive.
+
+## Traps
+
+Each of these was found the expensive way, and each looks like a correct piece of code.
+
+- **The gutter is not cosmetic.** A cell is read as drawn-over text when its character differs from
+  the buffer's at that column. Anything Neovim paints in the margin shifts every column on the line,
+  and `list` and `conceallevel` break the same equality from the other side. With line numbers left
+  on, one flash jump produced **132** phantom labels against the 30 that were real. `hostPlugin.ts`
+  forces the whole set as window-local options _and_ as globals, and
+  `tests/unit/editor-session-wired.test.ts` holds them there.
+- **The `neovim` npm package is not the way in.** It routes through its own session object and
+  hides the UI events this needs. The framing is ours, in `NvimRpc.ts`, and it is about two hundred
+  lines.
+- **Never replace the whole model.** Monaco 0.56's `setValue` destroys every decoration before it
+  clears the undo history — the line is literally commented "Destroy all my decorations" in
+  `textModel.js` — so a whole-model write takes the file's comment anchors with it. Reconcile with
+  `applyEdits`, which also records no undo element of its own.
+- **`stdpath('config')` is not a lever.** Neovim resolves its configuration as
+  `$XDG_CONFIG_HOME/nvim`, so the environment variable is what moves it, and the configured
+  directory has to be pointed at as that variable's `nvim` child. `NvimLaunch.ts` owns the
+  arithmetic.
+- **`useSyncExternalStore` hands a component the current value, not a queue.** Two events that land
+  between two renders produce one render carrying the second, and the first is never applied. A
+  state that carried only the latest event is therefore correct exactly until the machine is busy.
+  Everything folds to absolute state — the lines themselves, the cursor, the mode, the decorations —
+  or to a counter, as `writeRequests` does. A `:w` immediately followed by any other event shares
+  one render, and a consumer reading the latest event sees the other one, so the write is never
+  flushed and the developer is told their file is saved.
+- **A `nvim_buf_lines_event` with a null `changedtick` is an `inccommand` preview, not a change.**
+  `:help nvim_buf_lines_event` says so. Applied as a delta, `:%s/two/TWO\rMORE/` piles up fragments
+  as the developer types the command. `NvimBridge.ts` drops them.
+- **Neovim will not hold a window that hides the cursor.** `winrestview({topline})` on its own snaps
+  straight back, and reads correct from inside the same Lua call, which is what makes it convincing.
+  The cursor has to be clamped into the range in the same call; `SET_VIEWPORT_LUA` does it.
+- **Edits handed to `nvim_buf_set_text` must be applied last-first, and sorted.** Out-of-order
+  edits that change length corrupt each other's positions. `APPLY_EDITS_LUA` sorts before it walks
+  backwards.
+- **`nvim_input` is asynchronous and nothing in the protocol says when a key was consumed.** Code
+  that has to know uses the session's `type`, which feeds keys with `nvim_feedkeys`'s `x` flag — at
+  the cost of aborting an incomplete command, so it takes whole sequences only.
+- **The editor sits under the app's own overlays and must stay there.** Monaco's widgets take a
+  z-index of their own, and the command palette, the file picker and the dialogs are the app's.
+  Meta never reaches Neovim (`nvimKeymap.ts` returns null for it) for the same reason: an editor
+  that swallowed it would take the app's shortcuts away wherever it happened to have focus.
+
+## The desktop app, and the PATH question
+
+The worry is specific: an Electron app launched from a desktop entry does not inherit a login
+shell's `PATH`, so a Neovim installed in `~/.local/bin` would be invisible to the server the app
+bundles, and every session would fail with `binary-missing` for a Neovim that is plainly installed.
+
+**It does not happen, and the reason is upstream's.** `fixPath` in `apps/server/src/os-jank.ts`
+runs at server start: it reads `PATH` from a login shell and _merges_ it with the process's own
+(`mergePathEntries`). The bundled server therefore sees the developer's real `PATH` whatever the
+launcher had.
+
+Measured on this machine. The desktop build was started with `PATH=/tmp/nonvim-bin`, a directory
+holding only `sh`, `bash`, `node`, `git`, `env` and `timeout` — no `nvim`. The backend process's
+own `PATH` read back as the full login-shell value with `/tmp/nonvim-bin` merged into the middle of
+it, `/usr/bin` still present, and the session started normally against `/usr/bin/nvim`.
+
+So `binary-missing` cannot be provoked through the desktop by stripping the launcher's `PATH`. What
+that fallback does when it _is_ reached is proved by `nvimFallback.test.ts` and by
+`NodeNvimAdapter`'s classifier, not by this route.
+
+## Running the conformance harness
+
+The suite in `apps/server/src/editor/conformance/` drives a real Neovim. It is the only thing in
+this area that proves anything about vim rather than about our arithmetic.
+
+```bash
+# Against a scratch configuration — runs anywhere nvim is on PATH.
+cd apps/server && vp test run src/editor/conformance --max-workers=2
+
+# Against the developer's own configuration, plugins and remaps.
+cd apps/server && MESURA_NVIM_CONFIG_DIR=~/.neovim vp test run src/editor/conformance --max-workers=2
+```
+
+Two files are gated on `MESURA_NVIM_CONFIG_DIR` and skip without it, `realConfig.test.ts` and
+`insertModeLatency.test.ts`. They skip rather than fail because there is no second machine and no
+continuous integration that has that directory — but the skip is itself asserted, so a harness that
+silently stopped running when the variable _is_ set fails instead of passing quietly.
+
+**No test in this area may wait on a clock.** `editorBridgeContract.test.ts` enforces it by reading
+the sources for `Effect.sleep`, `setTimeout` and `TestClock`. A text-sync harness that waits on a
+clock passes on a fast machine for the wrong reason and fails on a loaded one for no defect, which
+is worse than no harness at all. The one exemption is the latency bench, which asserts no duration
+and therefore has no threshold to be wrong about; the exemption is a named list, so widening it is
+an edit somebody reads.
 
 ## Insert mode
 

@@ -13,6 +13,7 @@ This is a living glossary for T3 Code. It explains what common terms mean in thi
 - [Symmetria integration](#symmetria-integration)
 - [Checkpointing](#checkpointing)
 - [Appearance](#appearance)
+- [Editor delegation](#editor-delegation)
 
 ## Concepts
 
@@ -194,6 +195,41 @@ theme a user picks in Settings afterwards sticks until the next set; mobile keep
 appearance settings. Naming a published [environment theme](#environment-theme) is how a desktop
 ships T3 Code already matching it.
 
+### Editor delegation
+
+#### Editor session
+
+One headless Neovim process the server runs on behalf of a thread, so the developer's own
+configuration, plugins and remapped keys are what edit the file while Monaco stays the thing on
+screen. A session belongs to a thread rather than to a file — the developer switches file inside one
+Neovim, the way they would in a terminal. Not event-sourced: it follows the terminal's precedent
+rather than the orchestration's, because its state is a live process and not a history. Sixteen
+sessions are kept once nobody is attached, thirty-two buffers inside each. See
+[editor-session.md](./editor-session.md).
+
+#### Host plugin
+
+The Lua the server writes to disk and prepends to Neovim's runtimepath, in
+[hostPlugin.ts][ed-host]. It forces the gutter off, forces syntax and the treesitter highlighter
+off, and turns `:w` into a `BufWriteCmd` that asks the host to save instead of writing the file
+itself. The gutter options are not cosmetic: they keep grid column N equal to buffer column N,
+which is the equality that [virtual cell](#virtual-cell) detection rests on.
+
+#### Virtual cell
+
+A cell on Neovim's drawn grid whose character differs from the buffer's character at that column —
+so it is something drawn _over_ the text rather than the text. It is how flash labels, inline
+diagnostics and any other virtual text are found and sent to the client as decorations, and it is
+why the host plugin forces every option that would shift a column. [GridModel.ts][ed-grid] does the
+comparison.
+
+#### Modal editing
+
+The client setting that turns delegation on, `modalEditing`, on by default. With it off the file
+panel is the plain Monaco editor it was before. With it on and Neovim unavailable, the panel falls
+back to that same plain editor and says in its status strip what is missing and how to fix it,
+rather than failing. See [the file panel](../user/file-panel.md).
+
 ## Practical Shortcuts
 
 - If you see `requested`, think "intent recorded".
@@ -212,6 +248,8 @@ ships T3 Code already matching it.
 - [Editor session](./editor-session.md)
 - [Reading and editing files](../user/file-panel.md)
 
+[ed-host]: ../../apps/server/src/editor/hostPlugin.ts
+[ed-grid]: ../../apps/server/src/editor/GridModel.ts
 [1]: ../../packages/contracts/src/orchestration.ts
 [2]: ./workspace-layout.md
 [3]: ../../apps/server/src/vcs/GitVcsDriverCore.ts
