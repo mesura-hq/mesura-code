@@ -113,6 +113,16 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.terminalClose]: AuthTerminalOperateScope,
   [WS_METHODS.subscribeTerminalEvents]: AuthTerminalOperateScope,
   [WS_METHODS.subscribeTerminalMetadata]: AuthTerminalOperateScope,
+  // The terminal scope, and it is the honest one rather than a convenient one:
+  // an editor session is a Neovim, and a Neovim runs `:!` and arbitrary Lua.
+  // Whoever may open a shell may open this; whoever may not, may not.
+  [WS_METHODS.editorSessionOpen]: AuthTerminalOperateScope,
+  [WS_METHODS.editorSessionAttach]: AuthTerminalOperateScope,
+  [WS_METHODS.editorSessionInput]: AuthTerminalOperateScope,
+  [WS_METHODS.editorSessionViewport]: AuthTerminalOperateScope,
+  [WS_METHODS.editorSessionSetCursor]: AuthTerminalOperateScope,
+  [WS_METHODS.editorSessionReplaceText]: AuthTerminalOperateScope,
+  [WS_METHODS.editorSessionClose]: AuthTerminalOperateScope,
   [WS_METHODS.previewOpen]: AuthOrchestrationOperateScope,
   [WS_METHODS.previewNavigate]: AuthOrchestrationOperateScope,
   [WS_METHODS.previewResize]: AuthOrchestrationOperateScope,

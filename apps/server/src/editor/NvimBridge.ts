@@ -32,6 +32,28 @@ import { makeNvimRpc, type NvimRpcError } from "./NvimRpc.ts";
  * equivalence rather than probability.
  */
 
+/**
+ * What a session tells whoever is watching it.
+ *
+ * Deliberately close to what Neovim said rather than to what a client wants:
+ * turning a redraw into something drawable is the business of whoever is
+ * drawing, and a bridge that decided it here would have to decide it again
+ * differently for the next surface.
+ */
+export type NvimBridgeEvent =
+  | {
+      readonly kind: "lines";
+      readonly first: number;
+      readonly last: number;
+      readonly lines: ReadonlyArray<string>;
+    }
+  | { readonly kind: "flush" }
+  | {
+      readonly kind: "notification";
+      readonly method: string;
+      readonly params: ReadonlyArray<unknown>;
+    };
+
 export interface NvimCursor {
   readonly line: number;
   readonly col: number;
@@ -129,6 +151,14 @@ export declare namespace NvimBridge {
      * on their own, so the next frame is usually not the one the key caused.
      */
     readonly settle: Effect.Effect<void, NvimRpcError>;
+    /**
+     * Watches the session. Returns the call that stops watching.
+     *
+     * A set of listeners rather than a second stream: the notification queue
+     * has one consumer by construction, and handing it out would mean the
+     * mirror and the watcher racing for the same events.
+     */
+    readonly subscribe: (listener: (event: NvimBridgeEvent) => void) => () => void;
     /**
      * Milliseconds from a key going in to the redraw it caused coming back.
      *
@@ -237,6 +267,19 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
   let flushWaiters: Array<Deferred.Deferred<void>> = [];
   let bufferEvents = 0;
   let frames = 0;
+  const watchers = new Set<(event: NvimBridgeEvent) => void>();
+
+  const tell = (event: NvimBridgeEvent) => {
+    // A watcher that throws must not stop the mirror from applying the next
+    // event; it is watching, and the mirror is the thing that has to be right.
+    for (const watcher of watchers) {
+      try {
+        watcher(event);
+      } catch {
+        /* a watcher's problem is its own */
+      }
+    }
+  };
   /** Markers handed out by `settle`, resolved when Neovim sends them back. */
   let settleSequence = 0;
   const settleWaiters = new Map<number, Deferred.Deferred<void>>();
@@ -268,7 +311,7 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
     ];
     // A buffer the mirror has left can still have events in flight, and
     // applying one of them splices the previous file's text into this one.
-    if (typeof handle?.id === "number" && handle.id !== attachedBuffer) return;
+    if (typeof handle?.id === "number" && handle.id !== attachedBuffer) return null;
     // The trailing `more` flag is deliberately unread. It marks a large update
     // split across several events, and each chunk's splice is self-consistent,
     // so the settled mirror is right either way. Only a `flush` landing between
@@ -279,6 +322,12 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
       lines.splice(firstLine, lastLine - firstLine, ...replacement);
     }
     if (lines.length === 0) lines = [""];
+    return {
+      kind: "lines" as const,
+      first: firstLine,
+      last: lastLine,
+      lines: [...replacement],
+    };
   };
 
   /**
@@ -336,11 +385,19 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
         }
         if (notification.method === "nvim_buf_lines_event") {
           bufferEvents += 1;
-          applyLinesEvent(notification.params);
+          const applied = applyLinesEvent(notification.params);
           grid.setBufferLines(lines);
+          if (applied !== null) tell(applied);
           return;
         }
-        if (notification.method !== "redraw") return;
+        if (notification.method !== "redraw") {
+          tell({
+            kind: "notification",
+            method: notification.method,
+            params: notification.params,
+          });
+          return;
+        }
         grid.applyRedraw(notification.params as ReadonlyArray<ReadonlyArray<unknown>>);
         const hasFlush = (notification.params as ReadonlyArray<ReadonlyArray<unknown>>).some(
           (event) => event[0] === "flush",
@@ -350,6 +407,7 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
         const collected = grid.collect();
         overlays = collected.overlays;
         highlightRuns = collected.highlightRuns;
+        tell({ kind: "flush" });
         releaseFlushWaiters();
       }),
     ),
@@ -515,6 +573,10 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
         yield* refreshCursorAndMode;
       }),
     settle,
+    subscribe: (listener) => {
+      watchers.add(listener);
+      return () => watchers.delete(listener);
+    },
     setLines: (next) =>
       settleAfter(rpc.request("nvim_buf_set_lines", [0, 0, -1, false, [...next]])),
     awaitFrame: awaitFlush,

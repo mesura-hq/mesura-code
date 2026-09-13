@@ -134,6 +134,7 @@ import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import * as EditorSessionManager from "./editor/Manager.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
@@ -829,6 +830,13 @@ const buildAppUnderTest = (options?: {
       ),
       Layer.provide(
         Layer.mergeAll(
+          // Mocked rather than built: a real one would start a Neovim, and
+          // these tests are about the router seam. `closeThread` is the one
+          // method they do reach, because archiving a thread closes its editor
+          // session the same way it closes its terminals.
+          Layer.mock(EditorSessionManager.EditorSessionManager)({
+            closeThread: () => Effect.void,
+          }),
           Layer.mock(PreviewManager.PreviewManager)({
             open: () => Effect.die("PreviewManager not stubbed in this test"),
             navigate: () => Effect.die("PreviewManager not stubbed in this test"),

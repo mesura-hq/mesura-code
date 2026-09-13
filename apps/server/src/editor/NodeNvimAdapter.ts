@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
+import * as NodeChildProcessSpawner from "@effect/platform-node/NodeChildProcessSpawner";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 
@@ -109,5 +110,10 @@ export const NodeNvimAdapter = {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       return NvimAdapter.of({ spawn: (input) => spawnWith(spawner, input) });
     }),
-  ),
+    // The spawner is provided here, not left for the caller. The `Node` in
+    // this module's name has already committed to a platform, so a layer that
+    // still asked for one would make every consumer carry a requirement this
+    // file has an answer for — and the server deliberately keeps platform
+    // imports out of its own module scope.
+  ).pipe(Layer.provide(NodeChildProcessSpawner.layer)),
 };

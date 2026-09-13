@@ -8,6 +8,7 @@ export * from "./desktopBootstrap.ts";
 export * from "./desktopAppActivation.ts";
 export * from "./remoteAccess.ts";
 export * from "./ipc.ts";
+export * from "./editorSession.ts";
 export * from "./terminal.ts";
 export * from "./provider.ts";
 export * from "./providerInstance.ts";

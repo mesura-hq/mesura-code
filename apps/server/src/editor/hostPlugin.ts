@@ -164,6 +164,100 @@ vim.api.nvim_create_autocmd({ "BufEnter", "BufWinEnter" }, {
   callback = announce_buffer,
 })
 
+--- The buffers the host opens, keyed by the file they stand for.
+---
+--- Neovim never reads or writes the file. The host holds the text, hands it
+--- over here, and takes it back through 'nvim_buf_lines_event'; the name is
+--- set so filetype detection, the developer's ftplugins and flash's parser all
+--- see the file they expect. 'buftype = 'acwrite'' is what makes that
+--- consistent: it tells Neovim this buffer is written by somebody else, so
+--- ':w' asks rather than writes.
+local mesura = {}
+_G.mesura = mesura
+
+--- Opens 'abs_path' in the window, with 'lines' as its contents.
+---
+--- Reuses the buffer for that path when there is one, so moving between two
+--- files and back keeps each one's undo history, marks and cursor.
+--- Finds the buffer whose name is exactly 'abs_path', or nil.
+---
+--- Not 'vim.fn.bufnr(abs_path)': that treats its argument as a Vim pattern
+--- whenever no buffer matches exactly, which is always true the first time a
+--- path is opened. A path can then match some other open buffer whose name
+--- happens to satisfy it, and the developer is handed the wrong file under the
+--- right name. Comparing names is unambiguous and costs one pass over a list
+--- that holds at most a few dozen entries.
+local function buffer_named(abs_path)
+  for _, buffer in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_valid(buffer) and vim.api.nvim_buf_get_name(buffer) == abs_path then
+      return buffer
+    end
+  end
+  return nil
+end
+
+function mesura.open(abs_path, lines)
+  local buffer = buffer_named(abs_path)
+  if buffer == nil then
+    buffer = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_buf_set_name(buffer, abs_path)
+    vim.bo[buffer].buftype = "acwrite"
+    vim.bo[buffer].swapfile = false
+    vim.bo[buffer].undofile = false
+
+    -- ':w' is a request, never a write. The host owns the file and saves it
+    -- the way the editor's own autosave does, so one path writes it and one
+    -- set of rules decides when.
+    vim.api.nvim_create_autocmd("BufWriteCmd", {
+      buffer = buffer,
+      callback = function()
+        vim.bo[buffer].modified = false
+        local channel = vim.g.mesura_channel
+        if type(channel) == "number" then
+          pcall(vim.rpcnotify, channel, "mesura:write", abs_path)
+        end
+      end,
+    })
+  end
+
+  -- Replaced only when it differs. Setting identical lines still resets undo
+  -- and moves every mark, which would throw away the developer's history every
+  -- time they came back to a file they had not changed.
+  local current = vim.api.nvim_buf_get_lines(buffer, 0, -1, false)
+  local same = #current == #lines
+  if same then
+    for index = 1, #current do
+      if current[index] ~= lines[index] then
+        same = false
+        break
+      end
+    end
+  end
+  if not same then
+    vim.api.nvim_buf_set_lines(buffer, 0, -1, false, lines)
+  end
+
+  vim.bo[buffer].modified = false
+  vim.api.nvim_win_set_buf(0, buffer)
+
+  local filetype = vim.filetype.match({ filename = abs_path, buf = buffer })
+  if filetype ~= nil then
+    vim.bo[buffer].filetype = filetype
+  end
+
+  apply_window_options()
+  stop_highlighting(buffer)
+  return buffer
+end
+
+--- Closes the buffer for 'abs_path', if the host still has one.
+function mesura.close(abs_path)
+  local buffer = buffer_named(abs_path)
+  if buffer ~= nil then
+    pcall(vim.api.nvim_buf_delete, buffer, { force = true })
+  end
+end
+
 apply_window_options()
 stop_highlighting(vim.api.nvim_get_current_buf())
 `;
