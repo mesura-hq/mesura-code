@@ -44,3 +44,11 @@ turns a silent break into a caught one.
   put it out of line with the composer directly below it. The rule restores the two custom properties
   upstream's variant-less base rule sets, scoped by `:has()` to the drawer that actually holds a
   question so the plan follow-up banner keeps its tint.
+- The pane holding the keyboard is marked, in one of two shapes. A pane with a header row lights
+  that row — its title goes to full foreground and a hairline appears under it — and a pane with no
+  title to light takes a rounded frame inset inside it. The chat column and the right panel take the
+  first shape, the sidebar and the terminal drawer the second. `:focus-within` drives all of it, so
+  the browser's focus tree is the only state involved and no component re-renders. Every rule
+  changes colour alone, which is what keeps the mark off the layout path. The full model, including
+  why the mark exists and the eight treatments rejected before it, is in
+  `docs/mesura/adr-004-pane-focus.md`.
