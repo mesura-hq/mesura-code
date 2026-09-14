@@ -50,6 +50,8 @@ const CHAT = "[data-chat-column-maximized-away]";
 const PANEL = "[data-preview-panel-mode]";
 const CHAT_ENTRY = '[data-chat-column-maximized-away] [contenteditable="true"]';
 const PANEL_ENTRY = "[data-preview-panel-mode] input";
+const DRAWER = '[data-terminal-owner="drawer"]';
+const DRAWER_ENTRY = '[data-terminal-owner="drawer"] textarea';
 const SIDEBAR_ENTRY = '[data-app-sidebar] [data-sidebar="menu-button"]';
 
 const originalDocument = globalThis.document;
@@ -57,7 +59,7 @@ const originalHTMLElement = globalThis.HTMLElement;
 
 interface Workspace {
   readonly entries: Record<string, FakeElement>;
-  focusInto(pane: "sidebar" | "chat" | "panel" | "none"): void;
+  focusInto(pane: "sidebar" | "chat" | "panel" | "terminal" | "none"): void;
   readonly body: FakeElement;
   /** Carries `data-state`, as the real sidebar's parent does. */
   readonly sidebarStateHost: FakeElement;
@@ -69,7 +71,7 @@ interface Workspace {
  * `sidebarCollapsed` and `panelPresent` are the two ways a pane goes away.
  */
 function installWorkspace(
-  options: { sidebarCollapsed?: boolean; panelPresent?: boolean } = {},
+  options: { sidebarCollapsed?: boolean; panelPresent?: boolean; drawerOpen?: boolean } = {},
 ): Workspace {
   const sidebarStateHost = new FakeElement([SIDEBAR_STATE_HOST]);
   sidebarStateHost.dataset.state = options.sidebarCollapsed === true ? "collapsed" : "expanded";
@@ -81,6 +83,13 @@ function installWorkspace(
 
   const panel = new FakeElement([PANEL]);
   panel.dataset.previewPanelMode = "inline";
+
+  // The drawer is a child of the chat column, as it is in the app.
+  const drawer = new FakeElement([DRAWER, "[data-terminal-owner]"]);
+  drawer.dataset.terminalOwner = "drawer";
+  drawer.parent = chat;
+  const drawerEntry = new FakeElement([]);
+  drawerEntry.parent = drawer;
 
   const sidebarEntry = new FakeElement([]);
   sidebarEntry.parent = sidebar;
@@ -95,11 +104,13 @@ function installWorkspace(
     [SIDEBAR]: sidebar,
     [CHAT]: chat,
     ...(options.panelPresent === false ? {} : { [PANEL]: panel }),
+    ...(options.drawerOpen === true ? { [DRAWER]: drawer } : {}),
   };
   const entries: Record<string, FakeElement> = {
     [SIDEBAR_ENTRY]: sidebarEntry,
     [CHAT_ENTRY]: chatEntry,
     ...(options.panelPresent === false ? {} : { [PANEL_ENTRY]: panelEntry }),
+    ...(options.drawerOpen === true ? { [DRAWER_ENTRY]: drawerEntry } : {}),
   };
 
   const documentLike = {
@@ -115,7 +126,12 @@ function installWorkspace(
   };
 
   return {
-    entries: { sidebar: sidebarEntry, chat: chatEntry, panel: panelEntry },
+    entries: {
+      sidebar: sidebarEntry,
+      chat: chatEntry,
+      panel: panelEntry,
+      terminal: drawerEntry,
+    },
     body,
     sidebarStateHost,
     chatRoot: chat,
@@ -126,7 +142,9 @@ function installWorkspace(
           ? chatEntry
           : pane === "panel"
             ? panelEntry
-            : body) as unknown as Element;
+            : pane === "terminal"
+              ? drawerEntry
+              : body) as unknown as Element;
     },
   };
 }
@@ -572,5 +590,125 @@ describe("arbitration against other bindings", () => {
 
     expect(event.defaultPrevented).toBe(false);
     expect(workspace.entries.panel?.focusCalls).toBe(0);
+  });
+});
+
+describe("vertical pane navigation", () => {
+  it("moves down from the chat into the terminal drawer", () => {
+    const workspace = installWorkspace({ drawerOpen: true });
+    workspace.focusInto("chat");
+
+    const event = keydown("j", { ctrlKey: true });
+    handler(event);
+
+    expect(workspace.entries.terminal?.focusCalls).toBe(1);
+    expect(event.defaultPrevented).toBe(true);
+    expect(event.stopped).toBe(1);
+  });
+
+  it("moves up from the terminal drawer back into the chat", () => {
+    const workspace = installWorkspace({ drawerOpen: true });
+    workspace.focusInto("terminal");
+
+    const event = keydown("k", { ctrlKey: true });
+    handler(event);
+
+    expect(workspace.entries.chat?.focusCalls).toBe(1);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("lets Ctrl+J through when the drawer is closed, so the toggle opens it", () => {
+    // The self-disabling half of the design: a chord with no neighbour in
+    // that direction is not consumed, and whatever else owns the key runs.
+    // Here that is terminal.toggle, and the two readings agree — both mean
+    // "go down into the terminal".
+    const workspace = installWorkspace({ drawerOpen: false });
+    workspace.focusInto("chat");
+
+    const event = keydown("j", { ctrlKey: true });
+    handler(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(event.stopped).toBe(0);
+    expect(workspace.entries.terminal?.focusCalls).toBe(0);
+  });
+
+  it("lets Ctrl+K through from the chat, which has nothing above it", () => {
+    const workspace = installWorkspace({ drawerOpen: true });
+    workspace.focusInto("chat");
+
+    const event = keydown("k", { ctrlKey: true });
+    handler(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(workspace.entries.chat?.focusCalls).toBe(0);
+  });
+
+  it("leaves both vertical chords alone in the sidebar and the panel", () => {
+    // Neither column has a vertical neighbour, so neither chord applies and
+    // both keep whatever other meaning they have.
+    for (const pane of ["sidebar", "panel"] as const) {
+      const workspace = installWorkspace({ drawerOpen: true });
+      workspace.focusInto(pane);
+      for (const key of ["j", "k"]) {
+        const event = keydown(key, { ctrlKey: true });
+        handler(event);
+        expect(event.defaultPrevented).toBe(false);
+        expect(event.stopped).toBe(0);
+      }
+    }
+  });
+
+  it("still moves horizontally out of the drawer, treating it as the chat column", () => {
+    const workspace = installWorkspace({ drawerOpen: true });
+    workspace.focusInto("terminal");
+
+    handler(keydown("l", { ctrlKey: true }));
+    expect(workspace.entries.panel?.focusCalls).toBe(1);
+  });
+});
+
+describe("two pane commands on one chord", () => {
+  it("moves the way the winning binding says, not the way the first match did", () => {
+    // Settings would flag this as a conflict but nothing prevents it. The
+    // handler finds a pane binding to decide the chord is plausible, then
+    // resolves the whole table to see who wins. Those two answers can name
+    // different directions, and the winner is the one that must decide.
+    const contested = [
+      {
+        command: "pane.focusLeft" as const,
+        shortcut: {
+          key: "m",
+          metaKey: false,
+          ctrlKey: false,
+          shiftKey: false,
+          altKey: false,
+          modKey: true,
+        },
+      },
+      {
+        command: "pane.focusRight" as const,
+        shortcut: {
+          key: "m",
+          metaKey: false,
+          ctrlKey: false,
+          shiftKey: false,
+          altKey: false,
+          modKey: true,
+        },
+      },
+    ];
+    const contestedHandler = createPaneNavigationHandler({
+      keybindings: contested,
+      platform: "Linux",
+    });
+    const workspace = installWorkspace();
+    workspace.focusInto("chat");
+
+    contestedHandler(keydown("m", { ctrlKey: true }));
+
+    // pane.focusRight is last, so it wins, and focus goes right.
+    expect(workspace.entries.panel?.focusCalls).toBe(1);
+    expect(workspace.entries.sidebar?.focusCalls).toBe(0);
   });
 });

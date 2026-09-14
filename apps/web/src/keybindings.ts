@@ -220,6 +220,15 @@ function shortcutConflictKey(shortcut: KeybindingShortcut, platform = navigator.
   ].join("|");
 }
 
+/**
+ * Never ask this, or `shortcutLabelForCommand`, about a `pane.*` command.
+ *
+ * A pane command may share its chord with another command on purpose, and
+ * this scan awards a shared chord to the last binding that claims it. For
+ * `pane.focusDown`, which sits behind `terminal.toggle` on `mod+j`
+ * deliberately, the answer would be "no shortcut" for a chord that works.
+ * Those commands are dispatched by `lib/usePaneNavigation.ts`, not resolved.
+ */
 export function findEffectiveShortcutForCommand(
   keybindings: ResolvedKeybindingsConfig,
   command: KeybindingCommand,
@@ -257,25 +266,41 @@ function matchesCommandShortcut(
   return resolveShortcutCommand(event, keybindings, options) === command;
 }
 
-export function resolveShortcutCommand(
+/**
+ * The last binding in `bindings` that this event satisfies, or null.
+ *
+ * Last wins, which is what lets a later rule override an earlier one. Taking
+ * the candidate list as an argument is what lets a caller resolve over a
+ * subset: the pane handler resolves over just the pane bindings, and doing it
+ * through here rather than in a copy of this loop keeps the two from drifting.
+ */
+export function findLastMatchingBinding(
   event: ShortcutEventLike,
-  keybindings: ResolvedKeybindingsConfig,
+  bindings: ResolvedKeybindingsConfig,
   options?: ShortcutMatchOptions,
-): KeybindingCommand | null {
+): ResolvedKeybindingsConfig[number] | null {
   const platform = resolvePlatform(options);
   const context = resolveContext(options);
 
-  for (let index = keybindings.length - 1; index >= 0; index -= 1) {
-    const binding = keybindings[index];
+  for (let index = bindings.length - 1; index >= 0; index -= 1) {
+    const binding = bindings[index];
     if (!binding) continue;
     // Shortcut first, `when` second. Both must hold, so the order cannot
     // change the answer, but a `when` clause can now read the focus tree
     // while a shortcut comparison is pure arithmetic on the event.
     if (!matchesShortcut(event, binding.shortcut, platform)) continue;
     if (!matchesWhenClause(binding.whenAst, context)) continue;
-    return binding.command;
+    return binding;
   }
   return null;
+}
+
+export function resolveShortcutCommand(
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+): KeybindingCommand | null {
+  return findLastMatchingBinding(event, keybindings, options)?.command ?? null;
 }
 
 function formatShortcutKeyLabel(key: string): string {

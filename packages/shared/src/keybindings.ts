@@ -20,6 +20,25 @@ type WhenToken =
 
 export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+b", command: "sidebar.toggle" },
+  // Two rules share mod+j, and BOTH the context and the order are
+  // load-bearing. Each was got wrong once, so both are spelled out.
+  //
+  // The context, `chatFocus`, is what stops the two being one shortcut
+  // context. Startup backfill skips a default whose context another rule
+  // already holds, so without the clause this row never reaches a config
+  // that has run the app before and the chord silently does nothing.
+  //
+  // The order is what keeps resolution answering `terminal.toggle`.
+  // Resolution is last-wins, so the pane rule must come FIRST. Put second,
+  // it wins whenever the chat has focus, and ChatView — which has no branch
+  // for a pane command — drops the key: the drawer never opens and nothing
+  // says why.
+  //
+  // The pane rule is therefore unreachable by resolution on purpose. Its
+  // consumer is usePaneNavigation, which matches it directly and consumes
+  // the chord only when the drawer is already open. Declining everywhere
+  // else is what leaves the toggle free to open it.
+  { key: "mod+j", command: "pane.focusDown", when: "chatFocus" },
   { key: "mod+j", command: "terminal.toggle" },
   { key: "mod+alt+b", command: "rightPanel.toggle" },
   { key: "mod+d", command: "terminal.split", when: "terminalFocus" },
@@ -37,7 +56,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod++", command: "preview.zoomIn", when: "previewFocus" },
   { key: "mod+-", command: "preview.zoomOut", when: "previewFocus" },
   { key: "mod+0", command: "preview.resetZoom", when: "previewFocus" },
-  { key: "mod+k", command: "commandPalette.toggle", when: "!terminalFocus" },
+  { key: "mod+o", command: "commandPalette.toggle", when: "!terminalFocus" },
   { key: "mod+p", command: "filePicker.toggle", when: "!terminalFocus" },
   // The content search gave mod+shift+f up to the project scope picker. The move
   // reaches existing configs through RETIRED_KEYBINDING_DEFAULTS below; without
@@ -75,12 +94,17 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // New commands, so the per-command startup backfill installs them and no
   // ADDED_KEYBINDING_DEFAULTS entry is needed.
   { key: "mod+h", command: "pane.focusLeft" },
+  { key: "mod+k", command: "pane.focusUp" },
   { key: "mod+l", command: "pane.focusRight" },
   // Scoped to the chat pane rather than to "not the terminal". The editor
   // is neither, and these two keys are half the motion set inside it.
   { key: "mod+u", command: "chat.scrollHalfPageUp", when: "chatFocus" },
   { key: "mod+d", command: "chat.scrollHalfPageDown", when: "chatFocus" },
-  { key: "mod+o", command: "editor.openFavorite" },
+  // Moved off mod+o for the command palette, and onto alt+o rather than
+  // mod+shift+o: that key already carries a second `chat.new` default, and
+  // an unconditional rule on it would shadow `chat.new` outright under
+  // last-wins. alt+o also joins the alt+letter family the other pickers use.
+  { key: "alt+o", command: "editor.openFavorite" },
   // Browsers keep ctrl+tab for their own tab strip and never deliver it to a
   // page, so this pair reaches the desktop app only. It is listed first so the
   // bracket pair below is the one the UI reports as the shortcut: the label
@@ -159,6 +183,22 @@ export const RETIRED_KEYBINDING_DEFAULTS: ReadonlyArray<{
     // chord with shift, and only while the preview has focus anyway.
     from: { key: "mod+l", command: "preview.focusUrl", when: "previewFocus" },
     toKey: "mod+shift+l",
+  },
+  {
+    // Moves aside for the palette, which lands on mod+o below.
+    //
+    // The two are independent, not ordered: a destination is only "claimed"
+    // when another rule holds the same key AND the same `when`, and these
+    // two differ there, so neither blocks the other. Written down because
+    // the opposite is the natural assumption and a test was built on it
+    // before being disproved.
+    from: { key: "mod+o", command: "editor.openFavorite" },
+    toKey: "alt+o",
+  },
+  {
+    // Freed for pane.focusUp.
+    from: { key: "mod+k", command: "commandPalette.toggle", when: "!terminalFocus" },
+    toKey: "mod+o",
   },
 ];
 

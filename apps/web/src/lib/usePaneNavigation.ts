@@ -2,7 +2,7 @@ import { useEffect } from "react";
 
 import type { ResolvedKeybindingsConfig } from "@t3tools/contracts";
 
-import { matchesShortcut, resolveShortcutCommand, type ShortcutEventLike } from "../keybindings";
+import { findLastMatchingBinding, matchesShortcut, type ShortcutEventLike } from "../keybindings";
 import { isPreviewFocused } from "./previewFocus";
 import { isTerminalFocused } from "./terminalFocus";
 import {
@@ -11,6 +11,7 @@ import {
   getLastFocusedPane,
   isPaneReachable,
   neighbourOf,
+  type PaneDirection,
   type PaneId,
 } from "./paneFocus";
 
@@ -47,10 +48,12 @@ interface MinimalEventTarget {
   removeEventListener(type: string, listener: (event: never) => void, capture: boolean): void;
 }
 
-/** The commands this handler claims. Not every pane command: see phase notes. */
-const HORIZONTAL_PANE_COMMANDS: ReadonlySet<string> = new Set([
-  "pane.focusLeft",
-  "pane.focusRight",
+/** Every pane command, and the way each one moves. */
+const PANE_COMMAND_DIRECTIONS: ReadonlyMap<string, PaneDirection> = new Map([
+  ["pane.focusLeft", "left"],
+  ["pane.focusRight", "right"],
+  ["pane.focusUp", "up"],
+  ["pane.focusDown", "down"],
 ]);
 
 export function createPaneNavigationHandler(input: {
@@ -60,14 +63,14 @@ export function createPaneNavigationHandler(input: {
   const platform = input.platform;
 
   // Whatever this config binds the pane commands to, computed once. Matching
-  // an event against these two is what lets the handler decline in a couple
-  // of comparisons instead of scanning the whole table.
+  // an event against these is what lets the handler decline in a couple of
+  // comparisons instead of scanning the whole table.
   //
-  // Derived from the config rather than hardcoded to `h` and `l`, because a
-  // rebound pane chord has to keep working and a hardcoded key would silently
-  // stop honouring it.
+  // Derived from the config rather than hardcoded to `h`, `j`, `k` and `l`,
+  // because a rebound pane chord has to keep working and a hardcoded key
+  // would silently stop honouring it.
   const paneBindings = input.keybindings.filter((binding) =>
-    HORIZONTAL_PANE_COMMANDS.has(binding.command),
+    PANE_COMMAND_DIRECTIONS.has(binding.command),
   );
 
   return (event) => {
@@ -79,31 +82,63 @@ export function createPaneNavigationHandler(input: {
 
     // The cheap gate. This handler sits on every keystroke in the app,
     // including every one typed into the editor, whose insert-mode latency is
-    // measured against a 16.7 ms budget, so the full resolution below must
-    // not run for ordinary typing.
+    // measured against a 16.7 ms budget, so nothing below runs for ordinary
+    // typing.
     if (!paneBindings.some((binding) => matchesShortcut(event, binding.shortcut, platform))) {
       return;
     }
 
-    // Resolved properly now that the chord is plausible, because another
-    // binding on the same chord may outrank the pane one. The terminal and
-    // preview flags are supplied for the same reason: a user rule scoped by
-    // one of them has to be able to win here, or this handler would swallow
-    // it before the handler that honours it ever runs.
-    const command = resolveShortcutCommand(event, input.keybindings, {
+    // One context for both resolutions below, built only once the chord is
+    // plausible. The terminal and preview flags are real rather than left at
+    // their defaults: a pane rule may be scoped by either, and so may the
+    // rule that outranks it.
+    const options = {
       ...(platform === undefined ? {} : { platform }),
       context: { terminalFocus: isTerminalFocused(), previewFocus: isPreviewFocused() },
-    });
-    if (command !== "pane.focusLeft" && command !== "pane.focusRight") return;
+    };
+
+    const paneMatch = findLastMatchingBinding(event, paneBindings, options);
+    if (paneMatch === null) return;
+    const direction = PANE_COMMAND_DIRECTIONS.get(paneMatch.command);
+    if (direction === undefined) return;
+
+    const from = getFocusedPane() ?? getLastFocusedPane();
+
+    if (direction === "up" || direction === "down") {
+      // The vertical chords disable themselves, and that is the mechanism
+      // rather than an omission. Both share their key with something else —
+      // `mod+j` with the terminal toggle by design — so consuming one where
+      // it does not apply would take that other meaning away. Declining
+      // leaves the event untouched and the other owner runs.
+      //
+      // Not resolved against the whole table, deliberately: `mod+j` answers
+      // the toggle by last-wins, so asking would always decline and the
+      // chord would never work at all.
+      const target = neighbourOf(from, direction);
+      if (target === null) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      focusPane(target);
+      return;
+    }
+
+    // Horizontal is the opposite case: the application owns the chord in
+    // every pane, so it is resolved against the whole table first, because
+    // another binding on the same chord may outrank the pane one.
+    const winner = findLastMatchingBinding(event, input.keybindings, options);
+    if (winner === null) return;
+    // Taken from the winner rather than from the pane match above. The two
+    // can name different directions where a config binds two pane commands
+    // to one chord, and the winner is the one that should decide.
+    const winningDirection = PANE_COMMAND_DIRECTIONS.get(winner.command);
+    if (winningDirection !== "left" && winningDirection !== "right") return;
 
     // Consumed even where the move is a no-op. Letting it fall through at the
     // edge would hand the chord a second meaning in exactly the place the
     // first one does not apply, which is the ambiguity being removed.
     event.preventDefault();
     event.stopImmediatePropagation();
-
-    const from = getFocusedPane() ?? getLastFocusedPane();
-    const target = neighbourOf(from, command === "pane.focusLeft" ? "left" : "right");
+    const target = neighbourOf(from, winningDirection);
     if (target !== null) focusPane(target);
   };
 }

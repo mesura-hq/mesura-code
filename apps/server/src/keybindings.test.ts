@@ -378,7 +378,8 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     Effect.sync(() => {
       // Resolution is last-wins, so two defaults sharing key and `when` would
       // silently make one command unreachable. mod+1 legitimately appears
-      // twice under different `when` clauses, which this key separates.
+      // twice under different `when` clauses, which this key separates, and
+      // so does mod+j once a pane chord shares it with the terminal toggle.
       const seen = new Set<string>();
       for (const rule of Keybindings.DEFAULT_KEYBINDINGS) {
         const context = `${rule.key}\u0000${rule.when ?? ""}`;
@@ -853,6 +854,106 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.deepEqual(keyMove.rewrites, [
         { command: "diff.toggle", fromKey: "mod+d", toKey: "mod+shift+d" },
       ]);
+    }),
+  );
+
+  it.effect("moves the palette onto the key the favourite editor vacates", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      // An install from before the pane chords: the palette still holds
+      // mod+k and the favourite editor still holds mod+o, which is where the
+      // palette has to land.
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+k", command: "commandPalette.toggle", when: "!terminalFocus" },
+        { key: "mod+o", command: "editor.openFavorite" },
+      ]);
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepEqual(
+        persisted.filter((entry) => entry.command === "commandPalette.toggle"),
+        [{ key: "mod+o", command: "commandPalette.toggle", when: "!terminalFocus" }],
+      );
+      // alt+o rather than mod+shift+o: that key already carries a second
+      // chat.new default, which an unconditional rule there would shadow.
+      assert.deepEqual(
+        persisted.filter((entry) => entry.command === "editor.openFavorite"),
+        [{ key: "alt+o", command: "editor.openFavorite" }],
+      );
+      // Freeing mod+k is the whole point: pane.focusUp has to be able to
+      // take it in the same startup.
+      assert.isTrue(
+        persisted.some((entry) => entry.command === "pane.focusUp" && entry.key === "mod+k"),
+      );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("keeps the two mod+j defaults in the one order that works", () =>
+    Effect.sync(() => {
+      // Both the context and the order were got wrong once, in opposite
+      // directions, so both are asserted here.
+      //
+      // Separate contexts, or backfill skips the pane rule and it never
+      // reaches an existing config. Pane rule first, or last-wins answers it
+      // instead of the toggle and ChatView, which has no branch for a pane
+      // command, drops the key: the drawer never opens.
+      const onModJ = Keybindings.DEFAULT_KEYBINDINGS.filter((rule) => rule.key === "mod+j");
+      assert.deepEqual(onModJ, [
+        { key: "mod+j", command: "pane.focusDown", when: "chatFocus" },
+        { key: "mod+j", command: "terminal.toggle" },
+      ]);
+    }),
+  );
+
+  it.effect("ships no default that another default shadows outright", () =>
+    Effect.sync(() => {
+      // Resolution is last-wins, so a rule with no `when` makes every earlier
+      // rule on its key unreachable, whatever their clauses say. That is
+      // invisible to the same-context check above, and it is how
+      // editor.openFavorite silently took mod+shift+o away from chat.new.
+      //
+      // One pair is exempt, named as a pair rather than by a `pane.` prefix:
+      // a prefix would wave through the next pane command shadowed by
+      // accident, which is the very class of bug this guard exists to catch.
+      // `pane.focusDown` sits behind `terminal.toggle` on mod+j on purpose:
+      // it is dispatched by usePaneNavigation, which matches it directly, so
+      // being unreachable by resolution is its design rather than a defect.
+      const INTENTIONALLY_SHADOWED = [{ key: "mod+j", command: "pane.focusDown" }];
+
+      const byKey = new Map<string, Array<{ command: string; when?: string }>>();
+      for (const rule of Keybindings.DEFAULT_KEYBINDINGS) {
+        const rules = byKey.get(rule.key) ?? [];
+        rules.push({
+          command: rule.command,
+          ...(rule.when === undefined ? {} : { when: rule.when }),
+        });
+        byKey.set(rule.key, rules);
+      }
+
+      const shadowed: string[] = [];
+      for (const [key, rules] of byKey) {
+        for (let earlier = 0; earlier < rules.length; earlier += 1) {
+          const victim = rules[earlier];
+          if (victim === undefined || victim.when === undefined) continue;
+          if (
+            INTENTIONALLY_SHADOWED.some(
+              (allowed) => allowed.key === key && allowed.command === victim.command,
+            )
+          ) {
+            continue;
+          }
+          for (let later = earlier + 1; later < rules.length; later += 1) {
+            if (rules[later]?.when === undefined) {
+              shadowed.push(`${key}: ${victim.command} is shadowed by ${rules[later]?.command}`);
+            }
+          }
+        }
+      }
+      assert.deepEqual(shadowed, []);
     }),
   );
 

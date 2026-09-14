@@ -14,7 +14,7 @@
  */
 
 export type PaneId = "sidebar" | "chat" | "panel" | "terminal";
-export type PaneDirection = "left" | "right";
+export type PaneDirection = "left" | "right" | "up" | "down";
 
 /**
  * The horizontal panes, left to right. The terminal drawer is absent on
@@ -163,6 +163,17 @@ export function isPaneReachable(pane: PaneId): boolean {
  * state is worse than one that does nothing.
  */
 export function neighbourOf(pane: PaneId, direction: PaneDirection): PaneId | null {
+  // Vertically there is one neighbour pair in the whole layout: the chat
+  // column and the terminal drawer beneath it. The sidebar and the right
+  // panel are single panes top to bottom, so a vertical chord has nothing to
+  // do there and says so by returning null.
+  if (direction === "down") {
+    return pane === "chat" && isPaneReachable("terminal") ? "terminal" : null;
+  }
+  if (direction === "up") {
+    return pane === "terminal" && isPaneReachable("chat") ? "chat" : null;
+  }
+
   const column: PaneId = pane === "terminal" ? "chat" : pane;
   const index = PANE_ORDER.indexOf(column);
   if (index === -1) return null;
