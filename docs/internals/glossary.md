@@ -152,6 +152,24 @@ A production protocol result that confirms the effect of one dictation command. 
 mean a test-only runtime receipt. A dictation receipt can confirm clipboard copy, persisted insert,
 provider-turn start, pending confirmation, refusal, or failure.
 
+#### File tree
+
+The Symmetria File Manager's tree, rendered in the files surface of the right panel from the
+server's file listing through a client-side adapter. It replaced T3 Code's `FileBrowserPanel`
+(ADR-005). See [file-tree.md](./file-tree.md).
+
+#### Overview
+
+The Symmetria File Manager's folder graph, opened over the window on `Ctrl+Shift+E` for the
+project the files surface shows. Same library, same data as the file tree. See
+[file-tree.md](./file-tree.md).
+
+#### Vendor
+
+`vendor/symmetria-file-manager`, the file manager's repository as a git subtree. Three of its
+packages are pnpm workspace members; the rest is inert here. Never formatted, linted or tested from
+this repository. Runbook: [vendor-symmetria-file-manager.md](../operations/vendor-symmetria-file-manager.md).
+
 #### Model manifest
 
 The per-driver list of current model slugs that decides which models land in the model picker's legacy section. Bundled at `apps/server/src/provider/model-manifest.json` and refreshed at runtime from the same file on `main`, so classification updates ship as commits instead of releases. See the [provider architecture][16] model manifest section.
@@ -246,6 +264,7 @@ rather than failing. See [the file panel](../user/file-panel.md).
 - [Permission modes][18]
 - [Workspace layout][2]
 - [Editor session](./editor-session.md)
+- [File tree](./file-tree.md)
 - [Reading and editing files](../user/file-panel.md)
 
 [ed-host]: ../../apps/server/src/editor/hostPlugin.ts

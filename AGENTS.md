@@ -208,6 +208,7 @@ Full glossary with file links: `docs/internals/glossary.md`
 - `packages/shared` - shared runtime utils, subpath exports, no barrel.
 - `packages/client-runtime` - client code shared by web and mobile.
 - `.repos/` - vendored read-only references. Prefer their patterns over invented ones. Never edit or import from them. Sync with `vpr sync:repos` when bumping the matching dependency.
+- `vendor/symmetria-file-manager` - the Symmetria File Manager as a git subtree; three of its packages are workspace members and the file tree imports them. Never format, lint or test it from here; the sync commands and the edits pending push-back are in `docs/operations/vendor-symmetria-file-manager.md`.
 
 ## Taste
 

@@ -1,12 +1,63 @@
 # Reading and editing files
 
 Open **Files** in the right panel to browse the workspace of the project you have open. Choose a
-file from the tree, or type part of its name in **Search files** above the tree. The panel opens the
-file in an editor with line numbers and syntax colouring.
+file from the tree, or press `Ctrl+P` and type part of its name. The panel opens the file in an
+editor with line numbers and syntax colouring.
 
 The editor is for reading and for small changes. It is not a place to write a feature: the agent
 does that. Use it to correct a line, adjust a value, or leave a note for the agent about the code in
 front of you.
+
+## The tree
+
+The tree is the one from the Symmetria File Manager, so its keys are the file manager's keys. It
+lists every file the project has, in the same order the file manager uses: folders first, then
+names.
+
+`Ctrl+E` takes you to it from anywhere in a thread. If the files panel is not open, it opens;
+if the tree is hidden behind a file, it shows. Press `Ctrl+E` again from inside the tree to leave
+it: the tree hides behind the file you have open and the editor takes the keyboard, or, when no
+file is open, the composer does. `Escape` leaves the tree the same way.
+
+Inside the tree:
+
+- `j` and `k`, or the arrow keys, move the cursor. `h` closes the folder you are in or moves to
+  its parent; `l` opens a folder or moves into it.
+- `o` opens or closes the folder under the cursor. `Enter` opens a file in the editor, or opens
+  and closes a folder.
+- `G` jumps to the last row, `Home` and `End` to the first and last, `PgUp` and `PgDn` a page at a
+  time.
+- `/` searches the names in the tree as you type. `n` and `N` step through the matches.
+- `s` is the flash jump: every visible row gets a short label; type the first letters of a name to
+  narrow them, then the label, and the cursor lands there.
+
+`Ctrl+D` and `Ctrl+U` inside the tree currently scroll the chat. They move to the tree with the
+pane-focus work.
+
+Right-click a row for **Copy mention**, which puts an `@` mention of the file on the clipboard,
+and **Add to chat**, which appends it to the composer.
+
+The folders you close stay closed: the tree remembers its shape per project, across a reload.
+
+**When the project is large**, the server lists part of it, the tree says so under its last row,
+and what is missing from the tree is missing from `Ctrl+P` too.
+
+## The overview
+
+`Ctrl+Shift+E` opens the folder overview over the window: the project as a graph of folders you
+can zoom and pan. Press it again, or `Escape`, to close it and return to where you were.
+
+- `h`, `j`, `k`, `l` or the arrows move the selection between folders and entries. With `Ctrl`
+  they pan half a screen; with `Ctrl+Shift`, a full screen. `PgUp` and `PgDn` pan a full screen too.
+- `+` and `-` zoom, `0` resets the zoom, `f` fits the whole graph on screen.
+- `o` folds or unfolds the selected folder.
+- `/` searches, `n` and `N` step through matches, `s` is the flash jump.
+- `Alt+M` hides and shows the minimap.
+- `Enter` on a folder closes the overview and puts the tree's cursor on that folder. `Enter` on a
+  file does that and opens the file in the editor.
+
+The overview remembers where you left it, per project: the zoom, the position and the selection
+come back when you open it again.
 
 ## Editing and saving
 

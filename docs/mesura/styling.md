@@ -1,7 +1,9 @@
 # Styling overrides
 
-This fork carries one stylesheet of its own: `apps/web/src/mesura.css`. Read this before concluding
-that a style in `apps/web/src/index.css` is in force, and before adding a rule of your own.
+This fork carries one app-wide stylesheet of its own: `apps/web/src/mesura.css`. Read this before
+concluding that a style in `apps/web/src/index.css` is in force, and before adding a rule of your
+own. A second, component-scoped one, `apps/web/src/components/files/mesuraTree/fileTree.css`, is
+imported by the file tree alone and follows the same constraints; see the end of this document.
 
 ## Why it exists
 
@@ -44,3 +46,12 @@ turns a silent break into a caught one.
   put it out of line with the composer directly below it. The rule restores the two custom properties
   upstream's variant-less base rule sets, scoped by `:has()` to the drawer that actually holds a
   question so the plan follow-up banner keeps its tint.
+
+## The file tree's stylesheet
+
+`apps/web/src/components/files/mesuraTree/fileTree.css` is imported by `MesuraFileTree.tsx` and
+holds only what the vendored file manager's stylesheets need on top of `index.css`: the icon
+palette and the six glass tokens those stylesheets read and `index.css` lacks, the panel's type
+size and layout, and the overview layer's position and stacking above the panel. Every rule is
+scoped to the tree's wrapper, `[data-mesura-file-tree]`, or to the overview's,
+`[data-mesura-folder-overview]`; the vendored stylesheets themselves are never edited here.

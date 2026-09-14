@@ -62,6 +62,9 @@ Commands are IDs like `terminal.toggle`, `commandPalette.toggle`, `preview.refre
 `chat.new`. Project scripts are addressable as `script.{id}.run`, for example `script.test.run`.
 
 `filePicker.toggle` opens file search for the active project and defaults to `mod+p`.
+`fileTree.toggle` reaches the file tree in the files panel and leaves it again; it defaults to
+`mod+e`. `fileTree.overview` opens and closes the folder overview and defaults to `mod+shift+e`.
+Both reach the app from inside the editor, and neither runs while the terminal has focus.
 `projectSearch.toggle` searches inside the active project's files and defaults to `mod+shift+g`.
 Repeating either shortcut closes that search, and switching shortcuts replaces the open search.
 `projectScope.toggle` filters the thread list to one project and defaults to `mod+shift+f`.
