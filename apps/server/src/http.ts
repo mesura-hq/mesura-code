@@ -114,7 +114,7 @@ export function assetResponseHeaders(
 }
 
 /** A single byte range for native video readers; unsupported range syntax uses the full file. */
-function assetByteRange(header: string, size: bigint) {
+export function assetByteRange(header: string, size: bigint) {
   const match = /^bytes=(\d*)-(\d*)$/i.exec(header.trim());
   if (!match || (!match[1] && !match[2])) return null;
   const first = match[1] ? BigInt(match[1]) : null;

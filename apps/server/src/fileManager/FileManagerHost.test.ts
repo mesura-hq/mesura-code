@@ -8,6 +8,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import {
   decodeListReply,
+  decodePreviewUrlReply,
   decodeRenameReply,
   decodeTransferReply,
 } from "@symmetria/fm-core/contract";
@@ -256,6 +257,39 @@ it.layer(TestLayer, { excludeTestServices: true })("FileManagerHost", (it) => {
         expect(reply.ok).toBe(true);
         expect(NodeFS.existsSync(NodePath.join(storeDirectory, "bookmarks.json"))).toBe(true);
       }),
+    );
+
+    it.effect(
+      "grants preview URLs under the preview route's prefix, for a file and for its directory",
+      () =>
+        Effect.gen(function* () {
+          const host = yield* FileManagerHost.FileManagerHost;
+          const root = yield* makeTempDir;
+          yield* writeTextFile(root, "doc.md");
+          yield* openSession("previews");
+          const query = (
+            channel: "symmetria-fm:preview-url" | "symmetria-fm:preview-directory-url",
+          ) =>
+            host.query(CLIENT, {
+              sessionId: "previews",
+              channel,
+              payload: { path: NodePath.join(root, "doc.md") },
+            });
+
+          const file = yield* query("symmetria-fm:preview-url");
+          const directory = yield* query("symmetria-fm:preview-directory-url");
+
+          for (const reply of [file, directory]) {
+            expect(reply).toMatchObject({ ok: true });
+            const decoded = decodePreviewUrlReply(reply.ok ? reply.value : null);
+            if (!decoded.ok) throw new Error("undecodable preview url reply");
+            const { url } = decoded.value;
+            expect(url.startsWith(FileManagerHost.FILE_MANAGER_PREVIEW_ROUTE_PREFIX)).toBe(true);
+            expect(
+              url.slice(FileManagerHost.FILE_MANAGER_PREVIEW_ROUTE_PREFIX.length),
+            ).not.toContain("/");
+          }
+        }),
     );
 
     it.effect("reports the server process's home directory", () =>

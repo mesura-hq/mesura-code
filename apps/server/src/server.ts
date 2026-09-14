@@ -75,6 +75,7 @@ import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolve
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import * as FileManagerHost from "./fileManager/FileManagerHost.ts";
+import { fileManagerPreviewRouteLayer } from "./fileManager/previewRoute.ts";
 import * as WorkspaceFileWatcher from "./workspace/WorkspaceFileWatcher.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
@@ -516,6 +517,8 @@ export const makeRoutesLayer = Layer.mergeAll(
     ),
     otlpTracesProxyRouteLayer,
     assetRouteLayer,
+    // Mesura: the file manager's preview grants.
+    fileManagerPreviewRouteLayer,
     attachmentUploadRouteLayer,
     staticAndDevRouteLayer,
     websocketRpcRouteLayer,

@@ -35,8 +35,8 @@ import { createWsIpcSurface } from "./wsIpcSurface.ts";
  */
 
 /**
- * The route that serves a granted preview token. The route is not mounted
- * yet; the prefix is fixed here so the token and the route cannot drift.
+ * Where `previewRoute.ts` serves a granted preview token. The prefix lives
+ * here, beside the `previewUrlFor` that mints the URL, so the two cannot drift.
  */
 export const FILE_MANAGER_PREVIEW_ROUTE_PREFIX = "/api/file-manager/preview/";
 
@@ -106,6 +106,9 @@ export type HostOverrides = Pick<
 function hostDependencies(overrides: HostOverrides): Dependencies {
   return {
     ...overrides,
+    // Root-relative on purpose: the server does not know the origin a client
+    // reaches it by. The browser bridge resolves it against the environment's
+    // HTTP base URL, the way asset URLs are resolved.
     previewUrlFor: (token) => `${FILE_MANAGER_PREVIEW_ROUTE_PREFIX}${token}`,
     operations: overrides.operations ?? createHostOperations(),
   };
