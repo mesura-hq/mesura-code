@@ -38,6 +38,7 @@ catalogs:
       version: 0.2.2
 
 overrides:
+  electron: 43.4.1
   '@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-darwin-arm64': '-'
   '@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-darwin-x64': '-'
   '@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-linux-arm64': '-'
@@ -517,6 +518,12 @@ importers:
       '@effect/vitest':
         specifier: 4.0.0-beta.103
         version: 4.0.0-beta.103(patch_hash=a16b1e870d8c29e4a98b17cc4c638a4ff471753d8ca3487f78a22b759caf951b)(effect@4.0.0-beta.103(patch_hash=af36b7948b6f9c56623074662b51dade5699880c1a7c71245de73e13c3185fb6))
+      '@symmetria/fm-core':
+        specifier: workspace:*
+        version: link:../../vendor/symmetria-file-manager/packages/fm-core
+      '@symmetria/fm-main':
+        specifier: workspace:*
+        version: link:../../vendor/symmetria-file-manager/packages/fm-main
       '@t3tools/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -1039,6 +1046,25 @@ importers:
 
   vendor/symmetria-file-manager/packages/fm-core:
     devDependencies:
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@types/node@24.12.4)(@vitest/browser-preview@4.1.9)(happy-dom@20.14.5(bufferutil@4.1.0)(utf-8-validate@6.0.6))(msw@2.12.11(@types/node@24.12.4)(typescript@6.0.3))(vite@8.3.0(@types/node@24.12.4)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.48.0)(yaml@2.9.0))
+
+  vendor/symmetria-file-manager/packages/fm-main:
+    dependencies:
+      '@symmetria/fm-core':
+        specifier: workspace:*
+        version: link:../fm-core
+      '@symmetria/fm-search':
+        specifier: workspace:*
+        version: link:../fm-search
+    devDependencies:
+      '@types/node':
+        specifier: 24.12.4
+        version: 24.12.4
+      electron:
+        specifier: 43.4.1
+        version: 43.4.1
       vitest:
         specifier: ^4.1.9
         version: 4.1.9(@types/node@24.12.4)(@vitest/browser-preview@4.1.9)(happy-dom@20.14.5(bufferutil@4.1.0)(utf-8-validate@6.0.6))(msw@2.12.11(@types/node@24.12.4)(typescript@6.0.3))(vite@8.3.0(@types/node@24.12.4)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.48.0)(yaml@2.9.0))
@@ -1912,7 +1938,7 @@ packages:
     engines: {node: '>=20.9.0'}
     peerDependencies:
       '@clerk/electron-passkeys': 0.0.3
-      electron: '>=28'
+      electron: 43.4.1
       electron-store: ^8.2.0
       react: ^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0
       react-dom: ^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0

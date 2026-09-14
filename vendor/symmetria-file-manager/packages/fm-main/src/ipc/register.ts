@@ -31,6 +31,7 @@ import {
   type ListBatch,
   type ListReply,
   type Result,
+  type SearchReply,
   success,
 } from "@symmetria/fm-core/contract";
 import type { EntrySummary, FsEntry } from "@symmetria/fm-core/entry";
@@ -49,11 +50,9 @@ import {
   loadListingOptions,
   saveListingOptions,
 } from "../listingOptions.ts";
-import { copyImage, copyText } from "../ops/clipboard.ts";
-import { operations } from "../ops/index.ts";
+import type { Operations } from "../ops/operations.ts";
 import { frecentDirectories } from "../ops/zoxide.ts";
 import { authorisePreview, authorisePreviewDirectory } from "../previewTokens.ts";
-import { searchPool } from "../search.ts";
 import { CHANNELS, REQUEST_CHANNELS } from "./channels.ts";
 
 /**
@@ -206,7 +205,44 @@ export interface Dependencies {
   scanDirectory?: typeof scanDirectory;
   readOverviewDirectory?: typeof readOverviewDirectory;
   watchDirectory?: typeof watchDirectory;
+  /**
+   * The three capabilities a host has to bring, because each one is bound to
+   * the host's platform: the file operations (trash and open reach the
+   * desktop), the clipboard, and the finder's index pool. The registry used to
+   * import Electron's answers for all three, which made it impossible to load
+   * in a process that has no Electron. A host that leaves one out gets a
+   * failure reply on that channel, never a crash.
+   */
+  operations?: Operations;
+  clipboard?: ClipboardHost;
+  searchPool?: () => SearchHost;
+  /**
+   * Where the bookmark and listing stores live. Absent, the process's own
+   * default paths apply; a host that must not touch the user's real
+   * configuration (a test, above all) names its own files.
+   */
+  bookmarksPath?: string;
+  listingOptionsPath?: string;
 }
+
+/** What the clipboard channel needs from a host. */
+export interface ClipboardHost {
+  copyText(text: string): void;
+  /** Put the image at `path` on the clipboard, or say why not. */
+  copyImage(path: string): string | null;
+}
+
+/** What the four search channels need from a host: the index pool's surface. */
+export interface SearchHost {
+  start(directory: string): Promise<void>;
+  search(directory: string, query: string): Promise<SearchReply>;
+  record(directory: string, query: string, chosenPath: string): void;
+  release(directory: string): void;
+}
+
+const OPERATIONS_UNAVAILABLE = "file operations are not available in this host";
+const CLIPBOARD_UNAVAILABLE = "the clipboard is not available in this host";
+const FINDER_UNAVAILABLE = "the finder is not available here yet";
 
 /**
  * How many entries travel in one push.
@@ -237,6 +273,11 @@ export function createRegistry(ipc: IpcSurface, deps: Dependencies): Registry {
   const scan = deps.scanDirectory ?? scanDirectory;
   const readOverview = deps.readOverviewDirectory ?? readOverviewDirectory;
   const watch = deps.watchDirectory ?? watchDirectory;
+  const operations = deps.operations;
+  const clipboard = deps.clipboard;
+  const searchPool = deps.searchPool;
+  const bookmarksPath = () => deps.bookmarksPath ?? defaultBookmarksPath();
+  const listingOptionsPath = () => deps.listingOptionsPath ?? defaultListingOptionsPath();
 
   /**
    * One window's resources.
@@ -503,7 +544,7 @@ export function createRegistry(ipc: IpcSurface, deps: Dependencies): Registry {
   // No `guard`: this channel takes no payload, so there is nothing to decode.
   ipc.handle(CHANNELS.bookmarksRead, async () => {
     try {
-      const bookmarks = await readOrSeedBookmarks();
+      const bookmarks = await readOrSeedBookmarks(bookmarksPath());
       return success({
         bookmarks: [...bookmarks].map(([letter, bookmark]) => ({ letter, bookmark })),
       });
@@ -524,7 +565,7 @@ export function createRegistry(ipc: IpcSurface, deps: Dependencies): Registry {
       const asObject: Record<string, { path: string; label: string }> = {};
       for (const { letter, bookmark } of request.bookmarks) asObject[letter] = bookmark;
 
-      await saveBookmarks(defaultBookmarksPath(), decodeBookmarks(asObject));
+      await saveBookmarks(bookmarksPath(), decodeBookmarks(asObject));
       return success(null);
     }),
   );
@@ -538,7 +579,7 @@ export function createRegistry(ipc: IpcSurface, deps: Dependencies): Registry {
    * lists in an order the user has to set again.
    */
   ipc.handle(CHANNELS.listingRead, async () => {
-    const stored = await loadListingOptions(defaultListingOptionsPath());
+    const stored = await loadListingOptions(listingOptionsPath());
     return success({ options: resolveListingOptions(stored).options });
   });
 
@@ -553,7 +594,7 @@ export function createRegistry(ipc: IpcSurface, deps: Dependencies): Registry {
       //
       // A file nobody could parse is left alone: `mayWrite` is false for it,
       // and saving over the user's data mid-edit destroys it.
-      const path = defaultListingOptionsPath();
+      const path = listingOptionsPath();
       const stored = await loadListingOptions(path);
       if (!resolveListingOptions(stored).mayWrite) {
         return failure("write_failed", "the stored listing order could not be read");
@@ -591,6 +632,7 @@ export function createRegistry(ipc: IpcSurface, deps: Dependencies): Registry {
   ipc.handle(
     CHANNELS.transfer,
     guard(decodeTransferRequest, "write_failed", async (request, from) => {
+      if (operations === undefined) return failure("write_failed", OPERATIONS_UNAVAILABLE);
       const outcome = await operations.transfer(request, (done, total) => {
         from.send(CHANNELS.transferProgress, {
           transferId: request.transferId,
@@ -605,6 +647,8 @@ export function createRegistry(ipc: IpcSurface, deps: Dependencies): Registry {
   ipc.handle(
     CHANNELS.cancelTransfer,
     guard(decodeCancelTransferRequest, "write_failed", (request) => {
+      if (operations === undefined)
+        return Promise.resolve(failure("write_failed", OPERATIONS_UNAVAILABLE));
       operations.cancelTransfer(request.transferId);
       return Promise.resolve(success(null));
     }),
@@ -613,6 +657,7 @@ export function createRegistry(ipc: IpcSurface, deps: Dependencies): Registry {
   ipc.handle(
     CHANNELS.create,
     guard(decodeCreateRequest, "write_failed", async (request) => {
+      if (operations === undefined) return failure("write_failed", OPERATIONS_UNAVAILABLE);
       await operations.create(request.path, request.kind);
       return success(null);
     }),
@@ -621,6 +666,7 @@ export function createRegistry(ipc: IpcSurface, deps: Dependencies): Registry {
   ipc.handle(
     CHANNELS.rename,
     guard(decodeRenameRequest, "write_failed", async (request) => {
+      if (operations === undefined) return failure("write_failed", OPERATIONS_UNAVAILABLE);
       return success({ path: await operations.rename(request.path, request.name) });
     }),
   );
@@ -628,6 +674,7 @@ export function createRegistry(ipc: IpcSurface, deps: Dependencies): Registry {
   ipc.handle(
     CHANNELS.trash,
     guard(decodeTrashRequest, "write_failed", async (request) => {
+      if (operations === undefined) return failure("write_failed", OPERATIONS_UNAVAILABLE);
       await operations.trash(request.paths);
       return success(null);
     }),
@@ -643,6 +690,7 @@ export function createRegistry(ipc: IpcSurface, deps: Dependencies): Registry {
       // success and letting the first query discover it turns "this directory
       // could not be indexed" into a finder that shows nothing and says
       // nothing.
+      if (searchPool === undefined) return failure("read_failed", FINDER_UNAVAILABLE);
       await searchPool().start(request.directory);
       return success(null);
     }),
@@ -651,6 +699,7 @@ export function createRegistry(ipc: IpcSurface, deps: Dependencies): Registry {
   ipc.handle(
     CHANNELS.searchQuery,
     guard(decodeSearchQueryRequest, "read_failed", async (request) => {
+      if (searchPool === undefined) return failure("read_failed", FINDER_UNAVAILABLE);
       const reply = await searchPool().search(request.directory, request.query);
       return success(reply);
     }),
@@ -663,6 +712,7 @@ export function createRegistry(ipc: IpcSurface, deps: Dependencies): Registry {
       // outcome a user could act on, and making the overlay wait for it would
       // put a statistic on the path between pressing Enter and the file
       // opening. Silent when the index is already gone.
+      if (searchPool === undefined) return failure("write_failed", FINDER_UNAVAILABLE);
       searchPool().record(request.directory, request.query, request.chosenPath);
       return success(null);
     }),
@@ -671,6 +721,7 @@ export function createRegistry(ipc: IpcSurface, deps: Dependencies): Registry {
   ipc.handle(
     CHANNELS.searchRelease,
     guard(decodeSearchDirectoryRequest, "read_failed", async (request) => {
+      if (searchPool === undefined) return failure("read_failed", FINDER_UNAVAILABLE);
       searchPool().release(request.directory);
       return success(null);
     }),
@@ -687,15 +738,16 @@ export function createRegistry(ipc: IpcSurface, deps: Dependencies): Registry {
   ipc.handle(
     CHANNELS.clipboard,
     guard(decodeClipboardRequest, "write_failed", async (request) => {
+      if (clipboard === undefined) return failure("write_failed", CLIPBOARD_UNAVAILABLE);
       if (request.kind === "text") {
-        copyText(request.text);
+        clipboard.copyText(request.text);
         return success(null);
       }
 
       // Reported as a value rather than thrown. A file that is not an image —
       // or one that vanished between the keystroke and the read — is an
       // ordinary thing for a user to point at, not an exceptional one.
-      const problem = copyImage(request.path);
+      const problem = clipboard.copyImage(request.path);
       return problem === null ? success(null) : failure("write_failed", problem);
     }),
   );
@@ -703,6 +755,7 @@ export function createRegistry(ipc: IpcSurface, deps: Dependencies): Registry {
   ipc.handle(
     CHANNELS.open,
     guard(decodeOpenRequest, "read_failed", async (request) => {
+      if (operations === undefined) return failure("read_failed", OPERATIONS_UNAVAILABLE);
       await operations.open(request.path);
       return success(null);
     }),

@@ -11,7 +11,9 @@ import { PUSH_CHANNELS, REQUEST_CHANNELS } from "@symmetria/fm-main/ipc/channels
 import type { ElectronTransport } from "@symmetria/fm-main/ipc/electronSurface";
 import { electronIpcSurface } from "@symmetria/fm-main/ipc/electronSurface";
 import { createRegistry, type Registry } from "@symmetria/fm-main/ipc/register";
-import { closeAllSearchIndices } from "@symmetria/fm-main/search";
+import { operations } from "@symmetria/fm-main/ops";
+import { copyImage, copyText } from "@symmetria/fm-main/ops/clipboard";
+import { closeAllSearchIndices, searchPool } from "@symmetria/fm-main/search";
 import { app, BrowserWindow, ipcMain, session } from "electron";
 import { writeToFifo } from "./fifo.ts";
 import { refuseDocumentRequestsOffScheme, refuseNavigationAwayFromApp } from "./frameNavigation.ts";
@@ -801,7 +803,9 @@ app.whenReady().then(async () => {
     // The host owns its own origin, so it is the host that turns a preview
     // token into a URL. The registry used to import this and that import was
     // the last line tying the privileged half to one particular application.
-    { previewUrlFor },
+    // The operations, the clipboard and the search pool are this host's too:
+    // each reaches Electron, and the registry must load where there is none.
+    { previewUrlFor, operations, clipboard: { copyText, copyImage }, searchPool },
   );
 
   // `dispose` was written and never called, which meant every filesystem watch

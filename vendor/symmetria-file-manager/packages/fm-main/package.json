@@ -26,17 +26,24 @@
     "./ops/zoxide": "./src/ops/zoxide.ts",
     "./listingOptions": "./src/listingOptions.ts",
     "./jsonStore": "./src/jsonStore.ts",
-    "./search": "./src/search.ts"
+    "./search": "./src/search.ts",
+    "./ops/operations": "./src/ops/operations.ts"
   },
   "dependencies": {
     "@symmetria/fm-search": "workspace:*",
     "@symmetria/fm-core": "workspace:*"
   },
   "devDependencies": {
-    "electron": "^41.5.0",
-    "@types/node": "^22.0.0"
+    "electron": ">=41",
+    "@types/node": "^22.0.0",
+    "vitest": "^4.1.9"
   },
   "peerDependencies": {
     "electron": ">=41"
+  },
+  "peerDependenciesMeta": {
+    "electron": {
+      "optional": true
+    }
   }
 }

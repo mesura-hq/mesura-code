@@ -74,6 +74,7 @@ import * as T3ProjectFileLoader from "./project/T3ProjectFileLoader.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
+import * as FileManagerHost from "./fileManager/FileManagerHost.ts";
 import * as WorkspaceFileWatcher from "./workspace/WorkspaceFileWatcher.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
@@ -476,6 +477,10 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       CloudManagedEndpointRuntimeLive,
     ),
   ),
+  // A second pipe, because the one above is at its arity limit.
+).pipe(
+  // Mesura: the Symmetria file manager's privileged half, behind fileManager.* RPCs.
+  Layer.provideMerge(FileManagerHost.layer),
 );
 
 const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(

@@ -14,6 +14,7 @@ import {
   type Registry,
   type SenderHandle,
 } from "../src/ipc/register.ts";
+import { operations } from "../src/ops/index.ts";
 
 /**
  * Which window a push reached.
@@ -196,10 +197,10 @@ describe("a push reaches the window that asked for it", () => {
     // `from` without ever touching the per-window resource map, so it is a
     // structurally different path from the listing and the watch.
     //
-    // A real copy on real files, because `operations` is a module-level import
-    // rather than an injected dependency — there is nothing to stub.
+    // A real copy on real files: the host's own `operations`, injected as a
+    // host would inject them.
     const h = harness();
-    createRegistry(h.surface, { previewUrlFor });
+    createRegistry(h.surface, { previewUrlFor, operations });
 
     const source = join(scratch, "to-copy.txt");
     const destination = join(scratch, "into");

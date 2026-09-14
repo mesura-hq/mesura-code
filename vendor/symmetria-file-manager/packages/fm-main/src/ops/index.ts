@@ -1,7 +1,8 @@
 import { shell } from "electron";
 
-import { createEntry, renameEntry, type TransferOutcome, transfer } from "./mutate.ts";
+import { createEntry, renameEntry, transfer } from "./mutate.ts";
 import { openEntry } from "./open.ts";
+import type { Operations } from "./operations.ts";
 
 /**
  * The file operations, as one surface.
@@ -19,26 +20,6 @@ import { openEntry } from "./open.ts";
 
 /** Transfers that can still be cancelled, by the id the caller gave. */
 const running = new Map<string, AbortController>();
-
-interface TransferArguments {
-  readonly sources: readonly string[];
-  readonly destination: string;
-  readonly mode: "copy" | "move";
-  readonly overwrite: boolean;
-  readonly transferId: string;
-}
-
-export interface Operations {
-  transfer(
-    args: TransferArguments,
-    onProgress: (done: number, total: number) => void,
-  ): Promise<TransferOutcome>;
-  cancelTransfer(transferId: string): void;
-  create(path: string, kind: "file" | "directory"): Promise<void>;
-  rename(path: string, name: string): Promise<string>;
-  trash(paths: readonly string[]): Promise<number>;
-  open(path: string): Promise<"terminal" | "desktop">;
-}
 
 export const operations: Operations = {
   async transfer(args, onProgress) {

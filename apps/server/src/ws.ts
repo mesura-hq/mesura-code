@@ -111,6 +111,7 @@ import { deletePendingAttachment, issueAttachmentUploadUrl } from "./assets/Atta
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
+import * as FileManagerHost from "./fileManager/FileManagerHost.ts";
 import * as WorkspaceFileWatcher from "./workspace/WorkspaceFileWatcher.ts";
 import { readWorkflowScript } from "./orchestration/workflowScriptQuery.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
@@ -525,6 +526,7 @@ const makeWsRpcLayer = (
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
       const workspaceFileWatcher = yield* WorkspaceFileWatcher.WorkspaceFileWatcher;
+      const fileManagerHost = yield* FileManagerHost.FileManagerHost;
       const canReplayPersistedRange = Effect.fnUntraced(function* (
         afterSequence: number,
         headSequence: number,
@@ -2099,6 +2101,30 @@ const makeWsRpcLayer = (
               ),
             ),
             { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.fileManagerHost]: () =>
+          observeRpcEffect(WS_METHODS.fileManagerHost, fileManagerHost.host, {
+            "rpc.aggregate": "fileManager",
+          }),
+        // A file manager session belongs to the connection that opened it,
+        // so every call carries the RPC client id beside the client's own id.
+        [WS_METHODS.fileManagerQuery]: (input, metadata) =>
+          observeRpcEffect(
+            WS_METHODS.fileManagerQuery,
+            fileManagerHost.query(String(metadata.client.id), input),
+            { "rpc.aggregate": "fileManager" },
+          ),
+        [WS_METHODS.fileManagerMutate]: (input, metadata) =>
+          observeRpcEffect(
+            WS_METHODS.fileManagerMutate,
+            fileManagerHost.mutate(String(metadata.client.id), input),
+            { "rpc.aggregate": "fileManager" },
+          ),
+        [WS_METHODS.fileManagerSubscribeEvents]: (input, metadata) =>
+          observeRpcStream(
+            WS_METHODS.fileManagerSubscribeEvents,
+            fileManagerHost.events(String(metadata.client.id), input),
+            { "rpc.aggregate": "fileManager" },
           ),
         [WS_METHODS.attachmentsCreateUploadUrl]: (input) =>
           observeRpcEffect(WS_METHODS.attachmentsCreateUploadUrl, issueAttachmentUploadUrl(input), {
