@@ -544,6 +544,8 @@ describe("thread navigation helpers", () => {
   it("maps traversal commands to directions", () => {
     assert.strictEqual(threadTraversalDirectionFromCommand("thread.previous"), "previous");
     assert.strictEqual(threadTraversalDirectionFromCommand("thread.next"), "next");
+    assert.strictEqual(threadTraversalDirectionFromCommand("thread.nextPage"), "next-page");
+    assert.strictEqual(threadTraversalDirectionFromCommand("thread.previousPage"), "previous-page");
     assert.isNull(threadTraversalDirectionFromCommand("thread.jump.1"));
     assert.isNull(threadTraversalDirectionFromCommand(null));
   });
@@ -1388,5 +1390,135 @@ describe("pane-scoped bindings", () => {
       resolve({ sidebarFocus: false, chatFocus: false, panelFocus: true });
     });
     assert.strictEqual(reads, 0);
+  });
+});
+
+describe("the sidebar's list chords", () => {
+  /**
+   * The same hand-built element the pane block uses, plus `tagName`, because
+   * what separates a thread row from the search box is what kind of element
+   * has the keyboard.
+   */
+  class SidebarElement {
+    parent: SidebarElement | null = null;
+    isConnected = true;
+    isContentEditable = false;
+
+    constructor(
+      readonly tagName: string,
+      readonly selectors: ReadonlyArray<string> = [],
+    ) {}
+
+    closest(selector: string): SidebarElement | null {
+      return closestSidebarFrom(this, selector);
+    }
+  }
+
+  function closestSidebarFrom(start: SidebarElement, selector: string): SidebarElement | null {
+    let node: SidebarElement | null = start;
+    while (node !== null) {
+      if (node.selectors.includes(selector)) return node;
+      node = node.parent;
+    }
+    return null;
+  }
+
+  const SIDEBAR_ROOT = "[data-app-sidebar]";
+  const PANEL_ROOT = "[data-preview-panel-mode]";
+
+  /** Runs `body` with `tagName` focused inside `paneRoot`. */
+  function withFocusOn(paneRoot: string, tagName: string, body: () => void): void {
+    const originalDocument = globalThis.document;
+    const originalHTMLElement = globalThis.HTMLElement;
+    const root = new SidebarElement("DIV", [paneRoot]);
+    const active = new SidebarElement(tagName);
+    active.parent = root;
+    globalThis.HTMLElement = SidebarElement as unknown as typeof HTMLElement;
+    globalThis.document = { activeElement: active } as unknown as Document;
+    try {
+      body();
+    } finally {
+      if (originalDocument === undefined) {
+        delete (globalThis as { document?: Document }).document;
+      } else {
+        globalThis.document = originalDocument;
+      }
+      if (originalHTMLElement === undefined) {
+        delete (globalThis as { HTMLElement?: typeof HTMLElement }).HTMLElement;
+      } else {
+        globalThis.HTMLElement = originalHTMLElement;
+      }
+    }
+  }
+
+  const withSidebarFocusOn = (tagName: string, body: () => void) =>
+    withFocusOn(SIDEBAR_ROOT, tagName, body);
+
+  const resolve = (keyEvent: ShortcutEventLike, context?: Record<string, boolean>) =>
+    resolveShortcutCommand(keyEvent, DEFAULT_RESOLVED_KEYBINDINGS, {
+      platform: "Linux",
+      ...(context ? { context } : {}),
+    });
+
+  it("walks the list one thread at a time on j and k", () => {
+    assert.strictEqual(
+      resolve(event({ key: "j" }), { sidebarFocus: true, sidebarSearchFocus: false }),
+      "thread.next",
+    );
+    assert.strictEqual(
+      resolve(event({ key: "k" }), { sidebarFocus: true, sidebarSearchFocus: false }),
+      "thread.previous",
+    );
+  });
+
+  it("types a j in the sidebar's search box instead of jumping a thread", () => {
+    // The only bare-letter chords in the app. Without this the search box
+    // would be unusable for any query containing a j or a k, which is most
+    // of them.
+    assert.isNull(resolve(event({ key: "j" }), { sidebarFocus: true, sidebarSearchFocus: true }));
+    assert.isNull(resolve(event({ key: "k" }), { sidebarFocus: true, sidebarSearchFocus: true }));
+  });
+
+  it("leaves a bare j alone everywhere outside the sidebar", () => {
+    // `j` is `down` in the embedded Neovim editor and an ordinary letter in
+    // the composer. Neither may ever move a thread.
+    assert.isNull(resolve(event({ key: "j" }), { sidebarFocus: false }));
+    assert.isNull(resolve(event({ key: "k" }), { sidebarFocus: false }));
+  });
+
+  it("reads the search box off the focused element when no context is given", () => {
+    withSidebarFocusOn("BUTTON", () => {
+      assert.strictEqual(resolve(event({ key: "j" })), "thread.next");
+    });
+    withSidebarFocusOn("INPUT", () => {
+      assert.isNull(resolve(event({ key: "j" })));
+    });
+    withSidebarFocusOn("TEXTAREA", () => {
+      assert.isNull(resolve(event({ key: "j" })));
+    });
+  });
+
+  it("is a motion, not a chord, inside the editor in the right panel", () => {
+    // GUARD. `j` is `down` in the embedded Neovim editor and the editor
+    // lives in the right panel, so the pane read is what keeps the letter a
+    // letter there. Asserted through the focus tree rather than an explicit
+    // context, because an explicit context is exactly what the editor does
+    // not pass.
+    withFocusOn(PANEL_ROOT, "TEXTAREA", () => {
+      assert.isNull(resolve(event({ key: "j" })));
+      assert.isNull(resolve(event({ key: "k" })));
+    });
+    withFocusOn(PANEL_ROOT, "DIV", () => {
+      assert.isNull(resolve(event({ key: "j" })));
+    });
+  });
+
+  it("steps a page with Ctrl+D and Ctrl+U, which three panes each read differently", () => {
+    const down = () => event({ key: "d", ctrlKey: true });
+    const up = () => event({ key: "u", ctrlKey: true });
+    assert.strictEqual(resolve(down(), { sidebarFocus: true }), "thread.nextPage");
+    assert.strictEqual(resolve(up(), { sidebarFocus: true }), "thread.previousPage");
+    assert.strictEqual(resolve(down(), { chatFocus: true }), "chat.scrollHalfPageDown");
+    assert.strictEqual(resolve(down(), { terminalFocus: true }), "terminal.split");
   });
 });

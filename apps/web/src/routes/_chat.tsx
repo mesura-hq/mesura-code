@@ -20,6 +20,7 @@ import { isPreviewSupportedInRuntime } from "../previewStateStore";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
+import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { usePaneNavigation } from "~/lib/usePaneNavigation";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 
@@ -57,8 +58,9 @@ function ChatRouteGlobalShortcuts() {
       : false,
   );
   // Claimed in the capture phase, ahead of every handler below and of every
-  // pane, so a pane chord means one thing wherever it is typed.
-  usePaneNavigation(keybindings);
+  // pane, so a pane chord means one thing wherever it is typed. The thread
+  // ref is what names the open thread's row as the way into the sidebar.
+  usePaneNavigation(keybindings, routeThreadRef ? scopedThreadKey(routeThreadRef) : null);
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;

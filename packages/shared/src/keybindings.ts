@@ -105,6 +105,30 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // an unconditional rule on it would shadow `chat.new` outright under
   // last-wins. alt+o also joins the alt+letter family the other pickers use.
   { key: "alt+o", command: "editor.openFavorite" },
+  // The sidebar's list chords. These are the only bare letters in the whole
+  // table, which is affordable because `sidebarFocus` is true for a handful
+  // of buttons and nothing else — and because the second clause hands the
+  // key back the moment the keyboard is in a box you type into. Without that
+  // clause the thread search would be unusable for any query holding a j.
+  //
+  // Placed before the two rows below rather than after them, so the chord the
+  // UI advertises for these commands stays the bracket pair: the label
+  // resolver reports the binding that wins, which is the last one, and a bare
+  // `j` is not a chord to put in front of someone who has not focused the
+  // sidebar.
+  { key: "j", command: "thread.next", when: "sidebarFocus && !sidebarSearchFocus" },
+  { key: "k", command: "thread.previous", when: "sidebarFocus && !sidebarSearchFocus" },
+  // The page step. Same two keys the chat reads as a half-page scroll and the
+  // terminal reads as a split, told apart by which pane has the keyboard —
+  // three panes, three meanings, no chord spent twice. New commands, so the
+  // per-command startup backfill installs them and no ADDED_KEYBINDING_DEFAULTS
+  // entry is needed.
+  //
+  // No search guard on these two: a modifier chord types nothing into a box,
+  // and moving on through the list while a search is narrowing it is the
+  // useful reading rather than a collision.
+  { key: "mod+d", command: "thread.nextPage", when: "sidebarFocus" },
+  { key: "mod+u", command: "thread.previousPage", when: "sidebarFocus" },
   // Browsers keep ctrl+tab for their own tab strip and never deliver it to a
   // page, so this pair reaches the desktop app only. It is listed first so the
   // bracket pair below is the one the UI reports as the shortcut: the label
@@ -247,6 +271,20 @@ export const ADDED_KEYBINDING_DEFAULTS: ReadonlyArray<AddedKeybindingDefault> = 
     id: "2026-08-thread-previous-ctrl-shift-tab",
     rule: { key: "ctrl+shift+tab", command: "thread.previous", when: "!terminalFocus" },
     insertBefore: { key: "mod+shift+[", command: "thread.previous" },
+  },
+  // Second defaults on commands an existing config already binds, so the
+  // per-command backfill would skip them and only this mechanism delivers
+  // them. The page pair needs no entry beside these: those commands are new,
+  // and a command a config has never heard of the backfill installs itself.
+  {
+    id: "2026-09-sidebar-thread-next-j",
+    rule: { key: "j", command: "thread.next", when: "sidebarFocus && !sidebarSearchFocus" },
+    insertBefore: { key: "ctrl+tab", command: "thread.next", when: "!terminalFocus" },
+  },
+  {
+    id: "2026-09-sidebar-thread-previous-k",
+    rule: { key: "k", command: "thread.previous", when: "sidebarFocus && !sidebarSearchFocus" },
+    insertBefore: { key: "ctrl+shift+tab", command: "thread.previous", when: "!terminalFocus" },
   },
 ];
 

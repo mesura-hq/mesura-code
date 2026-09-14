@@ -211,8 +211,14 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       // The everywhere-works chord is last on purpose: the label resolver
       // reports the binding that wins, and naming ctrl+tab would be wrong on
       // every surface that never receives it.
-      assert.deepEqual(keysFor("thread.previous"), ["ctrl+shift+tab", "mod+shift+["]);
-      assert.deepEqual(keysFor("thread.next"), ["ctrl+tab", "mod+shift+]"]);
+      //
+      // The sidebar's bare letter is first for the same reason from the other
+      // end. It only works with a thread row focused, so advertising `k` as
+      // the way to reach the previous thread would be wrong everywhere else.
+      assert.deepEqual(keysFor("thread.previous"), ["k", "ctrl+shift+tab", "mod+shift+["]);
+      assert.deepEqual(keysFor("thread.next"), ["j", "ctrl+tab", "mod+shift+]"]);
+      assert.deepEqual(keysFor("thread.nextPage"), ["mod+d"]);
+      assert.deepEqual(keysFor("thread.previousPage"), ["mod+u"]);
       assert.equal(soleKeyFor("thread.jump.1"), "mod+1");
       assert.equal(soleKeyFor("thread.jump.9"), "mod+9");
       assert.deepEqual(keysFor("modelPicker.toggle"), ["alt+m", "mod+shift+m"]);
@@ -653,7 +659,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
       assert.deepEqual(
         persisted.filter((entry) => entry.command === "thread.next").map((entry) => entry.key),
-        ["ctrl+tab", "mod+shift+]"],
+        ["j", "ctrl+tab", "mod+shift+]"],
       );
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );

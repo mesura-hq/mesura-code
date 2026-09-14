@@ -37,6 +37,11 @@ export type ModelPickerJumpKeybindingCommand =
 export const THREAD_KEYBINDING_COMMANDS = [
   "thread.previous",
   "thread.next",
+  // The sidebar's page step, five threads at a time. Separate commands
+  // rather than a modifier on the two above, because a command is what a
+  // keybinding row can name and what a user can rebind.
+  "thread.previousPage",
+  "thread.nextPage",
   "thread.copyReference",
   "thread.settle",
   // Bound to no chord since the 2026-W35 sync: upstream's thread.settle owns

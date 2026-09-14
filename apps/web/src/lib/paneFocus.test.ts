@@ -6,6 +6,7 @@ import {
   getFocusedPane,
   getLastFocusedPane,
   isPaneReachable,
+  isSidebarSearchFocused,
   neighbourOf,
   registerPaneEntry,
 } from "./paneFocus";
@@ -20,9 +21,13 @@ class FakeElement {
   isConnected = true;
   parent: FakeElement | null = null;
   focusCalls = 0;
+  isContentEditable = false;
   readonly dataset: Record<string, string | undefined> = {};
 
-  constructor(readonly selectors: ReadonlyArray<string> = []) {}
+  constructor(
+    readonly selectors: ReadonlyArray<string> = [],
+    readonly tagName: string = "DIV",
+  ) {}
 
   closest(selector: string): FakeElement | null {
     return closestFrom(this, selector);
@@ -327,27 +332,35 @@ describe("focusPane", () => {
     unregister();
   });
 
-  it("focuses the active thread row in the sidebar, in preference to the first row", () => {
-    const active = new FakeElement([]);
-    const first = new FakeElement([]);
+  it("enters the sidebar on a thread row, never on the toolbar", () => {
+    // This assertion used to name `[data-sidebar="menu-button"][data-active]`
+    // and call it the active thread row. It is not: in the running app those
+    // are the six icon buttons in the sidebar's top and bottom bars, all of
+    // them `data-active="false"`, so the old selector matched nothing and the
+    // keyboard landed on the collapse toggle. A thread row is a
+    // `role="button"` inside an `<li data-thread-item>`.
+    const row = new FakeElement([]);
+    const toolbarButton = new FakeElement([]);
     installDocument({
       registry: {
-        '[data-app-sidebar] [data-sidebar="menu-button"][data-active="true"]': active,
-        '[data-app-sidebar] [data-sidebar="menu-button"]': first,
+        '[data-app-sidebar] [data-thread-item] [role="button"]': row,
+        '[data-app-sidebar] [data-sidebar="menu-button"]': toolbarButton,
       },
     });
     expect(focusPane("sidebar")).toBe(true);
-    expect(active.focusCalls).toBe(1);
-    expect(first.focusCalls).toBe(0);
+    expect(row.focusCalls).toBe(1);
+    expect(toolbarButton.focusCalls).toBe(0);
   });
 
-  it("focuses the first thread row when no row is active", () => {
-    const first = new FakeElement([]);
+  it("takes the toolbar only when the list has no row at all", () => {
+    // An empty sidebar still has to be enterable, or `Ctrl+H` would look
+    // broken to somebody with no threads yet.
+    const toolbarButton = new FakeElement([]);
     installDocument({
-      registry: { '[data-app-sidebar] [data-sidebar="menu-button"]': first },
+      registry: { '[data-app-sidebar] [data-sidebar="menu-button"]': toolbarButton },
     });
     expect(focusPane("sidebar")).toBe(true);
-    expect(first.focusCalls).toBe(1);
+    expect(toolbarButton.focusCalls).toBe(1);
   });
 
   it("focuses the composer for the chat, which is a contenteditable and not an input", () => {
@@ -384,5 +397,54 @@ describe("focusPane", () => {
     expect(queried.indexOf("[data-preview-panel-mode] input")).toBeLessThan(
       queried.indexOf("[data-preview-panel-mode] button"),
     );
+  });
+});
+
+describe("isSidebarSearchFocused", () => {
+  /**
+   * The sidebar's `j` and `k` are the only bare-letter chords in the app, so
+   * something has to say when the sidebar has the keyboard but a letter is
+   * meant to be a letter. That is any text entry inside it, not one named
+   * search box: the thread search and the project filter are two different
+   * inputs and a rule keyed to one would silently stop guarding the other.
+   */
+  function focused(element: FakeElement | null): void {
+    installDocument({ activeElement: element });
+  }
+
+  function inSidebar(element: FakeElement): FakeElement {
+    element.parent = sidebarRoot();
+    return element;
+  }
+
+  it("is true for the text entries the sidebar renders", () => {
+    for (const tag of ["INPUT", "TEXTAREA"]) {
+      focused(inSidebar(new FakeElement([], tag)));
+      expect(isSidebarSearchFocused()).toBe(true);
+    }
+  });
+
+  it("is true for a contenteditable, whatever tag it wears", () => {
+    const editable = inSidebar(new FakeElement([], "DIV"));
+    editable.isContentEditable = true;
+    focused(editable);
+    expect(isSidebarSearchFocused()).toBe(true);
+  });
+
+  it("is false for a thread row, which is the case j exists for", () => {
+    focused(inSidebar(new FakeElement([], "BUTTON")));
+    expect(isSidebarSearchFocused()).toBe(false);
+  });
+
+  it("is false for an input in another pane", () => {
+    const outside = new FakeElement([], "INPUT");
+    outside.parent = panelRoot();
+    focused(outside);
+    expect(isSidebarSearchFocused()).toBe(false);
+  });
+
+  it("is false when nothing has the keyboard, and where there is no document", () => {
+    focused(null);
+    expect(isSidebarSearchFocused()).toBe(false);
   });
 });

@@ -45,8 +45,18 @@ const CONTAINMENT_ORDER: ReadonlyArray<PaneId> = ["terminal", "sidebar", "panel"
  * keystroke, which looks identical to the feature not working.
  */
 const PANE_ENTRY_SELECTORS: Record<PaneId, ReadonlyArray<string>> = {
+  // A thread row before anything else. The rows are what the sidebar is for,
+  // and the `[data-sidebar="menu-button"]` elements are the six icon buttons
+  // in the top and bottom bars — verified in the running app, where the
+  // original selector landed the keyboard on the collapse toggle. The row
+  // itself is the `role="button"` inside the `<li>`: the `<li>` carries the
+  // key but is not focusable.
+  //
+  // Which row is a question this module cannot answer, so the route
+  // registers the active one through `registerPaneEntry` and these are the
+  // fallback for when it has not.
   sidebar: [
-    '[data-app-sidebar] [data-sidebar="menu-button"][data-active="true"]',
+    '[data-app-sidebar] [data-thread-item] [role="button"]',
     '[data-app-sidebar] [data-sidebar="menu-button"]',
   ],
   // The composer is a contenteditable div, not a textarea; the textarea is
@@ -212,6 +222,32 @@ export function focusPane(pane: PaneId): boolean {
     }
   }
   return false;
+}
+
+/** Elements a keystroke goes into rather than through. */
+const TEXT_ENTRY_TAGS: ReadonlySet<string> = new Set(["INPUT", "TEXTAREA"]);
+
+/**
+ * Whether the keyboard is in something you type into, inside the sidebar.
+ *
+ * The sidebar's list chords are the only bare letters in the app: `j` and `k`
+ * walk the thread list. So something has to say when the sidebar holds the
+ * keyboard and a letter is nonetheless meant to be a letter.
+ *
+ * Asked of any text entry rather than of one named search box. The sidebar
+ * renders two — the thread search and the project filter — and a rule keyed
+ * to either would silently stop guarding the other the day upstream adds a
+ * third.
+ */
+export function isSidebarSearchFocused(): boolean {
+  if (typeof document === "undefined") return false;
+  const activeElement = document.activeElement;
+  if (!(activeElement instanceof HTMLElement)) return false;
+  if (!activeElement.isConnected) return false;
+  if (!TEXT_ENTRY_TAGS.has(activeElement.tagName) && !activeElement.isContentEditable) {
+    return false;
+  }
+  return activeElement.closest(PANE_ROOT_SELECTOR.sidebar) !== null;
 }
 
 /**

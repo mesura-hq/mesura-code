@@ -8,7 +8,10 @@ import {
   type ModelPickerJumpKeybindingCommand,
   type ThreadJumpKeybindingCommand,
 } from "@t3tools/contracts";
-import { getFocusedPane, type PaneId } from "./lib/paneFocus";
+import { getFocusedPane, isSidebarSearchFocused, type PaneId } from "./lib/paneFocus";
+// Type only, so nothing from the component graph is pulled in at runtime.
+// The direction union stays where upstream declares it.
+import type { ThreadTraversalDirection } from "./components/Sidebar.logic";
 import { isMacPlatform } from "./lib/utils";
 
 export interface ShortcutEventLike {
@@ -44,6 +47,11 @@ export interface ShortcutMatchContext {
   sidebarFocus: boolean;
   chatFocus: boolean;
   panelFocus: boolean;
+  /**
+   * The sidebar holds the keyboard, and a letter typed into it is a letter.
+   * Only the sidebar's bare-letter chords consult this.
+   */
+  sidebarSearchFocus: boolean;
   [key: string]: boolean;
 }
 
@@ -154,6 +162,7 @@ function resolveContext(options: ShortcutMatchOptions | undefined): ShortcutMatc
     sidebarFocus: false,
     chatFocus: false,
     panelFocus: false,
+    sidebarSearchFocus: false,
     ...options?.context,
   };
 
@@ -175,6 +184,21 @@ function resolveContext(options: ShortcutMatchOptions | undefined): ShortcutMatc
     if (options?.context !== undefined && key in options.context) continue;
     Object.defineProperty(context, key, {
       get: () => isFocused(pane),
+      enumerable: true,
+      configurable: true,
+    });
+  }
+
+  // Separately memoised from the pane read above, and asked far less often:
+  // only the sidebar's two bare letters carry a `when` clause that mentions
+  // it, and both have already had to match `sidebarFocus` to get here.
+  if (options?.context === undefined || !("sidebarSearchFocus" in options.context)) {
+    let searchFocus: boolean | undefined;
+    Object.defineProperty(context, "sidebarSearchFocus", {
+      get: () => {
+        if (searchFocus === undefined) searchFocus = isSidebarSearchFocused();
+        return searchFocus;
+      },
       enumerable: true,
       configurable: true,
     });
@@ -363,9 +387,11 @@ export function threadJumpIndexFromCommand(command: string): number | null {
 
 export function threadTraversalDirectionFromCommand(
   command: string | null,
-): "previous" | "next" | null {
+): ThreadTraversalDirection | null {
   if (command === "thread.previous") return "previous";
   if (command === "thread.next") return "next";
+  if (command === "thread.previousPage") return "previous-page";
+  if (command === "thread.nextPage") return "next-page";
   return null;
 }
 

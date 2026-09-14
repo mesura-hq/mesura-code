@@ -5,6 +5,7 @@ import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import {
   createPaneFocusGuard,
   createPaneNavigationHandler,
+  createSidebarListFocusClaim,
   registerPaneNavigation,
 } from "./usePaneNavigation";
 
@@ -517,8 +518,13 @@ describe("registration", () => {
       },
     });
 
+    // Four, and every one of them in the capture phase: the pane chords and
+    // the sidebar list claim each take a keydown and a focusout, and a
+    // listener that bubbled would arrive after a pane had already answered.
     expect(added).toEqual([
       { type: "keydown", capture: true },
+      { type: "keydown", capture: true },
+      { type: "focusout", capture: true },
       { type: "focusout", capture: true },
     ]);
 
@@ -528,6 +534,8 @@ describe("registration", () => {
     expect(observing).toBe(false);
     expect(removed).toEqual([
       { type: "keydown", capture: true },
+      { type: "keydown", capture: true },
+      { type: "focusout", capture: true },
       { type: "focusout", capture: true },
     ]);
   });
@@ -710,5 +718,150 @@ describe("two pane commands on one chord", () => {
     // pane.focusRight is last, so it wins, and focus goes right.
     expect(workspace.entries.panel?.focusCalls).toBe(1);
     expect(workspace.entries.sidebar?.focusCalls).toBe(0);
+  });
+});
+
+describe("the sidebar list claim", () => {
+  /**
+   * Opening a thread makes ChatView focus the composer, on every change of
+   * the active thread. That is right when you clicked the row and wrong when
+   * you walked to it with `j`, so the claim puts the keyboard back.
+   *
+   * Both bugs these cases exist for were found by a reviewer reading the
+   * first version, and neither was reachable from any test that existed then.
+   */
+  function claimFor() {
+    const frames: Array<() => void> = [];
+    let clock = 1000;
+    const claim = createSidebarListFocusClaim({
+      keybindings: DEFAULT_RESOLVED_KEYBINDINGS,
+      platform: "Linux",
+      scheduleFrame: (callback) => {
+        frames.push(callback);
+      },
+      now: () => clock,
+    });
+    return {
+      claim,
+      advance: (ms: number) => {
+        clock += ms;
+      },
+      runFrames: () => {
+        const pending = frames.splice(0, frames.length);
+        for (const frame of pending) frame();
+      },
+    };
+  }
+
+  /** ChatView's own behaviour: the composer takes the keyboard. */
+  function composerSteals(workspace: Workspace, claim: ReturnType<typeof claimFor>) {
+    workspace.focusInto("chat");
+    claim.claim.onFocusOut({ relatedTarget: workspace.entries.chat ?? null });
+  }
+
+  it("puts the keyboard back on the sidebar after the composer takes it", () => {
+    const workspace = installWorkspace();
+    workspace.focusInto("sidebar");
+    const claim = claimFor();
+
+    claim.claim.onKeyDown(keydown("j"));
+    composerSteals(workspace, claim);
+    claim.runFrames();
+
+    expect(workspace.entries.sidebar?.focusCalls).toBe(1);
+  });
+
+  it("keeps walking when the next chord arrives before the rescue frame", () => {
+    // The second `j` of a fast run lands while the composer holds the
+    // keyboard and the rescue has not run. The first version read that as
+    // "`j` typed somewhere else", disarmed, and left the letter to be typed
+    // into the draft. Moving focus back inside the capture phase is what
+    // makes the sidebar's own handler see a focused sidebar a moment later.
+    const workspace = installWorkspace();
+    workspace.focusInto("sidebar");
+    const claim = claimFor();
+
+    claim.claim.onKeyDown(keydown("j"));
+    workspace.focusInto("chat");
+    claim.claim.onKeyDown(keydown("j"));
+
+    expect(workspace.entries.sidebar?.focusCalls).toBe(1);
+  });
+
+  it("leaves a bare j alone when no chord armed the claim", () => {
+    const workspace = installWorkspace();
+    workspace.focusInto("chat");
+    const claim = claimFor();
+
+    claim.claim.onKeyDown(keydown("j"));
+    claim.runFrames();
+
+    expect(workspace.entries.sidebar?.focusCalls).toBe(0);
+  });
+
+  it("takes the keyboard back from the chat and from nowhere else", () => {
+    // A dialog, the command palette and a context menu all render outside
+    // every pane root. The person opened them on purpose, and the first
+    // version yanked focus out of whichever one appeared inside the window.
+    const workspace = installWorkspace();
+    workspace.focusInto("sidebar");
+    const claim = claimFor();
+
+    claim.claim.onKeyDown(keydown("j"));
+    workspace.focusInto("none");
+    claim.claim.onFocusOut({ relatedTarget: workspace.body });
+    claim.runFrames();
+
+    expect(workspace.entries.sidebar?.focusCalls).toBe(0);
+  });
+
+  it("stops waiting after any key that is not a list chord", () => {
+    const workspace = installWorkspace();
+    workspace.focusInto("sidebar");
+    const claim = claimFor();
+
+    claim.claim.onKeyDown(keydown("j"));
+    claim.claim.onKeyDown(keydown("q"));
+    composerSteals(workspace, claim);
+    claim.runFrames();
+
+    expect(workspace.entries.sidebar?.focusCalls).toBe(0);
+  });
+
+  it("stops waiting once the window has passed", () => {
+    const workspace = installWorkspace();
+    workspace.focusInto("sidebar");
+    const claim = claimFor();
+
+    claim.claim.onKeyDown(keydown("j"));
+    claim.advance(601);
+    composerSteals(workspace, claim);
+    claim.runFrames();
+
+    expect(workspace.entries.sidebar?.focusCalls).toBe(0);
+  });
+
+  it("does not fight a sidebar that closed under it", () => {
+    const workspace = installWorkspace({ sidebarCollapsed: true });
+    workspace.focusInto("sidebar");
+    const claim = claimFor();
+
+    claim.claim.onKeyDown(keydown("j"));
+    composerSteals(workspace, claim);
+    claim.runFrames();
+
+    expect(workspace.entries.sidebar?.focusCalls).toBe(0);
+  });
+
+  it("arms on the page chords too, not only the letters", () => {
+    const workspace = installWorkspace();
+    workspace.focusInto("sidebar");
+    const claim = claimFor();
+
+    claim.claim.onKeyDown(keydown("d", { ctrlKey: true }));
+    composerSteals(workspace, claim);
+    claim.runFrames();
+
+    expect(workspace.entries.sidebar?.focusCalls).toBe(1);
   });
 });
