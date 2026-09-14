@@ -53,6 +53,9 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+alt+shift+t", command: "themeEditor.toggle" },
   { key: "mod+s", command: "composer.stash", when: "!terminalFocus" },
   { key: "alt+a", command: "composer.attachFiles", when: "!terminalFocus" },
+  // Fork addition: a new command on a free chord, installed by the per-command
+  // startup backfill; no RETIRED or ADDED entry, as with alt+q below.
+  { key: "mod+e", command: "fileTree.toggle", when: "!terminalFocus" },
   { key: "alt+u", command: "usage.peek" },
   { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },

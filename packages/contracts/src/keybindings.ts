@@ -102,6 +102,9 @@ export const STATIC_KEYBINDING_COMMANDS = [
   // Fork addition (ADR-003). Upstream ships no keyboard route to attaching at
   // all, so retiring the fork's attachment stack would have taken the only one.
   "composer.attachFiles",
+  // Fork addition. Reaches the Symmetria file tree in the files surface and
+  // leaves it again. The rename warning below applies to this id too.
+  "fileTree.toggle",
   "usage.peek",
   "chat.new",
   "chat.newLocal",

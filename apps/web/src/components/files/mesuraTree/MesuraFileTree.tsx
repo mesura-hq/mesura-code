@@ -13,11 +13,14 @@ import "@symmetria/fm-ui/overview/styles.css";
 import "@symmetria/fm-search/ui/styles.css";
 
 import { useComposerHandleContext } from "~/composerHandleContext";
+import { registerFocusTarget } from "~/lib/focusTargets";
 
 import { showFileTreeContextMenu } from "./fileTreeContextMenu";
+import { useFileTreeStore } from "./fileTreeStore";
 import { relativeToCwd } from "./overviewModelFromEntries";
 import { treeCommandForKey } from "./treeKeymap";
 import { type HandledReveal, nextRevealRequest } from "./treeReveal";
+import { leaveFileTree } from "./fileTreeFocusMoves";
 import { useProjectOverviewModel } from "./useProjectOverviewModel";
 import "./fileTree.css";
 
@@ -88,6 +91,32 @@ export function MesuraFileTree({
   );
   const record = useMemo(() => recordFor(environmentId, cwd), [environmentId, cwd]);
   const composerRef = useComposerHandleContext();
+  const wrapper = useRef<HTMLDivElement | null>(null);
+
+  // The viewport is the element that owns the tree's keys; focusing the
+  // wrapper would land on a node that eats nothing.
+  const focusViewport = useCallback(() => {
+    const viewport = wrapper.current?.querySelector<HTMLElement>('[role="tree"]');
+    viewport?.focus({ preventScroll: true });
+    return viewport !== null && viewport !== undefined;
+  }, []);
+  useEffect(() => registerFocusTarget("tree", focusViewport), [focusViewport]);
+  // Registered here for as long as the tree is mounted, which is the only time
+  // a move out of the tree can be asked for; the composer's owner is upstream's.
+  useEffect(
+    () =>
+      registerFocusTarget("composer", () => {
+        const composer = composerRef?.current;
+        if (!composer) return false;
+        composer.focusAtEnd();
+        return true;
+      }),
+    [composerRef],
+  );
+  // A chord that opened the surface asked for focus before the tree existed.
+  useEffect(() => {
+    if (useFileTreeStore.getState().consumePendingFocus()) focusViewport();
+  }, [focusViewport]);
 
   const controller = useRef<TreeController | null>(null);
   const connect = useCallback((next: TreeController) => {
@@ -140,13 +169,23 @@ export function MesuraFileTree({
     }
     // A toolbar button or disclosure keeps its native activation.
     if (target?.closest("button, summary") && (event.key === "Enter" || event.key === " ")) return;
+    const inTextInput = target?.closest("input, textarea, select, [contenteditable=true]") !== null;
+    // Escape leaves the tree the same way Ctrl+E does, hiding it behind the
+    // editor when there is one; inside the search field it is the field's own
+    // cancel.
+    if (event.key === "Escape" && !inTextInput) {
+      event.preventDefault();
+      event.stopPropagation();
+      leaveFileTree();
+      return;
+    }
     const command = treeCommandForKey({
       key: event.key,
       ctrl: event.ctrlKey,
       shift: event.shiftKey,
       alt: event.altKey,
       meta: event.metaKey,
-      inTextInput: target?.closest("input, textarea, select, [contenteditable=true]") !== null,
+      inTextInput,
     });
     if (command === null) return;
     event.preventDefault();
@@ -175,6 +214,7 @@ export function MesuraFileTree({
   return (
     // The tree viewport inside owns focus and the tree role; this wrapper only routes keys and the menu.
     <div
+      ref={wrapper}
       role="group"
       data-mesura-file-tree={`${environmentId}:${cwd}`}
       aria-label={`${projectName} files`}
