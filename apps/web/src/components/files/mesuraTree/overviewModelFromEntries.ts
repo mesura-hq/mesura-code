@@ -1,6 +1,6 @@
 import type { OverviewEntry } from "@symmetria/fm-core/overview/contract";
 import type { OverviewFolder } from "@symmetria/fm-core/overview/model";
-import { joinPath } from "@symmetria/fm-core/pane";
+import { basename, joinPath, parentOf } from "@symmetria/fm-core/pane";
 import type { ProjectEntry, ProjectListEntriesResult } from "@t3tools/contracts";
 
 /**
@@ -110,4 +110,19 @@ function directoriesFirstThenName(a: OverviewEntry, b: OverviewEntry): number {
   return (
     Number(b.kind === "directory") - Number(a.kind === "directory") || a.name.localeCompare(b.name)
   );
+}
+
+/**
+ * What the model says sits at an absolute path: the entry's kind from its
+ * parent folder's listing, or `null` for the root, for a parent the listing
+ * does not carry, or for a name the parent does not list.
+ */
+export function entryKindAt(
+  folders: ReadonlyMap<string, OverviewFolder>,
+  absolute: string,
+): OverviewEntry["kind"] | null {
+  const parent = parentOf(absolute);
+  if (parent === absolute) return null;
+  const name = basename(absolute);
+  return folders.get(parent)?.entries.find((entry) => entry.name === name)?.kind ?? null;
 }

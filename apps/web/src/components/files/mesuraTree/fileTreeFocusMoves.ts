@@ -7,7 +7,7 @@ import {
   useRightPanelStore,
 } from "~/rightPanelStore";
 
-import { decideFileTreeShortcut } from "./fileTreeShortcutDecision";
+import { decideFileTreeShortcut, decideOverviewShortcut } from "./fileTreeShortcutDecision";
 import { useFileTreeStore } from "./fileTreeStore";
 
 /**
@@ -44,11 +44,7 @@ export function runFileTreeToggle(routeThreadRef: ScopedThreadRef | null): void 
       return;
     case "open-surface": {
       if (!routeThreadRef) return;
-      // A hidden panel that still holds a file keeps it; showing beats
-      // replacing the developer's open file with the bare files surface.
-      const selected = selectSelectedRightPanelSurface(panels.byThreadKey, routeThreadRef);
-      if (selected?.kind === "file" || selected?.kind === "files") panels.show(routeThreadRef);
-      else panels.open(routeThreadRef, "files");
+      showFilesSurface(routeThreadRef);
       store.setExplorerOpen(true);
       store.requestFocus();
       return;
@@ -61,6 +57,43 @@ export function runFileTreeToggle(routeThreadRef: ScopedThreadRef | null): void 
     case "hide-and-focus-editor":
     case "focus-composer":
       leaveFileTree();
+      return;
+  }
+}
+
+/**
+ * A hidden panel that still holds a file keeps it; showing beats replacing
+ * the developer's open file with the bare files surface.
+ */
+function showFilesSurface(routeThreadRef: ScopedThreadRef): void {
+  const panels = useRightPanelStore.getState();
+  const selected = selectSelectedRightPanelSurface(panels.byThreadKey, routeThreadRef);
+  if (selected?.kind === "file" || selected?.kind === "files") panels.show(routeThreadRef);
+  else panels.open(routeThreadRef, "files");
+}
+
+export function runOverviewToggle(routeThreadRef: ScopedThreadRef | null): void {
+  const store = useFileTreeStore.getState();
+  const panels = useRightPanelStore.getState();
+  const active = selectActiveRightPanelSurface(panels.byThreadKey, routeThreadRef);
+  const action = decideOverviewShortcut({
+    hasThread: routeThreadRef !== null,
+    surfaceKind: active?.kind ?? null,
+    overviewOpen: store.overviewOpen,
+  });
+  switch (action) {
+    case "none":
+      return;
+    case "close":
+      store.setOverviewOpen(false);
+      return;
+    case "open-surface-and-overview":
+      if (!routeThreadRef) return;
+      showFilesSurface(routeThreadRef);
+      store.setOverviewOpen(true);
+      return;
+    case "open":
+      store.setOverviewOpen(true);
       return;
   }
 }

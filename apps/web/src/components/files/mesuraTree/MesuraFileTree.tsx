@@ -18,6 +18,7 @@ import { registerFocusTarget } from "~/lib/focusTargets";
 import { showFileTreeContextMenu } from "./fileTreeContextMenu";
 import { useFileTreeStore } from "./fileTreeStore";
 import { relativeToCwd } from "./overviewModelFromEntries";
+import { routeKey } from "./keyInput";
 import { treeCommandForKey } from "./treeKeymap";
 import { type HandledReveal, nextRevealRequest } from "./treeReveal";
 import { projectTreeKey, treeShapePersister } from "./treeShapeStorage";
@@ -70,6 +71,26 @@ function recordFor(environmentId: EnvironmentId, cwd: string): TreeRecord {
     records.delete(oldest);
   }
   return record;
+}
+
+/** The controllers of the trees mounted right now, so the overview can reveal into them. */
+const mounted = new Map<string, TreeController>();
+
+/**
+ * Reveals a path in the project's tree, from outside it. With the tree
+ * mounted, the cursor moves now; otherwise the record carries the reveal and
+ * the tree resolves it on its first render, which the explorer being shown
+ * triggers.
+ */
+export function revealInTree(environmentId: EnvironmentId, cwd: string, absolute: string): void {
+  const store = useFileTreeStore.getState();
+  const controller = mounted.get(projectTreeKey(environmentId, cwd));
+  if (controller) {
+    controller.reveal(absolute);
+    return;
+  }
+  recordFor(environmentId, cwd).pendingReveal = absolute;
+  store.setExplorerOpen(true);
 }
 
 /**
@@ -126,12 +147,18 @@ export function MesuraFileTree({
   }, [focusViewport]);
 
   const controller = useRef<TreeController | null>(null);
-  const connect = useCallback((next: TreeController) => {
-    controller.current = next;
-    return () => {
-      if (controller.current === next) controller.current = null;
-    };
-  }, []);
+  const treeKey = projectTreeKey(environmentId, cwd);
+  const connect = useCallback(
+    (next: TreeController) => {
+      controller.current = next;
+      mounted.set(treeKey, next);
+      return () => {
+        if (controller.current === next) controller.current = null;
+        if (mounted.get(treeKey) === next) mounted.delete(treeKey);
+      };
+    },
+    [treeKey],
+  );
   const flash = useFlashPort();
   const port = useMemo<TreePort>(
     () => ({ connect, select: () => undefined, flash: flash.port }),
@@ -165,40 +192,15 @@ export function MesuraFileTree({
     onOpenFile(relative);
   };
 
-  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const target = event.target instanceof Element ? event.target : null;
-    if (flash.active) {
-      if (flash.onKey(event.nativeEvent)) {
-        event.preventDefault();
-        event.stopPropagation();
-      }
-      return;
-    }
-    // A toolbar button or disclosure keeps its native activation.
-    if (target?.closest("button, summary") && (event.key === "Enter" || event.key === " ")) return;
-    const inTextInput = target?.closest("input, textarea, select, [contenteditable=true]") !== null;
-    // Escape leaves the tree the same way Ctrl+E does, hiding it behind the
-    // editor when there is one; inside the search field it is the field's own
-    // cancel.
-    if (event.key === "Escape" && !inTextInput) {
-      event.preventDefault();
-      event.stopPropagation();
-      leaveFileTree();
-      return;
-    }
-    const command = treeCommandForKey({
-      key: event.key,
-      ctrl: event.ctrlKey,
-      shift: event.shiftKey,
-      alt: event.altKey,
-      meta: event.metaKey,
-      inTextInput,
+  // Escape leaves the tree the same way Ctrl+E does, hiding it behind the
+  // editor when there is one.
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) =>
+    routeKey(event, {
+      flash,
+      commandFor: treeCommandForKey,
+      onEscape: leaveFileTree,
+      onCommand: (command) => controller.current?.command(command),
     });
-    if (command === null) return;
-    event.preventDefault();
-    event.stopPropagation();
-    controller.current?.command(command);
-  };
 
   const onContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
     const row = event.target instanceof Element ? event.target.closest("[data-path]") : null;
@@ -223,7 +225,7 @@ export function MesuraFileTree({
     <div
       ref={wrapper}
       role="group"
-      data-mesura-file-tree={projectTreeKey(environmentId, cwd)}
+      data-mesura-file-tree={treeKey}
       aria-label={`${projectName} files`}
       onKeyDown={onKeyDown}
       onContextMenu={onContextMenu}

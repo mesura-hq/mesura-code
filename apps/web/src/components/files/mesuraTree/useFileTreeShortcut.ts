@@ -10,10 +10,11 @@ import { selectActiveRightPanel, useRightPanelStore } from "~/rightPanelStore";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "~/terminalUiStateStore";
 
-import { runFileTreeToggle } from "./fileTreeFocusMoves";
+import { runFileTreeToggle, runOverviewToggle } from "./fileTreeFocusMoves";
 
 /**
- * `fileTree.toggle`, dispatched from a window capture-phase listener.
+ * `fileTree.toggle` and `fileTree.overview`, dispatched from a window
+ * capture-phase listener.
  *
  * Capture, because the tree consumes bare letters and the editor consumes
  * everything: a bubbling handler would never see the chord from either. The
@@ -49,12 +50,13 @@ export function useFileTreeShortcut(routeThreadRef: ScopedThreadRef | null): voi
           previewOpen: current.previewOpen,
         },
       });
-      if (command !== "fileTree.toggle") return;
+      if (command !== "fileTree.toggle" && command !== "fileTree.overview") return;
       event.preventDefault();
       event.stopPropagation();
       // A held chord toggles once, not at the key-repeat rate.
       if (event.repeat) return;
-      runFileTreeToggle(current.routeThreadRef);
+      if (command === "fileTree.toggle") runFileTreeToggle(current.routeThreadRef);
+      else runOverviewToggle(current.routeThreadRef);
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);

@@ -9,6 +9,7 @@ function key(key: string, mods: Partial<Omit<TreeKeyInput, "key">> = {}): TreeKe
     shift: false,
     alt: false,
     meta: false,
+    altGraph: false,
     inTextInput: false,
     ...mods,
   };
@@ -44,7 +45,9 @@ describe("treeCommandForKey", () => {
 
   it("opens search on / from any layout's modifier for it", () => {
     expect(treeCommandForKey(key("/", { shift: true }))).toBe("search");
-    expect(treeCommandForKey(key("/", { ctrl: true, alt: true }))).toBe("search");
+    // AltGr as the browser reports it; a Ctrl+Alt chord is the desktop's.
+    expect(treeCommandForKey(key("/", { altGraph: true }))).toBe("search");
+    expect(treeCommandForKey(key("/", { ctrl: true, alt: true }))).toBeNull();
     expect(treeCommandForKey(key("/", { meta: true }))).toBeNull();
   });
 

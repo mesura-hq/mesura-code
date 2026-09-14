@@ -47,6 +47,7 @@ import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
 
 import { useFileTreeStore } from "./mesuraTree/fileTreeStore";
 import { MesuraFileTree } from "./mesuraTree/MesuraFileTree";
+import { MesuraFolderOverview } from "./mesuraTree/MesuraFolderOverview";
 import { FileMarkdownPreview } from "./FileMarkdownPreview";
 import { resolveCenteredFileLineScrollTop } from "./fileLineReveal";
 import { projectFileCacheKey } from "./fileContentRevision";
@@ -934,6 +935,12 @@ export default function FilePreviewPanel({
             />
           </aside>
         ) : null}
+        <MesuraFolderOverview
+          environmentId={environmentId}
+          cwd={cwd}
+          onOpenFile={onOpenFile}
+          workspaceMutationId={workspaceMutationId}
+        />
       </div>
     </div>
   );

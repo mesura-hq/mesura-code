@@ -56,6 +56,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // Fork addition: a new command on a free chord, installed by the per-command
   // startup backfill; no RETIRED or ADDED entry, as with alt+q below.
   { key: "mod+e", command: "fileTree.toggle", when: "!terminalFocus" },
+  { key: "mod+shift+e", command: "fileTree.overview", when: "!terminalFocus" },
   { key: "alt+u", command: "usage.peek" },
   { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },

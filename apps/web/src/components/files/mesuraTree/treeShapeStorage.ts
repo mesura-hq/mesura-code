@@ -3,6 +3,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
 import { createSchemaLocalStorage } from "./schemaLocalStorage";
+import { createWriteCoalescer, flushOnPageHide } from "./writeCoalescer";
 
 /**
  * The tree's shape, persisted per project.
@@ -70,7 +71,6 @@ const REMEMBERED_KEYS = 16;
 export function createTreeShapePersister(storage: TreeShapeStorage, wait = WRITE_DELAY_MS) {
   const written = new Map<string, StoredTreeShape>();
   const pending = new Map<string, StoredTreeShape>();
-  let timer: ReturnType<typeof setTimeout> | null = null;
 
   const remember = (key: string, value: StoredTreeShape) => {
     written.delete(key);
@@ -85,16 +85,12 @@ export function createTreeShapePersister(storage: TreeShapeStorage, wait = WRITE
     a.selected === b.selected &&
     a.collapsed.length === b.collapsed.length &&
     a.collapsed.every((path, index) => path === b.collapsed[index]);
-  const flush = () => {
-    if (timer !== null) {
-      clearTimeout(timer);
-      timer = null;
-    }
+  const writer = createWriteCoalescer(() => {
     for (const [key, value] of pending) {
       if (storage.write(key, value)) remember(key, value);
     }
     pending.clear();
-  };
+  }, wait);
 
   return {
     restore(environmentId: EnvironmentId, cwd: string): TreeShape | null {
@@ -121,19 +117,13 @@ export function createTreeShapePersister(storage: TreeShapeStorage, wait = WRITE
       // A project that stored nothing gets no key for merely being opened.
       if (last === undefined && next.collapsed.length === 0 && next.selected === cwd) return;
       pending.set(key, next);
-      if (timer === null) timer = setTimeout(flush, wait);
+      writer.schedule();
     },
-    flush,
+    flush: writer.flush,
   };
 }
 
 const localTreeShapeStorage = createSchemaLocalStorage(StoredTreeShape, "FILE-TREE");
 
 export const treeShapePersister = createTreeShapePersister(localTreeShapeStorage);
-
-if (typeof window !== "undefined") {
-  window.addEventListener("pagehide", () => treeShapePersister.flush());
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") treeShapePersister.flush();
-  });
-}
+flushOnPageHide(treeShapePersister);

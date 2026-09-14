@@ -44,4 +44,15 @@ describe("fileTreeStore", () => {
     expect(store.getState().consumePendingFocus()).toBe(true);
     expect(store.getState().consumePendingFocus()).toBe(false);
   });
+
+  it("toggles the folder overview without touching storage", () => {
+    const memory = memoryStorage(null);
+    const store = createFileTreeStore(memory.storage);
+    expect(store.getState().overviewOpen).toBe(false);
+    store.getState().toggleOverview();
+    expect(store.getState().overviewOpen).toBe(true);
+    store.getState().setOverviewOpen(false);
+    expect(store.getState().overviewOpen).toBe(false);
+    expect(memory.writes).toEqual([]);
+  });
 });

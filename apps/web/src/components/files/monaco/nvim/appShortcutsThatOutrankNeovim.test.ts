@@ -6,6 +6,7 @@ describe("app shortcuts that outrank Neovim", () => {
   it("is exactly the file picker and the file tree toggle", () => {
     expect([...APP_SHORTCUTS_THAT_OUTRANK_NEOVIM].toSorted()).toEqual([
       "filePicker.toggle",
+      "fileTree.overview",
       "fileTree.toggle",
     ]);
   });

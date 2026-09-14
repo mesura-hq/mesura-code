@@ -11,11 +11,13 @@
  * developer's file finder and `<C-u>`/`<C-d>` are the scrolling half the
  * motion set depends on — every one of those stays Neovim's.
  *
- * `fileTree.toggle` is listed as defence only: its listener is capture-phase
- * on the window and stops propagation before Monaco sees the key, so the
- * entry matters only if that listener ever moves.
+ * `fileTree.toggle` and `fileTree.overview` are listed as defence only: their
+ * listener is capture-phase on the window and stops propagation before Monaco
+ * sees the key, so the entries matter only if that listener ever moves.
+ * `<C-S-e>` is not a Neovim binding.
  */
 export const APP_SHORTCUTS_THAT_OUTRANK_NEOVIM: ReadonlySet<string> = new Set([
   "filePicker.toggle",
   "fileTree.toggle",
+  "fileTree.overview",
 ]);

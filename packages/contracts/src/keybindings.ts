@@ -105,6 +105,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   // Fork addition. Reaches the Symmetria file tree in the files surface and
   // leaves it again. The rename warning below applies to this id too.
   "fileTree.toggle",
+  "fileTree.overview",
   "usage.peek",
   "chat.new",
   "chat.newLocal",
