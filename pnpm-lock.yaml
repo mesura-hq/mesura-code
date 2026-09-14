@@ -595,6 +595,9 @@ importers:
       '@symmetria/fm-core':
         specifier: workspace:*
         version: link:../../vendor/symmetria-file-manager/packages/fm-core
+      '@symmetria/fm-search':
+        specifier: workspace:*
+        version: link:../../vendor/symmetria-file-manager/packages/fm-search
       '@symmetria/fm-ui':
         specifier: workspace:*
         version: link:../../vendor/symmetria-file-manager/packages/fm-ui

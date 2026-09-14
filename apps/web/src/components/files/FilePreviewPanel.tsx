@@ -45,7 +45,7 @@ import { previewEnvironment } from "~/state/preview";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
 
-import FileBrowserPanel from "./FileBrowserPanel";
+import { MesuraFileTree } from "./mesuraTree/MesuraFileTree";
 import { FileMarkdownPreview } from "./FileMarkdownPreview";
 import { resolveCenteredFileLineScrollTop } from "./fileLineReveal";
 import { projectFileCacheKey } from "./fileContentRevision";
@@ -941,7 +941,7 @@ export default function FilePreviewPanel({
                 : "min-w-0 flex-1",
             )}
           >
-            <FileBrowserPanel
+            <MesuraFileTree
               key={`${environmentId}:${cwd}`}
               environmentId={environmentId}
               cwd={cwd}

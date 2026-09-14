@@ -13,6 +13,7 @@
     "./bridge": "./src/bridge.ts",
     "./tree": "./src/tree/index.ts",
     "./overview": "./src/overview/index.ts",
+    "./overview/styles.css": "./src/overview/overview.css",
     "./styles.css": "./src/styles.css",
     "./syntax-wine.css": "./src/syntax-wine.css",
     "./highlight.worker": "./src/highlight.worker.ts",
