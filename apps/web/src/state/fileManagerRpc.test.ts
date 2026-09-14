@@ -103,3 +103,25 @@ describe("following a session", () => {
     expect(lost).toEqual(["socket closed"]);
   });
 });
+
+describe("watching an atom", () => {
+  it("computes the atom on subscribe, so a runtime atom's effect starts", async () => {
+    const { Atom, AtomRegistry } = await import("effect/unstable/reactivity");
+    const { watchAtom } = await import("./fileManagerRpc");
+    let computed = 0;
+    const atom = Atom.make(() => {
+      computed += 1;
+      return computed;
+    });
+    const registry = AtomRegistry.make();
+    const seen: number[] = [];
+    // A plain subscription asks only to be told of changes; nothing runs.
+    const plain = registry.subscribe(atom, (value) => seen.push(value));
+    expect(computed).toBe(0);
+    plain();
+    const stop = watchAtom(registry, atom, (value) => seen.push(value));
+    expect(computed).toBe(1);
+    expect(seen).toEqual([1]);
+    stop();
+  });
+});

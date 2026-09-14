@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  decideFileTreeShortcut,
-  decideOverviewShortcut,
-  type FileTreeShortcutInput,
-} from "./fileTreeShortcutDecision";
+import { decideFileTreeShortcut, type FileTreeShortcutInput } from "./fileTreeShortcutDecision";
 
 const base: FileTreeShortcutInput = {
   hasThread: true,
@@ -37,37 +33,5 @@ describe("decideFileTreeShortcut", () => {
     expect(decideFileTreeShortcut({ ...base, surfaceKind: "files", treeFocused: true })).toBe(
       "focus-composer",
     );
-  });
-});
-
-describe("decideOverviewShortcut", () => {
-  it("does nothing without a thread", () => {
-    expect(
-      decideOverviewShortcut({ hasThread: false, surfaceKind: null, overviewOpen: false }),
-    ).toBe("none");
-  });
-
-  it("closes an open overview from any surface", () => {
-    expect(
-      decideOverviewShortcut({ hasThread: true, surfaceKind: "preview", overviewOpen: true }),
-    ).toBe("close");
-  });
-
-  it("opens the files surface first when another surface is up", () => {
-    expect(
-      decideOverviewShortcut({ hasThread: true, surfaceKind: null, overviewOpen: false }),
-    ).toBe("open-surface-and-overview");
-    expect(
-      decideOverviewShortcut({ hasThread: true, surfaceKind: "preview", overviewOpen: false }),
-    ).toBe("open-surface-and-overview");
-  });
-
-  it("opens the overview over an open file or files surface", () => {
-    expect(
-      decideOverviewShortcut({ hasThread: true, surfaceKind: "file", overviewOpen: false }),
-    ).toBe("open");
-    expect(
-      decideOverviewShortcut({ hasThread: true, surfaceKind: "files", overviewOpen: false }),
-    ).toBe("open");
   });
 });

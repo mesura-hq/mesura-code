@@ -1,0 +1,28 @@
+/*
+ * The overview layer's root (`.overview`, from the file manager's
+ * `overview.css`): the tree's search row reads two of its tokens, and the
+ * file manager's own overview (`Ctrl+O` inside the Miller layer) renders
+ * under it. Imported by both `MesuraFileTree` and `MesuraFileManagerLayer`,
+ * because the tree is lazy-loaded with the file panel and the layer must not
+ * depend on the panel having been opened first. The six tokens
+ * `overview.css` reads and `index.css` lacks, with the file manager's own
+ * values (`theme/tokens.css`), which that file states are Mesura Code's dark
+ * palette. Light values mix against Mesura Code's light `--background` the
+ * same way, with the highlights turned to black.
+ */
+.overview {
+  --glass-surface: color-mix(in srgb, var(--background) 96%, black);
+  --glass-background: color-mix(in srgb, var(--glass-surface) 80%, transparent);
+  --glass-border: rgb(0 0 0 / 8%);
+  --glass-highlight: rgb(0 0 0 / 4%);
+  --search-match: rgb(0 0 0 / 6%);
+  --toolbar-inset: 16px;
+}
+/* Mesura Code's dark theme is a class on the root (`index.css`, `.dark`). */
+.dark .overview {
+  --glass-surface: color-mix(in srgb, var(--background) 96%, white);
+  --glass-background: color-mix(in srgb, var(--glass-surface) 80%, transparent);
+  --glass-border: rgb(255 255 255 / 5%);
+  --glass-highlight: rgb(255 255 255 / 3%);
+  --search-match: rgb(255 255 255 / 5%);
+}

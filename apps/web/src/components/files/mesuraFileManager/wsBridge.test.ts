@@ -338,3 +338,29 @@ describe("the WebSocket bridge", () => {
     expect(write).toEqual({ ok: false, error: { code: "write_failed", message: "socket closed" } });
   });
 });
+
+describe("values on the wire", () => {
+  it("brings a describe reply's byte head back as bytes, and a push through the same codec", async () => {
+    const pushes: ((event: FileManagerEvent) => void)[] = [];
+    const transport: FileManagerTransport = {
+      query: async () => ({ ok: true, value: { name: "x", head: { $symmetriaBytes: "AQI=" } } }),
+      mutate: async () => ({ ok: true, value: null }),
+      events: (_sessionId, onEvent) => {
+        pushes.push(onEvent);
+        return { ready: Promise.resolve(), stop: () => undefined };
+      },
+    };
+    const bridge = createWsBridge(transport, hooks());
+    const reply = await bridge.describe({ path: "/x" });
+    expect(reply.ok && (reply.value as { head: unknown }).head).toBeInstanceOf(Uint8Array);
+
+    const seen: unknown[] = [];
+    bridge.onChanged((payload) => seen.push(payload));
+    pushes[0]?.({
+      channel: "symmetria-fm:changed",
+      payload: { subscriptionId: "w", detail: null },
+    });
+    expect(seen).toEqual([{ subscriptionId: "w", detail: null }]);
+    bridge.dispose();
+  });
+});

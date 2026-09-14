@@ -16,6 +16,7 @@ import { useComposerHandleContext } from "~/composerHandleContext";
 import { registerFocusTarget } from "~/lib/focusTargets";
 
 import { showFileTreeContextMenu } from "./fileTreeContextMenu";
+import { useFileManagerStore } from "../mesuraFileManager/fileManagerStore";
 import { useFileTreeStore } from "./fileTreeStore";
 import { relativeToCwd } from "./overviewModelFromEntries";
 import { routeKey } from "./keyInput";
@@ -24,6 +25,8 @@ import { type HandledReveal, nextRevealRequest } from "./treeReveal";
 import { projectTreeKey, treeShapePersister } from "./treeShapeStorage";
 import { leaveFileTree } from "./fileTreeFocusMoves";
 import { useProjectOverviewModel } from "./useProjectOverviewModel";
+import "../symmetriaIcons.css";
+import "../symmetriaOverview.css";
 import "./fileTree.css";
 
 interface MesuraFileTreeProps {
@@ -73,25 +76,8 @@ function recordFor(environmentId: EnvironmentId, cwd: string): TreeRecord {
   return record;
 }
 
-/** The controllers of the trees mounted right now, so the overview can reveal into them. */
-const mounted = new Map<string, TreeController>();
-
-/**
- * Reveals a path in the project's tree, from outside it. With the tree
- * mounted, the cursor moves now; otherwise the record carries the reveal and
- * the tree resolves it on its first render, which the explorer being shown
- * triggers.
- */
-export function revealInTree(environmentId: EnvironmentId, cwd: string, absolute: string): void {
-  const store = useFileTreeStore.getState();
-  const controller = mounted.get(projectTreeKey(environmentId, cwd));
-  if (controller) {
-    controller.reveal(absolute);
-    return;
-  }
-  recordFor(environmentId, cwd).pendingReveal = absolute;
-  store.setExplorerOpen(true);
-}
+/** The toolbar's Miller button: the file manager over the window, at this project. */
+const openFileManager = () => useFileManagerStore.getState().setOpen(true);
 
 /**
  * The Symmetria file tree, mounted in the files surface.
@@ -148,17 +134,12 @@ export function MesuraFileTree({
 
   const controller = useRef<TreeController | null>(null);
   const treeKey = projectTreeKey(environmentId, cwd);
-  const connect = useCallback(
-    (next: TreeController) => {
-      controller.current = next;
-      mounted.set(treeKey, next);
-      return () => {
-        if (controller.current === next) controller.current = null;
-        if (mounted.get(treeKey) === next) mounted.delete(treeKey);
-      };
-    },
-    [treeKey],
-  );
+  const connect = useCallback((next: TreeController) => {
+    controller.current = next;
+    return () => {
+      if (controller.current === next) controller.current = null;
+    };
+  }, []);
   const flash = useFlashPort();
   const port = useMemo<TreePort>(
     () => ({ connect, select: () => undefined, flash: flash.port }),
@@ -243,6 +224,7 @@ export function MesuraFileTree({
         }}
         autoFocus={false}
         showScope={false}
+        onMiller={openFileManager}
       />
       {truncated ? (
         <p className="mesura-file-tree-notice">

@@ -16,28 +16,23 @@ interface FileTreeState {
   readonly explorerOpen: boolean;
   /** A focus was requested before the tree mounted; the tree takes it on mount. */
   readonly pendingFocus: boolean;
-  /** The folder overview graph is open over the window. Session state, never stored. */
-  readonly overviewOpen: boolean;
   setExplorerOpen(open: boolean): void;
   toggleExplorer(): void;
   requestFocus(): void;
   /** A resolved or abandoned request must not steal a later mount's focus. */
   clearPendingFocus(): void;
   consumePendingFocus(): boolean;
-  setOverviewOpen(open: boolean): void;
-  toggleOverview(): void;
 }
 
 /**
  * Whether the tree pane is shown, shared by the panel's header toggle and the
- * `Ctrl+E` chord, the one-shot focus request the chord leaves when the tree
- * is not mounted yet, and whether the folder overview is up.
+ * `Ctrl+E` chord, and the one-shot focus request the chord leaves when the
+ * tree is not mounted yet.
  */
 export function createFileTreeStore(storage: ExplorerOpenStorage) {
   return create<FileTreeState>((set, get) => ({
     explorerOpen: storage.read() ?? true,
     pendingFocus: false,
-    overviewOpen: false,
     setExplorerOpen: (open) => {
       if (get().explorerOpen === open) return;
       storage.write(open);
@@ -51,8 +46,6 @@ export function createFileTreeStore(storage: ExplorerOpenStorage) {
       if (pending) set({ pendingFocus: false });
       return pending;
     },
-    setOverviewOpen: (open) => set({ overviewOpen: open }),
-    toggleOverview: () => set({ overviewOpen: !get().overviewOpen }),
   }));
 }
 

@@ -116,7 +116,12 @@ function stemLength(name: string): number {
 
 let nextTransfer = 0;
 
-export function useFileOps(tabs: Tabs): FileOps {
+/**
+ * @param openFile what activating a file does. The desktop's `open` by
+ *   default; a host that embeds the interface hands the file to its own
+ *   editor instead. One seam, so Enter, `l` and a double click cannot differ.
+ */
+export function useFileOps(tabs: Tabs, openFile?: (path: string) => void): FileOps {
   const [modal, setModal] = useState<OpsModal>({ kind: "none" });
   const [clipboard, setClipboard] = useState<Clipboard | null>(null);
   const [progress, setProgress] = useState<TransferProgressState | null>(null);
@@ -151,12 +156,13 @@ export function useFileOps(tabs: Tabs): FileOps {
     if (isFailure(reply)) setMessage(reply.error.message);
   }, []);
 
-  /** Hand one path to the desktop, reporting a refusal in the status strip. */
+  /** Hand one path to the desktop, reporting a refusal in the status strip — or to the host. */
   const openOne = useCallback(
     (path: string) => {
-      void report(openPath(path));
+      if (openFile !== undefined) openFile(path);
+      else void report(openPath(path));
     },
-    [report],
+    [openFile, report],
   );
 
   const take = useCallback(

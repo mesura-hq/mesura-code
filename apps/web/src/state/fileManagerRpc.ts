@@ -132,6 +132,24 @@ export function followSession(
   return { ready, stop: following.stop };
 }
 
+/**
+ * Subscribe to an atom and compute it now.
+ *
+ * A runtime atom's effect starts on the atom's first read, and a plain
+ * `registry.subscribe` never reads: it only asks to be told of changes. The
+ * events atom below has nothing to change until its stream runs, so a plain
+ * subscription left the session never opened, every bridge call waiting on a
+ * readiness that could not come, and the columns empty with no error
+ * anywhere. `immediate` is the read.
+ */
+export function watchAtom<A>(
+  registry: AtomRegistry.AtomRegistry,
+  atom: Atom.Atom<A>,
+  onValue: (value: A) => void,
+): () => void {
+  return registry.subscribe(atom, onValue, { immediate: true });
+}
+
 /** The bridge's transport for one environment, over the application's atom registry. */
 export function createFileManagerTransport(
   environmentId: EnvironmentId,
@@ -157,7 +175,7 @@ export function createFileManagerTransport(
           let report: (cause: unknown) => void = () => undefined;
           // The atom settles only when the stream ends or fails; a settled
           // failure is the one signal that pushes have stopped.
-          const unsubscribe = registry.subscribe(atom, (result) => {
+          const unsubscribe = watchAtom(registry, atom, (result) => {
             if (AsyncResult.isFailure(result)) report(squashAtomCommandFailure(result));
           });
           return {

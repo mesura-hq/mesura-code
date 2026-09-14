@@ -8,12 +8,14 @@ import {
 } from "@symmetria/fm-core/contract";
 import { PUSH_CHANNELS, REQUEST_CHANNELS } from "@symmetria/fm-main/ipc/channels";
 import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
-import type {
-  FileManagerEvent,
-  FileManagerPushChannel,
-  FileManagerReadChannel,
-  FileManagerReply,
-  FileManagerWriteChannel,
+import {
+  type FileManagerEvent,
+  type FileManagerPushChannel,
+  type FileManagerReadChannel,
+  type FileManagerReply,
+  type FileManagerWriteChannel,
+  fromFileManagerWireValue,
+  toFileManagerWireValue,
 } from "@t3tools/contracts";
 
 import { randomUUID } from "~/lib/utils";
@@ -102,8 +104,8 @@ export function createWsBridge(transport: FileManagerTransport, hooks: WsBridgeH
     sessionId,
     (event) => {
       // A snapshot: a listener may unsubscribe and re-arm during delivery.
-      for (const listener of Array.from(listeners.get(event.channel) ?? []))
-        listener(event.payload);
+      const payload = fromFileManagerWireValue(event.payload);
+      for (const listener of Array.from(listeners.get(event.channel) ?? [])) listener(payload);
     },
     (cause) => {
       lost = true;
@@ -126,7 +128,11 @@ export function createWsBridge(transport: FileManagerTransport, hooks: WsBridgeH
       if (lost) return failure(code, SESSION_LOST);
       try {
         await session.ready;
-        return await call({ sessionId, channel, payload });
+        // Both directions cross the contract's wire codec: a request carries
+        // nothing JSON cannot write today, and the day one does it must not
+        // die where `describe`'s byte head once did.
+        const reply = await call({ sessionId, channel, payload: toFileManagerWireValue(payload) });
+        return reply.ok ? { ok: true, value: fromFileManagerWireValue(reply.value) } : reply;
       } catch (cause) {
         return failed(code, cause);
       }

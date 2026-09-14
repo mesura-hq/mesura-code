@@ -1,3 +1,4 @@
+import type { IpcReply } from "@symmetria/fm-core/contract";
 import type { FileManagerEvent } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 
@@ -108,6 +109,51 @@ describe("the WebSocket-shaped IPC surface", () => {
     expect(reply).toEqual({
       ok: false,
       error: { code: "invalid_reply", message: "symmetria-fm:list: boom" },
+    });
+  });
+});
+
+describe("replies over JSON", () => {
+  it("carries a reply's bytes as base64 and a push's undefined as null", async () => {
+    const transport = createWsIpcSurface();
+    const sink = collector();
+    const handle = transport.openSession(s1, sink.push);
+    transport.surface.handle(
+      "symmetria-fm:describe",
+      async () => ({ ok: true, value: { name: "x", head: new Uint8Array([1, 2]) } }) as IpcReply,
+    );
+
+    expect(await transport.invoke(s1, "symmetria-fm:describe", {})).toEqual({
+      ok: true,
+      value: { name: "x", head: { $symmetriaBytes: "AQI=" } },
+    });
+    handle?.send("symmetria-fm:changed", { subscriptionId: "w", detail: undefined });
+    expect(sink.events).toEqual([
+      { channel: "symmetria-fm:changed", payload: { subscriptionId: "w", detail: null } },
+    ]);
+  });
+
+  it("answers a success with no value as null, which JSON can carry", async () => {
+    const transport = createWsIpcSurface();
+    transport.openSession(s1, collector().push);
+    // The registry's type says a bare success carries `null`; at runtime a
+    // handler that resolves with nothing hands the surface `undefined`.
+    transport.surface.handle(
+      "symmetria-fm:unwatch",
+      async () => ({ ok: true, value: undefined }) as unknown as IpcReply,
+    );
+    transport.surface.handle(
+      "symmetria-fm:list",
+      async () => ({ ok: true, value: { n: 1 } }) as unknown as IpcReply,
+    );
+
+    expect(await transport.invoke(s1, "symmetria-fm:unwatch", {})).toEqual({
+      ok: true,
+      value: null,
+    });
+    expect(await transport.invoke(s1, "symmetria-fm:list", {})).toEqual({
+      ok: true,
+      value: { n: 1 },
     });
   });
 });

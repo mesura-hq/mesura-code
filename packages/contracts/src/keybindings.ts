@@ -103,9 +103,11 @@ export const STATIC_KEYBINDING_COMMANDS = [
   // all, so retiring the fork's attachment stack would have taken the only one.
   "composer.attachFiles",
   // Fork addition. Reaches the Symmetria file tree in the files surface and
-  // leaves it again. The rename warning below applies to this id too.
+  // leaves it again, and opens the file manager over the window. The rename
+  // warning below applies here too; this fork's one rename so far is carried
+  // by RENAMED_KEYBINDING_COMMANDS in packages/shared.
   "fileTree.toggle",
-  "fileTree.overview",
+  "fileTree.miller",
   "usage.peek",
   "chat.new",
   "chat.newLocal",

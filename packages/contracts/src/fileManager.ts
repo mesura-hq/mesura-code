@@ -151,3 +151,78 @@ export class FileManagerError extends Schema.TaggedErrorClass<FileManagerError>(
     cause: Schema.optional(Schema.Defect()),
   },
 ) {}
+
+/**
+ * The file manager's values on the wire.
+ *
+ * In the standalone the replies cross Electron's IPC by structured clone,
+ * which carries `undefined` and byte arrays; the WebSocket carries JSON,
+ * which has neither, and a reply with either dies in the RPC encoder as a
+ * defect the client cannot act on. `describe` answers with a file's first
+ * bytes for the content sniff. So on the way out bytes become
+ * `{ $symmetriaBytes: <base64> }` — a key no file manager payload can carry —
+ * and `undefined` and the numbers JSON cannot write (non-finite, bigint)
+ * become `null`; on the way in the bytes come back. A value with nothing to
+ * change is returned as the same reference, so a large listing costs one
+ * walk and no copy.
+ */
+const FILE_MANAGER_BYTES_KEY = "$symmetriaBytes";
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function mapArray(values: ReadonlyArray<unknown>, map: (value: unknown) => unknown): unknown {
+  let copy: unknown[] | null = null;
+  for (let index = 0; index < values.length; index += 1) {
+    const mapped = map(values[index]);
+    if (mapped !== values[index] && copy === null) copy = values.slice(0, index);
+    if (copy !== null) copy.push(mapped);
+  }
+  return copy ?? values;
+}
+
+function mapObject(record: Record<string, unknown>, map: (value: unknown) => unknown): unknown {
+  let copy: Record<string, unknown> | null = null;
+  for (const key of Object.keys(record)) {
+    const mapped = map(record[key]);
+    if (mapped !== record[key] && copy === null) copy = { ...record };
+    if (copy !== null) copy[key] = mapped;
+  }
+  return copy ?? record;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return btoa(binary);
+}
+
+function base64ToBytes(text: string): Uint8Array {
+  const binary = atob(text);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
+export function toFileManagerWireValue(value: unknown): unknown {
+  if (value === undefined) return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "bigint") return null;
+  if (value instanceof Uint8Array) return { [FILE_MANAGER_BYTES_KEY]: bytesToBase64(value) };
+  if (Array.isArray(value)) return mapArray(value, toFileManagerWireValue);
+  if (isPlainObject(value)) return mapObject(value, toFileManagerWireValue);
+  return value;
+}
+
+export function fromFileManagerWireValue(value: unknown): unknown {
+  if (Array.isArray(value)) return mapArray(value, fromFileManagerWireValue);
+  if (!isPlainObject(value)) return value;
+  const encoded = value[FILE_MANAGER_BYTES_KEY];
+  if (typeof encoded === "string" && Object.keys(value).length === 1) return base64ToBytes(encoded);
+  return mapObject(value, fromFileManagerWireValue);
+}

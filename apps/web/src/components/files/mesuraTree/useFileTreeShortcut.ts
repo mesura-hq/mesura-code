@@ -10,10 +10,11 @@ import { selectActiveRightPanel, useRightPanelStore } from "~/rightPanelStore";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "~/terminalUiStateStore";
 
-import { runFileTreeToggle, runOverviewToggle } from "./fileTreeFocusMoves";
+import { runFileManagerToggle } from "../mesuraFileManager/fileManagerToggle";
+import { runFileTreeToggle } from "./fileTreeFocusMoves";
 
 /**
- * `fileTree.toggle` and `fileTree.overview`, dispatched from a window
+ * `fileTree.toggle` and `fileTree.miller`, dispatched from a window
  * capture-phase listener.
  *
  * Capture, because the tree consumes bare letters and the editor consumes
@@ -50,13 +51,13 @@ export function useFileTreeShortcut(routeThreadRef: ScopedThreadRef | null): voi
           previewOpen: current.previewOpen,
         },
       });
-      if (command !== "fileTree.toggle" && command !== "fileTree.overview") return;
+      if (command !== "fileTree.toggle" && command !== "fileTree.miller") return;
       event.preventDefault();
       event.stopPropagation();
       // A held chord toggles once, not at the key-repeat rate.
       if (event.repeat) return;
       if (command === "fileTree.toggle") runFileTreeToggle(current.routeThreadRef);
-      else runOverviewToggle(current.routeThreadRef);
+      else runFileManagerToggle(current.routeThreadRef);
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);

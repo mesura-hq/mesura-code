@@ -9,6 +9,8 @@ import {
   FileManagerMutateInput,
   FileManagerQueryInput,
   FileManagerReply,
+  fromFileManagerWireValue,
+  toFileManagerWireValue,
 } from "./fileManager.ts";
 
 const decodeQuery = Schema.decodeUnknownExit(FileManagerQueryInput);
@@ -57,5 +59,51 @@ describe("file manager contract", () => {
       "Success",
     );
     expect(decodeEvent({ channel: "symmetria-fm:list", payload: {} })._tag).toBe("Failure");
+  });
+});
+
+describe("the file manager's values on the wire", () => {
+  it("carries bytes as base64 and brings them back", () => {
+    const head = new Uint8Array([0, 255, 10, 65]);
+    const wire = toFileManagerWireValue({ name: "a", head, entries: [{ n: 1 }] });
+    expect(wire).toEqual({
+      name: "a",
+      head: { $symmetriaBytes: "AP8KQQ==" },
+      entries: [{ n: 1 }],
+    });
+    expect(JSON.parse(JSON.stringify(wire))).toEqual(wire);
+    const revived = fromFileManagerWireValue(JSON.parse(JSON.stringify(wire))) as {
+      head: Uint8Array;
+    };
+    expect(revived.head).toBeInstanceOf(Uint8Array);
+    expect([...revived.head]).toEqual([0, 255, 10, 65]);
+  });
+
+  it("writes what JSON cannot as null", () => {
+    expect(toFileManagerWireValue(undefined)).toBeNull();
+    expect(
+      toFileManagerWireValue({ mime: undefined, size: Number.NaN, list: [undefined], big: 1n }),
+    ).toEqual({ mime: null, size: null, list: [null], big: null });
+  });
+
+  it("revives bytes wherever they sit, and only under their own key", () => {
+    const nested = fromFileManagerWireValue([{ head: { $symmetriaBytes: "AQ==" } }]) as [
+      { head: Uint8Array },
+    ];
+    expect([...nested[0].head]).toEqual([1]);
+    // A payload of its own with a similar key is data, not bytes.
+    expect(fromFileManagerWireValue({ $bytes: "AQ==" })).toEqual({ $bytes: "AQ==" });
+  });
+
+  it("returns a value with nothing to change as the same reference", () => {
+    const listing = {
+      entries: [
+        { name: "x", size: 1 },
+        { name: "y", size: 2 },
+      ],
+      ok: true,
+    };
+    expect(toFileManagerWireValue(listing)).toBe(listing);
+    expect(fromFileManagerWireValue(listing)).toBe(listing);
   });
 });

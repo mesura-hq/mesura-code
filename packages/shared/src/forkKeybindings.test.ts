@@ -11,7 +11,7 @@ import { DEFAULT_KEYBINDINGS } from "./keybindings.ts";
  * stack was retired for upstream's: their attach button survives the switch,
  * but upstream ships no keyboard route to attaching at all. `fileTree.toggle`
  * reaches the Symmetria file tree in the files surface and leaves it again;
- * `fileTree.overview` opens the project's folder overview graph over it.
+ * `fileTree.miller` opens the file manager's Miller columns over the window.
  *
  * Each is cheap to carry and easy to lose: a sync that takes upstream's
  * command list wholesale drops the command, and the shortcut then resolves to
@@ -21,7 +21,7 @@ import { DEFAULT_KEYBINDINGS } from "./keybindings.ts";
 const FORK_BINDINGS = [
   { command: "composer.attachFiles", key: "alt+a" },
   { command: "fileTree.toggle", key: "mod+e" },
-  { command: "fileTree.overview", key: "mod+shift+e" },
+  { command: "fileTree.miller", key: "mod+shift+e" },
 ] as const;
 
 describe("fork keybindings", () => {

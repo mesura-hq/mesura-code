@@ -7,7 +7,7 @@ import {
   useRightPanelStore,
 } from "~/rightPanelStore";
 
-import { decideFileTreeShortcut, decideOverviewShortcut } from "./fileTreeShortcutDecision";
+import { decideFileTreeShortcut } from "./fileTreeShortcutDecision";
 import { useFileTreeStore } from "./fileTreeStore";
 
 /**
@@ -70,30 +70,4 @@ function showFilesSurface(routeThreadRef: ScopedThreadRef): void {
   const selected = selectSelectedRightPanelSurface(panels.byThreadKey, routeThreadRef);
   if (selected?.kind === "file" || selected?.kind === "files") panels.show(routeThreadRef);
   else panels.open(routeThreadRef, "files");
-}
-
-export function runOverviewToggle(routeThreadRef: ScopedThreadRef | null): void {
-  const store = useFileTreeStore.getState();
-  const panels = useRightPanelStore.getState();
-  const active = selectActiveRightPanelSurface(panels.byThreadKey, routeThreadRef);
-  const action = decideOverviewShortcut({
-    hasThread: routeThreadRef !== null,
-    surfaceKind: active?.kind ?? null,
-    overviewOpen: store.overviewOpen,
-  });
-  switch (action) {
-    case "none":
-      return;
-    case "close":
-      store.setOverviewOpen(false);
-      return;
-    case "open-surface-and-overview":
-      if (!routeThreadRef) return;
-      showFilesSurface(routeThreadRef);
-      store.setOverviewOpen(true);
-      return;
-    case "open":
-      store.setOverviewOpen(true);
-      return;
-  }
 }

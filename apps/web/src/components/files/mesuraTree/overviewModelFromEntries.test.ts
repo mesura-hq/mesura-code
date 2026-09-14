@@ -2,7 +2,6 @@ import type { ProjectEntry } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  entryKindAt,
   foldersForListing,
   overviewFoldersFromEntries,
   relativeToCwd,
@@ -87,19 +86,5 @@ describe("foldersForListing", () => {
   it("builds the map once a listing exists, an empty one included", () => {
     expect([...foldersForListing(CWD, { entries: [], truncated: false }).keys()]).toEqual([CWD]);
     expect(foldersForListing(CWD, { entries, truncated: false }).get(`${CWD}/src`)).toBeTruthy();
-  });
-
-  it("tells a file from a directory by its parent's listing", () => {
-    const folders = overviewFoldersFromEntries(CWD, entries);
-    expect(entryKindAt(folders, `${CWD}/src`)).toBe("directory");
-    expect(entryKindAt(folders, `${CWD}/src/main.ts`)).toBe("file");
-    // The root is nobody's entry.
-    expect(entryKindAt(folders, CWD)).toBeNull();
-    expect(entryKindAt(folders, `${CWD}/src/missing.ts`)).toBeNull();
-    expect(entryKindAt(folders, `${CWD}/nowhere/deep.ts`)).toBeNull();
-    expect(entryKindAt(folders, "/")).toBeNull();
-    // A top-level path's parent is the root itself, and the name is whole.
-    const top = overviewFoldersFromEntries("/", [{ path: "top.txt", kind: "file" }]);
-    expect(entryKindAt(top, "/top.txt")).toBe("file");
   });
 });

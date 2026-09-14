@@ -329,7 +329,7 @@ export function App(props: AppProps = {}) {
   // key action table. The URL cannot change for this window's lifetime.
   const request = useMemo(() => pickerRequest(props.picker), [props.picker]);
   const picker = usePicker(request, tabs);
-  const ops = useFileOps(tabs);
+  const ops = useFileOps(tabs, props.onOpenFile);
   const search = useSearch({
     entries: tabs.pane.entries,
     cursorIndex: tabs.pane.cursorIndex,
@@ -418,7 +418,7 @@ export function App(props: AppProps = {}) {
           tabs={tabs}
           tree={tree}
           model={overview.treeModel}
-          onOpen={props.onOpenFile ?? ops.openAbsolute}
+          onOpen={ops.openAbsolute}
           matches={search.matches}
           preview={previewing.pane}
           flashLabels={millerFlash.labels}

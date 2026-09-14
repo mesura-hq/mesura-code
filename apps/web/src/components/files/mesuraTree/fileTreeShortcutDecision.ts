@@ -34,24 +34,3 @@ export function decideFileTreeShortcut(input: FileTreeShortcutInput): FileTreeSh
   if (!input.explorerOpen || !input.treeFocused) return "show-and-focus";
   return input.surfaceKind === "file" ? "hide-and-focus-editor" : "focus-composer";
 }
-
-export type OverviewShortcutAction = "none" | "close" | "open" | "open-surface-and-overview";
-
-export interface OverviewShortcutInput {
-  readonly hasThread: boolean;
-  readonly surfaceKind: RightPanelKind | null;
-  readonly overviewOpen: boolean;
-}
-
-/**
- * What `Ctrl+Shift+E` does. The overview is rendered by the files surface,
- * because that is where the project's file list lives; from any other
- * surface the chord brings the files surface up first.
- */
-export function decideOverviewShortcut(input: OverviewShortcutInput): OverviewShortcutAction {
-  if (!input.hasThread) return "none";
-  if (input.overviewOpen) return "close";
-  if (input.surfaceKind !== "files" && input.surfaceKind !== "file")
-    return "open-surface-and-overview";
-  return "open";
-}

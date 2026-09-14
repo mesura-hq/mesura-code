@@ -113,6 +113,8 @@ const LAUNCHER_SHORTCUT_BLOCKING_LAYERS = [
   '[data-slot="popover-popup"]',
   '[data-slot="combobox-popup"]',
   '[data-slot="autocomplete-popup"]',
+  // Fork addition: the file manager over the window (`MesuraFileManagerLayer`).
+  "[data-mesura-file-manager]",
 ].join(",");
 
 /** One-line unavailability hints for the empty-state cards. */

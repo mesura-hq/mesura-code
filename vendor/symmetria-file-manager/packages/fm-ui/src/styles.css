@@ -17,26 +17,19 @@
  * fails the build for one.
  */
 
+/*
+ * Nothing here styles `html`, `body`, `#root`, a bare element or a bare
+ * pseudo-element: this sheet is loaded by hosts that embed the interface in
+ * a page of their own, and a rule on the page's elements would restyle the
+ * host. The window rules the standalone needs are in
+ * `app/src/renderer/window.css`; `kbd` is scoped to the interface's own
+ * roots below. The one exception is the scrollbar: its six rules are global
+ * by design (`theme.test.ts`, "styles every scrolling surface"), and a host
+ * that embeds the interface points their tokens at its own values.
+ */
+
 * {
   box-sizing: border-box;
-}
-
-html,
-body,
-#root {
-  height: 100%;
-  margin: 0;
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans);
-  font-size: 16px;
-
-  /* The window is the viewport. A scrolling body would scroll the chrome along
-   * with the columns, and the columns do their own scrolling. */
-  overflow: hidden;
 }
 
 .app {
@@ -347,7 +340,12 @@ body {
   text-overflow: ellipsis;
 }
 
-kbd {
+/*
+ * Scoped to the interface's roots (the browsing `main`, the overview layer
+ * and the overlays), never to the page: a host that embeds the interface
+ * keeps its own `kbd`.
+ */
+:is(.app, .overview, .overlay, .which-key) kbd {
   padding: 1px 5px;
   border-radius: var(--radius-sm);
   background: var(--accent);
