@@ -1,0 +1,49 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": [],
+      "project": []
+    },
+    "packages/fm-core": {
+      "entry": ["src/*.ts"],
+      "project": ["src/**/*.ts", "test/**/*.ts"]
+    },
+    "app": {
+      "entry": ["src/main/index.ts", "src/preload/index.ts", "src/renderer/main.tsx"],
+      "project": ["src/**/*.{ts,tsx}", "test/**/*.ts"]
+    },
+    "packages/fm-main": {
+      "entry": ["src/**/*.ts"],
+      "project": ["src/**/*.ts", "test/**/*.ts"]
+    },
+    "packages/fm-search": {
+      "entry": [
+        "src/main/index.ts",
+        "src/main/worker-entry.ts",
+        "src/main/worker-entry-electron.ts",
+        "src/ui/index.ts"
+      ],
+      "project": ["src/**/*.{ts,tsx}", "test/**/*.{ts,tsx}"]
+    },
+    "packages/fm-ui": {
+      "entry": [
+        "src/App.tsx",
+        "src/highlight.worker.ts",
+        "src/tags.worker.ts",
+        "src/waveform.worker.ts",
+        "src/spreadsheet.worker.ts"
+      ],
+      "project": ["src/**/*.{ts,tsx}", "test/**/*.{ts,tsx}"]
+    }
+  },
+  "ignore": [
+    "plugin/third_party/**",
+    "plugin/build/**",
+    "qml/**",
+    "docs/**",
+    "tools/oxlint/anti-slop/**"
+  ],
+  "ignoreDependencies": ["@oxlint/plugins", "@ff-labs/fff-node"],
+  "ignoreBinaries": ["systemd-analyze", "xdg-mime"]
+}

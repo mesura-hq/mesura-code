@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Symmetria File Manager → Electron · Resumen de investigación</title>
+<style>
+  :root{
+    --bg:#0b0b0b; --surface:#0f0f0f; --card:#131313; --card-hi:#171717;
+    --fg:#d4d4d4; --fg-dim:#a8a8a8; --fg-faint:#6e6e6e;
+    --line:rgba(255,255,255,.08); --line-hi:rgba(255,255,255,.13);
+    --ok:#4caf7d; --warn:#f0c674; --bad:#e57373; --info:#61afef; --accent:#b4b4b4;
+    --mono:"CaskaydiaCove NF","JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:"Rubik",system-ui,-apple-system,"Segoe UI",sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth; scroll-padding-top:1.5rem}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font-family:var(--sans); font-size:16px; line-height:1.65;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{display:grid; grid-template-columns:250px minmax(0,1fr); gap:3rem;
+        max-width:1180px; margin:0 auto; padding:2.5rem 1.5rem 6rem}
+  @media(max-width:900px){.wrap{grid-template-columns:1fr; gap:1.5rem}
+                          nav.toc{position:static!important; max-height:none!important}}
+
+  /* ---- TOC ---- */
+  nav.toc{position:sticky; top:1.5rem; align-self:start; max-height:calc(100vh - 3rem);
+          overflow-y:auto; font-size:.82rem; border-left:1px solid var(--line); padding-left:1rem}
+  nav.toc b{display:block; color:var(--fg-faint); text-transform:uppercase;
+            letter-spacing:.09em; font-size:.68rem; font-weight:600; margin:1.4rem 0 .5rem}
+  nav.toc b:first-child{margin-top:0}
+  nav.toc a{display:block; color:var(--fg-dim); text-decoration:none; padding:.22rem 0;
+            border-left:2px solid transparent; margin-left:-1rem; padding-left:1rem}
+  nav.toc a:hover{color:var(--fg); border-left-color:var(--accent)}
+
+  /* ---- typography ---- */
+  h1{font-size:2rem; line-height:1.2; margin:0 0 .4rem; font-weight:600; letter-spacing:-.02em}
+  .sub{color:var(--fg-faint); font-size:.92rem; margin:0 0 2.5rem}
+  h2{font-size:1.4rem; margin:3.5rem 0 .3rem; font-weight:600; letter-spacing:-.01em;
+     padding-bottom:.5rem; border-bottom:1px solid var(--line)}
+  h2 .n{color:var(--fg-faint); font-family:var(--mono); font-size:.85rem; margin-right:.6rem}
+  h3{font-size:1.02rem; margin:2rem 0 .5rem; font-weight:600; color:var(--fg)}
+  p{margin:.7rem 0}
+  ul,ol{margin:.6rem 0; padding-left:1.3rem}
+  li{margin:.35rem 0}
+  code{font-family:var(--mono); font-size:.85em; background:var(--card-hi);
+       padding:.1em .38em; border-radius:4px; color:#c8c8c8; white-space:nowrap}
+  a{color:var(--fg)}
+  strong{color:#e8e8e8; font-weight:600}
+  hr{border:0; border-top:1px solid var(--line); margin:2.5rem 0}
+
+  /* ---- components ---- */
+  .card{background:var(--card); border:1px solid var(--line); border-radius:8px;
+        padding:1.1rem 1.3rem; margin:1.2rem 0}
+  .card.hi{background:var(--card-hi)}
+  .card > :first-child{margin-top:0} .card > :last-child{margin-bottom:0}
+  .lead{border-left:3px solid var(--accent); padding-left:1.1rem; color:var(--fg-dim);
+        font-size:1.02rem; margin:1.2rem 0}
+
+  .flag{border-left:3px solid var(--line-hi); padding:.9rem 1.2rem; margin:1.2rem 0;
+        background:var(--card); border-radius:0 6px 6px 0}
+  .flag.bad{border-left-color:var(--bad)} .flag.warn{border-left-color:var(--warn)}
+  .flag.ok{border-left-color:var(--ok)} .flag.info{border-left-color:var(--info)}
+  .flag .t{font-weight:600; color:#e8e8e8; display:block; margin-bottom:.25rem}
+  .flag > :last-child{margin-bottom:0}
+
+  table{width:100%; border-collapse:collapse; margin:1.2rem 0; font-size:.9rem}
+  th{text-align:left; font-weight:600; color:var(--fg-faint); font-size:.72rem;
+     text-transform:uppercase; letter-spacing:.07em; padding:.5rem .7rem;
+     border-bottom:1px solid var(--line-hi)}
+  td{padding:.55rem .7rem; border-bottom:1px solid var(--line); vertical-align:top}
+  tr:last-child td{border-bottom:0}
+  td.num{font-family:var(--mono); font-size:.85em; white-space:nowrap}
+
+  .pill{display:inline-block; font-size:.68rem; font-weight:600; letter-spacing:.05em;
+        text-transform:uppercase; padding:.14em .55em; border-radius:99px;
+        border:1px solid var(--line-hi); color:var(--fg-dim); white-space:nowrap}
+  .pill.ok{color:var(--ok); border-color:rgba(76,175,125,.35)}
+  .pill.bad{color:var(--bad); border-color:rgba(229,115,115,.35)}
+  .pill.warn{color:var(--warn); border-color:rgba(240,198,116,.35)}
+  .pill.info{color:var(--info); border-color:rgba(97,175,239,.35)}
+
+  .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(215px,1fr)); gap:.8rem; margin:1.2rem 0}
+  .stat{background:var(--card); border:1px solid var(--line); border-radius:8px; padding:.9rem 1rem}
+  .stat .v{font-family:var(--mono); font-size:1.5rem; color:#e8e8e8; line-height:1.1}
+  .stat .k{font-size:.78rem; color:var(--fg-faint); margin-top:.3rem}
+
+  .q{display:flex; gap:.9rem; padding:1rem 0; border-bottom:1px solid var(--line)}
+  .q:last-child{border-bottom:0}
+  .q .i{font-family:var(--mono); color:var(--fg-faint); font-size:.9rem; flex:0 0 1.4rem}
+  .q .b{flex:1} .q .b > :first-child{margin-top:0} .q .b > :last-child{margin-bottom:0}
+  .q .b b{display:block; color:#e8e8e8; margin-bottom:.2rem}
+
+  footer{margin-top:5rem; padding-top:1.5rem; border-top:1px solid var(--line);
+         color:var(--fg-faint); font-size:.82rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<nav class="toc">
+  <b>Contexto</b>
+  <a href="#s1">El replanteo</a>
+  <a href="#s2">Los tres repositorios</a>
+  <a href="#s3">Qué es hoy el FM</a>
+  <b>Hallazgos</b>
+  <a href="#s4">Bugs encontrados</a>
+  <a href="#s5">Documentación falsa</a>
+  <a href="#s6">Se gana / se pierde</a>
+  <b>Arquitectura</b>
+  <a href="#s7">Dónde vive el código</a>
+  <a href="#s8">La regla del fork</a>
+  <a href="#s9">El contrato de embebido</a>
+  <a href="#s10">Daemon y ventanas</a>
+  <a href="#s11">Mapa de tecnologías</a>
+  <a href="#s12">Trampas técnicas</a>
+  <b>Decidir y ejecutar</b>
+  <a href="#s13">7 decisiones abiertas</a>
+  <a href="#s14">Orden de ataque</a>
+  <a href="#s15">El dossier</a>
+</nav>
+
+<main>
+
+<h1>Symmetria File Manager → Electron</h1>
+<p class="sub">Resumen de la investigación · 24 de agosto de 2026 · 15 documentos, ~17.000 líneas · once agentes en paralelo</p>
+
+<p class="lead">
+El pedido era «portar el file manager de Qt a Electron». La investigación dice que
+la tarea real es distinta en tres sentidos, y que buena parte del trabajo difícil
+ya está hecho — sólo que en otro repositorio.
+</p>
+
+<!-- ==================== 1 ==================== -->
+<h2 id="s1"><span class="n">01</span>El replanteo</h2>
+
+<div class="card">
+<h3 style="margin-top:0">Uno · El destino no es una aplicación Electron vacía</h3>
+<p>
+Mesura Code ya trae montado casi todo lo que un file manager necesita: árbol de
+archivos virtualizado, visor de diffs con resaltado, motor de búsqueda difusa,
+empaquetado de módulos nativos, servicio de ventanas y capa de IPC. Dos de esas
+piezas están <strong>pagas y sin estrenar</strong>: la librería de árboles trae una API de
+decoración de git status que el producto no usa, y el visor de diffs exporta un
+comparador de dos archivos con cero llamadas en todo el repositorio.
+</p>
+</div>
+
+<div class="card">
+<h3 style="margin-top:0">Dos · Varias «features a portar» no existen</h3>
+<p>
+El PRD es en buena medida aspiracional. Modo visual, modo comando (<code>:q</code>, <code>:cd</code>),
+marcas, <code>yy</code>/<code>dd</code>/<code>pp</code> y una barra de ruta editable nunca se construyeron. Y el
+file manager <strong>no tiene git status</strong>: hay un filtro de <code>.gitignore</code>, un badge cuyo
+proveedor jamás se enchufa, y una palabra de estado que llega de <code>fff</code>. Nada de eso
+está conectado.
+</p>
+<p>Esto es una buena noticia: el port es más chico de lo que el PRD sugiere, y lo
+que falta es espacio de diseño libre en vez de deuda a arrastrar.</p>
+</div>
+
+<div class="card">
+<h3 style="margin-top:0">Tres · El módulo que quería extraer ya es una dependencia</h3>
+<p>
+<code>@ff-labs/fff-node@0.9.4</code> está declarado en <code>apps/server/package.json</code> de Mesura
+Code. Es <strong>el mismo motor <code>fff</code></strong> que su plugin de C++ enlaza hoy. Y viene con la
+parte que siempre se subestima ya resuelta: binarios precompilados para ocho
+plataformas, un parche para resolver dentro de <code>app.asar.unpacked</code>, y un control de
+empaquetado que arranca el binario Electron real y hace una carga en vivo para
+probar que el <code>.so</code> abre.
+</p>
+<p><strong>No hay que extraer nada. Hay que envolver.</strong></p>
+</div>
+
+<!-- ==================== 2 ==================== -->
+<h2 id="s2"><span class="n">02</span>Los tres repositorios</h2>
+
+<table>
+<tr><th>Repositorio</th><th>Stack</th><th>Rol</th></tr>
+<tr>
+  <td><strong>Symmetria File Manager</strong></td>
+  <td>Qt6 · QML · C++ · Rust</td>
+  <td>La fuente de verdad de las features. Es lo que se porta.</td>
+</tr>
+<tr>
+  <td><strong>Symmetria IDE</strong></td>
+  <td>PySide6 · QML · Python</td>
+  <td>Antecedente: embebe el panel del FM y tiene la única implementación real de git status. También guarda el plan de migración escrito.</td>
+</tr>
+<tr>
+  <td><strong>Mesura Code</strong></td>
+  <td>Electron 41.5 · React 19.2 · Effect-TS · Tailwind v4</td>
+  <td>El destino. Fork de <code>pingdotgg/t3code</code>, monorepo pnpm.</td>
+</tr>
+</table>
+
+<div class="flag info">
+<span class="t">La integración con su ecosistema ya empezó</span>
+<p>Existen <code>apps/desktop/src/symmetria/</code>, <code>apps/web/src/symmetria/</code> y
+<code>packages/symmetria-broker-contract</code>. Son carpetas propias del fork que
+<strong>nunca tuvieron un conflicto de merge</strong>. Ese es el patrón a seguir.</p>
+</div>
+
+<!-- ==================== 3 ==================== -->
+<h2 id="s3"><span class="n">03</span>Qué es hoy el file manager, en números</h2>
+
+<div class="grid">
+  <div class="stat"><div class="v">54</div><div class="k">atajos de teclado en el registro</div></div>
+  <div class="stat"><div class="v">3 → 20</div><div class="k">prefijos de chord → invocaciones</div></div>
+  <div class="stat"><div class="v">18</div><div class="k">tipos de preview</div></div>
+  <div class="stat"><div class="v">12</div><div class="k">operaciones de archivo</div></div>
+  <div class="stat"><div class="v">4</div><div class="k">comandos de IPC</div></div>
+  <div class="stat"><div class="v">63</div><div class="k">tokens de tema</div></div>
+  <div class="stat"><div class="v">2</div><div class="k">modos de vista</div></div>
+  <div class="stat"><div class="v">8 / 80</div><div class="k">funciones del ABI de <code>fff</code> usadas</div></div>
+</div>
+
+<div class="flag warn">
+<span class="t">Ninguna escritura pasa por el proceso</span>
+<p>Cada operación se delega a un comando externo: <code>cp</code>, <code>mv</code>, <code>gio trash</code>, <code>touch</code>,
+<code>mkdir</code>, <code>bsdtar</code>. No hay conflictos, no hay progreso salvo en la extracción, no hay
+deshacer.</p>
+</div>
+
+<!-- ==================== 4 ==================== -->
+<h2 id="s4"><span class="n">04</span>Bugs encontrados en el código actual</h2>
+
+<p>Están en el file manager que corre hoy. Un port los habría copiado.</p>
+
+<table>
+<tr><th style="width:2.2rem">#</th><th>Defecto</th><th style="width:9rem">Dónde</th></tr>
+<tr><td class="num">1</td>
+    <td><strong><code>closePicker</code> está muerto.</strong> El CLI lo rechaza como método desconocido, así que cancelar un diálogo del portal no avisa a nadie y el FIFO espera los 300 s completos de timeout. El handler del daemon y el listener de QML están implementados y sin uso.</td>
+    <td class="num">cli.cpp:57</td></tr>
+<tr><td class="num">2</td>
+    <td><strong>El badge de git del buscador nunca acierta.</strong> <code>fff</code> emite palabras en inglés y el <code>switch</code> espera caracteres de porcelain. Todo cae en <code>default</code>: usted ve una <code>c</code> gris en cada archivo limpio. La tabla de diez colores es código inalcanzable.</td>
+    <td class="num">FuzzyFinder<wbr>InfoPanel</td></tr>
+<tr><td class="num">3</td>
+    <td><strong>El hot reload de <code>.gitignore</code> no funciona.</strong> Lee el <code>mtime</code>, lo guarda y nunca lo compara — mientras el comentario de cabecera afirma lo contrario.</td>
+    <td class="num">Gitignore.qml</td></tr>
+<tr><td class="num">4</td>
+    <td><strong>Los directorios pierden un carácter en el buscador.</strong> El delegate saca la barra final de la ruta pero no del nombre, así que <code>src/components/</code> se muestra partido como <code>src</code> + <code>/components</code>.</td>
+    <td class="num">…ResultDelegate:47</td></tr>
+<tr><td class="num">5</td>
+    <td><strong><code>Ctrl+D</code> y <code>Ctrl+U</code> saltan mal en el árbol compacto.</strong> <code>halfPageCount</code> omite <code>compactScale</code>, que <code>rowHeight</code> sí incluye — contra un comentario que dice que deben mantenerse iguales.</td>
+    <td class="num">TreeModel.js</td></tr>
+<tr><td class="num">6</td>
+    <td><code>.xlsb</code> pasa el filtro de tipo MIME pero la librería no puede leerlo.</td>
+    <td class="num">preview planillas</td></tr>
+<tr><td class="num">7</td>
+    <td><strong>El PDF deja caché corrupta.</strong> Es el único decodificador que no borra el archivo parcial si falla la escritura, así que un PNG truncado se sirve como caché válida para siempre.</td>
+    <td class="num">generateCached<wbr>Preview</td></tr>
+<tr><td class="num">8</td>
+    <td>El archivo de activación de D-Bus apunta a <code>/usr/bin/python3.12</code>, que no tiene <code>dbus-fast</code>.</td>
+    <td class="num">portal</td></tr>
+</table>
+
+<!-- ==================== 5 ==================== -->
+<h2 id="s5"><span class="n">05</span>Documentación que contradice al código</h2>
+
+<ul>
+<li><strong>Los chords no tienen timer.</strong> <code>CLAUDE.md</code> dice «detección por timer de 500 ms», dos veces. El prefijo persiste hasta la próxima tecla, Escape, pérdida de foco o cambio de pestaña. El único timer de 500 ms lo usa el árbol embebido, para otra cosa.</li>
+<li><strong>El orden de Escape es otro.</strong> El documentado omite dos pasos y ubica mal la búsqueda, que en realidad no es un paso del cascade sino una consecuencia de qué campo tiene el foco.</li>
+<li><strong>Los archivos ocultos no persisten.</strong> El PRD dice que sí; la función de guardado es un no-op documentado.</li>
+<li><strong><code>fff</code> sí pone barra final</strong> en el nombre de directorio, al revés de lo que dice <code>CLAUDE.md</code> — y de ahí sale el bug 4.</li>
+<li><strong><code>tech-stack.md:63</code> todavía dice que Electron está rechazado</strong>, y el plan de migración ubica al file manager en la posición 9 de 10, después del cutover.</li>
+</ul>
+
+<div class="flag warn">
+<span class="t">Esto último es su decisión, no la mía</span>
+<p>El pedido de esta noche promueve ese ítem 9 al primer lugar. Cambiar de opinión
+está perfecto — pero si no queda escrito, dentro de tres meses un agente lee
+<code>tech-stack.md</code> y «corrige» el rumbo.</p>
+</div>
+
+<!-- ==================== 6 ==================== -->
+<h2 id="s6"><span class="n">06</span>Qué se gana y qué se pierde</h2>
+
+<h3><span class="pill ok">Se gana</span> — sin escribir código</h3>
+<ul>
+<li><strong>Desaparece el bug del watcher.</strong> Qt omite <code>IN_MODIFY</code> en las máscaras de directorio; libuv lo incluye siempre. Toda la maquinaria de watches por archivo, el tope de 2048 y el rescan con debounce <strong>se borra, no se porta</strong>.</li>
+<li><strong>Desaparece el bug del clipboard.</strong> Chromium es dueño del data-source mientras viva el proceso, así que el problema de <code>wl-copy</code> muriendo con la ventana deja de existir.</li>
+<li><strong>Los PDF pasan a ser documentos reales</strong> — multipágina, con selección y búsqueda. Se elimina toda la ruta de PDF → PNG cacheado.</li>
+<li>GIF, WebP y AVIF animan solos. Markdown se renderiza. Los previews de texto scrollean y se seleccionan.</li>
+<li>Los iconos SVG quedan vectoriales de forma natural: el diseño actual de devolver rutas en vez de <code>QIcon</code> era una maniobra para esquivar la rasterización de Qt.</li>
+<li><strong>La detección de tipos MIME se vuelve testeable</strong>, lo que convierte la clase de bug silencioso que rompió el preview de YAML en un test que falla.</li>
+</ul>
+
+<h3><span class="pill bad">Se pierde</span> — honestamente</h3>
+
+<table>
+<tr><th></th><th>Qt hoy</th><th>Electron</th></tr>
+<tr><td>Memoria residente, una ventana</td><td class="num">113 MiB</td><td class="num">~345 MiB</td></tr>
+<tr><td>Cada ventana adicional</td><td class="num">—</td><td class="num">48–235 MiB</td></tr>
+<tr><td>Aparición de una ventana</td><td class="num">10–30 ms</td><td class="num">objetivo p50 &lt; 60 ms</td></tr>
+</table>
+
+<p style="color:var(--fg-faint); font-size:.85rem; margin-top:-.5rem">
+Medido en su máquina con <code>/proc/*/smaps_rollup</code>. Aproximadamente <strong>3× la memoria</strong>
+a cambio de ventanas instantáneas. Hasta 4× con pool caliente y picker.
+</p>
+
+<ul>
+<li><strong>Las planillas <code>.xls</code> viejas.</strong> Único riesgo alto del mapa: hoy funcionan bien, y todo camino en JavaScript está sin mantenimiento, sólo por CDN, o con licencia problemática.</li>
+<li><strong>Cobertura de sintaxis</strong>: de 407 lenguajes a 193 o 242 según el motor.</li>
+<li>Los hard links y los archivos dispersos se pierden con un motor de copia propio; <code>cp</code> los preserva hoy.</li>
+<li>Arranque en frío, costo de <code>stat</code> por entrada, y una cadena de suministro de npm que antes no existía.</li>
+</ul>
+
+<!-- ==================== 7 ==================== -->
+<h2 id="s7"><span class="n">07</span>Dónde vive el código</h2>
+
+<p>Sus dos objetivos —daemon standalone y superficie embebida— <strong>no se pueden servir
+desde un solo lugar</strong>. La recomendación son cuatro ubicaciones:</p>
+
+<table>
+<tr><th style="width:16rem">Ubicación</th><th>Contenido</th></tr>
+<tr><td class="num">packages/file-manager-core/</td><td>Modelo sin framework: registro de atajos, clasificación de previews, herencia de tipos MIME, reglas de orden y filtro</td></tr>
+<tr><td class="num">apps/desktop/src/fileManager/</td><td>La mitad privilegiada, en el proceso principal, registrando su propio IPC</td></tr>
+<tr><td class="num">packages/file-manager-ui/</td><td>La superficie React, ciega al host</td></tr>
+<tr><td class="num">apps/file-manager/</td><td>El host Electron standalone y el daemon residente</td></tr>
+</table>
+
+<!-- ==================== 8 ==================== -->
+<h2 id="s8"><span class="n">08</span>La regla del fork le gana a DRY</h2>
+
+<div class="flag bad">
+<span class="t">Esto contradice su instrucción global, y adentro de Mesura Code gana la del fork</span>
+<p>Editar una línea que mantiene upstream es un conflicto de merge <strong>todas las
+semanas, para siempre</strong>. Crear un archivo nuevo es gratis. Desactivar le gana a
+borrar. Un refactor más prolijo que toca más líneas de upstream suele ser la
+decisión equivocada — incluso extraer una constante compartida.</p>
+</div>
+
+<p>La evidencia es cuantitativa, no una opinión:</p>
+
+<div class="grid">
+  <div class="stat"><div class="v">587</div><div class="k">commits de upstream sobre <code>apps/web/src</code> en tres meses</div></div>
+  <div class="stat"><div class="v">39</div><div class="k">commits sobre <code>contracts/src/ipc.ts</code></div></div>
+  <div class="stat"><div class="v">0</div><div class="k">conflictos en las carpetas <code>symmetria/</code> del fork</div></div>
+</div>
+
+<div class="flag warn">
+<span class="t">Una trampa escrita en el propio código</span>
+<p><code>packages/contracts/src/ipc.ts</code> lleva un comentario que dice, literalmente, que ya
+se agregaron tres miembros de Symmetria, que cada uno es un conflicto semanal, y
+que <strong>no se agregue un cuarto sin leer el issue #16</strong>. El file manager sería el
+cuarto. Hay una variante barata que el fork ya usa: registrar el handler dentro de
+la capa propia. El costo baja de seis archivos a dos líneas.</p>
+</div>
+
+<p><strong>Presupuesto: cuatro puntos de edición en archivos de upstream</strong> para la superficie
+embebida, cada uno de una línea. Una ventana standalone tiene <strong>superficie de
+conflicto cero</strong>, y por eso es el primer objetivo barato.</p>
+
+<!-- ==================== 9 ==================== -->
+<h2 id="s9"><span class="n">09</span>El contrato de embebido ya existe</h2>
+
+<p>
+El Symmetria IDE no consume «el file manager». Inyecta tres objetos con forma de
+pato, y <strong>el árbol no sabe nada de git</strong>:
+</p>
+
+<table>
+<tr><th style="width:12rem">Inyección</th><th>Qué hace</th></tr>
+<tr><td class="num">statusProvider</td><td><code>statusForPath(ruta)</code> devuelve estado y color, o <code>null</code>. Más una señal de cambio.</td></tr>
+<tr><td class="num">ignoredPathSet</td><td>El conjunto de rutas ignoradas.</td></tr>
+<tr><td class="num">pathFilter</td><td>Qué filas se muestran.</td></tr>
+</table>
+
+<p>
+<code>null</code> siempre es seguro y el file manager nunca llama de vuelta al host. Es
+exactamente la arquitectura correcta para meterlo en Mesura Code: <strong>el host inyecta
+su git y nosotros no duplicamos ninguna implementación</strong>. Hay que reproducir ese
+contrato en TypeScript, no inventar uno nuevo.
+</p>
+
+<div class="flag info">
+<span class="t">La performance del árbol ya está resuelta y medida</span>
+<p><strong>3994 ms → 449 ms</strong> en el peor repositorio, 8,9×. Y el hallazgo que importa no
+es el número sino la causa: <em>el costo dominante era la cantidad de unidades de
+expansión, no el costo de cada una</em>. Un port que virtualice filas pero siga
+expandiendo el árbol entero va a re-pagar los cuatro segundos con otro disfraz.</p>
+</div>
+
+<!-- ==================== 10 ==================== -->
+<h2 id="s10"><span class="n">10</span>Daemon residente y ventanas instantáneas</h2>
+
+<ul>
+<li><strong>Unidad de systemd</strong>, no autostart de XDG. Sólo systemd puede expresar el borrado de la variable de entorno de Hyprland que hoy es indispensable.</li>
+<li><strong>Proceso principal residente</strong> con el cierre de la última ventana neutralizado. Esto <strong>invierte</strong> la decisión deliberada del host Qt, que es barata en Qt y ruinosa en Electron.</li>
+<li><strong>Transporte: socket Unix</strong>, en la misma ruta, con el mismo sobre y los mismos textos de error. Así el CLI de C++ sin tocar y el portal de Python sin tocar <strong>se convierten en la prueba de aceptación</strong>.</li>
+<li><strong>Pool caliente de una sola ventana oculta ya pintada</strong>, más un picker único. Se re-apunta por IPC, <strong>nunca navegando</strong>: una navegación entre orígenes descarta el renderer caliente.</li>
+<li>Pintar un esqueleto y mostrar. Nunca esperar el escaneo del directorio.</li>
+</ul>
+
+<div class="flag ok">
+<span class="t">Objetivo medible</span>
+<p><strong>p50 por debajo de 60 ms, p95 por debajo de 120 ms</strong>, con cuatro marcas de tiempo
+desde el CLI hasta el commit de Wayland. Si el p95 no llega, se renegocia el
+objetivo <em>antes</em> de construir features.</p>
+</div>
+
+<p style="color:var(--fg-faint); font-size:.88rem">
+El mecanismo nativo de «segunda instancia» de Electron quedó descartado con
+puntaje 1 de 5: cuesta un arranque en frío completo por mensaje y no tiene canal
+de respuesta.
+</p>
+
+<!-- ==================== 11 ==================== -->
+<h2 id="s11"><span class="n">11</span>Mapa de tecnologías</h2>
+
+<p><strong>Un solo módulo nativo nuevo. Cero Rust escrito por nosotros.</strong></p>
+
+<table>
+<tr><th style="width:13rem">Capacidad</th><th>Elección</th><th style="width:5rem">Riesgo</th></tr>
+<tr><td>Listado de directorios</td><td>APIs estándar de Node en un hilo aparte, con sondas perezosas por fila visible</td><td><span class="pill ok">bajo</span></td></tr>
+<tr><td>Vigilancia de archivos</td><td><code>@parcel/watcher</code> — <strong>el único módulo nativo nuevo</strong></td><td><span class="pill warn">medio</span></td></tr>
+<tr><td>Tipos MIME + herencia</td><td>~200 líneas propias sobre la base de datos XDG, incluyendo <strong>las dos reglas implícitas</strong></td><td><span class="pill warn">medio</span></td></tr>
+<tr><td>Iconos del tema</td><td>Portar el resolvedor actual tal cual y servirlo por un protocolo propio</td><td><span class="pill ok">bajo</span></td></tr>
+<tr><td>Resaltado de sintaxis</td><td><code>highlight.js</code> con hoja de estilos generada, <strong>truncado por tamaño</strong></td><td><span class="pill warn">medio</span></td></tr>
+<tr><td>Imágenes</td><td>Chromium nativo para ocho formatos; <code>magick</code> como proceso externo para la cola larga</td><td><span class="pill warn">medio</span></td></tr>
+<tr><td>Comprimidos</td><td>Librerías puras para zip y tar; <code>bsdtar</code> para 7z, rar, cab, iso</td><td><span class="pill warn">medio</span></td></tr>
+<tr><td>PDF</td><td>El visor incorporado de Chromium</td><td><span class="pill ok">bajo</span></td></tr>
+<tr><td>Planillas</td><td>Sin buena opción — ver decisión abierta 4</td><td><span class="pill bad">alto</span></td></tr>
+<tr><td>Git</td><td>Colgarse del ejecutor de <code>git</code> que Mesura Code <strong>ya tiene</strong>. No agregar librería.</td><td><span class="pill ok">bajo</span></td></tr>
+<tr><td>Búsqueda difusa</td><td><code>@ff-labs/fff-node</code>, envuelto en un paquete propio</td><td><span class="pill ok">bajo</span></td></tr>
+</table>
+
+<h3>Las dos correcciones que llegaron tarde</h3>
+
+<div class="flag bad">
+<span class="t"><code>sharp</code> está bloqueado en Electron sobre Linux</span>
+<p>Emite una advertencia en cada arranque, desde su propio código. Electron enlaza
+un <code>glib</code> global y filtra sus símbolos, lo que produce fallos intermitentes en el
+hilo de decodificación. <strong>El bug está abierto y sin arreglar</strong>; el co-mantenedor de
+libvips dijo en julio que la única salida es enlazar estáticamente, con las
+implicancias de licencia que eso trae. Probaron dos soluciones a nivel enlazador y
+las dos fallaron.</p>
+<p>La forma que emerge es <strong>más simple</strong>: que Chromium haga todo lo que puede, y
+llamar a <code>magick</code> como proceso externo para el resto. Un proceso no puede colgar la
+aplicación; una librería enlazada sí.</p>
+</div>
+
+<div class="flag warn">
+<span class="t">Shiki es 5–8× más lento que las alternativas</span>
+<p>Medido acá: 0,42 MB/s contra 3,56 MB/s del más rápido. Y su salida se infla
+<strong>nueve veces</strong> respecto de la entrada — esa memoria, no la CPU, es lo que mata un
+panel de preview. Su motor JavaScript, además, resultó <strong>2,1× más lento</strong> que el
+WASM, al revés de lo que sugiere su documentación.</p>
+<p><strong>Pero truncar lo arregla todo</strong>: las primeras 2000 líneas de un archivo de 4 MB
+se resaltan en 55 ms con <code>highlight.js</code> y 156 ms con Shiki. Un panel de preview
+nunca necesita el archivo entero, así que la elección de motor importa mucho menos
+de lo que parecía.</p>
+</div>
+
+<!-- ==================== 12 ==================== -->
+<h2 id="s12"><span class="n">12</span>Trampas técnicas a no repetir</h2>
+
+<div class="card">
+<h3 style="margin-top:0">La herencia de tipos MIME</h3>
+<p>
+<code>text/x-shellscript</code> <strong>no</strong> hereda de <code>text/plain</code> en la tabla de subclases: llega
+ahí sólo por una regla implícita de la especificación. Un port que lea la tabla y
+se detenga ahí <strong>rompe en silencio todos los scripts de shell</strong>.
+</p>
+<p>
+Y como corolario: <code>image/svg+xml</code> <em>es</em> texto bajo esa regla. El router actual
+acierta sólo porque pregunta si es imagen primero. <strong>Ese orden es un contrato, no
+una casualidad.</strong>
+</p>
+</div>
+
+<div class="card">
+<h3 style="margin-top:0">La política de seguridad bloquea WebAssembly</h3>
+<p>
+Chromium bloquea WASM si hay una política de seguridad de contenido que no lo
+autorice explícitamente. <strong>La guía de seguridad de Electron recomienda una política
+que no menciona WASM jamás</strong>, así que seguirla al pie de la letra rompe en silencio
+cualquier decodificador que embarquemos.
+</p>
+</div>
+
+<div class="card">
+<h3 style="margin-top:0">Un paquete de ICNS cuelga el proceso para siempre</h3>
+<p>
+<code>icns-lib</code> avanza su cursor por el tamaño declarado de cada bloque, así que un
+bloque que declara tamaño cero nunca avanza. Verificado: un archivo de 80 bytes lo
+cuelga hasta matarlo. Es <strong>el mismo tipo de bug que el CVE-2025-71330</strong>, que no
+tiene arreglo disponible.
+</p>
+<p>Un file manager parsea archivos de origen desconocido. Son 40 líneas escribirlo
+bien.</p>
+</div>
+
+<div class="card">
+<h3 style="margin-top:0">La caché de miniaturas está genuinamente compartida</h3>
+<p>
+Verificado en su máquina: <strong>1253 miniaturas escritas por GNOME y 66 por KDE
+conviviendo en el mismo directorio</strong>, las 1554 validando con la misma regla. Conviene
+leerla antes de generar nada, y devolverle lo que generemos.
+</p>
+<p>
+Dos trampas: KDE las escribe <strong>comprimidas</strong>, no en texto plano, así que un lector
+ingenuo las regenera todas para siempre; y la regla de escapado de la ruta <strong>no es
+la que produce Node</strong> — difiere en dos caracteres.
+</p>
+</div>
+
+<!-- ==================== 13 ==================== -->
+<h2 id="s13"><span class="n">13</span>Siete decisiones abiertas</h2>
+<p class="sub" style="margin-bottom:1rem">No resolví ninguna. Son suyas.</p>
+
+<div class="card">
+  <div class="q"><div class="i">1</div><div class="b">
+    <b>¿Un solo código base, o dos consumidores de un núcleo compartido?</b>
+    El reparto en cuatro ubicaciones asume lo segundo. Conviene confirmarlo antes de crear el primer directorio.
+  </div></div>
+  <div class="q"><div class="i">2</div><div class="b">
+    <b>¿Quién es dueño del índice de <code>fff</code>?</b>
+    LMDB no admite dos aperturas del mismo entorno por proceso. El diseño actual de Mesura Code funciona sólo porque no usa frecuencia de uso; activarla —que es justamente lo que usted quiere— lo convierte en un bug. Un proceso auxiliar único es la única forma de tener «un índice, un ranking».
+  </div></div>
+  <div class="q"><div class="i">3</div><div class="b">
+    <b>¿Se acepta 3× de memoria a cambio de ventanas instantáneas?</b>
+    113 MiB contra ~345 MiB. La alternativa es aceptar que la primera ventana tarde.
+  </div></div>
+  <div class="q"><div class="i">4</div><div class="b">
+    <b>¿Se mantiene o se resigna <code>.xls</code> viejo?</b>
+    Todo camino en JavaScript es una regresión. Resignarlo es defendible; mantener la paridad obliga a un módulo Rust y reabre la decisión de «cero Rust nuevo».
+  </div></div>
+  <div class="q"><div class="i">5</div><div class="b">
+    <b>¿Qué escalera de grises sigue la versión Electron?</b>
+    El file manager y el IDE mapean los mismos nombres a valores distintos — <code>surface</code> es <code>#0f0f0f</code> en uno y <code>#131313</code> en el otro. Comparten el archivo, no la escalera. Un tercer consumidor tiene que elegir.
+  </div></div>
+  <div class="q"><div class="i">6</div><div class="b">
+    <b>¿Se corrige <code>tech-stack.md</code>?</b>
+    Todavía dice que Electron está rechazado. Si no queda escrito el cambio de rumbo, alguien lo va a «corregir» más adelante.
+  </div></div>
+  <div class="q"><div class="i">7</div><div class="b">
+    <b>¿Qué librería de imágenes reemplaza a <code>sharp</code>?</b>
+    La alternativa principal no enlaza <code>glib</code> y por eso no tiene el bug — pero no decodifica HEIC en Linux, y tampoco GIF, una carencia que no está documentada en ningún lado. <strong>Esto lo resuelve un spike, no una discusión.</strong>
+  </div></div>
+</div>
+
+<!-- ==================== 14 ==================== -->
+<h2 id="s14"><span class="n">14</span>Orden de ataque</h2>
+
+<h3>Fase 0 — cuatro spikes antes de cualquier feature</h3>
+<p>Cada uno responde algo que puede hundir el diseño, y cada uno es barato.</p>
+
+<table>
+<tr><th style="width:2rem"></th><th>Spike</th><th style="width:8rem">Costo</th></tr>
+<tr><td class="num">1</td><td><strong>El presupuesto de aparición de ventana.</strong> Arnés de cuatro marcas de tiempo contra un renderer vacío, 200 iteraciones.</td><td>medio día</td></tr>
+<tr><td class="num">2</td><td><strong>El foco de teclado del picker.</strong> El mecanismo de activación de Electron apunta a procesos recién lanzados; un daemon residente no lo es, y no hay API pública para pasarle el testigo a una ventana existente. <span class="pill warn">abre una ventana</span></td><td>40 líneas</td></tr>
+<tr><td class="num">3</td><td><strong>El crash de <code>sharp</code>.</strong> Cargarlo en el proceso principal y decodificar unos cientos de imágenes. Si aparece el fallo, queda descartado y el pipeline cambia.</td><td>una hora</td></tr>
+<tr><td class="num">4</td><td><strong>El desenfoque en escala fraccional.</strong> Su pantalla va a 1,6 y la versión de Chromium que trae Electron es anterior al soporte. Se resuelve capturando dos ventanas ya abiertas y comparando. <span class="pill ok">sin escribir código</span></td><td>una hora</td></tr>
+</table>
+
+<div class="flag info">
+<span class="t">El spike 2 lo corre usted</span>
+<p>Abre una ventana en su sesión, y la sesión de Hyprland es suya. Le dejo el
+script listo y el comando exacto.</p>
+</div>
+
+<h3>Fases siguientes</h3>
+<ol>
+<li><strong>El file manager standalone.</strong> Conflicto cero con upstream. El daemon, el protocolo del socket, los dos modos de vista, el registro de atajos y el router de previews.</li>
+<li><strong>Los previews</strong>, ordenados por el mapa de tecnologías y por cuáles abre usted realmente.</li>
+<li><strong>El paquete de búsqueda</strong>, envolviendo <code>fff</code>, con la decisión 2 ya resuelta.</li>
+<li><strong>Git status</strong>, construido una sola vez, con la forma que el IDE ya probó, detrás del contrato de inyección.</li>
+<li><strong>La superficie embebida en Mesura Code</strong>, gastando los cuatro puntos de edición presupuestados y ni uno más.</li>
+</ol>
+
+<!-- ==================== 15 ==================== -->
+<h2 id="s15"><span class="n">15</span>El dossier</h2>
+
+<p>Quince documentos en <code>docs/electron-transition/</code>. El <code>12-synthesis.md</code> es el
+resumen técnico y cita al resto.</p>
+
+<table>
+<tr><th style="width:2.4rem">#</th><th>Documento</th></tr>
+<tr><td class="num">00</td><td>Índice y orden de lectura</td></tr>
+<tr><td class="num">01</td><td>Navegación, modos de vista y la tabla completa de atajos y chords</td></tr>
+<tr><td class="num">02</td><td>Los 18 tipos de preview, con librería, límites, caché y equivalente web</td></tr>
+<tr><td class="num">03</td><td>Operaciones de archivo, clipboard, daemon, protocolo, CLI, picker y portal</td></tr>
+<tr><td class="num">04</td><td>El motor <code>fff</code>, su ABI de C, y las cinco opciones de reutilización</td></tr>
+<tr><td class="num">05</td><td>Todos los tokens de tema, transparencia, claymorfismo y el bloque CSS listo</td></tr>
+<tr><td class="num">06</td><td>Cómo el IDE embebe el panel, su git status, y el plan de migración escrito</td></tr>
+<tr><td class="num">07</td><td>Arquitectura de Mesura Code: procesos, IPC, ventanas, stack, código nativo</td></tr>
+<tr><td class="num">08</td><td>Sus superficies de archivos y git, con la tabla de reemplazar / extender / convivir</td></tr>
+<tr><td class="num">09</td><td>Mapa de capacidades de Node <span class="pill warn">corregido por 13 y 14</span></td></tr>
+<tr><td class="num">10</td><td>Daemon residente, ventanas instantáneas, Wayland y memoria honesta</td></tr>
+<tr><td class="num">11</td><td>Las piezas de git del file manager y la ausencia de un pipeline</td></tr>
+<tr><td class="num">12</td><td><strong>La síntesis.</strong> Empezar por acá</td></tr>
+<tr><td class="num">13</td><td>Resaltado de sintaxis, con benchmarks propios</td></tr>
+<tr><td class="num">14</td><td>Decodificación de imágenes, RAW, ICNS y la caché de miniaturas</td></tr>
+</table>
+
+<footer>
+Investigación del 24 de agosto de 2026 · once agentes en paralelo · las cifras de
+memoria, los benchmarks y las verificaciones de caché se midieron en esta máquina.
+Nada de esto es todavía una decisión.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

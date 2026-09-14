@@ -1,0 +1,11 @@
+{
+  // The privileged half. Node yes, DOM NO.
+  //
+  // The exclusion is the point of the file. This package is imported into a
+  // MAIN process, where `window` and `document` do not exist — without it an
+  // accidental DOM reference type-checks here and throws at runtime in an
+  // embedding host, which is the failure this split exists to make impossible.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "lib": ["ES2023"], "types": ["node"] },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

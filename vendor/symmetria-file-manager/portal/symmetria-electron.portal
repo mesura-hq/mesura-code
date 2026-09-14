@@ -1,0 +1,4 @@
+[portal]
+DBusName=org.freedesktop.impl.portal.desktop.symmetria-electron
+Interfaces=org.freedesktop.impl.portal.FileChooser
+UseIn=Hyprland

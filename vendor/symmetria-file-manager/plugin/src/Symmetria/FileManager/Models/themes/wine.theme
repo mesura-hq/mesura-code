@@ -1,0 +1,174 @@
+{
+    "_comment": "Wine — KSyntaxHighlighting theme mirroring the user's NeoVim Lush colorscheme (lua/jc/plugins/theme/wine_theme). Source of truth for the palette is wine_theme.lua; keep the two in sync. Maps every KSyntaxHighlighting TextStyle to the closest wine_theme syntax role so all file-manager previews (code + Markdown) read as the same palette as the editor.",
+    "metadata": {
+        "name": "Wine",
+        "revision": 1
+    },
+    "editor-colors": {
+        "BackgroundColor": "#131313",
+        "CodeFolding": "#272727",
+        "BracketMatching": "#373636",
+        "CurrentLine": "#1e1d1e",
+        "IconBorder": "#131313",
+        "IndentationLine": "#3a3a3a",
+        "LineNumbers": "#8f8f8f",
+        "CurrentLineNumber": "#dddddd",
+        "MarkBookmark": "#6d94e9",
+        "MarkBreakpointActive": "#d2602d",
+        "MarkBreakpointReached": "#b0a878",
+        "MarkBreakpointDisabled": "#9e9e9e",
+        "MarkExecution": "#62ba46",
+        "MarkWarning": "#b0a878",
+        "MarkError": "#d2602d",
+        "ModifiedLines": "#c28b12",
+        "ReplaceHighlight": "#62ba46",
+        "SavedLines": "#62ba46",
+        "SearchHighlight": "#6d94e9",
+        "Separator": "#404040",
+        "SpellChecking": "#d2602d",
+        "TabMarker": "#404040",
+        "TemplateBackground": "#1e1d1e",
+        "TemplatePlaceholder": "#272727",
+        "TemplateFocusedPlaceholder": "#373636",
+        "TemplateReadOnlyPlaceholder": "#1e1d1e",
+        "TextSelection": "#474646",
+        "WordWrapMarker": "#373636"
+    },
+    "text-styles": {
+        "Normal": {
+            "text-color": "#dddddd",
+            "selected-text-color": "#dddddd"
+        },
+        "Keyword": {
+            "text-color": "#c28b12",
+            "selected-text-color": "#c28b12",
+            "bold": true
+        },
+        "Function": {
+            "text-color": "#fdd888",
+            "selected-text-color": "#fdd888",
+            "bold": true,
+            "italic": true
+        },
+        "Variable": {
+            "text-color": "#dddddd",
+            "selected-text-color": "#dddddd"
+        },
+        "ControlFlow": {
+            "text-color": "#c28b12",
+            "selected-text-color": "#c28b12",
+            "bold": true,
+            "italic": true
+        },
+        "Operator": {
+            "text-color": "#dddddd",
+            "selected-text-color": "#dddddd"
+        },
+        "BuiltIn": {
+            "text-color": "#c75828",
+            "selected-text-color": "#c75828"
+        },
+        "Extension": {
+            "text-color": "#fdd888",
+            "selected-text-color": "#fdd888",
+            "italic": true
+        },
+        "Preprocessor": {
+            "text-color": "#c28b12",
+            "selected-text-color": "#c28b12"
+        },
+        "Attribute": {
+            "text-color": "#e7cb8f",
+            "selected-text-color": "#e7cb8f"
+        },
+        "Char": {
+            "text-color": "#e1d797",
+            "selected-text-color": "#e1d797"
+        },
+        "SpecialChar": {
+            "text-color": "#e19773",
+            "selected-text-color": "#e19773"
+        },
+        "String": {
+            "text-color": "#62ba46",
+            "selected-text-color": "#62ba46"
+        },
+        "VerbatimString": {
+            "text-color": "#62ba46",
+            "selected-text-color": "#62ba46"
+        },
+        "SpecialString": {
+            "text-color": "#e19773",
+            "selected-text-color": "#e19773"
+        },
+        "Import": {
+            "text-color": "#c28b12",
+            "selected-text-color": "#c28b12"
+        },
+        "DataType": {
+            "text-color": "#c75828",
+            "selected-text-color": "#c75828"
+        },
+        "DecVal": {
+            "text-color": "#e1d797",
+            "selected-text-color": "#e1d797"
+        },
+        "BaseN": {
+            "text-color": "#e1d797",
+            "selected-text-color": "#e1d797"
+        },
+        "Float": {
+            "text-color": "#e1d797",
+            "selected-text-color": "#e1d797"
+        },
+        "Constant": {
+            "text-color": "#e1d797",
+            "selected-text-color": "#e1d797"
+        },
+        "Comment": {
+            "text-color": "#9e9e9e",
+            "selected-text-color": "#9e9e9e",
+            "italic": true
+        },
+        "Documentation": {
+            "text-color": "#9e9e9e",
+            "selected-text-color": "#9e9e9e",
+            "italic": true
+        },
+        "Annotation": {
+            "text-color": "#e7cb8f",
+            "selected-text-color": "#e7cb8f"
+        },
+        "CommentVar": {
+            "text-color": "#9e9e9e",
+            "selected-text-color": "#9e9e9e",
+            "italic": true
+        },
+        "RegionMarker": {
+            "text-color": "#6d94e9",
+            "selected-text-color": "#6d94e9"
+        },
+        "Information": {
+            "text-color": "#6d94e9",
+            "selected-text-color": "#6d94e9"
+        },
+        "Warning": {
+            "text-color": "#b0a878",
+            "selected-text-color": "#b0a878"
+        },
+        "Alert": {
+            "text-color": "#d2602d",
+            "selected-text-color": "#d2602d",
+            "bold": true
+        },
+        "Error": {
+            "text-color": "#d2602d",
+            "selected-text-color": "#d2602d",
+            "underline": true
+        },
+        "Others": {
+            "text-color": "#e1d797",
+            "selected-text-color": "#e1d797"
+        }
+    }
+}

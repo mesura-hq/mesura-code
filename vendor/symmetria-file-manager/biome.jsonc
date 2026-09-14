@@ -1,0 +1,75 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.6/schema.json",
+
+  // `--changed --since=<base>` does not work at all without this block, and
+  // `defaultBranch` must be DETECTED per repository rather than copied from an
+  // example. Derived here with `git symbolic-ref --short refs/remotes/origin/HEAD`,
+  // which resolved to `origin/main`. Writing the wrong name makes change-scoped
+  // linting resolve against a nonexistent ref and mis-scope in silence.
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true,
+    "defaultBranch": "main"
+  },
+
+  "files": {
+    "includes": [
+      "**",
+      "!**/node_modules",
+      "!**/dist",
+      "!**/dist-electron",
+
+      // ── The Qt tree. Not ours to lint. ──
+      // `qml/` holds the QML panel and its `.js` key handlers. Those already
+      // have an incumbent gate — `tools/quality/check-qml.sh`, delta-based with
+      // the baseline recorded in `.claude/project-standards.md`. Two tools in
+      // one slot is worse than either alone, so Biome stays out.
+      "!qml",
+      "!plugin/third_party",
+      "!plugin/build",
+
+      // ── Vendored policy source. Provenance-tracked, not ours to format. ──
+      // Copied verbatim from anti-slop upstream commit
+      // 6d538555cb151d4121ed51a27db81890eacf8ae9. Drift is detected by diffing
+      // against upstream, so reformatting it would destroy the only mechanism
+      // that proves the copy is unmodified.
+      "!tools/oxlint/anti-slop",
+
+      // Research prose and a generated page; no source to check.
+      "!docs",
+      "!pnpm-lock.yaml"
+    ]
+  },
+
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always",
+      "trailingCommas": "all"
+    }
+  },
+
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended"
+    }
+  },
+
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  }
+}
