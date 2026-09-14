@@ -13,6 +13,7 @@ This is a living glossary for T3 Code. It explains what common terms mean in thi
 - [Symmetria integration](#symmetria-integration)
 - [Checkpointing](#checkpointing)
 - [Appearance](#appearance)
+- [Pane focus](#pane-focus)
 - [Editor delegation](#editor-delegation)
 
 ## Concepts
@@ -195,6 +196,27 @@ theme a user picks in Settings afterwards sticks until the next set; mobile keep
 appearance settings. Naming a published [environment theme](#environment-theme) is how a desktop
 ships T3 Code already matching it.
 
+### Pane focus
+
+#### Pane
+
+One of the four regions of the web client that can hold keyboard focus: the sidebar, the chat
+column, the right panel, and the terminal drawer. Exactly one holds it at any moment, and which
+one decides what the pane chords and the pane-scoped keybindings do. A pane is a view position,
+not an identity: it is never persisted, it is not addressable, and it is not a
+[project](#project) — one window shows many projects and the panes do not change with them (see
+[ADR-002](../mesura/adr-002-one-window-many-projects.md)). Derived from the browser's own focus
+tree by [paneFocus.ts][pane-focus-ts] rather than stored, so nothing can disagree with where a
+keystroke will actually be delivered. See [Pane focus](./pane-focus.md).
+
+#### Pane chord
+
+`Ctrl+H` and `Ctrl+L` move focus left and right across the sidebar, the chat and the right
+panel; `Ctrl+J` and `Ctrl+K` move down into the terminal drawer and back up. The application
+claims all four on the window in the capture phase, so a chord means one thing wherever it is
+typed, the embedded editor and a terminal included. The vertical pair disables itself where
+there is no neighbour, which is what leaves `Ctrl+J` free to open the drawer.
+
 ### Editor delegation
 
 #### Editor session
@@ -246,8 +268,10 @@ rather than failing. See [the file panel](../user/file-panel.md).
 - [Permission modes][18]
 - [Workspace layout][2]
 - [Editor session](./editor-session.md)
+- [Pane focus](./pane-focus.md)
 - [Reading and editing files](../user/file-panel.md)
 
+[pane-focus-ts]: ../../apps/web/src/lib/paneFocus.ts
 [ed-host]: ../../apps/server/src/editor/hostPlugin.ts
 [ed-grid]: ../../apps/server/src/editor/GridModel.ts
 [1]: ../../packages/contracts/src/orchestration.ts

@@ -387,12 +387,16 @@ than argued.
   vertical pair, `Ctrl+J` and `Ctrl+K`, moves between the chat and its
   terminal drawer and has no bearing on the editor: the right panel has no
   vertical neighbour, so neither chord is claimed while the editor has focus.
+  The whole model is in [Pane focus](./pane-focus.md).
 - **One application shortcut outranks Neovim among the keys Monaco does
   receive: the file picker.** `<C-p>` is unmapped in his
   configuration, so the picker costs Neovim nothing. Every other collision goes the other way, and
   the measurements are why — `<C-k>` is `TmuxNavigateUp`, `<C-b>` is Telescope, `<C-f>` is his file
   finder, `<C-u>` and `<C-d>` are half the scrolling. The application's own version of those is
-  reached by pressing Escape in normal mode first, which releases the editor.
+  reached by leaving the editor first — Escape in normal mode releases it to the panel, and
+  `Ctrl+H` from there reaches the chat, which is the pane `Ctrl+U` and `Ctrl+D` scroll. They are
+  scoped to that pane rather than to "not the terminal" precisely so the editor keeps them; see
+  [Pane focus](./pane-focus.md).
 - **Escape in plain normal mode belongs to the panel**, and in every other mode to Neovim. Leaving
   insert, visual or an operator is what Escape is for, and a host that blurred the editor instead
   would strand him in that mode with the keyboard elsewhere. In normal mode there is nothing to
