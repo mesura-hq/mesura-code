@@ -5,6 +5,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Option from "effect/Option";
 import { describe, expect, it } from "@effect/vitest";
 import {
   decodeListReply,
@@ -13,6 +14,7 @@ import {
   decodeTransferReply,
 } from "@symmetria/fm-core/contract";
 import type { FileManagerEvent, FileManagerReply } from "@t3tools/contracts";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -79,15 +81,16 @@ const writeTextFile = Effect.fn("writeTextFile")(function* (directory: string, n
   yield* fileSystem.writeFileString(path.join(directory, name), name).pipe(Effect.orDie);
 });
 
-/** Opens a session for the scope and drains its pushes into a queue. */
+/** Opens a session for the scope and drains its pushes (after the ready marker) into a queue. */
 const openSession = Effect.fn("openSession")(function* (sessionId: string, clientId = CLIENT) {
   const host = yield* FileManagerHost.FileManagerHost;
-  const events = yield* host.openSession(clientId, { sessionId });
+  const items = yield* host.openSession(clientId, { sessionId });
   const queue = yield* Queue.unbounded<FileManagerEvent>();
-  yield* Stream.runForEach(events, (event) => Queue.offer(queue, event)).pipe(
-    Effect.orDie,
-    Effect.forkScoped,
-  );
+  const ready = yield* Deferred.make<void>();
+  yield* Stream.runForEach(items, (item) =>
+    "ready" in item ? Deferred.succeed(ready, undefined) : Queue.offer(queue, item),
+  ).pipe(Effect.orDie, Effect.forkScoped);
+  yield* Deferred.await(ready);
   return queue;
 });
 
@@ -175,6 +178,22 @@ it.layer(TestLayer, { excludeTestServices: true })("FileManagerHost", (it) => {
           payload: listing(root),
         });
         expect(expectFailure(after, "invalid_request")).toBe("session not open");
+      }),
+    );
+
+    it.effect("announces readiness first, and only once the session can answer", () =>
+      Effect.gen(function* () {
+        const host = yield* FileManagerHost.FileManagerHost;
+        const items = yield* host.openSession(CLIENT, { sessionId: "ready" });
+        const first = yield* Stream.runHead(items.pipe(Stream.take(1)));
+
+        expect(first).toEqual(Option.some({ ready: true }));
+        const reply = yield* host.query(CLIENT, {
+          sessionId: "ready",
+          channel: "symmetria-fm:listing-read",
+          payload: {},
+        });
+        expect(reply.ok).toBe(true);
       }),
     );
 

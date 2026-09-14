@@ -9,6 +9,7 @@ import {
   type FileManagerMutateInput,
   type FileManagerQueryInput,
   type FileManagerReply,
+  type FileManagerStreamItem,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -74,12 +75,15 @@ export class FileManagerHost extends Context.Service<
     readonly openSession: (
       clientId: string,
       input: FileManagerEventsInput,
-    ) => Effect.Effect<Stream.Stream<FileManagerEvent>, FileManagerError, Scope.Scope>;
-    /** `openSession` as one stream, which is what the RPC carries. */
+    ) => Effect.Effect<Stream.Stream<FileManagerStreamItem>, FileManagerError, Scope.Scope>;
+    /**
+     * `openSession` as one stream, which is what the RPC carries. Its first
+     * item is the ready marker: from then on the session answers queries.
+     */
     readonly events: (
       clientId: string,
       input: FileManagerEventsInput,
-    ) => Stream.Stream<FileManagerEvent, FileManagerError>;
+    ) => Stream.Stream<FileManagerStreamItem, FileManagerError>;
     /** How many sessions hold resources right now; the leak check. */
     readonly trackedSessions: Effect.Effect<number>;
   }
@@ -160,7 +164,12 @@ export const make = (overrides: HostOverrides = {}) =>
             message: `File manager session '${sessionId}' is already open.`,
           });
         }
-        return Stream.fromQueue(queue);
+        // The marker follows the acquire, so a client that waits for it can
+        // never be refused as `session not open`.
+        return Stream.concat(
+          Stream.succeed<FileManagerStreamItem>({ ready: true }),
+          Stream.fromQueue(queue),
+        );
       });
 
     return FileManagerHost.of({

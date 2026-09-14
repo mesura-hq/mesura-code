@@ -52,14 +52,14 @@ const previewMimeType = Effect.fn("previewMimeType")(function* (path: string) {
  * moment the cursor lands on it. It rides on every status the route answers
  * for such a document, not the 200 alone.
  */
-const FRAMED_DOCUMENT_TYPES: readonly string[] = ["text/html", "application/xhtml+xml"];
+const FRAMED_DOCUMENT_TYPES = new Set(["text/html", "application/xhtml+xml"]);
 const DOCUMENT_POLICY =
   "default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; " +
   "font-src 'self'; media-src 'self'; form-action 'none'; base-uri 'none'";
 
 function documentPolicy(contentType: string): Record<string, string> {
   const bare = contentType.split(";")[0]?.trim() ?? contentType;
-  return FRAMED_DOCUMENT_TYPES.includes(bare) ? { "Content-Security-Policy": DOCUMENT_POLICY } : {};
+  return FRAMED_DOCUMENT_TYPES.has(bare) ? { "Content-Security-Policy": DOCUMENT_POLICY } : {};
 }
 
 /**

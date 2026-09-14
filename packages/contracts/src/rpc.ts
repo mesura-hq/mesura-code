@@ -20,12 +20,12 @@ import {
 } from "./filesystem.ts";
 import {
   FileManagerError,
-  FileManagerEvent,
   FileManagerEventsInput,
   FileManagerHostInfo,
   FileManagerMutateInput,
   FileManagerQueryInput,
   FileManagerReply,
+  FileManagerStreamItem,
 } from "./fileManager.ts";
 import {
   AssetAccessError,
@@ -745,7 +745,7 @@ export const WsFileManagerMutateRpc = Rpc.make(WS_METHODS.fileManagerMutate, {
 
 export const WsFileManagerSubscribeEventsRpc = Rpc.make(WS_METHODS.fileManagerSubscribeEvents, {
   payload: FileManagerEventsInput,
-  success: FileManagerEvent,
+  success: FileManagerStreamItem,
   error: Schema.Union([FileManagerError, EnvironmentAuthorizationError]),
   stream: true,
 });

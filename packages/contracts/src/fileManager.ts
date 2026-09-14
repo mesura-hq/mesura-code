@@ -120,6 +120,18 @@ export const FileManagerEvent = Schema.Struct({
 });
 export type FileManagerEvent = typeof FileManagerEvent.Type;
 
+/**
+ * The first item of every session's stream: the session exists on the server
+ * from this point on. The stream is what opens a session, and a query that
+ * arrives before it is refused as `session not open`, so a client waits for
+ * this marker before its first call.
+ */
+export const FileManagerSessionReady = Schema.Struct({ ready: Schema.Literal(true) });
+export type FileManagerSessionReady = typeof FileManagerSessionReady.Type;
+
+export const FileManagerStreamItem = Schema.Union([FileManagerSessionReady, FileManagerEvent]);
+export type FileManagerStreamItem = typeof FileManagerStreamItem.Type;
+
 export const FileManagerHostInfo = Schema.Struct({
   homePath: TrimmedNonEmptyString,
 });
