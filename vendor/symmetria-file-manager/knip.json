@@ -32,7 +32,9 @@
         "src/highlight.worker.ts",
         "src/tags.worker.ts",
         "src/waveform.worker.ts",
-        "src/spreadsheet.worker.ts"
+        "src/spreadsheet.worker.ts",
+        "src/tree/index.ts",
+        "src/overview/index.ts"
       ],
       "project": ["src/**/*.{ts,tsx}", "test/**/*.{ts,tsx}"]
     }

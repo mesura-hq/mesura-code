@@ -2,7 +2,7 @@ import { type ReactNode, useRef } from "react";
 import { DirectoryScope, snapshotStatus } from "../directory/DirectoryScope.tsx";
 import { useDialogFocus } from "../hooks/useDialogFocus.ts";
 import { ConnectedGroups } from "./ConnectedGroups.tsx";
-import type { useOverview } from "./useOverview.ts";
+import type { OverviewModel } from "./useOverview.ts";
 import type { OverviewPort } from "./useOverviewMode.ts";
 import "./overview.css";
 
@@ -15,7 +15,7 @@ function Overview({
   onToggleMinimap,
 }: {
   readonly root: string;
-  readonly model: ReturnType<typeof useOverview>;
+  readonly model: OverviewModel;
   readonly onClose: () => void;
   readonly port: OverviewPort;
   readonly minimapVisible: boolean;
@@ -69,7 +69,7 @@ function OverviewToolbar({
   onClose,
   children,
 }: {
-  readonly model: ReturnType<typeof useOverview>;
+  readonly model: OverviewModel;
   readonly onClose: () => void;
   readonly children: ReactNode;
 }) {
@@ -100,7 +100,7 @@ export function OverviewLayer({
   onToggleMinimap,
 }: {
   readonly root: string | null;
-  readonly model: ReturnType<typeof useOverview>;
+  readonly model: OverviewModel;
   readonly onClose: () => void;
   readonly port: OverviewPort;
   readonly minimapVisible: boolean;

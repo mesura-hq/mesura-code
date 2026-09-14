@@ -7,7 +7,7 @@ import type { OverviewModel } from "../overview/useOverview.ts";
 import { LoadedPathSearch } from "../search/LoadedPathSearch.tsx";
 import { isTreeDirectory, treeItemId } from "./model.ts";
 import { runTreeCommand } from "./navigation.ts";
-import type { TreeRecord } from "./state.ts";
+import type { TreeRecord, TreeShape } from "./state.ts";
 import { TreeRow } from "./TreeRow.tsx";
 import { TreeToolbar } from "./TreeToolbar.tsx";
 import { useTreeController } from "./useTreeController.ts";
@@ -28,17 +28,32 @@ export function FileTree({
   onOpen,
   onMiller,
   record,
+  autoFocus = true,
+  showScope = true,
+  onShapeChange,
 }: {
   root: string;
   model: OverviewModel;
   port: TreePort;
   onOpen(path: string): void;
-  onMiller(): void;
+  /** Return to the Miller view. A host with no Miller view leaves it out and gets no button. */
+  onMiller?: (() => void) | undefined;
   record: TreeRecord;
+  /** Focus the viewport on mount. A host that mounts the tree beside a composer passes false. */
+  autoFocus?: boolean | undefined;
+  /** Show the scanner's Scope popover. False for a host whose model is not a scan. */
+  showScope?: boolean | undefined;
+  /**
+   * Called after every change to the tree's shape — including a cursor move,
+   * since `selected` is part of the shape — so a host can persist it. A host
+   * that writes over the wire should debounce. The first call is the shape at
+   * mount, which a host baselines on.
+   */
+  onShapeChange?: ((shape: TreeShape) => void) | undefined;
 }) {
   const [viewport, setViewport] = useState<HTMLDivElement | null>(null);
   const labelId = useId();
-  const state = useTreeState(root, model, record);
+  const state = useTreeState(root, model, record, onShapeChange);
   const { rows, select: setSelected, toggle } = state;
   const selected = state.shape.selected;
   const cursor = Math.max(
@@ -132,6 +147,7 @@ export function FileTree({
     search.active,
     search.matchCount,
     viewport,
+    autoFocus,
   );
   const width = useTreeWidth(rows, viewport);
   return (
@@ -140,6 +156,7 @@ export function FileTree({
         model={model}
         labelId={labelId}
         onMiller={onMiller}
+        showScope={showScope}
         preset={(value) => {
           interrupt();
           reset();

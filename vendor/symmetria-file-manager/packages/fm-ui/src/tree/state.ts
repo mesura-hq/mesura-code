@@ -2,6 +2,7 @@ import { isAncestorPath } from "@symmetria/fm-core/overview/model";
 import { parentOf } from "@symmetria/fm-core/pane";
 import type { TreeRow } from "./model.ts";
 
+/** A field added here must also be compared in `sameShape` (useTreeState.ts), or hosts stop hearing about it. */
 export interface TreeShape {
   selected: string;
   collapsed: ReadonlySet<string>;

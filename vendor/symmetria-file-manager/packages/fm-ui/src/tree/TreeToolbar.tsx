@@ -5,12 +5,14 @@ export function TreeToolbar({
   model,
   labelId,
   onMiller,
+  showScope = true,
   preset,
   canRestore,
 }: {
   model: OverviewModel;
   labelId: string;
-  onMiller(): void;
+  onMiller?: (() => void) | undefined;
+  showScope?: boolean | undefined;
   preset(value: "expanded" | "collapsed" | "restore"): void;
   canRestore: boolean;
 }) {
@@ -35,13 +37,17 @@ export function TreeToolbar({
           </button>
         </div>
       </details>
-      <DirectoryScope model={model} />
-      <button type="button" onClick={onMiller}>
-        Miller · Esc
-      </button>
-      <button type="button" onClick={model.refresh}>
-        Refresh
-      </button>
+      {showScope ? <DirectoryScope model={model} /> : null}
+      {onMiller ? (
+        <button type="button" onClick={onMiller}>
+          Miller · Esc
+        </button>
+      ) : null}
+      {model.refresh ? (
+        <button type="button" onClick={model.refresh}>
+          Refresh
+        </button>
+      ) : null}
     </header>
   );
 }

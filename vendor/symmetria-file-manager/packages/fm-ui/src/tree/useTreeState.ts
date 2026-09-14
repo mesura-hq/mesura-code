@@ -1,5 +1,5 @@
 import { isAncestorPath, overviewPaths } from "@symmetria/fm-core/overview/model";
-import { useLayoutEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { OverviewModel } from "../overview/useOverview.ts";
 import { projectTree } from "./model.ts";
 import { pruneTreeShape } from "./prune.ts";
@@ -11,12 +11,31 @@ import {
   visibleFallback,
 } from "./state.ts";
 
-export function useTreeState(root: string, model: OverviewModel, record: TreeRecord) {
+export function useTreeState(
+  root: string,
+  model: OverviewModel,
+  record: TreeRecord,
+  onShapeChange?: ((shape: TreeShape) => void) | undefined,
+) {
   const [shape, setShape] = useState(record.shape);
   const [temporaryPath, setTemporaryPath] = useState<string | null>(null);
+  // Held in a ref so a host passing a new function each render does not turn
+  // every render into a shape report; the effect below fires on shape alone.
+  const shapeChange = useRef(onShapeChange);
+  shapeChange.current = onShapeChange;
+  // Pruning re-creates the shape object even when nothing was pruned, so the
+  // report compares content: a host hears about a change once.
+  const reported = useRef<TreeShape | null>(null);
   useLayoutEffect(() => {
     record.shape = shape;
   }, [record, shape]);
+  // Passive on purpose: `selected` changes on every cursor move, and a host
+  // that persists in response must not add a pre-paint render to each key.
+  useEffect(() => {
+    if (reported.current && sameShape(reported.current, shape)) return;
+    reported.current = shape;
+    shapeChange.current?.(shape);
+  }, [shape]);
   const collapsed = useMemo(
     () => effectiveCollapsed(root, model.folders, shape.preset, shape.collapsed),
     [root, model.folders, shape.preset, shape.collapsed],
@@ -120,4 +139,20 @@ function effectiveCollapsed(
 ): ReadonlySet<string> {
   if (preset !== "collapsed") return collapsed;
   return new Set([...folders.keys()].filter((path) => path !== root));
+}
+
+function sameSet(a: ReadonlySet<string> | null, b: ReadonlySet<string> | null): boolean {
+  if (a === null || b === null) return a === b;
+  if (a.size !== b.size) return false;
+  for (const path of a) if (!b.has(path)) return false;
+  return true;
+}
+
+function sameShape(a: TreeShape, b: TreeShape): boolean {
+  return (
+    a.selected === b.selected &&
+    a.preset === b.preset &&
+    sameSet(a.collapsed, b.collapsed) &&
+    sameSet(a.checkpoint, b.checkpoint)
+  );
 }

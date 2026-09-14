@@ -11,6 +11,8 @@
   "exports": {
     "./App": "./src/App.tsx",
     "./bridge": "./src/bridge.ts",
+    "./tree": "./src/tree/index.ts",
+    "./overview": "./src/overview/index.ts",
     "./styles.css": "./src/styles.css",
     "./syntax-wine.css": "./src/syntax-wine.css",
     "./highlight.worker": "./src/highlight.worker.ts",

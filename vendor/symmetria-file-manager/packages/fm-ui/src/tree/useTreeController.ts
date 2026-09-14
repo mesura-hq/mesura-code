@@ -9,6 +9,7 @@ export function useTreeController(
   editing: boolean,
   count: number,
   viewport: HTMLElement | null,
+  autoFocus: boolean,
 ) {
   const controller = useRef(commands);
   controller.current = commands;
@@ -34,7 +35,9 @@ export function useTreeController(
         mimeType: "",
       });
   }, [current, port.select]);
+  // A host that mounts the tree beside another input (a composer, an editor)
+  // must not lose focus to it; the tree then takes focus only when asked.
   useEffect(() => {
-    viewport?.focus({ preventScroll: true });
-  }, [viewport]);
+    if (autoFocus) viewport?.focus({ preventScroll: true });
+  }, [viewport, autoFocus]);
 }
