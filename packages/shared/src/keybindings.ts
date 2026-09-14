@@ -70,8 +70,10 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // entry: that mechanism exists for a SECOND default on a command a config
   // already binds.
   { key: "alt+q", command: "question.toggleCollapse", when: "!terminalFocus" },
-  { key: "mod+u", command: "chat.scrollHalfPageUp", when: "!terminalFocus" },
-  { key: "mod+d", command: "chat.scrollHalfPageDown", when: "!terminalFocus" },
+  // Scoped to the chat pane rather than to "not the terminal". The editor
+  // is neither, and these two keys are half the motion set inside it.
+  { key: "mod+u", command: "chat.scrollHalfPageUp", when: "chatFocus" },
+  { key: "mod+d", command: "chat.scrollHalfPageDown", when: "chatFocus" },
   { key: "mod+o", command: "editor.openFavorite" },
   // Browsers keep ctrl+tab for their own tab strip and never deliver it to a
   // page, so this pair reaches the desktop app only. It is listed first so the
@@ -111,10 +113,16 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
  * `from` must match a retired default exactly — key, command, and `when`
  * together. A rule that differs in any of the three is the user's own and is
  * left alone.
+ *
+ * `toWhen` moves the rule's context instead of, or as well as, its key. A
+ * default whose `when` narrows has the same problem a moved key has: the
+ * config already mentions the command, so the per-command backfill skips it
+ * and the old context survives forever with nothing saying so.
  */
 export const RETIRED_KEYBINDING_DEFAULTS: ReadonlyArray<{
   readonly from: KeybindingRule;
   readonly toKey: string;
+  readonly toWhen?: string;
 }> = [
   {
     // Freed for chat.scrollHalfPageDown; see the diff.toggle default above.
@@ -127,6 +135,18 @@ export const RETIRED_KEYBINDING_DEFAULTS: ReadonlyArray<{
     // picker take mod+shift+f on a config that already held the search there.
     from: { key: "mod+shift+f", command: "projectSearch.toggle", when: "!terminalFocus" },
     toKey: "mod+shift+g",
+  },
+  {
+    // Narrowed to the chat pane, on the key it already had. Left as it was,
+    // the pair keeps firing in the editor, where Neovim owns both keys.
+    from: { key: "mod+u", command: "chat.scrollHalfPageUp", when: "!terminalFocus" },
+    toKey: "mod+u",
+    toWhen: "chatFocus",
+  },
+  {
+    from: { key: "mod+d", command: "chat.scrollHalfPageDown", when: "!terminalFocus" },
+    toKey: "mod+d",
+    toWhen: "chatFocus",
   },
 ];
 
@@ -259,6 +279,8 @@ export interface RetiredKeybindingRewrite {
   readonly command: KeybindingRule["command"];
   readonly fromKey: string;
   readonly toKey: string;
+  /** Present only where the rewrite moved the rule's context as well. */
+  readonly toWhen?: string;
 }
 
 export interface BlockedRetiredKeybindingRewrite extends RetiredKeybindingRewrite {
@@ -317,10 +339,17 @@ export function migrateRetiredKeybindingDefaults(config: ReadonlyArray<Keybindin
       continue;
     }
 
-    const destination = { ...rule, key: retired.toKey };
+    const destinationWhen = retired.toWhen ?? rule.when ?? undefined;
+    const destination: KeybindingRule = {
+      ...rule,
+      key: retired.toKey,
+      ...(destinationWhen === undefined ? {} : { when: destinationWhen }),
+    };
+    // Checked against the destination's context, not the source's: a rewrite
+    // that only narrows `when` stays on its key, so the source context would
+    // ask whether the rule collides with itself.
     const claimedByAnother = config.some(
-      (entry) =>
-        entry !== rule && claimsShortcutContext(entry, retired.toKey, rule.when ?? undefined),
+      (entry) => entry !== rule && claimsShortcutContext(entry, retired.toKey, destinationWhen),
     );
     if (claimedByAnother) {
       blocked.push({
@@ -339,7 +368,12 @@ export function migrateRetiredKeybindingDefaults(config: ReadonlyArray<Keybindin
       continue;
     }
 
-    rewrites.push({ command: rule.command, fromKey: rule.key, toKey: retired.toKey });
+    rewrites.push({
+      command: rule.command,
+      fromKey: rule.key,
+      toKey: retired.toKey,
+      ...(retired.toWhen === undefined ? {} : { toWhen: retired.toWhen }),
+    });
     next.push(destination);
   }
 

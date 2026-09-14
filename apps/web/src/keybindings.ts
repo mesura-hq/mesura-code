@@ -8,6 +8,7 @@ import {
   type ModelPickerJumpKeybindingCommand,
   type ThreadJumpKeybindingCommand,
 } from "@t3tools/contracts";
+import { getFocusedPane, type PaneId } from "./lib/paneFocus";
 import { isMacPlatform } from "./lib/utils";
 
 export interface ShortcutEventLike {
@@ -32,6 +33,17 @@ export interface ShortcutMatchContext {
   terminalOpen: boolean;
   previewFocus: boolean;
   previewOpen: boolean;
+  /**
+   * Which pane owns the keyboard, filled from the document's focus tree for
+   * every caller. A binding scoped to one pane says so with these rather
+   * than by naming every pane it is not.
+   *
+   * The terminal drawer sets none of the three: it is its own pane, and
+   * `terminalFocus` already speaks for it.
+   */
+  sidebarFocus: boolean;
+  chatFocus: boolean;
+  panelFocus: boolean;
   [key: string]: boolean;
 }
 
@@ -127,14 +139,48 @@ function resolvePlatform(options: ShortcutMatchOptions | undefined): string {
   return options?.platform ?? navigator.platform;
 }
 
+const PANE_CONTEXT_KEYS = [
+  ["sidebarFocus", "sidebar"],
+  ["chatFocus", "chat"],
+  ["panelFocus", "panel"],
+] as const satisfies ReadonlyArray<readonly [string, PaneId]>;
+
 function resolveContext(options: ShortcutMatchOptions | undefined): ShortcutMatchContext {
-  return {
+  const context: ShortcutMatchContext = {
     terminalFocus: false,
     terminalOpen: false,
     previewFocus: false,
     previewOpen: false,
+    sidebarFocus: false,
+    chatFocus: false,
+    panelFocus: false,
     ...options?.context,
   };
+
+  // The document is read only if a `when` clause actually asks which pane has
+  // focus, and then once. This runs on every keystroke typed anywhere in the
+  // app, including every one typed into the embedded Neovim editor, whose
+  // insert-mode latency is measured against a 16.7 ms budget. Most keystrokes
+  // never reach a pane-scoped rule and so never walk the DOM at all.
+  //
+  // A caller that named a pane itself keeps its own value: the property is
+  // only replaced where the caller left it out.
+  let focusedPane: PaneId | null | undefined;
+  const isFocused = (pane: PaneId): boolean => {
+    if (focusedPane === undefined) focusedPane = getFocusedPane();
+    return focusedPane === pane;
+  };
+
+  for (const [key, pane] of PANE_CONTEXT_KEYS) {
+    if (options?.context !== undefined && key in options.context) continue;
+    Object.defineProperty(context, key, {
+      get: () => isFocused(pane),
+      enumerable: true,
+      configurable: true,
+    });
+  }
+
+  return context;
 }
 
 function evaluateWhenNode(node: KeybindingWhenNode, context: ShortcutMatchContext): boolean {
@@ -222,8 +268,11 @@ export function resolveShortcutCommand(
   for (let index = keybindings.length - 1; index >= 0; index -= 1) {
     const binding = keybindings[index];
     if (!binding) continue;
-    if (!matchesWhenClause(binding.whenAst, context)) continue;
+    // Shortcut first, `when` second. Both must hold, so the order cannot
+    // change the answer, but a `when` clause can now read the focus tree
+    // while a shortcut comparison is pure arithmetic on the event.
     if (!matchesShortcut(event, binding.shortcut, platform)) continue;
+    if (!matchesWhenClause(binding.whenAst, context)) continue;
     return binding.command;
   }
   return null;

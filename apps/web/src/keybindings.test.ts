@@ -1062,20 +1062,33 @@ describe("shipped defaults on Linux", () => {
     metaKey: false,
     ...modifiers,
   });
-  const resolve = (shortcutEvent: ShortcutEventLike, terminalFocus = false) =>
+  const resolve = (
+    shortcutEvent: ShortcutEventLike,
+    terminalFocus = false,
+    pane: Record<string, boolean> = {},
+  ) =>
     resolveShortcutCommand(shortcutEvent, DEFAULT_RESOLVED_KEYBINDINGS, {
       platform: "Linux",
-      context: { terminalFocus },
+      context: { terminalFocus, ...pane },
     });
 
-  it("scrolls the timeline with Ctrl+U and Ctrl+D outside the terminal", () => {
-    assert.strictEqual(resolve(press("u", { ctrlKey: true })), "chat.scrollHalfPageUp");
-    assert.strictEqual(resolve(press("d", { ctrlKey: true })), "chat.scrollHalfPageDown");
+  it("scrolls the timeline with Ctrl+U and Ctrl+D while the chat has focus", () => {
+    // The pair belongs to the chat pane now, not to everywhere that is not
+    // the terminal, so the pane has to be said out loud here.
+    assert.strictEqual(
+      resolve(press("u", { ctrlKey: true }), false, { chatFocus: true }),
+      "chat.scrollHalfPageUp",
+    );
+    assert.strictEqual(
+      resolve(press("d", { ctrlKey: true }), false, { chatFocus: true }),
+      "chat.scrollHalfPageDown",
+    );
   });
 
   it("gives Ctrl+D back to the terminal when the terminal has focus", () => {
     // terminal.split owns mod+d under terminalFocus. The scroll binding is
-    // later in the array but its !terminalFocus clause has to keep it out.
+    // later in the array but its chatFocus clause has to keep it out, and
+    // the terminal drawer is its own pane rather than part of the chat.
     assert.strictEqual(resolve(press("d", { ctrlKey: true }), true), "terminal.split");
   });
 
@@ -1229,4 +1242,151 @@ it("resolves mod+shift+k to the thread search outside terminal focus", () => {
     ),
     "threadSearch.toggle",
   );
+});
+
+describe("pane-scoped bindings", () => {
+  // No DOM is installed for tests in this workspace, so the focus tree is
+  // hand-built, as terminalFocus.test.ts does.
+  class PaneElement {
+    isConnected = true;
+    parent: PaneElement | null = null;
+    constructor(readonly selectors: ReadonlyArray<string> = []) {}
+    closest(selector: string): PaneElement | null {
+      return closestPaneFrom(this, selector);
+    }
+  }
+
+  function closestPaneFrom(start: PaneElement, selector: string): PaneElement | null {
+    let node: PaneElement | null = start;
+    while (node !== null) {
+      if (node.selectors.includes(selector)) return node;
+      node = node.parent;
+    }
+    return null;
+  }
+
+  const CHAT_ROOT = "[data-chat-column-maximized-away]";
+  const PANEL_ROOT = "[data-preview-panel-mode]";
+
+  /** Runs `body` with the keyboard inside `paneRootSelector`. */
+  function withFocusIn(paneRootSelector: string, body: () => void): void {
+    const originalDocument = globalThis.document;
+    const originalHTMLElement = globalThis.HTMLElement;
+    const root = new PaneElement([paneRootSelector]);
+    const active = new PaneElement([]);
+    active.parent = root;
+    globalThis.HTMLElement = PaneElement as unknown as typeof HTMLElement;
+    globalThis.document = { activeElement: active } as unknown as Document;
+    try {
+      body();
+    } finally {
+      if (originalDocument === undefined) {
+        delete (globalThis as { document?: Document }).document;
+      } else {
+        globalThis.document = originalDocument;
+      }
+      if (originalHTMLElement === undefined) {
+        delete (globalThis as { HTMLElement?: typeof HTMLElement }).HTMLElement;
+      } else {
+        globalThis.HTMLElement = originalHTMLElement;
+      }
+    }
+  }
+
+  // The real shipped table, not the hand-built fixture above: what this
+  // describe block is about is which pane the shipped default belongs to.
+  const scrollUp = () => event({ key: "u", ctrlKey: true });
+  const resolve = (context?: Record<string, boolean>) =>
+    resolveShortcutCommand(scrollUp(), DEFAULT_RESOLVED_KEYBINDINGS, {
+      platform: "Linux",
+      ...(context ? { context } : {}),
+    });
+
+  it("gives the half-page scroll to the chat and to no other pane", () => {
+    assert.strictEqual(resolve({ chatFocus: true }), "chat.scrollHalfPageUp");
+    assert.isNull(resolve({ panelFocus: true }));
+  });
+
+  it("reads the focused pane from the document when the caller passes no context", () => {
+    withFocusIn(CHAT_ROOT, () => {
+      assert.strictEqual(resolve(), "chat.scrollHalfPageUp");
+    });
+    withFocusIn(PANEL_ROOT, () => {
+      assert.isNull(resolve());
+    });
+  });
+
+  it("lets an explicit context override the pane read from the document", () => {
+    withFocusIn(CHAT_ROOT, () => {
+      assert.isNull(resolve({ chatFocus: false }));
+    });
+    withFocusIn(PANEL_ROOT, () => {
+      assert.strictEqual(resolve({ chatFocus: true }), "chat.scrollHalfPageUp");
+    });
+  });
+
+  // GUARD, not a spec: true before this change and after it. Reading the
+  // focus tree inside the resolver must not make it throw where there is no
+  // document, which is every caller outside a browser.
+  it("resolves with no document at all, as a non-browser caller has none", () => {
+    assert.strictEqual(resolve({ chatFocus: true }), "chat.scrollHalfPageUp");
+  });
+
+  /** Runs `body` with a document that counts how often focus was read. */
+  function countingFocusReads(paneRootSelector: string, body: () => void): number {
+    const originalDocument = globalThis.document;
+    const originalHTMLElement = globalThis.HTMLElement;
+    const root = new PaneElement([paneRootSelector]);
+    const active = new PaneElement([]);
+    active.parent = root;
+    let reads = 0;
+    globalThis.HTMLElement = PaneElement as unknown as typeof HTMLElement;
+    globalThis.document = {
+      get activeElement() {
+        reads += 1;
+        return active;
+      },
+    } as unknown as Document;
+    try {
+      body();
+      return reads;
+    } finally {
+      if (originalDocument === undefined) {
+        delete (globalThis as { document?: Document }).document;
+      } else {
+        globalThis.document = originalDocument;
+      }
+      if (originalHTMLElement === undefined) {
+        delete (globalThis as { HTMLElement?: typeof HTMLElement }).HTMLElement;
+      } else {
+        globalThis.HTMLElement = originalHTMLElement;
+      }
+    }
+  }
+
+  it("never reads the focus tree for a key no pane-scoped binding claims", () => {
+    // This runs on every keystroke typed anywhere in the app, the embedded
+    // Neovim editor included. A plain letter reaches no pane-scoped rule and
+    // must cost no DOM walk at all.
+    const reads = countingFocusReads(CHAT_ROOT, () => {
+      resolveShortcutCommand(event({ key: "q" }), DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform: "Linux",
+      });
+    });
+    assert.strictEqual(reads, 0);
+  });
+
+  it("reads the focus tree once, not once per binding, when a pane-scoped key matches", () => {
+    const reads = countingFocusReads(CHAT_ROOT, () => {
+      assert.strictEqual(resolve(), "chat.scrollHalfPageUp");
+    });
+    assert.strictEqual(reads, 1);
+  });
+
+  it("never reads the focus tree when the caller named every pane itself", () => {
+    const reads = countingFocusReads(CHAT_ROOT, () => {
+      resolve({ sidebarFocus: false, chatFocus: false, panelFocus: true });
+    });
+    assert.strictEqual(reads, 0);
+  });
 });

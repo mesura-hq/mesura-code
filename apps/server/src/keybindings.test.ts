@@ -11,6 +11,9 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as ServerConfig from "./config.ts";
 import * as Keybindings from "./keybindings.ts";
+// The migration itself lives in the shared package; the server module wires
+// it up but does not re-export it.
+import { migrateRetiredKeybindingDefaults } from "@t3tools/shared/keybindings";
 import { KeybindingsConfigError } from "@t3tools/contracts";
 
 const KeybindingsConfigJson = Schema.fromJsonString(KeybindingsConfig);
@@ -348,11 +351,18 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
           Keybindings.parseKeybindingShortcut(entry.toKey),
           `retired default ${entry.from.command} moves to an unparseable key`,
         );
+        // Compared as a whole rule, `when` included: an entry that moves a
+        // rule's context rather than its key would otherwise pass this by
+        // matching the key it never left.
         assert.isTrue(
-          Keybindings.DEFAULT_KEYBINDINGS.some(
-            (rule) => rule.command === entry.from.command && rule.key === entry.toKey,
+          Keybindings.DEFAULT_KEYBINDINGS.some((rule) =>
+            Keybindings.isSameKeybindingRule(rule, {
+              ...entry.from,
+              key: entry.toKey,
+              ...(entry.toWhen === undefined ? {} : { when: entry.toWhen }),
+            }),
           ),
-          `retired default ${entry.from.command} moves to a key it no longer ships on`,
+          `retired default ${entry.from.command} moves to a rule it no longer ships`,
         );
         assert.isFalse(
           Keybindings.DEFAULT_KEYBINDINGS.some((rule) =>
@@ -780,6 +790,90 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         persisted.some(
           (entry) => entry.command === "chat.scrollHalfPageDown" && entry.key === "mod+d",
         ),
+      );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("ships the half-page scroll pair scoped to the chat pane", () =>
+    Effect.sync(() => {
+      // The pair used to fire wherever the terminal did not have focus, which
+      // included the editor, where those keys belong to Neovim.
+      for (const command of ["chat.scrollHalfPageUp", "chat.scrollHalfPageDown"] as const) {
+        const rules = Keybindings.DEFAULT_KEYBINDINGS.filter((rule) => rule.command === command);
+        assert.deepEqual(
+          rules.map((rule) => rule.when),
+          ["chatFocus"],
+          `${command} must belong to the chat pane and nothing else`,
+        );
+      }
+    }),
+  );
+
+  it.effect("moves a retired default to a new context on the key it already had", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      // The rule an install written before the pane model still carries.
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+u", command: "chat.scrollHalfPageUp", when: "!terminalFocus" },
+      ]);
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepEqual(
+        persisted.filter((entry) => entry.command === "chat.scrollHalfPageUp"),
+        [{ key: "mod+u", command: "chat.scrollHalfPageUp", when: "chatFocus" }],
+      );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("reports a context move on the rewrite, so the startup log can say so", () =>
+    Effect.sync(() => {
+      // A context move keeps its key, so fromKey and toKey are equal and the
+      // log line would otherwise read as a no-op.
+      const contextMove = migrateRetiredKeybindingDefaults([
+        { key: "mod+u", command: "chat.scrollHalfPageUp", when: "!terminalFocus" },
+      ]);
+      assert.deepEqual(contextMove.rewrites, [
+        {
+          command: "chat.scrollHalfPageUp",
+          fromKey: "mod+u",
+          toKey: "mod+u",
+          toWhen: "chatFocus",
+        },
+      ]);
+
+      // A plain key move carries no context, so the field stays absent.
+      const keyMove = migrateRetiredKeybindingDefaults([
+        { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
+      ]);
+      assert.deepEqual(keyMove.rewrites, [
+        { command: "diff.toggle", fromKey: "mod+d", toKey: "mod+shift+d" },
+      ]);
+    }),
+  );
+
+  it.effect("leaves a scroll rule whose context the user already changed alone", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      // Same key and command as the retired default, different `when`, so it
+      // is the user's own rule.
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+u", command: "chat.scrollHalfPageUp", when: "terminalOpen" },
+      ]);
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepEqual(
+        persisted.filter((entry) => entry.command === "chat.scrollHalfPageUp"),
+        [{ key: "mod+u", command: "chat.scrollHalfPageUp", when: "terminalOpen" }],
       );
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );

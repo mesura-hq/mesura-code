@@ -558,12 +558,20 @@ const make = Effect.gen(function* () {
       for (const rewrite of migration.rewrites) {
         // Info rather than warning: the rewrite is expected and self-healing,
         // and it runs at most once per retired default.
-        yield* Effect.logInfo("moved a retired default keybinding to its current key", {
-          path: keybindingsConfigPath,
-          command: rewrite.command,
-          from: rewrite.fromKey,
-          to: rewrite.toKey,
-        });
+        yield* Effect.logInfo(
+          rewrite.toWhen === undefined
+            ? "moved a retired default keybinding to its current key"
+            : "moved a retired default keybinding to its current context",
+          {
+            path: keybindingsConfigPath,
+            command: rewrite.command,
+            from: rewrite.fromKey,
+            to: rewrite.toKey,
+            // A context move keeps its key, so without this the line reads as
+            // a no-op and says nothing about what actually changed.
+            ...(rewrite.toWhen === undefined ? {} : { toWhen: rewrite.toWhen }),
+          },
+        );
       }
       for (const addition of additions.results) {
         switch (addition.outcome) {
