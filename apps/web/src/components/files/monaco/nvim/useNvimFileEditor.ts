@@ -38,6 +38,12 @@ const IDLE_SESSION_ATOM = Atom.make(AsyncResult.initial<EditorSessionState, neve
 /**
  * The application's shortcuts that outrank Neovim while the editor has focus.
  *
+ * This list is about keys Monaco receives. The pane chords are not on it and
+ * do not need to be: `usePaneNavigation` claims them on the window in the
+ * capture phase, so the editor is never offered them at all. Neovim's own
+ * window commands stay reachable as `<C-w>h` and `<C-w>l`, because a prefix
+ * chord is never captured.
+ *
  * One entry, and the list is short because it was measured rather than
  * guessed. In the developer's configuration `<C-p>` is unmapped, so the file
  * picker costs Neovim nothing. `<C-k>` is `TmuxNavigateUp`, `<C-b>` is

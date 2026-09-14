@@ -183,13 +183,20 @@ export function neighbourOf(pane: PaneId, direction: PaneDirection): PaneId | nu
  */
 export function focusPane(pane: PaneId): boolean {
   const registered = registeredEntries.get(pane);
-  if (registered !== undefined && registered()) return true;
+  if (registered !== undefined && registered()) {
+    lastFocusedPane = pane;
+    return true;
+  }
 
   if (typeof document === "undefined") return false;
   for (const selector of PANE_ENTRY_SELECTORS[pane]) {
     const entry = document.querySelector<HTMLElement>(selector);
     if (entry !== null) {
       entry.focus({ preventScroll: true });
+      // Recorded here rather than waiting for the next read: two chords in a
+      // row with no resolve between them would otherwise both step from the
+      // pane the first one left.
+      lastFocusedPane = pane;
       return true;
     }
   }

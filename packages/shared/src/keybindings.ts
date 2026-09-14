@@ -32,7 +32,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+d", command: "diff.toggle", when: "!terminalFocus" },
   { key: "mod+shift+j", command: "preview.toggle" },
   { key: "mod+r", command: "preview.refresh", when: "previewFocus" },
-  { key: "mod+l", command: "preview.focusUrl", when: "previewFocus" },
+  { key: "mod+shift+l", command: "preview.focusUrl", when: "previewFocus" },
   { key: "mod+=", command: "preview.zoomIn", when: "previewFocus" },
   { key: "mod++", command: "preview.zoomIn", when: "previewFocus" },
   { key: "mod+-", command: "preview.zoomOut", when: "previewFocus" },
@@ -70,6 +70,12 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // entry: that mechanism exists for a SECOND default on a command a config
   // already binds.
   { key: "alt+q", command: "question.toggleCollapse", when: "!terminalFocus" },
+  // Directional pane focus, deliberately unconditional: the chord has one
+  // meaning in every pane, which is what stops two surfaces claiming a key.
+  // New commands, so the per-command startup backfill installs them and no
+  // ADDED_KEYBINDING_DEFAULTS entry is needed.
+  { key: "mod+h", command: "pane.focusLeft" },
+  { key: "mod+l", command: "pane.focusRight" },
   // Scoped to the chat pane rather than to "not the terminal". The editor
   // is neither, and these two keys are half the motion set inside it.
   { key: "mod+u", command: "chat.scrollHalfPageUp", when: "chatFocus" },
@@ -147,6 +153,12 @@ export const RETIRED_KEYBINDING_DEFAULTS: ReadonlyArray<{
     from: { key: "mod+d", command: "chat.scrollHalfPageDown", when: "!terminalFocus" },
     toKey: "mod+d",
     toWhen: "chatFocus",
+  },
+  {
+    // Freed for pane.focusRight. The address bar is reachable from the same
+    // chord with shift, and only while the preview has focus anyway.
+    from: { key: "mod+l", command: "preview.focusUrl", when: "previewFocus" },
+    toKey: "mod+shift+l",
   },
 ];
 
