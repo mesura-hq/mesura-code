@@ -17,6 +17,7 @@ import * as Queue from "effect/Queue";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
+import { createHostOperations } from "./hostOperations.ts";
 import { createWsIpcSurface } from "./wsIpcSurface.ts";
 
 /**
@@ -87,19 +88,26 @@ export class FileManagerHost extends Context.Service<
 /**
  * What a host may change about the registry's dependencies. Production passes
  * nothing: the bookmark and listing stores are the standalone file manager's
- * own files, so both applications share them. Tests confine both to a
- * temporary directory.
+ * own files, so both applications share them, and the operations reach the
+ * real desktop. Tests confine the stores to a temporary directory and hand in
+ * operations whose `gio` and `xdg-open` never run.
  */
-export type HostOverrides = Pick<Dependencies, "bookmarksPath" | "listingOptionsPath">;
+export type HostOverrides = Pick<
+  Dependencies,
+  "bookmarksPath" | "listingOptionsPath" | "operations"
+>;
 
 /**
- * The registry's dependencies. No `operations` yet, so every write channel
- * answers `write_failed`; injecting them here is what turns writes on.
+ * The registry's dependencies. The operations act on this host's filesystem
+ * and desktop; the clipboard is left out on purpose, because the browser owns
+ * it (the registry answers that channel as unavailable); the search pool is
+ * left out until Mesura Code has a finder of its own.
  */
 function hostDependencies(overrides: HostOverrides): Dependencies {
   return {
     ...overrides,
     previewUrlFor: (token) => `${FILE_MANAGER_PREVIEW_ROUTE_PREFIX}${token}`,
+    operations: overrides.operations ?? createHostOperations(),
   };
 }
 

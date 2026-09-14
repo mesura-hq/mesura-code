@@ -1,14 +1,20 @@
 // @effect-diagnostics nodeBuiltinImport:off - the confined store directory exists before any Effect runs
+import * as NodeEvents from "node:events";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
-import { decodeListReply } from "@symmetria/fm-core/contract";
+import {
+  decodeListReply,
+  decodeRenameReply,
+  decodeTransferReply,
+} from "@symmetria/fm-core/contract";
 import type { FileManagerEvent, FileManagerReply } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -17,6 +23,29 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
 import * as FileManagerHost from "./FileManagerHost.ts";
+import { createHostOperations, type SpawnHostProcess } from "./hostOperations.ts";
+
+/**
+ * The host commands the operations would run, recorded instead of spawned:
+ * `trash` and `open` must never reach this machine's desktop from a test.
+ */
+const hostCommands: Array<{ command: string; args: readonly string[] }> = [];
+const recordingSpawn: SpawnHostProcess = (command, args) => {
+  hostCommands.push({ command, args });
+  const process = new NodeEvents.EventEmitter() as NodeEvents.EventEmitter & {
+    stderr: null;
+    kill(): boolean;
+    unref(): void;
+  };
+  process.stderr = null;
+  process.kill = () => true;
+  process.unref = () => undefined;
+  queueMicrotask(() => {
+    if (command === "gio") process.emit("close", 0, null);
+    else process.emit("spawn");
+  });
+  return process;
+};
 
 /**
  * The bookmark and listing stores are confined here: the registry's defaults
@@ -30,6 +59,7 @@ const TestLayer = Layer.empty.pipe(
     FileManagerHost.layerWith({
       bookmarksPath: NodePath.join(storeDirectory, "bookmarks.json"),
       listingOptionsPath: NodePath.join(storeDirectory, "listing.json"),
+      operations: createHostOperations({ spawn: recordingSpawn }),
     }),
   ),
   Layer.provideMerge(NodeServices.layer),
@@ -237,24 +267,184 @@ it.layer(TestLayer, { excludeTestServices: true })("FileManagerHost", (it) => {
   });
 
   describe("write channels", () => {
-    it.effect("refuses a write while no operations are injected, and creates nothing", () =>
+    it.effect("creates a file and a directory with parents, and renames in place", () =>
       Effect.gen(function* () {
         const host = yield* FileManagerHost.FileManagerHost;
         const fileSystem = yield* FileSystem.FileSystem;
         const root = yield* makeTempDir;
         yield* openSession("writes");
-        const target = NodePath.join(root, "made.txt");
+        const mutate = (channel: "symmetria-fm:create" | "symmetria-fm:rename", payload: unknown) =>
+          host.mutate(CLIENT, { sessionId: "writes", channel, payload });
+
+        const created = yield* mutate("symmetria-fm:create", {
+          path: NodePath.join(root, "a/b/file.txt"),
+          kind: "file",
+        });
+        const madeDirectory = yield* mutate("symmetria-fm:create", {
+          path: NodePath.join(root, "dir"),
+          kind: "directory",
+        });
+        const renamed = yield* mutate("symmetria-fm:rename", {
+          path: NodePath.join(root, "a/b/file.txt"),
+          name: "renamed.txt",
+        });
+
+        expect(created).toMatchObject({ ok: true });
+        expect(madeDirectory).toMatchObject({ ok: true });
+        expect(yield* fileSystem.exists(NodePath.join(root, "a/b/renamed.txt"))).toBe(true);
+        if (!renamed.ok) throw new Error("rename failed");
+        const decoded = decodeRenameReply(renamed.value);
+        expect(decoded.ok && decoded.value.path).toBe(NodePath.join(root, "a/b/renamed.txt"));
+      }),
+    );
+
+    it.effect("copies and moves with progress events on the session's stream", () =>
+      Effect.gen(function* () {
+        const host = yield* FileManagerHost.FileManagerHost;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const root = yield* makeTempDir;
+        yield* writeTextFile(root, "one.txt");
+        yield* writeTextFile(root, "two.txt");
+        yield* fileSystem.makeDirectory(NodePath.join(root, "copies"));
+        yield* fileSystem.makeDirectory(NodePath.join(root, "moves"));
+        const events = yield* openSession("transfer");
+        const sources = [NodePath.join(root, "one.txt"), NodePath.join(root, "two.txt")];
+
+        const copied = yield* host.mutate(CLIENT, {
+          sessionId: "transfer",
+          channel: "symmetria-fm:transfer",
+          payload: {
+            sources,
+            destination: NodePath.join(root, "copies"),
+            mode: "copy",
+            overwrite: false,
+            transferId: "t-copy",
+          },
+        });
+        if (!copied.ok) throw new Error(copied.error.message);
+        const copiedReply = decodeTransferReply(copied.value);
+        expect(copiedReply.ok && copiedReply.value.moved).toBe(2);
+        const first = yield* Queue.take(events);
+        expect(first.channel).toBe("symmetria-fm:transfer-progress");
+        expect(first.payload).toMatchObject({ transferId: "t-copy", done: 0, total: 2 });
+        expect(yield* fileSystem.exists(NodePath.join(root, "copies/two.txt"))).toBe(true);
+
+        const moved = yield* host.mutate(CLIENT, {
+          sessionId: "transfer",
+          channel: "symmetria-fm:transfer",
+          payload: {
+            sources,
+            destination: NodePath.join(root, "moves"),
+            mode: "move",
+            overwrite: false,
+            transferId: "t-move",
+          },
+        });
+        expect(moved).toMatchObject({ ok: true, value: { moved: 2, conflicts: [] } });
+        expect(yield* fileSystem.exists(NodePath.join(root, "one.txt"))).toBe(false);
+        expect(yield* fileSystem.exists(NodePath.join(root, "moves/one.txt"))).toBe(true);
+        // The copy's later ticks are still queued; the move's follow them.
+        let tick = yield* Queue.take(events);
+        while ((tick.payload as { transferId?: string }).transferId !== "t-move") {
+          tick = yield* Queue.take(events);
+        }
+        expect(tick.channel).toBe("symmetria-fm:transfer-progress");
+        expect(tick.payload).toMatchObject({ transferId: "t-move", total: 2 });
+      }),
+    );
+
+    it.effect("cancels a running transfer between entries", () =>
+      Effect.gen(function* () {
+        const host = yield* FileManagerHost.FileManagerHost;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const root = yield* makeTempDir;
+        // Many sources, so the cancel lands while the loop still runs; the
+        // strict proof of the abort is the operations' own test, which
+        // cancels from inside the progress callback.
+        const names = Array.from({ length: 64 }, (_, i) => `f${String(i).padStart(2, "0")}.txt`);
+        for (const name of names) yield* writeTextFile(root, name);
+        yield* fileSystem.makeDirectory(NodePath.join(root, "into"));
+        const events = yield* openSession("cancel");
+
+        // Cancel as soon as the first progress tick arrives, from a fiber that
+        // follows the stream while the transfer runs.
+        const canceller = yield* Effect.forkScoped(
+          Effect.gen(function* () {
+            // A transfer that fails before its first tick must fail the test,
+            // not hang it.
+            yield* Queue.take(events).pipe(Effect.timeout("5 seconds"));
+            yield* host.mutate(CLIENT, {
+              sessionId: "cancel",
+              channel: "symmetria-fm:cancel-transfer",
+              payload: { transferId: "t-cancel" },
+            });
+          }),
+        );
+        const reply = yield* host.mutate(CLIENT, {
+          sessionId: "cancel",
+          channel: "symmetria-fm:transfer",
+          payload: {
+            sources: names.map((name) => NodePath.join(root, name)),
+            destination: NodePath.join(root, "into"),
+            mode: "copy",
+            overwrite: false,
+            transferId: "t-cancel",
+          },
+        });
+        yield* Fiber.join(canceller);
+
+        if (!reply.ok) throw new Error(reply.error.message);
+        const outcome = decodeTransferReply(reply.value);
+        if (!outcome.ok) throw new Error("undecodable transfer reply");
+        expect(outcome.value.moved).toBeLessThanOrEqual(names.length);
+        expect(outcome.value.conflicts).toEqual([]);
+        const landed = yield* fileSystem.readDirectory(NodePath.join(root, "into"));
+        expect(landed.length).toBe(outcome.value.moved);
+      }),
+    );
+
+    it.effect("trashes through gio and opens through xdg-open on the host", () =>
+      Effect.gen(function* () {
+        const host = yield* FileManagerHost.FileManagerHost;
+        const root = yield* makeTempDir;
+        yield* writeTextFile(root, "doomed.txt");
+        yield* openSession("desktop");
+        hostCommands.length = 0;
+
+        const trashed = yield* host.mutate(CLIENT, {
+          sessionId: "desktop",
+          channel: "symmetria-fm:trash",
+          payload: { paths: [NodePath.join(root, "doomed.txt")] },
+        });
+        const opened = yield* host.mutate(CLIENT, {
+          sessionId: "desktop",
+          channel: "symmetria-fm:open",
+          payload: { path: NodePath.join(root, "doomed.txt") },
+        });
+
+        expect(trashed).toEqual({ ok: true, value: null });
+        expect(opened).toEqual({ ok: true, value: null });
+        expect(hostCommands).toEqual([
+          { command: "gio", args: ["trash", NodePath.join(root, "doomed.txt")] },
+          { command: "xdg-open", args: [NodePath.join(root, "doomed.txt")] },
+        ]);
+      }),
+    );
+
+    it.effect("answers the clipboard channel as unavailable: the browser owns it", () =>
+      Effect.gen(function* () {
+        const host = yield* FileManagerHost.FileManagerHost;
+        yield* openSession("clipboard");
 
         const reply = yield* host.mutate(CLIENT, {
-          sessionId: "writes",
-          channel: "symmetria-fm:create",
-          payload: { path: target, kind: "file" },
+          sessionId: "clipboard",
+          channel: "symmetria-fm:clipboard",
+          payload: { kind: "text", text: "hello" },
         });
 
         expect(expectFailure(reply, "write_failed")).toBe(
-          "file operations are not available in this host",
+          "the clipboard is not available in this host",
         );
-        expect(yield* fileSystem.exists(target)).toBe(false);
       }),
     );
   });
