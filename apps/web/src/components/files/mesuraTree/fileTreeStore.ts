@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import { create } from "zustand";
 
-import { getLocalStorageItem, setLocalStorageItem } from "~/hooks/useLocalStorage";
+import { createSchemaLocalStorage } from "./schemaLocalStorage";
 
 /** The T3 tree's key, kept so an existing preference carries over. */
 export const EXPLORER_OPEN_STORAGE_KEY = "t3code.fileExplorerOpen";
@@ -49,21 +49,11 @@ export function createFileTreeStore(storage: ExplorerOpenStorage) {
   }));
 }
 
+const explorerOpenStorage = createSchemaLocalStorage(Schema.Boolean, "FILE-TREE");
 const localStorageExplorerOpen: ExplorerOpenStorage = {
-  read: () => {
-    try {
-      return getLocalStorageItem(EXPLORER_OPEN_STORAGE_KEY, Schema.Boolean);
-    } catch (error) {
-      console.error(error);
-      return null;
-    }
-  },
+  read: () => explorerOpenStorage.read(EXPLORER_OPEN_STORAGE_KEY),
   write: (open) => {
-    try {
-      setLocalStorageItem(EXPLORER_OPEN_STORAGE_KEY, open, Schema.Boolean);
-    } catch (error) {
-      console.error(error);
-    }
+    explorerOpenStorage.write(EXPLORER_OPEN_STORAGE_KEY, open);
   },
 };
 

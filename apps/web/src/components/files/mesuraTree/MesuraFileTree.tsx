@@ -20,6 +20,7 @@ import { useFileTreeStore } from "./fileTreeStore";
 import { relativeToCwd } from "./overviewModelFromEntries";
 import { treeCommandForKey } from "./treeKeymap";
 import { type HandledReveal, nextRevealRequest } from "./treeReveal";
+import { projectTreeKey, treeShapePersister } from "./treeShapeStorage";
 import { leaveFileTree } from "./fileTreeFocusMoves";
 import { useProjectOverviewModel } from "./useProjectOverviewModel";
 import "./fileTree.css";
@@ -42,16 +43,22 @@ interface MesuraFileTreeProps {
  * this component. The file panel unmounts for a spinner, for Settings and for
  * a thread switch, and a tree that forgot its shape on each of those would be
  * worse than the one it replaced. Bounded and least-recently-used, like the
- * file manager's own `TreeStateCache`.
+ * file manager's own `TreeStateCache`. A record is created from the shape
+ * persisted for the project, so the first render already shows it.
  */
 const records = new Map<string, TreeRecord>();
 const RECORD_LIMIT = 8;
 
 function recordFor(environmentId: EnvironmentId, cwd: string): TreeRecord {
-  const key = `${environmentId} ${cwd}`;
+  const key = projectTreeKey(environmentId, cwd);
   const existing = records.get(key);
   const record = existing ?? {
-    shape: { selected: cwd, collapsed: new Set<string>(), preset: null, checkpoint: null },
+    shape: treeShapePersister.restore(environmentId, cwd) ?? {
+      selected: cwd,
+      collapsed: new Set<string>(),
+      preset: null,
+      checkpoint: null,
+    },
     anchor: null,
     pendingReveal: null,
   };
@@ -216,7 +223,7 @@ export function MesuraFileTree({
     <div
       ref={wrapper}
       role="group"
-      data-mesura-file-tree={`${environmentId}:${cwd}`}
+      data-mesura-file-tree={projectTreeKey(environmentId, cwd)}
       aria-label={`${projectName} files`}
       onKeyDown={onKeyDown}
       onContextMenu={onContextMenu}
@@ -227,6 +234,11 @@ export function MesuraFileTree({
         port={port}
         record={record}
         onOpen={onOpen}
+        onShapeChange={(shape) => {
+          // An incomplete listing cannot prove a folder gone; the tree's own
+          // pruning would drop it, and persisting that would lose the fold.
+          if (!truncated) treeShapePersister.persist(environmentId, cwd, shape);
+        }}
         autoFocus={false}
         showScope={false}
       />

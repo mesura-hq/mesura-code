@@ -1,7 +1,7 @@
 import type { OverviewEntry } from "@symmetria/fm-core/overview/contract";
 import type { OverviewFolder } from "@symmetria/fm-core/overview/model";
 import { joinPath } from "@symmetria/fm-core/pane";
-import type { ProjectEntry } from "@t3tools/contracts";
+import type { ProjectEntry, ProjectListEntriesResult } from "@t3tools/contracts";
 
 /**
  * The server's flat file list, as the file manager's folder map.
@@ -64,6 +64,22 @@ export function overviewFoldersFromEntries(
     });
   }
   return folders;
+}
+
+const NO_FOLDERS: ReadonlyMap<string, OverviewFolder> = new Map();
+
+/**
+ * The folder map for a listing the server may not have answered yet.
+ *
+ * Nothing at all until it has. The tree prunes a persisted collapsed folder
+ * whose parent is `Loaded` and does not list it, so a synthesised empty root
+ * before the first answer would erase every remembered fold on mount.
+ */
+export function foldersForListing(
+  cwd: string,
+  listing: ProjectListEntriesResult | null,
+): ReadonlyMap<string, OverviewFolder> {
+  return listing === null ? NO_FOLDERS : overviewFoldersFromEntries(cwd, listing.entries);
 }
 
 /** The path the panel opens, from the absolute path the tree activates. */

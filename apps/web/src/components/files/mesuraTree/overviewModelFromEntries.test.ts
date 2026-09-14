@@ -1,7 +1,11 @@
 import type { ProjectEntry } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { overviewFoldersFromEntries, relativeToCwd } from "./overviewModelFromEntries";
+import {
+  foldersForListing,
+  overviewFoldersFromEntries,
+  relativeToCwd,
+} from "./overviewModelFromEntries";
 
 const CWD = "/home/jc/project";
 
@@ -71,5 +75,16 @@ describe("relativeToCwd", () => {
     expect(relativeToCwd(CWD, CWD)).toBeNull();
     expect(relativeToCwd(CWD, "/home/jc/projectile/x")).toBeNull();
     expect(relativeToCwd(CWD, "/tmp/other")).toBeNull();
+  });
+});
+
+describe("foldersForListing", () => {
+  it("has no folders, not even the root, until the server has answered", () => {
+    expect(foldersForListing(CWD, null).size).toBe(0);
+  });
+
+  it("builds the map once a listing exists, an empty one included", () => {
+    expect([...foldersForListing(CWD, { entries: [], truncated: false }).keys()]).toEqual([CWD]);
+    expect(foldersForListing(CWD, { entries, truncated: false }).get(`${CWD}/src`)).toBeTruthy();
   });
 });

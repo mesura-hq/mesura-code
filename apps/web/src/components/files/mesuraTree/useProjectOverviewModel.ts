@@ -5,9 +5,7 @@ import { useCallback, useMemo, useRef } from "react";
 import { useWorkspaceMutationRefresh } from "~/hooks/useWorkspaceMutationRefresh";
 
 import { useProjectEntriesQuery } from "../projectFilesQueryState";
-import { overviewFoldersFromEntries } from "./overviewModelFromEntries";
-
-const NO_ENTRIES: ReadonlyArray<never> = [];
+import { foldersForListing } from "./overviewModelFromEntries";
 
 /**
  * `projects.listEntries`, as the model the Symmetria tree renders.
@@ -34,8 +32,7 @@ export function useProjectOverviewModel(
     resourceKey: `files:${environmentId}:${cwd}`,
   });
   const data = entriesQuery.data;
-  const entries = data?.entries ?? NO_ENTRIES;
-  const folders = useMemo(() => overviewFoldersFromEntries(cwd, entries), [cwd, entries]);
+  const folders = useMemo(() => foldersForListing(cwd, data), [cwd, data]);
   const truncated = data?.truncated ?? false;
   const isPending = entriesQuery.isPending;
   const onRefreshRef = useRef(onRefresh);
@@ -49,13 +46,13 @@ export function useProjectOverviewModel(
     () => ({
       folders,
       loading: data === null && isPending,
-      inspected: entries.length,
+      inspected: data?.entries.length ?? 0,
       include: refresh,
       refresh,
       refreshing: data !== null && isPending,
       paused: false,
     }),
-    [data, entries.length, folders, isPending, refresh],
+    [data, folders, isPending, refresh],
   );
   return { model, error: entriesQuery.error, hasData: data !== null, truncated };
 }
