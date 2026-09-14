@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    // Imports carry their real `.ts` / `.tsx` extension. Nothing here is
+    // emitted by `tsc` — esbuild bundles the two Node targets and Vite bundles
+    // the renderer — so the extension in the source is the extension on disk,
+    // which is what makes the imports resolvable without a build step.
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "exclude": ["**/node_modules", "**/dist"]
+}

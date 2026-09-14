@@ -1,0 +1,35 @@
+{
+  "name": "@symmetria/file-manager",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Keyboard-first file manager \u2014 Electron rewrite, beside the Qt tree",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@11.3.0",
+  "scripts": {
+    "lint": "biome check .",
+    "lint:fix": "biome check . --write",
+    "anti-slop": "oxlint --config anti-slop.config.mjs --disable-nested-config --format stylish -- .",
+    "typecheck": "tsc -p packages/fm-core --noEmit --pretty false",
+    "test": "pnpm -r test",
+    "knip": "knip --reporter json",
+    "fallow:dead-code": "fallow dead-code --fail-on-issues",
+    "fallow:health": "fallow health --score --hotspots --fail-on-issues",
+    "fallow:dupes": "fallow dupes --fail-on-issues",
+    "theme:generate": "node tools/theme/kde-theme-to-hljs.mjs plugin/src/Symmetria/FileManager/Models/themes/wine.theme app/src/renderer/syntax-wine.css"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.6",
+    "@oxlint/plugins": "1.79.0",
+    "@types/node": "^26.4.0",
+    "electron": "41.5.0",
+    "fallow": "^3.20.0",
+    "knip": "^6.33.0",
+    "oxlint": "1.79.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  }
+}

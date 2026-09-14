@@ -1,0 +1,18 @@
+[Unit]
+Description=Symmetria Portal FileChooser backend (Electron build)
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=dbus
+BusName=org.freedesktop.impl.portal.desktop.symmetria-electron
+# The SAME script the Qt backend runs. The two backends differ in exactly two
+# values and both come from the environment below, so there is one file to fix
+# when a bug is found in it rather than two that have drifted apart.
+Environment=SYMMETRIA_PORTAL_FM_CLI=symmetria-fm-electron-cli
+Environment=SYMMETRIA_PORTAL_BUS_NAME=org.freedesktop.impl.portal.desktop.symmetria-electron
+ExecStart=%h/.local/share/symmetria/portal-venv/bin/python3 /usr/lib/symmetria/symmetria_portal.py
+Restart=on-failure
+
+[Install]
+WantedBy=graphical-session.target

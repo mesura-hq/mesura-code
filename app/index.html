@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      Chromium blocks WebAssembly under a Content Security Policy that omits
+      'wasm-unsafe-eval'. Electron's own security guide recommends
+      `script-src 'self'` and never mentions WASM, so following it verbatim
+      silently breaks any WASM decoder shipped later. It is here from the start
+      rather than discovered when a preview goes blank.
+
+      `img-src` allows `blob:` for the same class of reason, and it was found
+      the hard way: embedded cover art is handed to the renderer as BYTES over a
+      worker message and turned into a blob URL, so without it every audio file
+      with artwork showed the placeholder instead. The failure was invisible in
+      the pane — the image simply had zero natural width — and said so only in
+      the console. This does NOT widen what the renderer can reach: a blob URL
+      is same-origin by construction and addresses bytes the renderer already
+      holds. `worker-src` already carries `blob:` in this same policy.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; object-src 'self'; connect-src 'self'"
+    />
+    <title>Symmetria File Manager</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/renderer/main.tsx"></script>
+  </body>
+</html>

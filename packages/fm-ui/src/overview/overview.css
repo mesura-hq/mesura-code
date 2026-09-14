@@ -1,0 +1,408 @@
+.overview {
+  /* The dialog receives programmatic focus; rows and controls show selection. */
+  outline: none;
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: var(--background);
+  color: var(--foreground);
+  display: flex;
+  flex-direction: column;
+}
+.overview-toolbar {
+  height: 32px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 var(--toolbar-inset);
+  border-bottom: 1px solid var(--border);
+}
+.overview-toolbar details {
+  position: relative;
+  flex-shrink: 0;
+}
+.overview-toolbar summary {
+  white-space: nowrap;
+}
+.overview-toolbar > details {
+  /* A nonshrinking coverage label pushed Close outside narrow windows. */
+  flex-shrink: 1;
+  min-width: 56px;
+}
+.overview-scope summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.overview-toolbar details[open] {
+  background: var(--card);
+  z-index: 2;
+}
+.overview-toolbar button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+/* Keep actions visible when Retry and the minimap toggle share a narrow toolbar. */
+.overview-toolbar > strong,
+.overview-toolbar > span,
+.tree-scope,
+.overview-search-query {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.overview-camera-controls {
+  flex: 0 0 auto;
+  margin-left: auto;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.overview button,
+.file-tree button {
+  font: inherit;
+  color: var(--foreground);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.overview button:focus-visible,
+.file-tree button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+.overview-toolbar > span {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.overview-popover {
+  position: absolute;
+  top: 20px;
+  padding: 10px;
+  width: 300px;
+  overflow-wrap: anywhere;
+  background: var(--popover);
+  border: 1px solid var(--border);
+  z-index: 30;
+}
+.connected-groups {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+  cursor: grab;
+}
+.overview-canvas {
+  position: relative;
+  transform-origin: 0 0;
+}
+.overview-links {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.overview-edge {
+  fill: var(--muted-foreground);
+  stroke: var(--border);
+}
+.overview-edge path {
+  fill: none;
+}
+.overview-edge.active {
+  stroke: var(--primary);
+  fill: var(--primary);
+}
+.folder-group {
+  position: absolute;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: default;
+}
+.folder-group header {
+  display: flex;
+  align-items: flex-start;
+  padding: 4px 6px 0;
+  gap: 4px;
+}
+.folder-group .folder-group-name {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  text-align: left;
+  border: 0;
+  background: var(--card);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.folder-group-name > span {
+  min-width: 0;
+}
+.folder-group .file-icon {
+  margin-top: 1px;
+}
+.folder-ancestors {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: left;
+  padding: 0 8px 5px;
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+.folder-entries {
+  display: grid;
+}
+.folder-group .overview-row {
+  display: flex;
+  gap: 5px;
+  width: 100%;
+  min-height: 24px;
+  text-align: left;
+  border: 0;
+  border-radius: 0;
+  padding: 3px 8px;
+  background: var(--card);
+}
+.overview-row span:last-child {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.folder-group [data-selected="true"] {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.folder-status {
+  margin: 4px 8px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.folder-load {
+  margin: 4px 8px;
+}
+
+.overview-popover p {
+  margin: 0 0 8px;
+}
+
+.overview-camera-controls details {
+  position: relative;
+}
+.overview-camera-controls .overview-popover {
+  right: 0;
+  max-width: calc(100vw - 24px);
+}
+.overview-search {
+  position: absolute;
+  bottom: 16px;
+  left: var(--toolbar-inset);
+  max-width: calc(100% - 32px);
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--popover);
+  box-shadow: 0 0 0 1px var(--border);
+  font-size: 12px;
+}
+.overview-search .search {
+  min-width: 0;
+  width: min(520px, calc(100vw - 90px));
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.overview-search .search__field {
+  min-width: 40px;
+}
+.overview-search-count {
+  white-space: nowrap;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.folder-group [data-search-match="true"] {
+  background: var(--search-match);
+  color: var(--foreground);
+}
+.folder-group [data-selected="true"] {
+  background: var(--accent);
+}
+.minimap-search-matches circle {
+  fill: var(--muted-foreground);
+}
+.minimap-search-matches [data-current="true"] {
+  fill: var(--foreground);
+  stroke: var(--background);
+  stroke-width: 1;
+}
+.overview-help {
+  z-index: 30;
+}
+
+.overview-graph-frame {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+}
+.overview-minimap-surface {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 1;
+  background: var(--glass-surface);
+  box-shadow:
+    0 0 0 1px var(--glass-border),
+    inset 0 1px var(--glass-highlight);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+@supports (backdrop-filter: blur(16px)) {
+  .overview-minimap-surface {
+    background: var(--glass-background);
+    backdrop-filter: blur(16px) saturate(1.08);
+  }
+}
+.minimap-geometry > rect {
+  fill: var(--muted-foreground);
+  fill-opacity: 0.45;
+}
+.minimap-geometry path {
+  stroke: var(--muted-foreground);
+  stroke-opacity: 0.5;
+  stroke-width: 0.5px;
+  vector-effect: non-scaling-stroke;
+}
+.minimap-viewport {
+  fill: var(--foreground);
+  fill-opacity: 0.08;
+  stroke: var(--foreground);
+  stroke-width: 1;
+}
+.minimap-outside {
+  fill: var(--foreground);
+}
+
+.overview-minimap {
+  display: block;
+  touch-action: none;
+  user-select: none;
+  cursor: crosshair;
+}
+.minimap-viewport {
+  cursor: grab;
+}
+.minimap-viewport:active {
+  cursor: grabbing;
+}
+
+.overview .overview-minimap-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  color: var(--muted-foreground);
+}
+.overview-minimap-toggle:hover,
+.overview-minimap-toggle[aria-pressed="true"] {
+  color: var(--foreground);
+  background: var(--accent);
+}
+
+.overview-flash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+.overview-flash-label {
+  position: absolute;
+  box-sizing: border-box;
+  border-radius: 3px;
+  background: var(--foreground);
+  color: var(--background);
+  white-space: nowrap;
+}
+.overview-flash-prefix {
+  opacity: 0.45;
+}
+.overview-flash-status {
+  position: absolute;
+  box-sizing: border-box;
+  overflow: hidden;
+  display: flex;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+  align-content: center;
+  flex-wrap: wrap;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 12px;
+}
+
+.overview-flash-query {
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Keep the matched query bright and fade the structure with Qt flash timing. */
+.overview-graph-frame .overview-row,
+.overview-graph-frame .folder-group-name,
+.overview-graph-frame .folder-ancestors,
+.overview-graph-frame .overview-links {
+  transition: opacity 400ms cubic-bezier(0.2, 0, 0, 1);
+}
+[data-flash-mode="true"] .overview-row[data-search-match="false"],
+[data-flash-mode="true"] .folder-group-name[data-search-match="false"],
+[data-flash-mode="true"] .folder-ancestors,
+[data-flash-mode="true"] .overview-links {
+  opacity: 0.25;
+}
+.overview-flash-match {
+  position: absolute;
+  color: var(--foreground);
+  transform-origin: 0 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .overview-graph-frame .overview-row,
+  .overview-graph-frame .folder-group-name,
+  .overview-graph-frame .folder-ancestors,
+  .overview-graph-frame .overview-links {
+    transition: none;
+  }
+}
+
+[data-flash-mode="true"] [data-search-match="true"] > .overview-name {
+  opacity: 0.25;
+}
+
+.overview-toolbar,
+.tree-toolbar {
+  position: relative;
+}
+/* Anchoring to the summary clipped Scope on narrow windows. The toolbar is
+   the containing block so both views keep the popup inside their bounds. */
+.overview-toolbar > .overview-scope,
+.tree-toolbar > .overview-scope {
+  position: static;
+}
+.overview-scope > .overview-popover {
+  top: 100%;
+  right: 16px;
+  width: min(300px, calc(100vw - 48px));
+  box-sizing: border-box;
+}

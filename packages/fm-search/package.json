@@ -1,0 +1,42 @@
+{
+  "name": "@symmetria/fm-search",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The file finder's search engine, for the privileged side. The panel-side overlay arrives at ./ui. Consumed as a git dependency pinned by commit.",
+  "license": "MIT",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "exports": {
+    "./main": "./src/main/index.ts",
+    "./main/store": "./src/main/store.ts",
+    "./main/rows": "./src/main/rows.ts",
+    "./main/match": "./src/main/match.ts",
+    "./main/pool": "./src/main/pool.ts",
+    "./main/worker": "./src/main/worker.ts",
+    "./main/client": "./src/main/client.ts",
+    "./ui": "./src/ui/index.ts",
+    "./ui/styles.css": "./src/ui/finder.css"
+  },
+  "dependencies": {
+    "@ff-labs/fff-node": "0.9.4",
+    "@pierre/trees": "1.0.0-beta.4",
+    "@symmetria/fm-core": "workspace:*",
+    "lucide-react": "0.564.0"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.3",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^6.1.1",
+    "happy-dom": "^20.12.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "peerDependencies": {
+    "react": "^19.2.8"
+  }
+}

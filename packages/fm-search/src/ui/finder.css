@@ -1,0 +1,323 @@
+/**
+ * The finder's own appearance, shipped with the finder.
+ *
+ * **It lives here because the components do.** A host mounts this package
+ * without the file-manager panel — that is the whole reason the package exists,
+ * and `test/standalone.test.tsx` proves the component tree works alone. It
+ * would have rendered UNSTYLED: the rules were in the panel's stylesheet, which
+ * such a host never loads. Review caught that when `FileIcon` moved here and
+ * its CSS did not follow.
+ *
+ * **What a host must still provide.** These rules are not self-contained and
+ * are not meant to be:
+ *
+ * - the design tokens they read — `--border`, `--accent`, `--foreground`,
+ *   `--muted-foreground`, `--radius-sm`, `--font-mono`, and the
+ *   `--finder-*` values. `packages/fm-ui/src/theme/tokens.css` is the reference
+ *   set; a host may declare its own with the same names and the finder takes
+ *   its palette.
+ * - `.overlay` and `.overlay__panel`, the scrim and the centred panel. They are
+ *   shared with dialogs that belong to the panel, so they stay there rather
+ *   than being claimed by whichever package happened to need them next.
+ *
+ * The `.overlay__*` rules below ARE here, because the finder and the panel's
+ * zoxide popup share them and share `useOverlayList`, which is also in this
+ * package. Appearance and behaviour of one pattern, in one place.
+ */
+
+/* Both icon sources use currentColor. Hosts can supply this optional palette;
+   without it, icons retain the surrounding text colour. */
+.file-icon {
+  flex: 0 0 auto;
+  color: currentcolor;
+}
+
+.file-icon[data-icon="folder"] {
+  color: var(--muted-foreground, currentcolor);
+}
+
+.file-icon:is(
+  [data-icon="typescript"],
+  [data-icon="c"],
+  [data-icon="cpp"],
+  [data-icon="css"],
+  [data-icon="docker"],
+  [data-icon="markdown"]
+) {
+  color: var(--icon-blue, currentcolor);
+}
+
+.file-icon:is([data-icon="react"], [data-icon="go"], [data-icon="tailwind"], [data-icon="biome"]) {
+  color: var(--icon-cyan, currentcolor);
+}
+
+.file-icon:is(
+  [data-icon="javascript"],
+  [data-icon="json"],
+  [data-icon="python"],
+  [data-icon="svg"],
+  [data-icon="zip"]
+) {
+  color: var(--icon-yellow, currentcolor);
+}
+
+.file-icon:is([data-icon="vue"], [data-icon="bash"], [data-icon="table"]) {
+  color: var(--icon-green, currentcolor);
+}
+
+.file-icon:is(
+  [data-icon="git"],
+  [data-icon="html"],
+  [data-icon="svelte"],
+  [data-icon="rust"],
+  [data-icon="swift"],
+  [data-icon="zig"],
+  [data-icon="astro"],
+  [data-icon="claude"]
+) {
+  color: var(--icon-orange, currentcolor);
+}
+
+.file-icon:is(
+  [data-icon="vite"],
+  [data-icon="eslint"],
+  [data-icon="terraform"],
+  [data-icon="wasm"],
+  [data-icon="database"],
+  [data-icon="video"]
+) {
+  color: var(--icon-purple, currentcolor);
+}
+
+.file-icon:is(
+  [data-icon="image"],
+  [data-icon="audio"],
+  [data-icon="sass"],
+  [data-icon="graphql"],
+  [data-icon="ruby"],
+  [data-icon="npm"]
+) {
+  color: var(--icon-pink, currentcolor);
+}
+
+.file-icon:is(
+  [data-icon="default"],
+  [data-icon="text"],
+  [data-icon="document"],
+  [data-icon="binary"],
+  [data-icon="font"],
+  [data-icon="bun"],
+  [data-icon="prettier"],
+  [data-icon="yml"]
+) {
+  color: var(--icon-muted, currentcolor);
+}
+
+/* The query field, the list and the row are shared by every overlay that is a
+   combobox over a listbox — the zoxide popup and the file finder today. They
+   were two identical copies for one commit, which is exactly how two dialogs
+   come to look subtly different for no reason anybody can name. The keyboard
+   behaviour they share is `useOverlayList`; this is the appearance half of the
+   same argument. */
+.overlay__query {
+  width: 100%;
+  padding: 4px 0;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: none;
+  color: var(--foreground);
+  font: inherit;
+  outline: none;
+}
+
+.overlay__list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* No transition and no gradient, for the reason every row fill in this file
+   has none: a per-row animation stutters during fast movement. */
+.overlay__row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.overlay__row--active {
+  background: var(--accent);
+}
+
+/* Search surfaces keep the input at the same position for every query state.
+   Only their results and preview scroll; the panel never sizes to its content. */
+.overlay.overlay--search {
+  align-items: flex-start;
+}
+
+.overlay__panel.search-popup {
+  display: flex;
+  flex-direction: column;
+  width: 90vw;
+  height: 80dvh;
+  min-width: 0;
+  max-height: none;
+  margin-top: 8dvh;
+  overflow: hidden;
+}
+
+.search-popup > .overlay__query {
+  flex-shrink: 0;
+}
+
+.search-popup__results {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.overlay__placeholder {
+  margin: 0;
+  color: var(--muted-foreground);
+}
+
+/* The split. `--finder-list-share` is the ONE lever; trying fifty/fifty is
+   that one number in `tokens.css` and nothing here. */
+.finder__body {
+  display: flex;
+  gap: var(--finder-gap);
+  align-items: stretch;
+  flex: 1 1 0;
+  min-height: 0;
+  margin-top: 8px;
+  overflow: hidden;
+}
+
+/* `min-width: 0` is load-bearing, not tidiness. A flex item's default minimum
+   is its content, so without it a single very long path would push the list
+   past its share and starve it — which is the exact failure Qt worked around by
+   pinning its panel to 360px with a hard maximum. */
+.finder__list {
+  /* The gap is subtracted BEFORE the share is taken, so the share divides the
+     space actually available. A plain percentage basis takes its cut of the
+     whole body and leaves the gap to the flexible side alone, which measured
+     61.5:38.5 in a real window when it was declared as sixty/forty. */
+  flex: 0 0 calc((100% - var(--finder-gap)) * var(--finder-list-share));
+  min-width: 0;
+  /* The shared `.overlay__list` carries `margin: 8px 0 0`, which is right in a
+     dialog where the list follows the field directly. Here the body already
+     owns that gap, and the inherited margin would both double it and drop the
+     list 8px below the information panel beside it — the two panes are flex
+     siblings under `align-items: stretch`, so only one of them moving is a
+     visible seam along the top edge. */
+  margin-top: 0;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+/* The finder's rows carry an icon; the zoxide popup's do not. `.overlay__row`
+   aligns on the baseline, which is right for two runs of text and wrong for a
+   glyph beside them — an SVG has no baseline of its own and sits low. Centred
+   here, exactly as the pane's own rows are. */
+/* Written as a COMPOUND selector so it beats `.overlay__row` on specificity
+   rather than on source order. Written apart, the two have equal weight and the
+   override survives only while this block sits later in the file — moving
+   either one silently reverses it, and the symptom (icons sitting low) is the
+   kind nobody reports. */
+.overlay__row.finder__row {
+  align-items: center;
+}
+
+.overlay__status {
+  flex-shrink: 0;
+  min-height: 1.25em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin: 8px 0 0;
+  color: var(--muted-foreground);
+  font-size: 0.85em;
+}
+
+.finder__name {
+  flex: 0 0 auto;
+}
+
+/* The directory is what elides. It is the part the reader needs LAST — the name
+   answers "is this the file", the directory answers "which one of them" — so a
+   long path shortens from the end rather than pushing the name off the row. */
+.finder__directory {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  text-overflow: ellipsis;
+}
+
+/* `mark` carries a browser default background that would paint a block of
+   highlighter yellow across the row. The match is shown by WEIGHT and colour
+   instead, which is what the Qt finder does and what survives a dark palette. */
+.finder__match {
+  background: none;
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.finder-info {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+  padding-left: var(--finder-gap);
+  border-left: 1px solid var(--border);
+  overflow: hidden;
+}
+
+/* Elided in the MIDDLE: the end of a name is where the extension is, and the
+   extension is most of what this line is read for. */
+.finder-info__name {
+  margin: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Two up, so four facts occupy two tight rows and leave the preview the room.
+   The Qt information panel uses the same arrangement for the same reason. */
+.finder-info__facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 24px;
+}
+
+.finder-info__fact {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+  font-size: 0.85em;
+}
+
+.finder-info__label {
+  color: var(--muted-foreground);
+}
+
+.finder-info__value {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.finder-info__preview {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}

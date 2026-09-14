@@ -1,0 +1,14 @@
+{
+  // The privileged half: main process and preload. Node globals, no DOM.
+  // The preload script runs in a renderer process but with Node available and
+  // the DOM deliberately out of reach — it only builds the bridge object, so
+  // grouping it here is correct.
+  // Add each new `@types/*` package to `types` below or its globals are
+  // silently invisible; nothing errors when it is missing.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["node"]
+  },
+  "include": ["src/main/**/*.ts", "src/preload/**/*.ts", "test/*.ts"]
+}

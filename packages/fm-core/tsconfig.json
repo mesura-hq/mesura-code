@@ -1,0 +1,13 @@
+{
+  // `lib` is ES2023 with NO DOM, deliberately. This package is imported by both
+  // the main process and the renderer, and owned by neither. Without the
+  // exclusion, an accidental `window` or `document` reference type-checks here
+  // and then crashes in the main process at runtime, where there is no DOM.
+  // No `types` either: `@types/node` globals do not belong in shared logic.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": []
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

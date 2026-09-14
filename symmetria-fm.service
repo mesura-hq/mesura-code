@@ -1,0 +1,41 @@
+# TWO COPIES OF THIS FILE EXIST — keep them byte-identical:
+#   symmetria-file-manager/symmetria-fm.service        (this one, the source)
+#   ~/.dotfiles/.config/systemd/user/symmetria-fm.service  (the INSTALLED one,
+#       symlinked into ~/.config/systemd/user by stow — systemd reads THAT one)
+# Editing only this file changes nothing at runtime.
+
+[Unit]
+Description=Symmetria File Manager IPC Service
+# Disable systemd's start rate limit (default: 5 starts per 10 s). This daemon
+# exits on purpose every time its last window closes, so an ordinary burst of
+# open/close cycles counts as a burst of starts. On hitting the limit systemd
+# parks the unit in `failed` PERMANENTLY — Super+E would then do nothing until
+# a manual `systemctl --user reset-failed`. There is no runaway-loop to protect
+# against here: every exit is a user action, not a crash loop.
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/usr/bin/symmetria-fm
+# Strip Hyprland's stale initial-workspace token before exec. This is a
+# long-lived daemon: systemd starts it once at login on whatever workspace was
+# active then, and it inherits HL_INITIAL_WORKSPACE_TOKEN from the session env.
+# Hyprland reads that token from /proc/<pid>/environ and, with
+# misc:initial_workspace_tracking=1 (its default), routes the daemon's FIRST
+# spawned window to the token's recorded workspace instead of the active one —
+# so the very first file-manager window after login always landed on workspace 1.
+# The unset MUST happen before exec: /proc/<pid>/environ is the exec-time
+# environment block, so an in-process unsetenv() in main.cpp would be too late.
+# See Hyprland issue #5919.
+UnsetEnvironment=HL_INITIAL_WORKSPACE_TOKEN
+Restart=always
+# Keep the dead window as short as possible. The daemon removes its socket file
+# on exit, so for the whole RestartSec the socket is ABSENT and a client
+# connect fails instantly rather than waiting — at the old value of 2 s that
+# left ~2.3 s (RestartSec + ~0.3 s startup) in which Super+E silently did
+# nothing, right after closing the last window, which is exactly when the user
+# is most likely to press it again. symmetria-fm-cli retries across this window
+# too; the two fixes are independent and both are wanted.
+RestartSec=200ms
+
+[Install]
+WantedBy=default.target
