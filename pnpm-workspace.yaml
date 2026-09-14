@@ -12,6 +12,15 @@ packages:
   # hand only. It follows the precedent of `scripts` and `oxlint-plugin-t3code`,
   # and it is the one upstream line this work touches.
   - tests
+  # Mesura: the Symmetria File Manager is vendored as a git subtree under
+  # vendor/symmetria-file-manager. Only its three renderer-side packages are
+  # workspace members: `app/` would install a second Electron beside the
+  # desktop's, and `fm-main` is the scanner the tree does not use here (the
+  # tree renders the server's file list). Runbook:
+  # docs/operations/vendor-symmetria-file-manager.md
+  - vendor/symmetria-file-manager/packages/fm-core
+  - vendor/symmetria-file-manager/packages/fm-ui
+  - vendor/symmetria-file-manager/packages/fm-search
 
 # Successor to onlyBuiltDependencies/ignoredBuiltDependencies (pnpm 11).
 # true = allowed to run build scripts; false mirrors the pnpm 10 behavior

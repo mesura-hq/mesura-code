@@ -12,6 +12,9 @@ export default defineConfig({
     environment: "node",
     exclude: [
       "**/.repos/**",
+      // The vendored file manager's suites run under their own vitest configs
+      // through their package `test` scripts; the root config has no DOM.
+      "**/vendor/**",
       "**/node_modules/**",
       "**/dist/**",
       "**/dist-electron/**",
@@ -75,6 +78,9 @@ export default defineConfig({
       // pins. `vp run generate` owns these bytes; a formatter pass would move
       // the checksum without any schema having changed.
       "packages/symmetria-broker-contract/schema/**",
+      // The vendored Symmetria File Manager subtree keeps its own formatter
+      // (biome); formatting it here would make every subtree sync a conflict.
+      "vendor/**",
     ],
     sortPackageJson: {},
     overrides: [
@@ -99,6 +105,11 @@ export default defineConfig({
       "apps/mobile/android/**",
       "apps/mobile/ios/**",
       "apps/mobile/uniwind-types.d.ts",
+      // The vendored Symmetria File Manager subtree is linted in its own
+      // repository (biome + oxlint); see the fmt ignore above. Both forms,
+      // like `.repos`: oxlint needs the bare one to skip the directory itself.
+      "vendor",
+      "vendor/**",
     ],
     plugins: ["eslint", "oxc", "react", "unicorn", "typescript"],
     jsPlugins: ["./oxlint-plugin-t3code/index.ts"],

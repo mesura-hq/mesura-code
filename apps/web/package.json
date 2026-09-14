@@ -27,6 +27,8 @@
     "@pierre/diffs": "catalog:",
     "@pierre/trees": "1.0.0-beta.4",
     "@symmetria/broker-contract": "workspace:*",
+    "@symmetria/fm-core": "workspace:*",
+    "@symmetria/fm-ui": "workspace:*",
     "@t3tools/client-runtime": "workspace:*",
     "@t3tools/contracts": "workspace:*",
     "@t3tools/shared": "workspace:*",
