@@ -42,6 +42,7 @@ policy in [CONTRIBUTING.md](../CONTRIBUTING.md); agent rules in [AGENTS.md](../A
 - [CI gates](./internals/ci.md)
 - [Engineering work artifacts](./internals/work-artifacts.md)
 - [File tree](./internals/file-tree.md)
+- [File manager](./internals/file-manager.md)
 
 ### Runbooks
 

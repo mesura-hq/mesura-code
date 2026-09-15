@@ -158,15 +158,29 @@ The Symmetria File Manager's tree, rendered in the files surface of the right pa
 server's file listing through a client-side adapter. It replaced T3 Code's `FileBrowserPanel`
 (ADR-005). See [file-tree.md](./file-tree.md).
 
-#### Overview
+#### File manager
 
-The Symmetria File Manager's folder graph, opened over the window on `Ctrl+Shift+E` for the
-project the files surface shows. Same library, same data as the file tree. See
-[file-tree.md](./file-tree.md).
+The whole Symmetria File Manager, Miller columns, previews, operations and its own folder
+overview, opened over the window on `Ctrl+Shift+E` at the thread's project. Its UI runs in the
+client; its privileged half runs in the server behind four RPCs. See
+[file-manager.md](./file-manager.md).
+
+#### File manager session
+
+One mounted file manager's connection to the server's registry: opened by the client's
+`fileManager.subscribeEvents` stream, named by a client-chosen id private to that RPC connection,
+and released with every watch it holds when the stream ends. Queries and mutations name their
+session. See [file-manager.md](./file-manager.md).
+
+#### Preview token
+
+An unguessable grant the registry mints for one path (or one document's directory) so the browser
+can load a preview as a same-origin URL under `/api/file-manager/preview/`. Bounded to the 64 most
+recent grants, evicted as newer ones arrive. See [file-manager.md](./file-manager.md).
 
 #### Vendor
 
-`vendor/symmetria-file-manager`, the file manager's repository as a git subtree. Three of its
+`vendor/symmetria-file-manager`, the file manager's repository as a git subtree. Four of its
 packages are pnpm workspace members; the rest is inert here. Never formatted, linted or tested from
 this repository. Runbook: [vendor-symmetria-file-manager.md](../operations/vendor-symmetria-file-manager.md).
 

@@ -1,6 +1,7 @@
 # ADR-005 — The Symmetria file tree replaces the T3 tree
 
-**Status:** Accepted, 2026-09-14.
+**Status:** Accepted, 2026-09-14. Partly superseded by ADR-006 (the `Ctrl+Shift+E` chord and the
+tree-listing overview); the rest stands, and the counts below are the record as of this decision.
 
 **Scope:** which file tree the files surface of the right panel shows, where its code comes from,
 how it gets its data, and which chords reach it.
@@ -12,7 +13,7 @@ The tree is consumed from the file manager's repository as a git subtree under
 `vendor/symmetria-file-manager`, pinned by commit, with three of its packages in the pnpm
 workspace. A pure adapter turns the server's existing flat file list into the folder map the
 library renders; nothing crosses the wire that did not already. `Ctrl+E` reaches and leaves the
-tree; `Ctrl+Shift+E` opens the folder overview graph. The architecture is in
+tree; `Ctrl+Shift+E` opens the file manager over the window (ADR-006). The architecture is in
 `docs/internals/file-tree.md`; the sync commands in
 `docs/operations/vendor-symmetria-file-manager.md`.
 
@@ -66,10 +67,9 @@ needed and focuses the tree; from inside, it hides the tree behind the editor, o
 composer when only the tree is shown. _Rejected: close the files surface from inside the tree._
 Larger than "toggle" implies, and a files surface without its tree is empty.
 
-**`Ctrl+Shift+E` is `fileTree.overview`.** _Rejected: `Ctrl+O`, the file manager's own chord._
-ADR-004 gives `Ctrl+O` to the command palette; the sibling chord keeps the tree and its bigger
-sibling adjacent. Both chords are free in the current defaults and in ADR-004's table, and this
-work claims none of `Ctrl+H/J/K/L`.
+**`Ctrl+Shift+E` was `fileTree.overview`**, the tree-listing overview graph over the window.
+_Superseded by ADR-006:_ the chord is `fileTree.miller` and opens the whole file manager, whose own
+overview is `Ctrl+O` inside it. The tree-listing overview and its host modules are deleted.
 
 **Host-owned key tables drive the ports.** _Rejected: mount the file manager's `useKeyDispatch`._
 It attaches to `window` and swallows keys, which would fight every chord this application owns;

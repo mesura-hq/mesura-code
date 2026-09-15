@@ -42,22 +42,41 @@ The folders you close stay closed: the tree remembers its shape per project, acr
 **When the project is large**, the server lists part of it, the tree says so under its last row,
 and what is missing from the tree is missing from `Ctrl+P` too.
 
-## The overview
+## The file manager
 
-`Ctrl+Shift+E` opens the folder overview over the window: the project as a graph of folders you
-can zoom and pan. Press it again, or `Escape`, to close it and return to where you were.
+`Ctrl+Shift+E` opens the Symmetria File Manager over the whole window, in the project of the thread
+you have open. It is the same file manager you run on its own, with its Miller columns: the folder
+you are in, its parent to the left, and what is under the cursor to the right. Press `Ctrl+Shift+E`
+again to put it away, or close its last tab with `Ctrl+Q`. You return to where you were, with the
+keyboard where it was.
 
-- `h`, `j`, `k`, `l` or the arrows move the selection between folders and entries. With `Ctrl`
-  they pan half a screen; with `Ctrl+Shift`, a full screen. `PgUp` and `PgDn` pan a full screen too.
-- `+` and `-` zoom, `0` resets the zoom, `f` fits the whole graph on screen.
-- `o` folds or unfolds the selected folder.
-- `/` searches, `n` and `N` step through matches, `s` is the flash jump.
-- `Alt+M` hides and shows the minimap.
-- `Enter` on a folder closes the overview and puts the tree's cursor on that folder. `Enter` on a
-  file does that and opens the file in the editor.
+While it is open, its keys are the file manager's keys and the application's own shortcuts wait,
+`Ctrl+Shift+E` apart (and `Alt+U`, the usage peek, which has no meaning in the file manager). `?` shows every key. The ones you will use first:
 
-The overview remembers where you left it, per project: the zoom, the position and the selection
-come back when you open it again.
+- `j` and `k` move the cursor, `h` goes up a directory, `l` and `Enter` go into a folder.
+- `Enter` on a file under the project opens it in the editor and closes the file manager. On a
+  file outside the project it opens the file with the desktop's own application for it, and the
+  file manager stays.
+- The pane on the right previews the file under the cursor: text, code, images, video, audio,
+  PDF, rendered markdown and HTML, spreadsheets, archives.
+- `a` creates a file or a folder, `r` renames, `d` moves to the desktop's trash after a
+  confirmation. `y` copies, `x` cuts, `p` pastes; `Space` marks several entries first.
+- `c` starts the copy-to-clipboard chord: the path, the name, or an image itself.
+- `g` starts the go-to chord: your bookmarks, `gg` for the top. `~` goes home and `z` jumps to a
+  frecent directory, each on its own.
+- `t` opens a tab, `[` and `]` move between tabs, `Ctrl+Q` closes one.
+- `/` searches the names in the column as you type; `s` is the flash jump.
+- `.` shows hidden files; `,` starts the sort chord.
+
+`Ctrl+O` opens the folder overview: the project as a graph of folders you can zoom and pan. `Esc`
+or `Ctrl+O` closes it and returns to the columns.
+
+The file manager's bookmarks, sort and hidden-files preferences are the ones of the file manager
+you run on its own, on the machine the server runs on: set a bookmark in one and the other has it.
+
+Two things are not there yet. `f`, the fuzzy finder, says so when you press it; it arrives as a
+finder of its own, reachable from anywhere in the application. And a remote browser opens files
+outside the project on the server's desktop, not on yours.
 
 ## Editing and saving
 

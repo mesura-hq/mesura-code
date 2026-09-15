@@ -4,8 +4,9 @@
 
 The **file tree** in the files surface of the right panel is the tree of the Symmetria File
 Manager, consumed as a library and driven by a thin host layer in `apps/web`. It replaced T3 Code's
-`FileBrowserPanel` (ADR-005). The folder **overview** on `Ctrl+Shift+E` is the same library's graph
-over the same data.
+`FileBrowserPanel` (ADR-005). The whole file manager, Miller columns and its own overview, opens over
+the window on `Ctrl+Shift+E`; that is a separate host, documented in
+[file-manager.md](./file-manager.md).
 
 The parts, and the file that owns each:
 
@@ -13,7 +14,6 @@ The parts, and the file that owns each:
 | ------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
 | The library, as a git subtree                          | `vendor/symmetria-file-manager` (runbook: `docs/operations/vendor-symmetria-file-manager.md`) |
 | The tree component and its seams                       | `@symmetria/fm-ui/tree` (`packages/fm-ui/src/tree/index.ts`)                                  |
-| The overview layer and its port                        | `@symmetria/fm-ui/overview` (`packages/fm-ui/src/overview/index.ts`)                          |
 | The host layer                                         | `apps/web/src/components/files/mesuraTree/`                                                   |
 | The focus registry the chords use                      | `apps/web/src/lib/focusTargets.ts`                                                            |
 | Chords that reach the app from inside a focused Neovim | `apps/web/src/components/files/monaco/nvim/appShortcutsThatOutrankNeovim.ts`                  |
@@ -23,26 +23,23 @@ The parts, and the file that owns each:
 Everything under `apps/web/src/components/files/mesuraTree/` is fork-owned. Each module has one
 job:
 
-| Module                        | Job                                                                                                                              |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `MesuraFileTree.tsx`          | Mounts `FileTree`; owns the tree record cache, the reveal route, the port, the context menu, and `revealInTree` for the overview |
-| `MesuraFolderOverview.tsx`    | Mounts `OverviewLayer` in a portal on `body` while the store says the overview is open; owns its port                            |
-| `useProjectOverviewModel.ts`  | The `projects.listEntries` query and the workspace-mutation refresh, as an `OverviewModel`                                       |
-| `overviewModelFromEntries.ts` | The pure adapter from the server's flat listing to the library's folder map; `relativeToCwd`, `entryKindAt`                      |
-| `keyInput.ts`                 | `KeyInput`, `Binding`, `commandForKey`, and `routeKey`, shared by the tree and the overview                                      |
-| `treeKeymap.ts`               | The tree's key table, over `TreeCommand`                                                                                         |
-| `overviewKeymap.ts`           | The overview's key table, over `OverviewCommand`                                                                                 |
-| `treeReveal.ts`               | When a `selectedPath` / `selectedPathRevealId` pair is a new reveal request                                                      |
-| `fileTreeStore.ts`            | zustand: `explorerOpen` (persisted under the T3 key), `pendingFocus`, `overviewOpen`                                             |
-| `fileTreeShortcutDecision.ts` | The pure decision tables for `Ctrl+E` and `Ctrl+Shift+E`                                                                         |
-| `fileTreeFocusMoves.ts`       | `leaveFileTree`, `runFileTreeToggle`, `runOverviewToggle`: the effects those decisions name                                      |
-| `useFileTreeShortcut.ts`      | The window capture-phase listener that resolves the two commands                                                                 |
-| `fileTreeContextMenu.ts`      | Copy mention / Add to chat, ported from the T3 tree                                                                              |
-| `treeShapeStorage.ts`         | The persisted tree shape (cursor and collapsed folders), with a coalescing persister                                             |
-| `overviewViewStorage.ts`      | The persisted overview view (selection, collapsed, camera, boxes), per graph root                                                |
-| `schemaLocalStorage.ts`       | Local storage behind an Effect schema that never throws at the caller                                                            |
-| `writeCoalescer.ts`           | The delay-and-flush writer both storages use                                                                                     |
-| `fileTree.css`                | The tokens the library reads and `index.css` lacks, plus panel sizing; see `docs/mesura/styling.md`                              |
+| Module                        | Job                                                                                                                                                                                  |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `MesuraFileTree.tsx`          | Mounts `FileTree`; owns the tree record cache, the reveal route, the port, the context menu, and the Miller button's `onMiller`                                                      |
+| `useProjectOverviewModel.ts`  | The `projects.listEntries` query and the workspace-mutation refresh, as an `OverviewModel`                                                                                           |
+| `overviewModelFromEntries.ts` | The pure adapter from the server's flat listing to the library's folder map; `relativeToCwd`                                                                                         |
+| `keyInput.ts`                 | `KeyInput`, `Binding`, `commandForKey`, and `routeKey`                                                                                                                               |
+| `treeKeymap.ts`               | The tree's key table, over `TreeCommand`                                                                                                                                             |
+| `treeReveal.ts`               | When a `selectedPath` / `selectedPathRevealId` pair is a new reveal request                                                                                                          |
+| `fileTreeStore.ts`            | zustand: `explorerOpen` (persisted under the T3 key), `pendingFocus`                                                                                                                 |
+| `fileTreeShortcutDecision.ts` | The pure decision table for `Ctrl+E`                                                                                                                                                 |
+| `fileTreeFocusMoves.ts`       | `leaveFileTree`, `runFileTreeToggle`: the effects that decision names                                                                                                                |
+| `useFileTreeShortcut.ts`      | The window capture-phase listener that resolves `fileTree.toggle` and `fileTree.miller`                                                                                              |
+| `fileTreeContextMenu.ts`      | Copy mention / Add to chat, ported from the T3 tree                                                                                                                                  |
+| `treeShapeStorage.ts`         | The persisted tree shape (cursor and collapsed folders), with a coalescing persister                                                                                                 |
+| `schemaLocalStorage.ts`       | Local storage behind an Effect schema that never throws at the caller                                                                                                                |
+| `writeCoalescer.ts`           | The delay-and-flush writer the shape storage uses                                                                                                                                    |
+| `fileTree.css`                | Panel sizing and the search row; the icon and glass tokens are in `../symmetriaIcons.css` and `../symmetriaOverview.css`, shared with the file manager; see `docs/mesura/styling.md` |
 
 `replacesT3Tree.test.ts` asserts that the five T3 tree files stay deleted and nothing under
 `apps/web/src` imports `@pierre/trees/react`.
@@ -72,23 +69,18 @@ own refresh so the toolbar's Refresh re-reads the open file too.
 
 ## The ports and who drives them
 
-The library exposes two seams and the host owns both ends of each chord:
+The library exposes one seam here and the host owns both ends of the chord:
 
 - **`TreePort` / `TreeController`.** The tree calls `port.connect(controller)` on mount; the host
-  keeps the controller and sends it `TreeCommand`s. `MesuraFileTree` also registers the controller
-  in a module-level map keyed by `projectTreeKey(environmentId, cwd)` so `revealInTree` can move
-  the cursor from outside; with no tree mounted, the reveal is stored on the tree record and
-  resolved on the tree's first render.
-- **`OverviewPort`.** `connect` for `OverviewCommand`s, `reveal(path)` (close, reveal in the tree,
-  open when it is a file), `focus(path)` (re-root the graph; the layer remounts on its root key),
-  and the flash port.
+  keeps the controller and sends it `TreeCommand`s. A reveal that arrives before the tree mounts is
+  stored on the tree record and resolved on the tree's first render.
 
 The file manager's own window-level dispatcher (`useKeyDispatch`) is **not mounted**. It attaches
 to `window` and swallows keys, which would fight every chord this application owns. Instead each
 wrapper's `onKeyDown` goes through `routeKey`: flash mode first, then native activation for buttons
 and disclosures, then Escape (inside a text field it blurs the field; elsewhere it is the host's),
-then the command table. The tables are copies of the file manager's `TREE` and `OVERVIEW_ONLY`
-registry rows, minus what belongs to the file manager alone. `Symbol` rows accept Shift and AltGr,
+then the command table. The table is a copy of the file manager's `TREE` registry rows, minus
+what belongs to the file manager alone. `Symbol` rows accept Shift and AltGr,
 as the file manager's `matchKey` does, and refuse Ctrl and Alt chords.
 
 The chat view's type-anywhere listener would otherwise take the letters: `[role="tree"]` and
@@ -102,29 +94,28 @@ whether it took focus. The tree registers `tree` and `composer` while mounted;
 the tree so focus never lands on `body`, and falls back to the composer with the tree left in
 place. ADR-004 (pane focus) is meant to reuse this registry.
 
-The overview layer's `useDialogFocus` (vendored) focuses the dialog on mount and restores the
-previous element on unmount, which is how `Escape` and the chord return focus to where they were.
+The file manager layer (`file-manager.md`) takes focus on mount and restores it on unmount the same
+way the library's `useDialogFocus` does.
 
 ## Storage
 
-| Key                                              | Value                                                      | Written by           |
-| ------------------------------------------------ | ---------------------------------------------------------- | -------------------- |
-| `t3code.fileExplorerOpen`                        | boolean, the T3 key kept so a preference carries           | `fileTreeStore`      |
-| `mesura.fileTree.<environmentId>:<cwd>`          | `{ selected, collapsed[] }`, collapsed sorted              | `treeShapePersister` |
-| `mesura.fileTreeOverview.<environmentId>:<root>` | `{ selected, collapsed[], zoom, origin, scroll, boxes[] }` | `overviewViewStore`  |
+| Key                                     | Value                                            | Written by           |
+| --------------------------------------- | ------------------------------------------------ | -------------------- |
+| `t3code.fileExplorerOpen`               | boolean, the T3 key kept so a preference carries | `fileTreeStore`      |
+| `mesura.fileTree.<environmentId>:<cwd>` | `{ selected, collapsed[] }`, collapsed sorted    | `treeShapePersister` |
 
-Both persisters coalesce writes behind 300 ms and flush on `pagehide`; the library reports a
-change on every cursor move and every scroll frame. The tree persister also skips a shape equal to
-the last one written and the default shape of a project that stored nothing, and retries a write
-that failed. Values are decoded with `Schema.is`, so a corrupt value is forgotten rather than
+The persister coalesces writes behind 300 ms and flushes on `pagehide`; the library reports a
+change on every cursor move. It also skips a shape equal to the last one written and the default
+shape of a project that stored nothing, and retries a write that failed. Keys of the retired
+overview view (`mesura.fileTreeOverview.*`) are left where they are. Values are decoded with `Schema.is`, so a corrupt value is forgotten rather than
 thrown. Keys are never evicted.
 
 ## Chords
 
-| Command             | Default       | Where it is decided      |
-| ------------------- | ------------- | ------------------------ |
-| `fileTree.toggle`   | `mod+e`       | `decideFileTreeShortcut` |
-| `fileTree.overview` | `mod+shift+e` | `decideOverviewShortcut` |
+| Command           | Default       | Where it is decided                           |
+| ----------------- | ------------- | --------------------------------------------- |
+| `fileTree.toggle` | `mod+e`       | `decideFileTreeShortcut`                      |
+| `fileTree.miller` | `mod+shift+e` | `runFileManagerToggle` (`mesuraFileManager/`) |
 
 Both are `when: "!terminalFocus"`, dispatched from one window capture-phase listener installed by
 the chat route, and members of `APP_SHORTCUTS_THAT_OUTRANK_NEOVIM` as defence should that listener
@@ -141,7 +132,7 @@ in the previous three months:
 | `apps/web/src/components/ChatView.tsx`               |     221 | two selector entries in `TYPE_TO_FOCUS_INTERACTIVE_SELECTOR` (that block: 1)              |
 | `apps/web/src/components/files/FilePreviewPanel.tsx` |      32 | one import and one element swapped, one element added; explorer state read from the store |
 | `apps/web/package.json`                              |      31 | three `workspace:*` dependencies                                                          |
-| `pnpm-workspace.yaml`                                |      44 | three vendored package paths                                                              |
+| `pnpm-workspace.yaml`                                |      44 | four vendored package paths                                                               |
 | `vite.config.ts`                                     |      15 | `vendor/**` excluded from fmt, lint and test                                              |
 | `packages/contracts/src/keybindings.ts`              |      13 | two command ids                                                                           |
 | `packages/shared/src/keybindings.ts`                 |       8 | two default bindings                                                                      |
