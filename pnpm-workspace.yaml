@@ -188,6 +188,10 @@ patchedDependencies:
   "@react-native-ai/apple@0.12.0": patches/@react-native-ai__apple@0.12.0.patch
   "@react-native-menu/menu@2.0.0": patches/@react-native-menu__menu@2.0.0.patch
   "@react-navigation/native-stack@7.17.6": patches/@react-navigation%2Fnative-stack@7.17.6.patch
+  # Mesura: sharp 0.35.0 declares `types` at the top level but omits it from its
+  # `exports` map, so NodeNext resolution finds no declarations and every import
+  # is an implicit any. The declarations ship; only the map is wrong.
+  sharp@0.35.0: patches/sharp@0.35.0.patch
   dbus-next@0.10.2: patches/dbus-next@0.10.2.patch
   effect@4.0.0-rc.112: patches/effect@4.0.0-rc.112.patch
   expo-audio@57.0.4: patches/expo-audio@57.0.4.patch
