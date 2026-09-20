@@ -18,6 +18,14 @@ const chord = (key: string, shift = false) => ({
   altKey: false,
 });
 
+const altChord = (key: string) => ({
+  key,
+  ctrlKey: false,
+  metaKey: false,
+  shiftKey: false,
+  altKey: true,
+});
+
 /**
  * Every window listener resolves its chord through `resolveShortcutCommand`
  * or one of the `is*Shortcut` helpers over it, so one guard there is what
@@ -35,7 +43,13 @@ describe("host chords while the file manager is open", () => {
     expect(resolveShortcutCommand(chord("e", true), DEFAULT_RESOLVED_KEYBINDINGS, linux)).toBe(
       "fileTree.miller",
     );
-    expect(isOpenFavoriteEditorShortcut(chord("o"), DEFAULT_RESOLVED_KEYBINDINGS, linux)).toBe(
+    // `editor.openFavorite` answers to alt+o, not mod+o. The pane-navigation
+    // work moved it there to free mod+k for `pane.focusUp`, which pushed
+    // `commandPalette.toggle` onto mod+o. Asserting mod+o here instead would
+    // pass for the wrong reason once the command moved, which is exactly what
+    // happened: this line read `chord("o")` and went false when the two
+    // changes met.
+    expect(isOpenFavoriteEditorShortcut(altChord("o"), DEFAULT_RESOLVED_KEYBINDINGS, linux)).toBe(
       true,
     );
   });
@@ -50,10 +64,22 @@ describe("host chords while the file manager is open", () => {
     expect(resolveShortcutCommand(chord("e"), DEFAULT_RESOLVED_KEYBINDINGS, linux)).toBeNull();
   });
 
+  /**
+   * Ctrl+O is the file manager's overview chord, so the host must not answer it
+   * while the file manager is up.
+   *
+   * Asserted through `resolveShortcutCommand` rather than through
+   * `isOpenFavoriteEditorShortcut`, because that helper now reports false for
+   * mod+o in BOTH states — `editor.openFavorite` lives on alt+o. A guard that
+   * cannot fail is worse than no guard: it reads as coverage and proves
+   * nothing. The host command competing for mod+o today is
+   * `commandPalette.toggle`.
+   */
   it("leaves Ctrl+O to the file manager's overview while it is open", () => {
-    state.open = true;
-    expect(isOpenFavoriteEditorShortcut(chord("o"), DEFAULT_RESOLVED_KEYBINDINGS, linux)).toBe(
-      false,
+    expect(resolveShortcutCommand(chord("o"), DEFAULT_RESOLVED_KEYBINDINGS, linux)).toBe(
+      "commandPalette.toggle",
     );
+    state.open = true;
+    expect(resolveShortcutCommand(chord("o"), DEFAULT_RESOLVED_KEYBINDINGS, linux)).toBeNull();
   });
 });
