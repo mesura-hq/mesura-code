@@ -5,39 +5,48 @@ import { STATIC_KEYBINDING_COMMANDS } from "@t3tools/contracts";
 import { DEFAULT_KEYBINDINGS } from "./keybindings.ts";
 
 /**
- * Keybindings this fork adds on top of upstream's defaults.
+ * The keybindings this fork adds on top of upstream's defaults.
  *
  * `composer.attachFiles` is the one ADR-003 kept when the fork's attachment
- * stack was retired for upstream's. Upstream's attach button survives the
- * switch, so nothing was lost there, but upstream ships no keyboard route to
- * attaching at all — their default list has no attach entry of any kind.
+ * stack was retired for upstream's: their attach button survives the switch,
+ * but upstream ships no keyboard route to attaching at all. `fileTree.toggle`
+ * reaches the Symmetria file tree in the files surface and leaves it again;
+ * `fileTree.miller` opens the file manager's Miller columns over the window.
  *
- * The binding is cheap to carry and easy to lose: a sync that takes upstream's
+ * Each is cheap to carry and easy to lose: a sync that takes upstream's
  * command list wholesale drops the command, and the shortcut then resolves to
- * nothing while the button keeps working, so no suite notices.
+ * nothing while the mouse route keeps working, so no suite notices.
  */
 
+const FORK_BINDINGS = [
+  { command: "composer.attachFiles", key: "alt+a" },
+  { command: "fileTree.toggle", key: "mod+e" },
+  { command: "fileTree.miller", key: "mod+shift+e" },
+] as const;
+
 describe("fork keybindings", () => {
-  it("binds alt+a to attaching files from the composer", () => {
-    const attachBindings = DEFAULT_KEYBINDINGS.filter(
-      (binding) => binding.command === "composer.attachFiles",
-    );
+  for (const { command, key } of FORK_BINDINGS) {
+    describe(command, () => {
+      it(`binds ${key} outside the terminal`, () => {
+        const bindings = DEFAULT_KEYBINDINGS.filter((binding) => binding.command === command);
 
-    expect(attachBindings).toHaveLength(1);
-    expect(attachBindings[0]?.key).toBe("alt+a");
-    // Not while a terminal owns the keyboard, where alt+a belongs to the shell.
-    expect(attachBindings[0]?.when).toBe("!terminalFocus");
-  });
+        expect(bindings).toHaveLength(1);
+        expect(bindings[0]?.key).toBe(key);
+        // Not while a terminal owns the keyboard, where the chord belongs to the shell.
+        expect(bindings[0]?.when).toBe("!terminalFocus");
+      });
 
-  it("registers the attach command so a user can rebind it", () => {
-    expect(STATIC_KEYBINDING_COMMANDS).toContain("composer.attachFiles");
-  });
+      it("registers the command so a user can rebind it", () => {
+        expect(STATIC_KEYBINDING_COMMANDS).toContain(command);
+      });
 
-  it("leaves alt+a free of any other command in the same context", () => {
-    const collisions = DEFAULT_KEYBINDINGS.filter(
-      (binding) => binding.key === "alt+a" && binding.command !== "composer.attachFiles",
-    );
+      it(`leaves ${key} free of any other command`, () => {
+        const collisions = DEFAULT_KEYBINDINGS.filter(
+          (binding) => binding.key === key && binding.command !== command,
+        );
 
-    expect(collisions).toEqual([]);
-  });
+        expect(collisions).toEqual([]);
+      });
+    });
+  }
 });

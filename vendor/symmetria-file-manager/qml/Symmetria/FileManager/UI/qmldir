@@ -1,0 +1,73 @@
+module Symmetria.FileManager.UI
+
+# === Embeddable entry component ===
+FileManager 1.0 modules/filemanager/FileManager.qml
+
+# === Singletons (theme, services, config) ===
+singleton FmTheme 1.0 services/FmTheme.qml
+singleton Paths 1.0 services/Paths.qml
+singleton Logger 1.0 services/Logger.qml
+singleton FileManagerService 1.0 services/FileManagerService.qml
+singleton BookmarkService 1.0 services/BookmarkService.qml
+singleton Config 1.0 config/Config.qml
+
+# === Per-instance service types ===
+WindowState 1.0 services/WindowState.qml
+TabManager 1.0 services/TabManager.qml
+FileManagerConfig 1.0 config/FileManagerConfig.qml
+Gitignore 1.0 services/Gitignore.qml
+
+# === Reusable components ===
+Anim 1.0 components/Anim.qml
+CAnim 1.0 components/CAnim.qml
+ClipboardCopyRunner 1.0 components/ClipboardCopyRunner.qml
+ClippingRect 1.0 components/ClippingRect.qml
+FileIcon 1.0 components/FileIcon.qml
+FileOpener 1.0 components/FileOpener.qml
+GitStatusBadge 1.0 components/GitStatusBadge.qml
+IndicatorStrip 1.0 components/IndicatorStrip.qml
+MaterialIcon 1.0 components/MaterialIcon.qml
+PasteRunner 1.0 components/PasteRunner.qml
+PillCard 1.0 components/PillCard.qml
+PillSurface 1.0 components/PillSurface.qml
+PreviewLoadingIndicator 1.0 components/PreviewLoadingIndicator.qml
+PreviewStateIndicator 1.0 components/PreviewStateIndicator.qml
+SlimScrollBar 1.0 components/SlimScrollBar.qml
+StateLayer 1.0 components/StateLayer.qml
+StyledRect 1.0 components/StyledRect.qml
+StyledText 1.0 components/StyledText.qml
+
+# === Panel sub-components (also exposed for IDE consumers) ===
+ArchiveExtractionView 1.0 modules/filemanager/ArchiveExtractionView.qml
+ArchivePreview 1.0 modules/filemanager/ArchivePreview.qml
+AudioPreview 1.0 modules/filemanager/AudioPreview.qml
+ContextMenuActionsView 1.0 modules/filemanager/ContextMenuActionsView.qml
+ContextMenuPopup 1.0 modules/filemanager/ContextMenuPopup.qml
+CreateFilePopup 1.0 modules/filemanager/CreateFilePopup.qml
+DeleteConfirmPopup 1.0 modules/filemanager/DeleteConfirmPopup.qml
+FallbackPreview 1.0 modules/filemanager/FallbackPreview.qml
+FileList 1.0 modules/filemanager/FileList.qml
+FileListItem 1.0 modules/filemanager/FileListItem.qml
+FileTreeRow 1.0 modules/filemanager/FileTreeRow.qml
+FileTreeView 1.0 modules/filemanager/FileTreeView.qml
+FuzzyFinderInfoPanel 1.0 modules/filemanager/FuzzyFinderInfoPanel.qml
+FuzzyFinderPopup 1.0 modules/filemanager/FuzzyFinderPopup.qml
+FuzzyFinderResultDelegate 1.0 modules/filemanager/FuzzyFinderResultDelegate.qml
+HelpPopup 1.0 modules/filemanager/HelpPopup.qml
+HtmlPreview 1.0 modules/filemanager/HtmlPreview.qml
+ImagePreview 1.0 modules/filemanager/ImagePreview.qml
+MillerColumns 1.0 modules/filemanager/MillerColumns.qml
+OpenWithView 1.0 modules/filemanager/OpenWithView.qml
+ParentPanel 1.0 modules/filemanager/ParentPanel.qml
+PathBar 1.0 modules/filemanager/PathBar.qml
+PreviewContent 1.0 modules/filemanager/PreviewContent.qml
+PreviewMetadata 1.0 modules/filemanager/PreviewMetadata.qml
+PreviewPanel 1.0 modules/filemanager/PreviewPanel.qml
+RenamePopup 1.0 modules/filemanager/RenamePopup.qml
+SpreadsheetPreview 1.0 modules/filemanager/SpreadsheetPreview.qml
+StatusBar 1.0 modules/filemanager/StatusBar.qml
+TabBar 1.0 modules/filemanager/TabBar.qml
+TextPreview 1.0 modules/filemanager/TextPreview.qml
+VideoPreview 1.0 modules/filemanager/VideoPreview.qml
+WhichKeyPopup 1.0 modules/filemanager/WhichKeyPopup.qml
+ZoxidePopup 1.0 modules/filemanager/ZoxidePopup.qml

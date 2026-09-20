@@ -41,6 +41,8 @@ policy in [CONTRIBUTING.md](../CONTRIBUTING.md); agent rules in [AGENTS.md](../A
 - [T3 Connect](./internals/t3-connect.md)
 - [CI gates](./internals/ci.md)
 - [Engineering work artifacts](./internals/work-artifacts.md)
+- [File tree](./internals/file-tree.md)
+- [File manager](./internals/file-manager.md)
 
 ### Runbooks
 
@@ -48,3 +50,4 @@ policy in [CONTRIBUTING.md](../CONTRIBUTING.md); agent rules in [AGENTS.md](../A
 - [Observability](./operations/observability.md)
 - [Relay observability](./operations/relay-observability.md)
 - [Mobile app store screenshots](./operations/mobile-app-store-screenshots.md)
+- [Syncing the vendored Symmetria File Manager](./operations/vendor-symmetria-file-manager.md)

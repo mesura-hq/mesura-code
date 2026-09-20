@@ -1,0 +1,131 @@
+import type { IpcReply } from "@symmetria/fm-core/contract";
+import type { IpcHandler, IpcSurface, SenderHandle } from "@symmetria/fm-main/ipc/register";
+import {
+  type FileManagerEvent,
+  type FileManagerPushChannel,
+  toFileManagerWireValue,
+} from "@t3tools/contracts";
+
+/**
+ * The file manager's `IpcSurface`, shaped for the WebSocket.
+ *
+ * `createRegistry` registers one handler per channel on a surface and routes
+ * every push by the `SenderHandle` the request arrived with. In Electron the
+ * handle is a renderer; here it is a **session**: one per mounted file manager
+ * in a client, opened by the client's event stream and closed when that stream
+ * ends. A request names its session, and a push goes to that session's sink.
+ *
+ * A session belongs to the connection that opened it. The client picks the
+ * session id, and two devices may well pick the same one, so the map is keyed
+ * by the owner (the RPC client id) and the session id together: a second
+ * device can never query, or receive the pushes of, a session it did not open.
+ *
+ * Sessions are opened only by the stream, never by a request. A request for a
+ * session nobody opened is refused rather than served without a sink, because
+ * a watch registered for a sink that does not exist would leak until the
+ * registry was disposed.
+ */
+
+/** Where a session's pushes go: the queue behind its event stream. */
+export type SessionSink = (event: FileManagerEvent) => void;
+
+/** The connection a session belongs to, and the client's name for it. */
+export interface SessionKey {
+  readonly owner: string;
+  readonly sessionId: string;
+}
+
+export interface WsIpcTransport {
+  readonly surface: IpcSurface;
+  /** Open a session, or `null` when that owner already has one by that id. */
+  openSession(key: SessionKey, sink: SessionSink): SenderHandle | null;
+  /** Close a session and hand back its handle for the registry to release, or `null`. */
+  closeSession(key: SessionKey): SenderHandle | null;
+  /** Run a channel's handler for a session. Never throws: every outcome is a reply. */
+  invoke(key: SessionKey, channel: string, payload: unknown): Promise<IpcReply>;
+}
+
+function refused(message: string): IpcReply {
+  return { ok: false, error: { code: "invalid_request", message } };
+}
+
+/**
+ * The registry's handlers answer as they do for Electron's IPC, bytes and
+ * `undefined` included; the WebSocket carries JSON. A reply that JSON cannot
+ * write dies in the RPC encoder as a defect the client cannot act on — the
+ * cursor settling on a directory did exactly that, through `describe`'s
+ * byte head — so every value crosses through the contract's wire codec.
+ */
+function wireReply(reply: IpcReply): IpcReply {
+  if (!reply.ok) return reply;
+  const value = toFileManagerWireValue(reply.value);
+  // SAFETY: the codec changes only what JSON cannot carry; the reply keeps its shape.
+  return value === reply.value ? reply : ({ ok: true, value } as IpcReply);
+}
+
+/**
+ * The owner and the id, joined on a NUL, a byte neither can hold: the owner
+ * is the server's RPC client id and the session id is a trimmed string the
+ * contract caps at 64 characters. Written as an escape so the file stays
+ * text to git.
+ */
+function mapKey({ owner, sessionId }: SessionKey): string {
+  return `${owner}\0${sessionId}`;
+}
+
+export function createWsIpcSurface(): WsIpcTransport {
+  const handlers = new Map<string, IpcHandler>();
+  const sessions = new Map<string, SenderHandle>();
+
+  const surface: IpcSurface = {
+    handle(channel, handler) {
+      handlers.set(channel, handler);
+    },
+    removeHandler(channel) {
+      handlers.delete(channel);
+    },
+  };
+
+  return {
+    surface,
+    openSession(key, sink) {
+      const id = mapKey(key);
+      if (sessions.has(id)) return null;
+      const handle: SenderHandle = {
+        send(channel, payload) {
+          // The registry only ever pushes on its own push channels; the cast
+          // names that fact for the contract's literal type.
+          sink({
+            channel: channel as FileManagerPushChannel,
+            payload: toFileManagerWireValue(payload),
+          });
+        },
+      };
+      sessions.set(id, handle);
+      return handle;
+    },
+    closeSession(key) {
+      const id = mapKey(key);
+      const handle = sessions.get(id) ?? null;
+      sessions.delete(id);
+      return handle;
+    },
+    async invoke(key, channel, payload) {
+      const handle = sessions.get(mapKey(key));
+      if (handle === undefined) return refused("session not open");
+      const handler = handlers.get(channel);
+      if (handler === undefined) return refused("unknown channel");
+      try {
+        return wireReply(await handler(payload, handle));
+      } catch (cause) {
+        // The registry's own guard already turns throws into failures; this
+        // catches a handler registered without it. `invalid_reply` is the
+        // file manager's code for "the host failed to answer": a throw is the
+        // host's fault, and `invalid_request` would tell the user to fix
+        // input that was never wrong.
+        const message = cause instanceof Error ? cause.message : String(cause);
+        return { ok: false, error: { code: "invalid_reply", message: `${channel}: ${message}` } };
+      }
+    },
+  };
+}

@@ -1,0 +1,116 @@
+/*
+ * The Symmetria tree inside the file panel.
+ *
+ * The tree ships its own stylesheet (`tree.css`); its search field and flash
+ * labels are styled by the file manager's `overview.css`, and its icons by
+ * `fm-search`'s stylesheet. Those read Mesura Code's own tokens by name
+ * (`--background`, `--accent`, `--border`, `--popover`, `--radius`, …) and
+ * they resolve as is. What `index.css` lacks is the icon palette, declared
+ * in `symmetriaIcons.css`, and the glass tokens the overview graph reads,
+ * declared in `symmetriaOverview.css`; both sheets serve this tree and the
+ * file manager alike. Plain CSS, no `@layer`, one comment per rule naming the
+ * hook it relies on — see `docs/mesura/styling.md`.
+ */
+
+/* The wrapper `MesuraFileTree` renders. */
+[data-mesura-file-tree] {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  font-size: 12px;
+}
+
+/* `.tree-row` sets 13px for a full-window file manager; the panel is denser.
+   The row height stays 24px: the tree's virtualizer measures rows at that
+   constant, so only the type shrinks. */
+[data-mesura-file-tree] .tree-row {
+  font-size: 12px;
+}
+
+/* `.tree-toolbar` is the file manager's header row; its label and status
+   read at the panel's size. The vendor's `.file-tree button` keeps the
+   pointer cursor. */
+[data-mesura-file-tree] .tree-toolbar {
+  font-size: 12px;
+  padding: 0 12px;
+  min-height: 28px;
+}
+[data-mesura-file-tree] .tree-toolbar > button,
+[data-mesura-file-tree] .tree-toolbar summary {
+  font: inherit;
+  color: var(--muted-foreground);
+  background: transparent;
+  border: none;
+}
+[data-mesura-file-tree] .tree-toolbar > button:hover,
+[data-mesura-file-tree] .tree-toolbar summary:hover {
+  color: var(--foreground);
+}
+[data-mesura-file-tree] .tree-expansion-menu button {
+  font: inherit;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--foreground);
+}
+
+/* In the panel's inline mode the file header beside the tree shrinks to
+   `h-7` with `mb-3` (`FilePreviewPanel.tsx`, hook `data-preview-panel-mode`);
+   the toolbar follows so the two chrome rows stay level. */
+[data-preview-panel-mode="inline"] [data-mesura-file-tree] .tree-toolbar {
+  min-height: 28px;
+  margin-bottom: 12px;
+}
+
+/* `.tree-breadcrumb` repeats the panel header's breadcrumbs for the selected
+   row; the panel already shows them for the open file. Hidden, not removed:
+   the tree keeps `title` on it for hover. */
+[data-mesura-file-tree] .tree-breadcrumb {
+  display: none;
+}
+
+/* The tree's search row is `SearchField`, whose base rules live in the file
+   manager's app stylesheet (`fm-ui/src/styles.css`, `.search*`), which this
+   app does not load; `overview.css` only overrides two of them. Copied here
+   so the row lays out as it does in the standalone app. */
+[data-mesura-file-tree] .search {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+}
+[data-mesura-file-tree] .search__sigil {
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+}
+[data-mesura-file-tree] .search__field {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  color: var(--foreground);
+  font: inherit;
+  outline: none;
+}
+[data-mesura-file-tree] .search__count {
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+}
+
+/* `.file-tree` fills the aside the panel gives it. */
+[data-mesura-file-tree] .file-tree {
+  width: 100%;
+}
+
+/* Shown under the tree when the server's listing was cut short. */
+[data-mesura-file-tree] .mesura-file-tree-notice {
+  margin: 0;
+  padding: 6px 16px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}

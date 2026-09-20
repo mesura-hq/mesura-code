@@ -20,6 +20,7 @@ import {
 } from "~/state/editorSession";
 import { fallbackFromCause, type NvimFallback } from "./nvimFallback.ts";
 import { useNvimDriver, type NvimDriverResult } from "./useNvimDriver.ts";
+import { APP_SHORTCUTS_THAT_OUTRANK_NEOVIM } from "./appShortcutsThatOutrankNeovim";
 
 /**
  * Binds the thread's editor session to a Monaco editor.
@@ -34,19 +35,6 @@ import { useNvimDriver, type NvimDriverResult } from "./useNvimDriver.ts";
 const IDLE_SESSION_ATOM = Atom.make(AsyncResult.initial<EditorSessionState, never>(false)).pipe(
   Atom.withLabel("editor-session:idle"),
 );
-
-/**
- * The application's shortcuts that outrank Neovim while the editor has focus.
- *
- * One entry, and the list is short because it was measured rather than
- * guessed. In the developer's configuration `<C-p>` is unmapped, so the file
- * picker costs Neovim nothing. `<C-k>` is `TmuxNavigateUp`, `<C-b>` is
- * Telescope, `<C-f>` is his file finder and `<C-u>`/`<C-d>` are the scrolling
- * half the motion set depends on — every one of those stays Neovim's, and the
- * application's own version is reached by pressing Escape in normal mode
- * first, which releases the editor.
- */
-const APP_SHORTCUTS_THAT_OUTRANK_NEOVIM: ReadonlySet<string> = new Set(["filePicker.toggle"]);
 
 export interface NvimFileEditorResult extends NvimDriverResult {
   /** Why Neovim is not running, when the developer asked for it and it is not. */

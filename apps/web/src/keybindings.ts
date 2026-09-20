@@ -8,6 +8,7 @@ import {
   type ModelPickerJumpKeybindingCommand,
   type ThreadJumpKeybindingCommand,
 } from "@t3tools/contracts";
+import { isFileManagerOpen } from "~/components/files/mesuraFileManager/isFileManagerOpen";
 import { isMacPlatform } from "./lib/utils";
 
 export interface ShortcutEventLike {
@@ -224,9 +225,21 @@ export function resolveShortcutCommand(
     if (!binding) continue;
     if (!matchesWhenClause(binding.whenAst, context)) continue;
     if (!matchesShortcut(event, binding.shortcut, platform)) continue;
-    return binding.command;
+    return standDownForFileManager(binding.command);
   }
   return null;
+}
+
+/**
+ * Fork addition. While the file manager is up over the window every host
+ * chord but its own toggle stands down, so its keys — `Ctrl+O` for the
+ * overview above all — reach its dispatcher unopposed. Every window listener
+ * resolves through this function or an `is*Shortcut` helper over it, which is
+ * why the one guard is here rather than in each listener.
+ */
+function standDownForFileManager(command: KeybindingCommand): KeybindingCommand | null {
+  if (command === "fileTree.miller") return command;
+  return isFileManagerOpen() ? null : command;
 }
 
 function formatShortcutKeyLabel(key: string): string {

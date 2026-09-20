@@ -1,7 +1,9 @@
 # Styling overrides
 
-This fork carries one stylesheet of its own: `apps/web/src/mesura.css`. Read this before concluding
-that a style in `apps/web/src/index.css` is in force, and before adding a rule of your own.
+This fork carries one app-wide stylesheet of its own: `apps/web/src/mesura.css`. Read this before
+concluding that a style in `apps/web/src/index.css` is in force, and before adding a rule of your
+own. A second, component-scoped one, `apps/web/src/components/files/mesuraTree/fileTree.css`, is
+imported by the file tree alone and follows the same constraints; see the end of this document.
 
 ## Why it exists
 
@@ -44,3 +46,23 @@ turns a silent break into a caught one.
   put it out of line with the composer directly below it. The rule restores the two custom properties
   upstream's variant-less base rule sets, scoped by `:has()` to the drawer that actually holds a
   question so the plan follow-up banner keeps its tint.
+
+## The Symmetria stylesheets
+
+Four component-scoped sheets under `apps/web/src/components/files/` carry what the vendored file
+manager's stylesheets need on top of `index.css`; the vendored stylesheets themselves are never
+edited here.
+
+- `symmetriaIcons.css`: the file-type icon palette, on `[data-mesura-file-tree]` and
+  `[data-mesura-file-manager]`.
+- `symmetriaOverview.css`: the six tokens the overview graph reads and `index.css` lacks, on `.overview`, with
+  light and `.dark` values. Imported by both hosts, because the tree is lazy-loaded with the file
+  panel and the file manager must not depend on it.
+- `mesuraTree/fileTree.css`: the panel's type size and layout and the tree's search row, scoped to
+  `[data-mesura-file-tree]`.
+- `mesuraFileManager/fileManager.css`: imports the file manager's whole stylesheet, declares on
+  `[data-mesura-file-manager]` the tokens it reads that `index.css` lacks (light and `.dark`
+  values), and positions the layer fixed over the window at `z-index: 60`. Its two rules outside the
+  layer alias the file manager's global scrollbar tokens to the host's `--app-scrollbar-*` and
+  restate the host's thumb radius, so the vendored `::-webkit-scrollbar` rules, global by that
+  project's design, paint the host's scrollbars exactly as `index.css` did.

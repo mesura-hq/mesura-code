@@ -1,0 +1,37 @@
+import { describe, expect, it } from "vite-plus/test";
+
+import { decideFileTreeShortcut, type FileTreeShortcutInput } from "./fileTreeShortcutDecision";
+
+const base: FileTreeShortcutInput = {
+  hasThread: true,
+  surfaceKind: "file",
+  explorerOpen: true,
+  treeFocused: false,
+};
+
+describe("decideFileTreeShortcut", () => {
+  it("does nothing without a thread", () => {
+    expect(decideFileTreeShortcut({ ...base, hasThread: false })).toBe("none");
+  });
+
+  it("opens the files surface when another surface, or none, is active", () => {
+    expect(decideFileTreeShortcut({ ...base, surfaceKind: null })).toBe("open-surface");
+    expect(decideFileTreeShortcut({ ...base, surfaceKind: "diff" })).toBe("open-surface");
+    expect(decideFileTreeShortcut({ ...base, surfaceKind: "terminal" })).toBe("open-surface");
+  });
+
+  it("shows and focuses the tree when the files surface is up but the tree is hidden or unfocused", () => {
+    expect(decideFileTreeShortcut({ ...base, explorerOpen: false })).toBe("show-and-focus");
+    expect(decideFileTreeShortcut({ ...base, surfaceKind: "files" })).toBe("show-and-focus");
+  });
+
+  it("hides the tree and focuses the editor when the tree is focused beside an open file", () => {
+    expect(decideFileTreeShortcut({ ...base, treeFocused: true })).toBe("hide-and-focus-editor");
+  });
+
+  it("focuses the composer when the tree is focused and only the tree is shown", () => {
+    expect(decideFileTreeShortcut({ ...base, surfaceKind: "files", treeFocused: true })).toBe(
+      "focus-composer",
+    );
+  });
+});

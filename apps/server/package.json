@@ -38,6 +38,8 @@
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
+    "@symmetria/fm-core": "workspace:*",
+    "@symmetria/fm-main": "workspace:*",
     "@t3tools/contracts": "workspace:*",
     "@t3tools/shared": "workspace:*",
     "@t3tools/tailscale": "workspace:*",

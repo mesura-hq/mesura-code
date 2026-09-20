@@ -1,0 +1,20 @@
+{
+  // The panel's SOURCE. DOM yes, Node NO.
+  //
+  // `types: []` keeps @types/node globals out, and the include covers `src`
+  // alone so nothing a test needs can weaken it. The panel runs sandboxed with
+  // no filesystem, so an accidental `node:fs` import has to fail here at
+  // compile time rather than at runtime in front of the user.
+  //
+  // Tests live in `tsconfig.test.json`, which DOES get Node — the invariant
+  // test reads every source file to prove this contract holds, and it cannot
+  // do that without a filesystem. Keeping them in two files is what stops the
+  // test's needs quietly becoming the source's permissions.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": [],
+    "jsx": "react-jsx"
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
+}

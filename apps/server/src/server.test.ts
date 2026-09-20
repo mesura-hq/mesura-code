@@ -146,6 +146,7 @@ import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolve
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
+import * as FileManagerHost from "./fileManager/FileManagerHost.ts";
 import * as WorkspaceFileWatcher from "./workspace/WorkspaceFileWatcher.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
@@ -638,6 +639,7 @@ const buildAppUnderTest = (options?: {
       workspaceEntriesLayer,
       workspaceFileSystemLayer,
       WorkspaceFileWatcher.layer.pipe(Layer.provide(workspaceFileSystemLayer)),
+      FileManagerHost.layer,
       ProjectFaviconResolver.layer.pipe(
         Layer.provide(WorkspacePaths.layer),
         Layer.provide(T3ProjectFileLoader.layer),

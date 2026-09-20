@@ -1,0 +1,49 @@
+{
+  "name": "@symmetria/fm-main",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The privileged half: scanning, watching, file operations and the IPC registry. Host-blind by contract.",
+  "license": "MIT",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "exports": {
+    "./appPath": "./src/appPath.ts",
+    "./bookmarks": "./src/bookmarks.ts",
+    "./previewTokens": "./src/previewTokens.ts",
+    "./xdg": "./src/xdg.ts",
+    "./fs/scan": "./src/fs/scan.ts",
+    "./fs/watch": "./src/fs/watch.ts",
+    "./fs/mimeTables": "./src/fs/mimeTables.ts",
+    "./ipc/channels": "./src/ipc/channels.ts",
+    "./ipc/register": "./src/ipc/register.ts",
+    "./ipc/electronSurface": "./src/ipc/electronSurface.ts",
+    "./ops": "./src/ops/index.ts",
+    "./ops/mutate": "./src/ops/mutate.ts",
+    "./ops/open": "./src/ops/open.ts",
+    "./ops/clipboard": "./src/ops/clipboard.ts",
+    "./ops/zoxide": "./src/ops/zoxide.ts",
+    "./listingOptions": "./src/listingOptions.ts",
+    "./jsonStore": "./src/jsonStore.ts",
+    "./search": "./src/search.ts",
+    "./ops/operations": "./src/ops/operations.ts"
+  },
+  "dependencies": {
+    "@symmetria/fm-search": "workspace:*",
+    "@symmetria/fm-core": "workspace:*"
+  },
+  "devDependencies": {
+    "electron": ">=41",
+    "@types/node": "^22.0.0",
+    "vitest": "^4.1.9"
+  },
+  "peerDependencies": {
+    "electron": ">=41"
+  },
+  "peerDependenciesMeta": {
+    "electron": {
+      "optional": true
+    }
+  }
+}

@@ -1,0 +1,60 @@
+#!/bin/sh
+# Symmetria File Manager — the Electron build.
+#
+# What `symmetria-fm-electron.service` runs, and what a keybinding runs. A
+# separate application from the Qt one, which keeps `Super+E`, its own daemon
+# and its own socket; the two are meant to run side by side until the rewrite
+# reaches parity.
+#
+# ── Why this file is in the repository ──────────────────────────────────────
+# It used to be a hand-written file in ~/.local/bin, tracked by nothing, with
+# the worktree path baked into it and a note saying to edit that line when the
+# branch merged. Review pointed out what that costs: the unit's ExecStart named
+# a file this repository neither owned nor installed, and `Restart=always` meant
+# losing it would restart-loop the daemon forever with no diagnostic pointing
+# anywhere useful.
+#
+# So it lives here and finds its own way home. Nothing to edit on a merge,
+# nothing to edit on a fresh machine, and one real file rather than two.
+set -eu
+
+# Resolve through however many symlinks the install used. `readlink -f` is
+# coreutils and this is a Linux-only application, so the portable-shell dance
+# other projects need here would be ceremony.
+self=$(readlink -f "$0")
+APP_DIR=$(dirname "$(dirname "$self")")/app
+
+# 78 is EX_CONFIG from sysexits.h, and the unit tells systemd not to retry it.
+# A missing tree is not a transient fault: restarting every two seconds forever
+# would burn a core and say nothing useful. A failed BUILD below keeps exit 1,
+# because that one can succeed on the next try.
+if [ ! -d "$APP_DIR" ]; then
+    notify-send "Symmetria FM (Electron)" "The application directory is gone: $APP_DIR"
+    exit 78
+fi
+
+cd "$APP_DIR" || exit 78
+
+# Absolute paths, because the environment a keybinding or a systemd unit hands
+# this script includes almost nothing.
+NODE=/usr/bin/node
+PNPM=/usr/bin/pnpm
+
+# Build on first run, or after the bundle has been removed. Building on EVERY
+# launch would put several seconds between the keystroke and the window; this
+# way only the first one pays.
+if [ ! -f "$APP_DIR/dist-electron/main/index.js" ]; then
+    notify-send "Symmetria FM (Electron)" "First run — building…"
+    "$PNPM" build || {
+        notify-send "Symmetria FM (Electron)" "Build failed. Run 'pnpm build' in $APP_DIR"
+        exit 1
+    }
+fi
+
+# `scripts/start.mjs` strips `ELECTRON_RUN_AS_NODE` — set in the operator's
+# shell, and with it set Electron starts as a plain Node process and opens no
+# window — and trims the trailing newline off the path `require("electron")`
+# returns, which otherwise fails with ENOENT on a binary that exists.
+#
+# Arguments pass through, so a starting directory can be given.
+exec "$NODE" scripts/start.mjs "$@"

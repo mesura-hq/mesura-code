@@ -84,6 +84,13 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.projectsWriteFile]: AuthOrchestrationOperateScope,
   [WS_METHODS.shellOpenInEditor]: AuthOrchestrationOperateScope,
   [WS_METHODS.filesystemBrowse]: AuthOrchestrationReadScope,
+  // Mesura: the file manager's query reaches any readable path on the host
+  // (list, describe, read-text, preview grants), not only a project's. A read
+  // token is a file-manager read; writes need the operate scope.
+  [WS_METHODS.fileManagerHost]: AuthOrchestrationReadScope,
+  [WS_METHODS.fileManagerQuery]: AuthOrchestrationReadScope,
+  [WS_METHODS.fileManagerMutate]: AuthOrchestrationOperateScope,
+  [WS_METHODS.fileManagerSubscribeEvents]: AuthOrchestrationReadScope,
   [WS_METHODS.assetsCreateUrl]: AuthOrchestrationReadScope,
   [WS_METHODS.attachmentsCreateUploadUrl]: AuthOrchestrationOperateScope,
   [WS_METHODS.attachmentsDelete]: AuthOrchestrationOperateScope,

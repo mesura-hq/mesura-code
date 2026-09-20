@@ -1,0 +1,10 @@
+{
+  // The panel's TESTS, which need Node because they read the source tree.
+  //
+  // Deliberately a second file rather than a wider `include` on the first: the
+  // whole value of this package's compile context is that `node:` is out of
+  // reach, and one shared config would hand the source whatever the tests need.
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": ["node"] },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx"]
+}

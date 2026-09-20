@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=org.freedesktop.impl.portal.desktop.symmetria-electron
+Exec=/usr/bin/python3 /usr/lib/symmetria/symmetria_portal.py
+SystemdService=xdg-desktop-portal-symmetria-electron.service

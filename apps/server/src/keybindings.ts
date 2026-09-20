@@ -55,6 +55,7 @@ import {
   migrateRetiredKeybindingDefaults,
   parseKeybindingShortcut,
 } from "@t3tools/shared/keybindings";
+import { withCurrentKeybindingCommand } from "@t3tools/shared/renamedKeybindingCommands";
 
 export {
   ADDED_KEYBINDING_DEFAULTS,
@@ -347,7 +348,7 @@ const make = Effect.gen(function* () {
 
     return yield* Effect.forEach(rawConfig, (entry) =>
       Effect.gen(function* () {
-        const decodedRule = decodeKeybindingRuleExit(entry);
+        const decodedRule = decodeKeybindingRuleExit(withCurrentKeybindingCommand(entry));
         if (decodedRule._tag === "Failure") {
           yield* Effect.logWarning("ignoring invalid keybinding entry", {
             path: keybindingsConfigPath,
@@ -394,7 +395,7 @@ const make = Effect.gen(function* () {
     const keybindings: KeybindingRule[] = [];
     const issues: ServerConfigIssue[] = [];
     for (const [index, entry] of decodedEntries.value.entries()) {
-      const decodedRule = decodeKeybindingRuleExit(entry);
+      const decodedRule = decodeKeybindingRuleExit(withCurrentKeybindingCommand(entry));
       if (decodedRule._tag === "Failure") {
         const detail = Cause.pretty(decodedRule.cause);
         issues.push(invalidEntryIssue(index, detail));

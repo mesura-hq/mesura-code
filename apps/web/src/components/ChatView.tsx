@@ -544,6 +544,11 @@ const TYPE_TO_FOCUS_INTERACTIVE_SELECTOR = [
   '[role="radio"]',
   '[role="switch"]',
   '[role="tab"]',
+  // Mesura: the file tree in the files surface is a composite widget with
+  // roving focus; its letters (j/k/h/l, /, s) are motions, not typing. The
+  // folder overview is a modal dialog with the same motions.
+  '[role="tree"]',
+  '[role="dialog"][aria-modal="true"]',
 ].join(",");
 const TYPE_TO_FOCUS_FLOATING_LAYER_SELECTOR = [
   '[data-slot="alert-dialog-popup"]:is([data-open],[data-ending-style])',

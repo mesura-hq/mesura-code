@@ -1,0 +1,18 @@
+{
+  // Root config for editors only. It compiles nothing itself: each of the three
+  // contexts has its own config with its own `lib`, because they must NOT share
+  // one. See `packages/fm-core/tsconfig.json`, `app/tsconfig.main.json` and
+  // `app/tsconfig.renderer.json` for why.
+  //
+  // The check contract runs one `tsc -p <config>` line per context rather than
+  // a single whole-tree invocation. That is a deliberate departure from the
+  // catalog's canonical single `tsc` line: a shared `lib` would let a `window`
+  // reference into the main process and a `node:fs` import into the sandboxed
+  // renderer, and both would type-check.
+  "files": [],
+  "references": [
+    { "path": "./packages/fm-core" },
+    { "path": "./app/tsconfig.main.json" },
+    { "path": "./app/tsconfig.renderer.json" }
+  ]
+}

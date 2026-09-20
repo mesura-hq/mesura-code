@@ -1,0 +1,3 @@
+[submodule "plugin/third_party/fff"]
+	path = plugin/third_party/fff
+	url = https://github.com/dmtrKovalenko/fff
