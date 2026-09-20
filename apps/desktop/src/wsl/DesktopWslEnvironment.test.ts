@@ -18,6 +18,7 @@ import {
   buildWslRuntimeProbeScript,
   DesktopWslDistroListError,
   formatMissingToolsReason,
+  formatNodePtyProbeFailureReason,
   parseNodePath,
   parseNodeVersion,
   parseResolvedPath,
@@ -925,5 +926,22 @@ describe("formatMissingToolsReason", () => {
     expect(reason).toContain("python3");
     expect(reason).toContain("build-essential");
     expect(reason).not.toContain("nvm");
+  });
+});
+
+describe("formatNodePtyProbeFailureReason", () => {
+  // The wording is the fork's, and the merge that brought v0.0.42 replaced this
+  // file with upstream's, dropping the test that pinned it. Restored, minus the
+  // `--wsl-prebuild` assertion: v0.0.42 removed that build flag, so the message
+  // no longer names it.
+  it("identifies a packaged build that omitted the Linux node-pty prebuild", () => {
+    const reason = formatNodePtyProbeFailureReason(4);
+
+    expect(reason).toContain("packaged Linux node-pty binary was not included");
+    expect(reason).toContain("Mesura Code");
+  });
+
+  it("leaves other node-pty load failures to the compatibility diagnostic", () => {
+    expect(formatNodePtyProbeFailureReason(1)).toBeNull();
   });
 });
