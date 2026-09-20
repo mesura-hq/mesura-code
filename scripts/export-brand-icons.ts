@@ -48,7 +48,20 @@ export interface IconVariant {
   readonly outputs: VariantOutputs;
 }
 
-export class IconExportFileSystemError extends Schema.TaggedErrorClass<IconExportFileSystemError>()(
+interface IconComposerTool {
+  readonly path: string;
+  readonly version: string;
+  readonly bundleVersion: string;
+  readonly supportsDesignGeneration: boolean;
+}
+
+interface CommandResult {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly exitCode: number;
+}
+
+export class IconExportFileSystemError extends Schema.TaggedError<IconExportFileSystemError>()(
   "IconExportFileSystemError",
   {
     operation: Schema.Literals([
@@ -71,7 +84,70 @@ export class IconExportFileSystemError extends Schema.TaggedErrorClass<IconExpor
   }
 }
 
-export class IconExportRenditionError extends Schema.TaggedErrorClass<IconExportRenditionError>()(
+export class IconExportProcessError extends Schema.TaggedError<IconExportProcessError>()(
+  "IconExportProcessError",
+  {
+    operation: Schema.Literals(["spawn", "collect-stdout", "collect-stderr", "wait-for-exit"]),
+    command: Schema.String,
+    argumentCount: NonNegativeInt,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Icon export process operation '${this.operation}' failed for ${this.command}.`;
+  }
+}
+
+export class IconExportCommandFailedError extends Schema.TaggedError<IconExportCommandFailedError>()(
+  "IconExportCommandFailedError",
+  {
+    command: Schema.String,
+    argumentCount: NonNegativeInt,
+    exitCode: Schema.Int,
+    sourcePath: Schema.String,
+    size: Schema.Int,
+    stdout: Schema.optional(Schema.String),
+    stderr: Schema.optional(Schema.String),
+  },
+) {
+  override get message(): string {
+    return `Icon Composer failed to export ${this.sourcePath} at ${this.size}x${this.size}.`;
+  }
+}
+
+export class IconExportToolResolutionError extends Schema.TaggedError<IconExportToolResolutionError>()(
+  "IconExportToolResolutionError",
+  {
+    reason: Schema.Literals(["configured-invalid", "configured-outdated", "not-found"]),
+    designGeneration: Schema.Int,
+    toolPath: Schema.optional(Schema.String),
+    version: Schema.optional(Schema.String),
+  },
+) {
+  override get message(): string {
+    switch (this.reason) {
+      case "configured-invalid":
+        return `ICON_COMPOSER_TOOL does not point to Icon Composer's export-capable ictool: ${this.toolPath}`;
+      case "configured-outdated":
+        return `ICON_COMPOSER_TOOL points to Icon Composer ${this.version}, but version 2 or newer is required for design generation ${this.designGeneration}.`;
+      case "not-found":
+        return `Could not find an Icon Composer 2.x exporter compatible with design generation ${this.designGeneration}. Install a compatible Icon Composer/Xcode or set ICON_COMPOSER_TOOL to Icon Composer.app/Contents/Executables/ictool.`;
+    }
+  }
+}
+
+export class IconExportSourceMissingError extends Schema.TaggedError<IconExportSourceMissingError>()(
+  "IconExportSourceMissingError",
+  {
+    sourcePath: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Missing Icon Composer source project: ${this.sourcePath}`;
+  }
+}
+
+export class IconExportRenditionError extends Schema.TaggedError<IconExportRenditionError>()(
   "IconExportRenditionError",
   {
     sourcePath: Schema.String,
@@ -87,11 +163,23 @@ export class IconExportRenditionError extends Schema.TaggedErrorClass<IconExport
       this.actualWidth === undefined || this.actualHeight === undefined
         ? "an invalid PNG"
         : `${this.actualWidth}x${this.actualHeight}`;
-    return `Icon renderer produced ${actual}; expected ${this.expectedSize}x${this.expectedSize} for ${this.sourcePath}.`;
+    return `Icon Composer produced ${actual}; expected ${this.expectedSize}x${this.expectedSize} for ${this.sourcePath}.`;
   }
 }
 
-export class IconExportAssetsStaleError extends Schema.TaggedErrorClass<IconExportAssetsStaleError>()(
+export class IconExportEncodingError extends Schema.TaggedError<IconExportEncodingError>()(
+  "IconExportEncodingError",
+  {
+    variant: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Failed to encode ICO renditions for the ${this.variant} icon.`;
+  }
+}
+
+export class IconExportAssetsStaleError extends Schema.TaggedError<IconExportAssetsStaleError>()(
   "IconExportAssetsStaleError",
   {
     paths: Schema.Array(Schema.String),

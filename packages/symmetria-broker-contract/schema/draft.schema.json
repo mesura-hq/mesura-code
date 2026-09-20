@@ -14,11 +14,7 @@
           "type": "string"
         },
         "version": {
-          "allOf": [
-            {
-              "minimum": 0
-            }
-          ],
+          "minimum": 0,
           "type": "integer"
         }
       },

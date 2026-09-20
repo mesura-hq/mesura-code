@@ -81,7 +81,9 @@ describe("DesktopEarlyElectronStartup", () => {
     });
 
     assert.deepEqual(options, {
+      isDevelopment: true,
       linuxWmClass: "mesura-code-dev",
+      linuxDesktopEntryName: "mesura-code-dev.desktop",
       passwordStore: "gnome-libsecret",
     });
   });

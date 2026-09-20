@@ -142,15 +142,12 @@ export type FileManagerHostInfo = typeof FileManagerHostInfo.Type;
  * reply: a session the host could not open, or a handler that threw past the
  * registry's own guard.
  */
-export class FileManagerError extends Schema.TaggedErrorClass<FileManagerError>()(
-  "FileManagerError",
-  {
-    sessionId: Schema.optional(FileManagerSessionId),
-    channel: Schema.optional(Schema.String),
-    message: TrimmedNonEmptyString,
-    cause: Schema.optional(Schema.Defect()),
-  },
-) {}
+export class FileManagerError extends Schema.TaggedError<FileManagerError>()("FileManagerError", {
+  sessionId: Schema.optional(FileManagerSessionId),
+  channel: Schema.optional(Schema.String),
+  message: TrimmedNonEmptyString,
+  cause: Schema.optional(Schema.Defect()),
+}) {}
 
 /**
  * The file manager's values on the wire.

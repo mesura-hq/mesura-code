@@ -10,12 +10,21 @@ vi.mock("~/components/files/mesuraFileManager/isFileManagerOpen", () => ({
 }));
 
 const linux = { platform: "Linux x86_64" };
-const chord = (key: string, shift = false) => ({
+const chord = (key: string) => ({
   key,
   ctrlKey: true,
   metaKey: false,
-  shiftKey: shift,
+  shiftKey: false,
   altKey: false,
+});
+// `fileTree.miller` moved from mod+shift+e to mod+alt+e when v0.0.42 claimed
+// mod+shift+e for `composer.effort`. See RETIRED in shared/keybindings.
+const modAltChord = (key: string) => ({
+  key,
+  ctrlKey: true,
+  metaKey: false,
+  shiftKey: false,
+  altKey: true,
 });
 
 const altChord = (key: string) => ({
@@ -40,7 +49,7 @@ describe("host chords while the file manager is open", () => {
     expect(resolveShortcutCommand(chord("n"), DEFAULT_RESOLVED_KEYBINDINGS, linux)).toBe(
       "chat.new",
     );
-    expect(resolveShortcutCommand(chord("e", true), DEFAULT_RESOLVED_KEYBINDINGS, linux)).toBe(
+    expect(resolveShortcutCommand(modAltChord("e"), DEFAULT_RESOLVED_KEYBINDINGS, linux)).toBe(
       "fileTree.miller",
     );
     // `editor.openFavorite` answers to alt+o, not mod+o. The pane-navigation
@@ -56,7 +65,7 @@ describe("host chords while the file manager is open", () => {
 
   it("lets only the file manager's own chord through while it is open", () => {
     state.open = true;
-    expect(resolveShortcutCommand(chord("e", true), DEFAULT_RESOLVED_KEYBINDINGS, linux)).toBe(
+    expect(resolveShortcutCommand(modAltChord("e"), DEFAULT_RESOLVED_KEYBINDINGS, linux)).toBe(
       "fileTree.miller",
     );
     expect(resolveShortcutCommand(chord("n"), DEFAULT_RESOLVED_KEYBINDINGS, linux)).toBeNull();

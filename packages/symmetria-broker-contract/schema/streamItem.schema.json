@@ -1,30 +1,6 @@
 {
   "$comment": "Generated from SymmetriaStreamItem by scripts/emit-json-schema.ts. Do not hand-edit.",
   "$defs": {
-    "Objects_": {
-      "additionalProperties": true,
-      "properties": {
-        "major": {
-          "enum": [
-            1
-          ],
-          "type": "number"
-        },
-        "minor": {
-          "allOf": [
-            {
-              "minimum": 0
-            }
-          ],
-          "type": "integer"
-        }
-      },
-      "required": [
-        "major",
-        "minor"
-      ],
-      "type": "object"
-    },
     "SymmetriaDraft": {
       "additionalProperties": true,
       "properties": {
@@ -38,11 +14,7 @@
           "type": "string"
         },
         "version": {
-          "allOf": [
-            {
-              "minimum": 0
-            }
-          ],
+          "minimum": 0,
           "type": "integer"
         }
       },
@@ -58,14 +30,8 @@
       "additionalProperties": true,
       "properties": {
         "name": {
-          "allOf": [
-            {
-              "minLength": 1
-            },
-            {
-              "pattern": "\\S"
-            }
-          ],
+          "minLength": 1,
+          "pattern": "\\S",
           "type": "string"
         },
         "projectId": {
@@ -137,14 +103,8 @@
         "branch": {
           "anyOf": [
             {
-              "allOf": [
-                {
-                  "minLength": 1
-                },
-                {
-                  "pattern": "\\S"
-                }
-              ],
+              "minLength": 1,
+              "pattern": "\\S",
               "type": "string"
             },
             {
@@ -296,14 +256,8 @@
           "type": "string"
         },
         "title": {
-          "allOf": [
-            {
-              "minLength": 1
-            },
-            {
-              "pattern": "\\S"
-            }
-          ],
+          "minLength": 1,
+          "pattern": "\\S",
           "type": "string"
         },
         "tokenUsage": {
@@ -314,11 +268,7 @@
                 "autoCompactThreshold": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 1
-                        }
-                      ],
+                      "minimum": 1,
                       "type": "integer"
                     },
                     {
@@ -329,11 +279,7 @@
                 "cachedInputTokens": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 0
-                        }
-                      ],
+                      "minimum": 0,
                       "type": "integer"
                     },
                     {
@@ -354,11 +300,7 @@
                 "durationMs": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 0
-                        }
-                      ],
+                      "minimum": 0,
                       "type": "integer"
                     },
                     {
@@ -369,11 +311,7 @@
                 "inputTokens": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 0
-                        }
-                      ],
+                      "minimum": 0,
                       "type": "integer"
                     },
                     {
@@ -384,11 +322,7 @@
                 "lastCachedInputTokens": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 0
-                        }
-                      ],
+                      "minimum": 0,
                       "type": "integer"
                     },
                     {
@@ -399,11 +333,7 @@
                 "lastInputTokens": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 0
-                        }
-                      ],
+                      "minimum": 0,
                       "type": "integer"
                     },
                     {
@@ -414,11 +344,7 @@
                 "lastOutputTokens": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 0
-                        }
-                      ],
+                      "minimum": 0,
                       "type": "integer"
                     },
                     {
@@ -429,11 +355,7 @@
                 "lastReasoningOutputTokens": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 0
-                        }
-                      ],
+                      "minimum": 0,
                       "type": "integer"
                     },
                     {
@@ -444,11 +366,7 @@
                 "lastUsedTokens": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 0
-                        }
-                      ],
+                      "minimum": 0,
                       "type": "integer"
                     },
                     {
@@ -459,11 +377,7 @@
                 "maxTokens": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 1
-                        }
-                      ],
+                      "minimum": 1,
                       "type": "integer"
                     },
                     {
@@ -474,11 +388,7 @@
                 "outputTokens": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 0
-                        }
-                      ],
+                      "minimum": 0,
                       "type": "integer"
                     },
                     {
@@ -489,11 +399,7 @@
                 "reasoningOutputTokens": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 0
-                        }
-                      ],
+                      "minimum": 0,
                       "type": "integer"
                     },
                     {
@@ -504,11 +410,7 @@
                 "toolUses": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 0
-                        }
-                      ],
+                      "minimum": 0,
                       "type": "integer"
                     },
                     {
@@ -519,11 +421,7 @@
                 "totalProcessedTokens": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 0
-                        }
-                      ],
+                      "minimum": 0,
                       "type": "integer"
                     },
                     {
@@ -532,11 +430,7 @@
                   ]
                 },
                 "usedTokens": {
-                  "allOf": [
-                    {
-                      "minimum": 0
-                    }
-                  ],
+                  "minimum": 0,
                   "type": "integer"
                 }
               },
@@ -556,14 +450,8 @@
         "worktreePath": {
           "anyOf": [
             {
-              "allOf": [
-                {
-                  "minLength": 1
-                },
-                {
-                  "pattern": "\\S"
-                }
-              ],
+              "minLength": 1,
+              "pattern": "\\S",
               "type": "string"
             },
             {
@@ -611,14 +499,27 @@
           "type": "array"
         },
         "protocolVersion": {
-          "$ref": "#/$defs/Objects_"
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "enum": [
+                1
+              ],
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
         },
         "revision": {
-          "allOf": [
-            {
-              "minimum": 0
-            }
-          ],
+          "minimum": 0,
           "type": "integer"
         },
         "surfaces": {
@@ -747,14 +648,27 @@
           ]
         },
         "protocolVersion": {
-          "$ref": "#/$defs/Objects_"
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "enum": [
+                1
+              ],
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
         },
         "sequence": {
-          "allOf": [
-            {
-              "minimum": 0
-            }
-          ],
+          "minimum": 0,
           "type": "integer"
         },
         "type": {

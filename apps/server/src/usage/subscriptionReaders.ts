@@ -53,12 +53,12 @@ export interface SubscriptionHttpResponse {
 }
 
 /** A request that did not produce a response at all. */
-export class SubscriptionTransportError extends Schema.TaggedErrorClass<SubscriptionTransportError>()(
+export class SubscriptionTransportError extends Schema.TaggedError<SubscriptionTransportError>()(
   "SubscriptionTransportError",
   { detail: Schema.String },
 ) {}
 
-export class SubscriptionReadError extends Schema.TaggedErrorClass<SubscriptionReadError>()(
+export class SubscriptionReadError extends Schema.TaggedError<SubscriptionReadError>()(
   "SubscriptionReadError",
   {
     reason: AccountLimitsFailureReason,

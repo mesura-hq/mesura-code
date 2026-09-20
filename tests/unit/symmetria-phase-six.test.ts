@@ -13,7 +13,7 @@ import {
   expectSuccessfulCommand,
   run,
   runContractScript,
-  tsgoPath,
+  typecheckerPath,
   vitePlusPath,
 } from "./contractHarness.ts";
 
@@ -398,6 +398,6 @@ describe("Symmetria broker contract phase-six guards", () => {
     const output = commandOutput(testResult);
     expect(output).toContain("src/jsonSchema.test.ts");
     expect(output).toContain("src/checksum.test.ts");
-    expectSuccessfulCommand(run(tsgoPath, ["--noEmit"], contractPackageRoot));
+    expectSuccessfulCommand(run(typecheckerPath, ["--noEmit"], contractPackageRoot));
   }, 30_000);
 });

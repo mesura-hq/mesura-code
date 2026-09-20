@@ -11,7 +11,14 @@ export const contractPackageRoot = NodePath.join(
 export const contractSourceRoot = NodePath.join(contractPackageRoot, "src");
 export const contractFixtureRoot = NodePath.join(contractPackageRoot, "test/fixtures");
 export const vitePlusPath = NodePath.join(repositoryRoot, "node_modules/.bin/vp");
-export const tsgoPath = NodePath.join(repositoryRoot, "node_modules/.bin/tsgo");
+/**
+ * The repository's typechecker.
+ *
+ * v0.0.42 dropped `@typescript/native-preview`, which is what provided `tsgo`;
+ * every package went back to `tsc`. These guards spawn the binary directly, so
+ * they need the path rather than the package script.
+ */
+export const typecheckerPath = NodePath.join(repositoryRoot, "node_modules/.bin/tsc");
 
 export const run = (command: string, args: ReadonlyArray<string>, cwd = repositoryRoot) =>
   NodeChildProcess.spawnSync(command, args, {

@@ -2,7 +2,7 @@ import * as Schema from "effect/Schema";
 import { ForwardCompatibleArray, TrimmedString } from "./baseSchemas.ts";
 
 export const MAX_KEYBINDING_VALUE_LENGTH = 64;
-export const MAX_KEYBINDING_WHEN_LENGTH = 256;
+const MAX_KEYBINDING_WHEN_LENGTH = 256;
 export const MAX_WHEN_EXPRESSION_DEPTH = 64;
 export const MAX_SCRIPT_ID_LENGTH = 24;
 export const MAX_KEYBINDINGS_COUNT = 256;
@@ -34,7 +34,9 @@ export const MODEL_PICKER_JUMP_KEYBINDING_COMMANDS = [
 export type ModelPickerJumpKeybindingCommand =
   (typeof MODEL_PICKER_JUMP_KEYBINDING_COMMANDS)[number];
 
-export const THREAD_KEYBINDING_COMMANDS = [
+const THREAD_KEYBINDING_COMMANDS = [
+  "thread.stop",
+  "thread.steerQueuedMessage",
   "thread.previous",
   "thread.next",
   // The sidebar's page step, five threads at a time. Separate commands
@@ -53,8 +55,10 @@ export const THREAD_KEYBINDING_COMMANDS = [
 ] as const;
 export type ThreadKeybindingCommand = (typeof THREAD_KEYBINDING_COMMANDS)[number];
 
-export const MODEL_PICKER_KEYBINDING_COMMANDS = [
+const MODEL_PICKER_KEYBINDING_COMMANDS = [
   "modelPicker.toggle",
+  "modelPicker.previousProvider",
+  "modelPicker.nextProvider",
   ...MODEL_PICKER_JUMP_KEYBINDING_COMMANDS,
 ] as const;
 export type ModelPickerKeybindingCommand = (typeof MODEL_PICKER_KEYBINDING_COMMANDS)[number];
@@ -87,6 +91,8 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "terminal.close",
   "rightPanel.toggle",
   "rightPanel.toggleMaximized",
+  "rightPanel.close",
+  "pullRequest.copyNumber",
   "diff.toggle",
   "preview.toggle",
   "preview.refresh",
@@ -112,13 +118,23 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "threadSearch.toggle",
   "themeEditor.toggle",
   "composer.stash",
-  // Fork addition (ADR-003). Upstream ships no keyboard route to attaching at
-  // all, so retiring the fork's attachment stack would have taken the only one.
+  "composer.host",
+  "composer.effort",
+  "composer.mode",
+  "composer.workspace",
+  "composer.previousWorktree",
+  "composer.branch",
+  // Fork additions, kept as one block after upstream's run rather than sorted
+  // into it. Upstream keeps growing that run, and a fork id interleaved with it
+  // turns every one of those additions into a conflict.
+  //
+  // (ADR-003) Upstream ships no keyboard route to attaching at all, so retiring
+  // the fork's attachment stack would have taken the only one.
   "composer.attachFiles",
-  // Fork addition. Reaches the Symmetria file tree in the files surface and
-  // leaves it again, and opens the file manager over the window. The rename
-  // warning below applies here too; this fork's one rename so far is carried
-  // by RENAMED_KEYBINDING_COMMANDS in packages/shared.
+  // Reaches the Symmetria file tree in the files surface and leaves it again,
+  // and opens the file manager over the window. The rename warning below
+  // applies here too; this fork's one rename so far is carried by
+  // RENAMED_KEYBINDING_COMMANDS in packages/shared.
   "fileTree.toggle",
   "fileTree.miller",
   "usage.peek",
@@ -245,7 +261,7 @@ export const ResolvedKeybindingsConfig = ForwardCompatibleArray(ResolvedKeybindi
 );
 export type ResolvedKeybindingsConfig = typeof ResolvedKeybindingsConfig.Type;
 
-export class KeybindingsConfigError extends Schema.TaggedErrorClass<KeybindingsConfigError>()(
+export class KeybindingsConfigError extends Schema.TaggedError<KeybindingsConfigError>()(
   "KeybindingsConfigParseError",
   {
     configPath: Schema.String,

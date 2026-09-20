@@ -12,7 +12,7 @@ import {
   fixturePath,
   run,
   runContractScript,
-  tsgoPath,
+  typecheckerPath,
   vitePlusPath,
 } from "./contractHarness.ts";
 
@@ -179,10 +179,10 @@ describe("Symmetria broker contract phase-two specifications", () => {
     expect(output).toContain("src/surfacePresence.test.ts");
   }, 30_000);
 
-  it("keeps the phase-two package source green under tsgo --noEmit", () => {
+  it("keeps the phase-two package source green under tsc --noEmit", () => {
     expect(NodeFS.existsSync(NodePath.join(contractSourceRoot, "threadSummary.ts"))).toBe(true);
     expect(NodeFS.existsSync(NodePath.join(contractSourceRoot, "surfacePresence.ts"))).toBe(true);
-    expectSuccessfulCommand(run(tsgoPath, ["--noEmit"], contractPackageRoot));
+    expectSuccessfulCommand(run(typecheckerPath, ["--noEmit"], contractPackageRoot));
   });
 
   it("keeps each phase-two projection available through its public package subpath", () => {

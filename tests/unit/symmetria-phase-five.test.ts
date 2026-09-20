@@ -12,7 +12,7 @@ import {
   fixturePath,
   run,
   runContractScript,
-  tsgoPath,
+  typecheckerPath,
   vitePlusPath,
 } from "./contractHarness.ts";
 
@@ -285,8 +285,8 @@ describe("Symmetria broker contract phase-five specifications", () => {
     expect(commandOutput(result)).toContain("src/stream.test.ts");
   }, 30_000);
 
-  it("keeps the phase-five package source green under tsgo --noEmit", () => {
+  it("keeps the phase-five package source green under tsc --noEmit", () => {
     expect(NodeFS.existsSync(NodePath.join(contractSourceRoot, "stream.ts"))).toBe(true);
-    expectSuccessfulCommand(run(tsgoPath, ["--noEmit"], contractPackageRoot));
+    expectSuccessfulCommand(run(typecheckerPath, ["--noEmit"], contractPackageRoot));
   });
 });

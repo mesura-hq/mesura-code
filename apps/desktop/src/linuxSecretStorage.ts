@@ -163,10 +163,6 @@ function isAffirmativeFlag(value: string | undefined): boolean {
   return normalized ? !NEGATIVE_FLAG_VALUES.has(normalized) : false;
 }
 
-function splitDesktopNameList(value: string | undefined): string[] {
-  return value?.split(":") ?? [];
-}
-
 function normalizeDesktopName(value: string | undefined): string | null {
   const normalized = value?.trim().toLowerCase();
   return normalized && normalized.length > 0 ? normalized : null;
@@ -175,4 +171,8 @@ function normalizeDesktopName(value: string | undefined): string | null {
 function normalizeSelectedStorageBackend(value: string | null): string | null {
   const normalized = value?.trim().toLowerCase().replace(/_/gu, "-");
   return normalized && normalized.length > 0 ? normalized : null;
+}
+
+function splitDesktopNameList(value: string | undefined): string[] {
+  return value?.split(":") ?? [];
 }

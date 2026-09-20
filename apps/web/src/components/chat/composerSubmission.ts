@@ -3,6 +3,7 @@ import {
   type ProviderDriverKind,
   type ServerProvider,
 } from "@t3tools/contracts";
+import { expandAssistantCitationsForProvider } from "@t3tools/shared/assistantCitations";
 import { applyClaudePromptEffortPrefix, resolvePromptInjectedEffort } from "@t3tools/shared/model";
 import { getProviderModelCapabilities } from "../../providerModels";
 
@@ -27,7 +28,12 @@ type ComposerSubmissionInput = {
 };
 
 export function getComposerPromptLengthValidationMessage(prompt: string): string | null {
-  const excessCharacters = prompt.trim().length - PROVIDER_SEND_TURN_MAX_INPUT_CHARS;
+  const normalizedPrompt = prompt.trim();
+  const inputLength = Math.max(
+    normalizedPrompt.length,
+    expandAssistantCitationsForProvider(normalizedPrompt).length,
+  );
+  const excessCharacters = inputLength - PROVIDER_SEND_TURN_MAX_INPUT_CHARS;
   if (excessCharacters <= 0) return null;
 
   const characterLabel = excessCharacters === 1 ? "character" : "characters";

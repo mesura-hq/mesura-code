@@ -1,7 +1,7 @@
 # Keybindings
 
-Edit keybindings from **Settings** → **Keybindings**. That page lists every command, its current
-shortcut, whether it is a default or your own, and warns about conflicts.
+Customize shortcuts in **Settings → Keybindings** on web and desktop. That page
+also lists the command IDs and defaults available in your version.
 
 The same configuration lives in `~/.mesura-code/userdata/keybindings.json` on the machine running
 the server, if you prefer editing it directly. Mesura Code writes the built-in defaults into that
@@ -24,7 +24,49 @@ Either way, when the key involved already belongs to a rule of yours, nothing is
 two commands on one chord would quietly disable one of them, so the server leaves your rule alone
 and logs a warning instead.
 
-The file is a JSON array of rules.
+## Composer controls
+
+Use `mod+shift+m` to choose a model and `mod+shift+h` to choose a host.
+Use `mod+shift+e` for effort, `mod+shift+a` for access mode, `mod+shift+x` for the
+workspace, and `mod+shift+g` for the Git branch. The workspace menu includes the
+current checkout, a new worktree, and the previous worktree when available.
+Use `mod+shift+l` to reuse the previous worktree directly.
+
+In the model picker, press Left in an empty search field or Shift+Tab to reach
+the provider list. Use Up/Down to move and Enter to choose. Right returns to
+model search. `mod+shift+up` and `mod+shift+down` switch providers directly and clear the
+search. These provider shortcuts can also be changed in Settings.
+
+These shortcuts run inside the focused web or desktop client. `mod` uses Command
+on macOS and Ctrl on Windows and Linux, including GNOME, KDE Plasma, Niri, and
+Hyprland. If a custom desktop shortcut takes the same keys, choose another binding
+in Settings.
+
+## Copy pull request references
+
+With a PR open in the right panel or on the Pull Requests page, use `mod+shift+c`
+to copy its URL and `mod+shift+k` to copy its number with a `#` prefix.
+Both shortcuts can be changed in Settings. Search for “Copy Link or Thread ID”
+or “Copy Number”. They copy the selected PR and leave terminal input alone.
+
+## iPad
+
+With a hardware keyboard, use `Cmd+1` through `Cmd+9` to open the first nine
+displayed threads. The shortcuts follow the current list filters and order.
+`Cmd+K` opens the command palette to search commands, projects, and threads.
+Use the arrow keys and Return to choose a result, or `Cmd+1` through `Cmd+9` to
+choose directly. Escape or `Cmd+K` closes the palette. Start a search with `>`
+to show only actions.
+
+In the composer, Return sends and `Shift+Return` inserts a new line. `Cmd+Return`
+also sends. To make Return insert a new line instead, change the Return key
+behavior in Settings → Keyboard.
+
+## Edit the configuration file
+
+Keybindings live on the environment's machine, in
+`~/.t3/userdata/keybindings.json` by default. You can edit this file directly.
+It is a JSON array of rules:
 
 ```json
 [
@@ -33,20 +75,23 @@ The file is a JSON array of rules.
 ]
 ```
 
-Invalid rules are ignored. An invalid file is ignored entirely, and the server logs a warning.
+T3 Code creates the file with its defaults and adds new defaults on later startups.
+New defaults do not replace commands you customized. If a new default overlaps one
+of your shortcuts, [rule order](#precedence) decides which runs.
+Invalid rules are ignored; if the file cannot be parsed, T3 Code uses defaults.
 
-## Rule Shape
+## Rule shape
 
-- `key` (required): shortcut string, like `mod+j`, `ctrl+k`, `cmd+shift+d`
-- `command` (required): the command ID to run
-- `when` (optional): boolean expression controlling when the shortcut is active
+Each rule requires a `key` shortcut and a `command` ID. An optional `when`
+expression restricts when it runs.
 
-## Key Syntax
+Project scripts use `script.{id}.run`, such as `script.test.run`.
 
-Modifiers: `mod` (`cmd` on macOS, `ctrl` elsewhere), `cmd` / `meta`, `ctrl` / `control`, `shift`,
-`alt` / `option`.
+## Key syntax
 
-Examples: `mod+j`, `mod+shift+d`, `ctrl+l`, `cmd+k`.
+Join modifiers and a key with `+`, such as `mod+shift+d` or `ctrl+l`.
+`mod` means Command on macOS and Control elsewhere. Other modifiers are
+`cmd` / `meta`, `ctrl` / `control`, `alt` / `option`, and `shift`.
 
 `tab` is usable as a key, but only with a modifier. The recorder in **Settings** → **Keybindings**
 passes a bare `Tab` and `Shift+Tab` through so they keep moving focus; a `Tab` held with Ctrl, Alt,
@@ -58,19 +103,16 @@ them works in the desktop app and stays silent in a browser.
 
 ## Commands
 
-Commands are IDs like `terminal.toggle`, `commandPalette.toggle`, `preview.refresh`, and
-`chat.new`. Project scripts are addressable as `script.{id}.run`, for example `script.test.run`.
-
 `filePicker.toggle` opens file search for the active project and defaults to `mod+p`.
 `fileTree.toggle` reaches the file tree in the files panel and leaves it again; it defaults to
 `mod+e`. `fileTree.miller` opens the file manager over the window and closes it again; it defaults
-to `mod+shift+e`, and it keeps working while the file manager is open, when the other shortcuts
+to `mod+alt+e`, and it keeps working while the file manager is open, when the other shortcuts
 wait.
 Both reach the app from inside the editor, and neither runs while the terminal has focus.
-`projectSearch.toggle` searches inside the active project's files and defaults to `mod+shift+g`.
+`projectSearch.toggle` searches inside the active project's files and defaults to `mod+alt+g`.
 Repeating either shortcut closes that search, and switching shortcuts replaces the open search.
 `projectScope.toggle` filters the thread list to one project and defaults to `mod+shift+f`.
-`threadSearch.toggle` searches every thread in every project and defaults to `mod+shift+k`. Type
+`threadSearch.toggle` searches every thread in every project and defaults to `mod+alt+k`. Type
 words in any order: each one is matched against the project name, the thread title and the branch,
 so `mesura rename` finds **Rename the sidebar** in the **Mesura Code** project. A word is also
 matched against what was said inside a thread. The project filter does not narrow this search — it
@@ -227,7 +269,7 @@ Three defaults moved to make room, and an existing config is rewritten on the ne
 
 - the command palette to `mod+o`,
 - open-in-favourite-editor to `alt+o`,
-- the preview's address bar to `mod+shift+l`.
+- the preview's address bar to `mod+alt+l`.
 
 Inside a terminal, `Ctrl+L` no longer clears the screen, because it now moves to the right panel.
 Type `clear` instead.
@@ -283,8 +325,14 @@ is a change to the native menu rather than to a keybinding, so it needs nothing 
 the key now closes a focused terminal and does nothing otherwise.
 
 The command palette, open-in-favourite-editor and the preview's address bar move to `mod+o`,
-`alt+o` and `mod+shift+l`, because `mod+k` and `mod+l` are now pane chords. Those three rules are
+`alt+o` and `mod+alt+l`, because `mod+k` and `mod+l` are now pane chords. Those three rules are
 rewritten in place on the next start, so a chord you had already changed yourself is left alone.
+
+Four more move because this release adds composer controls on `mod+shift+` with a letter, and each
+of those letters was already taken here. The file tree's Miller view goes to `mod+alt+e`, the
+thread search to `mod+alt+k`, the project's content search to `mod+alt+g`, and the preview's
+address bar to `mod+alt+l`. Each keeps its letter and changes only a modifier, and each rule is
+rewritten in place on the next start.
 
 `alt+m` for the model picker, the `ctrl+tab` pair for thread navigation, and `j` and `k` for the
 sidebar's list are second defaults for commands your file already binds, so they are added once on
@@ -331,7 +379,35 @@ Examples:
 
 ## Precedence
 
-- Rules are evaluated in array order.
-- For a key event, the last rule where both `key` matches and `when` evaluates to `true` wins.
-- Precedence is across commands, not only within the same command. A later rule for a different
-  command can take a key away from an earlier one.
+The last rule whose key and condition both match wins, even if it belongs to a
+different command. Put a more specific rule after a general one when they share
+a shortcut.
+
+## Commands with special behavior
+
+`thread.stop` interrupts the running turn in the focused thread. It has no default
+shortcut; assign one in **Settings → Keybindings**.
+
+`chat.new` may ask you to choose a project when there is more than one.
+`chat.newLocal` skips that chooser. Both use your
+[new-thread defaults](./thread-sidebar.md#start-a-thread).
+
+## Reserved shortcuts
+
+In the desktop app, `mod+w` closes the focused terminal or the active right-panel
+tab. When nothing remains to close, it closes the window. In a browser, `mod+w`
+closes the browser tab; rebind `rightPanel.close` and `terminal.close` to an available
+shortcut such as `alt+w`.
+
+Many defaults include `!terminalFocus` so they do not intercept terminal input.
+Keep that condition when remapping them if you want the same behavior.
+
+## Desktop quit shortcut
+
+Use `Cmd+Q` on macOS or `Ctrl+Q` on Windows and Linux. In the default **Hold** mode,
+hold for 1.2 seconds or press twice within 500 milliseconds. Holding requires
+keyboard repeat; if repeat is disabled, use two presses or the application menu.
+
+Change **Settings → General → Confirmations → Quit shortcut** to **Direct** for a
+single press or **Double press** for two presses only. Choosing **Quit** from the
+application menu always quits immediately.

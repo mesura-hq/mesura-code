@@ -12,7 +12,7 @@ import {
   fixturePath,
   run,
   runContractScript,
-  tsgoPath,
+  typecheckerPath,
   vitePlusPath,
 } from "./contractHarness.ts";
 
@@ -178,8 +178,8 @@ describe("Symmetria broker contract phase-four acceptance guards", () => {
     expect(commandOutput(result)).toContain("src/draft.test.ts");
   }, 30_000);
 
-  it("keeps the phase-four package source green under tsgo --noEmit", () => {
+  it("keeps the phase-four package source green under tsc --noEmit", () => {
     expect(NodeFS.existsSync(NodePath.join(contractSourceRoot, "draft.ts"))).toBe(true);
-    expectSuccessfulCommand(run(tsgoPath, ["--noEmit"], contractPackageRoot));
+    expectSuccessfulCommand(run(typecheckerPath, ["--noEmit"], contractPackageRoot));
   });
 });

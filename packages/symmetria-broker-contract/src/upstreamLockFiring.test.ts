@@ -29,7 +29,7 @@ import { BORROWED_RUNTIME_VOCABULARIES } from "./upstreamLock.ts";
 
 const packageRoot = NodeURL.fileURLToPath(new URL("..", import.meta.url));
 const repositoryRoot = NodePath.join(packageRoot, "../..");
-const tsgoPath = NodePath.join(repositoryRoot, "node_modules/.bin/tsgo");
+const typecheckerPath = NodePath.join(repositoryRoot, "node_modules/.bin/tsc");
 const lockModulePath = NodePath.join(packageRoot, "src/upstreamLock.ts");
 
 type VocabularyName = keyof typeof BORROWED_RUNTIME_VOCABULARIES;
@@ -66,7 +66,7 @@ const compileAgainstUpstream = (
     )}\n`,
   );
 
-  return NodeChildProcess.spawnSync(tsgoPath, ["-p", configPath], {
+  return NodeChildProcess.spawnSync(typecheckerPath, ["-p", configPath], {
     cwd: repositoryRoot,
     encoding: "utf8",
   });

@@ -17,14 +17,8 @@
         "branch": {
           "anyOf": [
             {
-              "allOf": [
-                {
-                  "minLength": 1
-                },
-                {
-                  "pattern": "\\S"
-                }
-              ],
+              "minLength": 1,
+              "pattern": "\\S",
               "type": "string"
             },
             {
@@ -176,14 +170,8 @@
           "type": "string"
         },
         "title": {
-          "allOf": [
-            {
-              "minLength": 1
-            },
-            {
-              "pattern": "\\S"
-            }
-          ],
+          "minLength": 1,
+          "pattern": "\\S",
           "type": "string"
         },
         "tokenUsage": {
@@ -194,11 +182,7 @@
                 "autoCompactThreshold": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 1
-                        }
-                      ],
+                      "minimum": 1,
                       "type": "integer"
                     },
                     {
@@ -209,11 +193,7 @@
                 "cachedInputTokens": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 0
-                        }
-                      ],
+                      "minimum": 0,
                       "type": "integer"
                     },
                     {
@@ -234,11 +214,7 @@
                 "durationMs": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 0
-                        }
-                      ],
+                      "minimum": 0,
                       "type": "integer"
                     },
                     {
@@ -249,11 +225,7 @@
                 "inputTokens": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 0
-                        }
-                      ],
+                      "minimum": 0,
                       "type": "integer"
                     },
                     {
@@ -264,11 +236,7 @@
                 "lastCachedInputTokens": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 0
-                        }
-                      ],
+                      "minimum": 0,
                       "type": "integer"
                     },
                     {
@@ -279,11 +247,7 @@
                 "lastInputTokens": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 0
-                        }
-                      ],
+                      "minimum": 0,
                       "type": "integer"
                     },
                     {
@@ -294,11 +258,7 @@
                 "lastOutputTokens": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 0
-                        }
-                      ],
+                      "minimum": 0,
                       "type": "integer"
                     },
                     {
@@ -309,11 +269,7 @@
                 "lastReasoningOutputTokens": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 0
-                        }
-                      ],
+                      "minimum": 0,
                       "type": "integer"
                     },
                     {
@@ -324,11 +280,7 @@
                 "lastUsedTokens": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 0
-                        }
-                      ],
+                      "minimum": 0,
                       "type": "integer"
                     },
                     {
@@ -339,11 +291,7 @@
                 "maxTokens": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 1
-                        }
-                      ],
+                      "minimum": 1,
                       "type": "integer"
                     },
                     {
@@ -354,11 +302,7 @@
                 "outputTokens": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 0
-                        }
-                      ],
+                      "minimum": 0,
                       "type": "integer"
                     },
                     {
@@ -369,11 +313,7 @@
                 "reasoningOutputTokens": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 0
-                        }
-                      ],
+                      "minimum": 0,
                       "type": "integer"
                     },
                     {
@@ -384,11 +324,7 @@
                 "toolUses": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 0
-                        }
-                      ],
+                      "minimum": 0,
                       "type": "integer"
                     },
                     {
@@ -399,11 +335,7 @@
                 "totalProcessedTokens": {
                   "anyOf": [
                     {
-                      "allOf": [
-                        {
-                          "minimum": 0
-                        }
-                      ],
+                      "minimum": 0,
                       "type": "integer"
                     },
                     {
@@ -412,11 +344,7 @@
                   ]
                 },
                 "usedTokens": {
-                  "allOf": [
-                    {
-                      "minimum": 0
-                    }
-                  ],
+                  "minimum": 0,
                   "type": "integer"
                 }
               },
@@ -436,14 +364,8 @@
         "worktreePath": {
           "anyOf": [
             {
-              "allOf": [
-                {
-                  "minLength": 1
-                },
-                {
-                  "pattern": "\\S"
-                }
-              ],
+              "minLength": 1,
+              "pattern": "\\S",
               "type": "string"
             },
             {

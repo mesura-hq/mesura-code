@@ -45,13 +45,14 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+d", command: "terminal.splitVertical", when: "terminalFocus" },
   { key: "mod+n", command: "terminal.new", when: "terminalFocus" },
   { key: "mod+w", command: "terminal.close", when: "terminalFocus" },
+  { key: "mod+w", command: "rightPanel.close", when: "!terminalFocus" },
   // Moved off mod+d so the reading scroll can take the vim pair mod+u/mod+d.
   // The move reaches existing configs through RETIRED_KEYBINDING_DEFAULTS
   // below, which startup applies before it backfills missing defaults.
   { key: "mod+shift+d", command: "diff.toggle", when: "!terminalFocus" },
   { key: "mod+shift+j", command: "preview.toggle" },
   { key: "mod+r", command: "preview.refresh", when: "previewFocus" },
-  { key: "mod+shift+l", command: "preview.focusUrl", when: "previewFocus" },
+  { key: "mod+alt+l", command: "preview.focusUrl", when: "previewFocus" },
   { key: "mod+=", command: "preview.zoomIn", when: "previewFocus" },
   { key: "mod++", command: "preview.zoomIn", when: "previewFocus" },
   { key: "mod+-", command: "preview.zoomOut", when: "previewFocus" },
@@ -61,21 +62,22 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // The content search gave mod+shift+f up to the project scope picker. The move
   // reaches existing configs through RETIRED_KEYBINDING_DEFAULTS below; without
   // that entry the freed chord stays claimed and the picker silently gets nothing.
-  { key: "mod+shift+g", command: "projectSearch.toggle", when: "!terminalFocus" },
+  { key: "mod+alt+g", command: "projectSearch.toggle", when: "!terminalFocus" },
   { key: "mod+shift+f", command: "projectScope.toggle", when: "!terminalFocus" },
   // Beside mod+k on purpose: the same overlay, narrowed to threads. A new
   // command on a free chord, so the ordinary per-command startup backfill
   // installs it; RETIRED_KEYBINDING_DEFAULTS is for moving a rule that already
   // shipped and ADDED_KEYBINDING_DEFAULTS for a second default on a command a
   // config already binds, and this is neither.
-  { key: "mod+shift+k", command: "threadSearch.toggle", when: "!terminalFocus" },
+  { key: "mod+alt+k", command: "threadSearch.toggle", when: "!terminalFocus" },
   { key: "mod+alt+shift+t", command: "themeEditor.toggle" },
   { key: "mod+s", command: "composer.stash", when: "!terminalFocus" },
+  { key: "mod+shift+enter", command: "thread.steerQueuedMessage", when: "!terminalFocus" },
   { key: "alt+a", command: "composer.attachFiles", when: "!terminalFocus" },
   // Fork addition: a new command on a free chord, installed by the per-command
   // startup backfill; no RETIRED or ADDED entry, as with alt+q below.
   { key: "mod+e", command: "fileTree.toggle", when: "!terminalFocus" },
-  { key: "mod+shift+e", command: "fileTree.miller", when: "!terminalFocus" },
+  { key: "mod+alt+e", command: "fileTree.miller", when: "!terminalFocus" },
   { key: "alt+u", command: "usage.peek" },
   { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
@@ -85,6 +87,15 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // last and alt+m stays the alternate.
   { key: "alt+m", command: "modelPicker.toggle", when: "!terminalFocus" },
   { key: "mod+shift+m", command: "modelPicker.toggle", when: "!terminalFocus" },
+  { key: "mod+shift+h", command: "composer.host", when: "!terminalFocus" },
+  { key: "mod+shift+e", command: "composer.effort", when: "!terminalFocus" },
+  { key: "mod+shift+a", command: "composer.mode", when: "!terminalFocus" },
+  { key: "mod+shift+x", command: "composer.workspace", when: "!terminalFocus" },
+  { key: "mod+shift+g", command: "composer.branch", when: "!terminalFocus" },
+  { key: "mod+shift+l", command: "composer.previousWorktree", when: "!terminalFocus" },
+  { key: "mod+shift+k", command: "pullRequest.copyNumber", when: "!terminalFocus" },
+  { key: "mod+shift+arrowup", command: "modelPicker.previousProvider", when: "modelPickerOpen" },
+  { key: "mod+shift+arrowdown", command: "modelPicker.nextProvider", when: "modelPickerOpen" },
   { key: "alt+e", command: "traitsPicker.toggle", when: "!terminalFocus" },
   { key: "alt+w", command: "workspacePicker.toggle", when: "!terminalFocus" },
   { key: "alt+b", command: "branchPicker.toggle", when: "!terminalFocus" },
@@ -192,7 +203,13 @@ export const RETIRED_KEYBINDING_DEFAULTS: ReadonlyArray<{
     // The rewrite runs before the per-command backfill, which is what lets the
     // picker take mod+shift+f on a config that already held the search there.
     from: { key: "mod+shift+f", command: "projectSearch.toggle", when: "!terminalFocus" },
-    toKey: "mod+shift+g",
+    toKey: "mod+alt+g",
+  },
+  {
+    // v0.0.42 gives mod+shift+g to composer.branch, so the destination above
+    // moved again. This entry catches the configs that already took it.
+    from: { key: "mod+shift+g", command: "projectSearch.toggle", when: "!terminalFocus" },
+    toKey: "mod+alt+g",
   },
   {
     // Narrowed to the chat pane, on the key it already had. Left as it was,
@@ -210,7 +227,25 @@ export const RETIRED_KEYBINDING_DEFAULTS: ReadonlyArray<{
     // Freed for pane.focusRight. The address bar is reachable from the same
     // chord with shift, and only while the preview has focus anyway.
     from: { key: "mod+l", command: "preview.focusUrl", when: "previewFocus" },
-    toKey: "mod+shift+l",
+    toKey: "mod+alt+l",
+  },
+  {
+    // v0.0.42 gives mod+shift+l to composer.previousWorktree. Same shape as the
+    // projectSearch.toggle pair above.
+    from: { key: "mod+shift+l", command: "preview.focusUrl", when: "previewFocus" },
+    toKey: "mod+alt+l",
+  },
+  {
+    // Fork-only commands that shipped on a mod+shift+ chord v0.0.42 has since
+    // claimed: fileTree.miller against composer.effort, threadSearch.toggle
+    // against pullRequest.copyNumber. Each keeps its letter and takes mod+alt,
+    // so an installed config follows without relearning the mnemonic.
+    from: { key: "mod+shift+e", command: "fileTree.miller", when: "!terminalFocus" },
+    toKey: "mod+alt+e",
+  },
+  {
+    from: { key: "mod+shift+k", command: "threadSearch.toggle", when: "!terminalFocus" },
+    toKey: "mod+alt+k",
   },
   {
     // Moves aside for the palette, which lands on mod+o below.
@@ -714,3 +749,23 @@ export function compileResolvedKeybindingsConfig(
 }
 
 export const DEFAULT_RESOLVED_KEYBINDINGS = compileResolvedKeybindingsConfig(DEFAULT_KEYBINDINGS);
+
+export function mergeWithDefaultKeybindings(
+  custom: ResolvedKeybindingsConfig,
+): ResolvedKeybindingsConfig {
+  if (custom.length === 0) {
+    return [...DEFAULT_RESOLVED_KEYBINDINGS];
+  }
+
+  const overriddenCommands = new Set(custom.map((binding) => binding.command));
+  const retainedDefaults = DEFAULT_RESOLVED_KEYBINDINGS.filter(
+    (binding) => !overriddenCommands.has(binding.command),
+  );
+  const merged = [...retainedDefaults, ...custom];
+
+  if (merged.length <= MAX_KEYBINDINGS_COUNT) {
+    return merged;
+  }
+
+  return merged.slice(-MAX_KEYBINDINGS_COUNT);
+}

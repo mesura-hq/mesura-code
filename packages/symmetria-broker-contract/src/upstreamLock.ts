@@ -137,6 +137,7 @@ export const PROVIDER_RUNTIME_EVENT_TYPES = [
   "hook.completed",
   "tool.progress",
   "tool.summary",
+  "tool.denied",
   "auth.status",
   "account.updated",
   "account.rate-limits.updated",

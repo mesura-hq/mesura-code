@@ -5,14 +5,8 @@
       "additionalProperties": true,
       "properties": {
         "draftId": {
-          "allOf": [
-            {
-              "minLength": 1
-            },
-            {
-              "pattern": "\\S"
-            }
-          ],
+          "minLength": 1,
+          "pattern": "\\S",
           "type": "string"
         },
         "futureThreadRef": {
@@ -61,12 +55,8 @@
         "audioLevel": {
           "anyOf": [
             {
-              "allOf": [
-                {
-                  "maximum": 1,
-                  "minimum": 0
-                }
-              ],
+              "maximum": 1,
+              "minimum": 0,
               "type": "number"
             },
             {
@@ -75,21 +65,13 @@
           ]
         },
         "elapsedMs": {
-          "allOf": [
-            {
-              "minimum": 0
-            }
-          ],
+          "minimum": 0,
           "type": "integer"
         },
         "graceRemainingMs": {
           "anyOf": [
             {
-              "allOf": [
-                {
-                  "minimum": 0
-                }
-              ],
+              "minimum": 0,
               "type": "integer"
             },
             {
@@ -138,14 +120,8 @@
                   "type": "string"
                 },
                 "word": {
-                  "allOf": [
-                    {
-                      "minLength": 1
-                    },
-                    {
-                      "pattern": "\\S"
-                    }
-                  ],
+                  "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 }
               },
@@ -169,11 +145,7 @@
                   "type": "string"
                 },
                 "index": {
-                  "allOf": [
-                    {
-                      "minimum": 0
-                    }
-                  ],
+                  "minimum": 0,
                   "type": "integer"
                 }
               },
@@ -233,14 +205,8 @@
         "projectName": {
           "anyOf": [
             {
-              "allOf": [
-                {
-                  "minLength": 1
-                },
-                {
-                  "pattern": "\\S"
-                }
-              ],
+              "minLength": 1,
+              "pattern": "\\S",
               "type": "string"
             },
             {
@@ -258,11 +224,7 @@
               "type": "number"
             },
             "minor": {
-              "allOf": [
-                {
-                  "minimum": 0
-                }
-              ],
+              "minimum": 0,
               "type": "integer"
             }
           },
@@ -273,14 +235,8 @@
           "type": "object"
         },
         "sessionId": {
-          "allOf": [
-            {
-              "minLength": 1
-            },
-            {
-              "pattern": "\\S"
-            }
-          ],
+          "minLength": 1,
+          "pattern": "\\S",
           "type": "string"
         },
         "source": {

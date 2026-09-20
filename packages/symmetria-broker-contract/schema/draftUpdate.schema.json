@@ -11,11 +11,7 @@
       "type": "string"
     },
     "expectedVersion": {
-      "allOf": [
-        {
-          "minimum": 0
-        }
-      ],
+      "minimum": 0,
       "type": "integer"
     },
     "protocolVersion": {
@@ -28,11 +24,7 @@
           "type": "number"
         },
         "minor": {
-          "allOf": [
-            {
-              "minimum": 0
-            }
-          ],
+          "minimum": 0,
           "type": "integer"
         }
       },

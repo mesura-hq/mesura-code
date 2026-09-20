@@ -1,5 +1,5 @@
 import type { EnvironmentId } from "@t3tools/contracts";
-import { useEffect, useMemo } from "react";
+import { createRef, useEffect, useMemo } from "react";
 
 import { projectEnvironment } from "~/state/projects";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -7,15 +7,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import { FileSaveCoordinator } from "./fileSaveCoordinator";
 import { confirmProjectFileQueryData } from "./projectFilesQueryState";
 
-/** Editing pauses this long before a save goes out. */
-export const FILE_SAVE_DEBOUNCE_MS = 500;
-
-export interface FileSaveCoordinatorInput {
-  readonly environmentId: EnvironmentId;
-  readonly cwd: string;
-  readonly relativePath: string;
-  readonly onPendingChange: (relativePath: string, pending: boolean) => void;
-}
+const FILE_SAVE_DEBOUNCE_MS = 500;
 
 /**
  * The debounced autosave for one file.
@@ -23,35 +15,53 @@ export interface FileSaveCoordinatorInput {
  * Lives in its own module because both the editing surface and the rendered
  * markdown surface need it, and the surface cannot import it from the panel
  * that renders the surface.
- *
- * One coordinator per path: disposing it on a file switch flushes a pending
- * edit rather than dropping it, which is what makes the file the user returns
- * to match what they left.
  */
+export interface FileSaveCoordinatorInput {
+  environmentId: EnvironmentId;
+  cwd: string;
+  relativePath: string;
+  onPendingChange: (relativePath: string, pending: boolean) => void;
+}
+
 export function useFileSaveCoordinator({
   environmentId,
   cwd,
   relativePath,
   onPendingChange,
-}: FileSaveCoordinatorInput): FileSaveCoordinator {
+}: FileSaveCoordinatorInput): Pick<FileSaveCoordinator, "change" | "flush"> {
   const writeFile = useAtomCommand(projectEnvironment.writeFile);
-  const coordinator = useMemo(
-    () =>
-      new FileSaveCoordinator({
-        debounceMs: FILE_SAVE_DEBOUNCE_MS,
-        onPendingChange: (pending) => onPendingChange(relativePath, pending),
-        persist: (nextContents) =>
-          writeFile({
-            environmentId,
-            input: { cwd, relativePath, contents: nextContents },
-          }),
-        onConfirmed: (confirmedContents) => {
-          confirmProjectFileQueryData(environmentId, cwd, relativePath, confirmedContents);
-        },
-      }),
-    [cwd, environmentId, onPendingChange, relativePath, writeFile],
-  );
+  const session = useMemo(() => {
+    const coordinatorRef = createRef<FileSaveCoordinator>();
+    return {
+      change: (contents: string) => coordinatorRef.current?.change(contents),
+      // The Monaco surface flushes before it hands the file to Neovim, and
+      // before a save keybinding returns. A retired session has no coordinator
+      // and nothing pending, so resolving is the honest answer.
+      flush: async () => coordinatorRef.current?.flush(),
+      setup: () => {
+        const coordinator = new FileSaveCoordinator({
+          debounceMs: FILE_SAVE_DEBOUNCE_MS,
+          onPendingChange: (pending) => onPendingChange(relativePath, pending),
+          persist: (nextContents) =>
+            writeFile({
+              environmentId,
+              input: { cwd, relativePath, contents: nextContents },
+            }),
+          onConfirmed: (confirmedContents) => {
+            confirmProjectFileQueryData(environmentId, cwd, relativePath, confirmedContents);
+          },
+        });
+        coordinatorRef.current = coordinator;
+        return () => {
+          coordinatorRef.current = null;
+          coordinator.dispose();
+        };
+      },
+    };
+  }, [cwd, environmentId, onPendingChange, relativePath, writeFile]);
 
-  useEffect(() => () => coordinator.dispose(), [coordinator]);
-  return coordinator;
+  // StrictMode replays effect setup. Retired file sessions stay inert, while the
+  // replay gets a fresh coordinator instead of reusing a disposed one.
+  useEffect(session.setup, [session]);
+  return session;
 }

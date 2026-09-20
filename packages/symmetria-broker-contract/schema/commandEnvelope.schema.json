@@ -1,31 +1,5 @@
 {
   "$comment": "Generated from SymmetriaCommandEnvelope by scripts/emit-json-schema.ts. Do not hand-edit.",
-  "$defs": {
-    "Objects_": {
-      "additionalProperties": true,
-      "properties": {
-        "major": {
-          "enum": [
-            1
-          ],
-          "type": "number"
-        },
-        "minor": {
-          "allOf": [
-            {
-              "minimum": 0
-            }
-          ],
-          "type": "integer"
-        }
-      },
-      "required": [
-        "major",
-        "minor"
-      ],
-      "type": "object"
-    }
-  },
   "$id": "commandEnvelope.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "anyOf": [
@@ -39,17 +13,28 @@
           "type": "string"
         },
         "protocolVersion": {
-          "$ref": "#/$defs/Objects_"
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "enum": [
+                1
+              ],
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
         },
         "text": {
-          "allOf": [
-            {
-              "minLength": 1
-            },
-            {
-              "pattern": "\\S"
-            }
-          ],
+          "minLength": 1,
+          "pattern": "\\S",
           "type": "string"
         },
         "threadId": {
@@ -82,7 +67,24 @@
           "type": "string"
         },
         "protocolVersion": {
-          "$ref": "#/$defs/Objects_"
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "enum": [
+                1
+              ],
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
         },
         "threadId": {
           "type": "string"
@@ -124,15 +126,28 @@
           "type": "string"
         },
         "expectedVersion": {
-          "allOf": [
-            {
-              "minimum": 0
-            }
-          ],
+          "minimum": 0,
           "type": "integer"
         },
         "protocolVersion": {
-          "$ref": "#/$defs/Objects_"
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "enum": [
+                1
+              ],
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
         },
         "text": {
           "type": "string"
@@ -168,7 +183,24 @@
           "type": "string"
         },
         "protocolVersion": {
-          "$ref": "#/$defs/Objects_"
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "enum": [
+                1
+              ],
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
         },
         "targetSurfaceId": {
           "type": "string"

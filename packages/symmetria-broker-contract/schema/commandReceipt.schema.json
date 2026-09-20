@@ -32,11 +32,7 @@
             "draftVersion": {
               "anyOf": [
                 {
-                  "allOf": [
-                    {
-                      "minimum": 0
-                    }
-                  ],
+                  "minimum": 0,
                   "type": "integer"
                 },
                 {
@@ -69,11 +65,7 @@
           "type": "string"
         },
         "sequence": {
-          "allOf": [
-            {
-              "minimum": 0
-            }
-          ],
+          "minimum": 0,
           "type": "integer"
         },
         "threadId": {
@@ -127,14 +119,8 @@
             "detail": {
               "anyOf": [
                 {
-                  "allOf": [
-                    {
-                      "minLength": 1
-                    },
-                    {
-                      "pattern": "\\S"
-                    }
-                  ],
+                  "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 {

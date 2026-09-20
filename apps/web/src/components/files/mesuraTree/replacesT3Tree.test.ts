@@ -26,25 +26,34 @@ function sourceFiles(directory: string): string[] {
 }
 
 describe("the T3 tree is deleted", () => {
-  it.each([
-    "FileBrowserPanel.tsx",
-    "fileTreeExpansion.ts",
-    "fileTreeExpansion.test.ts",
-    "fileTreeDragMention.ts",
-    "fileTreeDragMention.test.ts",
-  ])("%s no longer exists", (name) => {
-    expect(NodeFS.existsSync(NodePath.join(filesDirectory, name))).toBe(false);
-  });
+  // `fileTreeExpansion.ts` is off this list from v0.0.42: upstream's new diff
+  // file tree reads it, and that tree is the diff viewer's, not the files
+  // surface this fork replaced.
+  it.each(["FileBrowserPanel.tsx", "fileTreeDragMention.ts", "fileTreeDragMention.test.ts"])(
+    "%s no longer exists",
+    (name) => {
+      expect(NodeFS.existsSync(NodePath.join(filesDirectory, name))).toBe(false);
+    },
+  );
 
-  it("nothing under apps/web/src imports the Pierre tree widget", () => {
-    const files = sourceFiles(webSource);
+  // Scoped to the files surface rather than to all of apps/web. v0.0.42 built
+  // its diff viewer a file tree on the same widget, and the diff viewer is
+  // upstream's to build: this fork replaced the file EXPLORER, not every tree.
+  it("nothing under the files surface imports the Pierre tree widget", () => {
+    const files = sourceFiles(filesDirectory);
     // A mis-rooted scan would still be large; a known file proves the root.
-    expect(files.some((file) => file.endsWith("/components/ChatView.tsx"))).toBe(true);
+    expect(files.some((file) => file.endsWith("/files/FilePreviewPanel.tsx"))).toBe(true);
     // This file names the widget in order to look for it.
     const offenders = files.filter(
       (file) =>
         file !== thisFile && NodeFS.readFileSync(file, "utf8").includes("@pierre/trees/react"),
     );
     expect(offenders).toEqual([]);
+  });
+
+  it("the diff viewer keeps its own tree, which is upstream's", () => {
+    const diffTree = NodePath.resolve(webSource, "components/diffs/DiffFileTree.tsx");
+    expect(NodeFS.existsSync(diffTree)).toBe(true);
+    expect(NodeFS.readFileSync(diffTree, "utf8")).toContain("@pierre/trees/react");
   });
 });
