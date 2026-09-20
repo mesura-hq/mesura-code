@@ -1,0 +1,87 @@
+# Mesura: this file exists to make `git submodule status` succeed, nothing more.
+#
+# The index carries 13 gitlinks (mode 160000) that arrived without a mapping.
+# Twelve came in with upstream's `bd851c0203 chore: add Alchemy reference repo
+# subtree (#2918)`, which imported a repository that had its own submodules; the
+# nested `.repos/alchemy-effect/.gitmodules` came along but git only reads the
+# one at the repository root. The thirteenth is this fork's vendored file
+# manager. Without a mapping `git submodule status` fails, and `actions/checkout`
+# reads that failure as "Bad Submodules found", deletes the working tree and
+# re-clones on every job of every run. That costs upstream nothing, because
+# Blacksmith runners are ephemeral anyway; it is paid on every job here.
+#
+# Every entry is deliberately inert. `update = none` and `ignore = all` mean
+# nothing fetches these and nothing reports them dirty, which matches how the
+# tree already works: CI passes `submodules: false`, and AGENTS.md says `.repos/`
+# is read-only vendored reference. The URLs are the real ones, copied from
+# `.repos/alchemy-effect/.gitmodules` and
+# `vendor/symmetria-file-manager/.gitmodules`, so the mapping stays honest.
+#
+# Adding this file, rather than removing upstream's gitlinks, is the cheap side
+# of the trade: a new root file conflicts with nothing upstream does today.
+
+[submodule ".repos/alchemy-effect/.vendor/alchemy"]
+	path = .repos/alchemy-effect/.vendor/alchemy
+	url = https://github.com/alchemy-run/alchemy-async.git
+	update = none
+	ignore = all
+[submodule ".repos/alchemy-effect/.vendor/astro"]
+	path = .repos/alchemy-effect/.vendor/astro
+	url = https://github.com/withastro/astro.git
+	update = none
+	ignore = all
+[submodule ".repos/alchemy-effect/.vendor/floci"]
+	path = .repos/alchemy-effect/.vendor/floci
+	url = https://github.com/alchemy-run/floci.git
+	update = none
+	ignore = all
+[submodule ".repos/alchemy-effect/.vendor/next.js"]
+	path = .repos/alchemy-effect/.vendor/next.js
+	url = https://github.com/vercel/next.js.git
+	update = none
+	ignore = all
+[submodule ".repos/alchemy-effect/.vendor/nitro"]
+	path = .repos/alchemy-effect/.vendor/nitro
+	url = https://github.com/nitrojs/nitro.git
+	update = none
+	ignore = all
+[submodule ".repos/alchemy-effect/.vendor/nitro-cloudflare-dev"]
+	path = .repos/alchemy-effect/.vendor/nitro-cloudflare-dev
+	url = https://github.com/nitrojs/nitro-cloudflare-dev.git
+	update = none
+	ignore = all
+[submodule ".repos/alchemy-effect/.vendor/nuxt"]
+	path = .repos/alchemy-effect/.vendor/nuxt
+	url = https://github.com/nuxt/nuxt.git
+	update = none
+	ignore = all
+[submodule ".repos/alchemy-effect/.vendor/opennextjs-cloudflare"]
+	path = .repos/alchemy-effect/.vendor/opennextjs-cloudflare
+	url = https://github.com/opennextjs/opennextjs-cloudflare.git
+	update = none
+	ignore = all
+[submodule ".repos/alchemy-effect/.vendor/sveltekit"]
+	path = .repos/alchemy-effect/.vendor/sveltekit
+	url = https://github.com/sveltejs/kit.git
+	update = none
+	ignore = all
+[submodule ".repos/alchemy-effect/.vendor/waku"]
+	path = .repos/alchemy-effect/.vendor/waku
+	url = https://github.com/wakujs/waku.git
+	update = none
+	ignore = all
+[submodule ".repos/alchemy-effect/.vendor/workers-sdk"]
+	path = .repos/alchemy-effect/.vendor/workers-sdk
+	url = https://github.com/cloudflare/workers-sdk.git
+	update = none
+	ignore = all
+[submodule ".repos/alchemy-effect/distilled"]
+	path = .repos/alchemy-effect/distilled
+	url = https://github.com/alchemy-run/distilled.git
+	update = none
+	ignore = all
+[submodule "vendor/symmetria-file-manager/plugin/third_party/fff"]
+	path = vendor/symmetria-file-manager/plugin/third_party/fff
+	url = https://github.com/dmtrKovalenko/fff
+	update = none
+	ignore = all
