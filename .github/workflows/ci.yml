@@ -58,6 +58,9 @@ jobs:
       - uses: ./.github/actions/setup-apt-mirrors
 
       - name: Install browser secret helper build libraries
+        # Mesura: skipped on this fork's Arch runners, where libsecret and
+        # pkgconf come from the host image. See ./.github/actions/setup-apt-mirrors.
+        if: env.APT_MIRRORS_CONFIGURED != '0'
         run: |
           sudo sed -i 's|http://|https://|g' /etc/apt/blacksmith-ubuntu-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources
           sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
@@ -99,6 +102,9 @@ jobs:
       - uses: ./.github/actions/setup-apt-mirrors
 
       - name: Install browser secret helper build libraries
+        # Mesura: skipped on this fork's Arch runners, where libsecret and
+        # pkgconf come from the host image. See ./.github/actions/setup-apt-mirrors.
+        if: env.APT_MIRRORS_CONFIGURED != '0'
         run: |
           sudo sed -i 's|http://|https://|g' /etc/apt/blacksmith-ubuntu-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources
           sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config

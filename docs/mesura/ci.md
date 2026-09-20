@@ -8,8 +8,10 @@ conclusion from what the code does say.
 
 ## The runners
 
-Two self-hosted runners on `vigilia-home`, the operator's home server. They run
-as the user `ci`, which has no sudo, and they carry these labels:
+Two self-hosted runners on `vigilia-home`, the operator's home server. **The box
+runs Arch Linux**, which the labels below deny and which matters more than it
+looks — see "The labels stop at the operating system". They run as the user
+`ci`, which has no sudo, and they carry these labels:
 
 ```
 blacksmith-8vcpu-ubuntu-2404
@@ -74,6 +76,62 @@ Disabling through repository settings rather than by editing or deleting the
 workflow files is the same trade the runner labels make — it costs nothing at
 merge time. The price is exactly this invisibility, which is what this section
 buys back.
+
+## The labels stop at the operating system
+
+The label trick above works because a `runs-on:` label is just a string. It
+keeps working only while the workflow steps stay indifferent to the operating
+system underneath, and v0.0.42 is where upstream stopped being indifferent.
+
+Upstream `#7261` made the desktop resolve Chromium cookie keys on Linux, which
+needs `libsecret`. So `ci.yml` gained a step that runs `sudo apt-get install -y
+libsecret-1-dev pkg-config`, preceded by `./.github/actions/setup-apt-mirrors`,
+which writes an Ubuntu mirror list into `/etc/apt`. On `vigilia-home` there is no
+`apt-get` and no `/etc/apt`, so both fail.
+
+**The first reading of the failure is wrong and costs real time.** The log says:
+
+```
+sudo: a terminal is required to read the password
+sudo: a password is required
+```
+
+which reads as a missing sudoers entry for `ci`. Granting it fixes nothing. The
+very next command writes to a directory Arch does not have, and `apt-get` is not
+installed either. The sudo message is simply the first of three obstacles, and
+it is the only one that looks like a configuration mistake.
+
+Nothing is actually missing. `libsecret` 0.21.7 and `pkgconf` are installed on
+the host, and `pkg-config --exists libsecret-1` succeeds, so the step is pure
+overhead here rather than a dependency this fork lacks.
+
+### This is the first exception to "never edit a workflow file"
+
+Every other CI problem on this fork was solved outside `.github/` — labels for
+the runners, repository settings for the ten disabled workflows. This one cannot
+be. The only fix that needs no workflow edit is to put no-op `sudo` and
+`apt-get` shims on the runner's PATH, which would disarm every future privileged
+step in every workflow and turn a genuinely missing dependency into a pass.
+
+So the guard lives in the workflow, in the cheapest shape available:
+
+- `.github/actions/setup-apt-mirrors/action.yml` exits early when `apt-get` is
+  absent and writes `APT_MIRRORS_CONFIGURED=0` to `$GITHUB_ENV`. That file has
+  taken **one** upstream commit ever, the one that created it.
+- The two `Install browser secret helper build libraries` steps in `ci.yml` carry
+  `if: env.APT_MIRRORS_CONFIGURED != '0'`. One line each, in the file upstream
+  moves most — 15 commits in three months.
+
+The condition is written `!= '0'` rather than `== '1'` on purpose: if the action
+never runs, the variable is unset and the install still goes ahead. The guard
+fails toward doing the work, which is the behaviour upstream expects everywhere
+else.
+
+Three other workflows use the same action — `release.yml`, `release-desktop.yml`
+and `desktop-macos-preview.yml`. They are left alone because they are disabled,
+so nothing executes them. **Re-enabling any of them means applying the same
+`if:` to their install steps**, or they will fail exactly the way `Check` and
+`Test` did.
 
 ## The macOS job will hang if it ever fires
 
