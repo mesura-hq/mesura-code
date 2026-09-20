@@ -130,7 +130,12 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
         validate: () => Effect.void,
       }).pipe(Effect.flip);
 
-      assert.include(error.step, "Mesura Code publishes none");
+      // The failure channel is a union and only the install error carries `step`,
+      // so assert the tag before reading it, as `dpop.test.ts` does.
+      assert.strictEqual(error._tag, "PinnedRuntimeInstallError");
+      if (error._tag === "PinnedRuntimeInstallError") {
+        assert.include(error.step, "Mesura Code publishes none");
+      }
       assert.deepEqual(requests, [], "nothing may be fetched without an origin");
       assert.deepEqual(commands, [], "nothing may be unpacked without an origin");
     }),

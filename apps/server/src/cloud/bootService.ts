@@ -784,7 +784,11 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
       httpClient,
       platform,
       arch,
-      releaseBaseUrl: installOrigin,
+      // `installOrigin` is `string | null` because this fork's
+      // PUBLISHED_RELEASE_BASE_URL is null. The installer's parameter is optional,
+      // and absent means exactly what null means here, so collapse the two: the
+      // gate falls back to the same null and refuses either way.
+      releaseBaseUrl: installOrigin ?? undefined,
       validate: (runtime) =>
         runner
           .run({
