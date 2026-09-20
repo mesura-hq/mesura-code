@@ -1,0 +1,44 @@
+# Secret scanning for this fork.
+#
+# The weekly upstream sync is what this exists for, and the hazard it guards
+# against is noise rather than absence: a scan of `v0.0.42` reported 16 findings
+# and every one was a false positive. Sixteen known-good findings every week is
+# how the seventeenth — a real one — gets waved through.
+#
+# Two rules about running it, both learned the hard way:
+#
+#   gitleaks does not scan a merge commit. Pointing it at one reports
+#   `0 commits scanned` and `no leaks found`, which reads as a pass. Scan the
+#   upstream range instead, which is where the content came from:
+#
+#     gitleaks detect --source . --log-opts="<base>..<upstream-tag>" --redact
+#
+#   Every allowlist entry below names WHY it is safe. An entry without a reason
+#   is indistinguishable from one added to make a real finding go away.
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+[rules.allowlist]
+regexTarget = "line"
+regexes = [
+  # Keyboard chords in the keybinding tables: `{ key: "mod+alt+l", command: … }`.
+  # The rule matches on `key:` followed by a quoted string.
+  '''key:\s*"(mod|alt|shift|ctrl|meta)\+''',
+  # The WebSocket opening handshake header. RFC 6455 §11.3.1 makes this a
+  # random nonce the client sends IN THE CLEAR; it authenticates nothing.
+  '''(?i)sec-websocket-key''',
+]
+
+[allowlist]
+description = "Vendored read-only reference trees, and this file's own examples."
+paths = [
+  # `.repos/` holds upstream's vendored copies of effect-smol and
+  # alchemy-effect, synced by `vpr sync:repos`. They are never edited here and
+  # never imported from; their test fixtures carry example HMAC keys and
+  # self-signed certificates that belong to those projects' own test suites.
+  '''^\.repos/''',
+  '''^\.gitleaks\.toml$''',
+]
