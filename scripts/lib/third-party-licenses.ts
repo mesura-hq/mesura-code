@@ -120,7 +120,23 @@ const NOTICE_TEXT_EXTENSIONS = new Set([
   ".txt",
   ".unlicense",
 ]);
-const FIRST_PARTY_PACKAGE_PREFIX = "@t3tools/";
+/**
+ * Scopes whose packages are this repository's own code, not a third-party
+ * dependency, and so belong in no third-party notice.
+ *
+ * Mesura: `@symmetria/` is the fork's scope — the broker contract and the
+ * vendored file manager, every one of them `private: true` and built from
+ * source in this workspace. Listing them here would claim the fork depends on
+ * someone else's package, and the alternative the generator offers is a
+ * `generatedNotice` override, which means writing a copyright line for our own
+ * code inside a THIRD-party manifest. `scripts/lib/third-party-licenses.ts`
+ * took one upstream commit in three months, so widening the constant is the
+ * cheap correct fix rather than the expensive one.
+ */
+const FIRST_PARTY_PACKAGE_PREFIXES = ["@t3tools/", "@symmetria/"];
+
+const isFirstPartyPackage = (name: string): boolean =>
+  FIRST_PARTY_PACKAGE_PREFIXES.some((prefix) => name.startsWith(prefix));
 
 function isNoticeTextFile(fileName: string): boolean {
   return (
@@ -523,7 +539,7 @@ async function collectProductionDependencyPackages(
       const dependencyPackageJsonPath = NodePath.join(resolved.packageRoot, "package.json");
       const name =
         typeof resolved.packageJson.name === "string" ? resolved.packageJson.name : dependencyName;
-      if (!name.startsWith(FIRST_PARTY_PACKAGE_PREFIX)) {
+      if (!isFirstPartyPackage(name)) {
         const identity = packageIdentity(resolved.packageJson, resolved.packageRoot);
         const existing = collection.byIdentity.get(identity);
         if (existing) {
@@ -579,7 +595,7 @@ async function addBundledModulePackages(
       throw error;
     }
     if (!found || typeof found.packageJson.name !== "string") continue;
-    if (found.packageJson.name.startsWith(FIRST_PARTY_PACKAGE_PREFIX)) continue;
+    if (isFirstPartyPackage(found.packageJson.name)) continue;
     const identity = packageIdentity(found.packageJson, found.packageRoot);
     const existing = collection.byIdentity.get(identity);
     if (existing) {

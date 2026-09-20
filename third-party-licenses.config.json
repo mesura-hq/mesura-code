@@ -473,6 +473,13 @@
         "licenseId": "MIT",
         "copyrights": ["Copyright (c) 2025 opencode"]
       }
+    },
+    {
+      "name": "@tokenizer/token",
+      "sourceUrl": "https://github.com/Borewit/tokenizer-token",
+      "generatedNotice": {
+        "licenseId": "MIT"
+      }
     }
   ]
 }

@@ -32,10 +32,15 @@ import * as ProcessRunner from "../processRunner.ts";
  * CLI installed that way pins an archive when it sets up the service.
  *
  * Mesura Code publishes no such archive, so every install below refuses — see
- * PUBLISHED_RELEASE_BASE_URL. Both routes that reach here, `t3 service install`
- * and server self-update, would otherwise resolve upstream's release server and
- * register a different product as this machine's boot service. The npm form of
- * this hazard was closed the same way before v0.0.42 removed the npm path.
+ * PUBLISHED_RELEASE_BASE_URL. Three routes reach here: `t3 service install`,
+ * server self-update, and `t3 update` (new in v0.0.42, apps/server/src/cli).
+ * Each would otherwise resolve upstream's release server and register a
+ * different product as this machine's boot service. The npm form of this hazard
+ * was closed the same way before v0.0.42 removed the npm path.
+ *
+ * Two more roads to the same place are closed elsewhere, and they are worth
+ * knowing about together: a remote launch over SSH, in packages/ssh/src/tunnel.ts,
+ * and the standalone installers in scripts/install.sh and scripts/install.ps1.
  */
 const PINNED_RUNTIME_DIR = "runtime";
 const PINNED_RUNTIME_INSTALL_TIMEOUT = Duration.minutes(10);

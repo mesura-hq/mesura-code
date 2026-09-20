@@ -101,6 +101,41 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
     }),
   );
 
+  // The fork's own guarantee, and the one most likely to stop working quietly:
+  // every OTHER test here names a release origin, so without this one the
+  // refusal path is never exercised. Three routes reach this function —
+  // `t3 service install`, server self-update, and `t3 update` — and each would
+  // otherwise resolve upstream's release server and install T3 Code's server
+  // under this fork's name. The assertion is that nothing is fetched at all.
+  it.effect("refuses to install when no release origin is configured", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-pinned-no-origin-" });
+      const requests: string[] = [];
+      const commands: string[] = [];
+      // `flip` fails the test if the install SUCCEEDS, and hands over the typed
+      // error when it refuses, which is the assertion this test wants.
+      const error = yield* ensurePinnedRuntimeInstalled({
+        baseDir,
+        version,
+        fs,
+        path,
+        platform: "linux",
+        arch: "x64",
+        httpClient: releaseHttpClient(yield* validChecksums, requests),
+        // No `releaseBaseUrl`: the caller has none, so the value falls back to
+        // PUBLISHED_RELEASE_BASE_URL, which is null for this fork.
+        runner: extractingRunner(fs, path, commands),
+        validate: () => Effect.void,
+      }).pipe(Effect.flip);
+
+      assert.include(error.step, "Mesura Code publishes none");
+      assert.deepEqual(requests, [], "nothing may be fetched without an origin");
+      assert.deepEqual(commands, [], "nothing may be unpacked without an origin");
+    }),
+  );
+
   it.effect("refuses an archive whose checksum does not match the release", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
