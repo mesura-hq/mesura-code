@@ -112,3 +112,57 @@ ssh dev@vigilia-home 'systemctl status ci.slice'
 A job stuck in `queued` with no runner `busy` means no runner is online. A job
 stuck in `queued` while runners are idle means its `runs-on:` label matches
 nothing here — the macOS job is the only one in that state by design.
+
+## Each runner has its own TMPDIR, and that is load-bearing
+
+`vigilia-home` is a shared box. The operator's own work and other agents run
+there as `dev`, and several of those leave a `node_modules` directory under
+`/tmp` — a Vitest cache writes `node_modules/.vite/vitest/` relative to whatever
+root it is given, so a run with a `/tmp` cwd creates `/tmp/node_modules`.
+
+That breaks the desktop artifact test. `scripts/build-desktop-artifact.ts`
+probes the packaged bundle for self-containment and refuses to report success
+when a `node_modules` is visible from the probe directory, because a bare import
+could then resolve outside the packaged tree. The probe is right to refuse. The
+failure reads as a bundling defect and is not one:
+
+```
+Refusing to report success: /tmp/node_modules is visible from the probe
+directory, so bare imports could resolve outside the packaged tree.
+```
+
+So each runner gets a private temporary directory, set in the runner's own
+`.env` rather than in a workflow:
+
+```
+/home/ci/actions-runner/.env     TMPDIR=/home/ci/tmp-r1
+/home/ci/actions-runner-2/.env   TMPDIR=/home/ci/tmp-r2
+```
+
+Both directories are `0700` and owned by `ci`. The runner applies `.env` to job
+processes, not to its own listener, so `TMPDIR` is absent from the listener's
+`/proc/<pid>/environ` and that is not a fault — a job is what proves it.
+
+**Set it here rather than in a workflow on purpose.** A workflow change is a line
+inside a file upstream owns, which is a merge conflict every week forever. The
+runner's `.env` is ours alone and costs the repository nothing. Deleting
+`/tmp/node_modules` by hand is not a fix either: the box keeps making new ones.
+
+Changing `.env` needs a runner restart, and a restart during a job kills that
+job. Check `busy=false` on both runners first, with the `gh api` command above.
+
+## Building the server package without the web client
+
+`node apps/server/scripts/cli.ts build` builds the server package directly,
+bypassing the task runner and its web dependency. It fails when
+`apps/web/dist/index.html` is absent, because a server package with no bundled
+client still installs, starts, and answers its whole API while serving 503 to
+every browser and mobile client — and the desktop app hides that, since it ships
+its own renderer. Prefer `vp run --filter t3 build`, which builds the web client
+first. Pass `--allow-missing-client` for a deliberate server-only bundle.
+
+This paragraph lived in `docs/internals/scripts.md` until upstream deleted that
+file in `docs: keep internal guides focused on architecture (#9755)`. It is kept
+here because the guard is the fork's, from
+`fix(cli): fail the server build when there is no web client to bundle (#47)`,
+and because a fork-owned file never conflicts.
