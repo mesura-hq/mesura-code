@@ -35,6 +35,15 @@ const workspaceFiles = [
   // fixture copies MANIFESTS ONLY, so a workspace dependency whose manifest is
   // absent makes the regenerated lockfile fail to resolve.
   "packages/symmetria-broker-contract/package.json",
+  // Same rule, for the vendored file manager. All four are workspace members
+  // and all four are depended on — `apps/web` takes every one, `apps/server`
+  // takes fm-core and fm-main — so every manifest has to be here or the
+  // regenerated lockfile fails with ERR_PNPM_WORKSPACE_PKG_NOT_FOUND. Adding a
+  // fifth workspace member under vendor/ means adding it here too.
+  "vendor/symmetria-file-manager/packages/fm-core/package.json",
+  "vendor/symmetria-file-manager/packages/fm-ui/package.json",
+  "vendor/symmetria-file-manager/packages/fm-search/package.json",
+  "vendor/symmetria-file-manager/packages/fm-main/package.json",
   "scripts/package.json",
 ] as const;
 
