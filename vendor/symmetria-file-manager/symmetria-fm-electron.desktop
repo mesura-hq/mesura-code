@@ -1,0 +1,51 @@
+[Desktop Entry]
+Name=Symmetria File Manager
+Comment=Keyboard-first file manager, Electron build
+# The daemon (symmetria-fm-electron.service) is resident, so this launches the
+# COMMAND-LINE TOOL rather than the binary. Launching the binary would start a
+# second process that finds the socket already claimed and exits — the whole
+# point of a resident daemon is that opening a folder reaches the one already
+# running, in the window the user already has their tabs in.
+# By NAME, not by absolute path, and that is forced rather than chosen: a
+# desktop entry has no home specifier — the field codes are %f %F %u %U %d %D
+# %n %N %i %c %k %v %m and nothing else — so `%h/.local/bin/...` would be a
+# literal, and a hardcoded /home/<user> path is worse. It therefore depends on
+# the launcher's PATH including ~/.local/bin. `TryExec` is what makes that
+# visible: a launcher hides the entry when it cannot resolve, instead of
+# offering something that fails silently on click. The install script warns
+# when the directory is off PATH.
+TryExec=symmetria-fm-electron-cli
+# %f and not %u: the tool takes a plain absolute path and would pass a file://
+# URI through verbatim.
+Exec=symmetria-fm-electron-cli open %f
+# DEFERRED, deliberately, and said here so it does not read as an oversight:
+# no asset with this name exists yet, so a launcher falls back to a generic
+# icon. The Qt build's `assets/symmetria-fm.png` is the obvious source when
+# somebody wants one, but sharing its NAME would make a launcher show one
+# entry for two applications that are deliberately distinct.
+Icon=symmetria-fm-electron
+Type=Application
+Categories=System;FileTools;FileManager;
+MimeType=inode/directory;
+Terminal=false
+StartupNotify=false
+# ── The identifier contract, which has three corners and two that matter ──
+#
+# This filename, the `desktopName` field in app/package.json, and the string
+# below must all be `symmetria-fm-electron`. A unit test asserts all three,
+# because they fail differently and two of them fail quietly:
+#
+#   * The BASENAME is what the portal resolves app info by. Drift there breaks
+#     registration with an error only the journal sees.
+#   * `desktopName` is what Electron hands Chromium, and Chromium sets the
+#     Wayland `app_id` from it. THAT is what a Hyprland windowrule matches — so
+#     renaming it silently moves the window off its workspace.
+#   * StartupWMClass is a launcher and XWayland hint and drives NOTHING here.
+#     Editing it to fix a window rule will do nothing at all. It is kept in step
+#     anyway so the three never disagree.
+#
+# Deliberately NOT `symmetria-fm`, which belongs to the Qt build. The two run
+# side by side until the rewrite reaches parity and the operator uses the Qt one
+# every day; one identifier for both would make either compositor rule match the
+# wrong window.
+StartupWMClass=symmetria-fm-electron

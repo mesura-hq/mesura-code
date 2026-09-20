@@ -12,6 +12,7 @@ import { getFocusedPane, isSidebarSearchFocused, type PaneId } from "./lib/paneF
 // Type only, so nothing from the component graph is pulled in at runtime.
 // The direction union stays where upstream declares it.
 import type { ThreadTraversalDirection } from "./components/Sidebar.logic";
+import { isFileManagerOpen } from "~/components/files/mesuraFileManager/isFileManagerOpen";
 import { isMacPlatform } from "./lib/utils";
 
 export interface ShortcutEventLike {
@@ -314,7 +315,15 @@ export function findLastMatchingBinding(
     // while a shortcut comparison is pure arithmetic on the event.
     if (!matchesShortcut(event, binding.shortcut, platform)) continue;
     if (!matchesWhenClause(binding.whenAst, context)) continue;
-    return binding;
+    // The file-manager stand-down belongs here rather than in
+    // `resolveShortcutCommand`, because that is no longer the single point
+    // every resolution crosses: `usePaneNavigation` calls this function
+    // directly, and a guard one level up would leave the pane chords firing
+    // over an open file manager, in the capture phase, ahead of its own
+    // dispatcher. A matched binding that stands down yields null rather than
+    // continuing the search, so a lower-priority binding cannot inherit the
+    // key the file manager just claimed.
+    return standDownForFileManager(binding.command) === null ? null : binding;
   }
   return null;
 }
@@ -325,6 +334,19 @@ export function resolveShortcutCommand(
   options?: ShortcutMatchOptions,
 ): KeybindingCommand | null {
   return findLastMatchingBinding(event, keybindings, options)?.command ?? null;
+}
+
+/**
+ * Fork addition. While the file manager is up over the window every host
+ * chord but its own toggle stands down, so its keys — `Ctrl+O` for the
+ * overview above all — reach its dispatcher unopposed. Every window listener
+ * resolves through `findLastMatchingBinding`, directly or through
+ * `resolveShortcutCommand` and the `is*Shortcut` helpers over it, which is why
+ * the one guard is applied there rather than in each listener.
+ */
+function standDownForFileManager(command: KeybindingCommand): KeybindingCommand | null {
+  if (command === "fileTree.miller") return command;
+  return isFileManagerOpen() ? null : command;
 }
 
 function formatShortcutKeyLabel(key: string): string {

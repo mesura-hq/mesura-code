@@ -1,0 +1,140 @@
+{
+  "$schema": "./node_modules/fallow/schema.json",
+
+  // Every entry here was added because an observed finding proved it was
+  // needed, per the catalog's rule. None is speculative.
+
+  // `ignorePatterns` removes files from analysis ENTIRELY — discovery, parsing,
+  // resolution and the module graph. Reserved for trees fallow cannot parse or
+  // must not reason about.
+  "ignorePatterns": [
+    // ── The Qt tree ──
+    // Observed: `fallow dead-code` reported 32 unreachable files, all of them
+    // QML-side JavaScript (`handlers/KeyRegistry.js`, `TreeModel.js`, …). They
+    // are not dead: QML loads them with `import "handlers/…" as …`, an edge no
+    // JavaScript analyser can follow. Observed too: `fallow dupes` found 127
+    // duplicated lines between `FlashHandler.js` and `TreeFlashHandler.js` —
+    // real, but in code this cycle must leave untouched, and already covered by
+    // the incumbent gate `tools/quality/check-qml.sh`.
+    // Remove this entry when the Qt tree is deleted at parity.
+    "qml/**",
+
+    // Vendored dependencies and build output. Not our source.
+    "plugin/third_party/**",
+    "plugin/build/**",
+
+    // Research prose and a generated page. No source to analyse.
+    "docs/**",
+
+    // ── The measurement harnesses ──
+    // Observed, two findings on `app/bench/pickerPath.mjs`:
+    //   unused-file      — nothing imports a bench. They are run by hand,
+    //                      against a daemon started by hand, and each names its
+    //                      own invocation in its header.
+    //   code-duplication — its socket client duplicates the one in
+    //                      `app/bin/symmetria-fm-electron-cli.mjs`, and that
+    //                      duplication is deliberate in BOTH files for the same
+    //                      stated reason: neither may have a build step or a
+    //                      dependency, so neither can import the TypeScript
+    //                      `sendCommand`. A bench that needed `pnpm build` to
+    //                      run would measure whatever was built last.
+    // Scoped to the directory rather than the file, because the next bench will
+    // have both properties for both of the same reasons.
+    "app/bench/**",
+
+    // ── Vendored policy source ──
+    // Observed, three separate findings: `fallow dupes` reported 42 duplicated
+    // lines in `shared/dictionary-types.ts`; `dead-code` reported two unused
+    // exports; and `audit --changed-since` reported 54 high-complexity
+    // functions. All of it is copied verbatim from anti-slop upstream commit
+    // 6d538555cb151d4121ed51a27db81890eacf8ae9. Drift is detected by diffing
+    // against upstream, so we neither refactor it nor let findings against it
+    // gate our reviews.
+    //
+    // `ignoreFindings` was tried first and is the more precise instrument —
+    // it keeps files in the module graph — but the schema scopes it to
+    // source-owned DEAD-CODE findings, so `audit`'s complexity and duplication
+    // findings still gated. Hence the blunter `ignorePatterns`, plus the
+    // `ignoreDependencies` entry below to undo its one side effect.
+    "tools/oxlint/anti-slop/**"
+  ],
+
+  // Electron has three entry points and none of them is imported by anything:
+  // the runtime loads the main bundle, Chromium loads the preload, and the
+  // built page loads the renderer. Without these, fallow reports all three as
+  // unused files — which is true of the module graph and false of the program.
+  "entry": [
+    "app/src/main/index.ts",
+    "app/src/preload/index.ts",
+    "app/src/renderer/main.tsx",
+    "app/scripts/build.mjs",
+    "app/test/**/*.ts",
+    // Two more entry points a person or a unit runs directly, so nothing in
+    // the module graph imports either.
+    //
+    // Observed for the BENCHMARK: `fallow audit` reported it as an unused file
+    // the moment it was added — true of the graph, false of the program.
+    //
+    // The command-line tool has the identical problem and is a PRE-EXISTING
+    // gap being closed here rather than a finding from this phase: it was added
+    // in an earlier commit and never listed, so the check had been quietly
+    // incomplete since then. Review noticed the comment conflated the two.
+    "app/bin/symmetria-fm-electron-cli.mjs",
+    "app/bench/pickerWindow.mjs",
+    // The search worker has TWO entries and nothing imports either, because a
+    // worker is started by PATH rather than by import: the Electron one is
+    // handed to `utilityProcess.fork`, and the Node one is forked by the
+    // topology test, which needs two real processes to prove that two indices
+    // can share one store.
+    //
+    // Observed: `fallow dead-code` reported both as unused files the moment
+    // they were added — true of the module graph and false of the program, the
+    // same shape as the three Electron entries above.
+    "packages/fm-search/src/main/worker-entry-electron.ts",
+    "packages/fm-search/src/main/worker-entry.ts"
+  ],
+
+  // Three paths inside `new URL(...)` point at build OUTPUT, not at modules:
+  // `../renderer/index.html` is the page the window loads,
+  // `../preload/index.cjs` is the bundle Chromium loads, and
+  // `./searchWorker.js` is the bundle `utilityProcess.fork` is handed. All
+  // three resolve at runtime, relative to `dist-electron/`, and never at
+  // analysis time.
+  //
+  // Observed for the worker: `fallow audit` reported it as an unresolved import
+  // the moment the path stopped being built from `__dirname`. It had to stop —
+  // the main bundle is ESM, where `__dirname` is a `ReferenceError` waiting for
+  // the first search — so `import.meta.url` is the correct form and this entry
+  // is the cost of it.
+  "ignoreUnresolvedImports": [
+    "../renderer/index.html",
+    "../preload/index.cjs",
+    "./searchWorker.js"
+  ],
+
+  // The side effect of excluding the tree above: fallow can no longer see that
+  // `tools/oxlint/anti-slop/index.ts` imports `@oxlint/plugins`, so it reported
+  // that package as an unused devDependency. It is not — verified with
+  // `grep -rn '@oxlint/plugins' tools/oxlint/anti-slop/`, which finds it in
+  // `index.ts`, `rules/no-reflect-apply.ts` and `shared/reflect-method.ts`.
+  // `knip.json` carries the identical entry for the identical reason.
+  //
+  // `@ff-labs/fff-node` is the second entry, and it is unused by every static
+  // measure: no file under `app/src` imports it, and it is declared in
+  // `app/package.json` all the same. Observed: both `fallow audit` and `knip`
+  // reported it as an unused dependency of `app` the moment it was added.
+  //
+  // It is a RUNTIME dependency of a BUILD ARTEFACT. `app/scripts/build.mjs`
+  // marks the native engine external — a `.node` binary cannot be bundled into
+  // JavaScript — so `dist-electron/main/searchWorker.js` imports it at run
+  // time. Node resolves from the importing FILE's location, and pnpm links a
+  // package only into the `node_modules` of the workspace package that declares
+  // it, so the declaration has to sit in `app` for the bundle to find anything
+  // at all. Declared only by `packages/fm-search`, the shipped worker died on
+  // startup with `ERR_MODULE_NOT_FOUND` while every test stayed green, because
+  // tests import the TypeScript source from inside `fm-search` where resolution
+  // has always worked. `app/test/workerBundle.test.ts` is what now holds that
+  // line; do not remove this entry without also removing that test's reason to
+  // exist. `knip.json` carries the identical entry for the identical reason.
+  "ignoreDependencies": ["@oxlint/plugins", "@ff-labs/fff-node"]
+}

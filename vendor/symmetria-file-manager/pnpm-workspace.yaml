@@ -1,0 +1,20 @@
+packages:
+  - "packages/*"
+  - "app"
+# pnpm 11 refuses to run a dependency's install scripts without an explicit
+# entry here. Both of these need theirs, and both are packages this project
+# selected deliberately rather than pulled in transitively:
+#   electron — its postinstall downloads the platform binary; without it there
+#              is no application to launch and no smoke test.
+#   esbuild  — its postinstall places the native binary the bundler runs on.
+# Anything not listed stays blocked, which is the point of the mechanism.
+#
+# There is deliberately no file-watching entry. `@parcel/watcher` was listed
+# here as "the ONE new native module this whole design adds"; it turned out to
+# have no non-recursive mode and exhausted the kernel's inotify budget when a
+# pane opened on a home directory. `node:fs.watch` needs no build step, so the
+# application ships no native modules.
+allowBuilds:
+  '@parcel/watcher': set this to true or false
+  electron: true
+  esbuild: true

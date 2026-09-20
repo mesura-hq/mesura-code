@@ -1,0 +1,20 @@
+{
+  // The finder's PANEL half. DOM yes, Node NO.
+  //
+  // The same split, and the same reason, as `packages/fm-ui`: this half runs in
+  // a sandboxed renderer with no filesystem, so an accidental `node:fs` import
+  // has to fail here at compile time rather than at runtime in front of the
+  // user. The privileged half sits under `src/main` in `tsconfig.json` and gets
+  // the opposite treatment.
+  //
+  // A separate file rather than a wider `include` on the first: one config
+  // sharing a `lib` would let a `window` reference type-check inside a utility
+  // process and a `node:fs` import type-check inside the renderer.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": [],
+    "jsx": "react-jsx"
+  },
+  "include": ["src/ui/**/*.ts", "src/ui/**/*.tsx"]
+}

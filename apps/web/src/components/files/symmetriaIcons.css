@@ -1,0 +1,20 @@
+/*
+ * The Symmetria file-type icon palette, for the file tree in the panel and
+ * the file manager over the window. The values are the file manager's own
+ * (`vendor/symmetria-file-manager/packages/fm-ui/src/theme/tokens.css`),
+ * read by `fm-search`'s `.file-icon[data-icon=…]` rules; `index.css` has no
+ * tokens of this name. One sheet, so the two surfaces cannot drift apart.
+ */
+
+/* The wrapper `MesuraFileTree` renders, and the root `MesuraFileManagerLayer` renders. */
+[data-mesura-file-tree],
+[data-mesura-file-manager] {
+  --icon-blue: #89b4e8;
+  --icon-cyan: #79c5ce;
+  --icon-yellow: #dfc47d;
+  --icon-green: #96c698;
+  --icon-orange: #dba17c;
+  --icon-purple: #b4a0da;
+  --icon-pink: #d39ab8;
+  --icon-muted: #a8adb8;
+}

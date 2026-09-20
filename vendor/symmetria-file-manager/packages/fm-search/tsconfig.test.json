@@ -1,0 +1,17 @@
+{
+  // The finder's TESTS, which need both environments and are the only thing
+  // here that does.
+  //
+  // The boundary test reads every source file under `src/ui` to prove that half
+  // never imports Node — so it needs a filesystem. The standalone test mounts
+  // the overlay — so it needs a DOM. Neither permission may reach the source,
+  // which is why this is a third file rather than a wider `include` on either
+  // of the other two.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "jsx": "react-jsx"
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx"]
+}

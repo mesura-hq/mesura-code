@@ -19,6 +19,15 @@ import {
   FilesystemBrowseError,
 } from "./filesystem.ts";
 import {
+  FileManagerError,
+  FileManagerEventsInput,
+  FileManagerHostInfo,
+  FileManagerMutateInput,
+  FileManagerQueryInput,
+  FileManagerReply,
+  FileManagerStreamItem,
+} from "./fileManager.ts";
+import {
   AssetAccessError,
   AssetCreateUrlInput,
   AssetCreateUrlResult,
@@ -236,6 +245,12 @@ export const WS_METHODS = {
 
   // Filesystem methods
   filesystemBrowse: "filesystem.browse",
+
+  // Mesura: the Symmetria file manager's bridge, hosted by the server
+  fileManagerHost: "fileManager.host",
+  fileManagerQuery: "fileManager.query",
+  fileManagerMutate: "fileManager.mutate",
+  fileManagerSubscribeEvents: "fileManager.subscribeEvents",
   assetsCreateUrl: "assets.createUrl",
   attachmentsCreateUploadUrl: "attachments.createUploadUrl",
   attachmentsDelete: "attachments.delete",
@@ -710,6 +725,31 @@ export const WsFilesystemBrowseRpc = Rpc.make(WS_METHODS.filesystemBrowse, {
   error: Schema.Union([FilesystemBrowseError, EnvironmentAuthorizationError]),
 });
 
+export const WsFileManagerHostRpc = Rpc.make(WS_METHODS.fileManagerHost, {
+  payload: Schema.Struct({}),
+  success: FileManagerHostInfo,
+  error: Schema.Union([FileManagerError, EnvironmentAuthorizationError]),
+});
+
+export const WsFileManagerQueryRpc = Rpc.make(WS_METHODS.fileManagerQuery, {
+  payload: FileManagerQueryInput,
+  success: FileManagerReply,
+  error: Schema.Union([FileManagerError, EnvironmentAuthorizationError]),
+});
+
+export const WsFileManagerMutateRpc = Rpc.make(WS_METHODS.fileManagerMutate, {
+  payload: FileManagerMutateInput,
+  success: FileManagerReply,
+  error: Schema.Union([FileManagerError, EnvironmentAuthorizationError]),
+});
+
+export const WsFileManagerSubscribeEventsRpc = Rpc.make(WS_METHODS.fileManagerSubscribeEvents, {
+  payload: FileManagerEventsInput,
+  success: FileManagerStreamItem,
+  error: Schema.Union([FileManagerError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
 export const WsAssetsCreateUrlRpc = Rpc.make(WS_METHODS.assetsCreateUrl, {
   payload: AssetCreateUrlInput,
   success: AssetCreateUrlResult,
@@ -1159,6 +1199,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
   WsAssetsCreateUrlRpc,
+  WsFileManagerHostRpc,
+  WsFileManagerQueryRpc,
+  WsFileManagerMutateRpc,
+  WsFileManagerSubscribeEventsRpc,
   WsAttachmentsCreateUploadUrlRpc,
   WsAttachmentsDeleteRpc,
   WsProviderUploadFeedbackRpc,

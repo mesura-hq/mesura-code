@@ -1,0 +1,99 @@
+/*
+ * The Symmetria file manager over the window.
+ *
+ * The file manager's own stylesheet is imported whole: it styles the columns,
+ * the preview, the status bar, the modals and the overlays by class, and it
+ * reads Mesura Code's tokens by name (`--background`, `--border`,
+ * `--muted-foreground`, `--radius`, …), which resolve as is. Its palette file
+ * (`theme/tokens.css`) is NOT imported: it declares those same names on
+ * `:root` and would recolour the host. The tokens it reads that `index.css`
+ * lacks are declared on the layer's root below, with the file manager's own
+ * values; the icon palette comes from `symmetriaIcons.css`. Plain CSS, no
+ * `@layer`, one comment per rule naming the hook it relies on — see
+ * `docs/mesura/styling.md`.
+ */
+@import "@symmetria/fm-ui/styles.css";
+@import "@symmetria/fm-ui/syntax-wine.css";
+
+/* The file manager's six `::-webkit-scrollbar` rules are global by its own
+   design and, imported here, outrank the host's own (`index.css`,
+   "Scrollbar styling", which reads `--app-scrollbar-*`). Their tokens are
+   pointed at the host's values on the root, so every scrollbar in the app
+   paints as it did; the layer's root below sets its own values over these.
+   The thumb's radius is the one declaration the host writes as a length,
+   restated here with the same value. */
+:root {
+  --scrollbar-width: var(--app-scrollbar-width);
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: var(--app-scrollbar-thumb);
+  --scrollbar-thumb-hover: var(--app-scrollbar-thumb-hover);
+}
+::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+}
+
+/* The root `MesuraFileManagerLayer` portals to `body`. Fixed over the whole
+   window, above the panel's stacking contexts and the composer (the same
+   `z-index: 60` the folder overview used). The values are the file manager's
+   `theme/tokens.css` ones, which that file states are Mesura Code's dark
+   palette; the light values mix against Mesura Code's light `--background`
+   the same way, with the highlights turned to black. The body's own font size
+   applies inside; the columns set their own row type. */
+[data-mesura-file-manager] {
+  --overlay-scrim: rgb(0 0 0 / 40%);
+  --search-match: rgb(0 0 0 / 6%);
+  --flash-query: rgb(0 0 0 / 14%);
+  --flash-label: var(--foreground);
+  --flash-label-ink: var(--background);
+  --marked: oklch(60% 0.12 25);
+  --markdown-rule: rgb(0 0 0 / 14%);
+  --rendered-page: rgb(255 255 255);
+  --scrollbar-width: 6px;
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: rgb(0 0 0 / 12%);
+  --scrollbar-thumb-hover: rgb(0 0 0 / 20%);
+  --row-height: 24px;
+  --toolbar-inset: 16px;
+  --status-bar-height: 26px;
+  --seek-track: 3px;
+  --seek-thumb: 9px;
+  --finder-list-share: 0.5;
+  --finder-gap: 12px;
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  outline: none;
+}
+/* Mesura Code's dark theme is a class on the root (`index.css`, `.dark`). */
+.dark [data-mesura-file-manager] {
+  --overlay-scrim: rgb(0 0 0 / 60%);
+  --search-match: rgb(255 255 255 / 5%);
+  --flash-query: rgb(255 255 255 / 18%);
+  --marked: oklch(75% 0.09 25);
+  --markdown-rule: rgb(255 255 255 / 14%);
+  --scrollbar-thumb: rgb(255 255 255 / 8%);
+  --scrollbar-thumb-hover: rgb(255 255 255 / 12%);
+}
+
+/* `.app` is the file manager's `main`, sized `height: 100%` for a window it
+   owned; here it is the flex child of the fixed root and fills it the same way
+   whatever the vendored value. */
+[data-mesura-file-manager] > .app {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
+/* Shown in place of the columns while the host's home directory is still
+   being asked for, or when that ask failed. */
+[data-mesura-file-manager] .mesura-file-manager-notice {
+  margin: auto;
+  color: var(--muted-foreground);
+  font-size: 13px;
+}

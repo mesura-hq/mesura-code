@@ -22,6 +22,8 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { usePaneNavigation } from "~/lib/usePaneNavigation";
+import { MesuraFileManagerLayer } from "~/components/files/mesuraFileManager/MesuraFileManagerLayer";
+import { useFileTreeShortcut } from "~/components/files/mesuraTree/useFileTreeShortcut";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 
 function ChatRouteGlobalShortcuts() {
@@ -30,6 +32,7 @@ function ChatRouteGlobalShortcuts() {
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread, routeThreadRef } =
     useHandleNewThread();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  useFileTreeShortcut(routeThreadRef);
   const legacySidebarEnabled = useLegacySidebarEnabled();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const projects = useProjects();
@@ -177,7 +180,7 @@ function ChatRouteGlobalShortcuts() {
     terminalOpen,
   ]);
 
-  return null;
+  return <MesuraFileManagerLayer routeThreadRef={routeThreadRef} activeThread={activeThread} />;
 }
 
 function ChatRouteLayout() {

@@ -1,0 +1,16 @@
+{
+  // The privileged half of the finder. Node yes, DOM NO.
+  //
+  // Same split, and the same reason, as `packages/fm-main`: this half runs in a
+  // main or utility process where `window` and `document` do not exist. The
+  // panel half lives under `src/ui` in `tsconfig.ui.json` and gets the opposite
+  // treatment, so an accidental DOM reference here cannot type-check.
+  //
+  // `src/main` alone. The tests moved to `tsconfig.test.json` when the package
+  // gained a panel half, because a test of the overlay needs a DOM and the
+  // engine must not — one shared config would hand the source whatever the
+  // tests need, which is the whole thing this split exists to prevent.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "lib": ["ES2023"], "types": ["node"] },
+  "include": ["src/main/**/*.ts"]
+}

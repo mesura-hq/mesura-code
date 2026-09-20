@@ -1,0 +1,188 @@
+/*
+ * The palette, as tokens.
+ *
+ * Decision D7: take Mesura Code's dark values as they are. NOT the Qt build's
+ * `FmTheme` ladder and NOT Symmetria IDE's — the three products map similar
+ * names to different values, and this is a third consumer choosing explicitly
+ * rather than inheriting by accident.
+ *
+ * The values are Mesura Code's `.dark` block, resolved from the Tailwind neutral
+ * scale it names, so this file needs no build step and no Tailwind. `oklch` is
+ * kept rather than converted to hex because that is what a neutral ladder is
+ * expressed in there, and converting would make a later comparison harder.
+ *
+ * **Every colour the interface uses comes from here.** A component that writes
+ * a literal colour cannot be re-themed and cannot be found; `theme.test.ts`
+ * fails the build for one.
+ */
+
+:root {
+  /* ── Surfaces ─────────────────────────────────────────────────────────── */
+  /* neutral-950 */
+  --background: oklch(14.5% 0 0);
+  /* Barely above the background: a card reads as a plane, not as a box. */
+  --card: color-mix(in srgb, var(--background) 97%, white);
+  --popover: color-mix(in srgb, var(--background) 94%, white);
+
+  /* Match Mesura Code's neutral dark composer glass. */
+  --glass-surface: color-mix(in srgb, var(--background) 96%, white);
+  --glass-background: color-mix(in srgb, var(--glass-surface) 80%, transparent);
+  --glass-border: rgb(255 255 255 / 5%);
+  --glass-highlight: rgb(255 255 255 / 3%);
+
+  /* ── Text ─────────────────────────────────────────────────────────────── */
+  /* neutral-100 */
+  --foreground: oklch(97% 0 0);
+  /* neutral-500, lifted slightly so it stays legible on the near-black base. */
+  --muted-foreground: color-mix(in srgb, oklch(55.6% 0 0) 90%, white);
+
+  /* ── Lines and fills ──────────────────────────────────────────────────── */
+  /* Alpha, not a grey: a border over a card and over the background should be
+     the same border, and a solid grey would be two different ones. */
+  --border: rgb(255 255 255 / 6%);
+  --muted: rgb(255 255 255 / 4%);
+  --accent: rgb(255 255 255 / 8%);
+  /* What dims the window behind a dialog. */
+  --overlay-scrim: rgb(0 0 0 / 60%);
+
+  /* File-type colours stay softer than search and flash labels. */
+  --icon-blue: #89b4e8;
+  --icon-cyan: #79c5ce;
+  --icon-yellow: #dfc47d;
+  --icon-green: #96c698;
+  --icon-orange: #dba17c;
+  --icon-purple: #b4a0da;
+  --icon-pink: #d39ab8;
+  --icon-muted: #a8adb8;
+
+  /* ── Meaning ──────────────────────────────────────────────────────────── */
+  --primary: oklch(57.1% 0.21 264);
+  --destructive: oklch(63.7% 0.208 25.3);
+  /*
+   * A search match, sitting under the row rather than on its text.
+   *
+   * Its own token and not `--accent`: the cursor uses that, and a match needs
+   * to be visible on a row that is NOT the cursor while staying quieter than
+   * one that is.
+   */
+  --search-match: rgb(255 255 255 / 5%);
+  /*
+   * Flash jump, and it is MONOCHROME on purpose.
+   *
+   * The Qt build draws the label as a near-white chip with dark ink and the
+   * matched characters on a much quieter grey, and the operator asked for the
+   * same here after seeing a coloured first attempt side by side with it. The
+   * accent colour is spoken for — it means "the application is doing
+   * something" — and a jump label is not that; it is the brightest thing on
+   * screen for a second and then gone.
+   *
+   * The contrast between the two is what separates them, so they may sit
+   * adjacent without reading as one block: 18% white against solid white.
+   */
+  --flash-query: rgb(255 255 255 / 18%);
+  --flash-label: var(--foreground);
+  --flash-label-ink: var(--background);
+  /* The cut/mark indicator. Hardcoded in the Qt build for the same reason it is
+     its own token here: an indicator that stops being legible is worse than one
+     that does not match. */
+  --marked: oklch(75% 0.09 25);
+
+  /*
+   * The rule down the side of a block quote, and the horizontal rule.
+   *
+   * Its own token rather than `--border`, which is the hairline used for
+   * separators and card edges. A quote bar at 6% white is invisible against
+   * the near-black base — it has to read as a deliberate mark rather than as
+   * an edge, and that is a different job from the one `--border` does.
+   */
+  --markdown-rule: rgb(255 255 255 / 14%);
+
+  /*
+   * The paper a rendered page sits on.
+   *
+   * White, because a page that declares no background of its own IS white by
+   * every browser's convention, and letting the near-black panel show through
+   * would misrepresent how the document actually looks. The Qt build sets its
+   * web view's background for exactly this reason.
+   *
+   * It is here rather than written into the rule because `theme.test.ts`
+   * refuses a colour literal anywhere else — and white is a colour.
+   */
+  --rendered-page: rgb(255 255 255);
+
+  /* ── Scrollbars ───────────────────────────────────────────────────────── */
+  /*
+   * Mesura Code's own values, from its `@variant dark` block — the same source
+   * the palette above came from, so a panel embedded there will not have two
+   * scrollbars that disagree.
+   *
+   * The thumb is 8% white, which is numerically the same as `--accent`. Declared
+   * separately anyway rather than aliased: a scrollbar and a row highlight
+   * drifting apart later is an ordinary change, and it should not require
+   * splitting a token at that point.
+   */
+  /*
+   * Both axes. A webkit scrollbar's thickness is its `width` when it runs
+   * vertically and its `height` when it runs horizontally, so this one value
+   * feeds both — the name says `width` because that is what Mesura Code calls
+   * it (`--app-scrollbar-width`), and keeping the names in step is worth more
+   * than the small inaccuracy.
+   */
+  --scrollbar-width: 6px;
+  /*
+   * What the lane is painted on.
+   *
+   * Transparent HERE, so the column surface runs under it rather than being
+   * interrupted by a stripe of its own. It is a token rather than the literal
+   * `transparent` because the SAME six rules are served into every previewed
+   * HTML document, where transparent is the one value that cannot be used:
+   * measured against Chromium 41, a custom-styled track in a framed document
+   * composites against the frame's own white base, which the previewed page
+   * cannot paint — with or without a background on its `html`. So a transparent
+   * track there is a white stripe down a dark page, which is the exact defect
+   * this whole token exists to end. `scrollbar.ts` gives it a solid value.
+   */
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: rgb(255 255 255 / 8%);
+  --scrollbar-thumb-hover: rgb(255 255 255 / 12%);
+
+  /* ── Geometry ─────────────────────────────────────────────────────────── */
+  --row-height: 24px;
+  --toolbar-inset: 16px;
+  /*
+   * The status bar's height, which is FIXED so the columns never move.
+   *
+   * Here rather than beside the rule, and that is not a preference:
+   * `theme.test.ts` requires every `var(--x)` any stylesheet reads to be
+   * DECLARED IN THIS FILE. Sized to fit a file dialog's Accept button and its
+   * save-name field, which are the tallest things the bar ever holds.
+   */
+  --status-bar-height: 26px;
+  /*
+   * The audio seek control, in two numbers.
+   *
+   * Here rather than local to the control's own rule, and that is not a
+   * preference: `theme.test.ts` requires every `var(--x)` any stylesheet reads
+   * to be DECLARED IN THIS FILE, so a property declared on `.preview__seek`
+   * fails the build. `--row-height` above is the same shape of value — one
+   * component's internal geometry — and sets the precedent.
+   *
+   * They are read by five rules between them, and the thumb's offset is
+   * `calc((track - thumb) / 2)`. Written out per rule instead, changing the
+   * track to 4px silently un-centres the playhead and leaves the groove and the
+   * fill at different heights, with nothing to catch it.
+   */
+  --seek-track: 3px;
+  --seek-thumb: 9px;
+  --radius: 0.5rem;
+  --radius-sm: 4px;
+
+  /* Divide the space after the gap so the ratio includes neither pane's gap.
+     Keep these here so hosts can tune the shared finder without changing CSS. */
+  --finder-list-share: 0.5;
+  --finder-gap: 12px;
+
+  /* ── Type ─────────────────────────────────────────────────────────────── */
+  --font-sans: Rubik, system-ui, sans-serif;
+  --font-mono: "CaskaydiaCove NF", ui-monospace, monospace;
+}

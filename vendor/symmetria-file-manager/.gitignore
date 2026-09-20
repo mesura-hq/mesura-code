@@ -1,0 +1,47 @@
+# QML cache
+qmlcache/
+
+# Build artifacts
+build/
+build_test/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+*.o
+*.so
+
+# Editor files
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Secrets / credentials
+.env
+.env.*
+*.pem
+*.key
+*.p12
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Build metadata
+compile_commands.json
+
+# macOS
+.DS_Store
+
+# Tooling scratch (playwright-cli writes this during agent browser checks)
+.playwright-cli/
+
+# ── Electron / TypeScript tree ──
+# The `build/` and `*.so` entries above already cover the CMake tree; these
+# cover the workspace added beside it.
+node_modules/
+dist/
+dist-electron/
+*.tsbuildinfo
+.vite/

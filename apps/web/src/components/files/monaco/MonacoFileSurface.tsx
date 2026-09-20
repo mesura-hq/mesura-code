@@ -26,6 +26,7 @@ import {
   readCodeSurfaceColors,
 } from "./monacoFileTheme";
 import "./monacoFileSurface.css";
+import { registerFocusTarget } from "~/lib/focusTargets";
 
 const REVEAL_LINE_CLASS = "mesura-file-reveal-line";
 
@@ -186,8 +187,13 @@ export function MonacoFileSurface({
     editorRef.current = editor;
     setEditor(editor);
     decorationsRef.current = editor.createDecorationsCollection();
+    const unregisterFocusTarget = registerFocusTarget("editor", () => {
+      editor.focus();
+      return true;
+    });
 
     return () => {
+      unregisterFocusTarget();
       decorationsRef.current = null;
       editorRef.current = null;
       setEditor(null);

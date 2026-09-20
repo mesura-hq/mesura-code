@@ -1,0 +1,15 @@
+{
+  // The sandboxed half. DOM yes, Node NO — the renderer runs with
+  // `sandbox: true`, `contextIsolation: true` and `nodeIntegration: false`, so
+  // an accidental `import fs from "node:fs"` must fail here at compile time
+  // rather than at runtime in front of the user.
+  // Add each new `@types/*` package to `types` below or its globals are
+  // silently invisible; nothing errors when it is missing.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": [],
+    "jsx": "react-jsx"
+  },
+  "include": ["src/renderer/**/*.ts", "src/renderer/**/*.tsx"]
+}

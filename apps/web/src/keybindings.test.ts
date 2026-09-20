@@ -1246,6 +1246,21 @@ it("resolves mod+shift+k to the thread search outside terminal focus", () => {
   );
 });
 
+/**
+ * A stub `document` for the focus helpers below, focused on `activeElement`.
+ *
+ * Answering `querySelector` is part of the contract, not a detail. Shortcut
+ * resolution reads the page at event time to see whether the file manager is up
+ * over the window, so a stub carrying only `activeElement` throws there instead
+ * of reporting a closed file manager, and every test that installs one fails.
+ * Returning null is the honest answer: nothing here puts a file manager in the
+ * page. A test that wants the opposite should return an element instead.
+ */
+const noFileManagerInPage = () => null;
+
+const stubDocumentFocusedOn = (activeElement: unknown): Document =>
+  ({ activeElement, querySelector: noFileManagerInPage }) as unknown as Document;
+
 describe("pane-scoped bindings", () => {
   // No DOM is installed for tests in this workspace, so the focus tree is
   // hand-built, as terminalFocus.test.ts does.
@@ -1278,7 +1293,7 @@ describe("pane-scoped bindings", () => {
     const active = new PaneElement([]);
     active.parent = root;
     globalThis.HTMLElement = PaneElement as unknown as typeof HTMLElement;
-    globalThis.document = { activeElement: active } as unknown as Document;
+    globalThis.document = stubDocumentFocusedOn(active);
     try {
       body();
     } finally {
@@ -1344,6 +1359,7 @@ describe("pane-scoped bindings", () => {
     let reads = 0;
     globalThis.HTMLElement = PaneElement as unknown as typeof HTMLElement;
     globalThis.document = {
+      querySelector: noFileManagerInPage,
       get activeElement() {
         reads += 1;
         return active;
@@ -1434,7 +1450,7 @@ describe("the sidebar's list chords", () => {
     const active = new SidebarElement(tagName);
     active.parent = root;
     globalThis.HTMLElement = SidebarElement as unknown as typeof HTMLElement;
-    globalThis.document = { activeElement: active } as unknown as Document;
+    globalThis.document = stubDocumentFocusedOn(active);
     try {
       body();
     } finally {

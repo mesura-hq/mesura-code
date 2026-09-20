@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  QT_VERSION: "6.9.0"
+  KF6_SYNTAX_TAG: "v6.12.0"
+  QXLSX_TAG: "v1.5.0"
+  DEPS_PREFIX: ${{ github.workspace }}/deps
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The fuzzy finder links the vendored Rust `fff` engine (submodule).
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('plugin/third_party/fff/Cargo.lock') }}
+          restore-keys: cargo-registry-${{ runner.os }}-
+
+      - name: Cache Cargo build artifacts
+        uses: actions/cache@v4
+        with:
+          # Corrosion writes Rust build artefacts into plugin/build/cargo/ (set via
+          # CORROSION_BUILD_DIR in Corrosion.cmake). Without this cache every CI run
+          # recompiles ~400 MB of Rust code even when fff source is unchanged.
+          path: plugin/build/cargo
+          key: cargo-build-${{ runner.os }}-${{ hashFiles('plugin/third_party/fff/Cargo.lock') }}
+          restore-keys: cargo-build-${{ runner.os }}-
+
+      - name: Install Qt ${{ env.QT_VERSION }}
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          modules: "qtmultimedia"
+          cache: true
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libarchive-dev \
+            libfreexl-dev \
+            libheif-dev \
+            libheif-plugin-libde265 \
+            pkg-config \
+            ninja-build \
+            locales
+          sudo locale-gen en_US.UTF-8
+
+      - name: Cache KF6 SyntaxHighlighting + QXlsx
+        id: deps-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.DEPS_PREFIX }}
+          key: deps-${{ env.QT_VERSION }}-kf6${{ env.KF6_SYNTAX_TAG }}-qxlsx${{ env.QXLSX_TAG }}
+
+      - name: Build Extra CMake Modules (ECM)
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch ${{ env.KF6_SYNTAX_TAG }} \
+            https://invent.kde.org/frameworks/extra-cmake-modules.git
+          cmake -G Ninja -B extra-cmake-modules/build -S extra-cmake-modules \
+            -DCMAKE_INSTALL_PREFIX=${{ env.DEPS_PREFIX }} \
+            -DBUILD_TESTING=OFF
+          cmake --build extra-cmake-modules/build
+          cmake --install extra-cmake-modules/build
+
+      - name: Build KF6 SyntaxHighlighting
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch ${{ env.KF6_SYNTAX_TAG }} \
+            https://invent.kde.org/frameworks/syntax-highlighting.git
+          cmake -G Ninja -B syntax-highlighting/build -S syntax-highlighting \
+            -DCMAKE_INSTALL_PREFIX=${{ env.DEPS_PREFIX }} \
+            -DCMAKE_PREFIX_PATH=${{ env.DEPS_PREFIX }} \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF \
+            -DQRC_SYNTAX=OFF
+          cmake --build syntax-highlighting/build --parallel $(nproc)
+          cmake --install syntax-highlighting/build
+
+      - name: Build QXlsx
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch ${{ env.QXLSX_TAG }} \
+            https://github.com/QtExcel/QXlsx.git
+          cmake -G Ninja -B QXlsx/build -S QXlsx/QXlsx \
+            -DCMAKE_INSTALL_PREFIX=${{ env.DEPS_PREFIX }} \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build QXlsx/build --parallel $(nproc)
+          cmake --install QXlsx/build
+
+      - name: Build plugin
+        working-directory: plugin
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/deps/lib
+        run: |
+          cmake -G Ninja -B build \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH=${{ env.DEPS_PREFIX }}
+          cmake --build build --parallel $(nproc)
+
+      - name: Run tests
+        working-directory: plugin
+        env:
+          QT_QPA_PLATFORM: offscreen
+          LD_LIBRARY_PATH: ${{ github.workspace }}/deps/lib
+          XDG_DATA_DIRS: ${{ github.workspace }}/deps/share:/usr/local/share:/usr/share
+          LC_ALL: en_US.UTF-8
+        run: ctest --test-dir build --output-on-failure --timeout 60

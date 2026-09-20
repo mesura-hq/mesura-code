@@ -1,0 +1,26 @@
+/*
+ * The window the standalone renders into.
+ *
+ * These rules were in `fm-ui`'s `styles.css`, and they left because that
+ * sheet is also loaded by hosts that embed the interface in a page of their
+ * own: a rule on `html`, `body` or `#root` restyled the host. Only the
+ * standalone owns its window, so only the standalone loads this.
+ */
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: 16px;
+
+  /* The window is the viewport. A scrolling body would scroll the chrome along
+   * with the columns, and the columns do their own scrolling. */
+  overflow: hidden;
+}
