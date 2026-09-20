@@ -16,6 +16,11 @@ import sharp from "sharp";
 import { BRAND_ASSET_PATHS, DEVELOPMENT_PUBLIC_ICON_OVERRIDES } from "./lib/brand-assets.ts";
 import { encodePngIco, readPngDimensions, WINDOWS_ICON_SIZES } from "./lib/icon-export.ts";
 
+// Upstream declares this beside its Icon Composer constants. This fork rewrote the
+// exporter onto sharp and dropped that block, but upstream's two error schemas below
+// still reference the check, so it keeps upstream's exact shape and stays here.
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+
 export const PINNED_LIBVIPS_VERSION = "8.18.3";
 
 /**
