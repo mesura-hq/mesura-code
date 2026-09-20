@@ -37,6 +37,11 @@ export type ModelPickerJumpKeybindingCommand =
 export const THREAD_KEYBINDING_COMMANDS = [
   "thread.previous",
   "thread.next",
+  // The sidebar's page step, five threads at a time. Separate commands
+  // rather than a modifier on the two above, because a command is what a
+  // keybinding row can name and what a user can rebind.
+  "thread.previousPage",
+  "thread.nextPage",
   "thread.copyReference",
   "thread.settle",
   // Bound to no chord since the 2026-W35 sync: upstream's thread.settle owns
@@ -66,6 +71,14 @@ export const CHAT_SCROLL_KEYBINDING_COMMANDS = [
 export type ChatScrollKeybindingCommand = (typeof CHAT_SCROLL_KEYBINDING_COMMANDS)[number];
 
 export const STATIC_KEYBINDING_COMMANDS = [
+  // Directional pane focus. The application claims these in the capture
+  // phase in every pane, the embedded editor and the terminal included, so a
+  // chord means one thing wherever it is typed. See
+  // apps/web/src/lib/usePaneNavigation.ts.
+  "pane.focusLeft",
+  "pane.focusRight",
+  "pane.focusUp",
+  "pane.focusDown",
   "sidebar.toggle",
   "terminal.toggle",
   "terminal.split",

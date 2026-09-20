@@ -20,6 +20,25 @@ type WhenToken =
 
 export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+b", command: "sidebar.toggle" },
+  // Two rules share mod+j, and BOTH the context and the order are
+  // load-bearing. Each was got wrong once, so both are spelled out.
+  //
+  // The context, `chatFocus`, is what stops the two being one shortcut
+  // context. Startup backfill skips a default whose context another rule
+  // already holds, so without the clause this row never reaches a config
+  // that has run the app before and the chord silently does nothing.
+  //
+  // The order is what keeps resolution answering `terminal.toggle`.
+  // Resolution is last-wins, so the pane rule must come FIRST. Put second,
+  // it wins whenever the chat has focus, and ChatView — which has no branch
+  // for a pane command — drops the key: the drawer never opens and nothing
+  // says why.
+  //
+  // The pane rule is therefore unreachable by resolution on purpose. Its
+  // consumer is usePaneNavigation, which matches it directly and consumes
+  // the chord only when the drawer is already open. Declining everywhere
+  // else is what leaves the toggle free to open it.
+  { key: "mod+j", command: "pane.focusDown", when: "chatFocus" },
   { key: "mod+j", command: "terminal.toggle" },
   { key: "mod+alt+b", command: "rightPanel.toggle" },
   { key: "mod+d", command: "terminal.split", when: "terminalFocus" },
@@ -32,12 +51,12 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+d", command: "diff.toggle", when: "!terminalFocus" },
   { key: "mod+shift+j", command: "preview.toggle" },
   { key: "mod+r", command: "preview.refresh", when: "previewFocus" },
-  { key: "mod+l", command: "preview.focusUrl", when: "previewFocus" },
+  { key: "mod+shift+l", command: "preview.focusUrl", when: "previewFocus" },
   { key: "mod+=", command: "preview.zoomIn", when: "previewFocus" },
   { key: "mod++", command: "preview.zoomIn", when: "previewFocus" },
   { key: "mod+-", command: "preview.zoomOut", when: "previewFocus" },
   { key: "mod+0", command: "preview.resetZoom", when: "previewFocus" },
-  { key: "mod+k", command: "commandPalette.toggle", when: "!terminalFocus" },
+  { key: "mod+o", command: "commandPalette.toggle", when: "!terminalFocus" },
   { key: "mod+p", command: "filePicker.toggle", when: "!terminalFocus" },
   // The content search gave mod+shift+f up to the project scope picker. The move
   // reaches existing configs through RETIRED_KEYBINDING_DEFAULTS below; without
@@ -74,9 +93,46 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // entry: that mechanism exists for a SECOND default on a command a config
   // already binds.
   { key: "alt+q", command: "question.toggleCollapse", when: "!terminalFocus" },
-  { key: "mod+u", command: "chat.scrollHalfPageUp", when: "!terminalFocus" },
-  { key: "mod+d", command: "chat.scrollHalfPageDown", when: "!terminalFocus" },
-  { key: "mod+o", command: "editor.openFavorite" },
+  // Directional pane focus, deliberately unconditional: the chord has one
+  // meaning in every pane, which is what stops two surfaces claiming a key.
+  // New commands, so the per-command startup backfill installs them and no
+  // ADDED_KEYBINDING_DEFAULTS entry is needed.
+  { key: "mod+h", command: "pane.focusLeft" },
+  { key: "mod+k", command: "pane.focusUp" },
+  { key: "mod+l", command: "pane.focusRight" },
+  // Scoped to the chat pane rather than to "not the terminal". The editor
+  // is neither, and these two keys are half the motion set inside it.
+  { key: "mod+u", command: "chat.scrollHalfPageUp", when: "chatFocus" },
+  { key: "mod+d", command: "chat.scrollHalfPageDown", when: "chatFocus" },
+  // Moved off mod+o for the command palette, and onto alt+o rather than
+  // mod+shift+o: that key already carries a second `chat.new` default, and
+  // an unconditional rule on it would shadow `chat.new` outright under
+  // last-wins. alt+o also joins the alt+letter family the other pickers use.
+  { key: "alt+o", command: "editor.openFavorite" },
+  // The sidebar's list chords. These are the only bare letters in the whole
+  // table, which is affordable because `sidebarFocus` is true for a handful
+  // of buttons and nothing else — and because the second clause hands the
+  // key back the moment the keyboard is in a box you type into. Without that
+  // clause the thread search would be unusable for any query holding a j.
+  //
+  // Placed before the two rows below rather than after them, so the chord the
+  // UI advertises for these commands stays the bracket pair: the label
+  // resolver reports the binding that wins, which is the last one, and a bare
+  // `j` is not a chord to put in front of someone who has not focused the
+  // sidebar.
+  { key: "j", command: "thread.next", when: "sidebarFocus && !sidebarSearchFocus" },
+  { key: "k", command: "thread.previous", when: "sidebarFocus && !sidebarSearchFocus" },
+  // The page step. Same two keys the chat reads as a half-page scroll and the
+  // terminal reads as a split, told apart by which pane has the keyboard —
+  // three panes, three meanings, no chord spent twice. New commands, so the
+  // per-command startup backfill installs them and no ADDED_KEYBINDING_DEFAULTS
+  // entry is needed.
+  //
+  // No search guard on these two: a modifier chord types nothing into a box,
+  // and moving on through the list while a search is narrowing it is the
+  // useful reading rather than a collision.
+  { key: "mod+d", command: "thread.nextPage", when: "sidebarFocus" },
+  { key: "mod+u", command: "thread.previousPage", when: "sidebarFocus" },
   // Browsers keep ctrl+tab for their own tab strip and never deliver it to a
   // page, so this pair reaches the desktop app only. It is listed first so the
   // bracket pair below is the one the UI reports as the shortcut: the label
@@ -115,10 +171,16 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
  * `from` must match a retired default exactly — key, command, and `when`
  * together. A rule that differs in any of the three is the user's own and is
  * left alone.
+ *
+ * `toWhen` moves the rule's context instead of, or as well as, its key. A
+ * default whose `when` narrows has the same problem a moved key has: the
+ * config already mentions the command, so the per-command backfill skips it
+ * and the old context survives forever with nothing saying so.
  */
 export const RETIRED_KEYBINDING_DEFAULTS: ReadonlyArray<{
   readonly from: KeybindingRule;
   readonly toKey: string;
+  readonly toWhen?: string;
 }> = [
   {
     // Freed for chat.scrollHalfPageDown; see the diff.toggle default above.
@@ -131,6 +193,40 @@ export const RETIRED_KEYBINDING_DEFAULTS: ReadonlyArray<{
     // picker take mod+shift+f on a config that already held the search there.
     from: { key: "mod+shift+f", command: "projectSearch.toggle", when: "!terminalFocus" },
     toKey: "mod+shift+g",
+  },
+  {
+    // Narrowed to the chat pane, on the key it already had. Left as it was,
+    // the pair keeps firing in the editor, where Neovim owns both keys.
+    from: { key: "mod+u", command: "chat.scrollHalfPageUp", when: "!terminalFocus" },
+    toKey: "mod+u",
+    toWhen: "chatFocus",
+  },
+  {
+    from: { key: "mod+d", command: "chat.scrollHalfPageDown", when: "!terminalFocus" },
+    toKey: "mod+d",
+    toWhen: "chatFocus",
+  },
+  {
+    // Freed for pane.focusRight. The address bar is reachable from the same
+    // chord with shift, and only while the preview has focus anyway.
+    from: { key: "mod+l", command: "preview.focusUrl", when: "previewFocus" },
+    toKey: "mod+shift+l",
+  },
+  {
+    // Moves aside for the palette, which lands on mod+o below.
+    //
+    // The two are independent, not ordered: a destination is only "claimed"
+    // when another rule holds the same key AND the same `when`, and these
+    // two differ there, so neither blocks the other. Written down because
+    // the opposite is the natural assumption and a test was built on it
+    // before being disproved.
+    from: { key: "mod+o", command: "editor.openFavorite" },
+    toKey: "alt+o",
+  },
+  {
+    // Freed for pane.focusUp.
+    from: { key: "mod+k", command: "commandPalette.toggle", when: "!terminalFocus" },
+    toKey: "mod+o",
   },
 ];
 
@@ -179,6 +275,20 @@ export const ADDED_KEYBINDING_DEFAULTS: ReadonlyArray<AddedKeybindingDefault> = 
     id: "2026-08-thread-previous-ctrl-shift-tab",
     rule: { key: "ctrl+shift+tab", command: "thread.previous", when: "!terminalFocus" },
     insertBefore: { key: "mod+shift+[", command: "thread.previous" },
+  },
+  // Second defaults on commands an existing config already binds, so the
+  // per-command backfill would skip them and only this mechanism delivers
+  // them. The page pair needs no entry beside these: those commands are new,
+  // and a command a config has never heard of the backfill installs itself.
+  {
+    id: "2026-09-sidebar-thread-next-j",
+    rule: { key: "j", command: "thread.next", when: "sidebarFocus && !sidebarSearchFocus" },
+    insertBefore: { key: "ctrl+tab", command: "thread.next", when: "!terminalFocus" },
+  },
+  {
+    id: "2026-09-sidebar-thread-previous-k",
+    rule: { key: "k", command: "thread.previous", when: "sidebarFocus && !sidebarSearchFocus" },
+    insertBefore: { key: "ctrl+shift+tab", command: "thread.previous", when: "!terminalFocus" },
   },
 ];
 
@@ -263,6 +373,8 @@ export interface RetiredKeybindingRewrite {
   readonly command: KeybindingRule["command"];
   readonly fromKey: string;
   readonly toKey: string;
+  /** Present only where the rewrite moved the rule's context as well. */
+  readonly toWhen?: string;
 }
 
 export interface BlockedRetiredKeybindingRewrite extends RetiredKeybindingRewrite {
@@ -321,10 +433,17 @@ export function migrateRetiredKeybindingDefaults(config: ReadonlyArray<Keybindin
       continue;
     }
 
-    const destination = { ...rule, key: retired.toKey };
+    const destinationWhen = retired.toWhen ?? rule.when ?? undefined;
+    const destination: KeybindingRule = {
+      ...rule,
+      key: retired.toKey,
+      ...(destinationWhen === undefined ? {} : { when: destinationWhen }),
+    };
+    // Checked against the destination's context, not the source's: a rewrite
+    // that only narrows `when` stays on its key, so the source context would
+    // ask whether the rule collides with itself.
     const claimedByAnother = config.some(
-      (entry) =>
-        entry !== rule && claimsShortcutContext(entry, retired.toKey, rule.when ?? undefined),
+      (entry) => entry !== rule && claimsShortcutContext(entry, retired.toKey, destinationWhen),
     );
     if (claimedByAnother) {
       blocked.push({
@@ -343,7 +462,12 @@ export function migrateRetiredKeybindingDefaults(config: ReadonlyArray<Keybindin
       continue;
     }
 
-    rewrites.push({ command: rule.command, fromKey: rule.key, toKey: retired.toKey });
+    rewrites.push({
+      command: rule.command,
+      fromKey: rule.key,
+      toKey: retired.toKey,
+      ...(retired.toWhen === undefined ? {} : { toWhen: retired.toWhen }),
+    });
     next.push(destination);
   }
 

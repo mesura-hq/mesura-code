@@ -581,6 +581,102 @@ describe("resolveAdjacentThreadId", () => {
       }),
     ).toBeNull();
   });
+
+  describe("page traversal", () => {
+    // `Ctrl+D` and `Ctrl+U` in the sidebar, which step by five rather than by
+    // one. Five because it is a useful jump in a list whose rows are tall and
+    // whose interesting entries are at the top: far enough to be worth a
+    // chord, short enough that you can still see where you landed.
+    const threads = Array.from({ length: 12 }, (_, index) => ThreadId.make(`thread-${index + 1}`));
+
+    it("steps five on", () => {
+      expect(
+        resolveAdjacentThreadId({
+          threadIds: threads,
+          currentThreadId: threads[1] ?? null,
+          direction: "next-page",
+        }),
+      ).toBe(threads[6]);
+    });
+
+    it("steps five back", () => {
+      expect(
+        resolveAdjacentThreadId({
+          threadIds: threads,
+          currentThreadId: threads[8] ?? null,
+          direction: "previous-page",
+        }),
+      ).toBe(threads[3]);
+    });
+
+    it("clamps to the last rather than falling off the end", () => {
+      // The single-step direction stops dead at the edge. A page step that
+      // did the same would refuse to move from the tenth of twelve, which
+      // reads as the chord being broken rather than as an edge.
+      expect(
+        resolveAdjacentThreadId({
+          threadIds: threads,
+          currentThreadId: threads[9] ?? null,
+          direction: "next-page",
+        }),
+      ).toBe(threads[11]);
+    });
+
+    it("clamps to the first rather than falling off the start", () => {
+      expect(
+        resolveAdjacentThreadId({
+          threadIds: threads,
+          currentThreadId: threads[2] ?? null,
+          direction: "previous-page",
+        }),
+      ).toBe(threads[0]);
+    });
+
+    it("says there is nowhere to go once the clamp has nothing left", () => {
+      // Returning the current id would navigate to the thread already open.
+      expect(
+        resolveAdjacentThreadId({
+          threadIds: threads,
+          currentThreadId: threads[11] ?? null,
+          direction: "next-page",
+        }),
+      ).toBeNull();
+      expect(
+        resolveAdjacentThreadId({
+          threadIds: threads,
+          currentThreadId: threads[0] ?? null,
+          direction: "previous-page",
+        }),
+      ).toBeNull();
+    });
+
+    it("enters the list at the same end a single step would", () => {
+      expect(
+        resolveAdjacentThreadId({
+          threadIds: threads,
+          currentThreadId: null,
+          direction: "next-page",
+        }),
+      ).toBe(threads[0]);
+      expect(
+        resolveAdjacentThreadId({
+          threadIds: threads,
+          currentThreadId: null,
+          direction: "previous-page",
+        }),
+      ).toBe(threads[11]);
+    });
+
+    it("answers nothing for a thread that is not in the list", () => {
+      expect(
+        resolveAdjacentThreadId({
+          threadIds: threads,
+          currentThreadId: ThreadId.make("thread-absent"),
+          direction: "next-page",
+        }),
+      ).toBeNull();
+    });
+  });
 });
 
 describe("getVisibleSidebarThreadIds", () => {

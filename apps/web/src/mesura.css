@@ -96,3 +96,140 @@
     animation: none;
   }
 }
+
+/* ── Which pane has the keyboard ────────────────────────────────────────
+   One mark, two shapes, chosen by whether the pane has a row to light.
+
+   The chat and the right panel each have a header row, so the row lights:
+   its title goes to full foreground and a hairline appears under it. The
+   sidebar and the terminal drawer have no title to light — the sidebar's top
+   row is the logo and the search box, and the drawer's is four icons — so
+   those take a frame inset inside the pane instead.
+
+   Driven by `:focus-within`, so the browser's own focus tree is the only
+   state involved: no React state, no re-render, no listener. Focus leaving
+   for a menu or the command palette drops the mark while that is open, which
+   is honest about where the keys are going.
+
+   Every rule below changes colour only. Never width, never `display`, never
+   opacity on content: a geometry flip costs a layout pass and reads as jank
+   on the one thing that has to feel instant. The hairlines are painted by an
+   `::after` that is always there and always the same size, so the transition
+   has nothing to reflow.
+
+   See docs/mesura/adr-004-pane-focus.md for why this shape and not the eight
+   that were tried before it. */
+
+:root {
+  /* Neutral rather than the accent. A saturated accent reads as "important"
+     and over-signals what is only a hint about where the keys are going.
+     Between 30% and 50% is the usable range; tune here, not per rule.
+
+     `--contrast-foreground` and `in srgb` are what every other hairline in
+     `index.css` mixes with, so the mark sits in the same colour space as the
+     borders it appears next to. */
+  --mesura-pane-focus-tint: color-mix(in srgb, var(--contrast-foreground) 35%, transparent);
+  --mesura-pane-focus-frame: color-mix(in srgb, var(--contrast-foreground) 20%, transparent);
+  --mesura-pane-focus-ease: 150ms;
+}
+
+/* The two panes that light a row.
+
+   Hooks: `[data-chat-header]` is set on the chat column's top bar in
+   ChatView.tsx, and `[data-right-panel-tabbar]` on the right panel's tab row
+   in RightPanelTabs.tsx. The title inside the chat header is ChatHeader's
+   `h2`, bound by tag rather than by class because that file changes often
+   upstream. The panel's active tab carries `[data-active-tab="true"]`, which
+   upstream's own code queries, so it cannot be renamed there unnoticed.
+
+   If any of those disappears upstream, that pane stops showing the mark and
+   nothing else changes.
+
+   `position: relative` is redundant on the chat header, which already carries
+   a `relative` class, and it is declared anyway: the class belongs to
+   upstream and the hairline stops being positioned the moment upstream drops
+   it. The tab bar genuinely needs it — it was `static`. Neither declaration
+   moves an absolutely positioned child: the only one inside either is the tab
+   bar's pending dot, whose containing block is a `ScrollArea` wrapper that
+   was already positioned. The same holds for the sidebar and the drawer
+   below. */
+[data-chat-header],
+[data-right-panel-tabbar] {
+  position: relative;
+}
+
+[data-chat-header]::after,
+[data-right-panel-tabbar]::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 1px;
+  background-color: transparent;
+  pointer-events: none;
+  transition: background-color var(--mesura-pane-focus-ease) ease;
+}
+
+/* The two scopes differ on purpose. In the chat header only the `h2` recedes,
+   because the breadcrumb and the controls beside it are not the title. A tab
+   is one atom, so the whole tab recedes: an icon left at full brightness
+   beside a greyed label reads as a rendering fault rather than as a hint.
+   Its pending dot is `bg-current` and so recedes too, which costs no signal —
+   `--muted-foreground` is the colour every inactive tab's dot already has. */
+[data-chat-header] h2,
+[data-right-panel-tabbar] [data-active-tab="true"] {
+  transition: color var(--mesura-pane-focus-ease) ease;
+}
+
+/* Unfocused: the row's title recedes. The chat column hands its mark to the
+   terminal drawer whenever focus is inside the drawer, because the drawer is
+   rendered inside the column and would otherwise light both. */
+[data-chat-column-maximized-away]:not(:focus-within) [data-chat-header] h2,
+[data-chat-column-maximized-away]:has([data-terminal-owner="drawer"]:focus-within)
+  [data-chat-header]
+  h2,
+[data-preview-panel-mode]:not(:focus-within) [data-right-panel-tabbar] [data-active-tab="true"] {
+  color: var(--muted-foreground);
+}
+
+/* Focused: the hairline appears. */
+[data-chat-column-maximized-away]:focus-within:not(
+    :has([data-terminal-owner="drawer"]:focus-within)
+  )
+  [data-chat-header]::after,
+[data-preview-panel-mode]:focus-within [data-right-panel-tabbar]::after {
+  background-color: var(--mesura-pane-focus-tint);
+}
+
+/* The two panes with no row to light take a frame instead.
+
+   Hooks: `[data-app-sidebar]` from AppSidebarLayout.tsx and
+   `[data-terminal-owner="drawer"]` from ThreadTerminalDrawer.tsx. Inset so
+   the frame sits inside the pane's own border rather than doubling it. */
+[data-app-sidebar],
+[data-terminal-owner="drawer"] {
+  position: relative;
+}
+
+[data-app-sidebar]::after,
+[data-terminal-owner="drawer"]::after {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  pointer-events: none;
+  /* Above everything drawn inside the pane, and below anything rendered into
+     a portal, which leaves this stacking context entirely. Both panes top out
+     at 20 today — the sidebar's drag rail and the drawer's resize rail — so
+     this has headroom on purpose. Raise it only against something new inside
+     a pane, never against a menu or a tooltip. */
+  z-index: 60;
+  transition: border-color var(--mesura-pane-focus-ease) ease;
+}
+
+[data-app-sidebar]:focus-within::after,
+[data-terminal-owner="drawer"]:focus-within::after {
+  border-color: var(--mesura-pane-focus-frame);
+}

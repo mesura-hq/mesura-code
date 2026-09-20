@@ -378,11 +378,25 @@ than argued.
   `<Tab>` to `vim.snippet.jump` backwards and forwards — two different commands. Escape is the one
   named key Shift is dropped for: nothing maps `<S-Esc>`, and a Shift held a moment too long would
   otherwise leave him in insert mode.
-- **One application shortcut outranks Neovim: the file picker.** `<C-p>` is unmapped in his
+- **The pane chords never reach Neovim, and are not on the list below.**
+  `Ctrl+H` and `Ctrl+L` are claimed on the window in the capture phase by
+  `apps/web/src/lib/usePaneNavigation.ts`, so Monaco is never offered them and
+  the whitelist has nothing to say about them. Neovim's own window commands
+  stay reachable as `<C-w>h` and `<C-w>l`, because a prefix chord is never
+  captured. Leaving the editor is a pane chord now, not only Escape. The
+  vertical pair, `Ctrl+J` and `Ctrl+K`, moves between the chat and its
+  terminal drawer and has no bearing on the editor: the right panel has no
+  vertical neighbour, so neither chord is claimed while the editor has focus.
+  The whole model is in [Pane focus](./pane-focus.md).
+- **One application shortcut outranks Neovim among the keys Monaco does
+  receive: the file picker.** `<C-p>` is unmapped in his
   configuration, so the picker costs Neovim nothing. Every other collision goes the other way, and
   the measurements are why — `<C-k>` is `TmuxNavigateUp`, `<C-b>` is Telescope, `<C-f>` is his file
   finder, `<C-u>` and `<C-d>` are half the scrolling. The application's own version of those is
-  reached by pressing Escape in normal mode first, which releases the editor.
+  reached by leaving the editor first — Escape in normal mode releases it to the panel, and
+  `Ctrl+H` from there reaches the chat, which is the pane `Ctrl+U` and `Ctrl+D` scroll. They are
+  scoped to that pane rather than to "not the terminal" precisely so the editor keeps them; see
+  [Pane focus](./pane-focus.md).
 - **Escape in plain normal mode belongs to the panel**, and in every other mode to Neovim. Leaving
   insert, visual or an operator is what Escape is for, and a host that blurred the editor instead
   would strand him in that mode with the keyboard elsewhere. In normal mode there is nothing to

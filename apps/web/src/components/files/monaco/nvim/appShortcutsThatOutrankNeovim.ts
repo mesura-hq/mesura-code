@@ -11,6 +11,12 @@
  * developer's file finder and `<C-u>`/`<C-d>` are the scrolling half the
  * motion set depends on — every one of those stays Neovim's.
  *
+ * The pane chords are deliberately absent and must stay absent.
+ * `usePaneNavigation` claims them on the window in the capture phase, so the
+ * editor is never offered them and an entry here would be dead weight.
+ * Neovim's own window commands stay reachable as `<C-w>h` and `<C-w>l`,
+ * because a prefix chord is never captured.
+ *
  * `fileTree.toggle` and `fileTree.miller` are listed as defence only: their
  * listener is capture-phase on the window and stops propagation before Monaco
  * sees the key, so the entries matter only if that listener ever moves.

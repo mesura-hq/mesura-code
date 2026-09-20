@@ -110,7 +110,19 @@ type LogicalSidebarProject = SidebarProject & {
   }[];
 };
 
-export type ThreadTraversalDirection = "previous" | "next";
+/**
+ * How a thread-list chord moves. The two page directions step five at a time
+ * and clamp at the ends, where the single steps stop dead.
+ */
+export type ThreadTraversalDirection = "previous" | "next" | "previous-page" | "next-page";
+
+/**
+ * Five, for `Ctrl+D` and `Ctrl+U`. Far enough that the chord is worth typing,
+ * short enough that you can still see where you landed. A fixed count rather
+ * than a share of the viewport, so the same chord lands in the same place
+ * whatever the window is doing.
+ */
+export const THREAD_PAGE_STEP = 5;
 
 export async function archiveSelectedThreadEntries<
   TEntry extends { readonly threadKey: string },
@@ -421,13 +433,14 @@ export function resolveAdjacentThreadId<T>(input: {
   direction: ThreadTraversalDirection;
 }): T | null {
   const { currentThreadId, direction, threadIds } = input;
+  const backwards = direction === "previous" || direction === "previous-page";
 
   if (threadIds.length === 0) {
     return null;
   }
 
   if (currentThreadId === null) {
-    return direction === "previous" ? (threadIds.at(-1) ?? null) : (threadIds[0] ?? null);
+    return backwards ? (threadIds.at(-1) ?? null) : (threadIds[0] ?? null);
   }
 
   const currentIndex = threadIds.indexOf(currentThreadId);
@@ -435,7 +448,17 @@ export function resolveAdjacentThreadId<T>(input: {
     return null;
   }
 
-  if (direction === "previous") {
+  // A page step clamps, a single step stops. The difference is deliberate:
+  // `Ctrl+D` from the tenth of twelve should reach the twelfth, where a
+  // refusal to move would read as the chord being broken rather than as an
+  // edge. A single step at the edge has nowhere unambiguous to go.
+  if (direction === "previous-page" || direction === "next-page") {
+    const step = direction === "previous-page" ? -THREAD_PAGE_STEP : THREAD_PAGE_STEP;
+    const clamped = Math.min(Math.max(currentIndex + step, 0), threadIds.length - 1);
+    return clamped === currentIndex ? null : (threadIds[clamped] ?? null);
+  }
+
+  if (backwards) {
     return currentIndex > 0 ? (threadIds[currentIndex - 1] ?? null) : null;
   }
 

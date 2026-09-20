@@ -8,6 +8,10 @@ import {
   type ModelPickerJumpKeybindingCommand,
   type ThreadJumpKeybindingCommand,
 } from "@t3tools/contracts";
+import { getFocusedPane, isSidebarSearchFocused, type PaneId } from "./lib/paneFocus";
+// Type only, so nothing from the component graph is pulled in at runtime.
+// The direction union stays where upstream declares it.
+import type { ThreadTraversalDirection } from "./components/Sidebar.logic";
 import { isFileManagerOpen } from "~/components/files/mesuraFileManager/isFileManagerOpen";
 import { isMacPlatform } from "./lib/utils";
 
@@ -33,6 +37,22 @@ export interface ShortcutMatchContext {
   terminalOpen: boolean;
   previewFocus: boolean;
   previewOpen: boolean;
+  /**
+   * Which pane owns the keyboard, filled from the document's focus tree for
+   * every caller. A binding scoped to one pane says so with these rather
+   * than by naming every pane it is not.
+   *
+   * The terminal drawer sets none of the three: it is its own pane, and
+   * `terminalFocus` already speaks for it.
+   */
+  sidebarFocus: boolean;
+  chatFocus: boolean;
+  panelFocus: boolean;
+  /**
+   * The sidebar holds the keyboard, and a letter typed into it is a letter.
+   * Only the sidebar's bare-letter chords consult this.
+   */
+  sidebarSearchFocus: boolean;
   [key: string]: boolean;
 }
 
@@ -128,14 +148,64 @@ function resolvePlatform(options: ShortcutMatchOptions | undefined): string {
   return options?.platform ?? navigator.platform;
 }
 
+const PANE_CONTEXT_KEYS = [
+  ["sidebarFocus", "sidebar"],
+  ["chatFocus", "chat"],
+  ["panelFocus", "panel"],
+] as const satisfies ReadonlyArray<readonly [string, PaneId]>;
+
 function resolveContext(options: ShortcutMatchOptions | undefined): ShortcutMatchContext {
-  return {
+  const context: ShortcutMatchContext = {
     terminalFocus: false,
     terminalOpen: false,
     previewFocus: false,
     previewOpen: false,
+    sidebarFocus: false,
+    chatFocus: false,
+    panelFocus: false,
+    sidebarSearchFocus: false,
     ...options?.context,
   };
+
+  // The document is read only if a `when` clause actually asks which pane has
+  // focus, and then once. This runs on every keystroke typed anywhere in the
+  // app, including every one typed into the embedded Neovim editor, whose
+  // insert-mode latency is measured against a 16.7 ms budget. Most keystrokes
+  // never reach a pane-scoped rule and so never walk the DOM at all.
+  //
+  // A caller that named a pane itself keeps its own value: the property is
+  // only replaced where the caller left it out.
+  let focusedPane: PaneId | null | undefined;
+  const isFocused = (pane: PaneId): boolean => {
+    if (focusedPane === undefined) focusedPane = getFocusedPane();
+    return focusedPane === pane;
+  };
+
+  for (const [key, pane] of PANE_CONTEXT_KEYS) {
+    if (options?.context !== undefined && key in options.context) continue;
+    Object.defineProperty(context, key, {
+      get: () => isFocused(pane),
+      enumerable: true,
+      configurable: true,
+    });
+  }
+
+  // Separately memoised from the pane read above, and asked far less often:
+  // only the sidebar's two bare letters carry a `when` clause that mentions
+  // it, and both have already had to match `sidebarFocus` to get here.
+  if (options?.context === undefined || !("sidebarSearchFocus" in options.context)) {
+    let searchFocus: boolean | undefined;
+    Object.defineProperty(context, "sidebarSearchFocus", {
+      get: () => {
+        if (searchFocus === undefined) searchFocus = isSidebarSearchFocused();
+        return searchFocus;
+      },
+      enumerable: true,
+      configurable: true,
+    });
+  }
+
+  return context;
 }
 
 function evaluateWhenNode(node: KeybindingWhenNode, context: ShortcutMatchContext): boolean {
@@ -175,6 +245,15 @@ function shortcutConflictKey(shortcut: KeybindingShortcut, platform = navigator.
   ].join("|");
 }
 
+/**
+ * Never ask this, or `shortcutLabelForCommand`, about a `pane.*` command.
+ *
+ * A pane command may share its chord with another command on purpose, and
+ * this scan awards a shared chord to the last binding that claims it. For
+ * `pane.focusDown`, which sits behind `terminal.toggle` on `mod+j`
+ * deliberately, the answer would be "no shortcut" for a chord that works.
+ * Those commands are dispatched by `lib/usePaneNavigation.ts`, not resolved.
+ */
 export function findEffectiveShortcutForCommand(
   keybindings: ResolvedKeybindingsConfig,
   command: KeybindingCommand,
@@ -212,30 +291,58 @@ function matchesCommandShortcut(
   return resolveShortcutCommand(event, keybindings, options) === command;
 }
 
+/**
+ * The last binding in `bindings` that this event satisfies, or null.
+ *
+ * Last wins, which is what lets a later rule override an earlier one. Taking
+ * the candidate list as an argument is what lets a caller resolve over a
+ * subset: the pane handler resolves over just the pane bindings, and doing it
+ * through here rather than in a copy of this loop keeps the two from drifting.
+ */
+export function findLastMatchingBinding(
+  event: ShortcutEventLike,
+  bindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+): ResolvedKeybindingsConfig[number] | null {
+  const platform = resolvePlatform(options);
+  const context = resolveContext(options);
+
+  for (let index = bindings.length - 1; index >= 0; index -= 1) {
+    const binding = bindings[index];
+    if (!binding) continue;
+    // Shortcut first, `when` second. Both must hold, so the order cannot
+    // change the answer, but a `when` clause can now read the focus tree
+    // while a shortcut comparison is pure arithmetic on the event.
+    if (!matchesShortcut(event, binding.shortcut, platform)) continue;
+    if (!matchesWhenClause(binding.whenAst, context)) continue;
+    // The file-manager stand-down belongs here rather than in
+    // `resolveShortcutCommand`, because that is no longer the single point
+    // every resolution crosses: `usePaneNavigation` calls this function
+    // directly, and a guard one level up would leave the pane chords firing
+    // over an open file manager, in the capture phase, ahead of its own
+    // dispatcher. A matched binding that stands down yields null rather than
+    // continuing the search, so a lower-priority binding cannot inherit the
+    // key the file manager just claimed.
+    return standDownForFileManager(binding.command) === null ? null : binding;
+  }
+  return null;
+}
+
 export function resolveShortcutCommand(
   event: ShortcutEventLike,
   keybindings: ResolvedKeybindingsConfig,
   options?: ShortcutMatchOptions,
 ): KeybindingCommand | null {
-  const platform = resolvePlatform(options);
-  const context = resolveContext(options);
-
-  for (let index = keybindings.length - 1; index >= 0; index -= 1) {
-    const binding = keybindings[index];
-    if (!binding) continue;
-    if (!matchesWhenClause(binding.whenAst, context)) continue;
-    if (!matchesShortcut(event, binding.shortcut, platform)) continue;
-    return standDownForFileManager(binding.command);
-  }
-  return null;
+  return findLastMatchingBinding(event, keybindings, options)?.command ?? null;
 }
 
 /**
  * Fork addition. While the file manager is up over the window every host
  * chord but its own toggle stands down, so its keys — `Ctrl+O` for the
  * overview above all — reach its dispatcher unopposed. Every window listener
- * resolves through this function or an `is*Shortcut` helper over it, which is
- * why the one guard is here rather than in each listener.
+ * resolves through `findLastMatchingBinding`, directly or through
+ * `resolveShortcutCommand` and the `is*Shortcut` helpers over it, which is why
+ * the one guard is applied there rather than in each listener.
  */
 function standDownForFileManager(command: KeybindingCommand): KeybindingCommand | null {
   if (command === "fileTree.miller") return command;
@@ -302,9 +409,11 @@ export function threadJumpIndexFromCommand(command: string): number | null {
 
 export function threadTraversalDirectionFromCommand(
   command: string | null,
-): "previous" | "next" | null {
+): ThreadTraversalDirection | null {
   if (command === "thread.previous") return "previous";
   if (command === "thread.next") return "next";
+  if (command === "thread.previousPage") return "previous-page";
+  if (command === "thread.nextPage") return "next-page";
   return null;
 }
 

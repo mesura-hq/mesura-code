@@ -176,9 +176,13 @@ instead. Holding a key keeps travelling, because each press aims from where the 
 going rather than from the position the animation is passing through. A scroll gesture arriving
 mid-animation wins: the wheel, a drag, or a touch stops the move where it is.
 
-Both shortcuts work while the composer has focus, since that is where the cursor usually sits
-while you read. They therefore take `mod+u` away from the readline-style "delete to line start"
-some text fields offer.
+Both shortcuts work while the chat column has focus, which includes the composer, since that is
+where the cursor usually sits while you read. They therefore take `mod+u` away from the
+readline-style "delete to line start" some text fields offer, in that column only.
+
+They no longer work while the file editor has focus. `Ctrl+U` and `Ctrl+D` are half the scrolling
+inside that editor, and taking them there made it worse at the thing it is for. Press `Escape` to
+leave the editor and `Ctrl+H` to reach the chat, and the pair works again.
 
 Scrolling up also stops the timeline following the live edge, the same as scrolling with the
 wheel. Without that, the next chunk of a streaming reply would pull you back to the bottom.
@@ -192,6 +196,41 @@ wheel. Without that, the next chunk of a streaming reply would pull you back to 
 the shortcut. The tab pair is desktop-only, because browsers keep those two chords for their own tab
 strip; it is also inactive while the terminal has focus, since the terminal encodes `ctrl+tab`
 itself. `mod+1` through `mod+9` jump straight to a thread by position.
+
+With the sidebar focused, the list also walks under your fingers: `j` opens the next thread and
+`k` the previous one, and `mod+d` and `mod+u` step five at a time, stopping at the ends rather
+than wrapping. These are the only single letters the app binds to anything, so they apply in the
+sidebar and nowhere else — typed in the composer, in a terminal or in the file editor they are
+letters. Inside the sidebar's own search box they are letters too, so you can still search for a
+thread whose name has a `j` in it.
+
+Focus stays in the sidebar as you walk, on the row of the thread you just opened, so you can keep
+going. Clicking a thread with the mouse still puts the cursor in the composer, as before.
+
+### Moving between panes
+
+`mod+h` and `mod+l` move focus left and right across the three columns — the sidebar, the chat and
+the right panel — and `mod+j` and `mod+k` move down into the terminal drawer and back up. A pane
+that is closed or collapsed is stepped over, and at the edge the chord does nothing rather than
+wrapping round to the other side.
+
+The app claims these four everywhere, including inside a terminal and inside the file editor, so
+each one means the same thing wherever you type it. That is the point of them: leaving the editor
+used to mean `Escape` and then the mouse. The editor's own window commands are unaffected, since
+a chord starting with `Ctrl+W` is never claimed.
+
+`mod+j` and `mod+k` keep whatever else they do in panes with no vertical neighbour. In the sidebar
+and the right panel there is nothing above or below, so the chord falls through untouched — which
+is how `mod+j` still opens the terminal drawer when none is open, and enters it when one is.
+
+Three defaults moved to make room, and an existing config is rewritten on the next start:
+
+- the command palette to `mod+o`,
+- open-in-favourite-editor to `alt+o`,
+- the preview's address bar to `mod+shift+l`.
+
+Inside a terminal, `Ctrl+L` no longer clears the screen, because it now moves to the right panel.
+Type `clear` instead.
 
 ### Settling a thread
 
@@ -243,9 +282,13 @@ which is also what frees `mod+d` for the reading scroll in the same run.
 is a change to the native menu rather than to a keybinding, so it needs nothing from your config:
 the key now closes a focused terminal and does nothing otherwise.
 
-`alt+m` for the model picker and the `ctrl+tab` pair for thread navigation are second defaults for
-commands your file already binds, so they are added once on that same start. If any of those keys
-is already yours, that one is skipped and your rule stands.
+The command palette, open-in-favourite-editor and the preview's address bar move to `mod+o`,
+`alt+o` and `mod+shift+l`, because `mod+k` and `mod+l` are now pane chords. Those three rules are
+rewritten in place on the next start, so a chord you had already changed yourself is left alone.
+
+`alt+m` for the model picker, the `ctrl+tab` pair for thread navigation, and `j` and `k` for the
+sidebar's list are second defaults for commands your file already binds, so they are added once on
+that same start. If any of those keys is already yours, that one is skipped and your rule stands.
 
 The full command list and the current defaults are shown in **Settings** → **Keybindings**, which
 always matches the build you are running. Use that rather than a copied list.
@@ -264,9 +307,19 @@ but the new thread does not reuse the worktree created for the thread that just 
 ## `when` Conditions
 
 A `when` expression is evaluated against context keys describing the current UI state. The keys
-the app supplies today are `terminalFocus`, `terminalOpen`, `previewFocus`, `previewOpen`, and
-`modelPickerOpen`. The set is open and grows over time, so treat that as the current list rather
-than a fixed one. Any key the running app does not supply evaluates to `false`.
+the app supplies today are `terminalFocus`, `terminalOpen`, `previewFocus`, `previewOpen`,
+`modelPickerOpen`, `sidebarFocus`, `chatFocus`, `panelFocus`, and `sidebarSearchFocus`. The set is
+open and grows over time, so treat that as the current list rather than a fixed one. Any key the
+running app does not supply evaluates to `false`.
+
+`sidebarFocus`, `chatFocus` and `panelFocus` name which region holds the keyboard. At most one of
+those three is true at a time, and all three are false while a terminal has focus, which
+`terminalFocus` already speaks for.
+
+`sidebarSearchFocus` is a fourth key and not one of that set: it says the cursor is in a box you
+type into inside the sidebar, so it is true at the same time as `sidebarFocus`. That pairing is
+the point of it — it lets a single letter be a shortcut on a thread row and a letter in the search
+field, written as `"sidebarFocus && !sidebarSearchFocus"`.
 
 Operators: `!` (not), `&&` (and), `||` (or), and parentheses.
 
