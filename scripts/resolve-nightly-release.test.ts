@@ -59,7 +59,10 @@ it("derives preview metadata under its own prerelease identifier", () => {
       baseVersion: "9.9.10",
       version: "9.9.10-preview.20260413.321",
       tag: "v9.9.10-preview.20260413.321",
-      name: "T3 Code Preview (maintainer test build, do not install) 9.9.10-preview.20260413.321 (abcdef123456)",
+      // The product name is this fork's, not upstream's. v0.0.42 added this case
+      // with T3's brand and the merge took it verbatim, the way
+      // `mobile-brand-assets.test.ts` already pins "Mesura Code Preview".
+      name: "Mesura Code Preview (maintainer test build, do not install) 9.9.10-preview.20260413.321 (abcdef123456)",
       shortSha: "abcdef123456",
     },
   );

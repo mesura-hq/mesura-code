@@ -16,11 +16,6 @@ import sharp from "sharp";
 import { BRAND_ASSET_PATHS, DEVELOPMENT_PUBLIC_ICON_OVERRIDES } from "./lib/brand-assets.ts";
 import { encodePngIco, readPngDimensions, WINDOWS_ICON_SIZES } from "./lib/icon-export.ts";
 
-// Upstream declares this beside its Icon Composer constants. This fork rewrote the
-// exporter onto sharp and dropped that block, but upstream's two error schemas below
-// still reference the check, so it keeps upstream's exact shape and stays here.
-const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
-
 export const PINNED_LIBVIPS_VERSION = "8.18.3";
 
 /**
@@ -89,69 +84,6 @@ export class IconExportFileSystemError extends Schema.TaggedError<IconExportFile
   }
 }
 
-export class IconExportProcessError extends Schema.TaggedError<IconExportProcessError>()(
-  "IconExportProcessError",
-  {
-    operation: Schema.Literals(["spawn", "collect-stdout", "collect-stderr", "wait-for-exit"]),
-    command: Schema.String,
-    argumentCount: NonNegativeInt,
-    cause: Schema.Defect(),
-  },
-) {
-  override get message(): string {
-    return `Icon export process operation '${this.operation}' failed for ${this.command}.`;
-  }
-}
-
-export class IconExportCommandFailedError extends Schema.TaggedError<IconExportCommandFailedError>()(
-  "IconExportCommandFailedError",
-  {
-    command: Schema.String,
-    argumentCount: NonNegativeInt,
-    exitCode: Schema.Int,
-    sourcePath: Schema.String,
-    size: Schema.Int,
-    stdout: Schema.optional(Schema.String),
-    stderr: Schema.optional(Schema.String),
-  },
-) {
-  override get message(): string {
-    return `Icon Composer failed to export ${this.sourcePath} at ${this.size}x${this.size}.`;
-  }
-}
-
-export class IconExportToolResolutionError extends Schema.TaggedError<IconExportToolResolutionError>()(
-  "IconExportToolResolutionError",
-  {
-    reason: Schema.Literals(["configured-invalid", "configured-outdated", "not-found"]),
-    designGeneration: Schema.Int,
-    toolPath: Schema.optional(Schema.String),
-    version: Schema.optional(Schema.String),
-  },
-) {
-  override get message(): string {
-    switch (this.reason) {
-      case "configured-invalid":
-        return `ICON_COMPOSER_TOOL does not point to Icon Composer's export-capable ictool: ${this.toolPath}`;
-      case "configured-outdated":
-        return `ICON_COMPOSER_TOOL points to Icon Composer ${this.version}, but version 2 or newer is required for design generation ${this.designGeneration}.`;
-      case "not-found":
-        return `Could not find an Icon Composer 2.x exporter compatible with design generation ${this.designGeneration}. Install a compatible Icon Composer/Xcode or set ICON_COMPOSER_TOOL to Icon Composer.app/Contents/Executables/ictool.`;
-    }
-  }
-}
-
-export class IconExportSourceMissingError extends Schema.TaggedError<IconExportSourceMissingError>()(
-  "IconExportSourceMissingError",
-  {
-    sourcePath: Schema.String,
-  },
-) {
-  override get message(): string {
-    return `Missing Icon Composer source project: ${this.sourcePath}`;
-  }
-}
-
 export class IconExportRenditionError extends Schema.TaggedError<IconExportRenditionError>()(
   "IconExportRenditionError",
   {
@@ -168,19 +100,7 @@ export class IconExportRenditionError extends Schema.TaggedError<IconExportRendi
       this.actualWidth === undefined || this.actualHeight === undefined
         ? "an invalid PNG"
         : `${this.actualWidth}x${this.actualHeight}`;
-    return `Icon Composer produced ${actual}; expected ${this.expectedSize}x${this.expectedSize} for ${this.sourcePath}.`;
-  }
-}
-
-export class IconExportEncodingError extends Schema.TaggedError<IconExportEncodingError>()(
-  "IconExportEncodingError",
-  {
-    variant: Schema.String,
-    cause: Schema.Defect(),
-  },
-) {
-  override get message(): string {
-    return `Failed to encode ICO renditions for the ${this.variant} icon.`;
+    return `Icon renderer produced ${actual}; expected ${this.expectedSize}x${this.expectedSize} for ${this.sourcePath}.`;
   }
 }
 
