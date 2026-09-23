@@ -8562,6 +8562,9 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      // mesura: choices and notes coexist. When merging upstream e36725682b,
+      // drop carryDisplacedCustomAnswerIntoPrompt here: carrying the note into
+      // the thread draft would send it twice. The shared answer helper owns it.
       const existing = pendingUserInputAnswersRef.current;
       applyPendingUserInputAnswers({
         ...existing,
@@ -8574,15 +8577,12 @@ export default function ChatView(props: ChatViewProps) {
           ),
         },
       });
-      promptRef.current = "";
-      composerRef.current?.resetCursorState({ cursor: 0 });
     },
     [
       activePendingProgress?.activeQuestion,
       activePendingUserInput,
       applyPendingUserInputAnswers,
       activePendingRequestKey,
-      composerRef,
     ],
   );
 
@@ -8598,7 +8598,7 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
       const question = activePendingUserInput.questions.find((entry) => entry.id === questionId);
-      if (!question || question.allowCustomAnswer === false) {
+      if (!question) {
         return;
       }
       promptRef.current = value;
@@ -8608,6 +8608,7 @@ export default function ChatView(props: ChatViewProps) {
         [activePendingRequestKey]: {
           ...existing[activePendingRequestKey],
           [questionId]: setPendingUserInputCustomAnswer(
+            question,
             existing[activePendingRequestKey]?.[questionId],
             value,
           ),
@@ -8631,20 +8632,25 @@ export default function ChatView(props: ChatViewProps) {
   // them. Enter reaches `submitComposer` without ever reading the button's
   // disabled state, which is how an unanswered question used to get skipped.
   const onAdvanceActivePendingUserInput = useCallback(() => {
-    if (
-      !activePendingUserInput ||
-      !activePendingProgress ||
-      !activePendingProgress.canAdvance ||
-      activePendingIsResponding
-    ) {
+    if (!activePendingUserInput || !activePendingProgress || activePendingIsResponding) {
       return;
     }
     // Derived here from the ref rather than taken from the render's memo:
     // see `pendingUserInputAnswersRef`. An answer written moments ago in
-    // this same task has to count.
-    const draftAnswers =
-      pendingUserInputAnswersRef.current[activePendingUserInput.requestId] ??
-      EMPTY_PENDING_USER_INPUT_ANSWERS;
+    // this same task has to count. A render-time canAdvance check can still
+    // describe the previous answer. Keep attachment status from the current
+    // projection so an attachment-only answer follows the same submit path.
+    const currentAnswers = pendingUserInputAnswersRef.current[activePendingRequestKey];
+    const draftAnswers = Object.fromEntries(
+      activePendingUserInput.questions.map((question) => [
+        question.id,
+        {
+          ...currentAnswers?.[question.id],
+          attachmentCount: activePendingDraftAnswers[question.id]?.attachmentCount ?? 0,
+          attachmentsBlocked: activePendingDraftAnswers[question.id]?.attachmentsBlocked ?? false,
+        },
+      ]),
+    );
     const progress = derivePendingUserInputProgress(
       activePendingUserInput.questions,
       draftAnswers,
@@ -8663,7 +8669,9 @@ export default function ChatView(props: ChatViewProps) {
     }
     setActivePendingUserInputQuestionIndex(advance.questionIndex);
   }, [
+    activePendingDraftAnswers,
     activePendingQuestionIndex,
+    activePendingRequestKey,
     activePendingUserInput,
     activePendingIsResponding,
     onRespondToUserInput,

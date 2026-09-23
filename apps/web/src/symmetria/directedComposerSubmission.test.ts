@@ -328,3 +328,60 @@ it("shares provider refusal, worktree guard, and successful draft consumption", 
 
   assert.isNull(useComposerDraftStore.getState().getComposerDraft(target));
 });
+
+it("directed question submission combines dictation with exact selected values and enforces choice-only limits", async () => {
+  const replies: unknown[] = [];
+  const executor = createDirectedComposerExecutor({
+    startTurn: async () => {
+      assert.fail("Question answers must not start a normal turn");
+    },
+    answerQuestion: async (input) => {
+      replies.push(input.input.answers);
+      return true;
+    },
+  });
+  const question = {
+    id: "scope",
+    header: "Scope",
+    question: "Scope?",
+    multiSelect: false,
+    options: [{ label: "Workspace", description: "Workspace", value: " workspace\t" }],
+  };
+  for (const allowCustomAnswer of [true, false]) {
+    const result = await executor.submit(
+      normalSubmission({
+        commandId: CommandId.make(`directed-note-${allowCustomAnswer}`),
+        prompt: "[voiced] Keep files",
+        pendingAction: {
+          kind: "text-question",
+          requestId: ApprovalRequestId.make("directed-choice"),
+          questionId: "scope",
+          questions: [{ ...question, allowCustomAnswer }],
+          draftAnswers: { scope: { selectedOptionValues: [" workspace\t"] } },
+          questionIndex: 0,
+        },
+      }),
+    );
+    assert.equal(result.kind, "answer-submitted");
+  }
+  assert.deepEqual(replies, [
+    { scope: [" workspace\t", "[voiced] Keep files"] },
+    { scope: " workspace\t" },
+  ]);
+  const result = await executor.submit(
+    normalSubmission({
+      commandId: CommandId.make("directed-note-without-choice"),
+      prompt: "[voiced] Keep files",
+      pendingAction: {
+        kind: "text-question",
+        requestId: ApprovalRequestId.make("directed-choice"),
+        questionId: "scope",
+        questions: [{ ...question, allowCustomAnswer: false }],
+        draftAnswers: {},
+        questionIndex: 0,
+      },
+    }),
+  );
+  assert.deepEqual(result, { kind: "refused", code: "unsupported_composer_action" });
+  assert.equal(replies.length, 2);
+});

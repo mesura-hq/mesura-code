@@ -110,18 +110,10 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       setOptimisticSingleSelect(null);
       return;
     }
-    if (
-      progress.customAnswer.trim().length === 0 &&
-      progress.selectedOptionValues.includes(optimisticSingleSelect.optionValue)
-    ) {
+    if (progress.selectedOptionValues.includes(optimisticSingleSelect.optionValue)) {
       setOptimisticSingleSelect(null);
     }
-  }, [
-    activeQuestion,
-    optimisticSingleSelect,
-    progress.customAnswer,
-    progress.selectedOptionValues,
-  ]);
+  }, [activeQuestion, optimisticSingleSelect, progress.selectedOptionValues]);
 
   // Clear auto-advance timer on unmount
   useEffect(() => {
@@ -184,8 +176,6 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   if (!activeQuestion) {
     return null;
   }
-
-  const customAnswerActive = progress.customAnswer.trim().length > 0;
 
   return (
     <Collapsible
@@ -256,8 +246,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                 optimisticSingleSelect?.questionId === activeQuestion.id &&
                 optimisticSingleSelect.optionValue === optionValue;
               const isSelected =
-                isOptimisticallySelected ||
-                (!customAnswerActive && progress.selectedOptionValues.includes(optionValue));
+                isOptimisticallySelected || progress.selectedOptionValues.includes(optionValue);
               const shortcutKey = index < 9 ? index + 1 : null;
               const className = cn(
                 "group flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left outline-none transition-colors duration-150 focus-visible:ring-1 focus-visible:ring-primary/25",

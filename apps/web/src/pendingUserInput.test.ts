@@ -54,13 +54,13 @@ const nativeChoiceQuestion = {
 } as const;
 
 describe("resolvePendingUserInputAnswer", () => {
-  it("prefers a custom answer over selected options", () => {
+  it("keeps a custom answer with selected options", () => {
     expect(
       resolvePendingUserInputAnswer(singleSelectQuestion, {
         selectedOptionValues: ["Orchestration-first"],
         customAnswer: "Keep the existing envelope for one release",
       }),
-    ).toBe("Keep the existing envelope for one release");
+    ).toEqual(["Orchestration-first", "Keep the existing envelope for one release"]);
   });
 
   it("falls back to the selected option for single-select questions", () => {
@@ -79,9 +79,10 @@ describe("resolvePendingUserInputAnswer", () => {
     ).toEqual(["Server", "Web"]);
   });
 
-  it("clears the preset selection when a custom answer is entered", () => {
+  it("keeps the preset selection when a custom answer is entered", () => {
     expect(
       setPendingUserInputCustomAnswer(
+        multiSelectQuestion,
         {
           selectedOptionValues: ["Server", "Web"],
         },
@@ -89,6 +90,7 @@ describe("resolvePendingUserInputAnswer", () => {
       ),
     ).toEqual({
       customAnswer: "doesn't matter",
+      selectedOptionValues: ["Server", "Web"],
     });
   });
 
@@ -108,6 +110,72 @@ describe("resolvePendingUserInputAnswer", () => {
       }),
     ).toBeNull();
   });
+});
+
+it("web draft keeps a single choice and note in one answer", () => {
+  const selected = togglePendingUserInputOptionSelection(
+    singleSelectQuestion,
+    undefined,
+    "Orchestration-first",
+  );
+  const draft = setPendingUserInputCustomAnswer(
+    singleSelectQuestion,
+    selected,
+    "Keep the existing envelope",
+  );
+  expect(draft).toMatchObject({
+    selectedOptionValues: ["Orchestration-first"],
+    customAnswer: "Keep the existing envelope",
+  });
+  expect(buildPendingUserInputAnswers([singleSelectQuestion], { scope: draft })).toEqual({
+    scope: ["Orchestration-first", "Keep the existing envelope"],
+  });
+});
+
+it("web draft keeps multiple opaque values and a note unchanged", () => {
+  const question = { ...nativeChoiceQuestion, multiSelect: true, allowCustomAnswer: true };
+  const first = togglePendingUserInputOptionSelection(question, undefined, " first\t");
+  const second = togglePendingUserInputOptionSelection(question, first, "second");
+  const draft = setPendingUserInputCustomAnswer(question, second, "Use both results");
+  expect(draft.selectedOptionValues).toEqual([" first\t", "second"]);
+  expect(buildPendingUserInputAnswers([question], { result: draft })).toEqual({
+    result: [" first\t", "second", "Use both results"],
+  });
+});
+
+it("web draft waits for all text and attachment answers", () => {
+  const textQuestion = { ...singleSelectQuestion, id: "text", options: [] };
+  const attachmentQuestion = { ...singleSelectQuestion, id: "file", options: [] };
+  const questions = [textQuestion, attachmentQuestion];
+  const drafts = { text: { customAnswer: "Details" }, file: { attachmentCount: 1 } };
+  expect(buildPendingUserInputAnswers(questions, drafts)).toEqual({ text: "Details", file: "" });
+  expect(buildPendingUserInputAnswers(questions, { ...drafts, file: {} })).toBeNull();
+  expect(
+    buildPendingUserInputAnswers(questions, {
+      ...drafts,
+      file: { attachmentCount: 1, attachmentsBlocked: true },
+    }),
+  ).toBeNull();
+  expect(
+    buildPendingUserInputAnswers([{ ...attachmentQuestion, allowCustomAnswer: false }], {
+      file: { attachmentCount: 1 },
+    }),
+  ).toBeNull();
+});
+
+it("web choice-only questions require an exact listed value", () => {
+  expect(
+    buildPendingUserInputAnswers([nativeChoiceQuestion], {
+      result: { selectedOptionValues: [" first\t"] },
+    }),
+  ).toEqual({ result: " first\t" });
+  for (const value of ["Result", " first ", "unknown"]) {
+    expect(
+      buildPendingUserInputAnswers([nativeChoiceQuestion], {
+        result: { selectedOptionValues: [value], customAnswer: "Ignore this note" },
+      }),
+    ).toBeNull();
+  }
 });
 
 describe("togglePendingUserInputOptionSelection", () => {
@@ -451,5 +519,13 @@ describe("isPendingUserInputOptionShortcut", () => {
 
   it("claims nothing when no question is on screen", () => {
     expect(isPendingUserInputOptionShortcut(null, "1")).toBe(false);
+  });
+});
+
+it("web shared setter refuses notes for an exact choice-only draft", () => {
+  const draft = { selectedOptionValues: [" first\t"] };
+  expect(setPendingUserInputCustomAnswer(nativeChoiceQuestion, draft, "Do not send")).toBe(draft);
+  expect(buildPendingUserInputAnswers([nativeChoiceQuestion], { result: draft })).toEqual({
+    result: " first\t",
   });
 });

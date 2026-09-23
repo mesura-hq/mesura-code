@@ -178,6 +178,7 @@ async function submitDirectedComposer(
           const nextDraftAnswers = {
             ...submission.pendingAction.draftAnswers,
             [progress.activeQuestion.id]: setPendingUserInputCustomAnswer(
+              progress.activeQuestion,
               submission.pendingAction.draftAnswers?.[progress.activeQuestion.id],
               submission.prompt,
             ),

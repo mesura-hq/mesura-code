@@ -1666,9 +1666,20 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         }
         const replies: string[] = [];
         for (const question of payload.value.questions) {
-          const answer = command.answers[question.id];
+          const value = command.answers[question.id];
+          const answer =
+            typeof value === "string"
+              ? value
+              : Array.isArray(value) &&
+                  value.length > 0 &&
+                  value.every((entry) => typeof entry === "string")
+                ? value.join("\n")
+                : null;
           if (
-            typeof answer !== "string" ||
+            answer === null ||
+            (question.allowCustomAnswer === false &&
+              (typeof value !== "string" ||
+                !question.options.some((option) => (option.value ?? option.label) === value))) ||
             (answer.trim().length === 0 && !command.attachmentsByQuestionId?.[question.id]?.length)
           ) {
             return yield* new OrchestrationCommandInvariantError({
@@ -1681,7 +1692,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             .map((attachment) => `Attached file: ${attachment.name} (${attachment.id})`)
             .join("\n");
           replies.push(
-            [`${question.question}\n${answer.trim()}`, attachmentLabels].filter(Boolean).join("\n"),
+            [`${question.question}\n${answer}`, attachmentLabels].filter(Boolean).join("\n"),
           );
         }
         // Commit the answer and its message together. The normal turn path

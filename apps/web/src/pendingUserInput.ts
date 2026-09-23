@@ -1,11 +1,17 @@
 import type { UserInputQuestion } from "@t3tools/contracts";
-
-export interface PendingUserInputDraftAnswer {
-  selectedOptionValues?: string[];
-  customAnswer?: string;
-  attachmentCount?: number;
-  attachmentsBlocked?: boolean;
-}
+import {
+  type PendingUserInputDraftAnswer,
+  resolvePendingUserInputAnswer,
+  buildPendingUserInputAnswers,
+  normalizeSelectedOptionValues,
+} from "@t3tools/client-runtime/user-input-answers";
+export {
+  type PendingUserInputDraftAnswer,
+  resolvePendingUserInputAnswer,
+  setPendingUserInputCustomAnswer,
+  togglePendingUserInputOptionSelection,
+  buildPendingUserInputAnswers,
+} from "@t3tools/client-runtime/user-input-answers";
 
 export interface PendingUserInputProgress {
   questionIndex: number;
@@ -28,115 +34,12 @@ export interface PendingUserInputProgress {
   firstUnansweredQuestionIndex: number | null;
 }
 
-function normalizeDraftAnswer(value: string | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-function normalizeSelectedOptionValues(value: string[] | undefined): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  // Provider option IDs must stay unchanged, including whitespace.
-  return Array.from(new Set(value.filter((entry) => typeof entry === "string")));
-}
-
-export function resolvePendingUserInputAnswer(
-  question: UserInputQuestion,
-  draft: PendingUserInputDraftAnswer | undefined,
-): string | string[] | null {
-  if (draft?.attachmentsBlocked) return null;
-  const customAnswer =
-    question.allowCustomAnswer === false ? null : normalizeDraftAnswer(draft?.customAnswer);
-  if (customAnswer) {
-    return customAnswer;
-  }
-
-  const selectedOptionValues = normalizeSelectedOptionValues(draft?.selectedOptionValues).filter(
-    (value) => question.options.some((option) => (option.value ?? option.label) === value),
-  );
-  if (question.multiSelect) {
-    return selectedOptionValues.length > 0
-      ? selectedOptionValues
-      : question.allowCustomAnswer !== false && (draft?.attachmentCount ?? 0) > 0
-        ? ""
-        : null;
-  }
-
-  return (
-    selectedOptionValues[0] ??
-    (question.allowCustomAnswer !== false && (draft?.attachmentCount ?? 0) > 0 ? "" : null)
-  );
-}
-
-export function setPendingUserInputCustomAnswer(
-  draft: PendingUserInputDraftAnswer | undefined,
-  customAnswer: string,
-): PendingUserInputDraftAnswer {
-  const selectedOptionValues =
-    customAnswer.trim().length > 0
-      ? undefined
-      : normalizeSelectedOptionValues(draft?.selectedOptionValues);
-
-  return {
-    customAnswer,
-    ...(selectedOptionValues && selectedOptionValues.length > 0 ? { selectedOptionValues } : {}),
-  };
-}
-
-export function togglePendingUserInputOptionSelection(
-  question: UserInputQuestion,
-  draft: PendingUserInputDraftAnswer | undefined,
-  optionValue: string,
-): PendingUserInputDraftAnswer {
-  if (question.multiSelect) {
-    const selectedOptionValues = normalizeSelectedOptionValues(draft?.selectedOptionValues);
-    const nextSelectedOptionValues = selectedOptionValues.includes(optionValue)
-      ? selectedOptionValues.filter((value) => value !== optionValue)
-      : [...selectedOptionValues, optionValue];
-
-    return {
-      customAnswer: "",
-      ...(nextSelectedOptionValues.length > 0
-        ? { selectedOptionValues: nextSelectedOptionValues }
-        : {}),
-    };
-  }
-
-  return {
-    customAnswer: "",
-    selectedOptionValues: [optionValue],
-  };
-}
-
-export function buildPendingUserInputAnswers(
-  questions: ReadonlyArray<UserInputQuestion>,
-  draftAnswers: Record<string, PendingUserInputDraftAnswer>,
-): Record<string, string | string[]> | null {
-  const answers: Record<string, string | string[]> = {};
-
-  for (const question of questions) {
-    const answer = resolvePendingUserInputAnswer(question, draftAnswers[question.id]);
-    if (answer === null) {
-      return null;
-    }
-    answers[question.id] = answer;
-  }
-
-  return answers;
-}
-
 export function findFirstUnansweredPendingUserInputQuestionIndex(
   questions: ReadonlyArray<UserInputQuestion>,
   draftAnswers: Record<string, PendingUserInputDraftAnswer>,
 ): number {
   const unansweredIndex = questions.findIndex(
-    (question) => !resolvePendingUserInputAnswer(question, draftAnswers[question.id]),
+    (question) => resolvePendingUserInputAnswer(question, draftAnswers[question.id]) === null,
   );
 
   return unansweredIndex === -1 ? Math.max(questions.length - 1, 0) : unansweredIndex;
@@ -160,7 +63,7 @@ export function countAnsweredPendingUserInputQuestions(
  * panel acts on the digit, and the window-level type-to-focus handler has to
  * let it through. That handler runs in the capture phase, so a disagreement
  * does not degrade gracefully — it swallows the key and types it into the
- * custom answer, which clears the option the user had already picked.
+ * custom answer instead of selecting an option.
  */
 export function isPendingUserInputOptionShortcut(
   question: UserInputQuestion | null,

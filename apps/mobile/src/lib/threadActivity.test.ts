@@ -77,6 +77,47 @@ const nativeQuestion = {
 } as const;
 
 describe("pending user input answers", () => {
+  it("mobile draft keeps choice and dictated detail together", () => {
+    const selected = togglePendingUserInputOptionSelection(singleSelectQuestion, undefined, "Go");
+    const draft = setPendingUserInputCustomAnswer(
+      singleSelectQuestion,
+      selected,
+      "Keep the runtime portable",
+    );
+    expect(isPendingUserInputOptionSelected(singleSelectQuestion, draft, "Go")).toBe(true);
+    expect(draft).toMatchObject({
+      selectedOptionValues: ["Go"],
+      customAnswer: "Keep the runtime portable",
+    });
+    expect(buildPendingUserInputAnswers([singleSelectQuestion], { runtime: draft })).toEqual({
+      runtime: ["Go", "Keep the runtime portable"],
+    });
+  });
+
+  it("mobile draft retains all opaque values while typing", () => {
+    const question = { ...nativeQuestion, multiSelect: true, allowCustomAnswer: true };
+    const first = togglePendingUserInputOptionSelection(question, undefined, " choice ");
+    const second = togglePendingUserInputOptionSelection(question, first, "choice");
+    const draft = setPendingUserInputCustomAnswer(question, second, "Both files");
+    expect(buildPendingUserInputAnswers([question], { choice: draft })).toEqual({
+      choice: [" choice ", "choice", "Both files"],
+    });
+  });
+
+  it("mobile blocks unfinished attachment uploads", () => {
+    const question = { ...singleSelectQuestion, options: [] };
+    expect(
+      buildPendingUserInputAnswers([question], {
+        runtime: { attachmentCount: 1 },
+      }),
+    ).toEqual({ runtime: "" });
+    expect(
+      buildPendingUserInputAnswers([question], {
+        runtime: { attachmentCount: 1, attachmentsBlocked: true },
+      }),
+    ).toBeNull();
+  });
+
   it("accepts free-text answers to async questions without options", () => {
     const question = {
       id: "0",
@@ -168,14 +209,14 @@ describe("pending user input answers", () => {
     });
   });
 
-  it("clears selected options while a custom answer is active", () => {
+  it("keeps selected options while a custom answer is active", () => {
     expect(
       setPendingUserInputCustomAnswer(
         multiSelectQuestion,
         { selectedOptionValues: ["Orders", "Listings"] },
         "Orders first",
       ),
-    ).toEqual({ customAnswer: "Orders first" });
+    ).toEqual({ selectedOptionValues: ["Orders", "Listings"], customAnswer: "Orders first" });
   });
 
   it("matches selected options against normalized legacy labels", () => {
@@ -192,7 +233,7 @@ describe("pending user input answers", () => {
         { selectedOptionValues: ["Orders"], customAnswer: "Orders first" },
         "  Orders  ",
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("keeps custom answers enabled for legacy questions", () => {
@@ -200,7 +241,7 @@ describe("pending user input answers", () => {
       buildPendingUserInputAnswers([singleSelectQuestion], {
         runtime: { selectedOptionValues: ["Go"], customAnswer: "  Use Bun  " },
       }),
-    ).toEqual({ runtime: "Use Bun" });
+    ).toEqual({ runtime: ["Go", "Use Bun"] });
   });
 
   it("keeps duplicate labels and whitespace-sensitive native values separate", () => {
