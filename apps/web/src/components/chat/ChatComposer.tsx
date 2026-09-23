@@ -1404,7 +1404,10 @@ export interface ChatComposerProps {
   terminalOpen: boolean;
   gitCwd: string | null;
   dictationStartControl?: ReactNode;
-  /** Stacks with the other attached banners, so neighboring tabs sit beside it. */
+  /**
+   * Rendered as the last child of `ComposerBanner.Column`, so neighboring tabs
+   * sit beside it. Its root must be a `ComposerBanner.Attachment`.
+   */
   dictationStrip?: ReactNode;
   pullRequestProjectId: ProjectId | null;
   pullRequestRepository: string | null;

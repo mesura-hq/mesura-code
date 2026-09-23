@@ -74,10 +74,16 @@ it("stacks the dictation strip inside the composer's banner column", () => {
     /\{dictationStrip\}\s*<\/ComposerBanner\.Column>/,
     "ChatComposer no longer renders dictationStrip as the last child of ComposerBanner.Column",
   );
-  assert.include(
-    read("apps/web/src/components/ChatView.tsx"),
-    "dictationStrip={",
+  const chatView = read("apps/web/src/components/ChatView.tsx");
+  assert.match(
+    chatView,
+    /dictationStrip=\{dictationStrip\}/,
     "ChatView no longer hands the dictation strip to ChatComposer",
+  );
+  assert.equal(
+    chatView.match(/<DictationStrip\b/g)?.length,
+    1,
+    "DictationStrip must mount exactly once, through ChatComposer",
   );
 });
 
