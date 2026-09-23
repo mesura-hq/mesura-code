@@ -1404,6 +1404,11 @@ export interface ChatComposerProps {
   terminalOpen: boolean;
   gitCwd: string | null;
   dictationStartControl?: ReactNode;
+  /**
+   * Rendered as the last child of `ComposerBanner.Column`, so neighboring tabs
+   * sit beside it. Its root must be a `ComposerBanner.Attachment`.
+   */
+  dictationStrip?: ReactNode;
   pullRequestProjectId: ProjectId | null;
   pullRequestRepository: string | null;
   restingControlsHost: HTMLDivElement | null;
@@ -1523,6 +1528,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     terminalOpen,
     gitCwd,
     dictationStartControl,
+    dictationStrip,
     pullRequestProjectId,
     pullRequestRepository,
     restingControlsHost,
@@ -6261,6 +6267,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               />
             </ComposerBanner.Attachment>
           ) : null}
+          {dictationStrip}
         </ComposerBanner.Column>
         {!isComposerApprovalState ? (
           <ComposerStashBadge

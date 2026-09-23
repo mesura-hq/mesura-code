@@ -8291,6 +8291,14 @@ export default function ChatView(props: ChatViewProps) {
       ),
     [composerDraftTarget, draftThread],
   );
+  // Memoized so the element stays referentially stable and ChatComposer's memo holds.
+  const dictationStrip = useMemo(
+    () =>
+      registeredDictationTarget ? (
+        <DictationStrip displayedTarget={registeredDictationTarget} />
+      ) : null,
+    [registeredDictationTarget],
+  );
   useEffect(() => {
     if (registeredDictationTarget === null) return;
     return dictationCoordinator.registerComposer({
@@ -9785,9 +9793,6 @@ export default function ChatView(props: ChatViewProps) {
                     }
                   >
                     <ComposerSurface.Shell contextStrip={showComposerContextStrip}>
-                      {registeredDictationTarget ? (
-                        <DictationStrip displayedTarget={registeredDictationTarget} />
-                      ) : null}
                       <ComposerSurface.Host>
                         <div ref={attachDraftHeroComposerAnchorRef} className="relative z-10">
                           <ChatComposer
@@ -9868,6 +9873,7 @@ export default function ChatView(props: ChatViewProps) {
                             terminalOpen={Boolean(terminalUiState.terminalOpen)}
                             gitCwd={gitCwd}
                             dictationStartControl={DICTATION_START_CONTROL}
+                            dictationStrip={dictationStrip}
                             pullRequestProjectId={
                               supportsPullRequests ? (activeProject?.id ?? null) : null
                             }
