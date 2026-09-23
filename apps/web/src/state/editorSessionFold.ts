@@ -1,6 +1,7 @@
 import type {
   EditorCmdline,
   EditorHighlightDefinition,
+  EditorSessionEndReason,
   EditorSessionEvent,
   EditorVisual,
 } from "@t3tools/contracts";
@@ -71,6 +72,11 @@ export interface EditorSessionState {
    * told their file is saved.
    */
   readonly writeRequests: number;
+  /**
+   * Why the session ended, once it has. The attachment's stream stops here,
+   * so nothing after this describes a live Neovim.
+   */
+  readonly ended: EditorSessionEndReason | null;
   readonly latestEvent: EditorSessionEvent | null;
   readonly sequence: number;
 }
@@ -88,6 +94,7 @@ export const EMPTY_EDITOR_SESSION_STATE: EditorSessionState = {
   hlDefs: {},
   visual: null,
   writeRequests: 0,
+  ended: null,
   latestEvent: null,
   sequence: 0,
 };
@@ -184,6 +191,8 @@ export function applyEditorSessionEvent(
       return { ...base, visual: event.visual };
     case "writeRequested":
       return { ...base, writeRequests: state.writeRequests + 1 };
+    case "exited":
+      return { ...base, ended: event.reason ?? "closed" };
     default:
       return base;
   }

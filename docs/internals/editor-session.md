@@ -134,7 +134,7 @@ event", for the reason under **Traps** below.
 | `cmdline`        | the command line Neovim is showing, or `null` when it closed             |
 | `message`        | the last message Neovim wrote, and its kind                              |
 | `writeRequested` | Neovim asked the host to write the file — this is what `:w` becomes      |
-| `exited`         | the process ended. In the contract; see **Known limitations**            |
+| `exited`         | the session is gone, and why; the stream ends after it                   |
 
 **`rows` on a decorations event is not a hint, it is the erase list.** It names the rows this event
 replaces, so the client drops what it held for those rows and takes these instead. Without it a
@@ -517,9 +517,18 @@ asking what just happened instead of what is true.
   output; `NvimRpc` then fails every waiting and later request, and the manager starts a new Neovim
   in the same session (`restartSession`), reopens the file with the mirror's text and sends a
   snapshot, so the client's attachment keeps working. Undo history from before is lost. After
-  three restarts without an `open` in between, the session is dropped and its attachments get an
-  `emsg` saying so. The wire's `exited` event is still never sent. A Neovim that
-  hangs rather than exits is not detected; the trace shows it as calls whose `tookMs` climbs.
+  three restarts without an `open` in between, the session is dropped with `exited` reason
+  `gave-up`, and the client falls back to the plain editor with a Retry rather than reopening. A
+  Neovim that hangs rather than exits is not detected; the trace shows it as calls whose `tookMs`
+  climbs.
+- **A lost session is reopened by the client, not rebuilt by the server.** A server restart (the
+  desktop app replaces its backend without reloading the window) takes every session with it, and
+  only the client still holds the file, the project and the text. So an attachment that fails with
+  `EditorSessionLookupError`, or ends with `exited` reason `closed`, makes `useNvimFileEditor` open
+  the file again and then attach afresh — in that order, because an attachment that reaches the
+  server first finds no session. Neovim state (undo, registers, marks) does not survive this. The
+  attach stream lives in `attachEventStream`: `Stream.callback` runs its registration on a fiber
+  nothing watches, so a failed attach there used to leave the client waiting on a silent stream.
 - **A visual selection assumes `selection=inclusive`.** His configuration uses the default, measured,
   and `virtualedit` is empty. Under `selection=exclusive` the drawn selection would be one character
   too long, and under `virtualedit=block` a block past the end of a short line would be clipped where

@@ -345,3 +345,13 @@ describe("flash's jump", () => {
     expect(done.jumping).toBe(false);
   });
 });
+
+describe("the session ending", () => {
+  it("records why, and an older server that names no reason means closed", () => {
+    const live = fold(EMPTY_EDITOR_SESSION_STATE, [snapshot(["one"])]);
+    expect(live.ended).toBeNull();
+    const gaveUp = applyEditorSessionEvent(live, { type: "exited", code: null, reason: "gave-up" });
+    expect(gaveUp.ended).toBe("gave-up");
+    expect(applyEditorSessionEvent(live, { type: "exited", code: null }).ended).toBe("closed");
+  });
+});

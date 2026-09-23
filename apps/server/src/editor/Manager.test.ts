@@ -3,6 +3,7 @@ import { assert, it } from "@effect/vitest";
 import type { EditorSessionEvent } from "@t3tools/contracts";
 import type * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -236,11 +237,12 @@ it.layer(layer, { excludeTestServices: true })("EditorSessionManager", (it) => {
         lines: [""],
       });
       const messages = yield* Queue.make<string>();
-      const unsubscribe = yield* manager.attachStream({ threadId: "thread-loop" }, (event) =>
-        event.type === "message"
-          ? Queue.offer(messages, event.text).pipe(Effect.asVoid)
-          : Effect.void,
-      );
+      const ends = yield* Queue.make<string | undefined>();
+      const unsubscribe = yield* manager.attachStream({ threadId: "thread-loop" }, (event) => {
+        if (event.type === "message") return Queue.offer(messages, event.text).pipe(Effect.asVoid);
+        if (event.type === "exited") return Queue.offer(ends, event.reason).pipe(Effect.asVoid);
+        return Effect.void;
+      });
       yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
 
       for (let restart = 1; restart <= 3; restart += 1) {
@@ -250,9 +252,49 @@ it.layer(layer, { excludeTestServices: true })("EditorSessionManager", (it) => {
       // A configuration that kills Neovim at start would otherwise loop.
       fake.crash();
       assert.include(yield* Queue.take(messages), "exited 4 times");
+      // Said as the reason the stream ends, so the client stops reopening a
+      // Neovim that only exits again.
+      assert.strictEqual(yield* Queue.take(ends), "gave-up");
       // Behind the thread's lock, so it runs once the drop has finished.
       const after = yield* Effect.result(manager.input({ threadId: "thread-loop", keys: "j" }));
       assert.isTrue(Result.isFailure(after), "the session is gone");
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("fails an attachment to a thread with no session, rather than leaving it waiting", () =>
+    Effect.gen(function* () {
+      const { manager } = yield* createManager();
+      // What a client finds after a server restart: its thread's session went
+      // with the old process. The failure used to happen inside the stream's
+      // callback fiber, which nothing watched, so the stream stayed open and
+      // silent and the client never learned it had to open the file again.
+      const outcome = yield* Effect.result(
+        Stream.runDrain(EditorSessionManager.attachEventStream(manager, { threadId: "nobody" })),
+      );
+      assert.isTrue(Result.isFailure(outcome));
+      if (Result.isFailure(outcome)) {
+        assert.strictEqual(outcome.failure._tag, "EditorSessionLookupError");
+      }
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("ends an attachment with `exited` when its session is closed", () =>
+    Effect.gen(function* () {
+      const { manager, root } = yield* createManager();
+      yield* manager.open({ threadId: "thread-end", cwd: root, relativePath: "a.ts", lines: [""] });
+      const attached = yield* Deferred.make<void>();
+      const collecting = yield* Stream.runCollect(
+        EditorSessionManager.attachEventStream(manager, { threadId: "thread-end" }).pipe(
+          Stream.tap(() => Deferred.succeed(attached, undefined)),
+        ),
+      ).pipe(Effect.forkChild);
+      yield* Deferred.await(attached);
+
+      yield* manager.closeThread({ threadId: "thread-end" });
+
+      // The stream ends on its own; joining would wait forever otherwise.
+      const events = [...(yield* Fiber.join(collecting))];
+      assert.deepStrictEqual(events.at(-1), { type: "exited", code: null, reason: "closed" });
     }).pipe(Effect.scoped),
   );
 

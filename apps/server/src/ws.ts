@@ -69,8 +69,6 @@ import {
   RpcClientId,
   EnvironmentAuthorizationError,
   ThreadId,
-  type EditorSessionError,
-  type EditorSessionEvent,
   type TerminalAttachStreamEvent,
   type TerminalError,
   type TerminalEvent,
@@ -3366,12 +3364,7 @@ const makeWsRpcLayer = (
         [WS_METHODS.editorSessionAttach]: (input) =>
           observeRpcStream(
             WS_METHODS.editorSessionAttach,
-            Stream.callback<EditorSessionEvent, EditorSessionError>((queue) =>
-              Effect.acquireRelease(
-                editorSessionManager.attachStream(input, (event) => Queue.offer(queue, event)),
-                (unsubscribe) => Effect.sync(unsubscribe),
-              ),
-            ),
+            EditorSessionManager.attachEventStream(editorSessionManager, input),
             { "rpc.aggregate": "editorSession" },
           ),
         [WS_METHODS.editorSessionInput]: (input) =>

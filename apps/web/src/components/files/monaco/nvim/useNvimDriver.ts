@@ -95,6 +95,8 @@ export interface NvimDriverOptions {
   readonly sendKeys: (keys: string) => void;
   /** Opens the file in the session, handing over the text the client has. */
   readonly openFile: (lines: ReadonlyArray<string>) => void;
+  /** Raised when the file has to be opened again with nothing else changed. */
+  readonly openGeneration: number;
   readonly setCursor: (line: number, col: number) => void;
   /** Tells Neovim which lines the developer can see, and how wide they are. */
   readonly sendViewport: (viewport: NvimViewport) => void;
@@ -172,6 +174,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
     state,
     sendKeys,
     openFile,
+    openGeneration,
     setCursor,
     sendViewport,
     flushSave,
@@ -275,7 +278,9 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
     // the last one.
     scrollOwnerRef.current = "keys";
     openFile(model.getLinesContent());
-  }, [enabled, model, openFile, environmentId, cwd, relativePath]);
+    // `openGeneration` is read by nothing here and is still the point: a Retry,
+    // or a session that was lost, opens the same file in the same model again.
+  }, [enabled, model, openFile, openGeneration, environmentId, cwd, relativePath]);
 
   // Keys.
   useEffect(() => {

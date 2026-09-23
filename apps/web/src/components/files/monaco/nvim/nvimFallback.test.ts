@@ -3,7 +3,12 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Cause from "effect/Cause";
 import { EditorSessionLookupError, EditorSessionSpawnError } from "@t3tools/contracts";
 
-import { describeFallback, fallbackFromCause, isSettingsFixable } from "./nvimFallback.ts";
+import {
+  describeFallback,
+  fallbackFromCause,
+  isSessionMissing,
+  isSettingsFixable,
+} from "./nvimFallback.ts";
 
 describe("describeFallback", () => {
   it("says what is wrong and where", () => {
@@ -67,5 +72,24 @@ describe("fallbackFromCause", () => {
     expect(fallbackFromCause(Cause.die(new Error("boom")))).toBeNull();
     expect(fallbackFromCause(null)).toBeNull();
     expect(fallbackFromCause({})).toBeNull();
+  });
+});
+
+describe("isSessionMissing", () => {
+  it("recognises a thread with no session, which reopening the file fixes", () => {
+    expect(isSessionMissing(Cause.fail(new EditorSessionLookupError({ threadId: "t" })))).toBe(
+      true,
+    );
+  });
+
+  it("does not take a spawn failure or a defect for one", () => {
+    const spawn = new EditorSessionSpawnError({
+      threadId: "t",
+      reason: "spawn-failed",
+      detail: "",
+    });
+    expect(isSessionMissing(Cause.fail(spawn))).toBe(false);
+    expect(isSessionMissing(Cause.die(new Error("boom")))).toBe(false);
+    expect(isSessionMissing(null)).toBe(false);
   });
 });

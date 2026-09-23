@@ -61,15 +61,8 @@ export function isSettingsFixable(reason: NvimFallbackReason): boolean {
  * into a plain one for a transient error is a worse answer than waiting.
  */
 export function fallbackFromCause(cause: unknown): NvimFallback | null {
-  const reasons =
-    typeof cause === "object" && cause !== null && "reasons" in cause
-      ? (cause as { reasons: ReadonlyArray<unknown> }).reasons
-      : [];
-  for (const entry of reasons) {
-    if (typeof entry !== "object" || entry === null || !("error" in entry)) continue;
-    const error = (entry as { error: unknown }).error;
-    if (typeof error !== "object" || error === null) continue;
-    if (!("_tag" in error) || error._tag !== "EditorSessionSpawnError") continue;
+  for (const error of taggedErrorsOf(cause)) {
+    if (error._tag !== "EditorSessionSpawnError") continue;
     const spawn = error as { reason?: unknown; detail?: unknown };
     if (typeof spawn.reason !== "string") continue;
     return {
@@ -78,4 +71,32 @@ export function fallbackFromCause(cause: unknown): NvimFallback | null {
     };
   }
   return null;
+}
+
+/**
+ * Whether a failure says the thread has no session at all.
+ *
+ * What a server restart looks like from here: the client reconnects and
+ * attaches again, and the session it attaches to went with the old process.
+ * Unlike a spawn failure this is not a reason to give up on Neovim — opening
+ * the file again starts a new session.
+ */
+export function isSessionMissing(cause: unknown): boolean {
+  return taggedErrorsOf(cause).some((error) => error._tag === "EditorSessionLookupError");
+}
+
+/** The typed errors inside an Effect `Cause`, which keeps them in `reasons`. */
+function taggedErrorsOf(cause: unknown): ReadonlyArray<{ readonly _tag: unknown }> {
+  const reasons =
+    typeof cause === "object" && cause !== null && "reasons" in cause
+      ? (cause as { reasons: ReadonlyArray<unknown> }).reasons
+      : [];
+  const errors: Array<{ readonly _tag: unknown }> = [];
+  for (const entry of reasons) {
+    if (typeof entry !== "object" || entry === null || !("error" in entry)) continue;
+    const error = (entry as { error: unknown }).error;
+    if (typeof error !== "object" || error === null || !("_tag" in error)) continue;
+    errors.push(error);
+  }
+  return errors;
 }

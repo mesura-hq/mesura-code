@@ -2,6 +2,7 @@
 import * as NodeOS from "node:os";
 import {
   type EditorHighlightDefinition,
+  type EditorSessionEndReason,
   EditorSessionLookupError,
   EditorSessionRpcError,
   EditorSessionSpawnError,
@@ -26,6 +27,7 @@ import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
+import * as Stream from "effect/Stream";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import { ServerConfig } from "../config.ts";
@@ -289,10 +291,34 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       return absolutePath;
     });
 
-  const stopSession = (session: Session) =>
+  /**
+   * Sends an event to the attachments now, not through the outbox.
+   *
+   * For what is said as a session goes: stopping it closes the scope of the
+   * fiber that drains the outbox, so a queued event would almost never arrive.
+   */
+  const deliverNow = (session: Session, event: EditorSessionEvent) =>
+    Effect.gen(function* () {
+      if (trace.enabled) {
+        trace.record({ dir: "out", thread: session.threadId, ...summarizeEditorEvent(event) });
+      }
+      yield* Effect.forEach([...session.listeners], (listener) => listener(event), {
+        discard: true,
+      });
+    });
+
+  /**
+   * Stops a session, and tells its attachments it is gone.
+   *
+   * Told rather than dropped silently: the attachment's stream ends on `exited`,
+   * and a client whose stream simply went quiet kept sending keys to a session
+   * that no longer existed, with nothing on screen saying so.
+   */
+  const stopSession = (session: Session, reason: EditorSessionEndReason = "closed") =>
     Effect.gen(function* () {
       session.unsubscribe?.();
       session.unsubscribe = null;
+      yield* deliverNow(session, { type: "exited", code: null, reason });
       session.listeners.clear();
       yield* Scope.close(session.scope, Effect.void as never).pipe(
         Effect.catchCause(() => Effect.void),
@@ -341,7 +367,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       }
       return next;
     });
-    yield* Effect.forEach(doomed, stopSession, { discard: true });
+    yield* Effect.forEach(doomed, (session) => stopSession(session), { discard: true });
   });
 
   const spawnBridge = (threadId: string, cwd: string, scope: Scope.Closeable) =>
@@ -414,7 +440,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
     return session;
   });
 
-  const dropSession = (threadId: string) =>
+  const dropSession = (threadId: string, reason: EditorSessionEndReason = "closed") =>
     Effect.gen(function* () {
       let doomed: Session | undefined;
       yield* SynchronizedRef.update(sessions, (current) => {
@@ -424,7 +450,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         next.delete(threadId);
         return next;
       });
-      if (doomed !== undefined) yield* stopSession(doomed);
+      if (doomed !== undefined) yield* stopSession(doomed, reason);
     });
 
   const lookup = (threadId: string) =>
@@ -969,23 +995,11 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       ),
     );
 
-  /**
-   * Drops a session whose Neovim cannot be replaced, and says so.
-   *
-   * The message goes straight to the listeners, not through the outbox:
-   * dropping the session closes the scope of the fiber that drains the outbox,
-   * so a queued message would almost never be delivered.
-   */
+  /** Drops a session whose Neovim cannot be replaced, and says why. */
   const giveUp = (session: Session, text: string) =>
     Effect.gen(function* () {
-      const event: EditorSessionEvent = { type: "message", kind: "emsg", text };
-      if (trace.enabled) {
-        trace.record({ dir: "out", thread: session.threadId, ...summarizeEditorEvent(event) });
-      }
-      yield* Effect.forEach([...session.listeners], (listener) => listener(event), {
-        discard: true,
-      });
-      yield* dropSession(session.threadId);
+      yield* deliverNow(session, { type: "message", kind: "emsg", text });
+      yield* dropSession(session.threadId, "gave-up");
     });
 
   // Each restart on its own fiber, so a slow one — a real configuration takes a
@@ -1002,12 +1016,42 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
     Effect.gen(function* () {
       const current = yield* SynchronizedRef.get(sessions);
       yield* SynchronizedRef.set(sessions, new Map());
-      yield* Effect.forEach(current.values(), stopSession, { discard: true });
+      yield* Effect.forEach(current.values(), (session) => stopSession(session), {
+        discard: true,
+      });
     }),
   );
 
   return service;
 });
+
+/**
+ * One attachment as a stream, which is what the websocket layer serves.
+ *
+ * Two things the plain callback shape got wrong, both of which left a client
+ * waiting on a stream that would never say anything again:
+ *
+ * - An attach that fails — no session for the thread, as after a server
+ *   restart — failed inside the callback's own fiber, which nothing watches.
+ *   The failure now fails the stream, so the client hears it and can open the
+ *   file again.
+ * - A session that ends sends `exited`, and the stream ends with it.
+ */
+export const attachEventStream = (
+  manager: EditorSessionManager["Service"],
+  input: EditorSessionAttachInput,
+): Stream.Stream<EditorSessionEvent, EditorSessionError> =>
+  Stream.callback<EditorSessionEvent, EditorSessionError>((queue) =>
+    Effect.acquireRelease(
+      manager.attachStream(input, (event) =>
+        Queue.offer(queue, event).pipe(
+          Effect.andThen(event.type === "exited" ? Queue.end(queue) : Effect.void),
+          Effect.asVoid,
+        ),
+      ),
+      (unsubscribe) => Effect.sync(unsubscribe),
+    ).pipe(Effect.tapError((error) => Queue.fail(queue, error))),
+  );
 
 export const make = Effect.fn("EditorSessionManager.make")(function* () {
   const config = yield* ServerConfig;

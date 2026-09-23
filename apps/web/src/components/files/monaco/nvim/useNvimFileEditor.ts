@@ -1,9 +1,9 @@
-import { useAtomValue } from "@effect/atom-react";
+import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import type { EditorTextEdit, EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import type * as monaco from "monaco-editor";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { resolveShortcutCommand } from "~/keybindings";
 import { primaryServerKeybindingsAtom } from "~/state/server";
@@ -18,7 +18,7 @@ import {
   EMPTY_EDITOR_SESSION_STATE,
   type EditorSessionState,
 } from "~/state/editorSession";
-import { fallbackFromCause, type NvimFallback } from "./nvimFallback.ts";
+import { fallbackFromCause, isSessionMissing, type NvimFallback } from "./nvimFallback.ts";
 import { useNvimDriver, type NvimDriverResult } from "./useNvimDriver.ts";
 import { APP_SHORTCUTS_THAT_OUTRANK_NEOVIM } from "./appShortcutsThatOutrankNeovim";
 
@@ -31,6 +31,13 @@ import { APP_SHORTCUTS_THAT_OUTRANK_NEOVIM } from "./appShortcutsThatOutrankNeov
  * — and keeping the subscription out of it is what lets that reasoning be
  * read without an atom runtime in the way.
  */
+
+/**
+ * How many times in a row a lost session is reopened without one working in
+ * between. Past it the panel falls back to the plain editor with a Retry,
+ * rather than reopening forever against a server that keeps dropping it.
+ */
+const MAX_AUTOMATIC_REOPENS = 3;
 
 const IDLE_SESSION_ATOM = Atom.make(AsyncResult.initial<EditorSessionState, never>(false)).pipe(
   Atom.withLabel("editor-session:idle"),
@@ -70,11 +77,20 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
    * Held here rather than in the driver because it decides whether the driver
    * runs at all: a session that could not start leaves the panel as the plain
    * editor it was before, and the driver is the thing that must not be in the
-   * way. `retryToken` is what a Retry changes, so the effect that opens the
-   * file runs again after the developer has fixed the setting.
+   * way.
    */
   const [fallback, setFallback] = useState<NvimFallback | null>(null);
-  const [retryToken, setRetryToken] = useState(0);
+  /**
+   * Raised to make the driver open the file again: by a Retry, and when the
+   * session is lost.
+   *
+   * A value the driver's open effect depends on, not a dependency smuggled into
+   * `openFile`'s list. REGRESSION: that is how Retry was first written, and
+   * the React Compiler drops a `useCallback` dependency the body never reads,
+   * so the callback never changed and nothing reopened. Retry only appeared to
+   * work because it also turns the driver off and on.
+   */
+  const [openGeneration, setOpenGeneration] = useState(0);
   const enabled = input.enabled && fallback === null;
 
   // Not subscribed at all while modal editing is off, so a developer who does
@@ -86,6 +102,57 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
   const state =
     (Option.getOrNull(AsyncResult.value(result)) as EditorSessionState | null) ??
     EMPTY_EDITOR_SESSION_STATE;
+
+  /**
+   * Opening the file again once its session is gone.
+   *
+   * A session goes with the server that held it — a restart, the desktop app
+   * replacing its backend — and the server also ends one on purpose. Either way
+   * the attachment has nothing left to follow, and every key sent after that
+   * failed with nobody told. The client holds what a new session needs — the
+   * file, the project, the text on screen — so it reopens: the same open a file
+   * switch does, through `openGeneration`, and then a fresh attachment, because
+   * the old stream has ended or failed for good.
+   *
+   * Not after `gave-up`. That is a Neovim that kept exiting, and reopening it
+   * would only repeat that, so the panel falls back and offers Retry instead.
+   */
+  const refreshAttach = useAtomRefresh(atom);
+  // A ref, so a new refresh function never makes `openFile` a new callback:
+  // the driver opens the file again whenever that identity changes.
+  const refreshAttachRef = useRef(refreshAttach);
+  useEffect(() => {
+    refreshAttachRef.current = refreshAttach;
+  }, [refreshAttach]);
+  const reattachAfterOpenRef = useRef(false);
+  const reopensInARowRef = useRef(0);
+  const sessionLost =
+    enabled &&
+    (state.ended === "closed" || (AsyncResult.isFailure(result) && isSessionMissing(result.cause)));
+  const sessionGaveUp = enabled && state.ended === "gave-up";
+
+  useEffect(() => {
+    // An open is already on its way, and the attachment is replaced after it.
+    // Until then the state is the old stream's, which is what said "gone".
+    if (reattachAfterOpenRef.current) return;
+    if (sessionGaveUp) {
+      setFallback({ reason: "spawn-failed", detail: "it kept exiting, so it was not restarted" });
+      return;
+    }
+    if (!sessionLost) return;
+    if (reopensInARowRef.current >= MAX_AUTOMATIC_REOPENS) {
+      setFallback({ reason: "spawn-failed", detail: "its session kept disappearing" });
+      return;
+    }
+    reopensInARowRef.current += 1;
+    reattachAfterOpenRef.current = true;
+    setOpenGeneration((generation) => generation + 1);
+  }, [sessionLost, sessionGaveUp]);
+
+  // A session that answers resets the count: the next loss is a new one.
+  useEffect(() => {
+    if (state.sequence > 0 && state.ended === null) reopensInARowRef.current = 0;
+  }, [state.sequence, state.ended]);
 
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const isAppShortcut = useCallback(
@@ -113,20 +180,26 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
         environmentId,
         input: { threadId, cwd, relativePath, lines: [...lines] },
       }).then((result) => {
+        // After the open, not alongside it: an attachment that reaches the
+        // server first finds no session and fails again.
+        if (reattachAfterOpenRef.current) {
+          reattachAfterOpenRef.current = false;
+          refreshAttachRef.current();
+        }
         if (result._tag !== "Failure") return;
         const failure = fallbackFromCause(result.cause);
         if (failure === null) return;
         setFallback(failure);
       });
     },
-    // `retryToken` is in here on purpose: a Retry has to make this callback a
-    // new one, or the effect that calls it will not run again.
-    [openCommand, environmentId, threadId, cwd, relativePath, retryToken],
+    [openCommand, environmentId, threadId, cwd, relativePath],
   );
 
   const retry = useCallback(() => {
+    reopensInARowRef.current = 0;
+    reattachAfterOpenRef.current = true;
     setFallback(null);
-    setRetryToken((token) => token + 1);
+    setOpenGeneration((generation) => generation + 1);
   }, []);
 
   const sendKeys = useCallback(
@@ -190,6 +263,7 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
     enabled,
     sendKeys,
     openFile,
+    openGeneration,
     setCursor,
     sendViewport,
     flushSave: input.flushSave,
