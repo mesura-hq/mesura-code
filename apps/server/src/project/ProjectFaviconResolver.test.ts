@@ -4,6 +4,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import { TestClock } from "effect/testing";
@@ -44,13 +45,210 @@ const writeTextFile = Effect.fn("writeTextFile")(function* (
 });
 
 const makeResolverWithFileSystem = (fileSystem: FileSystem.FileSystem) =>
-  ProjectFaviconResolver.make.pipe(
-    Effect.provide([WorkspacePaths.layer, T3ProjectFileLoader.layer]),
+  T3ProjectFileLoader.make.pipe(
+    Effect.flatMap((loader) =>
+      ProjectFaviconResolver.make.pipe(
+        Effect.provideService(T3ProjectFileLoader.T3ProjectFileLoader, loader),
+        Effect.provide(WorkspacePaths.layer),
+      ),
+    ),
     Effect.provideService(FileSystem.FileSystem, fileSystem),
   );
 
 it.layer(TestLayer)("ProjectFaviconResolverLive", (it) => {
   describe("resolvePath", () => {
+    it.effect(
+      "logs a stale Mesura icon and falls through saved and legacy icons to discovery",
+      () => {
+        const messages: unknown[] = [];
+        const logger = Logger.make<unknown, void>(({ message }) => messages.push(message));
+        return Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
+          const cwd = yield* makeTempDir;
+          yield* writeTextFile(
+            cwd,
+            ".mesura.json",
+            '{ "version": 1, "iconPath": "brand/portable.svg" }',
+          );
+          yield* writeTextFile(cwd, "t3.json", '{ "iconPath": "brand/legacy.svg" }');
+          for (const name of [
+            "brand/portable.svg",
+            "brand/saved.svg",
+            "brand/legacy.svg",
+            "favicon.svg",
+          ]) {
+            yield* writeTextFile(cwd, name, "<svg/>");
+          }
+          const resolve = resolver.resolvePath(cwd, "brand/saved.svg");
+          for (const expected of [
+            "brand/portable.svg",
+            "brand/saved.svg",
+            "brand/legacy.svg",
+            "favicon.svg",
+          ]) {
+            expect(yield* resolve).toBe(path.join(cwd, expected));
+            yield* fileSystem.remove(path.join(cwd, expected));
+          }
+          expect(messages).toContainEqual([
+            "Configured project icon is unavailable; trying the next candidate.",
+            { workspaceRoot: cwd, iconPath: "brand/portable.svg", source: "mesura" },
+          ]);
+          expect(messages).toContainEqual([
+            "Configured project icon is unavailable; trying the next candidate.",
+            { workspaceRoot: cwd, iconPath: "brand/legacy.svg", source: "t3" },
+          ]);
+          expect(messages).not.toContainEqual([
+            expect.any(String),
+            expect.objectContaining({ source: "project" }),
+          ]);
+        }).pipe(Effect.provide(Logger.layer([logger], { mergeWithExisting: false })));
+      },
+    );
+
+    it.effect("retains the legacy t3 icon cache lifetime after edits", () =>
+      Effect.gen(function* () {
+        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
+        const path = yield* Path.Path;
+        for (const fileName of ["t3.json"]) {
+          const cwd = yield* makeTempDir;
+          yield* writeTextFile(cwd, "brand/old.svg", "<svg/>");
+          yield* writeTextFile(cwd, "brand/new.svg", "<svg/>");
+          yield* writeTextFile(cwd, fileName, '{ "version": 1, "iconPath": "brand/old.svg" }');
+          expect(yield* resolver.resolvePath(cwd)).toBe(path.join(cwd, "brand", "old.svg"));
+
+          yield* writeTextFile(cwd, fileName, '{ "version": 1, "iconPath": "brand/new.svg" }');
+          expect(yield* resolver.resolvePath(cwd)).toBe(path.join(cwd, "brand", "old.svg"));
+          yield* TestClock.adjust(Duration.minutes(11));
+          expect(yield* resolver.resolvePath(cwd)).toBe(path.join(cwd, "brand", "new.svg"));
+        }
+      }).pipe(Effect.provide(TestClock.layer())),
+    );
+
+    it.effect("refreshes Mesura icon edits while the old image still exists", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
+        const cwd = yield* makeTempDir;
+        const configPath = path.join(cwd, ".mesura.json");
+        yield* writeTextFile(cwd, "brand/old.svg", "<svg/>");
+        yield* writeTextFile(cwd, "brand/new.svg", "<svg/>");
+        yield* writeTextFile(cwd, ".mesura.json", '{ "version": 1, "iconPath": "brand/old.svg" }');
+        yield* fileSystem.utimes(configPath, 1000, 1000);
+        expect(yield* resolver.resolvePath(cwd)).toBe(path.join(cwd, "brand/old.svg"));
+        yield* writeTextFile(cwd, ".mesura.json", '{ "version": 1, "iconPath": "brand/new.svg" }');
+        yield* fileSystem.utimes(configPath, 1001, 1001);
+        expect(yield* resolver.resolvePath(cwd)).toBe(path.join(cwd, "brand/new.svg"));
+      }),
+    );
+
+    it.effect("refreshes rapid same-length Mesura saves without changing file timestamps", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
+        const cwd = yield* makeTempDir;
+        const configPath = path.join(cwd, ".mesura.json");
+        yield* writeTextFile(cwd, "brand/old.svg", "<svg/>");
+        yield* writeTextFile(cwd, "brand/new.svg", "<svg/>");
+        for (let save = 0; save < 80; save += 1) {
+          const iconPath = save % 2 === 0 ? "brand/old.svg" : "brand/new.svg";
+          yield* fileSystem.writeFileString(configPath, `{"version":1,"iconPath":"${iconPath}"}`);
+          expect(yield* resolver.resolvePath(cwd)).toBe(path.join(cwd, iconPath));
+        }
+      }),
+    );
+
+    it.effect(
+      "refreshes an atomic Mesura replacement with the same length and modification time",
+      () =>
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
+          const cwd = yield* makeTempDir;
+          const configPath = path.join(cwd, ".mesura.json");
+          const replacementPath = path.join(cwd, ".mesura.json.tmp");
+          yield* writeTextFile(cwd, "brand/old.svg", "<svg/>");
+          yield* writeTextFile(cwd, "brand/new.svg", "<svg/>");
+          yield* fileSystem.writeFileString(configPath, '{"version":1,"iconPath":"brand/old.svg"}');
+          yield* fileSystem.utimes(configPath, 1000, 1000);
+          expect(yield* resolver.resolvePath(cwd)).toBe(path.join(cwd, "brand/old.svg"));
+          yield* fileSystem.writeFileString(
+            replacementPath,
+            '{"version":1,"iconPath":"brand/new.svg"}',
+          );
+          yield* fileSystem.utimes(replacementPath, 1000, 1000);
+          yield* fileSystem.rename(replacementPath, configPath);
+          expect(yield* resolver.resolvePath(cwd)).toBe(path.join(cwd, "brand/new.svg"));
+        }),
+    );
+
+    it.effect(
+      "refreshes Mesura additions removals and invalid replacements across cached misses",
+      () =>
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
+          const cwd = yield* makeTempDir;
+          yield* writeTextFile(cwd, "brand/portable.svg", "<svg/>");
+          expect(yield* resolver.resolvePath(cwd)).toBeNull();
+          yield* writeTextFile(
+            cwd,
+            ".mesura.json",
+            '{ "version": 1, "iconPath": "brand/portable.svg" }',
+          );
+          expect(yield* resolver.resolvePath(cwd)).toBe(path.join(cwd, "brand/portable.svg"));
+          yield* writeTextFile(cwd, "favicon.svg", "<svg/>");
+          yield* fileSystem.remove(path.join(cwd, ".mesura.json"));
+          expect(yield* resolver.resolvePath(cwd)).toBe(path.join(cwd, "favicon.svg"));
+          yield* writeTextFile(cwd, "brand/saved.svg", "<svg/>");
+          yield* writeTextFile(cwd, "brand/legacy.svg", "<svg/>");
+          yield* writeTextFile(cwd, "t3.json", '{ "iconPath": "brand/legacy.svg" }');
+          yield* writeTextFile(
+            cwd,
+            ".mesura.json",
+            '{ "version": 1, "iconPath": "brand/portable.svg" }',
+          );
+          expect(yield* resolver.resolvePath(cwd, "brand/saved.svg")).toBe(
+            path.join(cwd, "brand/portable.svg"),
+          );
+          yield* writeTextFile(cwd, ".mesura.json", "{ broken");
+          expect(yield* resolver.resolvePath(cwd, "brand/saved.svg")).toBe(
+            path.join(cwd, "brand/saved.svg"),
+          );
+          expect(yield* resolver.resolvePath(cwd)).toBe(path.join(cwd, "brand/legacy.svg"));
+        }),
+    );
+
+    it.effect("does not reread unchanged Mesura configuration on icon cache hits", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        const configPath = path.join(cwd, ".mesura.json");
+        yield* writeTextFile(cwd, "brand/icon.svg", "<svg/>");
+        yield* writeTextFile(cwd, ".mesura.json", '{ "version": 1, "iconPath": "brand/icon.svg" }');
+        let configReads = 0;
+        const resolver = yield* makeResolverWithFileSystem(
+          FileSystem.FileSystem.of({
+            ...fileSystem,
+            readFileString: (filePath, encoding) => {
+              if (filePath === configPath) configReads += 1;
+              return fileSystem.readFileString(filePath, encoding);
+            },
+          }),
+        );
+        for (const _attempt of [1, 2, 3]) {
+          expect(yield* resolver.resolvePath(cwd)).toBe(path.join(cwd, "brand/icon.svg"));
+        }
+        expect(configReads).toBe(1);
+      }),
+    );
+
     it.effect("serves repeated resolves from cache instead of re-walking candidates", () =>
       Effect.gen(function* () {
         const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
