@@ -315,18 +315,29 @@ const EditorWriteRequestedEvent = Schema.Struct({
 /**
  * The session is gone, and this attachment's stream ends after it.
  *
- * `reason` says what a client should do about it. `closed` is a session that
- * went for an ordinary reason — the thread was closed, the server is stopping —
- * and opening the file again starts a new one. `gave-up` is a Neovim that kept
- * exiting until the server stopped replacing it, which reopening would repeat.
+ * `reason` says what a client should do about it, which is why there are four:
+ *
+ * - `closed` — the thread's editor was closed on purpose (the thread was
+ *   archived). Not reopened.
+ * - `replaced` — a new session took over the thread, because its project
+ *   moved. Attach again; there is nothing to open.
+ * - `stopping` — the server is shutting down. Wait: the attach that follows
+ *   the reconnect finds no session, and that is the signal to reopen.
+ * - `gave-up` — Neovim kept exiting until the server stopped replacing it.
+ *   Reopening would repeat it.
  */
-export const EditorSessionEndReason = Schema.Literals(["closed", "gave-up"]);
+export const EditorSessionEndReason = Schema.Literals([
+  "closed",
+  "replaced",
+  "stopping",
+  "gave-up",
+]);
 export type EditorSessionEndReason = typeof EditorSessionEndReason.Type;
 
 const EditorExitedEvent = Schema.Struct({
   type: Schema.Literal("exited"),
   code: Schema.NullOr(Schema.Int),
-  reason: Schema.optionalKey(EditorSessionEndReason),
+  reason: EditorSessionEndReason,
 });
 
 export const EditorSessionEvent = Schema.Union([

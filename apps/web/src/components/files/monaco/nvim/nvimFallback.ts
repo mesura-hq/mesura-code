@@ -14,7 +14,10 @@ export type NvimFallbackReason =
   | "version"
   | "config-missing"
   | "spawn-failed"
-  | "runtime-unwritable";
+  | "runtime-unwritable"
+  // Not launch reasons: Neovim started, and then its session ended.
+  | "kept-exiting"
+  | "session-lost";
 
 export interface NvimFallback {
   readonly reason: NvimFallbackReason;
@@ -27,6 +30,8 @@ const EXPLANATIONS: Readonly<Record<NvimFallbackReason, string>> = {
   "config-missing": "that configuration directory is not there",
   "spawn-failed": "Neovim would not start",
   "runtime-unwritable": "the runtime directory could not be written",
+  "kept-exiting": "Neovim kept exiting, so it was not restarted",
+  "session-lost": "the editor session ended",
 };
 
 /**

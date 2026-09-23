@@ -149,6 +149,9 @@ export function applyEditorSessionEvent(
         mode: event.snapshot.mode,
         jumping: event.snapshot.jumping ?? false,
         topline: event.snapshot.topline,
+        // A snapshot is a live session. The subscription re-attaches by itself
+        // when the connection comes back, so one can follow an `exited`.
+        ended: null,
       };
     case "lines":
       // A delta for another file is refused rather than applied. The event
@@ -192,7 +195,7 @@ export function applyEditorSessionEvent(
     case "writeRequested":
       return { ...base, writeRequests: state.writeRequests + 1 };
     case "exited":
-      return { ...base, ended: event.reason ?? "closed" };
+      return { ...base, ended: event.reason };
     default:
       return base;
   }

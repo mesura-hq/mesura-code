@@ -148,7 +148,7 @@ describe("EditorSessionEvent", () => {
     ["cmdline cleared", { type: "cmdline", cmdline: null }],
     ["message", { type: "message", kind: "echo", text: "written" }],
     ["writeRequested", { type: "writeRequested", relativePath: "src/main.ts" }],
-    ["exited", { type: "exited", code: 0 }],
+    ["exited", { type: "exited", code: 0, reason: "closed" }],
   ])("decodes a %s event", (_name, event) => {
     expect(decodeEvent(event).type).toBe((event as { type: string }).type);
   });

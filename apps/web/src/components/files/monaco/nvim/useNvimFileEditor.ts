@@ -19,6 +19,7 @@ import {
   type EditorSessionState,
 } from "~/state/editorSession";
 import { fallbackFromCause, isSessionMissing, type NvimFallback } from "./nvimFallback.ts";
+import { decideSessionRecovery } from "./nvimSessionRecovery.ts";
 import { useNvimDriver, type NvimDriverResult } from "./useNvimDriver.ts";
 import { APP_SHORTCUTS_THAT_OUTRANK_NEOVIM } from "./appShortcutsThatOutrankNeovim";
 
@@ -31,13 +32,6 @@ import { APP_SHORTCUTS_THAT_OUTRANK_NEOVIM } from "./appShortcutsThatOutrankNeov
  * — and keeping the subscription out of it is what lets that reasoning be
  * read without an atom runtime in the way.
  */
-
-/**
- * How many times in a row a lost session is reopened without one working in
- * between. Past it the panel falls back to the plain editor with a Retry,
- * rather than reopening forever against a server that keeps dropping it.
- */
-const MAX_AUTOMATIC_REOPENS = 3;
 
 const IDLE_SESSION_ATOM = Atom.make(AsyncResult.initial<EditorSessionState, never>(false)).pipe(
   Atom.withLabel("editor-session:idle"),
@@ -103,20 +97,8 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
     (Option.getOrNull(AsyncResult.value(result)) as EditorSessionState | null) ??
     EMPTY_EDITOR_SESSION_STATE;
 
-  /**
-   * Opening the file again once its session is gone.
-   *
-   * A session goes with the server that held it — a restart, the desktop app
-   * replacing its backend — and the server also ends one on purpose. Either way
-   * the attachment has nothing left to follow, and every key sent after that
-   * failed with nobody told. The client holds what a new session needs — the
-   * file, the project, the text on screen — so it reopens: the same open a file
-   * switch does, through `openGeneration`, and then a fresh attachment, because
-   * the old stream has ended or failed for good.
-   *
-   * Not after `gave-up`. That is a Neovim that kept exiting, and reopening it
-   * would only repeat that, so the panel falls back and offers Retry instead.
-   */
+  // Recovering a session that is gone: see `nvimSessionRecovery.ts` for what
+  // is decided, and why in that order. What follows is the bookkeeping.
   const refreshAttach = useAtomRefresh(atom);
   // A ref, so a new refresh function never makes `openFile` a new callback:
   // the driver opens the file again whenever that identity changes.
@@ -124,35 +106,62 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
   useEffect(() => {
     refreshAttachRef.current = refreshAttach;
   }, [refreshAttach]);
-  const reattachAfterOpenRef = useRef(false);
+  /** Attach again once the next open lands. Taken by whichever open lands first. */
+  const reattachPendingRef = useRef(false);
+  const opensInFlightRef = useRef(0);
   const reopensInARowRef = useRef(0);
-  const sessionLost =
-    enabled &&
-    (state.ended === "closed" || (AsyncResult.isFailure(result) && isSessionMissing(result.cause)));
-  const sessionGaveUp = enabled && state.ended === "gave-up";
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  // Nothing opens while the driver is off, so a pending reattach would wait
+  // for an open that is not coming.
+  useEffect(() => {
+    if (!enabled) reattachPendingRef.current = false;
+  }, [enabled]);
+
+  // Judged on the settled failure, not the one a refresh leaves behind while
+  // it waits: that one is the old stream's, and it flips back and forth, which
+  // is what lets a second identical failure be noticed at all.
+  const attachFoundNoSession =
+    enabled && AsyncResult.isFailure(result) && !result.waiting && isSessionMissing(result.cause);
+  const ended = enabled ? state.ended : null;
 
   useEffect(() => {
-    // An open is already on its way, and the attachment is replaced after it.
-    // Until then the state is the old stream's, which is what said "gone".
-    if (reattachAfterOpenRef.current) return;
-    if (sessionGaveUp) {
-      setFallback({ reason: "spawn-failed", detail: "it kept exiting, so it was not restarted" });
-      return;
+    const action = decideSessionRecovery({
+      ended,
+      attachFoundNoSession,
+      reattachPending: reattachPendingRef.current,
+      openInFlight: opensInFlightRef.current > 0,
+      reopensInARow: reopensInARowRef.current,
+    });
+    switch (action.kind) {
+      case "none":
+        return;
+      case "reattach":
+        refreshAttachRef.current();
+        return;
+      case "reattach-after-open":
+        reattachPendingRef.current = true;
+        return;
+      case "reopen":
+        reopensInARowRef.current += 1;
+        reattachPendingRef.current = true;
+        setOpenGeneration((generation) => generation + 1);
+        return;
+      case "fallback":
+        setFallback(action.fallback);
+        return;
     }
-    if (!sessionLost) return;
-    if (reopensInARowRef.current >= MAX_AUTOMATIC_REOPENS) {
-      setFallback({ reason: "spawn-failed", detail: "its session kept disappearing" });
-      return;
-    }
-    reopensInARowRef.current += 1;
-    reattachAfterOpenRef.current = true;
-    setOpenGeneration((generation) => generation + 1);
-  }, [sessionLost, sessionGaveUp]);
+  }, [ended, attachFoundNoSession]);
 
   // A session that answers resets the count: the next loss is a new one.
   useEffect(() => {
-    if (state.sequence > 0 && state.ended === null) reopensInARowRef.current = 0;
-  }, [state.sequence, state.ended]);
+    if (state.latestEvent?.type === "snapshot") reopensInARowRef.current = 0;
+  }, [state.latestEvent]);
 
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const isAppShortcut = useCallback(
@@ -176,14 +185,19 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
 
   const openFile = useCallback(
     (lines: ReadonlyArray<string>) => {
+      opensInFlightRef.current += 1;
       void openCommand({
         environmentId,
         input: { threadId, cwd, relativePath, lines: [...lines] },
       }).then((result) => {
+        opensInFlightRef.current -= 1;
+        if (!mountedRef.current) return;
         // After the open, not alongside it: an attachment that reaches the
-        // server first finds no session and fails again.
-        if (reattachAfterOpenRef.current) {
-          reattachAfterOpenRef.current = false;
+        // server first finds no session and fails again. Refreshed whether or
+        // not the open worked — one that failed leaves an attach that fails
+        // again, and that is what counts it against the reopen limit.
+        if (reattachPendingRef.current) {
+          reattachPendingRef.current = false;
           refreshAttachRef.current();
         }
         if (result._tag !== "Failure") return;
@@ -197,7 +211,7 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
 
   const retry = useCallback(() => {
     reopensInARowRef.current = 0;
-    reattachAfterOpenRef.current = true;
+    reattachPendingRef.current = true;
     setFallback(null);
     setOpenGeneration((generation) => generation + 1);
   }, []);

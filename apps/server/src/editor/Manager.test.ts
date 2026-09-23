@@ -3,8 +3,9 @@ import { assert, it } from "@effect/vitest";
 import type { EditorSessionEvent } from "@t3tools/contracts";
 import type * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
-import * as Fiber from "effect/Fiber";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
@@ -164,6 +165,29 @@ const createManager = (options: { readonly maxSessions?: number } = {}) =>
     return { manager, fake, root } satisfies Fixture;
   });
 
+/**
+ * Attaches through the websocket layer's stream and collects until it ends.
+ * Returns once the attachment has its snapshot, so what follows happens to a
+ * live attachment.
+ */
+const attachUntilEnd = (
+  manager: EditorSessionManager.EditorSessionManager["Service"],
+  threadId: string,
+) =>
+  Effect.gen(function* () {
+    const attached = yield* Deferred.make<void>();
+    const collecting = yield* Stream.runCollect(
+      EditorSessionManager.attachEventStream(manager, { threadId }).pipe(
+        Stream.tap(() => Deferred.succeed(attached, undefined)),
+      ),
+    ).pipe(
+      Effect.map((events) => [...events]),
+      Effect.forkChild,
+    );
+    yield* Deferred.await(attached);
+    return collecting;
+  });
+
 /** Collects everything an attachment reports, for the life of the scope. */
 const collect = (manager: EditorSessionManager.EditorSessionManager["Service"], threadId: string) =>
   Effect.gen(function* () {
@@ -282,19 +306,71 @@ it.layer(layer, { excludeTestServices: true })("EditorSessionManager", (it) => {
     Effect.gen(function* () {
       const { manager, root } = yield* createManager();
       yield* manager.open({ threadId: "thread-end", cwd: root, relativePath: "a.ts", lines: [""] });
-      const attached = yield* Deferred.make<void>();
-      const collecting = yield* Stream.runCollect(
-        EditorSessionManager.attachEventStream(manager, { threadId: "thread-end" }).pipe(
-          Stream.tap(() => Deferred.succeed(attached, undefined)),
-        ),
-      ).pipe(Effect.forkChild);
-      yield* Deferred.await(attached);
+      const events = yield* attachUntilEnd(manager, "thread-end");
 
       yield* manager.closeThread({ threadId: "thread-end" });
 
       // The stream ends on its own; joining would wait forever otherwise.
-      const events = [...(yield* Fiber.join(collecting))];
-      assert.deepStrictEqual(events.at(-1), { type: "exited", code: null, reason: "closed" });
+      assert.deepStrictEqual((yield* Fiber.join(events)).at(-1), {
+        type: "exited",
+        code: null,
+        reason: "closed",
+      });
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("tells an attachment its session was replaced when the project moves", () =>
+    Effect.gen(function* () {
+      const { manager, root } = yield* createManager();
+      yield* manager.open({
+        threadId: "thread-swap",
+        cwd: root,
+        relativePath: "a.ts",
+        lines: [""],
+      });
+      const events = yield* attachUntilEnd(manager, "thread-swap");
+
+      yield* manager.open({
+        threadId: "thread-swap",
+        cwd: `${root}/worktree`,
+        relativePath: "a.ts",
+        lines: [""],
+      });
+
+      // `replaced`, not `closed`: the client attaches again and opens nothing.
+      assert.deepStrictEqual((yield* Fiber.join(events)).at(-1), {
+        type: "exited",
+        code: null,
+        reason: "replaced",
+      });
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("tells attachments the server is stopping, and opens nothing after", () =>
+    Effect.gen(function* () {
+      const managerScope = yield* Scope.make();
+      const { manager, root } = yield* createManager().pipe(Scope.provide(managerScope));
+      yield* manager.open({
+        threadId: "thread-stop",
+        cwd: root,
+        relativePath: "a.ts",
+        lines: [""],
+      });
+      const events = yield* attachUntilEnd(manager, "thread-stop");
+
+      yield* Scope.close(managerScope, Exit.void);
+
+      // `stopping` makes the client wait for the reconnect rather than reopen
+      // against a server on its way out.
+      assert.deepStrictEqual((yield* Fiber.join(events)).at(-1), {
+        type: "exited",
+        code: null,
+        reason: "stopping",
+      });
+      const late = yield* Effect.result(
+        manager.open({ threadId: "thread-late", cwd: root, relativePath: "a.ts", lines: [""] }),
+      );
+      assert.isTrue(Result.isFailure(late), "an open after shutdown starts no Neovim");
     }).pipe(Effect.scoped),
   );
 

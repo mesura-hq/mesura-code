@@ -524,11 +524,13 @@ asking what just happened instead of what is true.
 - **A lost session is reopened by the client, not rebuilt by the server.** A server restart (the
   desktop app replaces its backend without reloading the window) takes every session with it, and
   only the client still holds the file, the project and the text. So an attachment that fails with
-  `EditorSessionLookupError`, or ends with `exited` reason `closed`, makes `useNvimFileEditor` open
-  the file again and then attach afresh — in that order, because an attachment that reaches the
-  server first finds no session. Neovim state (undo, registers, marks) does not survive this. The
-  attach stream lives in `attachEventStream`: `Stream.callback` runs its registration on a fiber
-  nothing watches, so a failed attach there used to leave the client waiting on a silent stream.
+  `EditorSessionLookupError` makes the client open the file again and then attach afresh — in that
+  order, because an attachment that reaches the server first finds no session. `exited` carries a
+  reason because the right answer differs: `replaced` attaches again, `stopping` waits for the
+  reconnect, and `closed` and `gave-up` fall back to the plain editor with Retry. The decision is
+  `nvimSessionRecovery.ts`. Neovim state (undo, registers, marks) does not survive a reopen. The
+  attach stream is `attachEventStream`, and it must not be `Stream.callback`: that runs its
+  registration on a fiber nothing watches, so a failed attach left the client on a silent stream.
 - **A visual selection assumes `selection=inclusive`.** His configuration uses the default, measured,
   and `virtualedit` is empty. Under `selection=exclusive` the drawn selection would be one character
   too long, and under `virtualedit=block` a block past the end of a short line would be clipped where

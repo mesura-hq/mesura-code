@@ -347,11 +347,18 @@ describe("flash's jump", () => {
 });
 
 describe("the session ending", () => {
-  it("records why, and an older server that names no reason means closed", () => {
+  it("records why, until a snapshot says a session is live again", () => {
     const live = fold(EMPTY_EDITOR_SESSION_STATE, [snapshot(["one"])]);
     expect(live.ended).toBeNull();
-    const gaveUp = applyEditorSessionEvent(live, { type: "exited", code: null, reason: "gave-up" });
-    expect(gaveUp.ended).toBe("gave-up");
-    expect(applyEditorSessionEvent(live, { type: "exited", code: null }).ended).toBe("closed");
+    const stopped = applyEditorSessionEvent(live, {
+      type: "exited",
+      code: null,
+      reason: "stopping",
+    });
+    expect(stopped.ended).toBe("stopping");
+    // The subscription re-attaches on its own after a reconnect, into the same
+    // fold. A reason that outlived that would keep the panel recovering a
+    // session that is already back.
+    expect(applyEditorSessionEvent(stopped, snapshot(["one"])).ended).toBeNull();
   });
 });

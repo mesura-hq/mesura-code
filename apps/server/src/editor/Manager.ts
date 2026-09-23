@@ -17,6 +17,7 @@ import {
   type EditorSessionSnapshot,
   type EditorSessionViewportInput,
 } from "@t3tools/contracts";
+import type * as Cause from "effect/Cause";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -213,6 +214,9 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
   let activityTick = 0;
   const now = () => (activityTick += 1);
 
+  /** Set once the manager is shutting down; see its finalizer. */
+  let stopping = false;
+
   const trace = makeEditorTrace(
     options.tracePath === undefined ? undefined : path.resolve(options.tracePath),
   );
@@ -314,7 +318,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
    * and a client whose stream simply went quiet kept sending keys to a session
    * that no longer existed, with nothing on screen saying so.
    */
-  const stopSession = (session: Session, reason: EditorSessionEndReason = "closed") =>
+  const stopSession = (session: Session, reason: EditorSessionEndReason) =>
     Effect.gen(function* () {
       session.unsubscribe?.();
       session.unsubscribe = null;
@@ -325,14 +329,6 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       );
     });
 
-  /**
-   * Lets the oldest unattached session go once there are too many.
-   *
-   * By `attachedClients` rather than by age alone: a session somebody is
-   * looking at must never be taken away underneath them, however long ago it
-   * was started. A session nobody is attached to costs a Neovim and its
-   * plugins, which is worth reclaiming.
-   */
   /**
    * Lets the oldest unattached session go once there are too many.
    *
@@ -367,7 +363,8 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       }
       return next;
     });
-    yield* Effect.forEach(doomed, (session) => stopSession(session), { discard: true });
+    // Nobody is attached to an evicted session, so the reason reaches no one.
+    yield* Effect.forEach(doomed, (session) => stopSession(session, "closed"), { discard: true });
   });
 
   const spawnBridge = (threadId: string, cwd: string, scope: Scope.Closeable) =>
@@ -440,7 +437,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
     return session;
   });
 
-  const dropSession = (threadId: string, reason: EditorSessionEndReason = "closed") =>
+  const dropSession = (threadId: string, reason: EditorSessionEndReason) =>
     Effect.gen(function* () {
       let doomed: Session | undefined;
       yield* SynchronizedRef.update(sessions, (current) => {
@@ -520,6 +517,13 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
     });
 
   const open = Effect.fn("EditorSessionManager.open")(function* (input: EditorSessionOpenInput) {
+    if (stopping) {
+      return yield* new EditorSessionRpcError({
+        threadId: input.threadId,
+        method: "open",
+        detail: "the server is stopping",
+      });
+    }
     const absolutePath = yield* resolveWithinRoot(input.threadId, input.cwd, input.relativePath);
 
     // Set inside the lock, read by the repair below. A local rather than
@@ -537,7 +541,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         // Neovim started in the new one. Plugins root themselves at Neovim's
         // working directory, and a session keeps the one it started in.
         if (existing !== undefined && existing.cwd !== cwd) {
-          yield* dropSession(input.threadId);
+          yield* dropSession(input.threadId, "replaced");
           existing = undefined;
         }
         const session = existing ?? (yield* startSession(input.threadId, cwd));
@@ -642,7 +646,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         // A session that could not be opened is not a session. Left in the
         // map it would hold a Neovim, occupy one of the slots, and claim to be
         // showing a file it never opened.
-        Effect.tapCause(() => (created ? dropSession(input.threadId) : Effect.void)),
+        Effect.tapCause(() => (created ? dropSession(input.threadId, "closed") : Effect.void)),
       ),
     );
   });
@@ -919,7 +923,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
   };
 
   const closeThread = (input: EditorSessionCloseInput) =>
-    withThreadLock(input.threadId, dropSession(input.threadId));
+    withThreadLock(input.threadId, dropSession(input.threadId, "closed"));
 
   /**
    * Puts a new Neovim under a session whose process exited.
@@ -1012,11 +1016,15 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
   );
 
   // Every session is a child process, so the server stopping has to stop them.
+  // `stopping` also turns away an `open` that arrives after this has run: the
+  // session it started would be in no map, and its Neovim would outlive the
+  // manager until the process exited.
   yield* Effect.addFinalizer(() =>
     Effect.gen(function* () {
+      stopping = true;
       const current = yield* SynchronizedRef.get(sessions);
       yield* SynchronizedRef.set(sessions, new Map());
-      yield* Effect.forEach(current.values(), (session) => stopSession(session), {
+      yield* Effect.forEach(current.values(), (session) => stopSession(session, "stopping"), {
         discard: true,
       });
     }),
@@ -1028,29 +1036,32 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
 /**
  * One attachment as a stream, which is what the websocket layer serves.
  *
- * Two things the plain callback shape got wrong, both of which left a client
- * waiting on a stream that would never say anything again:
- *
- * - An attach that fails — no session for the thread, as after a server
- *   restart — failed inside the callback's own fiber, which nothing watches.
- *   The failure now fails the stream, so the client hears it and can open the
- *   file again.
- * - A session that ends sends `exited`, and the stream ends with it.
+ * The attach runs on the stream's own fiber, so an attach that fails — no
+ * session for the thread, as after a server restart — fails the stream and the
+ * client hears it. REGRESSION: this was `Stream.callback` first, which runs its
+ * registration on a forked fiber nothing watches. The failure vanished there,
+ * the stream stayed open and silent, and the client never learned it had to
+ * open the file again. A session that ends sends `exited`, and the stream ends
+ * after it.
  */
 export const attachEventStream = (
   manager: EditorSessionManager["Service"],
   input: EditorSessionAttachInput,
 ): Stream.Stream<EditorSessionEvent, EditorSessionError> =>
-  Stream.callback<EditorSessionEvent, EditorSessionError>((queue) =>
-    Effect.acquireRelease(
-      manager.attachStream(input, (event) =>
-        Queue.offer(queue, event).pipe(
-          Effect.andThen(event.type === "exited" ? Queue.end(queue) : Effect.void),
-          Effect.asVoid,
+  Stream.unwrap(
+    Effect.gen(function* () {
+      const queue = yield* Queue.unbounded<EditorSessionEvent, Cause.Done>();
+      yield* Effect.acquireRelease(
+        manager.attachStream(input, (event) =>
+          Queue.offer(queue, event).pipe(
+            Effect.andThen(event.type === "exited" ? Queue.end(queue) : Effect.void),
+            Effect.asVoid,
+          ),
         ),
-      ),
-      (unsubscribe) => Effect.sync(unsubscribe),
-    ).pipe(Effect.tapError((error) => Queue.fail(queue, error))),
+        (unsubscribe) => Effect.sync(unsubscribe),
+      );
+      return Stream.fromQueue(queue);
+    }),
   );
 
 export const make = Effect.fn("EditorSessionManager.make")(function* () {
