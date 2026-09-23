@@ -331,3 +331,17 @@ describe("applyEditorSessionEvent", () => {
     expect(after.latestEvent?.type).toBe("message");
   });
 });
+
+describe("flash's jump", () => {
+  it("is on while a mode event says so, and off with the next one that does not", () => {
+    // Neovim's own mode stays `n` throughout a flash jump, so the flag is the
+    // only thing that tells the strip the next key picks a label.
+    const jumping = fold(EMPTY_EDITOR_SESSION_STATE, [
+      snapshot(["one"]),
+      { type: "mode", mode: "n", blocking: false, jumping: true },
+    ]);
+    expect(jumping.jumping).toBe(true);
+    const done = applyEditorSessionEvent(jumping, { type: "mode", mode: "n", blocking: false });
+    expect(done.jumping).toBe(false);
+  });
+});

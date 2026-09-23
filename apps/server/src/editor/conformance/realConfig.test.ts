@@ -165,8 +165,19 @@ if (enabled)
             );
           }
 
+          // Neovim reports normal mode throughout; the flag is what says the
+          // next key picks a label. Read with the cursor after a frame, so it
+          // can trail the labels by a frame or two.
+          let waited = 0;
+          while (!bridge.jumping && waited < 40) {
+            yield* bridge.awaitFrame;
+            waited += 1;
+          }
+          assert.isTrue(bridge.jumping, "the session reports flash as jumping");
+
           yield* bridge.input("<Esc>");
           yield* bridge.settle;
+          assert.isFalse(bridge.jumping, "and not once the jump is abandoned");
           yield* assertMirrored(bridge);
         }).pipe(Effect.orDie),
       ),

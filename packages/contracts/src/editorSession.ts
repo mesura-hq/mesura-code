@@ -152,6 +152,8 @@ export const EditorSessionSnapshot = Schema.Struct({
   lines: EditorLinesSchema,
   cursor: EditorCursor,
   mode: Schema.String,
+  /** A jump plugin (flash) is labelling targets and waiting for one. */
+  jumping: Schema.optionalKey(Schema.Boolean),
   topline: EditorLineSchema,
   hlDefs: EditorHighlightDefinitions,
 });
@@ -222,6 +224,12 @@ const EditorModeEvent = Schema.Struct({
   mode: Schema.String,
   /** Neovim is waiting for a key a plugin asked for, so it will not answer. */
   blocking: Schema.Boolean,
+  /**
+   * flash is labelling jump targets. Neovim's own mode stays `n` throughout,
+   * so this is the only way a client can tell the developer where the next
+   * key goes.
+   */
+  jumping: Schema.optionalKey(Schema.Boolean),
 });
 
 /**

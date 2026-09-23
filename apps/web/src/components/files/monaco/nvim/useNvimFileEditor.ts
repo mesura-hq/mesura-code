@@ -166,6 +166,7 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
       lines: state.lines,
       cursor: state.cursor,
       mode: state.mode,
+      jumping: state.jumping,
       topline: state.topline,
       cmdline: state.cmdline,
       message: state.message,

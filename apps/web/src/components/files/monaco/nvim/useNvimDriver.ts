@@ -21,7 +21,11 @@ import {
   type DecorationState,
   type OverlayWidget,
 } from "./nvimDecorations.ts";
-import { highlightClassName, highlightStylesheet } from "./nvimHighlightStyles.ts";
+import {
+  highlightClassName,
+  highlightStylesheet,
+  NVIM_JUMPING_CLASS,
+} from "./nvimHighlightStyles.ts";
 import {
   EMPTY_VIEWPORT_HISTORY,
   rememberTopline,
@@ -126,6 +130,7 @@ export interface NvimDriverState {
   readonly lines: ReadonlyArray<string>;
   readonly cursor: { readonly line: number; readonly col: number } | null;
   readonly mode: string;
+  readonly jumping: boolean;
   readonly topline: number;
   readonly cmdline: EditorCmdline | null;
   readonly message: { readonly kind: string; readonly text: string } | null;
@@ -140,6 +145,8 @@ export interface NvimDriverState {
 /** What the status strip shows, and what the caret looks like. */
 export interface NvimDriverResult {
   readonly mode: string;
+  /** flash is labelling jump targets. */
+  readonly jumping: boolean;
   readonly active: boolean;
   readonly cmdline: EditorCmdline | null;
   readonly message: { readonly kind: string; readonly text: string } | null;
@@ -190,6 +197,16 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   const decorationsRef = useRef<monaco.editor.IEditorDecorationsCollection | null>(null);
   const styleRef = useRef<HTMLStyleElement | null>(null);
   const hadSelectionRef = useRef(false);
+  /**
+   * Who moved the view last: a key sent to Neovim, or the pointer.
+   *
+   * Both sides can scroll, so both sides' echoes arrive. A wheel scroll moves
+   * Neovim's cursor into the new window, and that cursor comes back; revealing
+   * it, or following Neovim's topline, then scrolled the view back to where the
+   * wheel had just left it — the "scroll down and it jumps up" the developer
+   * hit. The view follows Neovim only while keys are what is moving it.
+   */
+  const scrollOwnerRef = useRef<"keys" | "pointer">("keys");
   const flushedWriteRequestsRef = useRef(0);
   const reactId = useId();
   const highlightScope = useMemo(
@@ -282,6 +299,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
 
       event.browserEvent.preventDefault();
       event.browserEvent.stopPropagation();
+      scrollOwnerRef.current = "keys";
       sendKeys(keys);
     });
     return () => subscription.dispose();
@@ -369,7 +387,12 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
         appliedCursorRef.current = key;
         const position = { lineNumber: cursor.line, column: cursor.col };
         editor.setPosition(position);
-        editor.revealPositionInCenterIfOutsideViewport(position);
+        // The smallest scroll that shows the caret. Neovim's own topline follows
+        // in the same frame when the key scrolled, and a centring reveal first
+        // made every scroll at the window's edge a jump and a jump back.
+        if (scrollOwnerRef.current === "keys") {
+          editor.revealPosition(position, monaco.editor.ScrollType.Immediate);
+        }
       }
     }
 
@@ -452,8 +475,28 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
       ...viewportRef.current,
       neovimToplines: rememberTopline(viewportRef.current.neovimToplines, topline),
     };
+    if (scrollOwnerRef.current !== "keys") return;
     editor.setScrollTop(editor.getTopForLineNumber(topline));
   }, [enabled, editor, relativePath, state.relativePath, state.topline]);
+
+  // The pointer takes the view the moment it touches it: a wheel, a trackpad
+  // swipe, a drag on the scrollbar, a click in the text.
+  useEffect(() => {
+    if (!enabled || editor === null) return;
+    const container = editor.getContainerDomNode();
+    const takeView = () => {
+      scrollOwnerRef.current = "pointer";
+    };
+    const options = { capture: true, passive: true } as const;
+    container.addEventListener("wheel", takeView, options);
+    container.addEventListener("pointerdown", takeView, options);
+    container.addEventListener("touchstart", takeView, options);
+    return () => {
+      container.removeEventListener("wheel", takeView, options);
+      container.removeEventListener("pointerdown", takeView, options);
+      container.removeEventListener("touchstart", takeView, options);
+    };
+  }, [enabled, editor]);
 
   // Undo has one owner, and never both at once — and the way to keep it that
   // way is to take nothing away rather than to reset anything.
@@ -524,6 +567,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
     }
     for (const overlay of addedWidgets) {
       const node = document.createElement("div");
+      applyEditorFont(node, editor);
       node.textContent = overlay.text;
       node.className = `mesura-nvim-overlay ${highlightClassName(overlay.hl)}`;
       const widget: monaco.editor.IContentWidget = {
@@ -575,6 +619,15 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
       container.classList.remove(highlightScope);
     };
   }, [enabled, editor, highlightScope]);
+
+  // flash's backdrop fades while it waits for a label; the rule that fades it
+  // is in the highlight stylesheet and keys on this class.
+  useEffect(() => {
+    if (!enabled || editor === null) return;
+    const container = editor.getContainerDomNode();
+    container.classList.toggle(NVIM_JUMPING_CLASS, state.jumping);
+    return () => container.classList.remove(NVIM_JUMPING_CLASS);
+  }, [enabled, editor, state.jumping]);
 
   useEffect(() => {
     const style = styleRef.current;
@@ -634,6 +687,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
 
   return {
     mode,
+    jumping: enabled && state.jumping,
     active: enabled,
     cmdline: state.cmdline,
     message: state.message,
@@ -744,3 +798,21 @@ function selectionsForVisual(
 
 /** Neovim reports visual block as the literal Ctrl-V character. */
 const VISUAL_BLOCK_CODE = 22;
+
+/**
+ * Sets a node in the editor's own font, so an overlay sits on the text grid.
+ *
+ * Inheriting it does not work: content widgets live outside `.view-lines`, and
+ * the element they inherit from carries the interface font. A label drawn in a
+ * proportional font covers the wrong characters and reads as a stray word in
+ * the middle of the file.
+ */
+function applyEditorFont(node: HTMLElement, editor: monaco.editor.IStandaloneCodeEditor): void {
+  const font = editor.getOption(monaco.editor.EditorOption.fontInfo);
+  node.style.fontFamily = font.fontFamily;
+  node.style.fontSize = `${font.fontSize}px`;
+  node.style.fontWeight = font.fontWeight;
+  node.style.fontFeatureSettings = font.fontFeatureSettings;
+  node.style.lineHeight = `${font.lineHeight}px`;
+  node.style.letterSpacing = `${font.letterSpacing}px`;
+}

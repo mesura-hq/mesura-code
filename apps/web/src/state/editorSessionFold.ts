@@ -48,6 +48,8 @@ export interface EditorSessionState {
   readonly lines: ReadonlyArray<string>;
   readonly cursor: { readonly line: number; readonly col: number } | null;
   readonly mode: string;
+  /** flash is labelling jump targets; Neovim's own mode says `n` meanwhile. */
+  readonly jumping: boolean;
   readonly topline: number;
   /** The command line Neovim is showing, `null` when it is closed. */
   readonly cmdline: EditorCmdline | null;
@@ -78,6 +80,7 @@ export const EMPTY_EDITOR_SESSION_STATE: EditorSessionState = {
   lines: [],
   cursor: null,
   mode: "n",
+  jumping: false,
   topline: 1,
   cmdline: null,
   message: null,
@@ -137,6 +140,7 @@ export function applyEditorSessionEvent(
         lines: event.snapshot.lines,
         cursor: event.snapshot.cursor,
         mode: event.snapshot.mode,
+        jumping: event.snapshot.jumping ?? false,
         topline: event.snapshot.topline,
       };
     case "lines":
@@ -157,7 +161,7 @@ export function applyEditorSessionEvent(
     case "cursor":
       return { ...base, cursor: { line: event.line, col: event.col } };
     case "mode":
-      return { ...base, mode: event.mode };
+      return { ...base, mode: event.mode, jumping: event.jumping ?? false };
     case "viewport":
       return { ...base, topline: event.topline };
     case "cmdline":

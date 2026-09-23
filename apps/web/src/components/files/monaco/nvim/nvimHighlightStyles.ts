@@ -51,8 +51,23 @@ export function highlightRule(
   if (definition.undercurl === true) declarations.push("text-decoration: underline wavy");
   else if (definition.underline === true) declarations.push("text-decoration: underline");
 
-  return `.${prefix} .${highlightClassName(id)} { ${declarations.join("; ")} }`;
+  // `.monaco-editor` in the selector so a rule outranks Monaco's own token
+  // colours (`.monaco-editor .mtkN`) instead of tying with them and depending
+  // on which stylesheet happened to load last.
+  const selector = `.monaco-editor .${highlightClassName(id)}`;
+  const rule = `.${prefix} ${selector} { ${declarations.join("; ")} }`;
+  if (background !== undefined) return rule;
+  // While flash waits for a label, every cell it is not pointing at carries its
+  // backdrop highlight, which has no background. Those fade; its matches and
+  // labels, which do have one, stay at full strength so the key to press is
+  // the thing that stands out.
+  return `${rule}\n.${prefix}.${NVIM_JUMPING_CLASS} ${selector} { opacity: ${JUMPING_BACKDROP_OPACITY} }`;
 }
+
+/** Set on the editor's container while flash is labelling targets. */
+export const NVIM_JUMPING_CLASS = "mesura-nvim-jumping";
+
+const JUMPING_BACKDROP_OPACITY = 0.4;
 
 export function highlightStylesheet(
   prefix: string,

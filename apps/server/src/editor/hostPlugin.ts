@@ -64,6 +64,12 @@ local function apply_window_options()
   vim.wo.list = false
   -- 'conceallevel' hides buffer text behind something narrower.
   vim.wo.conceallevel = 0
+  -- A closed fold is one row standing for many lines, a 'statuscolumn' draws a
+  -- margin even with numbers off, and a 'winbar' takes the first row: each one
+  -- breaks "row N shows line topline + N", which the classification reads by.
+  vim.wo.foldenable = false
+  vim.wo.statuscolumn = ""
+  vim.wo.winbar = ""
   -- The host scrolls. With a scroll offset Neovim drags the viewport of its
   -- own accord and the two fight over the top line.
   vim.wo.scrolloff = 0
@@ -83,6 +89,9 @@ vim.opt.cursorcolumn = false
 vim.opt.colorcolumn = ""
 vim.opt.list = false
 vim.opt.conceallevel = 0
+vim.opt.foldenable = false
+vim.opt.statuscolumn = ""
+vim.opt.winbar = ""
 vim.opt.scrolloff = 0
 vim.opt.sidescrolloff = 0
 
@@ -284,6 +293,17 @@ export const HOST_PLUGIN_RELATIVE_PATH = "mesura_host.lua";
  * with its own copy of the Lua proves the copy works.
  */
 export const APPLY_EDITS_LUA = `local buffer, edits = ...
+-- Columns arrive in UTF-16 units, as Monaco counts them, and nvim_buf_set_text
+-- takes bytes. All of them are converted against the text before any edit
+-- runs, because that is the text every edit's positions describe.
+local function byte_col(line, utf16)
+  local text = vim.api.nvim_buf_get_lines(buffer, line, line + 1, false)[1] or ""
+  return vim.str_byteindex(text, "utf-16", utf16, false)
+end
+for _, edit in ipairs(edits) do
+  edit[2] = byte_col(edit[1], edit[2])
+  edit[4] = byte_col(edit[3], edit[4])
+end
 table.sort(edits, function(left, right)
   if left[1] ~= right[1] then return left[1] < right[1] end
   return left[2] < right[2]
@@ -322,7 +342,10 @@ if window == -1 then
   return
 end
 local last = vim.api.nvim_buf_line_count(buffer)
-vim.api.nvim_win_set_cursor(window, { math.max(1, math.min(line, last)), col })`;
+local target = math.max(1, math.min(line, last))
+-- 'col' is a UTF-16 offset, as Monaco counts; the window wants bytes.
+local text = vim.api.nvim_buf_get_lines(buffer, target - 1, target, false)[1] or ""
+vim.api.nvim_win_set_cursor(window, { target, vim.str_byteindex(text, "utf-16", col, false) })`;
 
 export const SET_VIEWPORT_LUA = `local buffer, topline, rows = ...
 local window = vim.fn.bufwinid(buffer)

@@ -84,6 +84,7 @@ import "monaco-editor/languages/definitions/graphql/register.js";
 import "monaco-editor/languages/definitions/handlebars/register.js";
 import "monaco-editor/languages/definitions/hcl/register.js";
 import "monaco-editor/languages/definitions/html/register.js";
+import "./monacoAstroLanguage.ts";
 import "monaco-editor/languages/definitions/ini/register.js";
 import "monaco-editor/languages/definitions/java/register.js";
 import "monaco-editor/languages/definitions/javascript/register.js";

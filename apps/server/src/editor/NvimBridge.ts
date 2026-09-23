@@ -95,6 +95,13 @@ export function shouldReadCursor(trigger: CursorReadTrigger): boolean {
 export type NvimBridgeEvent =
   | {
       /**
+       * Neovim's output ended, which is the process ending. Nothing after this
+       * is answered; the watcher decides whether a new process takes over.
+       */
+      readonly kind: "exited";
+    }
+  | {
+      /**
        * The cursor and the mode were re-read, and are now current.
        *
        * Its own kind rather than a second `flush`, because it is not a frame:
@@ -321,6 +328,8 @@ export declare namespace NvimBridge {
     readonly lines: ReadonlyArray<string>;
     readonly cursor: NvimCursor;
     readonly mode: string;
+    /** flash is labelling jump targets. Neovim's mode stays `n` meanwhile. */
+    readonly jumping: boolean;
     /** The selection Neovim is showing, `null` outside visual mode. */
     readonly visual: NvimVisual | null;
     readonly topLine: number;
@@ -555,6 +564,8 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
   let lines: string[] = [];
   let cursor: NvimCursor = { line: 1, col: 1 };
   let mode = "n";
+  /** Whether flash is labelling targets, read with the mode. */
+  let jumping = false;
   let overlays: ReadonlyArray<GridOverlay> = [];
   let highlightRuns: ReadonlyArray<HighlightRun> = [];
   let flushWaiters: Array<Deferred.Deferred<void>> = [];
@@ -690,34 +701,61 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
       // the mode, because it is only meaningful read with them: `getpos("v")`
       // answers wherever the cursor is when no selection is running, so the
       // mode is what says whether the answer means anything.
-      `local position = vim.api.nvim_win_get_cursor(0)
+      //
+      // Columns leave here in UTF-16 units, which is what the wire and Monaco
+      // count in. Neovim counts bytes: on a line holding an accent or an emoji
+      // the raw byte column put the caret several characters to the right, and
+      // past the end of the line Monaco silently clamped it there.
+      `local attached = ...
+       local position = vim.api.nvim_win_get_cursor(0)
        local mode = vim.api.nvim_get_mode().mode
+       local function utf16_col(line, byte)
+         local text = vim.fn.getline(line)
+         return vim.str_utfindex(text, "utf-16", math.min(byte, #text), false) + 1
+       end
        local anchor = nil
        if mode:sub(1, 1) == "v" or mode:sub(1, 1) == "V" or mode:byte(1) == 22 then
          local other = vim.fn.getpos("v")
-         anchor = { line = other[2], col = other[3] }
+         anchor = { line = other[2], col = utf16_col(other[2], other[3] - 1) }
+       end
+       local tabstop = 8
+       local jumping = false
+       if attached ~= 0 and vim.api.nvim_buf_is_valid(attached) then
+         tabstop = vim.bo[attached].tabstop
+         -- flash draws its backdrop and labels as extmarks in its own
+         -- namespace, and only while a jump is waiting for its label.
+         local flash = vim.api.nvim_get_namespaces().flash
+         if flash ~= nil then
+           jumping = #vim.api.nvim_buf_get_extmarks(attached, flash, 0, -1, { limit = 1 }) > 0
+         end
        end
        return {
          line = position[1],
-         col = position[2] + 1,
+         col = utf16_col(position[1], position[2]),
          mode = mode,
          anchor = anchor,
          window = vim.api.nvim_get_current_win(),
+         tabstop = tabstop,
+         jumping = jumping,
        }`,
-      [],
+      [attachedBuffer],
     ])) as {
       line: number;
       col: number;
       mode: string;
       anchor?: { line: number; col: number };
       window: number;
+      tabstop: number;
+      jumping: boolean;
     };
     cursor = { line: state.line, col: state.col };
     mode = state.mode;
+    jumping = state.jumping === true;
     visual =
       state.anchor === undefined
         ? null
         : { anchor: state.anchor, cursor: { line: state.line, col: state.col }, kind: state.mode };
+    grid.setTabstop(state.tabstop);
     grid.setCurrentWindow(state.window);
   });
 
@@ -836,6 +874,10 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
       }),
     ),
     Effect.catchCause(() => Effect.void),
+    // Reached only when the stream ends on its own, which `NvimRpc` makes it
+    // do when the process's output closes. A scope closing interrupts this
+    // fiber instead, so a session being stopped on purpose says nothing here.
+    Effect.andThen(() => Effect.sync(() => tell({ kind: "exited" }))),
     Effect.forkScoped,
   );
 
@@ -964,6 +1006,9 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
     },
     get mode() {
       return mode;
+    },
+    get jumping() {
+      return jumping;
     },
     get topLine() {
       return grid.topLine;

@@ -178,6 +178,20 @@ Each of these was found the expensive way, and each looks like a correct piece o
   on, one flash jump produced **132** phantom labels against the 30 that were real. `hostPlugin.ts`
   forces the whole set as window-local options _and_ as globals, and
   `tests/unit/editor-session-wired.test.ts` holds them there.
+- **Neovim's working directory is the thread's project, never the server's.** The configuration's
+  plugins root themselves at it. Spawned in the installed service's own directory (the home
+  directory), neo-tree built a tree of all of it and re-rendered it on every edit: 100% CPU, 1.7 GB,
+  and every key queued behind it for ten seconds or more, which reads as "the editor ignores me".
+- **Three column units meet here, and the wire speaks only one.** The grid counts screen cells (a
+  tab is `tabstop` cells, a wide character two), Neovim's cursor and `nvim_buf_set_text` count
+  bytes, and Monaco counts UTF-16 units. The wire is UTF-16 throughout; the conversion happens in
+  the Lua that reads or writes a position (`vim.str_utfindex`, `vim.str_byteindex`), and
+  `classifyRow` in `GridModel.ts` walks cells and text together. Index-for-index comparison read
+  every character after the first accent or tab on a line as a phantom label.
+- **`grid_scroll` moves rows Neovim will not send again.** A scroll redraws only the rows that came
+  into view. A grid model that ignores it compares stale rows against the lines now under them —
+  one `<C-d>` produced 915 phantom overlays and put a closing tag from the top of the file in the
+  middle of the screen.
 - **The `neovim` npm package is not the way in.** It routes through its own session object and
   hides the UI events this needs. The framing is ours, in `NvimRpc.ts`, and it is about two hundred
   lines.
@@ -278,6 +292,11 @@ Two files are gated on `MESURA_NVIM_CONFIG_DIR` and skip without it, `realConfig
 `insertModeLatency.test.ts`. They skip rather than fail because there is no second machine and no
 continuous integration that has that directory — but the skip is itself asserted, so a harness that
 silently stopped running when the variable _is_ set fails instead of passing quietly.
+
+**Tracing a live session.** Start the server with `MESURA_EDITOR_TRACE=<file>` and every call from a
+client and every event sent back is appended to that file as JSONL (`editorTrace.ts`). `waitedMs` is
+time queued behind the thread's lock and `tookMs` is Neovim's answer time; a frozen editor shows up
+as `tookMs` in the seconds.
 
 **No test in this area may wait on a clock.** `editorBridgeContract.test.ts` enforces it by reading
 the sources for `Effect.sleep`, `setTimeout` and `TestClock`. A text-sync harness that waits on a
@@ -400,7 +419,11 @@ than argued.
 - **Escape in plain normal mode belongs to the panel**, and in every other mode to Neovim. Leaving
   insert, visual or an operator is what Escape is for, and a host that blurred the editor instead
   would strand him in that mode with the keyboard elsewhere. In normal mode there is nothing to
-  leave, and `<Esc>` is unmapped there in his configuration, so it dismisses as it always did.
+  leave, and `<Esc>` is unmapped there in his configuration, so it dismisses as it always did —
+  except while flash waits for a label. Neovim reports plain `n` then, so the session reads flash's
+  own extmark namespace alongside the mode and sends `jumping`; without it Escape was taken as a
+  dismissal and the labels stayed up. The same flag drives the strip's FLASH label and fades every
+  highlight with no background (flash's backdrop) so the labels stand out.
 
 **The session state the client holds is absolute, not the last event.** Every event other than
 `snapshot` is a delta, and a client that kept only the latest one would be correct exactly as long
@@ -458,9 +481,10 @@ Everything on the buffer grid that is not the file's own text is classified by p
 cell whose character differs from the buffer's is a drawing, a cell that matches but carries a
 highlight is the text marked — and reaches Monaco as one of two things.
 
-- **Overlays are content widgets**, one per cell, named by their position so the same node survives
-  a label changing. Flash rewrites its labels on every keystroke of a search, and a widget removed
-  and added again flickers.
+- **Overlays are content widgets**, one per run of adjacent cells on one highlight, named by their
+  position so the same node survives a label changing. They take the editor's font inline, because a
+  content widget sits outside `.view-lines` and inherits the interface font. Flash rewrites its
+  labels on every keystroke of a search, and a widget removed and added again flickers.
 - **Highlight runs are decorations** with an inline class, and the class is the highlight id. The
   colours are the developer's own colourscheme, written as one CSS rule per id into a stylesheet
   scoped to that editor — two file panels on two threads are two Neovims, and id 7 means something
@@ -489,9 +513,12 @@ asking what just happened instead of what is true.
   `{major, minor, patch}` rather than a string match, which is the shape that does not rot — but it
   is read rather than measured, and the classifier beside it that _was_ a string match had been
   broken since it was written.
-- **`exited` is in the wire contract and nothing sends it.** The event exists for a Neovim that dies
-  or is killed, and the server never constructs one, so no client can react to a session ending
-  unexpectedly. The fallback that needs it is phase 8's.
+- **A Neovim that exits is replaced, not reported.** `:q`, a crash or a kill ends the process's
+  output; `NvimRpc` then fails every waiting and later request, and the manager starts a new Neovim
+  in the same session (`restartSession`), reopens the file with the mirror's text and sends a
+  snapshot, so the client's attachment keeps working. Undo history from before is lost, and after
+  three restarts the session is dropped. The wire's `exited` event is still never sent. A Neovim that
+  hangs rather than exits is not detected; the trace shows it as calls whose `tookMs` climbs.
 - **A visual selection assumes `selection=inclusive`.** His configuration uses the default, measured,
   and `virtualedit` is empty. Under `selection=exclusive` the drawn selection would be one character
   too long, and under `virtualedit=block` a block past the end of a short line would be clipped where

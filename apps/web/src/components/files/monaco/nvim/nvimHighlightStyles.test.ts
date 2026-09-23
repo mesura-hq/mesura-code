@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { highlightClassName, highlightRule, highlightStylesheet } from "./nvimHighlightStyles.ts";
+import {
+  highlightClassName,
+  highlightRule,
+  highlightStylesheet,
+  NVIM_JUMPING_CLASS,
+} from "./nvimHighlightStyles.ts";
 
 /**
  * Neovim's highlight attributes, as CSS.
@@ -17,9 +22,20 @@ import { highlightClassName, highlightRule, highlightStylesheet } from "./nvimHi
 const PREFIX = "nvim-scope-abc";
 
 describe("highlightRule", () => {
+  it("fades flash's backdrop while it jumps, and leaves its labels alone", () => {
+    // The backdrop has a colour and no background; a label has both.
+    const backdrop = highlightRule(PREFIX, 191, { fg: 0x9e9e9e, italic: true, groups: [] });
+    const label = highlightRule(PREFIX, 192, { fg: 0x121212, bg: 0x6d94e9, groups: [] });
+    expect(backdrop).toContain(
+      `.${PREFIX}.${NVIM_JUMPING_CLASS} .monaco-editor .mesura-nvim-hl-191`,
+    );
+    expect(backdrop).toContain("opacity");
+    expect(label).not.toContain("opacity");
+  });
+
   it("turns Neovim's packed colours into CSS ones", () => {
     const rule = highlightRule(PREFIX, 7, { fg: 0xff8800, bg: 0x102030, groups: [] });
-    expect(rule).toContain(".nvim-scope-abc .mesura-nvim-hl-7");
+    expect(rule).toContain(".nvim-scope-abc .monaco-editor .mesura-nvim-hl-7");
     expect(rule).toContain("color: #ff8800");
     expect(rule).toContain("background-color: #102030");
   });
@@ -71,14 +87,14 @@ describe("highlightRule", () => {
 });
 
 describe("highlightStylesheet", () => {
-  it("writes one rule per id", () => {
+  it("writes one colour rule per id, plus the jump fade for one with no background", () => {
     const sheet = highlightStylesheet(PREFIX, {
       "1": { fg: 0xff0000, groups: [] },
       "2": { bg: 0x00ff00, groups: [] },
     });
     expect(sheet).toContain(".mesura-nvim-hl-1");
     expect(sheet).toContain(".mesura-nvim-hl-2");
-    expect(sheet.split("}").length - 1).toBe(2);
+    expect(sheet.split("}").length - 1).toBe(3);
   });
 
   it("replaces the rule for an id that was defined again", () => {

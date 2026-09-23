@@ -1,6 +1,8 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import type { EditorSessionEvent } from "@t3tools/contracts";
+import type * as Cause from "effect/Cause";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -36,7 +38,7 @@ class FakeNvim {
   readonly spawns: NvimSpawnInput[] = [];
   readonly calls: Array<{ method: string; params: ReadonlyArray<unknown> }> = [];
   readonly killed: string[] = [];
-  #outbound: Queue.Queue<Uint8Array> | null = null;
+  #outbound: Queue.Queue<Uint8Array, Cause.Done> | null = null;
   #responder: Responder = () => null;
   /** The buffer the fake pretends the window is on, as `mesura.open` returns. */
   #nextBufferNumber = 1;
@@ -44,6 +46,11 @@ class FakeNvim {
 
   respondWith(responder: Responder): void {
     this.#responder = responder;
+  }
+
+  /** Ends the current process's output, which is how Neovim exiting looks. */
+  crash(): void {
+    if (this.#outbound !== null) Queue.endUnsafe(this.#outbound);
   }
 
   /** Pushes a notification at the host, the way a real Neovim would. */
@@ -90,12 +97,13 @@ class FakeNvim {
     // through `this` inside the generator, which cannot see it.
     const { calls, killed } = this;
     const answer = (method: string, params: ReadonlyArray<unknown>) => this.#answer(method, params);
-    const setOutbound = (queue: Queue.Queue<Uint8Array>) => {
+    const setOutbound = (queue: Queue.Queue<Uint8Array, Cause.Done>) => {
       this.#outbound = queue;
     };
 
     return Effect.gen(function* () {
-      const outbound = yield* Queue.make<Uint8Array>();
+      // Typed to end, so `crash` can close it the way a dead process closes stdout.
+      const outbound = yield* Queue.make<Uint8Array, Cause.Done>();
       setOutbound(outbound);
       return {
         pid: 4242,
@@ -169,6 +177,55 @@ const collect = (manager: EditorSessionManager.EditorSessionManager["Service"], 
 const layer = NodeServices.layer;
 
 it.layer(layer, { excludeTestServices: true })("EditorSessionManager", (it) => {
+  it.effect("starts Neovim in the thread's project, not the server's directory", () =>
+    Effect.gen(function* () {
+      const { manager, fake, root } = yield* createManager();
+      yield* manager.open({ threadId: "thread-cwd", cwd: root, relativePath: "a.ts", lines: [""] });
+      // Plugins root themselves at Neovim's working directory. Left at the
+      // server's own, neo-tree watched the whole home directory.
+      assert.strictEqual(fake.spawns[0]?.cwd, root);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("replaces a Neovim that exited, and the attachment keeps working", () =>
+    Effect.gen(function* () {
+      const { manager, fake, root } = yield* createManager();
+      fake.lines = ["const a = 1;"];
+      yield* manager.open({
+        threadId: "thread-exit",
+        cwd: root,
+        relativePath: "a.ts",
+        lines: ["const a = 1;"],
+      });
+      const restarted = yield* Deferred.make<void>();
+      const unsubscribe = yield* manager.attachStream({ threadId: "thread-exit" }, (event) =>
+        event.type === "message" && event.text.includes("restarted")
+          ? Deferred.succeed(restarted, undefined).pipe(Effect.asVoid)
+          : Effect.void,
+      );
+      yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
+
+      // `:q` typed into the editor, or the process killed: either way the
+      // output ends. Before, every later call on the thread waited forever.
+      fake.crash();
+      yield* Deferred.await(restarted);
+
+      assert.strictEqual(fake.spawns.length, 2, "a second Neovim was started");
+      assert.strictEqual(fake.spawns[1]?.cwd, root, "in the same project");
+      const reopen = fake.calls.findLast(
+        (call) => call.method === "nvim_exec_lua" && String(call.params[0]).includes("mesura.open"),
+      );
+      assert.isDefined(reopen, "the file was reopened");
+      assert.deepStrictEqual(
+        (reopen.params[1] as ReadonlyArray<unknown>)[1],
+        ["const a = 1;"],
+        "with the text the mirror held",
+      );
+      // And the thread answers again.
+      yield* manager.input({ threadId: "thread-exit", keys: "j" });
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("points the mirror at the buffer it opened, before it answers", () =>
     Effect.gen(function* () {
       const { manager, fake, root } = yield* createManager();
