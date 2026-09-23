@@ -226,6 +226,59 @@ it.layer(layer, { excludeTestServices: true })("EditorSessionManager", (it) => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("gives up after three restarts, and tells the attachment why", () =>
+    Effect.gen(function* () {
+      const { manager, fake, root } = yield* createManager();
+      yield* manager.open({
+        threadId: "thread-loop",
+        cwd: root,
+        relativePath: "a.ts",
+        lines: [""],
+      });
+      const messages = yield* Queue.make<string>();
+      const unsubscribe = yield* manager.attachStream({ threadId: "thread-loop" }, (event) =>
+        event.type === "message"
+          ? Queue.offer(messages, event.text).pipe(Effect.asVoid)
+          : Effect.void,
+      );
+      yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
+
+      for (let restart = 1; restart <= 3; restart += 1) {
+        fake.crash();
+        assert.include(yield* Queue.take(messages), "restarted");
+      }
+      // A configuration that kills Neovim at start would otherwise loop.
+      fake.crash();
+      assert.include(yield* Queue.take(messages), "exited 4 times");
+      // Behind the thread's lock, so it runs once the drop has finished.
+      const after = yield* Effect.result(manager.input({ threadId: "thread-loop", keys: "j" }));
+      assert.isTrue(Result.isFailure(after), "the session is gone");
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("starts a new Neovim when the thread's project moves", () =>
+    Effect.gen(function* () {
+      const { manager, fake, root } = yield* createManager();
+      yield* manager.open({
+        threadId: "thread-move",
+        cwd: root,
+        relativePath: "a.ts",
+        lines: [""],
+      });
+      const worktree = `${root}/worktree`;
+      yield* manager.open({
+        threadId: "thread-move",
+        cwd: worktree,
+        relativePath: "a.ts",
+        lines: [""],
+      });
+      assert.deepStrictEqual(
+        fake.spawns.map((spawn) => spawn.cwd),
+        [root, worktree],
+      );
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("points the mirror at the buffer it opened, before it answers", () =>
     Effect.gen(function* () {
       const { manager, fake, root } = yield* createManager();

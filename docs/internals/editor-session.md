@@ -516,8 +516,9 @@ asking what just happened instead of what is true.
 - **A Neovim that exits is replaced, not reported.** `:q`, a crash or a kill ends the process's
   output; `NvimRpc` then fails every waiting and later request, and the manager starts a new Neovim
   in the same session (`restartSession`), reopens the file with the mirror's text and sends a
-  snapshot, so the client's attachment keeps working. Undo history from before is lost, and after
-  three restarts the session is dropped. The wire's `exited` event is still never sent. A Neovim that
+  snapshot, so the client's attachment keeps working. Undo history from before is lost. After
+  three restarts without an `open` in between, the session is dropped and its attachments get an
+  `emsg` saying so. The wire's `exited` event is still never sent. A Neovim that
   hangs rather than exits is not detected; the trace shows it as calls whose `tookMs` climbs.
 - **A visual selection assumes `selection=inclusive`.** His configuration uses the default, measured,
   and `virtualedit` is empty. Under `selection=exclusive` the drawn selection would be one character

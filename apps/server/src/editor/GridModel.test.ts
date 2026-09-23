@@ -238,4 +238,30 @@ describe("classifyRow", () => {
     );
     assert.deepStrictEqual(result.highlightRuns, [{ line: 7, startCol: 1, endCol: 6, hl: 8 }]);
   });
+
+  it("keeps its place when a label covers half of a wide character", () => {
+    // Neovim blanks the half the label did not cover. Read against the next
+    // character, that blank consumed it and every label after was misplaced.
+    const result = row("中文x", cellsOf("a", " ", "文", "", "Q"), [9, 0, 0, 0, 5]);
+    assert.deepStrictEqual(result.overlays, [
+      { line: 7, col: 1, text: "a", hl: 9 },
+      { line: 7, col: 3, text: "Q", hl: 5 },
+    ]);
+  });
+
+  it("keeps its place when something wide is drawn over narrow text", () => {
+    const result = row("abcx", cellsOf("中", "", "c", "Q"), [9, 9, 0, 5]);
+    assert.deepStrictEqual(result.overlays, [
+      { line: 7, col: 1, text: "中", hl: 9 },
+      { line: 7, col: 4, text: "Q", hl: 5 },
+    ]);
+  });
+
+  it("reads a control or unprintable character in Neovim's spelling as the file's own", () => {
+    assert.deepStrictEqual(row("a\u0001b", cellsOf("a", "^", "A", "b")).overlays, []);
+    assert.deepStrictEqual(
+      row("a\u200bb", cellsOf("a", "<", "2", "0", "0", "b", ">", "b")).overlays,
+      [],
+    );
+  });
 });

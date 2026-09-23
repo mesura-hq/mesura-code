@@ -12,6 +12,8 @@ import type { EditorSessionEvent } from "@t3tools/contracts";
  * editor defects that only show up under a person's hands: every call from a
  * client, how long it queued behind the thread's lock (`waitedMs`), how long
  * Neovim took to answer it (`tookMs`), and a summary of every event sent back.
+ * The `input` calls carry the keys as typed, so a trace records everything
+ * typed while it is on.
  * A Neovim whose main loop is busy shows up as calls whose `tookMs` climbs into
  * seconds, which is what a frozen editor looks like from here.
  *
@@ -20,9 +22,10 @@ import type { EditorSessionEvent } from "@t3tools/contracts";
 export interface EditorTrace {
   readonly enabled: boolean;
   readonly record: (entry: Record<string, unknown>) => void;
+  readonly close: () => void;
 }
 
-const DISABLED: EditorTrace = { enabled: false, record: () => undefined };
+const DISABLED: EditorTrace = { enabled: false, record: () => undefined, close: () => undefined };
 
 export function makeEditorTrace(path: string | undefined): EditorTrace {
   if (path === undefined || path.trim() === "") return DISABLED;
@@ -34,10 +37,14 @@ export function makeEditorTrace(path: string | undefined): EditorTrace {
     record: (entry) => {
       stream.write(`${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`);
     },
+    close: () => stream.end(),
   };
 }
 
-/** What an outgoing event says, without the text it carries. */
+/**
+ * What an outgoing event says: its counts, with short excerpts of overlay,
+ * command-line and message text rather than the file's text.
+ */
 export function summarizeEditorEvent(event: EditorSessionEvent): Record<string, unknown> {
   switch (event.type) {
     case "snapshot":

@@ -57,10 +57,11 @@ export function highlightRule(
   const selector = `.monaco-editor .${highlightClassName(id)}`;
   const rule = `.${prefix} ${selector} { ${declarations.join("; ")} }`;
   if (background !== undefined) return rule;
-  // While flash waits for a label, every cell it is not pointing at carries its
-  // backdrop highlight, which has no background. Those fade; its matches and
-  // labels, which do have one, stay at full strength so the key to press is
-  // the thing that stands out.
+  // While flash waits for a label, every highlight without a background fades:
+  // its backdrop, which covers the text it is not pointing at, and on purpose
+  // anything else drawn that way, such as a diagnostic's virtual text. Its
+  // matches and labels have a background and stay at full strength, so the key
+  // to press is the thing that stands out.
   return `${rule}\n.${prefix}.${NVIM_JUMPING_CLASS} ${selector} { opacity: ${JUMPING_BACKDROP_OPACITY} }`;
 }
 

@@ -575,6 +575,8 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
   let lastCursorMoves = 0;
   /** Whether a forked cursor read is already on its way. */
   let cursorRefreshPending = false;
+  /** A frame that wanted a cursor read while one was already on its way. */
+  let cursorRefreshAgain = false;
   /** A `mode_change` seen since the last frame was judged. */
   let pendingModeChange = false;
   /** A `win_viewport` seen since the last frame was judged. */
@@ -722,11 +724,21 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
        local jumping = false
        if attached ~= 0 and vim.api.nvim_buf_is_valid(attached) then
          tabstop = vim.bo[attached].tabstop
-         -- flash draws its backdrop and labels as extmarks in its own
-         -- namespace, and only while a jump is waiting for its label.
-         local flash = vim.api.nvim_get_namespaces().flash
+         -- flash draws in its own namespace. Looked up until flash, which loads
+         -- lazily, has created it, and cached after: this runs on every key.
+         mesura.flash_namespace = mesura.flash_namespace or vim.api.nvim_get_namespaces().flash
+         local flash = mesura.flash_namespace
          if flash ~= nil then
-           jumping = #vim.api.nvim_buf_get_extmarks(attached, flash, 0, -1, { limit = 1 }) > 0
+           -- A label is the one mark with virtual text; the backdrop and the
+           -- matches are plain highlights. Those stay up after an \`f\` motion,
+           -- for \`;\` to repeat it, when no label is waiting.
+           local marks = vim.api.nvim_buf_get_extmarks(attached, flash, 0, -1, { details = true })
+           for _, mark in ipairs(marks) do
+             if mark[4].virt_text ~= nil then
+               jumping = true
+               break
+             end
+           end
          end
        end
        return {
@@ -758,6 +770,29 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
     grid.setTabstop(state.tabstop);
     grid.setCurrentWindow(state.window);
   });
+
+  /** Reads the cursor, then again for as long as frames asked while it was reading. */
+  const readCursorUntilCurrent = Effect.gen(function* () {
+    do {
+      cursorRefreshAgain = false;
+      yield* refreshCursorAndMode.pipe(
+        Effect.tapCause((cause) =>
+          Effect.logWarning("could not read the cursor after a frame", { cause }),
+        ),
+        Effect.catchCause(() => Effect.void),
+      );
+      // A `cursor` event carries the freshly read values to the manager, which
+      // reads them the same way it reads them from a frame. The drawing frame
+      // has already gone out by then.
+      tell({ kind: "cursor" });
+    } while (cursorRefreshAgain);
+  }).pipe(
+    Effect.ensuring(
+      Effect.sync(() => {
+        cursorRefreshPending = false;
+      }),
+    ),
+  );
 
   yield* rpc.notifications.pipe(
     Stream.runForEach((notification: { method: string; params: ReadonlyArray<unknown> }) =>
@@ -832,9 +867,12 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
         // `settle` — which has no timeout and is called under the thread's
         // lock — would never resolve, taking the thread with it.
         //
-        // One in flight at a time. A second trigger arriving while a refresh
-        // is pending is dropped rather than queued, which is what keeps a
-        // burst of typing to one round trip rather than one per frame.
+        // One in flight at a time. Triggers arriving while a read is pending
+        // collapse into one more read after it, which keeps a burst of typing
+        // to two round trips rather than one per frame. Dropping them instead
+        // lost the frame that ends a flash jump when it landed mid-read, and
+        // left the client showing FLASH with Escape routed to a Neovim that
+        // was no longer waiting for it.
         const trigger: CursorReadTrigger = {
           hasModeChange: pendingModeChange,
           hasViewport: pendingViewport,
@@ -844,26 +882,14 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
         };
         pendingModeChange = false;
         pendingViewport = false;
-        if (!cursorRefreshPending && shouldReadCursor(trigger)) {
+        if (shouldReadCursor(trigger)) {
           lastCursorMoves = grid.cursorMoves;
-          cursorRefreshPending = true;
-          yield* Effect.forkScoped(
-            refreshCursorAndMode.pipe(
-              Effect.tapCause((cause) =>
-                Effect.logWarning("could not read the cursor after a frame", { cause }),
-              ),
-              Effect.catchCause(() => Effect.void),
-              // A `cursor` event carries the freshly read values to the
-              // manager, which reads them the same way it reads them from a
-              // frame. The drawing frame below has already gone out by then.
-              Effect.ensuring(
-                Effect.sync(() => {
-                  cursorRefreshPending = false;
-                  tell({ kind: "cursor" });
-                }),
-              ),
-            ),
-          );
+          if (cursorRefreshPending) {
+            cursorRefreshAgain = true;
+          } else {
+            cursorRefreshPending = true;
+            yield* Effect.forkScoped(readCursorUntilCurrent);
+          }
         }
 
         tell({

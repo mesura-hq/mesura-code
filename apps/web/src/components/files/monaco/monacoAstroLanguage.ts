@@ -24,20 +24,28 @@ export function astroMonarchLanguage(
     tokenPostfix: ".astro",
     // Component names are capitalised (`<BaseLayout>`) and HTML ignores case,
     // which is harmless here: the tag rules already accept either.
+    // Frontmatter is only ever the file's first block, so the fence is looked
+    // for there and nowhere else: a `---` line in the markup is text.
+    start: "astroStart",
     tokenizer: {
       ...html.tokenizer,
+      astroStart: [
+        [
+          /^---\s*$/,
+          { token: "delimiter", switchTo: "@frontmatter", nextEmbedded: "text/typescript" },
+        ],
+        [/(?=.)/, { token: "", switchTo: "@root" }],
+      ],
       root: [
-        [/^---\s*$/, { token: "delimiter", next: "@frontmatter", nextEmbedded: "text/typescript" }],
         [/[{}]/, "delimiter.bracket"],
         // HTML's own text rule would swallow the braces, so this one comes
         // first and stops at them.
         [/[^<{}]+/, ""],
         ...htmlRoot,
       ],
-      frontmatter: [
-        [/^---\s*$/, { token: "delimiter", next: "@pop", nextEmbedded: "@pop" }],
-        [/[^-]+|-/, ""],
-      ],
+      // Only the closing fence: while TypeScript is embedded, Monarch reads
+      // this state for nothing but where the embedding ends.
+      frontmatter: [[/^---\s*$/, { token: "delimiter", switchTo: "@root", nextEmbedded: "@pop" }]],
     },
   };
 }

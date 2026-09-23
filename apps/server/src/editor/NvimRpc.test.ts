@@ -163,6 +163,23 @@ describe("NvimRpc", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("fails waiting and later requests when reading the channel fails", () =>
+    Effect.gen(function* () {
+      const inbound = yield* Queue.make<Uint8Array, string>();
+      const rpc = yield* makeNvimRpc({ write: () => undefined, data: Stream.fromQueue(inbound) });
+
+      const pending = yield* Effect.forkChild(Effect.result(rpc.request("nvim_get_mode", [])));
+      yield* Effect.yieldNow;
+      // A pipe that errors rather than ends, which is not the process exiting
+      // cleanly but leaves nothing to answer either.
+      yield* Queue.fail(inbound, "EIO");
+
+      assert.isTrue(Result.isFailure(yield* Fiber.join(pending)), "the waiting request fails");
+      const later = yield* Effect.result(rpc.request("nvim_get_mode", []));
+      assert.isTrue(Result.isFailure(later), "and so does the next one, at once");
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("fails rather than wedges on a frame it cannot read at all", () =>
     Effect.gen(function* () {
       const { duplex, inbound } = yield* fakeDuplex;

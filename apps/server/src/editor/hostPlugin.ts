@@ -102,6 +102,20 @@ vim.opt.ruler = false
 vim.opt.showcmd = false
 vim.opt.cmdheight = 1
 
+-- Inlay hints are inline virtual text: cells that are in no buffer line, so
+-- every character after one is read a column off. Off globally, and again per
+-- buffer when a server attaches, because a configuration usually turns them on
+-- in its own LspAttach.
+pcall(vim.lsp.inlay_hint.enable, false)
+vim.api.nvim_create_autocmd("LspAttach", {
+  group = group,
+  callback = function(event)
+    vim.schedule(function()
+      pcall(vim.lsp.inlay_hint.enable, false, { bufnr = event.buf })
+    end)
+  end,
+})
+
 --- Syntax and treesitter are the editor's job here. Left on, every cell
 --- carries a highlight and the decoration stream becomes the whole viewport on
 --- every keystroke, for colours the editor is already drawing itself.

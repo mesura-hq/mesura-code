@@ -16,10 +16,12 @@ import {
   type EditorSessionSnapshot,
   type EditorSessionViewportInput,
 } from "@t3tools/contracts";
+import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Scope from "effect/Scope";
@@ -209,7 +211,10 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
   let activityTick = 0;
   const now = () => (activityTick += 1);
 
-  const trace = makeEditorTrace(options.tracePath);
+  const trace = makeEditorTrace(
+    options.tracePath === undefined ? undefined : path.resolve(options.tracePath),
+  );
+  yield* Effect.addFinalizer(() => Effect.sync(trace.close));
 
   /** Sessions whose Neovim exited, and the bridge that did, waiting to be replaced. */
   const exits = yield* Queue.make<{
@@ -231,7 +236,8 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
   const withTracedLock = <A, E, R>(
     threadId: string,
     call: string,
-    detail: Record<string, unknown>,
+    /** A thunk, so the per-keystroke path allocates nothing while tracing is off. */
+    detail: () => Record<string, unknown>,
     effect: Effect.Effect<A, E, R>,
   ) => {
     if (!trace.enabled) return withThreadLock(threadId, effect);
@@ -246,7 +252,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
               dir: "in",
               thread: threadId,
               call,
-              ...detail,
+              ...detail(),
               outcome,
               waitedMs: Math.round(acquiredAt - queuedAt),
               tookMs: Math.round(performance.now() - acquiredAt),
@@ -441,20 +447,35 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       ),
     );
 
-  const snapshotOf = (session: Session): EditorSessionSnapshot => ({
+  /**
+   * Where the session is now.
+   *
+   * `withHighlightDefinitions` is for a client that has none of them yet: one
+   * that just attached, or every client after a restart renumbered them.
+   * Definitions otherwise go out once per session, so a client that attached
+   * later — a reload, a second window — never had the colours: flash's labels
+   * were drawn with no background over the letters they replace, and its
+   * dimmed backdrop was not dimmed. A file switch leaves them out, because
+   * every attached client already holds them and a long session has thousands.
+   */
+  const snapshotOf = (
+    session: Session,
+    { withHighlightDefinitions }: { readonly withHighlightDefinitions: boolean },
+  ): EditorSessionSnapshot => ({
     relativePath: session.currentPath ?? "",
     lines: [...session.bridge.lines],
     cursor: session.bridge.cursor,
     mode: session.bridge.mode,
     jumping: session.bridge.jumping,
     topline: Math.max(1, session.bridge.topLine + 1),
-    // Every definition so far, not none. Definitions otherwise go out once per
-    // session, so a client that attached later — a reload, a second window —
-    // never had the colours: flash's labels were drawn with no background over
-    // the letters they replace, and its dimmed backdrop was not dimmed.
-    hlDefs: Object.fromEntries(
-      [...session.bridge.highlightDefinitions].map(([id, definition]) => [String(id), definition]),
-    ),
+    hlDefs: withHighlightDefinitions
+      ? Object.fromEntries(
+          [...session.bridge.highlightDefinitions].map(([id, definition]) => [
+            String(id),
+            definition,
+          ]),
+        )
+      : {},
   });
 
   /** Forgets the least recently used buffers once a session holds too many. */
@@ -482,10 +503,22 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
     return yield* withTracedLock(
       input.threadId,
       "open",
-      { path: input.relativePath, lines: input.lines.length },
+      () => ({ path: input.relativePath, lines: input.lines.length }),
       Effect.gen(function* () {
-        const existing = (yield* SynchronizedRef.get(sessions)).get(input.threadId);
-        const session = existing ?? (yield* startSession(input.threadId, path.resolve(input.cwd)));
+        const cwd = path.resolve(input.cwd);
+        let existing = (yield* SynchronizedRef.get(sessions)).get(input.threadId);
+        // A thread whose project moved — it was given a worktree — gets a
+        // Neovim started in the new one. Plugins root themselves at Neovim's
+        // working directory, and a session keeps the one it started in.
+        if (existing !== undefined && existing.cwd !== cwd) {
+          yield* dropSession(input.threadId);
+          existing = undefined;
+        }
+        const session = existing ?? (yield* startSession(input.threadId, cwd));
+        // Opening a file is someone asking for the editor, so the restart
+        // budget starts over. It exists to stop a configuration that kills
+        // Neovim at start from looping, not to count a day's worth of `:q`.
+        session.restarts = 0;
 
         if (existing === undefined) {
           created = true;
@@ -572,7 +605,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         );
 
         session.currentPath = input.relativePath;
-        const snapshot = snapshotOf(session);
+        const snapshot = snapshotOf(session, { withHighlightDefinitions: created });
         // Every attachment is told which file the session now has open, not
         // just the caller. One session serves the whole thread, so a client
         // that does not learn about the switch would keep applying this
@@ -749,7 +782,10 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
           const session = yield* requireSession(input.threadId);
           // The snapshot goes to this attachment alone, and before the listener
           // is registered, so a delta cannot arrive ahead of the state it edits.
-          yield* emit({ type: "snapshot", snapshot: snapshotOf(session) });
+          yield* emit({
+            type: "snapshot",
+            snapshot: snapshotOf(session, { withHighlightDefinitions: true }),
+          });
           session.listeners.add(emit);
           session.attachedClients += 1;
           // Returned rather than held in a scope, matching the terminal: the
@@ -771,7 +807,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       withTracedLock(
         input.threadId,
         "input",
-        { keys: input.keys },
+        () => ({ keys: input.keys }),
         Effect.gen(function* () {
           const session = yield* requireSession(input.threadId);
           yield* request(session, "nvim_input", [input.keys]);
@@ -781,7 +817,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       withTracedLock(
         input.threadId,
         "viewport",
-        { topline: input.topline, rows: input.rows, cols: input.cols },
+        () => ({ topline: input.topline, rows: input.rows, cols: input.cols }),
         Effect.gen(function* () {
           const session = yield* requireSession(input.threadId);
           // The buffer's own grid, not the outer one. With `ext_multigrid` the
@@ -807,7 +843,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       withTracedLock(
         input.threadId,
         "setCursor",
-        { line: input.line, col: input.col },
+        () => ({ line: input.line, col: input.col }),
         Effect.gen(function* () {
           const session = yield* requireSession(input.threadId);
           // The window showing the mirror's buffer, not the current one. A
@@ -823,7 +859,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       withTracedLock(
         input.threadId,
         "replaceText",
-        { edits: input.edits.length },
+        () => ({ edits: input.edits.length }),
         Effect.gen(function* () {
           const session = yield* requireSession(input.threadId);
           if (input.edits.length === 0) return;
@@ -891,18 +927,15 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         );
 
         if (session.restarts >= MAX_RESTARTS_PER_SESSION) {
-          publish(session, {
-            type: "message",
-            kind: "emsg",
-            text: `Neovim exited ${session.restarts + 1} times; reopen the file to start it again.`,
-          });
-          yield* dropSession(session.threadId);
+          yield* giveUp(
+            session,
+            `Neovim exited ${session.restarts + 1} times; reopen the file to start it again.`,
+          );
           return;
         }
         session.restarts += 1;
         session.bridgeScope = yield* Scope.fork(session.scope);
         session.bridge = yield* spawnBridge(session.threadId, session.cwd, session.bridgeScope);
-        wireNotifications(session);
 
         if (openBuffer !== undefined) {
           const buffer = yield* request(session, "nvim_exec_lua", [
@@ -914,7 +947,14 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
             yield* session.bridge.settle;
           }
         }
-        publish(session, { type: "snapshot", snapshot: snapshotOf(session) });
+        // Wired only once the new Neovim is on the file. Before that it shows
+        // whatever it started on — a dashboard, a restored session — and its
+        // text would reach the clients as the file's.
+        wireNotifications(session);
+        publish(session, {
+          type: "snapshot",
+          snapshot: snapshotOf(session, { withHighlightDefinitions: true }),
+        });
         publish(session, {
           type: "message",
           kind: "emsg",
@@ -923,14 +963,36 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       }).pipe(
         Effect.catchCause((cause) =>
           Effect.logWarning("could not restart Neovim for a session", { cause }).pipe(
-            Effect.andThen(dropSession(session.threadId)),
+            Effect.andThen(giveUp(session, "Neovim exited and could not be restarted.")),
           ),
         ),
       ),
     );
 
+  /**
+   * Drops a session whose Neovim cannot be replaced, and says so.
+   *
+   * The message goes straight to the listeners, not through the outbox:
+   * dropping the session closes the scope of the fiber that drains the outbox,
+   * so a queued message would almost never be delivered.
+   */
+  const giveUp = (session: Session, text: string) =>
+    Effect.gen(function* () {
+      const event: EditorSessionEvent = { type: "message", kind: "emsg", text };
+      if (trace.enabled) {
+        trace.record({ dir: "out", thread: session.threadId, ...summarizeEditorEvent(event) });
+      }
+      yield* Effect.forEach([...session.listeners], (listener) => listener(event), {
+        discard: true,
+      });
+      yield* dropSession(session.threadId);
+    });
+
+  // Each restart on its own fiber, so a slow one — a real configuration takes a
+  // plugin load — does not hold up another thread's. The thread's lock still
+  // orders restarts within one thread.
   yield* Queue.take(exits).pipe(
-    Effect.flatMap(({ session, exited }) => restartSession(session, exited)),
+    Effect.flatMap(({ session, exited }) => Effect.forkScoped(restartSession(session, exited))),
     Effect.forever,
     Effect.forkScoped,
   );
@@ -956,7 +1018,9 @@ export const make = Effect.fn("EditorSessionManager.make")(function* () {
   return yield* makeWithOptions({
     configDirectory: current.neovimConfigDirectory,
     stateDir: config.neovimRuntimeDir,
-    tracePath: process.env["MESURA_EDITOR_TRACE"],
+    tracePath: Option.getOrUndefined(
+      yield* Config.string("MESURA_EDITOR_TRACE").pipe(Config.option),
+    ),
   });
 });
 

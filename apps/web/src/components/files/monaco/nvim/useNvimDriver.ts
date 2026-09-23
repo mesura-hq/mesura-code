@@ -271,6 +271,9 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
     // first topline happens to equal a stale one would be taken for an echo
     // and never applied.
     viewportRef.current = EMPTY_VIEWPORT_HISTORY;
+    // A new file opens where Neovim has its cursor, whatever the wheel did to
+    // the last one.
+    scrollOwnerRef.current = "keys";
     openFile(model.getLinesContent());
   }, [enabled, model, openFile, environmentId, cwd, relativePath]);
 
@@ -323,6 +326,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
         .join("");
       if (composed.length === 0) return;
       model.undo();
+      scrollOwnerRef.current = "keys";
       // A literal `<` opens a key name, and it has the one escape Neovim gives.
       sendKeys(composed.replaceAll("<", "<lt>"));
     });
@@ -496,6 +500,17 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
       container.removeEventListener("pointerdown", takeView, options);
       container.removeEventListener("touchstart", takeView, options);
     };
+  }, [enabled, editor]);
+
+  // The labels are set in the editor's font when they are made, so a zoom or a
+  // font change has to reach the ones already on screen too.
+  useEffect(() => {
+    if (!enabled || editor === null) return;
+    const subscription = editor.onDidChangeConfiguration((event) => {
+      if (!event.hasChanged(monaco.editor.EditorOption.fontInfo)) return;
+      for (const { node } of widgetNodesRef.current.values()) applyEditorFont(node, editor);
+    });
+    return () => subscription.dispose();
   }, [enabled, editor]);
 
   // Undo has one owner, and never both at once — and the way to keep it that

@@ -213,8 +213,11 @@ export class GridModel {
         return;
       }
       case "grid_destroy": {
-        this.#grids.delete(batch[0] as number);
-        this.#touch(batch[0] as number);
+        const gridId = batch[0] as number;
+        this.#touch(gridId);
+        this.#grids.delete(gridId);
+        this.#gridWindows.delete(gridId);
+        if (this.#bufferGridId === gridId) this.#bufferGridId = null;
         return;
       }
       case "grid_scroll": {
@@ -249,6 +252,9 @@ export class GridModel {
         for (const entry of info ?? []) {
           if (typeof entry?.hi_name === "string") groups.add(entry.hi_name);
         }
+        // A redefined id can change whether its cells are the host's own
+        // drawing, so the rows already read against the old one are stale.
+        if (this.#highlightDefinitions.has(id)) this.#dirty = true;
         this.#highlightDefinitions.set(id, { attributes, groups });
         return;
       }
@@ -452,6 +458,41 @@ function clusterLength(text: string, index: number): number {
   return first.done === true ? 1 : Math.max(1, first.value.segment.length);
 }
 
+/**
+ * East Asian wide and fullwidth ranges, and emoji shown as emoji. An
+ * approximation of Neovim's own width table, good for the scripts and symbols
+ * a source file holds; a character it misjudges costs one misplaced overlay.
+ */
+const WIDE_CHARACTER =
+  /[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA000-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6\u{20000}-\u{3FFFD}]|\p{Emoji_Presentation}|\p{Extended_Pictographic}\uFE0F/u;
+
+/** How many screen cells a character takes when Neovim draws it as itself. */
+function cellWidth(cluster: string): number {
+  return WIDE_CHARACTER.test(cluster) ? 2 : 1;
+}
+
+/**
+ * The ways Neovim spells a character it cannot draw as itself: `^A` for a
+ * control character, `<200b>` for an unprintable one. Candidates rather than
+ * one answer, because the hex form's padding is Neovim's to choose; the cells
+ * decide which one it drew.
+ */
+function spelledForms(cluster: string): ReadonlyArray<string> {
+  const code = cluster.codePointAt(0) ?? 0;
+  if (code < 0x20) return [`^${String.fromCharCode(code + 64)}`];
+  if (code === 0x7f) return ["^?"];
+  const hex = code.toString(16);
+  return [`<${hex}>`, `<${hex.padStart(4, "0")}>`];
+}
+
+/** Whether `cells` from `column` on hold exactly `spelled`, one character per cell. */
+function cellsSpell(cells: ReadonlyArray<string>, column: number, spelled: string): boolean {
+  for (let index = 0; index < spelled.length; index += 1) {
+    if (cells[column + index] !== spelled[index]) return false;
+  }
+  return true;
+}
+
 export interface ClassifyRowInput {
   readonly cells: ReadonlyArray<string>;
   readonly highlights: ReadonlyArray<number>;
@@ -497,11 +538,20 @@ export function classifyRow(input: ClassifyRowInput): {
   // leave TypeScript narrowing them to `null` for the rest of the loop.
   let overlay = null as { col: number; text: string; hl: number; lastColumn: number } | null;
   let run = null as { start: number; hl: number } | null;
+  /**
+   * A buffer character that something else was drawn over, and the grid
+   * column its cells end at. A wide character under a one-cell label still
+   * owns the cell after the label, so that cell must not be read against the
+   * next character.
+   */
+  let covered = { at: 0, untilColumn: 0 };
+  /** The last column that drew something over the text. */
+  let lastOverlaidColumn = -2;
 
   const closeOverlay = () => {
     if (overlay === null) return;
     const trimmed = overlay.text.trimEnd();
-    if (trimmed.trim().length > 0) {
+    if (trimmed !== "") {
       overlays.push({ line, col: overlay.col, text: trimmed, hl: overlay.hl });
     }
     overlay = null;
@@ -529,6 +579,31 @@ export function classifyRow(input: ClassifyRowInput): {
   for (let column = 0; column < cells.length; column += 1) {
     const drawn = cells[column] ?? " ";
     const highlight = highlights[column] ?? 0;
+
+    if (column < covered.untilColumn) {
+      // The rest of a covered wide character: its right half, blanked, or
+      // more of whatever was drawn over it.
+      if (drawn === "") {
+        if (overlay !== null && overlay.lastColumn === column - 1) overlay.lastColumn = column;
+      } else if (drawn === " ") {
+        closeOverlay();
+      } else {
+        addOverlay(column, drawn, highlight, covered.at);
+        lastOverlaidColumn = column;
+      }
+      continue;
+    }
+
+    if (drawn === "" && lastOverlaidColumn === column - 1 && position < text.length) {
+      // The right half of something wide drawn over the text, which covers
+      // the next buffer character as well.
+      const at = position;
+      const length = clusterLength(text, position);
+      covered = { at, untilColumn: column + cellWidth(text.slice(at, at + length)) };
+      position += length;
+      if (overlay !== null && overlay.lastColumn === column - 1) overlay.lastColumn = column;
+      continue;
+    }
 
     if (drawn === "") {
       // The right half of a wide character belongs to whatever the left half
@@ -578,14 +653,29 @@ export function classifyRow(input: ClassifyRowInput): {
       continue;
     }
 
+    const length = clusterLength(text, position);
+    const cluster = text.slice(position, position + length);
+    const spelled = spelledForms(cluster).find((form) => cellsSpell(cells, column, form));
+    if (spelled !== undefined) {
+      // The file's own character, in the only form Neovim can draw it. Monaco
+      // draws its own, so nothing is reported.
+      position += length;
+      closeOverlay();
+      closeRun(at);
+      column += spelled.length - 1;
+      continue;
+    }
+
     // Something else was drawn where the buffer has this character.
-    position += clusterLength(text, position);
+    position += length;
+    covered = { at, untilColumn: column + cellWidth(cluster) };
     closeRun(at);
     if (drawn === " ") {
       closeOverlay();
       continue;
     }
     addOverlay(column, drawn, highlight, at);
+    lastOverlaidColumn = column;
   }
   closeOverlay();
   closeRun(Math.min(position, text.length));

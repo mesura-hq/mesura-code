@@ -84,7 +84,5 @@
   position: relative;
   z-index: 2;
   pointer-events: none;
-  font: inherit;
-  line-height: inherit;
   white-space: pre;
 }
