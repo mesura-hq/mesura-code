@@ -7,6 +7,23 @@ import {
 } from "./t3ProjectFile.ts";
 
 describe("Mesura repository validation", () => {
+  it("rejects valid model and workspace defaults together with an invalid icon field", () => {
+    expect(
+      parseMesuraProjectFile(
+        JSON.stringify({
+          version: 1,
+          iconPath: "../outside.svg",
+          defaultModelSelection: {
+            provider: "codex",
+            model: "portable-model",
+            options: [{ id: "reasoningEffort", value: "high" }],
+          },
+          defaultThreadEnvMode: "worktree",
+        }),
+      ),
+    ).toBeNull();
+  });
+
   it("accepts a local editor schema reference alongside portable defaults", () => {
     expect(
       parseMesuraProjectFile(`{
