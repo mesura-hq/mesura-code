@@ -125,8 +125,9 @@ Focus a question's text field before dictating. Dictation appends to that questi
 not submit it. Use **Submit** when the complete request is ready. Files belong to their own question;
 wait for uploads to finish or retry or remove a failed upload.
 
-The mobile app currently lists every question of the set in one card, and its button sends them once
-they all have an answer. The web and desktop keyboard shortcuts do not apply to mobile.
+On mobile, pending requests appear as cards in the conversation, with all questions in each request
+together. Submit sends the complete request. The regular message composer stays separate. The web
+and desktop keyboard shortcuts do not apply to mobile.
 
 ## Prompt stash
 

@@ -1,5 +1,5 @@
 import { TextInputWrapper } from "expo-paste-input";
-import { AppTextInput as TextInput } from "../../components/AppText";
+import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
 import { useNativePaste } from "../../lib/useNativePaste";
 import { convertPastedImagesToAttachments } from "../../lib/composerImages";
 import {
@@ -8,7 +8,7 @@ import {
   type UserInputQuestion,
 } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
-import { Alert, View } from "react-native";
+import { Alert, View, type TextInput as NativeTextInput } from "react-native";
 import { useEffect, useRef, useState } from "react";
 import { ComposerAttachmentButton } from "../../components/ComposerAttachmentButton";
 import { ComposerAttachmentStrip } from "../../components/ComposerAttachmentStrip";
@@ -38,9 +38,12 @@ export function QuestionAttachments(props: {
   disabled: boolean;
   value: string;
   onChangeText: (value: string) => void;
+  onFocusInput?: ((input: NativeTextInput | null) => void) | undefined;
   onInputFocusChange?: ((focused: boolean) => void) | undefined;
 }) {
   const { selectedThread } = useThreadSelection();
+  const inputRef = useRef<NativeTextInput>(null);
+  const inputFocused = useRef(false);
   const navigation = useNavigation();
   const [previewFile, setPreviewFile] = useState<FilePreviewSource | null>(null);
   const [previewVideo, setPreviewVideo] = useState<VideoPreviewSource | null>(null);
@@ -84,6 +87,7 @@ export function QuestionAttachments(props: {
     if (
       !selectedThread ||
       props.disabled ||
+      props.question.allowCustomAnswer === false ||
       !configs.get(selectedThread.environmentId)?.environment.capabilities.questionAttachments
     )
       return;
@@ -112,10 +116,11 @@ export function QuestionAttachments(props: {
       )
       .finally(() => changeQuestionAttachmentPreparation(key, -1));
   });
-  if (!selectedThread || props.question.allowCustomAnswer === false) return null;
+  if (!selectedThread) return null;
+  const choiceOnly = props.question.allowCustomAnswer === false;
   const { environmentId, id: threadId } = selectedThread;
   const capabilities = configs.get(environmentId)?.environment.capabilities;
-  const canAttach = capabilities?.questionAttachments === true;
+  const canAttach = !choiceOnly && capabilities?.questionAttachments === true;
   const key = questionAttachmentDraftKey(
     environmentId,
     threadId,
@@ -192,15 +197,35 @@ export function QuestionAttachments(props: {
       <VideoPreviewModal source={previewVideo} onRequestClose={() => setPreviewVideo(null)} />
       <TextInputWrapper onPaste={paste}>
         <TextInput
+          ref={inputRef}
+          multiline
+          scrollEnabled={false}
+          accessibilityLabel={props.question.header}
           value={props.value}
-          editable={!props.disabled}
+          editable={!props.disabled && !choiceOnly}
           onChangeText={props.onChangeText}
-          onFocus={() => props.onInputFocusChange?.(true)}
-          onBlur={() => props.onInputFocusChange?.(false)}
-          placeholder="Or type a custom answer"
+          onFocus={() => {
+            inputFocused.current = true;
+            props.onInputFocusChange?.(true);
+            props.onFocusInput?.(inputRef.current);
+          }}
+          onBlur={() => {
+            inputFocused.current = false;
+            props.onInputFocusChange?.(false);
+            props.onFocusInput?.(null);
+          }}
+          onContentSizeChange={() => {
+            if (inputFocused.current) props.onFocusInput?.(inputRef.current);
+          }}
+          placeholder={choiceOnly ? "Select a listed choice" : "Add an answer or extra detail"}
           className="min-h-[54px] rounded-2xl border border-input-border bg-input px-3.5 py-3 font-sans text-base text-foreground"
         />
       </TextInputWrapper>
+      {choiceOnly ? (
+        <Text className="text-sm text-foreground-muted">
+          Choose only from the listed choices. This question does not accept extra text.
+        </Text>
+      ) : null}
     </View>
   );
 }

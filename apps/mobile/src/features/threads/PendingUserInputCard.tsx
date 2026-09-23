@@ -1,61 +1,38 @@
-import { QuestionAttachments } from "./QuestionAttachments";
-import type { ApprovalRequestId, UserInputQuestion } from "@t3tools/contracts";
-import { useCallback, useRef } from "react";
-import { Platform, Pressable, ScrollView, View, type LayoutChangeEvent } from "react-native";
-import Animated, {
-  Easing,
-  FadeInUp,
-  FadeOutDown,
-  LinearTransition,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-  type SharedValue,
-} from "react-native-reanimated";
-
-import { USER_INPUT_TOGGLE_DURATION_MS } from "./pendingUserInputLayout";
-
-import { SymbolView } from "../../components/AppSymbol";
+import type {
+  ApprovalRequestId,
+  EnvironmentId,
+  ThreadId,
+  UserInputQuestion,
+} from "@t3tools/contracts";
+import { useMemo } from "react";
+import { useAtomValue } from "@effect/atom-react";
+import { Atom } from "effect/unstable/reactivity";
+import { appAtomRegistry } from "../../state/atom-registry";
+import { usePendingUserInputDrafts } from "../../state/use-selected-thread-requests";
+import { Pressable, View, type TextInput } from "react-native";
 import { AppText as Text } from "../../components/AppText";
-import { ControlPill } from "../../components/ControlPill";
 import { cn } from "../../lib/cn";
 import {
+  buildPendingUserInputAnswers,
   isPendingUserInputOptionSelected,
   type PendingUserInput,
-  type PendingUserInputDraftAnswer,
 } from "../../lib/threadActivity";
+import { QuestionAttachments } from "./QuestionAttachments";
+import { useVoiceInputController } from "../voice-input/useVoiceInputController";
+import { resolveVoiceComposerPresentation } from "../voice-input/voiceInputPresentation";
+import {
+  ComposerDictationCancelAction,
+  ComposerDictationPrimaryAction,
+  ComposerDictationStatus,
+} from "../voice-input/ComposerDictationControl";
 
 export interface PendingUserInputCardProps {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
   readonly pendingUserInput: PendingUserInput;
-  /**
-   * Constant while a request is pending (it reserves keyboard space), so the
-   * keyboard transition is pure translation; changes only on rare discrete
-   * corrections, which the layout transition smooths.
-   */
-  readonly maxHeight: number;
-  readonly collapsed: boolean;
-  readonly onToggleCollapsed: () => void;
-  /** Renders a stop control on the collapsed bar, which replaces the composer. */
-  readonly onStopThread?: () => void;
-  /**
-   * 0 collapsed → 1 expanded. Slides the iOS overlay card down behind the
-   * collapsed bar (inside a clipping window) on the UI thread; the host
-   * animates it directly from the tap handler so the card and the feed
-   * inset glide start the same frame.
-   */
-  readonly cardProgress?: SharedValue<number>;
-  /**
-   * Receives how far the expanded card extends above the bar footprint
-   * (written from onLayout with no re-render); the host adds it to the
-   * thread feed's end inset so the end of the chat stays visible above the
-   * card.
-   */
-  readonly cardCoverage?: SharedValue<number>;
-  /** Fires on custom-answer focus/blur; hosts use it to vet stale keyboard state. */
-  readonly onInputFocusChange?: (focused: boolean) => void;
-  readonly drafts: Record<string, PendingUserInputDraftAnswer>;
-  readonly answers: Record<string, string | ReadonlyArray<string>> | null;
-  readonly respondingUserInputId: ApprovalRequestId | null;
+  readonly responding: boolean;
+  readonly onInputFocusChange?: ((focused: boolean) => void) | undefined;
+  readonly onFocusInput?: ((input: TextInput | null) => void) | undefined;
   readonly onSelectOption: (
     requestId: ApprovalRequestId,
     question: UserInputQuestion,
@@ -64,314 +41,183 @@ export interface PendingUserInputCardProps {
   readonly onChangeCustomAnswer: (
     requestId: ApprovalRequestId,
     questionId: string,
-    customAnswer: string,
+    value: string,
   ) => void;
-  readonly onSubmit: () => Promise<unknown>;
-  /** Closes an async question without a reply. Hidden for native callback questions. */
-  readonly onDismiss: () => Promise<unknown>;
+  readonly onSubmit: (requestId: ApprovalRequestId) => Promise<unknown>;
+  readonly onDismiss: (requestId: ApprovalRequestId) => Promise<unknown>;
 }
 
-/**
- * On iOS the collapsed bar is the PERMANENT in-flow footprint — the expanded
- * card is an absolutely-positioned overlay rising above it. The overlay's
- * measured height (which drives the thread feed's bottom inset) therefore
- * never changes on collapse/expand, so the transcript stays perfectly still
- * while the card animates over it.
- *
- * Android cannot use the overlay: it does not hit-test touches outside a
- * parent's bounds, which made everything above the bar-sized wrapper
- * untouchable. There the expanded card renders in-flow instead (the wrapper
- * grows with it, and the host skips the coverage inset since the measured
- * overlay already includes the card).
- */
-const EXPANDED_CARD_IS_OVERLAY = Platform.OS === "ios";
-
-const CARD_LAYOUT_TRANSITION = LinearTransition.duration(200);
+// One target across request cards. Changing it cancels the previous voice controller.
+const questionVoiceTargetAtom = Atom.make<{ ownerKey: string; questionId: string } | null>(null);
 
 export function PendingUserInputCard(props: PendingUserInputCardProps) {
-  const questionCount = props.pendingUserInput.questions.length;
-
-  const cardCoverage = props.cardCoverage;
-  const barHeightRef = useRef(0);
-  const cardHeightRef = useRef(0);
-  // Measured card height, written straight from onLayout: the collapse slide
-  // distance. Not animated — it only changes on discrete relayouts.
-  const cardHeight = useSharedValue(0);
-  const notifyCoverage = useCallback(() => {
-    if (!cardCoverage) {
-      return;
-    }
-    const coverage = Math.max(0, cardHeightRef.current - barHeightRef.current);
-    if (coverage === cardCoverage.value) {
-      return;
-    }
-    if (cardCoverage.value === 0) {
-      // First measurement lands while the list is doing its initial
-      // end-pin (thread opened onto a pending request); animating it from
-      // zero would move the end anchor out from under that scroll.
-      cardCoverage.value = coverage;
-      return;
-    }
-    // Animated so a coverage change at rest (discrete max-height
-    // corrections) glides the feed instead of stepping it; toggle timing is
-    // owned by the host's progress values.
-    cardCoverage.value = withTiming(coverage, {
-      duration: USER_INPUT_TOGGLE_DURATION_MS,
-      easing: Easing.out(Easing.cubic),
-    });
-  }, [cardCoverage]);
-  const handleBarLayout = useCallback(
-    (event: LayoutChangeEvent) => {
-      barHeightRef.current = event.nativeEvent.layout.height;
-      notifyCoverage();
-    },
-    [notifyCoverage],
+  const request = props.pendingUserInput;
+  const drafts = usePendingUserInputDrafts(props.environmentId, props.threadId, request);
+  const answers = useMemo(
+    () => buildPendingUserInputAnswers(request.questions, drafts),
+    [request.questions, drafts],
   );
-  const handleCardLayout = useCallback(
-    (event: LayoutChangeEvent) => {
-      cardHeightRef.current = event.nativeEvent.layout.height;
-      cardHeight.value = event.nativeEvent.layout.height;
-      notifyCoverage();
-    },
-    [cardHeight, notifyCoverage],
+  const voiceTarget = useAtomValue(questionVoiceTargetAtom);
+  const ownerKey = JSON.stringify([props.environmentId, props.threadId, request.requestId]);
+  const focusedQuestionId = voiceTarget?.ownerKey === ownerKey ? voiceTarget.questionId : null;
+  const focusedQuestion = request.questions.find(
+    (question) => question.id === focusedQuestionId && question.allowCustomAnswer !== false,
   );
-  const cardProgress = props.cardProgress;
-  // No opacity: fading an opaque card over the live transcript reads as a
-  // crossfade (card text, transcript, and bar all half-visible at once).
-  // Instead the card stays opaque and slides its full height down past the
-  // clipping window's bottom edge, so the transcript is only revealed where
-  // the card has physically left.
-  const cardAnimatedStyle = useAnimatedStyle(() => {
-    const progress = cardProgress === undefined ? 1 : cardProgress.value;
-    return {
-      transform: [{ translateY: (1 - progress) * cardHeight.value }],
-    };
+  const note = focusedQuestion ? (drafts[focusedQuestion.id]?.customAnswer ?? "") : "";
+  const voice = useVoiceInputController({
+    ownerKey: focusedQuestion
+      ? JSON.stringify([props.environmentId, props.threadId, request.requestId, focusedQuestion.id])
+      : null,
+    draftMessage: note,
+    // Dictation adds a note to this answer; it never replaces its selected options.
+    selection: { start: note.length, end: note.length },
+    disabled: props.responding || !focusedQuestion,
+    onChangeDraftMessage: (value) => {
+      if (focusedQuestion) props.onChangeCustomAnswer(request.requestId, focusedQuestion.id, value);
+    },
+    onChangeSelection: () => undefined,
   });
-
-  // On iOS the card stays MOUNTED while collapsed (hidden via the animated
-  // style): expanding animates existing views on the UI thread the same
-  // frame the host starts the progress timing, instead of paying a React
-  // mount + layout before anything moves.
-  const renderCard = EXPANDED_CARD_IS_OVERLAY || !props.collapsed;
-  const showBar = props.collapsed || EXPANDED_CARD_IS_OVERLAY;
-  // The bar renders UNDER the card (earlier in JSX), always opaque: while
-  // expanded the opaque card covers it, and during the collapse slide the
-  // card's top edge wipes past and reveals it — no opacity handoff, so no
-  // crossfade frames.
-  const bar = showBar ? (
-    <View
-      onLayout={handleBarLayout}
-      pointerEvents={props.collapsed ? "auto" : "none"}
-      accessibilityElementsHidden={!props.collapsed}
-      importantForAccessibility={props.collapsed ? "auto" : "no-hide-descendants"}
-      className="flex-row items-center gap-2 rounded-full border border-border bg-card-alt py-1.5 pl-4 pr-1.5"
-    >
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Expand user input, ${questionCount} question${
-          questionCount === 1 ? "" : "s"
-        }`}
-        onPress={props.onToggleCollapsed}
-        className="min-h-10 flex-1 flex-row items-center gap-2 active:opacity-70"
-      >
-        <Text className="font-t3-bold text-2xs uppercase tracking-[1.1px] text-foreground-secondary">
-          User input needed
-        </Text>
-        <Text className="font-sans text-xs text-foreground-muted">
-          {questionCount} question{questionCount === 1 ? "" : "s"}
-        </Text>
-        <View className="flex-1" />
-        <SymbolView
-          name="chevron.up"
-          size={12}
-          tintColorClassName={"accent-icon-subtle"}
-          type="monochrome"
-        />
-      </Pressable>
-      {props.onStopThread ? (
-        <ControlPill
-          accessibilityLabel="Stop"
-          icon="stop.fill"
-          variant="danger"
-          className="h-9 w-9"
-          onPress={props.onStopThread}
-        />
-      ) : null}
-    </View>
-  ) : null;
-  const card = renderCard ? (
-    // The surface is opaque on purpose: the card floats over the thread
-    // feed with no blur behind it, so a translucent background renders
-    // the questions on top of whatever message happens to sit underneath.
-    <Animated.View
-      onLayout={handleCardLayout}
-      pointerEvents={props.collapsed ? "none" : "auto"}
-      accessibilityElementsHidden={props.collapsed}
-      importantForAccessibility={props.collapsed ? "no-hide-descendants" : "auto"}
-      entering={
-        EXPANDED_CARD_IS_OVERLAY
-          ? undefined
-          : FadeInUp.duration(USER_INPUT_TOGGLE_DURATION_MS).easing(Easing.out(Easing.cubic))
-      }
-      exiting={
-        EXPANDED_CARD_IS_OVERLAY
-          ? undefined
-          : FadeOutDown.duration(USER_INPUT_TOGGLE_DURATION_MS).easing(Easing.out(Easing.cubic))
-      }
-      layout={CARD_LAYOUT_TRANSITION}
-      className="overflow-hidden gap-2.5 rounded-[20px] border border-border bg-card-alt p-4"
-      style={
-        EXPANDED_CARD_IS_OVERLAY
-          ? [{ maxHeight: props.maxHeight }, cardAnimatedStyle]
-          : { maxHeight: props.maxHeight }
-      }
-    >
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Collapse user input"
-        onPress={props.onToggleCollapsed}
-        className="flex-row items-start gap-2"
-      >
-        <View className="flex-1 gap-2.5">
-          <Text className="font-t3-bold text-2xs uppercase tracking-[1.1px] text-foreground-secondary">
-            User input needed
-          </Text>
-          <Text className="font-t3-bold text-lg text-foreground">Fill in the pending answers</Text>
-        </View>
-        <View className="h-8 w-8 items-center justify-center rounded-full bg-subtle-strong">
-          <SymbolView
-            name="chevron.down"
-            size={13}
-            tintColorClassName={"accent-icon-subtle"}
-            type="monochrome"
-          />
-        </View>
-      </Pressable>
-      <ScrollView
-        bounces={false}
-        className="min-h-0"
-        contentContainerClassName="gap-2.5 pb-1"
-        keyboardShouldPersistTaps="handled"
-        nestedScrollEnabled
-        showsVerticalScrollIndicator
-        style={{ flexShrink: 1 }}
-      >
-        {props.pendingUserInput.questions.map((question) => {
-          const draft = props.drafts[question.id];
-          return (
-            <View key={question.id} className="gap-2 pt-1">
-              <Text className="font-t3-bold text-xs uppercase tracking-[1px] text-foreground-muted">
-                {question.header}
-              </Text>
-              <Text className="font-sans text-base leading-snug text-foreground">
-                {question.question}
-              </Text>
-              <View className="gap-2">
-                {question.options.map((option) => {
-                  const optionValue = option.value ?? option.label.trim();
-                  const selected = isPendingUserInputOptionSelected(question, draft, optionValue);
-                  const description =
-                    option.description !== option.label ? option.description : undefined;
-                  return (
-                    <Pressable
-                      key={optionValue}
-                      className={cn(
-                        "min-h-12 w-full rounded-2xl border px-3.5 py-3",
-                        selected ? "border-primary bg-primary/10" : "border-border bg-input",
-                      )}
-                      onPress={() =>
-                        props.onSelectOption(
-                          props.pendingUserInput.requestId,
-                          question,
-                          optionValue,
-                        )
-                      }
-                    >
-                      <View className="min-w-0 flex-1 gap-0.5">
-                        <Text
-                          className={cn(
-                            "font-t3-bold text-sm",
-                            selected ? "text-foreground" : "text-foreground-secondary",
-                          )}
-                        >
-                          {option.label}
+  const presentation = resolveVoiceComposerPresentation(voice.state, voice.elapsedSeconds);
+  return (
+    <View className="gap-3 rounded-[20px] border border-border bg-card-alt p-4">
+      <Text className="font-t3-bold text-lg text-foreground">Fill in the pending answers</Text>
+      {props.pendingUserInput.questions.map((question) => {
+        const draft = drafts[question.id];
+        return (
+          <View key={question.id} className="gap-2 pt-1">
+            <Text className="font-t3-bold text-xs uppercase tracking-[1px] text-foreground-muted">
+              {question.header}
+            </Text>
+            <Text className="font-sans text-base leading-snug text-foreground">
+              {question.question}
+            </Text>
+            <View className="gap-2">
+              {question.options.map((option) => {
+                const optionValue = option.value ?? option.label.trim();
+                const selected = isPendingUserInputOptionSelected(question, draft, optionValue);
+                const description =
+                  option.description !== option.label ? option.description : undefined;
+                return (
+                  <Pressable
+                    key={optionValue}
+                    accessibilityRole={question.multiSelect ? "checkbox" : "radio"}
+                    accessibilityState={{ checked: selected }}
+                    disabled={props.responding}
+                    className={cn(
+                      "min-h-12 w-full rounded-2xl border px-3.5 py-3",
+                      selected ? "border-primary bg-primary/10" : "border-border bg-input",
+                    )}
+                    onPress={() =>
+                      props.onSelectOption(props.pendingUserInput.requestId, question, optionValue)
+                    }
+                  >
+                    <View className="min-w-0 flex-1 gap-0.5">
+                      <Text
+                        className={cn(
+                          "font-t3-bold text-sm",
+                          selected ? "text-foreground" : "text-foreground-secondary",
+                        )}
+                      >
+                        {option.label}
+                      </Text>
+                      {description ? (
+                        <Text className="font-sans text-sm leading-5 text-foreground-muted">
+                          {description}
                         </Text>
-                        {description ? (
-                          <Text className="font-sans text-sm leading-5 text-foreground-muted">
-                            {description}
-                          </Text>
-                        ) : null}
-                      </View>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              <QuestionAttachments
-                requestId={props.pendingUserInput.requestId}
-                question={question}
-                questions={props.pendingUserInput.questions}
-                disabled={props.respondingUserInputId === props.pendingUserInput.requestId}
-                value={draft?.customAnswer ?? ""}
-                onChangeText={(value) =>
-                  props.onChangeCustomAnswer(props.pendingUserInput.requestId, question.id, value)
-                }
-                onInputFocusChange={props.onInputFocusChange}
-              />
+                      ) : null}
+                    </View>
+                  </Pressable>
+                );
+              })}
             </View>
-          );
-        })}
-      </ScrollView>
+            {!draft?.attachmentsBlocked &&
+            buildPendingUserInputAnswers([question], drafts) === null ? (
+              <Text className="text-sm text-foreground-muted">Answer required</Text>
+            ) : null}
+            <QuestionAttachments
+              requestId={props.pendingUserInput.requestId}
+              question={question}
+              questions={props.pendingUserInput.questions}
+              disabled={
+                props.responding || (voice.freezesEditor && focusedQuestionId === question.id)
+              }
+              value={draft?.customAnswer ?? ""}
+              onChangeText={(value) =>
+                props.onChangeCustomAnswer(props.pendingUserInput.requestId, question.id, value)
+              }
+              onInputFocusChange={(focused) => {
+                if (focused)
+                  appAtomRegistry.set(questionVoiceTargetAtom, {
+                    ownerKey,
+                    questionId: question.id,
+                  });
+                props.onInputFocusChange?.(focused);
+              }}
+              onFocusInput={props.onFocusInput}
+            />
+          </View>
+        );
+      })}
+
+      {focusedQuestion && voice.isAvailable ? (
+        <View className="gap-2">
+          <Text className="text-sm text-foreground-muted">
+            Voice answer: {focusedQuestion.header}
+          </Text>
+          <View className="flex-row items-center gap-2">
+            <ComposerDictationCancelAction presentation={presentation} onCancel={voice.cancel} />
+            <ComposerDictationStatus
+              audioLevels={voice.audioLevels}
+              elapsedSeconds={voice.elapsedSeconds}
+              phase={voice.state.phase}
+              presentation={presentation}
+              onDismissError={voice.cancel}
+            />
+            <ComposerDictationPrimaryAction
+              state={voice.state}
+              presentation={presentation}
+              isAvailable={voice.isAvailable}
+              disabled={props.responding}
+              onStart={voice.start}
+              onConfirm={voice.stop}
+              onCancel={voice.cancel}
+            />
+          </View>
+        </View>
+      ) : null}
       <Pressable
+        accessibilityRole="button"
         className={cn(
           "items-center justify-center rounded-2xl px-4 py-3.5",
-          props.answers ? "bg-primary" : "bg-subtle-strong",
+          answers ? "bg-primary" : "bg-subtle-strong",
         )}
-        disabled={
-          props.answers === null || props.respondingUserInputId === props.pendingUserInput.requestId
-        }
-        onPress={() => void props.onSubmit()}
+        disabled={answers === null || props.responding || voice.blocksSubmission}
+        onPress={() => void props.onSubmit(request.requestId)}
       >
         <Text
           className={cn(
             "font-t3-extrabold text-sm",
-            props.answers ? "text-primary-foreground" : "text-foreground-muted",
+            answers ? "text-primary-foreground" : "text-foreground-muted",
           )}
         >
           Submit answers
         </Text>
       </Pressable>
-      {props.pendingUserInput.dismissible ? (
+      {request.dismissible ? (
         <Pressable
           accessibilityRole="button"
-          className="items-center justify-center rounded-2xl px-4 py-2.5 active:opacity-70"
-          disabled={props.respondingUserInputId === props.pendingUserInput.requestId}
-          onPress={() => void props.onDismiss()}
+          className="items-center justify-center rounded-2xl px-4 py-2.5"
+          disabled={props.responding}
+          onPress={() => {
+            voice.cancel();
+            void props.onDismiss(request.requestId);
+          }}
         >
           <Text className="font-t3-bold text-sm text-foreground-muted">
             Dismiss without answering
           </Text>
         </Pressable>
       ) : null}
-    </Animated.View>
-  ) : null;
-  return (
-    <View className="relative">
-      {bar}
-      {EXPANDED_CARD_IS_OVERLAY ? (
-        // Clipping window for the collapse slide: same footprint as the
-        // expanded card, bottom edge on the bar's bottom edge. The sliding
-        // card exits through the bottom edge instead of drawing over the
-        // composer area, wiping the bar (and the transcript) into view.
-        <View
-          pointerEvents={props.collapsed ? "none" : "box-none"}
-          className="absolute inset-x-0 bottom-0 justify-end overflow-hidden"
-          style={{ height: props.maxHeight }}
-        >
-          {card}
-        </View>
-      ) : (
-        card
-      )}
     </View>
   );
 }

@@ -1,3 +1,4 @@
+import { PendingUserInputCard, type PendingUserInputCardProps } from "./PendingUserInputCard";
 import * as Haptics from "expo-haptics";
 import { KeyboardAwareLegendList } from "@legendapp/list/keyboard";
 import { useViewabilityAmount, type LegendListRef } from "@legendapp/list/react-native";
@@ -63,6 +64,8 @@ import {
   type PartialMarkdownTheme,
 } from "react-native-nitro-markdown";
 import {
+  Keyboard,
+  type TextInput,
   ActivityIndicator,
   Alert,
   Image,
@@ -234,7 +237,18 @@ function isFreshTimestamp(input: string): boolean {
   return Number.isFinite(timestamp) && Date.now() - timestamp < FRESH_ENTRY_WINDOW_MS;
 }
 
-export interface ThreadFeedProps {
+export interface PendingUserInputFeedProps {
+  readonly respondingUserInputIds: ReadonlySet<
+    PendingUserInputCardProps["pendingUserInput"]["requestId"]
+  >;
+  readonly onSelectUserInputOption: PendingUserInputCardProps["onSelectOption"];
+  readonly onChangeUserInputCustomAnswer: PendingUserInputCardProps["onChangeCustomAnswer"];
+  readonly onSubmitUserInput: PendingUserInputCardProps["onSubmit"];
+  readonly onDismissUserInput: PendingUserInputCardProps["onDismiss"];
+}
+
+export interface ThreadFeedProps extends PendingUserInputFeedProps {
+  readonly onInputFocusChange?: ((focused: boolean) => void) | undefined;
   readonly queuedMessages: ReadonlyArray<QueuedThreadMessage>;
   readonly dispatchingMessageId: MessageId | null;
   readonly onEditPendingMessage: (message: QueuedThreadMessage) => void;
@@ -1337,7 +1351,7 @@ function useMarkdownStyles(
 }
 
 function renderFeedEntry(
-  info: { item: PendingThreadFeedEntry; index: number },
+  info: { item: Exclude<PendingThreadFeedEntry, { type: "pending-user-input" }>; index: number },
   props: Pick<
     ThreadFeedProps,
     | "environmentId"
@@ -1897,6 +1911,38 @@ function ThreadFeedPlaceholder(props: {
 }
 
 export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
+  const { listRef, contentInsetEndAdjustment } = props;
+  const focusedQuestionInput = useRef<TextInput | null>(null);
+  const revealFocusedQuestion = useCallback(() => {
+    const input = focusedQuestionInput.current;
+    if (!input?.isFocused()) return;
+    const keyboard = Keyboard.metrics();
+    const list = listRef.current;
+    if (!keyboard || !list) return;
+    // The native ScrollView helper mixes content coordinates with screen coordinates.
+    // In this inset-driven list that left answers under the floating composer.
+    // Measure the visible input instead and move only the obscured distance.
+    input.measureInWindow((_x, y, _width, height) => {
+      if (focusedQuestionInput.current !== input || !input.isFocused()) return;
+      const visibleBottom = keyboard.screenY - contentInsetEndAdjustment.value - 12;
+      const overlap = y + height - visibleBottom;
+      if (overlap > 0) {
+        list.scrollToOffset({ offset: list.getState().scroll + overlap, animated: false });
+      }
+    });
+  }, [listRef, contentInsetEndAdjustment]);
+  const handleQuestionInputFocus = useCallback(
+    (input: TextInput | null) => {
+      focusedQuestionInput.current = input;
+      revealFocusedQuestion();
+    },
+    [revealFocusedQuestion],
+  );
+  useEffect(() => {
+    const subscription = Keyboard.addListener("keyboardDidShow", revealFocusedQuestion);
+    return () => subscription.remove();
+  }, [revealFocusedQuestion]);
+
   const navigation = useNavigation();
   const { themeAppearance } = useAppearancePreferences();
   const copyFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2229,6 +2275,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   const listAppearanceData = useMemo(
     () => ({
       dispatchingMessageId: props.dispatchingMessageId,
+      respondingUserInputIds: props.respondingUserInputIds,
       unsettledTurnId,
       copiedRowId,
       expandedWorkRows,
@@ -2241,6 +2288,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       viewportWidth,
     }),
     [
+      props.respondingUserInputIds,
       props.dispatchingMessageId,
       unsettledTurnId,
       copiedRowId,
@@ -2656,45 +2704,76 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         entering={disclosureToggleSettling ? THREAD_FEED_DISCLOSURE_ENTER_TRANSITION : undefined}
       >
         <ThreadMediaVisibility>
-          {renderFeedEntry(info, {
-            environmentId: props.environmentId,
-            dispatchingMessageId: props.dispatchingMessageId,
-            onEditPendingMessage: props.onEditPendingMessage,
-            copiedRowId,
-            expandedWorkRows,
-            workRowSizing,
-            workGroupScrollPositions,
-            terminalAssistantMessageIds,
-            unsettledTurnId,
-            onCopyWorkRow,
-            onToggleWorkGroup,
-            onToggleWorkRow,
-            onToggleTurnFold,
-            onPressPreview,
-            onPressVideo,
-            markdownLinkHandlers,
-            renderMarkdownImage,
-            renderViewedImage,
-            iconSubtleColor,
-            screenColor,
-            userBubbleColor,
-            markdownStyles,
-            reviewCommentColors,
-            reviewCommentBubbleWidth,
-            themeAppearance,
-            userBubbleMaxWidth,
-            markdownContentWidth,
-            skills: props.skills,
-            onUseArtifactTemplate: props.onUseArtifactTemplate,
-          })}
+          {info.item.type === "pending-user-input" ? (
+            <PendingUserInputCard
+              key={JSON.stringify([
+                props.environmentId,
+                props.threadId,
+                info.item.pendingUserInput.requestId,
+              ])}
+              environmentId={props.environmentId}
+              threadId={props.threadId}
+              pendingUserInput={info.item.pendingUserInput}
+              responding={props.respondingUserInputIds.has(info.item.pendingUserInput.requestId)}
+              onSelectOption={props.onSelectUserInputOption}
+              onChangeCustomAnswer={props.onChangeUserInputCustomAnswer}
+              onSubmit={props.onSubmitUserInput}
+              onDismiss={props.onDismissUserInput}
+              onInputFocusChange={props.onInputFocusChange}
+              onFocusInput={handleQuestionInputFocus}
+            />
+          ) : (
+            renderFeedEntry(
+              { ...info, item: info.item },
+              {
+                environmentId: props.environmentId,
+                dispatchingMessageId: props.dispatchingMessageId,
+                onEditPendingMessage: props.onEditPendingMessage,
+                copiedRowId,
+                expandedWorkRows,
+                workRowSizing,
+                workGroupScrollPositions,
+                terminalAssistantMessageIds,
+                unsettledTurnId,
+                onCopyWorkRow,
+                onToggleWorkGroup,
+                onToggleWorkRow,
+                onToggleTurnFold,
+                onPressPreview,
+                onPressVideo,
+                markdownLinkHandlers,
+                renderMarkdownImage,
+                renderViewedImage,
+                iconSubtleColor,
+                screenColor,
+                userBubbleColor,
+                markdownStyles,
+                reviewCommentColors,
+                reviewCommentBubbleWidth,
+                themeAppearance,
+                userBubbleMaxWidth,
+                markdownContentWidth,
+                skills: props.skills,
+                onUseArtifactTemplate: props.onUseArtifactTemplate,
+              },
+            )
+          )}
         </ThreadMediaVisibility>
       </Animated.View>
     ),
     [
+      props.respondingUserInputIds,
       props.dispatchingMessageId,
       props.onEditPendingMessage,
       copiedRowId,
       disclosureToggleSettling,
+      props.threadId,
+      props.onSelectUserInputOption,
+      props.onChangeUserInputCustomAnswer,
+      props.onSubmitUserInput,
+      props.onDismissUserInput,
+      props.onInputFocusChange,
+      handleQuestionInputFocus,
       expandedWorkRows,
       workRowSizing,
       workGroupScrollPositions,

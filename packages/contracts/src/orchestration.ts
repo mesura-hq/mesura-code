@@ -1,3 +1,4 @@
+import { countGraphemes } from "./graphemes.ts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
@@ -459,11 +460,10 @@ const ProjectLucideIconName = TrimmedNonEmptyString.check(
 
 const ProjectEmoji = TrimmedNonEmptyString.check(Schema.isMaxLength(32));
 
-const monogramSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 export const ProjectMonogramText = TrimmedNonEmptyString.check(
   Schema.isMaxLength(32),
   Schema.isPattern(/^[\p{L}\p{N}][\p{L}\p{N}\p{M}\u200c\u200d]*$/u),
-  Schema.makeFilter((text) => Array.from(monogramSegmenter.segment(text)).length <= 2),
+  Schema.makeFilter((text) => countGraphemes(text) <= 2),
 );
 
 export const ProjectIconOverride = Schema.Union([

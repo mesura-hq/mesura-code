@@ -2,8 +2,10 @@ import * as Option from "effect/Option";
 import { foldUserInputActivities } from "@t3tools/client-runtime/work-log/user-input";
 import * as Schema from "effect/Schema";
 import {
+  derivePendingRequests,
   requestKindFromRequestType,
   type PendingApproval,
+  type PendingUserInput,
 } from "@t3tools/client-runtime/pending-requests";
 import { UserInputAttachmentAnswerPayload, isToolLifecycleItemType } from "@t3tools/contracts";
 import type {
@@ -139,6 +141,12 @@ interface DerivedWorkLogEntry extends WorkLogEntry {
 
 type RawThreadFeedEntry =
   | {
+      readonly type: "pending-user-input";
+      readonly id: string;
+      readonly createdAt: string;
+      readonly pendingUserInput: PendingUserInput;
+    }
+  | {
       readonly type: "message";
       readonly id: string;
       readonly createdAt: string;
@@ -153,7 +161,7 @@ type RawThreadFeedEntry =
     };
 
 export type ThreadFeedEntry =
-  | Extract<RawThreadFeedEntry, { type: "message" }>
+  | Extract<RawThreadFeedEntry, { type: "message" | "pending-user-input" }>
   | {
       readonly type: "activity-group";
       readonly id: string;
@@ -239,6 +247,10 @@ type ThreadFeedActivityGroup = Extract<ThreadFeedEntry, { readonly type: "activi
 const activityEntriesCache = new WeakMap<
   ReadonlyArray<OrchestrationThreadActivity>,
   ReadonlyArray<Extract<RawThreadFeedEntry, { readonly type: "activity" }>>
+>();
+const pendingInputEntriesCache = new WeakMap<
+  ReadonlyArray<OrchestrationThreadActivity>,
+  ReadonlyArray<Extract<RawThreadFeedEntry, { type: "pending-user-input" }>>
 >();
 const messageEntriesCache = new WeakMap<
   OrchestrationThread["messages"][number],
@@ -2072,9 +2084,23 @@ export function buildThreadFeed(
     : loadedMessages;
   const oldestLoadedMessageCreatedAt =
     options?.loadedMessages !== undefined ? (loadedMessages[0]?.createdAt ?? null) : null;
+  let pendingEntries = pendingInputEntriesCache.get(thread.activities);
+  if (!pendingEntries) {
+    pendingEntries = derivePendingRequests(thread.activities).userInputs.map((request) => ({
+      type: "pending-user-input",
+      id: `pending-user-input:${request.requestId}`,
+      createdAt: request.createdAt,
+      pendingUserInput: request,
+    }));
+    pendingInputEntriesCache.set(thread.activities, pendingEntries);
+  }
+  const pendingRequestIds = new Set<string>(
+    pendingEntries.map((entry) => entry.pendingUserInput.requestId),
+  );
   const activityEntries = getThreadFeedActivityEntries(thread.activities).filter(
     (entry) =>
-      oldestLoadedMessageCreatedAt === null || entry.createdAt >= oldestLoadedMessageCreatedAt,
+      !pendingRequestIds.has(entry.activity.workEntry.questionAnswer?.requestId ?? "") &&
+      (oldestLoadedMessageCreatedAt === null || entry.createdAt >= oldestLoadedMessageCreatedAt),
   );
   const foldedAnswerMessageIds = new Set(
     activityEntries.flatMap((entry) =>
@@ -2096,6 +2122,7 @@ export function buildThreadFeed(
           return entry;
         }),
       ...activityEntries,
+      ...pendingEntries,
     ],
     (s) => new Date(s.createdAt),
     Order.Date,
