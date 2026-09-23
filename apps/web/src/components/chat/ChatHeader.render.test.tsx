@@ -36,9 +36,15 @@ function renderHeader(rightPanelOpen = false) {
       activeThreadId={"thread-test" as ThreadId}
       activeThreadTitle={THREAD_TITLE}
       isServerThread
-      activeProjectName="mesura-code"
-      activeProjectCwd="/tmp/mesura-code"
-      activeProjectFaviconPath={null}
+      activeProject={
+        {
+          id: "project-test",
+          environmentId: "env-test",
+          title: "mesura-code",
+          workspaceRoot: "/tmp/mesura-code",
+          faviconPath: null,
+        } as never
+      }
       openInCwd="/tmp/mesura-code"
       activeProjectScripts={[]}
       preferredScriptId={null}

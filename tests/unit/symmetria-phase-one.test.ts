@@ -12,7 +12,7 @@ import {
   expectSuccessfulCommand,
   repositoryRoot,
   run,
-  tsgoPath,
+  typecheckerPath,
   vitePlusPath,
 } from "./contractHarness.ts";
 
@@ -75,7 +75,7 @@ const compileUpstreamLock = (
       2,
     )}\n`,
   );
-  return run(tsgoPath, ["-p", configPath]);
+  return run(typecheckerPath, ["-p", configPath]);
 };
 
 // The phase implementation is present in this working tree. These checks are
@@ -95,14 +95,14 @@ describe("Symmetria broker contract phase-one regression guards", () => {
 
     expect(manifest.name).toBe("@symmetria/acceptance-tests");
     expect(manifest.scripts?.test).toBe("vp test run");
-    expect(manifest.scripts?.typecheck).toBe("tsgo --noEmit");
+    expect(manifest.scripts?.typecheck).toBe("tsc --noEmit");
     expect(workspaceSource).toMatch(/^\s*- tests\s*$/m);
-    expectSuccessfulCommand(run(tsgoPath, ["--noEmit"], acceptanceTestsRoot));
+    expectSuccessfulCommand(run(typecheckerPath, ["--noEmit"], acceptanceTestsRoot));
   });
 
-  it("keeps the fork-owned package typecheck green with tsgo --noEmit", () => {
+  it("keeps the fork-owned package typecheck green with tsc --noEmit", () => {
     expect(NodeFS.existsSync(contractPackageRoot)).toBe(true);
-    expectSuccessfulCommand(run(tsgoPath, ["--noEmit"], contractPackageRoot));
+    expectSuccessfulCommand(run(typecheckerPath, ["--noEmit"], contractPackageRoot));
   });
 
   it("keeps the package repair guards in its normal test suite", () => {
@@ -250,7 +250,7 @@ describe("Symmetria broker contract phase-one regression guards", () => {
           2,
         )}\n`,
       );
-      expectSuccessfulCommand(run(tsgoPath, ["-p", configPath]));
+      expectSuccessfulCommand(run(typecheckerPath, ["-p", configPath]));
     } finally {
       NodeFS.rmSync(temporaryDirectory, { force: true, recursive: true });
     }
@@ -262,7 +262,7 @@ describe("Symmetria broker contract phase-one regression guards", () => {
     const source = NodeFS.readFileSync(proofPath, "utf8");
     expect(source).toContain("@ts-expect-error");
     expect(source).toMatch(/stale/i);
-    expectSuccessfulCommand(run(tsgoPath, ["--noEmit"], contractPackageRoot));
+    expectSuccessfulCommand(run(typecheckerPath, ["--noEmit"], contractPackageRoot));
   });
 
   it("keeps the supported Symmetria protocol major version decodable", () => {
@@ -362,9 +362,13 @@ describe("Symmetria broker contract phase-one regression guards", () => {
       };
     };
 
+    // Effect 4.0.0-rc.112 emits the bound directly; up to beta.103 it wrapped
+    // it in `allOf: [{ minimum: 0 }]`. What this guard is for is the alignment
+    // below — every non-negative field carrying the SAME constraint — so the
+    // shape is pinned only to catch the day one of them stops matching.
     expect(documents.base).toEqual({
       type: "integer",
-      allOf: [{ minimum: 0 }],
+      minimum: 0,
     });
     expect(documents.draftVersion).toEqual(documents.base);
     expect(documents.snapshotRevision).toEqual(documents.base);

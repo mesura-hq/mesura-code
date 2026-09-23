@@ -48,7 +48,20 @@ export interface IconVariant {
   readonly outputs: VariantOutputs;
 }
 
-export class IconExportFileSystemError extends Schema.TaggedErrorClass<IconExportFileSystemError>()(
+interface IconComposerTool {
+  readonly path: string;
+  readonly version: string;
+  readonly bundleVersion: string;
+  readonly supportsDesignGeneration: boolean;
+}
+
+interface CommandResult {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly exitCode: number;
+}
+
+export class IconExportFileSystemError extends Schema.TaggedError<IconExportFileSystemError>()(
   "IconExportFileSystemError",
   {
     operation: Schema.Literals([
@@ -71,7 +84,7 @@ export class IconExportFileSystemError extends Schema.TaggedErrorClass<IconExpor
   }
 }
 
-export class IconExportRenditionError extends Schema.TaggedErrorClass<IconExportRenditionError>()(
+export class IconExportRenditionError extends Schema.TaggedError<IconExportRenditionError>()(
   "IconExportRenditionError",
   {
     sourcePath: Schema.String,
@@ -91,7 +104,7 @@ export class IconExportRenditionError extends Schema.TaggedErrorClass<IconExport
   }
 }
 
-export class IconExportAssetsStaleError extends Schema.TaggedErrorClass<IconExportAssetsStaleError>()(
+export class IconExportAssetsStaleError extends Schema.TaggedError<IconExportAssetsStaleError>()(
   "IconExportAssetsStaleError",
   {
     paths: Schema.Array(Schema.String),

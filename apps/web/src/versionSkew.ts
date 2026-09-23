@@ -13,7 +13,7 @@ export interface VersionMismatch {
   readonly hint: string;
 }
 
-export const VERSION_MISMATCH_DISMISSALS_STORAGE_KEY = "t3code:version-mismatch-dismissals:v1";
+const VERSION_MISMATCH_DISMISSALS_STORAGE_KEY = "t3code:version-mismatch-dismissals:v1";
 
 // Runtime failures retain their identity until the next attempt. Dismiss only
 // that attempt, across chat remounts, without clearing the error in Settings.
@@ -97,6 +97,22 @@ export function resolveServerSelfUpdateCapability(
   serverConfig: Pick<ServerConfig, "environment"> | null | undefined,
 ): ServerSelfUpdateCapability | null {
   return serverConfig?.environment.capabilities.serverSelfUpdate ?? null;
+}
+
+/** True when the desktop app supervising this server can be told to update
+    itself over RPC. Older desktop servers only get the manual instruction. */
+export function supportsDesktopAppUpdate(
+  serverConfig: Pick<ServerConfig, "environment"> | null | undefined,
+): boolean {
+  return serverConfig?.environment.capabilities.desktopAppUpdate === true;
+}
+
+/** True when the connected server can recover opted-in running turns after
+    its self-update restart. */
+export function supportsServerUpdateThreadContinuation(
+  serverConfig: Pick<ServerConfig, "environment"> | null | undefined,
+): boolean {
+  return serverConfig?.environment.capabilities.serverUpdateThreadContinuation === true;
 }
 
 /**

@@ -213,7 +213,6 @@ export function MonacoFileSurface({
     };
     // Created once. Theme, font and wrap are applied by the effects below so a
     // change to any of them does not rebuild the editor.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // The open file's model, kept in a cache so leaving a file and coming back
@@ -255,7 +254,6 @@ export function MonacoFileSurface({
     // model, which would discard the undo stack. A reused model whose file
     // changed while it was away is caught by that same effect, which runs after
     // this one on the same render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [environmentId, cwd, relativePath, retention, models]);
 
   // An external change to the open file: the watcher pushed one, or a save

@@ -8,6 +8,7 @@ import {
   type CommandId,
   type EnvironmentId,
   type MessageId,
+  type OrchestrationMessageContext,
   type ModelSelection,
   type ProviderInteractionMode,
   type RuntimeMode,
@@ -18,22 +19,17 @@ import {
 } from "@t3tools/contracts";
 import { runAtomCommand } from "@t3tools/client-runtime/state/runtime";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
+import { serializeLegacyContextMessage } from "@t3tools/shared/composerContextLegacySend";
 
 import { useComposerDraftStore, DraftId, type DraftSessionState } from "../composerDraftStore";
 import { deriveComposerSendState, readFileAsDataUrl } from "../components/ChatView.logic";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentProjects } from "../state/projects";
 import { environmentThreadDetails, threadEnvironment } from "../state/threads";
-import { appendElementContextsToPrompt } from "../lib/elementContext";
-import { appendTerminalContextsToPrompt } from "../lib/terminalContext";
-import { appendPreviewAnnotationPrompt } from "../lib/previewAnnotation";
-import { appendReviewCommentsToPrompt } from "../reviewCommentContext";
-import {
-  derivePendingApprovals,
-  derivePendingUserInputs,
-  findLatestProposedPlan,
-  hasActionableProposedPlan,
-} from "../session-logic";
+import { buildMessageContext } from "../lib/composerContextRecords";
+import { derivePendingRequests } from "@t3tools/client-runtime/pending-requests";
+import { environmentServerConfigsAtom } from "../state/server";
+import { findLatestProposedPlan, hasActionableProposedPlan } from "../session-logic";
 import { resolvePlanFollowUpSubmission } from "../proposedPlan";
 import {
   buildPendingUserInputAnswers,
@@ -82,6 +78,18 @@ export type DirectedComposerSubmission = {
   readonly attachments: StartThreadTurnInput["message"]["attachments"];
   readonly bootstrap: ThreadTurnStartBootstrap | undefined;
   readonly pendingAction: DirectedComposerPendingAction;
+  /**
+   * Terminal picks, review comments and preview annotations that travel with
+   * the message, and whether this server takes them inline. A server from
+   * before inline context drops the records, so for those the same content is
+   * serialized into the text instead.
+   */
+  readonly messageContext?:
+    | {
+        readonly inline: boolean;
+        readonly context: OrchestrationMessageContext | undefined;
+      }
+    | undefined;
 };
 
 export type DirectedSubmissionContext = {
@@ -215,6 +223,23 @@ export function buildDirectedTurnStartInput(
       : null;
   const interactionMode = planFollowUp?.interactionMode ?? submission.interactionMode;
   const text = planFollowUp?.text ?? submission.prompt;
+  const messageContext = submission.messageContext;
+  // The legacy text is built from `text`, not from the raw prompt: a plan
+  // follow-up rewrites the message, and serializing the prompt would send the
+  // pre-rewrite words to exactly the servers that cannot read the records.
+  const contextFields =
+    messageContext === undefined
+      ? {}
+      : messageContext.inline
+        ? messageContext.context
+          ? { context: messageContext.context }
+          : {}
+        : {
+            text: serializeLegacyContextMessage({
+              text,
+              records: messageContext.context?.records ?? [],
+            }),
+          };
   return {
     commandId: submission.commandId,
     threadId: submission.threadId,
@@ -223,6 +248,7 @@ export function buildDirectedTurnStartInput(
       role: "user",
       text,
       attachments: [...submission.attachments],
+      ...contextFields,
     },
     ...(submission.modelSelection ? { modelSelection: submission.modelSelection } : {}),
     titleSeed: submission.titleSeed,
@@ -327,8 +353,9 @@ export async function submitDirectedDictation(input: {
     return { kind: "refused", code: "unsupported_composer_action" };
   }
 
-  const pendingUserInput = thread ? derivePendingUserInputs(thread.activities)[0] : undefined;
-  const pendingApproval = thread ? derivePendingApprovals(thread.activities)[0] : undefined;
+  const pendingRequests = thread ? derivePendingRequests(thread.activities) : null;
+  const pendingUserInput = pendingRequests?.userInputs[0];
+  const pendingApproval = pendingRequests?.approvals[0];
   const latestPlan = thread
     ? findLatestProposedPlan(thread.proposedPlans, thread.latestTurn?.turnId)
     : null;
@@ -357,26 +384,21 @@ export async function submitDirectedDictation(input: {
     prompt: input.prompt,
     imageCount: draft.images.length,
     terminalContexts: draft.terminalContexts,
-    elementContextCount:
-      draft.elementContexts.length + draft.previewAnnotations.length + draft.reviewComments.length,
+    elementContextCount: draft.previewAnnotations.length + draft.reviewComments.length,
   });
   if (!sendState.hasSendableContent) {
     return { kind: "refused", code: "unsupported_composer_action" };
   }
-  const textWithTerminalContexts = appendTerminalContextsToPrompt(
-    input.prompt,
-    sendState.sendableTerminalContexts,
-  );
-  const textWithElementContexts = appendElementContextsToPrompt(
-    textWithTerminalContexts,
-    draft.elementContexts,
-  );
-  const textWithAnnotations = draft.previewAnnotations.reduce(
-    (text, annotation) => appendPreviewAnnotationPrompt(text, annotation),
-    textWithElementContexts,
-  );
-  const assembledPrompt = appendReviewCommentsToPrompt(textWithAnnotations, draft.reviewComments);
-  const preparedPrompt = prepareDirectedProviderPrompt(assembledPrompt, input.submissionContext);
+  // v0.0.42 stopped appending this material to the prompt as text. It travels
+  // as records beside the message now, and only a server too old to read them
+  // gets the serialized form — which `buildDirectedTurnStartInput` decides.
+  const messageContext = buildMessageContext({
+    terminalContexts: sendState.sendableTerminalContexts,
+    reviewComments: draft.reviewComments,
+    previewAnnotations: draft.previewAnnotations,
+    attachments: draft.images.map((image) => ({ attachment: image, attachmentId: image.id })),
+  });
+  const preparedPrompt = prepareDirectedProviderPrompt(input.prompt, input.submissionContext);
   if (!preparedPrompt.ok) {
     return { kind: "refused", code: "unsupported_composer_action" };
   }
@@ -458,6 +480,12 @@ export async function submitDirectedDictation(input: {
     attachments,
     bootstrap,
     pendingAction,
+    messageContext: {
+      inline:
+        appAtomRegistry.get(environmentServerConfigsAtom).get(threadRef.environmentId)?.environment
+          .capabilities.inlineMessageContext === true,
+      context: messageContext,
+    },
   });
   if (result.kind === "turn-dispatched" || result.kind === "answer-submitted") {
     consumeDirectedComposerDraft(input.composerTarget, input.sourceComposerTarget);

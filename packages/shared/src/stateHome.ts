@@ -58,3 +58,20 @@ export const REMOTE_DEFAULT_STATE_HOME = `$HOME/${DEFAULT_STATE_HOME_DIR_NAME}`;
  * rather than a command that quietly installs someone else's server.
  */
 export const PUBLISHED_SERVER_PACKAGE_NAME: string | null = null;
+
+/**
+ * The origin a released server downloads its own release archives from, or
+ * `null` while the fork publishes none.
+ *
+ * The registry hazard above has a second road. v0.0.42 replaced the remote
+ * `npx t3` bootstrap with a self-contained release archive, and the origin it
+ * falls back to is upstream's GitHub releases. A remote launch would therefore
+ * download and run *upstream's* server and connect this desktop to it — the
+ * same outcome PUBLISHED_SERVER_PACKAGE_NAME closes for npm, reached by a
+ * different road and with no npm involved.
+ *
+ * Keep this `null` until the fork publishes archives it owns. Code that builds
+ * a download URL must treat `null` as "this server cannot be installed from a
+ * release archive" and refuse, rather than silently resolving upstream's.
+ */
+export const PUBLISHED_RELEASE_BASE_URL: string | null = null;

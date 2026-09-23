@@ -5,14 +5,8 @@
       "additionalProperties": true,
       "properties": {
         "name": {
-          "allOf": [
-            {
-              "minLength": 1
-            },
-            {
-              "pattern": "\\S"
-            }
-          ],
+          "minLength": 1,
+          "pattern": "\\S",
           "type": "string"
         },
         "projectId": {

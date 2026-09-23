@@ -18,12 +18,15 @@ export interface ThreadSearchFields {
   readonly title: string;
   readonly projectTitle?: string | null;
   readonly branch?: string | null;
+  /** What a linked pull request is found by — its number, its repository and
+      number, its url, its own title. Built by `threadPullRequestSearchTerms`. */
+  readonly pullRequestTerms?: ReadonlyArray<string>;
 }
 
 /** A word found in the title beats the same word found in the project name,
     which beats the branch. Multiplied out so the field always outranks how
     well the word sat inside it. */
-const FIELD_WEIGHT = { title: 3, projectTitle: 2, branch: 1 } as const;
+const FIELD_WEIGHT = { title: 3, projectTitle: 2, branch: 1, pullRequest: 1 } as const;
 const FIELD_WEIGHT_STEP = 10;
 
 /** How well one word sits inside one field. */
@@ -107,12 +110,21 @@ function scoreInField(normalizedField: string, word: string): number | null {
  */
 function weighFields(fields: ThreadSearchFields): ReadonlyArray<readonly [string, number]> {
   const weighed: Array<readonly [string, number]> = [];
-  for (const name of ["title", "projectTitle", "branch"] as const) {
-    const value = fields[name];
-    if (value == null) continue;
+  const weigh = (value: string | null | undefined, weight: number) => {
+    if (value == null) return;
     const normalized = normalizeThreadSearchText(value);
-    if (normalized.length === 0) continue;
-    weighed.push([normalized, FIELD_WEIGHT[name] * FIELD_WEIGHT_STEP] as const);
+    if (normalized.length === 0) return;
+    weighed.push([normalized, weight] as const);
+  };
+
+  for (const name of ["title", "projectTitle", "branch"] as const) {
+    weigh(fields[name], FIELD_WEIGHT[name] * FIELD_WEIGHT_STEP);
+  }
+  // Each pull request term is its own field rather than one joined string, so
+  // "#41 sidebar" has to find the number in the pull request and the word in
+  // the title separately instead of matching a seam between two terms.
+  for (const term of fields.pullRequestTerms ?? []) {
+    weigh(term, FIELD_WEIGHT.pullRequest * FIELD_WEIGHT_STEP);
   }
   return weighed;
 }

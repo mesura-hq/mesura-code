@@ -1,30 +1,6 @@
 {
   "$comment": "Generated from SymmetriaDictationReceipt by scripts/emit-json-schema.ts. Do not hand-edit.",
   "$defs": {
-    "Objects_": {
-      "additionalProperties": true,
-      "properties": {
-        "major": {
-          "enum": [
-            1
-          ],
-          "type": "number"
-        },
-        "minor": {
-          "allOf": [
-            {
-              "minimum": 0
-            }
-          ],
-          "type": "integer"
-        }
-      },
-      "required": [
-        "major",
-        "minor"
-      ],
-      "type": "object"
-    },
     "SymmetriaDictationConfirmationPendingReceipt": {
       "additionalProperties": true,
       "properties": {
@@ -45,21 +21,39 @@
           "type": "string"
         },
         "protocolVersion": {
-          "$ref": "#/$defs/Objects_"
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "enum": [
+                1
+              ],
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
         },
         "sessionId": {
-          "allOf": [
-            {
-              "minLength": 1
-            },
-            {
-              "pattern": "\\S"
-            }
-          ],
+          "minLength": 1,
+          "pattern": "\\S",
           "type": "string"
         },
         "target": {
-          "$ref": "#/$defs/Union_"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SymmetriaDictationThreadTarget"
+            },
+            {
+              "$ref": "#/$defs/SymmetriaDictationDraftTarget"
+            }
+          ]
         }
       },
       "required": [
@@ -92,21 +86,39 @@
           "type": "string"
         },
         "protocolVersion": {
-          "$ref": "#/$defs/Objects_"
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "enum": [
+                1
+              ],
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
         },
         "sessionId": {
-          "allOf": [
-            {
-              "minLength": 1
-            },
-            {
-              "pattern": "\\S"
-            }
-          ],
+          "minLength": 1,
+          "pattern": "\\S",
           "type": "string"
         },
         "target": {
-          "$ref": "#/$defs/Union_"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SymmetriaDictationThreadTarget"
+            },
+            {
+              "$ref": "#/$defs/SymmetriaDictationDraftTarget"
+            }
+          ]
         }
       },
       "required": [
@@ -123,14 +135,8 @@
       "additionalProperties": true,
       "properties": {
         "draftId": {
-          "allOf": [
-            {
-              "minLength": 1
-            },
-            {
-              "pattern": "\\S"
-            }
-          ],
+          "minLength": 1,
+          "pattern": "\\S",
           "type": "string"
         },
         "futureThreadRef": {
@@ -177,14 +183,8 @@
         "detail": {
           "anyOf": [
             {
-              "allOf": [
-                {
-                  "minLength": 1
-                },
-                {
-                  "pattern": "\\S"
-                }
-              ],
+              "minLength": 1,
+              "pattern": "\\S",
               "type": "string"
             },
             {
@@ -199,21 +199,39 @@
           "type": "string"
         },
         "protocolVersion": {
-          "$ref": "#/$defs/Objects_"
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "enum": [
+                1
+              ],
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
         },
         "sessionId": {
-          "allOf": [
-            {
-              "minLength": 1
-            },
-            {
-              "pattern": "\\S"
-            }
-          ],
+          "minLength": 1,
+          "pattern": "\\S",
           "type": "string"
         },
         "target": {
-          "$ref": "#/$defs/Union_"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SymmetriaDictationThreadTarget"
+            },
+            {
+              "$ref": "#/$defs/SymmetriaDictationDraftTarget"
+            }
+          ]
         }
       },
       "required": [
@@ -250,11 +268,7 @@
           "type": "string"
         },
         "draftVersion": {
-          "allOf": [
-            {
-              "minimum": 0
-            }
-          ],
+          "minimum": 0,
           "type": "integer"
         },
         "outcome": {
@@ -264,21 +278,39 @@
           "type": "string"
         },
         "protocolVersion": {
-          "$ref": "#/$defs/Objects_"
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "enum": [
+                1
+              ],
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
         },
         "sessionId": {
-          "allOf": [
-            {
-              "minLength": 1
-            },
-            {
-              "pattern": "\\S"
-            }
-          ],
+          "minLength": 1,
+          "pattern": "\\S",
           "type": "string"
         },
         "target": {
-          "$ref": "#/$defs/Union_"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SymmetriaDictationThreadTarget"
+            },
+            {
+              "$ref": "#/$defs/SymmetriaDictationDraftTarget"
+            }
+          ]
         }
       },
       "required": [
@@ -317,14 +349,8 @@
         "detail": {
           "anyOf": [
             {
-              "allOf": [
-                {
-                  "minLength": 1
-                },
-                {
-                  "pattern": "\\S"
-                }
-              ],
+              "minLength": 1,
+              "pattern": "\\S",
               "type": "string"
             },
             {
@@ -339,21 +365,39 @@
           "type": "string"
         },
         "protocolVersion": {
-          "$ref": "#/$defs/Objects_"
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "enum": [
+                1
+              ],
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
         },
         "sessionId": {
-          "allOf": [
-            {
-              "minLength": 1
-            },
-            {
-              "pattern": "\\S"
-            }
-          ],
+          "minLength": 1,
+          "pattern": "\\S",
           "type": "string"
         },
         "target": {
-          "$ref": "#/$defs/Union_"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SymmetriaDictationThreadTarget"
+            },
+            {
+              "$ref": "#/$defs/SymmetriaDictationDraftTarget"
+            }
+          ]
         }
       },
       "required": [
@@ -414,21 +458,39 @@
           "type": "string"
         },
         "protocolVersion": {
-          "$ref": "#/$defs/Objects_"
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "enum": [
+                1
+              ],
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
         },
         "sessionId": {
-          "allOf": [
-            {
-              "minLength": 1
-            },
-            {
-              "pattern": "\\S"
-            }
-          ],
+          "minLength": 1,
+          "pattern": "\\S",
           "type": "string"
         },
         "target": {
-          "$ref": "#/$defs/Union_"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SymmetriaDictationThreadTarget"
+            },
+            {
+              "$ref": "#/$defs/SymmetriaDictationDraftTarget"
+            }
+          ]
         },
         "turnId": {
           "type": "string"
@@ -461,16 +523,6 @@
         "threadId"
       ],
       "type": "object"
-    },
-    "Union_": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/SymmetriaDictationThreadTarget"
-        },
-        {
-          "$ref": "#/$defs/SymmetriaDictationDraftTarget"
-        }
-      ]
     }
   },
   "$id": "dictationReceipt.schema.json",

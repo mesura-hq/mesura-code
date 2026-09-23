@@ -99,22 +99,18 @@ describe("SymmetriaProjectSummary", () => {
     // a consumer's pinned `$defs` pointer comes to mean a different shape.
     const definitions = definitionsOf(documentFor("streamItem.schema.json"));
     expect(Object.keys(definitions)).toContain("SymmetriaProjectSummary");
-    // Exactly ONE definition still carries a positional name, and pinning the
-    // count is what makes this assertion worth having.
+    // NO definition carries a positional name any more, and pinning the count
+    // is what makes this assertion worth having.
     //
-    // `Objects_` is `SymmetriaProtocolVersion`, which `version.ts` leaves
-    // un-annotated deliberately — its WORKAROUND comment records that
-    // annotating a root makes `toJsonSchemaDocument` emit that root's own
-    // document as a bare `$ref`, which an approved test elsewhere reads
-    // through. It is the reason positional naming is a live hazard here rather
-    // than a theoretical one: a SECOND un-annotated struct would make the pair
-    // `Objects_` and `Objects_1`, numbered by the order Effect met them, so
-    // inserting a third would silently repoint a consumer's pinned `$defs`
-    // pointer at a different shape. Asserting zero would fail today; asserting
-    // one fails the moment that becomes possible.
-    expect(Object.keys(definitions).filter((key) => key.startsWith("Objects_"))).toEqual([
-      "Objects_",
-    ]);
+    // It used to be exactly one: `Objects_`, which was `SymmetriaProtocolVersion`
+    // left un-annotated deliberately (see the WORKAROUND in version.ts — an
+    // annotated root made `toJsonSchemaDocument` emit that root's own document
+    // as a bare `$ref`). Effect 4.0.0-rc.112 stopped emitting it into `$defs`
+    // at all, so zero is the truth now. The hazard the assertion guards is
+    // unchanged: a positional name is numbered by the order Effect met the
+    // struct, so inserting one silently repoints a consumer's pinned `$defs`
+    // pointer at a different shape.
+    expect(Object.keys(definitions).filter((key) => key.startsWith("Objects_"))).toEqual([]);
   });
 
   it("refuses project configuration on the wire", () => {

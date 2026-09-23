@@ -18,8 +18,8 @@ const personalTeamBundleIdentifier = repoEnv.T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID?
 const IOS_BUNDLE_IDENTIFIER_PATTERN = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
 
 const fromRepoRoot = (relativePath: string) => `../../${relativePath}`;
-// Universal exports already contain their own rounded-square silhouette. Using one as an adaptive
-// foreground makes Android draw an icon shape inside the launcher's mask.
+// Android layers are rendered by scripts/export-android-icons.ts from the Icon Composer sources.
+// The wordmark sits inside the adaptive safe zone; the variant artwork is a full-bleed background.
 const androidAdaptiveForeground = "./assets/android-icon-foreground.png";
 
 if (
@@ -44,6 +44,13 @@ const DEVELOPMENT_ASSETS = {
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
   androidAdaptiveForeground: fromRepoRoot(BRAND_ASSET_PATHS.developmentUniversalIconPng),
   androidAdaptiveBackgroundColor: "#00639B",
+  // WORKAROUND: these two are upstream's artwork, where every other icon on this
+  // channel comes from BRAND_ASSET_PATHS. They are set anyway because the nightly
+  // and production channels declare the same keys and the shape is shared, so
+  // leaving them off this one does not typecheck. Point them at the fork's own
+  // export once it emits an adaptive background and a splash icon.
+  androidAdaptiveBackgroundImage: "./assets/android-icon-background-dev.png",
+  androidSplashIcon: "./assets/android-splash-icon-dev.png",
   androidMonochromeIcon: "./assets/android-icon-mark.png",
   androidNotificationIcon: "./assets/android-notification-icon.png",
   androidNotificationColor: "#00639B",
@@ -55,6 +62,8 @@ const PREVIEW_ASSETS = {
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIosIconPng),
   androidAdaptiveForeground: fromRepoRoot(BRAND_ASSET_PATHS.nightlyLinuxIconPng),
   androidAdaptiveBackgroundColor: "#111533",
+  androidAdaptiveBackgroundImage: "./assets/android-icon-background-nightly.png",
+  androidSplashIcon: "./assets/android-splash-icon-nightly.png",
   androidMonochromeIcon: "./assets/android-icon-mark.png",
   androidNotificationIcon: "./assets/android-notification-icon.png",
   androidNotificationColor: "#7565C7",
@@ -66,6 +75,8 @@ const RELEASE_ASSETS = {
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIosIconPng),
   androidAdaptiveForeground: fromRepoRoot(BRAND_ASSET_PATHS.productionUniversalIconPng),
   androidAdaptiveBackgroundColor: "#000000",
+  androidAdaptiveBackgroundImage: undefined,
+  androidSplashIcon: "./assets/android-splash-icon-prod.png",
   androidMonochromeIcon: "./assets/android-icon-mark.png",
   androidNotificationIcon: "./assets/android-notification-icon.png",
   androidNotificationColor: "#FFFFFF",
@@ -131,6 +142,45 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
     frequentUpdates: true,
     widgets: [
       {
+        name: "SubscriptionUsage",
+        displayName: "Subscription usage",
+        description: "Subscription quotas from your connected T3 Code environments.",
+        configuration: {
+          title: "Subscription usage",
+          description:
+            "Both shows Session and Weekly when available. The Lock Screen shows the tightest selected limit.",
+          parameters: {
+            codexPeriod: {
+              title: "Codex limits",
+              type: "enum",
+              default: "auto",
+              values: [
+                { name: "Both", value: "auto" },
+                { name: "Session", value: "session" },
+                { name: "Weekly", value: "weekly" },
+              ],
+            },
+            claudePeriod: {
+              title: "Claude limits",
+              type: "enum",
+              default: "auto",
+              values: [
+                { name: "Both", value: "auto" },
+                { name: "Session", value: "session" },
+                { name: "Weekly", value: "weekly" },
+              ],
+            },
+          },
+        },
+        supportedFamilies: [
+          "systemSmall",
+          "systemMedium",
+          "systemLarge",
+          "systemExtraLarge",
+          "accessoryRectangular",
+        ],
+      },
+      {
         name: "AgentActivity",
         displayName: "Agent Activity",
         description: "Shows the current state of active Mesura Code agents.",
@@ -175,7 +225,7 @@ const config: ExpoConfig = {
   slug: "t3-code",
   platforms: ["ios", "android"],
   scheme: variant.scheme,
-  version: "1.0.4",
+  version: "1.2.0",
   runtimeVersion: {
     // Development manifests resolve on every launch, so avoid fingerprint's
     // expensive native-project calculation there. Preview and production stay
@@ -186,7 +236,7 @@ const config: ExpoConfig = {
   icon: variant.assets.appIcon,
   userInterfaceStyle: "automatic",
   updates: {
-    enabled: true,
+    enabled: repoEnv.T3CODE_MOBILE_UPDATES_ENABLED !== "0",
     url: "https://u.expo.dev/d763fcb8-d37c-41ea-a773-b54a0ab4a454",
     checkAutomatically: "ON_LOAD",
     fallbackToCacheTimeout: 0,
@@ -206,6 +256,9 @@ const config: ExpoConfig = {
       `applinks:${variant.relyingParty}`,
       `webcredentials:${variant.relyingParty}`,
     ],
+    entitlements: {
+      "keychain-access-groups": [`$(AppIdentifierPrefix)${variant.iosBundleIdentifier}`],
+    },
     infoPlist: {
       NSAppTransportSecurity: {
         NSAllowsArbitraryLoads: true,
@@ -234,8 +287,14 @@ const config: ExpoConfig = {
   android: {
     icon: variant.assets.appIcon,
     package: variant.androidPackage,
+    ...(repoEnv.T3CODE_ANDROID_GOOGLE_SERVICES_FILE
+      ? { googleServicesFile: repoEnv.T3CODE_ANDROID_GOOGLE_SERVICES_FILE }
+      : {}),
     adaptiveIcon: {
       backgroundColor: variant.assets.androidAdaptiveBackgroundColor,
+      ...(variant.assets.androidAdaptiveBackgroundImage
+        ? { backgroundImage: variant.assets.androidAdaptiveBackgroundImage }
+        : {}),
       foregroundImage: variant.assets.androidAdaptiveForeground,
       monochromeImage: variant.assets.androidMonochromeIcon,
     },
@@ -299,6 +358,9 @@ const config: ExpoConfig = {
           shortcut_icon: {
             foregroundImage: variant.assets.androidAdaptiveForeground,
             backgroundColor: variant.assets.androidAdaptiveBackgroundColor,
+            ...(variant.assets.androidAdaptiveBackgroundImage
+              ? { backgroundImage: variant.assets.androidAdaptiveBackgroundImage }
+              : {}),
           },
         },
       },
@@ -334,11 +396,24 @@ const config: ExpoConfig = {
           image: SPLASH_MARK,
           backgroundColor: "#0a0a0a",
         },
+        android: {
+          // Android 12+ masks the splash icon to a circle over the central two thirds of
+          // its 288dp canvas, so the iOS export's corners get cut. A full-canvas image of
+          // the composed adaptive layers puts the wordmark in the same frame the launcher
+          // icon uses.
+          image: variant.assets.androidSplashIcon,
+          imageWidth: 288,
+          dark: { image: variant.assets.androidSplashIcon },
+        },
       },
     ],
     [
       "expo-build-properties",
       {
+        android: {
+          // Keep the supported floor explicit and covered by native notification tests.
+          minSdkVersion: 24,
+        },
         ios: {
           deploymentTarget: "18.0",
           // AppCheckCore 11.3+ includes Swift and needs module maps for these Objective-C dependencies.

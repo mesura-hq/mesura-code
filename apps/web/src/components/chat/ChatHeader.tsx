@@ -6,6 +6,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -31,6 +32,7 @@ import {
 } from "../ProjectScriptsControl";
 import { type RemoteOpenMode } from "../../remoteOpen";
 import { useThreadActionMenu } from "~/hooks/useThreadActionMenu";
+import { readLocalApi } from "~/localApi";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { ProjectFavicon } from "../ProjectFavicon";
@@ -48,9 +50,7 @@ interface ChatHeaderProps {
   activeThreadTitle: string;
   /** Drafts have no server thread yet, so the title carries no action menu. */
   isServerThread: boolean;
-  activeProjectName: string | undefined;
-  activeProjectCwd: string | null;
-  activeProjectFaviconPath: string | null;
+  activeProject: EnvironmentProject | null;
   openInCwd: string | null;
   activeProjectScripts: ReadonlyArray<ProjectScript> | undefined;
   preferredScriptId: string | null;
@@ -60,6 +60,7 @@ interface ChatHeaderProps {
   gitCwd: string | null;
   readonly onOpenPullRequest?: ((number: number) => void) | undefined;
   onNewThreadInProject: () => void;
+  onOpenProjectSettings?: (() => void) | undefined;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
   onUpdateProjectScript: (
@@ -90,6 +91,8 @@ export function resolveRenameCommit(input: {
 // events (the second click dismisses it and dblclick still fires), so it
 // opens immediately.
 const TITLE_MENU_OPEN_DELAY_MS = 500;
+// Matches the @3xl/header-actions container breakpoint owned by this header.
+const HEADER_ACTIONS_EXPANDED_BREAKPOINT_REM = 48;
 
 export function shouldShowOpenInPicker(input: {
   readonly activeProjectName: string | undefined;
@@ -119,12 +122,18 @@ export const ChatHeader = memo(function ChatHeader({
   activeThreadId,
   activeThreadTitle,
   isServerThread,
-  activeProjectName,
-  activeProjectCwd,
-  activeProjectFaviconPath,
+  activeProject,
   rightPanelOpen,
   onNewThreadInProject,
+  onOpenProjectSettings,
 }: ChatHeaderProps) {
+  // v0.0.42 passes the project itself where this header used to take three
+  // fields off it. The header still reads only these three: the script, open-in
+  // and git controls it used to carry live in the composer footer now, and the
+  // props that feed them stay on the interface for the call site's sake.
+  const activeProjectName = activeProject?.title;
+  const activeProjectCwd = activeProject?.workspaceRoot ?? null;
+  const activeProjectFaviconPath = activeProject?.faviconPath ?? null;
   const activeThreadRef = useMemo(
     () => scopeThreadRef(activeThreadEnvironmentId, activeThreadId),
     [activeThreadEnvironmentId, activeThreadId],
@@ -236,11 +245,25 @@ export const ChatHeader = memo(function ChatHeader({
       // is now an empty inset, but the panel toggle floats over it and keeps
       // its own behavior, so the guard stays.
       if ((event.target as HTMLElement).closest("[data-chat-header-actions]")) return;
+      if (!isServerThread && onOpenProjectSettings === undefined) return;
       cancelPendingTitleMenu();
       event.preventDefault();
+      if (!isServerThread) {
+        const api = readLocalApi();
+        if (!api) return;
+        void api.contextMenu
+          .show([{ id: "project-settings", label: "Project settings", icon: "settings" }], {
+            x: event.clientX,
+            y: event.clientY,
+          })
+          .then((action) => {
+            if (action === "project-settings") onOpenProjectSettings?.();
+          });
+        return;
+      }
       openMenu({ x: event.clientX, y: event.clientY });
     },
-    [cancelPendingTitleMenu, isServerThread, openMenu, renamingTitle],
+    [cancelPendingTitleMenu, isServerThread, onOpenProjectSettings, openMenu, renamingTitle],
   );
   const handleRenameKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLInputElement>) => {
@@ -271,7 +294,7 @@ export const ChatHeader = memo(function ChatHeader({
         {/* The project always leads the header: knowing which project a
             thread lives in is priority zero, and the thread title alone
             doesn't answer it. */}
-        {activeProjectName ? (
+        {activeProject ? (
           <>
             <WorkspaceBreadcrumbItem className="shrink">
               <Tooltip>
@@ -285,12 +308,7 @@ export const ChatHeader = memo(function ChatHeader({
                     />
                   }
                 >
-                  <ProjectFavicon
-                    environmentId={activeThreadEnvironmentId}
-                    cwd={activeProjectCwd ?? ""}
-                    faviconPath={activeProjectFaviconPath}
-                    className="size-3.5"
-                  />
+                  <ProjectFavicon project={activeProject} className="size-3.5" />
                   <span className="max-w-40 truncate">{activeProjectName}</span>
                 </TooltipTrigger>
                 <TooltipPopup side="top">New thread in {activeProjectName}</TooltipPopup>

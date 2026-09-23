@@ -4,7 +4,7 @@ import { AsyncResult } from "effect/unstable/reactivity";
 import { useEffect, useRef } from "react";
 
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
-import { resolveMobileThreadSortOrder } from "../../state/thread-order";
+import { resolveMobileThreadSortOrder } from "../../state/thread-sort-order";
 
 /**
  * Keeps the home list's thread order on the device.

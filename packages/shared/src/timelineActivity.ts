@@ -126,6 +126,9 @@ export function contextCompactionActivityDetailFromHistory(
     return fallbackDetail;
   }
 
+  // `.sort()`, not `.toSorted()`: this runs on Hermes, which has no ES2023
+  // change-array-by-copy methods, and `.filter()` above already returned a
+  // fresh array so sorting in place mutates nothing the caller owns.
   const contextSnapshots = activities
     .filter(
       (candidate) =>
@@ -134,7 +137,7 @@ export function contextCompactionActivityDetailFromHistory(
           ? candidate.sequence <= activity.sequence
           : candidate.createdAt <= activity.createdAt),
     )
-    .toSorted((left, right) =>
+    .sort((left, right) =>
       left.sequence !== undefined && right.sequence !== undefined
         ? left.sequence - right.sequence
         : left.createdAt.localeCompare(right.createdAt),

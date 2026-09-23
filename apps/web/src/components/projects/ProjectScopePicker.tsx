@@ -7,7 +7,8 @@ import { useProjectScopeStore } from "~/projectScopeStore";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 
 import { CommandPaletteContent } from "../CommandPaletteContent";
-import { findJumpTargetItem, normalizeSearchText } from "../CommandPalette.logic";
+import { findJumpTargetItem } from "../CommandPalette.logic";
+import { normalizeSearchText } from "~/lib/utils";
 import { CommandPaletteResults } from "../CommandPaletteResults";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { buildProjectScopeItems } from "./projectScopePicker.logic";
@@ -30,14 +31,7 @@ export function ProjectScopePicker(props: { readonly setOpen: (open: boolean) =>
     () =>
       buildProjectScopeItems({
         groups,
-        renderIcon: (group) => (
-          <ProjectFavicon
-            environmentId={group.environmentId}
-            cwd={group.workspaceRoot}
-            faviconPath={group.faviconPath}
-            className="size-4 shrink-0"
-          />
-        ),
+        renderIcon: (group) => <ProjectFavicon project={group} className="size-4 shrink-0" />,
         allProjectsIcon: <FolderIcon className="size-4 shrink-0 text-icon-muted" />,
         onScope: (projectScopeKey) => {
           setProjectScopeKey(projectScopeKey);

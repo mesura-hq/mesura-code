@@ -333,7 +333,7 @@ export type EditorSessionEvent = typeof EditorSessionEvent.Type;
  * different problem from a Neovim that is too old, and telling the developer
  * "the editor did not start" for both is telling them nothing.
  */
-export class EditorSessionSpawnError extends Schema.TaggedErrorClass<EditorSessionSpawnError>()(
+export class EditorSessionSpawnError extends Schema.TaggedError<EditorSessionSpawnError>()(
   "EditorSessionSpawnError",
   {
     threadId: Schema.String,
@@ -352,7 +352,7 @@ export class EditorSessionSpawnError extends Schema.TaggedErrorClass<EditorSessi
   }
 }
 
-export class EditorSessionLookupError extends Schema.TaggedErrorClass<EditorSessionLookupError>()(
+export class EditorSessionLookupError extends Schema.TaggedError<EditorSessionLookupError>()(
   "EditorSessionLookupError",
   {
     threadId: Schema.String,
@@ -363,7 +363,7 @@ export class EditorSessionLookupError extends Schema.TaggedErrorClass<EditorSess
   }
 }
 
-export class EditorSessionRpcError extends Schema.TaggedErrorClass<EditorSessionRpcError>()(
+export class EditorSessionRpcError extends Schema.TaggedError<EditorSessionRpcError>()(
   "EditorSessionRpcError",
   {
     threadId: Schema.String,

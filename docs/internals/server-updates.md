@@ -1,49 +1,53 @@
-# Server Update Architecture
+# Server updates
 
-> For maintainers. Using T3 Code? See [docs/user](../user/).
+A [stable launcher](../../apps/server/src/serviceLauncher.ts) owns the runtime
+selected by systemd or launchd. It is the only runtime writer of durable service
+state. Server children request updates over inherited IPC; they never rewrite
+their service definition or select their own replacement. Local service commands
+may replace the launcher and state while the service is stopped. Foreground CLI
+processes do not self-update.
 
-Remote server updates use one stable launcher selected by the platform service manager (systemd on
-Linux, launchd on macOS). Foreground CLI processes do not self-update, and a running server never
-edits its service definition or durable service state.
+Exact-version installs keep restarts independent of npm cache eviction or a moving
+release tag. Installation and preflight happen in staging before publishing an
+immutable runtime. Preflight checks the launcher protocol because a target that
+needs new rollback guarantees cannot safely run under an older launcher. Upgrading
+that launcher requires a local service update.
 
-## Ownership
+## Commit boundary
 
-The service files under `<baseDir>/runtime` are:
+The launcher durably records the pending update before acknowledging it, then
+stops the old child and starts the target as a trial. Service-state writes use
+same-directory replacement with file and directory fsync. Invalid state stops
+startup rather than guessing which runtime to boot.
 
-- `service-launcher.mjs`, the stable process selected by the service manager;
-- `service-state.json`, the launcher's durable selection state;
-- `versions/<version>`, immutable exact-version npm installs.
+The trial must finish migrations, acquire dependencies, bind HTTP, and park every
+long-running root at the activation gate before reporting `prepared`. The launcher
+then commits the target version durably and replies `committed`. Only then may the
+child release its gates, accept commands, and publish ready. Keep fallible startup
+acquisitions before this boundary. A listener alone does not prove the runtime is
+ready to commit.
 
-The launcher is the only runtime writer of `service-state.json`. `t3 service install` and
-`t3 service update` may replace the launcher and state while the unit is stopped. Server children
-only communicate with the launcher over their inherited IPC channel.
+A failed or timed-out trial returns to the old version. After commit, the target
+is authoritative and the service manager's ordinary restart policy applies.
 
-The state contains one active version and, at most, one update record:
+## Database rollback
 
-- `pending A → B` selects B as a retryable trial;
-- `committed A → B` selects B for ordinary restarts;
-- `rolled-back A → B` or `failed A → B` selects A;
-- invalid state fails closed so the service manager cannot guess at a runtime.
+After the old child exits, the launcher snapshots SQLite's main file, WAL, and
+shared-memory file. This makes trial migrations reversible without down
+migrations. The snapshot is made once per update and survives launcher restarts;
+replacing it during a retry could capture changes from the failed trial.
 
-Every write uses same-directory replacement plus file and directory fsync.
+Rollback stops the trial before restoring. A durable restore marker makes an
+interrupted restore finish before either version boots. Keep the snapshot until
+commit, or until both restoration and the terminal rollback state are durable.
+Attachments and other files outside SQLite are outside this rollback boundary.
 
-## Remote Update
+## Client acknowledgement
 
-1. The active server installs `t3@<target>` into a unique staging directory.
-2. The target runs `__service-preflight` and verifies that the stable launcher supports its update
-   protocol.
-3. The staging directory is renamed to its immutable version path only after preflight succeeds.
-4. The active child sends `request-update`. The launcher validates the child and target, writes
-   pending state, generates the update ID, then replies `update-accepted`.
-5. After a short response-flush grace period, the launcher stops the active child.
-6. With SQLite quiescent, the launcher snapshots the database, WAL, and shared-memory files.
-7. The launcher starts the target as a trial and gives it the pending update over IPC.
-8. The trial runs migrations, acquires dependencies, binds HTTP, starts every long-running root
-   fiber, and verifies that each root is parked at the activation gate.
-9. The trial sends `prepared`. The launcher durably commits B, deletes the snapshot, then replies
-   `committed`.
-10. The child opens the existing activation gate, accepts commands, and publishes lifecycle ready
-    with the terminal update outcome.
+An accepted update is still pending. Clients correlate the launcher's update ID
+with the ready event after reconnecting, then check the outcome and target version.
+A reconnect alone cannot distinguish successful replacement from rollback. Older
+servers without an update ID retain version-only correlation.
 
 Post-commit startup does not call service `start`, `initialize`, `connect`, `load`, or `acquire`
 operations. It only opens prepared gates and publishes prepared lifecycle state.
@@ -69,7 +73,10 @@ npx t3@<version> service update
 ```
 
 (`t3` is upstream's package name; this fork publishes nothing, so the command resolves upstream's
-server — see `PUBLISHED_SERVER_PACKAGE_NAME` in `packages/shared/src/stateHome.ts`.)
+server. v0.0.42 replaced the npm bootstrap with a release archive, and the origin it would resolve
+is upstream's release server, so the same hazard now lives on that road too — see
+`PUBLISHED_SERVER_PACKAGE_NAME` and `PUBLISHED_RELEASE_BASE_URL` in
+`packages/shared/src/stateHome.ts`.)
 
 The local command stops the unit, selects the new launcher and exact runtime, then restarts the
 service. Later releases, including releases with migrations, can use the remote trial path.
@@ -100,3 +107,10 @@ manual command; the old detached foreground respawn path no longer exists.
 - Service installation: `apps/server/src/cloud/bootService.ts`
 - Activation boundary: `apps/server/src/serverRuntimeStartup.ts` and `serverActivation.ts`
 - Client outcome correlation: `packages/client-runtime/src/state/server.ts`
+
+Desktop updates have a separate two-phase handoff because installing the app stops
+its bundled backend. Preparation returns a token while the connection is alive;
+the client commits that token only after receiving it. Otherwise backend shutdown
+could lose the only successful RPC result. The client must then observe the
+prepared version after reconnecting. If installation fails, desktop restarts the
+stopped backends and replays the failure for the same token.

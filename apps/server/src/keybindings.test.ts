@@ -15,6 +15,7 @@ import * as Keybindings from "./keybindings.ts";
 // it up but does not re-export it.
 import { migrateRetiredKeybindingDefaults } from "@t3tools/shared/keybindings";
 import { KeybindingsConfigError } from "@t3tools/contracts";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
 const KeybindingsConfigJson = Schema.fromJsonString(KeybindingsConfig);
 const encodeKeybindingsConfigJson = Schema.encodeEffect(KeybindingsConfigJson);
@@ -225,7 +226,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.equal(soleKeyFor("themeEditor.toggle"), "mod+alt+shift+t");
       assert.equal(soleKeyFor("usage.peek"), "alt+u");
       assert.equal(soleKeyFor("filePicker.toggle"), "mod+p");
-      assert.equal(soleKeyFor("projectSearch.toggle"), "mod+shift+g");
+      assert.equal(soleKeyFor("projectSearch.toggle"), "mod+alt+g");
       assert.equal(soleKeyFor("projectScope.toggle"), "mod+shift+f");
       assert.equal(soleKeyFor("sidebar.toggle"), "mod+b");
       assert.equal(soleKeyFor("rightPanel.toggle"), "mod+alt+b");
@@ -443,7 +444,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         persisted
           .filter((entry) => entry.command === "projectSearch.toggle")
           .map((entry) => entry.key),
-        ["mod+shift+g"],
+        ["mod+alt+g"],
       );
       assert.deepEqual(
         persisted
@@ -1230,31 +1231,34 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
 
-  it.effect("fails when config directory is not writable", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
-      const { dirname } = yield* Path.Path;
-      yield* writeKeybindingsConfig(keybindingsConfigPath, [
-        { key: "mod+j", command: "terminal.toggle" },
-      ]);
-      yield* fs.chmod(dirname(keybindingsConfigPath), 0o500);
+  // chmod cannot make a directory unwritable on Windows, so the write succeeds.
+  it.effect.skipIf(HostProcessPlatform.defaultValue() === "win32")(
+    "fails when config directory is not writable",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+        const { dirname } = yield* Path.Path;
+        yield* writeKeybindingsConfig(keybindingsConfigPath, [
+          { key: "mod+j", command: "terminal.toggle" },
+        ]);
+        yield* fs.chmod(dirname(keybindingsConfigPath), 0o500);
 
-      const result = yield* Effect.gen(function* () {
-        const keybindings = yield* Keybindings.Keybindings;
-        return yield* keybindings.upsertKeybindingRule({
-          key: "mod+shift+r",
-          command: "script.run-tests.run",
-        });
-      }).pipe(toDetailResult);
-      assertFailure(result, "failed to write keybindings config");
+        const result = yield* Effect.gen(function* () {
+          const keybindings = yield* Keybindings.Keybindings;
+          return yield* keybindings.upsertKeybindingRule({
+            key: "mod+shift+r",
+            command: "script.run-tests.run",
+          });
+        }).pipe(toDetailResult);
+        assertFailure(result, "failed to write keybindings config");
 
-      yield* fs.chmod(dirname(keybindingsConfigPath), 0o700);
+        yield* fs.chmod(dirname(keybindingsConfigPath), 0o700);
 
-      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
-      const persistedView = persisted.map(({ key, command }) => ({ key, command }));
-      assert.deepEqual(persistedView, [{ key: "mod+j", command: "terminal.toggle" }]);
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+        const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+        const persistedView = persisted.map(({ key, command }) => ({ key, command }));
+        assert.deepEqual(persistedView, [{ key: "mod+j", command: "terminal.toggle" }]);
+      }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
 
   it.effect("caches loaded resolved config across repeated reads", () =>
@@ -1329,32 +1333,40 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
   );
 });
 
-it("binds threadSearch.toggle to mod+shift+k outside terminal focus", () => {
+it("binds threadSearch.toggle to mod+alt+k outside terminal focus", () => {
   const rules = Keybindings.DEFAULT_KEYBINDINGS.filter(
     (rule) => rule.command === "threadSearch.toggle",
   );
   assert.strictEqual(rules.length, 1, "expected exactly one default for threadSearch.toggle");
-  assert.strictEqual(rules[0]?.key, "mod+shift+k");
+  assert.strictEqual(rules[0]?.key, "mod+alt+k");
   assert.strictEqual(rules[0]?.when, "!terminalFocus");
 });
 
 it("gives the thread search a chord no other default claims in the same context", () => {
   const clashes = Keybindings.DEFAULT_KEYBINDINGS.filter(
     (rule) =>
-      rule.key === "mod+shift+k" &&
+      rule.key === "mod+alt+k" &&
       rule.command !== "threadSearch.toggle" &&
       rule.when === "!terminalFocus",
   );
   assert.deepEqual(clashes, []);
 });
 
-it("needs no retired or added entry for threadSearch.toggle, a new command on a free chord", () => {
+// This used to assert the opposite: threadSearch.toggle shipped on a free chord,
+// so the per-command startup backfill installed it and no retirement was needed.
+// v0.0.42 gave mod+shift+k to pullRequest.copyNumber, so the chord moved and an
+// installed config now needs the rewrite to follow it. Do not restore the
+// no-entry assertion without moving the default back to a chord upstream leaves
+// alone.
+it("retires threadSearch.toggle off the chord v0.0.42 claimed", () => {
   assert.deepEqual(
     Keybindings.RETIRED_KEYBINDING_DEFAULTS.filter(
       (entry) => entry.from.command === "threadSearch.toggle",
-    ),
-    [],
+    ).map((entry) => [entry.from.key, entry.toKey]),
+    [["mod+shift+k", "mod+alt+k"]],
   );
+  // Still no ADDED entry: that mechanism is for a SECOND default on a command a
+  // config already binds, and this command has exactly one.
   assert.deepEqual(
     Keybindings.ADDED_KEYBINDING_DEFAULTS.filter(
       (entry) => entry.rule.command === "threadSearch.toggle",

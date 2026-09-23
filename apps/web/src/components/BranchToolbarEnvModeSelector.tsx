@@ -7,6 +7,7 @@ import {
   resolveLockedWorkspaceLabel,
   type EnvMode,
 } from "./BranchToolbar.logic";
+import { useComposerMenuProps } from "./chat/composerEventScope";
 import {
   Select,
   SelectGroup,
@@ -18,7 +19,7 @@ import {
 } from "./ui/select";
 import { subscribePickerAction } from "../lib/pickerActionBus";
 
-export const PREVIOUS_WORKTREE_SELECT_VALUE = "previous-worktree";
+const PREVIOUS_WORKTREE_SELECT_VALUE = "previous-worktree";
 
 interface BranchToolbarEnvModeSelectorProps {
   envModeLocked: boolean;
@@ -51,6 +52,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
       setIsOpen((open) => !open);
     });
   }, [envModeLocked]);
+  const composerFloatingLayerProps = useComposerMenuProps();
   const showPreviousWorktree = Boolean(previousWorktreeLabel && onUsePreviousWorktree);
   const envModeItems = useMemo(
     () => [
@@ -66,7 +68,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
   if (envModeLocked) {
     return (
       <span
-        className="inline-flex h-7 min-w-0 items-center gap-1 border border-transparent px-[calc(--spacing(3)-1px)] text-sm font-medium text-muted-foreground/70 sm:h-6 sm:text-xs"
+        className="inline-flex h-7 min-w-0 items-center gap-1 border border-transparent px-[calc(--spacing(2)-1px)] font-normal text-muted-foreground/70 text-xs sm:h-6"
         data-composer-context-control
       >
         {activeWorktreePath ? (
@@ -80,7 +82,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
         >
           <span
             data-composer-label-motion
-            className="block w-full min-w-0 max-w-[240px] origin-left truncate transition-[opacity,transform] duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:[transform:translateX(-0.25rem)_scaleX(0.95)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transform-none motion-reduce:transition-opacity"
+            className="block w-full min-w-0 max-w-[240px] truncate transition-opacity duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transition-none"
           >
             {resolveLockedWorkspaceLabel(activeWorktreePath)}
           </span>
@@ -107,8 +109,9 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
       <SelectTrigger
         variant="ghost"
         size="xs"
-        className="min-w-0 shrink font-medium"
+        className="min-w-0 shrink font-normal text-xs!"
         aria-label="Workspace"
+        data-composer-shortcut="composer.workspace"
         data-composer-context-control
       >
         {effectiveEnvMode === "worktree" ? (
@@ -124,13 +127,13 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
         >
           <span
             data-composer-label-motion
-            className="block w-full min-w-0 max-w-[240px] origin-left truncate transition-[opacity,transform] duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:[transform:translateX(-0.25rem)_scaleX(0.95)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transform-none motion-reduce:transition-opacity"
+            className="block w-full min-w-0 max-w-[240px] truncate transition-opacity duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transition-none"
           >
             <SelectValue />
           </span>
         </span>
       </SelectTrigger>
-      <SelectPopup>
+      <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
         <SelectGroup>
           <SelectGroupLabel>Workspace</SelectGroupLabel>
           <SelectItem value="local">

@@ -2,7 +2,8 @@ diff --git a/package.json b/package.json
 index 5e4ea31..8f1fb0c 100644
 --- a/package.json
 +++ b/package.json
-@@ -124,5 +124,6 @@
+@@ -123,6 +123,7 @@
+   "types": "./lib/index.d.ts",
    "exports": {
      ".": {
 +      "types": "./lib/index.d.ts",

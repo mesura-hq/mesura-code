@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   threadSearchMatchKey,
@@ -45,6 +46,12 @@ export function useThreadCommandItems(input?: {
   readonly contentMatchByKey?: ReadonlyMap<string, EnvironmentThreadSearchMatch>;
   /** What the snippet highlights, which is the word the server searched for. */
   readonly contentQuery?: string;
+  /**
+   * How each environment is named under the thread's project, for callers that
+   * show threads from more than one. Omit it and the row names no environment,
+   * which is what a single-environment picker wants.
+   */
+  readonly environmentLabelById?: ReadonlyMap<EnvironmentId, string>;
 }): CommandPaletteActionItem[] {
   const navigate = useNavigate();
   const projects = useProjects();
@@ -57,13 +64,12 @@ export function useThreadCommandItems(input?: {
   const activeThreadId = input?.activeThreadId;
   const contentMatchByKey = input?.contentMatchByKey;
   const contentQuery = input?.contentQuery ?? "";
+  const environmentLabelById = input?.environmentLabelById;
 
-  const projectCwdById = useMemo(
-    () => new Map(projects.map((project) => [project.id, project.workspaceRoot] as const)),
-    [projects],
-  );
-  const projectFaviconPathById = useMemo(
-    () => new Map(projects.map((project) => [project.id, project.faviconPath ?? null] as const)),
+  // Keyed by environment as well as project id: two environments can both hold
+  // a project of the same id, and the favicon is the project's own.
+  const projectByKey = useMemo(
+    () => new Map(projects.map((project) => [`${project.environmentId}:${project.id}`, project])),
     [projects],
   );
   const projectTitleById = useMemo(
@@ -102,10 +108,13 @@ export function useThreadCommandItems(input?: {
             ) ?? null;
           return (
             <ThreadCommandSubtitle
-              environmentId={thread.environmentId}
-              projectCwd={projectCwdById.get(thread.projectId) ?? null}
-              projectFaviconPath={projectFaviconPathById.get(thread.projectId) ?? null}
+              project={projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null}
               projectTitle={projectTitle ?? null}
+              environmentLabel={
+                environmentLabelById
+                  ? (environmentLabelById.get(thread.environmentId) ?? "Remote")
+                  : null
+              }
               branch={thread.branch}
               worktreePath={thread.worktreePath}
               isCurrent={thread.id === activeThreadId}
@@ -139,9 +148,9 @@ export function useThreadCommandItems(input?: {
       clientSettings.sidebarThreadSortOrder,
       contentMatchByKey,
       contentQuery,
+      environmentLabelById,
       navigate,
-      projectCwdById,
-      projectFaviconPathById,
+      projectByKey,
       projectTitleById,
       providerEntryByEnvironmentAndInstanceId,
       threads,

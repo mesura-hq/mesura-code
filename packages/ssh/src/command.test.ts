@@ -14,7 +14,6 @@ import {
   baseSshArgs,
   getLastNonEmptyOutputLine,
   parseSshResolveOutput,
-  resolveRemoteT3CliPackageSpec,
   runSshCommand,
 } from "./command.ts";
 import { SshCommandError } from "./errors.ts";
@@ -96,30 +95,6 @@ describe("ssh command", () => {
         ),
         ["-o", "BatchMode=no", "-o", "ConnectTimeout=10", "-p", "2222"],
       );
-    }),
-  );
-
-  // Regression guard. This resolver used to return `t3@<version>` on every
-  // branch — upstream's package, not Mesura's. The desktop passed that to the
-  // SSH launcher, which `npx`-installed it on any host with no server yet, so
-  // the desktop ended up talking to a different product. Verified live: the
-  // first launch against a fresh box put upstream's t3 in the npx cache.
-  //
-  // While Mesura Code publishes nothing there is no channel to resolve, so
-  // every branch answers null. Do not restore a literal package name here;
-  // give PUBLISHED_SERVER_PACKAGE_NAME a name Mesura owns instead.
-  it.effect("resolves no package spec while Mesura Code publishes none", () =>
-    Effect.sync(() => {
-      const channels = [
-        { appVersion: "0.0.17", updateChannel: "latest" },
-        { appVersion: "0.0.17-nightly.20260415.44", updateChannel: "nightly" },
-        { appVersion: "0.0.0-dev", updateChannel: "nightly", isDevelopment: true },
-        { appVersion: "0.0.0-dev", updateChannel: "latest", isDevelopment: true },
-      ] as const;
-
-      for (const channel of channels) {
-        assert.isNull(resolveRemoteT3CliPackageSpec(channel));
-      }
     }),
   );
 

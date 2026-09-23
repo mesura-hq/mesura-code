@@ -380,7 +380,6 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
     }
     // `state.sequence` is the dependency that matters: the state can be
     // identical to the last one and still be a new event.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, editor, model, relativePath, state.sequence]);
 
   // The window Monaco is showing, told to Neovim.
@@ -599,7 +598,6 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
     }
     hadSelectionRef.current = true;
     editor.setSelections(selectionsForVisual(visual, model));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, editor, model, relativePath, state.relativePath, state.visual]);
 
   // The mouse is the one place the client tells Neovim where the caret is.

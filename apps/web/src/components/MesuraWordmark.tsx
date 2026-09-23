@@ -14,11 +14,11 @@
 //   measured ink box, `70 118 874 126`. In the original the glyphs fill only 37%
 //   of the canvas height, so a height class would have set the padding rather
 //   than the letters: at `h-3` the word would have rendered 4.5px tall.
-export function MesuraWordmark() {
+export function MesuraWordmark({ className = "h-3 w-auto shrink-0" }: { className?: string }) {
   return (
     <svg
       aria-label="Mesura"
-      className="h-3 w-auto shrink-0"
+      className={className}
       role="img"
       viewBox="70 118 874 126"
       xmlns="http://www.w3.org/2000/svg"

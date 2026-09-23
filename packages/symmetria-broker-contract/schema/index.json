@@ -1,5 +1,5 @@
 {
-  "checksum": "b382ab57c48889086ef9b7ecb27a886640ea94da5f497de8a8f376ce1c00fd93",
+  "checksum": "276a68ca2780f8f08741de71ad0cc4324f24cc813dabc66b2945051d0b872578",
   "contractVersion": "1.5.0",
   "schemas": [
     {
@@ -63,5 +63,5 @@
       "summary": "The narrow read projection of one agent thread."
     }
   ],
-  "sourceChecksum": "2792aa0aebdc2d256b3072fa479d90a0347bf90d80a332ad5cef504974dd61d1"
+  "sourceChecksum": "52335f890b963153694a6abbf89440f3d18c6a1f3bba46a09b8996721a42097d"
 }
