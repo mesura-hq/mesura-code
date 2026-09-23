@@ -106,12 +106,6 @@ vi.mock("@t3tools/shared/projectSettings", () => ({
     overrides: {},
   }),
 }));
-vi.mock("@t3tools/shared/threadEnvMode", () => ({
-  resolveDefaultThreadEnvMode: (input: {
-    readonly projectFile: "local" | "worktree" | null;
-    readonly globalDefault: "local" | "worktree";
-  }) => input.projectFile ?? input.globalDefault,
-}));
 vi.mock("@tanstack/react-router", () => ({
   useParams: () => null,
   useRouter: () => testState.router,
@@ -137,7 +131,16 @@ vi.mock("../lib/chatThreadActions", async (importOriginal) => ({
   resolveNewThreadModelSelectionOverride: () => null,
 }));
 vi.mock("../lib/t3ProjectFileDefaults", () => ({
-  readT3ProjectFileDefaultThreadEnvMode: () => testState.projectFileRead,
+  readRepositoryDefaults: async () => {
+    const mode = await testState.projectFileRead;
+    return {
+      defaultThreadEnvMode: { value: mode ?? undefined, source: mode ? "t3" : null },
+      defaultModelSelection: { value: undefined, source: null },
+      iconPath: { value: undefined, source: null },
+      iconCandidates: [],
+      scripts: [],
+    };
+  },
 }));
 vi.mock("../lib/utils", () => ({
   newDraftId: () => "draft-delayed",
@@ -269,7 +272,9 @@ describe.each([
         projectId: "project-remote",
       } as never;
 
-      const opened = await openThread(projectRef, { envMode: "worktree", startFromOrigin });
+      const pendingOpen = openThread(projectRef, { envMode: "worktree", startFromOrigin });
+      testState.completeProjectFileRead(null);
+      const opened = await pendingOpen;
 
       expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledWith(
         "remote-project",

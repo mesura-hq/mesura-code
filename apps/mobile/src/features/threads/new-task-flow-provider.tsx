@@ -16,17 +16,19 @@ import {
   DEFAULT_SERVER_SETTINGS,
   MessageId,
   T3_PROJECT_FILE_NAME,
+  MESURA_PROJECT_FILE_NAME,
   ThreadId,
 } from "@t3tools/contracts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
 import {
-  isDefaultThreadEnvModeSettled,
-  resolveDefaultThreadEnvMode,
-} from "@t3tools/shared/threadEnvMode";
+  parseT3ProjectFile,
+  parseMesuraProjectFile,
+  resolveRepositoryDefaults,
+} from "@t3tools/shared/t3ProjectFile";
 import * as Arr from "effect/Array";
 import { pipe } from "effect/Function";
 
+import { useEnvironmentPresentation } from "../../state/presentation";
 import { useEnvironmentServerConfig, useProjects, useThreadShells } from "../../state/entities";
 import type { TurnCommandMetadata } from "../../lib/commandMetadata";
 import type { DraftComposerAttachment } from "../../lib/composerImages";
@@ -416,56 +418,78 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       }),
     );
   }, [activeDraftKey, editingPendingTask, selectedProject]);
+  const { presentation: selectedEnvironmentPresentation } = useEnvironmentPresentation(
+    selectedProject?.environmentId ?? null,
+  );
+  const repositoryReadConnected = selectedEnvironmentPresentation?.connection.phase === "connected";
   const selectedProjectDraft = useComposerDraft(selectedProjectDraftKey);
   const prompt = selectedProjectDraft.text;
   const attachments = selectedProjectDraft.attachments;
-  // Default mode until the user picks one explicitly — same resolution web
-  // uses for new draft threads: per-project setting, then the repo's
-  // checked-in t3.json, then the server's configured default.
-  const t3ProjectFileQuery = useEnvironmentQuery(
-    selectedProject !== null && selectedProject.workspaceRoot !== ""
+  const selectedWorktreePath = selectedProjectDraft.workspaceSelection?.worktreePath ?? null;
+  const defaultsCheckout = selectedWorktreePath ?? selectedProject?.workspaceRoot;
+  const mesuraProjectFileQuery = useEnvironmentQuery(
+    selectedProject !== null && defaultsCheckout
       ? projectEnvironment.readFile({
           environmentId: selectedProject.environmentId,
-          input: { cwd: selectedProject.workspaceRoot, relativePath: T3_PROJECT_FILE_NAME },
+          input: { cwd: defaultsCheckout, relativePath: MESURA_PROJECT_FILE_NAME },
         })
       : null,
   );
-  const t3ProjectFileData = t3ProjectFileQuery.data as ProjectReadFileResult | null;
-  const t3ProjectFileDefaultMode = useMemo(() => {
-    if (t3ProjectFileData === null || t3ProjectFileData.truncated) return null;
-    return parseT3ProjectFile(t3ProjectFileData.contents)?.defaultThreadEnvMode ?? null;
-  }, [t3ProjectFileData]);
-  // Environment settings with the project's overrides applied; the
-  // aggregate's own legacy fields still count until the server folds them.
+  const t3ProjectFileQuery = useEnvironmentQuery(
+    selectedProject !== null && defaultsCheckout
+      ? projectEnvironment.readFile({
+          environmentId: selectedProject.environmentId,
+          input: { cwd: defaultsCheckout, relativePath: T3_PROJECT_FILE_NAME },
+        })
+      : null,
+  );
+  const defaultsIdentity = JSON.stringify([
+    selectedProject?.environmentId,
+    defaultsCheckout,
+    selectedProjectDraftKey,
+  ]);
+  const [refreshedDefaultsIdentity, setRefreshedDefaultsIdentity] = useState<string | null>(null);
+  const refreshMesuraDefaults = mesuraProjectFileQuery.refresh;
+  const refreshLegacyDefaults = t3ProjectFileQuery.refresh;
+  useEffect(() => {
+    refreshMesuraDefaults();
+    refreshLegacyDefaults();
+    setRefreshedDefaultsIdentity(defaultsIdentity);
+  }, [defaultsIdentity, refreshMesuraDefaults, refreshLegacyDefaults]);
+  const mesuraData = mesuraProjectFileQuery.data as ProjectReadFileResult | null;
+  const legacyData = t3ProjectFileQuery.data as ProjectReadFileResult | null;
+  const repositoryDefaults = useMemo(
+    () =>
+      resolveRepositoryDefaults(
+        mesuraData && !mesuraData.truncated ? parseMesuraProjectFile(mesuraData.contents) : null,
+        legacyData && !legacyData.truncated ? parseT3ProjectFile(legacyData.contents) : null,
+      ),
+    [mesuraData, legacyData],
+  );
   const projectSettings = useMemo(
     () =>
       resolveProjectSettings(
         selectedEnvironmentServerConfig?.settings ?? DEFAULT_SERVER_SETTINGS,
         selectedProject?.id ?? null,
         selectedProject,
+        { repositoryDefaults, providers: selectedEnvironmentServerConfig?.providers ?? [] },
       ),
-    [selectedEnvironmentServerConfig?.settings, selectedProject],
+    [selectedEnvironmentServerConfig, selectedProject, repositoryDefaults],
   );
-  const projectThreadEnvMode =
-    projectSettings.sources.defaultThreadEnvMode === "project"
-      ? projectSettings.settings.defaultThreadEnvMode
-      : undefined;
-  const defaultWorkspaceMode: WorkspaceMode = resolveDefaultThreadEnvMode({
-    projectSetting: projectThreadEnvMode,
-    projectFile: t3ProjectFileDefaultMode,
-    globalDefault: projectSettings.settings.defaultThreadEnvMode,
-  });
-  // While unsettled the resolved default is provisional. Nothing may write
-  // it into the draft during that window (the auto-branch effect does), or
-  // the frozen interim value beats the t3.json default once it loads.
-  const defaultWorkspaceModeSettled = isDefaultThreadEnvModeSettled({
-    explicitMode: selectedProjectDraft.workspaceSelection?.mode,
-    projectSetting: projectThreadEnvMode,
-    projectFilePending: t3ProjectFileQuery.isPending,
-  });
-  const workspaceMode = selectedProjectDraft.workspaceSelection?.mode ?? defaultWorkspaceMode;
+  useEffect(() => {
+    if (projectSettings.modelDefaultWarning) console.warn(projectSettings.modelDefaultWarning);
+  }, [projectSettings.modelDefaultWarning]);
+  const repositoryDefaultsPending =
+    repositoryReadConnected &&
+    (refreshedDefaultsIdentity !== defaultsIdentity ||
+      mesuraProjectFileQuery.isPending ||
+      t3ProjectFileQuery.isPending);
+  // Even a local project override is provisional until the higher-priority file settles.
+  const defaultWorkspaceModeSettled =
+    selectedProjectDraft.workspaceSelection?.mode !== undefined || !repositoryDefaultsPending;
+  const workspaceMode =
+    selectedProjectDraft.workspaceSelection?.mode ?? projectSettings.settings.defaultThreadEnvMode;
   const selectedBranchName = selectedProjectDraft.workspaceSelection?.branch ?? null;
-  const selectedWorktreePath = selectedProjectDraft.workspaceSelection?.worktreePath ?? null;
   // Keep the user's explicit choice separate from the resolved display value:
   // only the explicit flag is ever written back to the draft, so the resolved
   // value keeps tracking the server setting when the config loads late.
@@ -509,12 +533,15 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
 
   // An unsent draft keeps its explicit pick. Fresh drafts resolve the project
   // default before the last manual app-wide selection and provider default.
-  const selectedModel = resolveNewTaskModelSelection({
-    draftSelection: draftModelSelection,
-    projectDefaultSelection: projectDefaultModelSelection,
-    stickySelection: stickyModelSelection,
-    modelOptions,
-  });
+  const selectedModel =
+    repositoryDefaults.defaultModelSelection.value && !projectDefaultModelSelection
+      ? draftModelSelection
+      : resolveNewTaskModelSelection({
+          draftSelection: draftModelSelection,
+          projectDefaultSelection: projectDefaultModelSelection,
+          stickySelection: stickyModelSelection,
+          modelOptions,
+        });
   const selectedModelKey = selectedModel
     ? `${selectedModel.instanceId}:${selectedModel.model}`
     : null;
@@ -955,7 +982,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       metadata: TurnCommandMetadata,
       options?: { readonly currentCheckoutBranch?: string | null },
     ): QueuedThreadMessage | null => {
-      if (!selectedProject || !selectedProjectDraftKey) {
+      if (!selectedProject || !selectedProjectDraftKey || repositoryDefaultsPending) {
         return null;
       }
       const draft = getComposerDraftSnapshot(selectedProjectDraftKey);
@@ -1031,6 +1058,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     },
     [
       defaultRuntimeMode,
+      repositoryDefaultsPending,
       editingPendingProject,
       editingPendingTask,
       selectedEnvironmentServerConfig,

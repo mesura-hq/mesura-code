@@ -1,4 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
+// P2 portable-default guards enter through OrchestrationEngineService.dispatch.
+// They cover the persisted thread model command, not ChatView's model-picker
+// callback or ThreadSettingsSheet's native navigation/session owner wiring.
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -27,7 +30,7 @@ import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { PersistenceSqlError } from "../../persistence/Errors.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
@@ -42,6 +45,7 @@ import {
   type OrchestrationEventStoreShape,
 } from "../../persistence/Services/OrchestrationEventStore.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
+import * as T3ProjectFileLoader from "../../project/T3ProjectFileLoader.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
@@ -128,6 +132,164 @@ const hasMetricSnapshot = (
       snapshot.id === id &&
       Object.entries(attributes).every(([key, value]) => snapshot.attributes?.[key] === value),
   );
+
+describe("phase 2 portable defaults command guards", () => {
+  const projectId = ProjectId.make("p2-portable-project");
+  const threadId = ThreadId.make("p2-existing-thread");
+  const originalSelection = {
+    instanceId: ProviderInstanceId.make("codex"),
+    model: "existing-thread-model",
+    options: [{ id: "reasoningEffort", value: "high" }],
+  };
+  const projectSelection = {
+    instanceId: ProviderInstanceId.make("codex"),
+    model: "machine-project-model",
+  };
+  let system: Awaited<ReturnType<typeof createOrchestrationSystem>>;
+  let workspaceRoot: string;
+  let repositoryFile: string;
+
+  beforeEach(async () => {
+    workspaceRoot = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "p2-thread-defaults-"));
+    repositoryFile = NodePath.join(workspaceRoot, ".mesura.json");
+    system = await createOrchestrationSystem();
+    await system.run(
+      system.engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("p2-create-project"),
+        projectId,
+        title: "Portable defaults",
+        workspaceRoot,
+        defaultModelSelection: projectSelection,
+        createdAt: now(),
+      }),
+    );
+    // project.create ignores the legacy defaultModelSelection input. The
+    // explicit project action is the supported way to pin a local default.
+    await system.run(
+      system.engine.dispatch({
+        type: "project.meta.update",
+        commandId: CommandId.make("p2-pin-project-model"),
+        projectId,
+        defaultModelSelection: projectSelection,
+      }),
+    );
+    await system.run(
+      system.engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("p2-create-thread"),
+        threadId,
+        projectId,
+        title: "Existing thread",
+        modelSelection: originalSelection,
+        runtimeMode: "approval-required",
+        interactionMode: "plan",
+        branch: "existing-branch",
+        worktreePath: NodePath.join(workspaceRoot, "existing-worktree"),
+        createdAt: now(),
+      }),
+    );
+  });
+
+  afterEach(async () => {
+    await system?.dispose();
+    if (workspaceRoot) await NodeFSP.rm(workspaceRoot, { recursive: true, force: true });
+  });
+
+  const loadRepositoryDefaults = () =>
+    system.run(
+      Effect.gen(function* () {
+        const loader = yield* T3ProjectFileLoader.T3ProjectFileLoader;
+        return yield* loader.loadRepositoryDefaults(workspaceRoot);
+      }).pipe(Effect.provide(T3ProjectFileLoader.layer.pipe(Layer.provide(NodeServices.layer)))),
+    );
+
+  it("P2 GUARD persisted thread selections stay fixed after repository and project defaults change", async () => {
+    await NodeFSP.writeFile(
+      repositoryFile,
+      '{"version":1,"defaultThreadEnvMode":"local","defaultModelSelection":{"provider":"codex","model":"old-default"}}',
+    );
+    const beforeDefaults = await loadRepositoryDefaults();
+    expect(beforeDefaults.defaultModelSelection.value?.model).toBe("old-default");
+    const before = Option.getOrThrow(await system.readThread(threadId));
+
+    await NodeFSP.writeFile(
+      repositoryFile,
+      '{"version":1,"defaultThreadEnvMode":"worktree","defaultModelSelection":{"provider":"codex","model":"new-default"}}',
+    );
+    const afterDefaults = await loadRepositoryDefaults();
+    expect(afterDefaults.defaultModelSelection.value?.model).toBe("new-default");
+    expect(afterDefaults.defaultThreadEnvMode.value).toBe("worktree");
+    await system.run(
+      system.engine.dispatch({
+        type: "project.meta.update",
+        commandId: CommandId.make("p2-change-project-defaults"),
+        projectId,
+        defaultModelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "new-local-default",
+        },
+        defaultThreadEnvMode: "local",
+      }),
+    );
+
+    const after = Option.getOrThrow(await system.readThread(threadId));
+    expect(after).toEqual(before);
+    expect(after).toMatchObject({
+      modelSelection: originalSelection,
+      branch: "existing-branch",
+      worktreePath: NodePath.join(workspaceRoot, "existing-worktree"),
+    });
+    expect((await system.readModel()).projects[0]?.defaultModelSelection?.model).toBe(
+      "new-local-default",
+    );
+  });
+
+  it.each(["absent", "present"] as const)(
+    "P2 GUARD thread model command leaves the %s Mesura repository file untouched",
+    async (fileState) => {
+      // Preserve the exact bytes, including JSONC and CRLF. Re-serialization
+      // would violate the read-only contract even if the values stayed equal.
+      const originalBytes = Buffer.from(
+        '{\r\n  // Edited by the developer\r\n  "version": 1,\r\n  "defaultModelSelection": {"provider":"codex","model":"portable-model"}\r\n}\r\n',
+      );
+      if (fileState === "present") await NodeFSP.writeFile(repositoryFile, originalBytes);
+      const beforeDefaults = await loadRepositoryDefaults();
+      const beforeSequence = (await system.readModel()).snapshotSequence;
+      const selection = {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "user-chosen-model",
+      };
+
+      const receipt = await system.run(
+        system.engine.dispatch(
+          {
+            type: "thread.meta.update",
+            commandId: CommandId.make("p2-user-model-pick"),
+            threadId,
+            modelSelection: selection,
+          },
+          { origin: { surface: "mobile" } },
+        ),
+      );
+      expect(receipt.sequence).toBeGreaterThan(beforeSequence);
+      expect(Option.getOrThrow(await system.readThread(threadId))).toMatchObject({
+        modelSelection: selection,
+      });
+      expect((await system.readModel()).projects[0]?.defaultModelSelection).toEqual(
+        projectSelection,
+      );
+      expect(await loadRepositoryDefaults()).toEqual(beforeDefaults);
+      if (fileState === "present") {
+        expect(await NodeFSP.readFile(repositoryFile)).toEqual(originalBytes);
+      } else {
+        await expect(NodeFSP.stat(repositoryFile)).rejects.toMatchObject({ code: "ENOENT" });
+      }
+      const events = await system.run(Stream.runCollect(system.engine.readEvents(beforeSequence)));
+      expect(events.map((event) => event.type)).toEqual(["thread.meta-updated"]);
+    },
+  );
+});
 
 describe("OrchestrationEngine", () => {
   it.each(["running", "stopped"] as const)(

@@ -1389,6 +1389,8 @@ export interface ChatComposerProps {
   /** False until the environment's server config has arrived at least once. */
   providerCatalogKnown: boolean;
   activeProjectDefaultModelSelection: ModelSelection | null | undefined;
+  /** The repository model has no safe catalog fallback; wait for a human choice. */
+  requireExplicitModelSelection?: boolean;
   activeThreadModelSelection: ModelSelection | null | undefined;
 
   // Context window
@@ -1512,6 +1514,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     providerStatuses,
     providerCatalogKnown,
     activeProjectDefaultModelSelection,
+    requireExplicitModelSelection = false,
     activeThreadModelSelection,
     activeContextWindow,
     compactThreadUnavailable,
@@ -1849,7 +1852,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   );
   const selectedProviderByThreadId = composerDraft.activeProvider ?? null;
   const {
-    selectedProviderEntry,
+    selectedProviderEntry: resolvedProviderEntry,
     requestedDriverKind,
     lockedContinuationGroupKey,
     unavailableProviderInstanceId,
@@ -1876,6 +1879,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       providerInstanceEntries,
     ],
   );
+  const modelChoiceRequired =
+    requireExplicitModelSelection && composerDraft.modelSelectionExplicit !== true;
+  const selectedProviderEntry = modelChoiceRequired ? undefined : resolvedProviderEntry;
   const selectedInstanceId =
     selectedProviderEntry?.instanceId ?? NO_PROVIDER_MODEL_SELECTION.instanceId;
   const noProviderAvailable = selectedProviderEntry === undefined;
@@ -1884,7 +1890,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // the thread's own selection instead of swapping in the setup button and
   // back once the catalog lands.
   const providerCatalogPending = noProviderAvailable && !providerCatalogKnown;
-  const showProviderUnavailable = noProviderAvailable && !providerCatalogPending;
+  const showProviderUnavailable =
+    noProviderAvailable && !providerCatalogPending && !modelChoiceRequired;
   const providerSetupInstanceId = noProviderAvailable
     ? (unavailableProviderInstanceId ??
       (lockedProvider === null
@@ -4983,6 +4990,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         />
       ) : null}
       <ProviderModelPicker
+        {...(modelChoiceRequired ? { triggerLabel: "Choose model" } : {})}
         isComposerOwned
         disabled={providerCatalogPending}
         activeInstanceId={
