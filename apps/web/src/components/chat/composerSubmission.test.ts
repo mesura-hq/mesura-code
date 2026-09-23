@@ -255,40 +255,4 @@ describe("submitComposerDraft", () => {
     expect(onSend).toHaveBeenCalledOnce();
     expect(preventDefault).not.toHaveBeenCalled();
   });
-
-  it("dispatches pending user input answers on their separate response path", () => {
-    const answer = "x".repeat(PROVIDER_SEND_TURN_MAX_INPUT_CHARS + 1);
-    const onSend = vi.fn();
-    const preventDefault = vi.fn();
-
-    const result = submitComposerDraft({
-      prompt: answer,
-      submissionTarget: "pending-user-input",
-      event: { preventDefault },
-      onSend,
-    });
-
-    expect(result).toEqual({ validationMessage: null, didDispatch: true });
-    expect(onSend).toHaveBeenCalledOnce();
-    expect(preventDefault).not.toHaveBeenCalled();
-  });
-
-  it("does not apply citation-expanded prompt limits to pending user input answers", () => {
-    const citation = serializeAssistantCitation(assistantCitation);
-    const answer = `${"x".repeat(PROVIDER_SEND_TURN_MAX_INPUT_CHARS - citation.length)}${citation}`;
-    const onSend = vi.fn();
-
-    expect(expandAssistantCitationsForProvider(answer).length).toBeGreaterThan(
-      PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
-    );
-    const result = submitComposerDraft({
-      prompt: answer,
-      submissionTarget: "pending-user-input",
-      event: undefined,
-      onSend,
-    });
-
-    expect(result).toEqual({ validationMessage: null, didDispatch: true });
-    expect(onSend).toHaveBeenCalledOnce();
-  });
 });

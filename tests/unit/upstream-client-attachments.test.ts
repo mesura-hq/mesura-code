@@ -20,9 +20,11 @@ import { repositoryRoot } from "./contractHarness.ts";
 const read = (relativePath: string) =>
   NodeFS.readFileSync(NodePath.join(repositoryRoot, relativePath), "utf8");
 
+// Both message and question attachments use the shared validation helper.
+// Pin its implementation here; executable web tests cover the rejection.
 it("tells a user when an attachment is too large instead of failing silently", () => {
   assert.include(
-    read("apps/web/src/components/chat/ChatComposer.tsx"),
+    read("apps/web/src/components/chat/composerAttachmentFiles.ts"),
     "fileAttachmentTooLargeMessage",
     "upstream's over-size attachment message is missing, so an oversized file fails without explanation",
   );

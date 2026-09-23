@@ -24,7 +24,7 @@ type ComposerSubmitEvent = { preventDefault: () => void };
 type ComposerSubmissionInput = {
   prompt: string;
   providerInput?: string;
-  submissionTarget: "provider-turn" | "pending-user-input";
+  submissionTarget: "provider-turn";
 };
 
 export function getComposerPromptLengthValidationMessage(prompt: string): string | null {
@@ -43,9 +43,7 @@ export function getComposerPromptLengthValidationMessage(prompt: string): string
 export function getComposerSubmissionValidationMessage(
   options: ComposerSubmissionInput,
 ): string | null {
-  return options.submissionTarget === "provider-turn"
-    ? getComposerPromptLengthValidationMessage(options.providerInput ?? options.prompt)
-    : null;
+  return getComposerPromptLengthValidationMessage(options.providerInput ?? options.prompt);
 }
 
 export function submitComposerDraft(

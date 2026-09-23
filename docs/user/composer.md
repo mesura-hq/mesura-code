@@ -113,15 +113,20 @@ memory. The action is available only when the provider supports rewind.
 
 ## Answering an agent's questions
 
-On the desktop app and in the browser, the composer shows one question at a time. Choose an option,
-or type your own answer in the composer, and the button below moves you to the next question. A
-question cannot be passed over unanswered: every answer in the set is sent together.
+On web and desktop, each pending request appears as a card in the conversation. All questions stay
+visible together. Choose options and add a note below each question. The answer includes both the
+selected options and your note. Choice-only questions require a listed option.
 
-The button on the last question sends all of them. If an earlier answer is still missing, the button
-names that question instead — press it to go back and answer it.
+Use **Submit** once to send the whole request. If an answer is missing, Submit focuses that question
+and keeps every draft editable. Failed responses keep the drafts and offer **Retry**. The normal
+composer stays separate: it sends or queues a normal message, never a question answer.
 
-The mobile app lists every question of the set in one card, and its button sends them once they all
-have an answer.
+Focus a question's text field before dictating. Dictation appends to that question's draft and does
+not submit it. Use **Submit** when the complete request is ready. Files belong to their own question;
+wait for uploads to finish or retry or remove a failed upload.
+
+The mobile app currently lists every question of the set in one card, and its button sends them once
+they all have an answer. The web and desktop keyboard shortcuts do not apply to mobile.
 
 ## Prompt stash
 

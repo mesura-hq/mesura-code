@@ -1,3 +1,9 @@
+import { PROVIDER_SEND_TURN_MAX_ATTACHMENTS } from "@t3tools/contracts";
+import {
+  validateComposerAttachmentFile,
+  prepareComposerImageAttachment,
+} from "./components/chat/composerAttachmentFiles";
+import { startAttachmentUpload } from "./lib/attachmentUploadQueue";
 import type { ApprovalRequestId, EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { create } from "zustand";
 import { DraftId, useComposerDraftStore } from "./composerDraftStore";
@@ -60,4 +66,66 @@ export function clearQuestionAttachmentDraft(key: DraftId): void {
     delete next[key];
     return { counts: next };
   });
+}
+
+/** Stage question files in the same drafts and upload queue as composer attachments. */
+export async function stageQuestionAttachments(input: {
+  environmentId: EnvironmentId;
+  target: DraftId;
+  requestTargets: ReadonlyArray<DraftId>;
+  files: ReadonlyArray<File>;
+  maxFileBytes: number | null;
+  isPending: () => boolean;
+}): Promise<string | null> {
+  let error: string | null = null;
+  const accepted: Array<Extract<ReturnType<typeof validateComposerAttachmentFile>, { ok: true }>> =
+    [];
+  let reserved = countQuestionAttachments(input.requestTargets);
+  for (const file of input.files) {
+    if (reserved >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
+      error = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} files per request.`;
+      continue;
+    }
+    const validated = validateComposerAttachmentFile(file, input.maxFileBytes);
+    if (!validated.ok) {
+      error = validated.error;
+      continue;
+    }
+    accepted.push(validated);
+    reserved += 1;
+  }
+  changeQuestionAttachmentPreparation(input.target, accepted.length);
+  try {
+    for (const item of accepted) {
+      if (!input.isPending()) break;
+      const prepared =
+        item.kind === "image"
+          ? await prepareComposerImageAttachment(item.file)
+          : { ok: true as const, attachment: item.attachment };
+      if (!prepared.ok) {
+        error = prepared.error;
+        continue;
+      }
+      const attachment = prepared.attachment;
+      if (!input.isPending()) {
+        if (attachment.type === "image") URL.revokeObjectURL(attachment.previewUrl);
+        break;
+      }
+      const store = useComposerDraftStore.getState();
+      const ids =
+        attachment.type === "image"
+          ? store.addImages(input.target, [attachment])
+          : store.addFiles(input.target, [attachment], { appendReference: false });
+      if (ids.includes(attachment.id))
+        startAttachmentUpload({
+          environmentId: input.environmentId,
+          image: attachment,
+          draftTarget: input.target,
+        });
+      else if (attachment.type === "image") URL.revokeObjectURL(attachment.previewUrl);
+    }
+  } finally {
+    changeQuestionAttachmentPreparation(input.target, -accepted.length);
+  }
+  return error;
 }

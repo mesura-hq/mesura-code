@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
 /**
  * Entry point: AppRoot, with a memory router rendering the real ChatView.
- * ChatView, ChatComposer, the question panel, and primary actions remain real.
+ * ChatView, MessagesTimeline, ChatComposer, and primary actions remain real.
  * The fixture replaces environment reads, RPC commands, and unrelated chrome;
  * clicks must travel through the application's selection and submit handlers.
  */
-import { act } from "react";
+import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
   createMemoryHistory,
@@ -76,6 +76,7 @@ vi.mock("./state/entities", async (importOriginal) => {
   return {
     ...(await importOriginal<typeof import("./state/entities")>()),
     useThread: useFixtureThread,
+    readThread: () => fixture.thread,
     useThreadShell: useFixtureThread,
     useThreadRefs: () => fixture.empty,
     useProjects: () => fixture.empty,
@@ -130,9 +131,33 @@ vi.mock("./components/preview/PreviewAutomationHosts", () => ({
 }));
 vi.mock("./browser/ElectronBrowserHost", () => ({ ElectronBrowserHost: () => null }));
 vi.mock("./components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }));
-vi.mock("./components/chat/MessagesTimeline", () => ({ MessagesTimeline: () => null }));
 vi.mock("./components/chat/ChatHeader", () => ({ ChatHeader: () => null }));
 vi.mock("./components/BranchToolbar", () => ({ BranchToolbar: () => null }));
+
+// happy-dom has no layout. Keep application routing and timeline projection
+// real, and replace only the virtual list's measurement boundary.
+vi.mock("@legendapp/list/react", () => ({
+  LegendList: ({
+    data,
+    renderItem,
+    ListHeaderComponent,
+    ListFooterComponent,
+  }: {
+    data: Array<{ id: string }>;
+    renderItem: (input: { item: { id: string } }) => ReactNode;
+    ListHeaderComponent?: ReactNode;
+    ListFooterComponent?: ReactNode;
+  }) => (
+    <div>
+      {ListHeaderComponent}
+      {data.map((item) => (
+        <div key={item.id}>{renderItem({ item })}</div>
+      ))}
+      {ListFooterComponent}
+    </div>
+  ),
+}));
+import { usePendingUserInputDraftStore } from "./pendingUserInputDraftStore";
 
 import { AppRoot } from "./AppRoot";
 import ChatView from "./components/ChatView";
@@ -150,6 +175,7 @@ let root: Root | undefined;
 let container: HTMLDivElement;
 
 beforeEach(() => {
+  usePendingUserInputDraftStore.setState({ requests: {} });
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   fixture.respond.mockClear();
   fixture.commands.set(threadEnvironment.respondToUserInput, fixture.respond);
@@ -246,11 +272,9 @@ function button(text: string) {
   return match!;
 }
 
-it("AppRoot selection advances and submits the same scoped request draft", async () => {
+it("AppRoot selection submits the same scoped request draft", async () => {
   await mountApp();
   await act(async () => button("Workspace").click());
-  expect(button("Next").disabled).toBe(false);
-  await act(async () => button("Next").click());
   expect(container.textContent).toContain("When should it run?");
   await act(async () => button("Now").click());
   expect(button("Submit").disabled).toBe(false);
@@ -275,12 +299,12 @@ it("AppRoot submits a selected final question from its scoped draft", async () =
   });
 });
 
-it("AppRoot keeps an unanswered request blocked and a selected option visible", async () => {
+it("AppRoot keeps an unanswered request unsent and a selected option visible", async () => {
   await mountApp();
-  expect(button("Next").disabled).toBe(true);
+  expect(button("Submit").disabled).toBe(false);
   await act(async () => button("Workspace").click());
   expect(button("Workspace").querySelector("svg")).not.toBeNull();
-  expect(button("Next").disabled).toBe(false);
+  expect(button("Submit").disabled).toBe(false);
   expect(fixture.respond).not.toHaveBeenCalled();
 });
 
@@ -299,17 +323,27 @@ it("AppRoot keeps a visible selection and its note through submission", async ()
 });
 
 async function pasteQuestionNote(note: string) {
-  const editor = container.querySelector<HTMLElement>('[contenteditable="true"]');
+  const editor = container.querySelector<HTMLElement>(
+    '[data-question-id="scope"] textarea, [data-question-id="scope"] [contenteditable="true"]',
+  );
   expect(editor).not.toBeNull();
-  const clipboardData = new DataTransfer();
-  clipboardData.setData("text/plain", note);
   await act(async () => {
     editor!.focus();
-    editor!.dispatchEvent(
-      new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData }),
-    );
+    if (editor instanceof HTMLTextAreaElement) {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+      setter?.call(editor, note);
+      editor.dispatchEvent(new Event("input", { bubbles: true }));
+    } else {
+      const clipboardData = new DataTransfer();
+      clipboardData.setData("text/plain", note);
+      editor!.dispatchEvent(
+        new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData }),
+      );
+    }
   });
-  expect(editor!.textContent).toContain(note);
+  expect(editor instanceof HTMLTextAreaElement ? editor.value : editor!.textContent).toContain(
+    note,
+  );
 }
 
 it("AppRoot selecting an option keeps the prior note out of the normal thread draft", async () => {
@@ -368,8 +402,8 @@ it("AppRoot clears optimistic selection after a noted draft is confirmed during 
   });
   await act(async () => button("Workspace").click());
   expect(button("Workspace").querySelector("svg")).toBeNull();
-  expect(container.querySelector('[contenteditable="true"]')?.textContent).toContain(
-    "Keep this note",
-  );
+  expect(
+    container.querySelector<HTMLTextAreaElement>('[data-question-id="scope"] textarea')?.value,
+  ).toContain("Keep this note");
   expect(fixture.respond).not.toHaveBeenCalled();
 });

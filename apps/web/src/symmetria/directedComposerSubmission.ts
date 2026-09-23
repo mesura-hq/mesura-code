@@ -1,10 +1,6 @@
-import type {
-  RespondToThreadUserInputInput,
-  StartThreadTurnInput,
-} from "@t3tools/client-runtime/state/threads";
+import type { StartThreadTurnInput } from "@t3tools/client-runtime/state/threads";
 import {
   OrchestrationProposedPlanId,
-  type ApprovalRequestId,
   type CommandId,
   type EnvironmentId,
   type MessageId,
@@ -15,7 +11,6 @@ import {
   type ServerProvider,
   type ThreadId,
   type ThreadTurnStartBootstrap,
-  type UserInputQuestion,
 } from "@t3tools/contracts";
 import { runAtomCommand } from "@t3tools/client-runtime/state/runtime";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
@@ -32,12 +27,6 @@ import { environmentServerConfigsAtom } from "../state/server";
 import { findLatestProposedPlan, hasActionableProposedPlan } from "../session-logic";
 import { resolvePlanFollowUpSubmission } from "../proposedPlan";
 import {
-  buildPendingUserInputAnswers,
-  derivePendingUserInputProgress,
-  setPendingUserInputCustomAnswer,
-  type PendingUserInputDraftAnswer,
-} from "../pendingUserInput";
-import {
   formatOutgoingComposerPrompt,
   getComposerPromptLengthValidationMessage,
 } from "../components/chat/composerSubmission";
@@ -49,14 +38,6 @@ import type {
 
 export type DirectedComposerPendingAction =
   | { readonly kind: "composer" }
-  | {
-      readonly kind: "text-question";
-      readonly requestId: ApprovalRequestId;
-      readonly questionId: string;
-      readonly questions?: ReadonlyArray<UserInputQuestion>;
-      readonly draftAnswers?: Readonly<Record<string, PendingUserInputDraftAnswer>>;
-      readonly questionIndex?: number;
-    }
   | {
       readonly kind: "plan-follow-up";
       readonly planId: string;
@@ -142,19 +123,13 @@ export function consumeDirectedComposerDraft(
 
 export type DirectedComposerSubmissionResult =
   | { readonly kind: "turn-dispatched"; readonly messageId: MessageId }
-  | { readonly kind: "answer-submitted" }
   | { readonly kind: "provider-start-failed"; readonly messageId: MessageId }
-  | { readonly kind: "answer-submit-failed" }
   | { readonly kind: "refused"; readonly code: "unsupported_composer_action" };
 
 export type DirectedComposerSubmissionDependencies = {
   readonly startTurn: (input: {
     readonly environmentId: EnvironmentId;
     readonly input: StartThreadTurnInput;
-  }) => Promise<boolean>;
-  readonly answerQuestion: (input: {
-    readonly environmentId: EnvironmentId;
-    readonly input: RespondToThreadUserInputInput;
   }) => Promise<boolean>;
 };
 
@@ -164,42 +139,6 @@ async function submitDirectedComposer(
 ): Promise<DirectedComposerSubmissionResult> {
   if (submission.pendingAction.kind === "button-approval") {
     return { kind: "refused", code: "unsupported_composer_action" };
-  }
-  if (submission.pendingAction.kind === "text-question") {
-    const questions = submission.pendingAction.questions;
-    const answers = questions
-      ? (() => {
-          const progress = derivePendingUserInputProgress(
-            questions,
-            submission.pendingAction.draftAnswers ?? {},
-            submission.pendingAction.questionIndex ?? 0,
-          );
-          if (progress.activeQuestion === null) return null;
-          const nextDraftAnswers = {
-            ...submission.pendingAction.draftAnswers,
-            [progress.activeQuestion.id]: setPendingUserInputCustomAnswer(
-              progress.activeQuestion,
-              submission.pendingAction.draftAnswers?.[progress.activeQuestion.id],
-              submission.prompt,
-            ),
-          };
-          return buildPendingUserInputAnswers(questions, nextDraftAnswers);
-        })()
-      : { [submission.pendingAction.questionId]: submission.prompt };
-    if (answers === null) {
-      return { kind: "refused", code: "unsupported_composer_action" };
-    }
-    const answered = await dependencies.answerQuestion({
-      environmentId: submission.environmentId,
-      input: {
-        commandId: submission.commandId,
-        threadId: submission.threadId,
-        requestId: submission.pendingAction.requestId,
-        answers,
-        createdAt: submission.createdAt,
-      },
-    });
-    return answered ? { kind: "answer-submitted" } : { kind: "answer-submit-failed" };
   }
 
   const input = buildDirectedTurnStartInput(submission);
@@ -281,7 +220,7 @@ export function createDirectedComposerExecutor(
       commands.set(submission.commandId, pending);
       void pending.then((result) => {
         if (
-          (result.kind === "provider-start-failed" || result.kind === "answer-submit-failed") &&
+          result.kind === "provider-start-failed" &&
           commands.get(submission.commandId) === pending
         ) {
           commands.delete(submission.commandId);
@@ -298,15 +237,6 @@ const productionExecutor = createDirectedComposerExecutor({
       await runAtomCommand(
         appAtomRegistry,
         threadEnvironment.startTurn,
-        { environmentId, input },
-        { reportFailure: false, reportDefect: false },
-      )
-    )._tag === "Success",
-  answerQuestion: async ({ environmentId, input }) =>
-    (
-      await runAtomCommand(
-        appAtomRegistry,
-        threadEnvironment.respondToUserInput,
         { environmentId, input },
         { reportFailure: false, reportDefect: false },
       )
@@ -355,31 +285,21 @@ export async function submitDirectedDictation(input: {
   }
 
   const pendingRequests = thread ? derivePendingRequests(thread.activities) : null;
-  const pendingUserInput = pendingRequests?.userInputs[0];
   const pendingApproval = pendingRequests?.approvals[0];
   const latestPlan = thread
     ? findLatestProposedPlan(thread.proposedPlans, thread.latestTurn?.turnId)
     : null;
   const pendingAction: DirectedComposerPendingAction =
     input.submissionContext?.pendingAction ??
-    (pendingUserInput
-      ? {
-          kind: "text-question",
-          requestId: pendingUserInput.requestId,
-          questionId: pendingUserInput.questions[0]!.id,
-          questions: pendingUserInput.questions,
-          draftAnswers: {},
-          questionIndex: 0,
-        }
-      : pendingApproval
-        ? { kind: "button-approval" }
-        : thread?.interactionMode === "plan" && hasActionableProposedPlan(latestPlan)
-          ? {
-              kind: "plan-follow-up",
-              planId: latestPlan!.id,
-              planMarkdown: latestPlan!.planMarkdown,
-            }
-          : { kind: "composer" });
+    (pendingApproval
+      ? { kind: "button-approval" }
+      : thread?.interactionMode === "plan" && hasActionableProposedPlan(latestPlan)
+        ? {
+            kind: "plan-follow-up",
+            planId: latestPlan!.id,
+            planMarkdown: latestPlan!.planMarkdown,
+          }
+        : { kind: "composer" });
 
   const sendState = deriveComposerSendState({
     prompt: input.prompt,
@@ -488,7 +408,7 @@ export async function submitDirectedDictation(input: {
       context: messageContext,
     },
   });
-  if (result.kind === "turn-dispatched" || result.kind === "answer-submitted") {
+  if (result.kind === "turn-dispatched") {
     consumeDirectedComposerDraft(input.composerTarget, input.sourceComposerTarget);
   }
   return result;

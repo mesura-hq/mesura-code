@@ -1,5 +1,5 @@
 import { memo, type PointerEventHandler } from "react";
-import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
+import { ChevronDownIcon } from "lucide-react";
 import { useEnvironmentIdentificationMode } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
 import { StageBackdropButtonArt, useSidebarStageBackdropVariant } from "../SidebarStageBackdrop";
@@ -8,46 +8,8 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Spinner } from "../ui/spinner";
 import { composerFloatingLayerProps } from "./composerEventScope";
 
-interface PendingActionState {
-  questionIndex: number;
-  isLastQuestion: boolean;
-  canAdvance: boolean;
-  isResponding: boolean;
-  isComplete: boolean;
-  /**
-   * The first question still missing an answer, or null when the set is
-   * complete. Optional so a caller that does not track it keeps the previous
-   * behaviour: the button then simply stays disabled on an incomplete set.
-   */
-  firstUnansweredQuestionIndex?: number | null | undefined;
-}
-
-/**
- * The question the control should go back to, 1-based, or null when there is
- * nowhere to go.
- *
- * Null covers three cases, and the third is the one worth naming: the
- * unanswered question IS the one on screen. Sending the user to where they
- * already are, on a control that cannot move, reads as a broken button.
- */
-function resolveUnansweredQuestionNumber(pendingAction: PendingActionState): number | null {
-  if (!pendingAction.isLastQuestion || pendingAction.isComplete) {
-    return null;
-  }
-  const unansweredIndex = pendingAction.firstUnansweredQuestionIndex;
-  if (
-    unansweredIndex === undefined ||
-    unansweredIndex === null ||
-    unansweredIndex === pendingAction.questionIndex
-  ) {
-    return null;
-  }
-  return unansweredIndex + 1;
-}
-
 interface ComposerPrimaryActionsProps {
   compact: boolean;
-  pendingAction: PendingActionState | null;
   isRunning: boolean;
   showPlanFollowUpPrompt: boolean;
   promptHasText: boolean;
@@ -58,44 +20,9 @@ interface ComposerPrimaryActionsProps {
   isPreparingWorktree: boolean;
   hasSendableContent: boolean;
   preserveComposerFocusOnPointerDown?: boolean;
-  onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
 }
-
-const formatPendingPrimaryActionLabel = (input: {
-  compact: boolean;
-  isLastQuestion: boolean;
-  isResponding: boolean;
-  questionIndex: number;
-  /**
-   * Which question the control goes back to, 1-based, when an earlier answer
-   * is missing — see `resolveUnansweredQuestionNumber`, which is the one place
-   * that decides it. `| undefined` is spelled out for
-   * `exactOptionalPropertyTypes`, since the caller forwards it straight
-   * through.
-   */
-  unansweredQuestionNumber?: number | null | undefined;
-}) => {
-  if (input.isResponding) {
-    return "Submitting...";
-  }
-  // An earlier answer is missing. One question is on screen at a time, so the
-  // button is the only place that can say WHICH one — and pressing it goes
-  // there.
-  if (input.unansweredQuestionNumber !== undefined && input.unansweredQuestionNumber !== null) {
-    return input.compact
-      ? `Question ${input.unansweredQuestionNumber}`
-      : `Answer question ${input.unansweredQuestionNumber}`;
-  }
-  if (input.compact) {
-    return input.isLastQuestion ? "Submit" : "Next";
-  }
-  if (!input.isLastQuestion) {
-    return "Next question";
-  }
-  return input.questionIndex > 0 ? "Submit answers" : "Submit answer";
-};
 
 const preventPointerFocus: PointerEventHandler<HTMLElement> = (event) => {
   event.preventDefault();
@@ -103,7 +30,6 @@ const preventPointerFocus: PointerEventHandler<HTMLElement> = (event) => {
 
 export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   compact,
-  pendingAction,
   isRunning,
   showPlanFollowUpPrompt,
   promptHasText,
@@ -114,7 +40,6 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   isPreparingWorktree,
   hasSendableContent,
   preserveComposerFocusOnPointerDown = false,
-  onPreviousPendingQuestion,
   onInterrupt,
   onImplementPlanInNewThread,
 }: ComposerPrimaryActionsProps) {
@@ -147,80 +72,6 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       </svg>
     </button>
   );
-
-  if (pendingAction) {
-    const unansweredQuestionNumber = resolveUnansweredQuestionNumber(pendingAction);
-    // The question ON SCREEN decides whether this button works, on the last
-    // question as much as on any other. It used to read the whole set there
-    // instead, which left the button disabled with nothing to tell the user
-    // which earlier answer was missing.
-    // The last clause is unreachable from `derivePendingUserInputProgress`
-    // (an incomplete set whose missing answer is not the question on screen
-    // always has somewhere to go, and one that IS the question on screen
-    // fails `canAdvance` first). It stays because the alternative is the very
-    // defect this control had: a button that looks live and does nothing.
-    const pendingPrimaryActionDisabled =
-      isEnvironmentUnavailable ||
-      pendingAction.isResponding ||
-      !pendingAction.canAdvance ||
-      (pendingAction.isLastQuestion &&
-        !pendingAction.isComplete &&
-        unansweredQuestionNumber === null);
-    return (
-      <div className={cn("flex items-center justify-end", compact ? "gap-1.5" : "gap-2")}>
-        {isRunning ? renderStopGenerationButton(true) : null}
-        {pendingAction.questionIndex > 0 ? (
-          compact ? (
-            <Button
-              size="icon-sm"
-              variant="outline"
-              className="rounded-full"
-              {...pointerFocusProps}
-              onClick={onPreviousPendingQuestion}
-              disabled={pendingAction.isResponding}
-              aria-label="Previous question"
-            >
-              <ChevronLeftIcon className="size-3.5" />
-            </Button>
-          ) : (
-            <Button
-              size="sm"
-              variant="outline"
-              className="rounded-full"
-              {...pointerFocusProps}
-              onClick={onPreviousPendingQuestion}
-              disabled={pendingAction.isResponding}
-            >
-              Previous
-            </Button>
-          )
-        ) : null}
-        <Button
-          type="submit"
-          size="sm"
-          className={cn(
-            "rounded-full bg-message-action text-message-action-foreground hover:bg-message-action-hover",
-            compact ? "px-3" : "px-4",
-          )}
-          {...pointerFocusProps}
-          title={
-            unansweredQuestionNumber === null
-              ? undefined
-              : `Question ${unansweredQuestionNumber} has no answer yet`
-          }
-          disabled={pendingPrimaryActionDisabled}
-        >
-          {formatPendingPrimaryActionLabel({
-            compact,
-            isLastQuestion: pendingAction.isLastQuestion,
-            isResponding: pendingAction.isResponding,
-            questionIndex: pendingAction.questionIndex,
-            unansweredQuestionNumber,
-          })}
-        </Button>
-      </div>
-    );
-  }
 
   if (showPlanFollowUpPrompt) {
     if (promptHasText) {

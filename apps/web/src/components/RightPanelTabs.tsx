@@ -263,7 +263,7 @@ export function surfaceShortcutActionForKey<
  * meant to land, and claiming launcher letters from it would redirect prompts
  * into whatever surface opens. The `:not` clause lets `closest` see past
  * non-editable islands (`contenteditable="false"`) to an editable host around
- * them, matching ComposerPendingUserInputPanel's typing guard.
+ * them.
  */
 export function surfaceShortcutTargetsTypingContext(
   target: { closest(selectors: string): unknown } | null,

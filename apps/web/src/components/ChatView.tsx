@@ -1,3 +1,6 @@
+import { createPendingUserInputProjection } from "../pendingUserInput";
+import type { SymmetriaDictationTarget } from "@symmetria/broker-contract";
+import { usePendingUserInputDraftStore } from "../pendingUserInputDraftStore";
 import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import type { UsageLimitSourceSnapshots } from "@t3tools/contracts";
@@ -15,7 +18,6 @@ import {
   clearQuestionAttachmentDraft,
   useQuestionAttachmentPreparation,
 } from "../questionAttachments";
-import { useAttachmentUploadStore } from "../lib/attachmentUploadQueue";
 import {
   type AssistantCitation,
   type ApprovalRequestId,
@@ -139,15 +141,7 @@ import {
   timelineContentOverflowsViewport,
   type TimelineScrollMode,
 } from "./chat/timelineScrollAnchoring";
-import {
-  buildPendingUserInputAnswers,
-  decidePendingUserInputAdvance,
-  derivePendingUserInputProgress,
-  isPendingUserInputOptionShortcut,
-  setPendingUserInputCustomAnswer,
-  togglePendingUserInputOptionSelection,
-  type PendingUserInputDraftAnswer,
-} from "../pendingUserInput";
+
 import { useUiStateStore } from "../uiStateStore";
 import {
   latestWorkspaceMutationId,
@@ -299,7 +293,7 @@ import {
 } from "../composerDraftStore";
 import { formatOutgoingComposerPrompt } from "./chat/composerSubmission";
 import { dictationCoordinator } from "../symmetria/dictationCoordinator";
-import { captureDictationTarget } from "../symmetria/dictationTarget";
+import { captureDictationTarget, dictationTargetsEqual } from "../symmetria/dictationTarget";
 import { buildDirectedTurnStartInput } from "../symmetria/directedComposerSubmission";
 import { DictationMicrophoneButton, DictationStrip } from "../symmetria/DictationStrip";
 import {
@@ -534,7 +528,6 @@ const EMPTY_QUEUED_MESSAGES: QueuedComposerMessage[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_USAGE_LIMIT_SOURCES: UsageLimitSourceSnapshots = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
-const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 // Built once. The composer forwards this into a memoized footer group, and an
 // element created inline here would take a new identity on every ChatView
 // render, re-rendering that group on every keystroke and every streaming delta.
@@ -1729,9 +1722,9 @@ export default function ChatView(props: ChatViewProps) {
   );
   const [respondingRequestIds, setRespondingRequestIds] = useState<ApprovalRequestId[]>([]);
   const userInputResponsesInFlight = useRef(new Set<string>());
-  const [respondingUserInputRequestIds, setRespondingUserInputRequestIds] = useState<
-    ApprovalRequestId[]
-  >([]);
+  const [respondingUserInputRequestKeys, setRespondingUserInputRequestKeys] = useState<string[]>(
+    [],
+  );
 
   useEffect(() => {
     setIsWorkspaceFileDragActive(false);
@@ -1743,25 +1736,9 @@ export default function ChatView(props: ChatViewProps) {
     window.addEventListener("dragend", clearWorkspaceFileDrag);
     return () => window.removeEventListener("dragend", clearWorkspaceFileDrag);
   }, [isWorkspaceFileDragActive]);
-  const [pendingUserInputAnswersByRequestId, setPendingUserInputAnswersByRequestId] = useState<
-    Record<string, Record<string, PendingUserInputDraftAnswer>>
-  >({});
-  // The same answers, held where they can be read in the task that wrote
-  // them. Dictation places its text and dispatches the send synchronously,
-  // so the advance decision cannot wait for a render — reading state there
-  // decided with the answers of the render BEFORE the dictated one, which
-  // blocked the very turn the dictation had just answered. Every write goes
-  // through `applyPendingUserInputAnswers`, so the two never disagree.
-  const pendingUserInputAnswersRef = useRef(pendingUserInputAnswersByRequestId);
-  const applyPendingUserInputAnswers = useCallback(
-    (nextAnswers: Record<string, Record<string, PendingUserInputDraftAnswer>>) => {
-      pendingUserInputAnswersRef.current = nextAnswers;
-      setPendingUserInputAnswersByRequestId(nextAnswers);
-    },
-    [],
-  );
-  const [pendingUserInputQuestionIndexByRequestId, setPendingUserInputQuestionIndexByRequestId] =
-    useState<Record<string, number>>({});
+  const [normalComposerFocusRevision, setNormalComposerFocusRevision] = useState(0);
+  const [questionDictationTarget, setQuestionDictationTarget] =
+    useState<SymmetriaDictationTarget | null>(null);
   const shouldUseRightPanelSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const isMobileViewport = useMediaQuery("max-sm");
   const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0);
@@ -2913,65 +2890,26 @@ export default function ChatView(props: ChatViewProps) {
       }),
     [agentSessionLive, threadActivities],
   );
-  const { approvals: pendingApprovals, userInputs: pendingUserInputs } = useMemo(
-    () => derivePendingRequests(threadActivities),
-    [threadActivities],
-  );
+  const projectPendingUserInputs = useMemo(createPendingUserInputProjection, []);
+  const { approvals: pendingApprovals, userInputs: pendingUserInputs } = useMemo(() => {
+    const requests = derivePendingRequests(threadActivities);
+    return { ...requests, userInputs: projectPendingUserInputs(requests.userInputs) };
+  }, [threadActivities, projectPendingUserInputs]);
   const activePendingUserInput = pendingUserInputs[0] ?? null;
-  const activePendingRequestKey = JSON.stringify([
-    environmentId,
-    activeThreadId,
-    activePendingUserInput?.requestId,
-  ]);
-  const pendingQuestionDraftKeys = useMemo(
-    () =>
-      activeThreadId
-        ? pendingUserInputs.flatMap((request) =>
-            request.questions.map((question) =>
-              questionAttachmentDraftId(
-                environmentId,
-                activeThreadId,
-                request.requestId,
-                question.id,
-              ),
-            ),
-          )
-        : [],
-    [activeThreadId, environmentId, pendingUserInputs],
-  );
-  const questionComposerDrafts = useComposerDraftStore(
-    useShallow((state) =>
-      Object.fromEntries(
-        pendingQuestionDraftKeys.map((key) => [key, state.draftsByThreadKey[key]]),
-      ),
-    ),
-  );
-  const questionUploadsBlocked = useAttachmentUploadStore(
-    useShallow((state) =>
-      Object.fromEntries(
-        pendingQuestionDraftKeys.map((key) => {
-          const draft = questionComposerDrafts[key];
-          const attachments = draft ? [...draft.images, ...draft.files] : [];
-          return [
-            key,
-            attachments.some((attachment) => {
-              const upload = state.uploadsByImageId[attachment.id];
-              return upload?.status !== "ready" || upload.environmentId !== environmentId;
-            }),
-          ];
-        }),
-      ),
-    ),
-  );
-  const questionPreparations = useQuestionAttachmentPreparation(
-    useShallow((state) =>
-      Object.fromEntries(pendingQuestionDraftKeys.map((key) => [key, state.counts[key] ?? 0])),
-    ),
-  );
   useEffect(() => {
     if (routeThreadState.status !== "live" || routeThreadState.data._tag !== "Some") return;
     const questionThread = routeThreadState.data.value;
     const { userInputs: currentRequests } = derivePendingRequests(questionThread.activities);
+    const requestIds = new Set(currentRequests.map((request) => request.requestId));
+    for (const key of Object.keys(usePendingUserInputDraftStore.getState().requests)) {
+      const [draftEnvironmentId, draftThreadId, requestId] = JSON.parse(key);
+      if (
+        draftEnvironmentId === environmentId &&
+        draftThreadId === questionThread.id &&
+        !requestIds.has(requestId)
+      )
+        usePendingUserInputDraftStore.getState().clear(key);
+    }
     const prefix = questionAttachmentDraftPrefix(environmentId, questionThread.id);
     const retained = new Set(
       currentRequests.flatMap((request) =>
@@ -2994,66 +2932,6 @@ export default function ChatView(props: ChatViewProps) {
         clearQuestionAttachmentDraft(DraftId.make(key));
     }
   }, [environmentId, routeThreadState.data, routeThreadState.status]);
-  const activePendingDraftAnswers = useMemo(() => {
-    if (!activePendingUserInput || !activeThreadId) return EMPTY_PENDING_USER_INPUT_ANSWERS;
-    return Object.fromEntries(
-      activePendingUserInput.questions.map((question) => {
-        const key = questionAttachmentDraftId(
-          environmentId,
-          activeThreadId,
-          activePendingUserInput.requestId,
-          question.id,
-        );
-        const draft = questionComposerDrafts[key];
-        const attachments = draft ? [...draft.images, ...draft.files] : [];
-        return [
-          question.id,
-          {
-            ...pendingUserInputAnswersByRequestId[activePendingRequestKey]?.[question.id],
-            attachmentCount: attachments.length,
-            attachmentsBlocked:
-              (attachments.length > 0 && !supportsQuestionAttachments) ||
-              (questionPreparations[key] ?? 0) > 0 ||
-              questionUploadsBlocked[key] === true,
-          },
-        ];
-      }),
-    );
-  }, [
-    activePendingUserInput,
-    activeThreadId,
-    environmentId,
-    questionComposerDrafts,
-    questionUploadsBlocked,
-    supportsQuestionAttachments,
-    questionPreparations,
-    pendingUserInputAnswersByRequestId,
-    activePendingRequestKey,
-  ]);
-  const activePendingQuestionIndex = activePendingUserInput
-    ? (pendingUserInputQuestionIndexByRequestId[activePendingRequestKey] ?? 0)
-    : 0;
-  const activePendingProgress = useMemo(
-    () =>
-      activePendingUserInput
-        ? derivePendingUserInputProgress(
-            activePendingUserInput.questions,
-            activePendingDraftAnswers,
-            activePendingQuestionIndex,
-          )
-        : null,
-    [activePendingDraftAnswers, activePendingQuestionIndex, activePendingUserInput],
-  );
-  const activePendingResolvedAnswers = useMemo(
-    () =>
-      activePendingUserInput
-        ? buildPendingUserInputAnswers(activePendingUserInput.questions, activePendingDraftAnswers)
-        : null,
-    [activePendingDraftAnswers, activePendingUserInput],
-  );
-  const activePendingIsResponding = activePendingUserInput
-    ? respondingUserInputRequestIds.includes(activePendingUserInput.requestId)
-    : false;
   const activeProposedPlan = useMemo(() => {
     if (!latestTurnSettled) {
       return null;
@@ -6655,11 +6533,10 @@ export default function ChatView(props: ChatViewProps) {
         !shortcutContext.terminalFocus &&
         !shortcutContext.modelPickerOpen &&
         shouldTypeToFocusComposer(event) &&
-        // The question prompt answers 1-9 with its own options, and this
-        // handler is registered on `window` in the CAPTURE phase — it runs
-        // before the panel's listener and would swallow the digit, typing it
-        // into the custom answer and clearing the option the user had picked.
-        !isPendingUserInputOptionShortcut(activePendingProgress?.activeQuestion ?? null, event.key)
+        !(
+          event.target instanceof HTMLElement &&
+          event.target.closest("[data-pending-user-input-request-id]")
+        )
       ) {
         if (composerRef.current?.insertTextAtEnd(event.key)) {
           event.preventDefault();
@@ -6898,8 +6775,7 @@ export default function ChatView(props: ChatViewProps) {
       if (command === "question.toggleCollapse") {
         event.preventDefault();
         event.stopPropagation();
-        // No-op when no question is waiting: the prompt panel is the only
-        // subscriber and it is unmounted then.
+        // Reveal the pending row. Questions remain expanded in the timeline.
         dispatchPickerAction("question");
         return;
       }
@@ -6929,7 +6805,6 @@ export default function ChatView(props: ChatViewProps) {
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
   }, [
-    activePendingProgress?.activeQuestion,
     activeProject,
     activeRightPanelSurface,
     activeProjectScripts,
@@ -7374,16 +7249,6 @@ export default function ChatView(props: ChatViewProps) {
       });
       return;
     }
-    if (activePendingProgress) {
-      // A queued message waits until the question is answered; it must not
-      // be submitted as the answer.
-      if (directAnnotation || queuedMessage) {
-        notifyDirectAnnotationAttached();
-        return;
-      }
-      onAdvanceActivePendingUserInput();
-      return;
-    }
     const sendCtx = composerRef.current?.getSendContext();
     if (!sendCtx?.providerAvailable) {
       notifyDirectAnnotationAttached();
@@ -7631,9 +7496,9 @@ export default function ChatView(props: ChatViewProps) {
     if (
       !queuedMessage &&
       !directAnnotation &&
-      phase === "running" &&
       activeThreadKey &&
-      settings.followUpBehavior === "queue"
+      ((phase === "running" && settings.followUpBehavior === "queue") ||
+        pendingUserInputs.length > 0)
     ) {
       if (composerRef.current?.validateProviderInput(promptForSend) === false) {
         return;
@@ -8302,26 +8167,15 @@ export default function ChatView(props: ChatViewProps) {
       readSubmissionContext: () => {
         const sendContext = composerRef.current?.getSendContext();
         if (!sendContext) return null;
-        const pendingAction = activePendingUserInput
-          ? {
-              kind: "text-question" as const,
-              requestId: activePendingUserInput.requestId,
-              questionId:
-                activePendingUserInput.questions[activePendingQuestionIndex]?.id ??
-                activePendingUserInput.questions[0]!.id,
-              questions: activePendingUserInput.questions,
-              draftAnswers: activePendingDraftAnswers,
-              questionIndex: activePendingQuestionIndex,
-            }
-          : activePendingApproval
-            ? { kind: "button-approval" as const }
-            : showPlanFollowUpPrompt && activeProposedPlan
-              ? {
-                  kind: "plan-follow-up" as const,
-                  planId: activeProposedPlan.id,
-                  planMarkdown: activeProposedPlan.planMarkdown,
-                }
-              : { kind: "composer" as const };
+        const pendingAction = activePendingApproval
+          ? { kind: "button-approval" as const }
+          : showPlanFollowUpPrompt && activeProposedPlan
+            ? {
+                kind: "plan-follow-up" as const,
+                planId: activeProposedPlan.id,
+                planMarkdown: activeProposedPlan.planMarkdown,
+              }
+            : { kind: "composer" as const };
         return {
           providerAvailable: sendContext.providerAvailable,
           provider: sendContext.selectedProvider,
@@ -8334,13 +8188,11 @@ export default function ChatView(props: ChatViewProps) {
     });
   }, [
     activePendingApproval,
-    activePendingDraftAnswers,
-    activePendingQuestionIndex,
-    activePendingUserInput,
     activeProject?.title,
     activeProposedPlan,
     composerRef,
     registeredDictationTarget,
+    normalComposerFocusRevision,
     showPlanFollowUpPrompt,
   ]);
 
@@ -8443,21 +8295,23 @@ export default function ChatView(props: ChatViewProps) {
 
   const onRespondToUserInput = useCallback(
     async (requestId: ApprovalRequestId, answers: Record<string, unknown>) => {
-      if (!activeThreadId || !activePendingUserInput || activePendingIsResponding) return;
+      if (!activeThreadId) return false;
+      const request = pendingUserInputs.find((entry) => entry.requestId === requestId);
+      if (!request || activeEnvironmentUnavailable) return false;
       const responseKey = JSON.stringify([environmentId, activeThreadId, requestId]);
-      if (userInputResponsesInFlight.current.has(responseKey)) return;
+      if (userInputResponsesInFlight.current.has(responseKey)) return false;
       const attachmentsByQuestionId = new Map<
         string,
         import("@t3tools/contracts").UserInputAttachments[string]
       >();
-      for (const question of activePendingUserInput.questions) {
+      for (const question of request.questions) {
         const target = questionAttachmentDraftId(
           environmentId,
           activeThreadId,
           requestId,
           question.id,
         );
-        if ((useQuestionAttachmentPreparation.getState().counts[target] ?? 0) > 0) return;
+        if ((useQuestionAttachmentPreparation.getState().counts[target] ?? 0) > 0) return false;
         const draft = useComposerDraftStore.getState().getComposerDraft(target);
         const attachments = draft ? [...draft.images, ...draft.files] : [];
         if (attachments.length === 0) continue;
@@ -8467,7 +8321,7 @@ export default function ChatView(props: ChatViewProps) {
             activeThreadId,
             "Wait for attachments to finish uploading, or remove failed uploads.",
           );
-          return;
+          return false;
         }
         attachmentsByQuestionId.set(
           question.id,
@@ -8475,35 +8329,47 @@ export default function ChatView(props: ChatViewProps) {
         );
       }
       userInputResponsesInFlight.current.add(responseKey);
-      setRespondingUserInputRequestIds((existing) =>
-        existing.includes(requestId) ? existing : [...existing, requestId],
+      setRespondingUserInputRequestKeys((existing) =>
+        existing.includes(responseKey) ? existing : [...existing, responseKey],
       );
-      const result = await respondToThreadUserInput({
-        environmentId,
-        input: {
-          threadId: activeThreadId,
-          requestId,
-          answers,
-          ...(attachmentsByQuestionId.size > 0
-            ? { attachmentsByQuestionId: Object.fromEntries(attachmentsByQuestionId) }
-            : {}),
-        },
-      });
-      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-        const error = squashAtomCommandFailure(result);
+      try {
+        const result = await respondToThreadUserInput({
+          environmentId,
+          input: {
+            threadId: activeThreadId,
+            requestId,
+            answers,
+            ...(attachmentsByQuestionId.size > 0
+              ? { attachmentsByQuestionId: Object.fromEntries(attachmentsByQuestionId) }
+              : {}),
+          },
+        });
+        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          setThreadError(
+            activeThreadId,
+            error instanceof Error ? error.message : "Failed to submit user input.",
+          );
+        }
+
+        return result._tag === "Success";
+      } catch (error) {
         setThreadError(
           activeThreadId,
           error instanceof Error ? error.message : "Failed to submit user input.",
         );
+        return false;
+      } finally {
+        userInputResponsesInFlight.current.delete(responseKey);
+        setRespondingUserInputRequestKeys((existing) =>
+          existing.filter((id) => id !== responseKey),
+        );
       }
-      userInputResponsesInFlight.current.delete(responseKey);
-      setRespondingUserInputRequestIds((existing) => existing.filter((id) => id !== requestId));
-      return result;
     },
     [
       activeThreadId,
-      activePendingUserInput,
-      activePendingIsResponding,
+      pendingUserInputs,
+      activeEnvironmentUnavailable,
       environmentId,
       respondToThreadUserInput,
       setThreadError,
@@ -8511,179 +8377,118 @@ export default function ChatView(props: ChatViewProps) {
   );
 
   // Closes an async question without messaging the agent. The server records
-  // the dismissal so every client releases the composer.
+  // the dismissal so every client removes the pending card.
   const onDismissUserInput = useCallback(
     async (requestId: ApprovalRequestId) => {
-      if (!activeThreadId) return;
+      if (!activeThreadId || activeEnvironmentUnavailable) return false;
+      const responseKey = JSON.stringify([environmentId, activeThreadId, requestId]);
 
-      setRespondingUserInputRequestIds((existing) =>
-        existing.includes(requestId) ? existing : [...existing, requestId],
+      setRespondingUserInputRequestKeys((existing) =>
+        existing.includes(responseKey) ? existing : [...existing, responseKey],
       );
-      const result = await dismissThreadUserInput({
-        environmentId,
-        input: { threadId: activeThreadId, requestId },
-      });
-      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-        const error = squashAtomCommandFailure(result);
+      if (userInputResponsesInFlight.current.has(responseKey)) return false;
+      userInputResponsesInFlight.current.add(responseKey);
+      try {
+        const result = await dismissThreadUserInput({
+          environmentId,
+          input: { threadId: activeThreadId, requestId },
+        });
+        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          setThreadError(
+            activeThreadId,
+            error instanceof Error ? error.message : "Failed to dismiss the question.",
+          );
+        }
+        return result._tag === "Success";
+      } catch (error) {
         setThreadError(
           activeThreadId,
           error instanceof Error ? error.message : "Failed to dismiss the question.",
         );
+        return false;
+      } finally {
+        userInputResponsesInFlight.current.delete(responseKey);
+        setRespondingUserInputRequestKeys((existing) =>
+          existing.filter((id) => id !== responseKey),
+        );
       }
-      setRespondingUserInputRequestIds((existing) => existing.filter((id) => id !== requestId));
-      return result;
-    },
-    [activeThreadId, dismissThreadUserInput, environmentId, setThreadError],
-  );
-
-  const setActivePendingUserInputQuestionIndex = useCallback(
-    (nextQuestionIndex: number) => {
-      if (!activePendingUserInput) {
-        return;
-      }
-      setPendingUserInputQuestionIndexByRequestId((existing) => ({
-        ...existing,
-        [activePendingRequestKey]: nextQuestionIndex,
-      }));
-    },
-    [activePendingUserInput, activePendingRequestKey],
-  );
-
-  const onSelectActivePendingUserInputOption = useCallback(
-    (questionId: string, optionValue: string) => {
-      if (!activePendingUserInput) {
-        return;
-      }
-      const question =
-        (activePendingProgress?.activeQuestion?.id === questionId
-          ? activePendingProgress.activeQuestion
-          : undefined) ?? activePendingUserInput.questions.find((entry) => entry.id === questionId);
-      if (!question) {
-        return;
-      }
-
-      // mesura: choices and notes coexist. When merging upstream e36725682b,
-      // drop carryDisplacedCustomAnswerIntoPrompt here: carrying the note into
-      // the thread draft would send it twice. The shared answer helper owns it.
-      const existing = pendingUserInputAnswersRef.current;
-      applyPendingUserInputAnswers({
-        ...existing,
-        [activePendingRequestKey]: {
-          ...existing[activePendingRequestKey],
-          [questionId]: togglePendingUserInputOptionSelection(
-            question,
-            existing[activePendingRequestKey]?.[questionId],
-            optionValue,
-          ),
-        },
-      });
     },
     [
-      activePendingProgress?.activeQuestion,
-      activePendingUserInput,
-      applyPendingUserInputAnswers,
-      activePendingRequestKey,
+      activeThreadId,
+      activeEnvironmentUnavailable,
+      dismissThreadUserInput,
+      environmentId,
+      setThreadError,
     ],
   );
 
-  const onChangeActivePendingUserInputCustomAnswer = useCallback(
-    (
-      questionId: string,
-      value: string,
-      nextCursor: number,
-      expandedCursor: number,
-      _cursorAdjacentToMention: boolean,
-    ) => {
-      if (!activePendingUserInput) {
-        return;
-      }
-      const question = activePendingUserInput.questions.find((entry) => entry.id === questionId);
-      if (!question) {
-        return;
-      }
-      promptRef.current = value;
-      const existing = pendingUserInputAnswersRef.current;
-      applyPendingUserInputAnswers({
-        ...existing,
-        [activePendingRequestKey]: {
-          ...existing[activePendingRequestKey],
-          [questionId]: setPendingUserInputCustomAnswer(
-            question,
-            existing[activePendingRequestKey]?.[questionId],
-            value,
-          ),
-        },
-      });
-      const snapshot = composerRef.current?.readSnapshot();
-      if (
-        snapshot?.value !== value ||
-        snapshot.cursor !== nextCursor ||
-        snapshot.expandedCursor !== expandedCursor
-      ) {
-        composerRef.current?.focusAt(nextCursor);
-      }
+  const onQuestionDictationTargetChange = useCallback(
+    (target: SymmetriaDictationTarget | null, previous?: SymmetriaDictationTarget) => {
+      setQuestionDictationTarget(
+        (current) =>
+          target ??
+          (previous && current && !dictationTargetsEqual(current, previous) ? current : null),
+      );
     },
-    [activePendingUserInput, activePendingRequestKey, applyPendingUserInputAnswers, composerRef],
+    [],
   );
-
-  // Every way of moving the prompt forward lands here — the primary button,
-  // the Enter key, and a dictation delivered with submit enabled — so the
-  // rules live in `decidePendingUserInputAdvance` rather than in any one of
-  // them. Enter reaches `submitComposer` without ever reading the button's
-  // disabled state, which is how an unanswered question used to get skipped.
-  const onAdvanceActivePendingUserInput = useCallback(() => {
-    if (!activePendingUserInput || !activePendingProgress || activePendingIsResponding) {
-      return;
-    }
-    // Derived here from the ref rather than taken from the render's memo:
-    // see `pendingUserInputAnswersRef`. An answer written moments ago in
-    // this same task has to count. A render-time canAdvance check can still
-    // describe the previous answer. Keep attachment status from the current
-    // projection so an attachment-only answer follows the same submit path.
-    const currentAnswers = pendingUserInputAnswersRef.current[activePendingRequestKey];
-    const draftAnswers = Object.fromEntries(
-      activePendingUserInput.questions.map((question) => [
-        question.id,
-        {
-          ...currentAnswers?.[question.id],
-          attachmentCount: activePendingDraftAnswers[question.id]?.attachmentCount ?? 0,
-          attachmentsBlocked: activePendingDraftAnswers[question.id]?.attachmentsBlocked ?? false,
-        },
-      ]),
-    );
-    const progress = derivePendingUserInputProgress(
-      activePendingUserInput.questions,
-      draftAnswers,
-      activePendingQuestionIndex,
-    );
-    const advance = decidePendingUserInputAdvance(progress);
-    if (advance.kind === "blocked") {
-      return;
-    }
-    if (advance.kind === "submit") {
-      const answers = buildPendingUserInputAnswers(activePendingUserInput.questions, draftAnswers);
-      if (answers) {
-        void onRespondToUserInput(activePendingUserInput.requestId, answers);
-      }
-      return;
-    }
-    setActivePendingUserInputQuestionIndex(advance.questionIndex);
-  }, [
-    activePendingDraftAnswers,
-    activePendingQuestionIndex,
-    activePendingRequestKey,
-    activePendingUserInput,
-    activePendingIsResponding,
-    onRespondToUserInput,
-    setActivePendingUserInputQuestionIndex,
-  ]);
-
-  const onPreviousActivePendingUserInputQuestion = useCallback(() => {
-    if (!activePendingProgress) {
-      return;
-    }
-    setActivePendingUserInputQuestionIndex(Math.max(activePendingProgress.questionIndex - 1, 0));
-  }, [activePendingProgress, setActivePendingUserInputQuestionIndex]);
+  const isQuestionResponding = useCallback(
+    (requestId: ApprovalRequestId) =>
+      userInputResponsesInFlight.current.has(
+        JSON.stringify([environmentId, activeThreadId, requestId]),
+      ),
+    [environmentId, activeThreadId],
+  );
+  const inlinePendingUserInput = useMemo(
+    () =>
+      activeThreadId && pendingUserInputs.length > 0
+        ? {
+            environmentId,
+            threadId: activeThreadId,
+            requests: pendingUserInputs,
+            supportsAttachments: supportsQuestionAttachments,
+            maxFileBytes: maxFileAttachmentBytes,
+            unavailable: activeEnvironmentUnavailable,
+            respondingRequestIds: pendingUserInputs
+              .filter((request) =>
+                respondingUserInputRequestKeys.includes(
+                  JSON.stringify([environmentId, activeThreadId, request.requestId]),
+                ),
+              )
+              .map((request) => request.requestId),
+            onRespond: onRespondToUserInput,
+            onDismiss: onDismissUserInput,
+            onDictationTargetChange: onQuestionDictationTargetChange,
+            isResponding: isQuestionResponding,
+          }
+        : null,
+    [
+      activeThreadId,
+      environmentId,
+      pendingUserInputs,
+      supportsQuestionAttachments,
+      maxFileAttachmentBytes,
+      activeEnvironmentUnavailable,
+      respondingUserInputRequestKeys,
+      onRespondToUserInput,
+      onDismissUserInput,
+      onQuestionDictationTargetChange,
+      isQuestionResponding,
+    ],
+  );
+  const activeQuestionDictationTarget =
+    questionDictationTarget?.kind === "draft" &&
+    activeThreadId &&
+    pendingUserInputs.some((request) =>
+      request.questions.some(
+        (question) =>
+          String(questionDictationTarget.draftId) ===
+          questionAttachmentDraftId(environmentId, activeThreadId, request.requestId, question.id),
+      ),
+    )
+      ? questionDictationTarget
+      : null;
 
   const onSubmitPlanFollowUp = useCallback(
     async ({
@@ -9179,7 +8984,6 @@ export default function ChatView(props: ChatViewProps) {
     clientSettingsHydrated &&
     !needsLoadBalancing &&
     !activeEnvironmentUnavailable &&
-    !activePendingProgress &&
     !feedbackUploading;
   useEffect(() => {
     if (
@@ -9638,6 +9442,7 @@ export default function ChatView(props: ChatViewProps) {
             <div className="relative flex min-h-0 flex-1 flex-col bg-background">
               {/* Messages — LegendList handles virtualization and scrolling internally */}
               <MessagesTimeline
+                pendingUserInput={paintOnlyDisplayedTimeline ? null : inlinePendingUserInput}
                 citationRequest={paintOnlyDisplayedTimeline ? null : citationRequest}
                 citationHistoryLoading={threadDetailLoading}
                 {...(!paintOnlyDisplayedTimeline
@@ -9794,17 +9599,35 @@ export default function ChatView(props: ChatViewProps) {
                   >
                     <ComposerSurface.Shell contextStrip={showComposerContextStrip}>
                       {registeredDictationTarget ? (
-                        <DictationStrip displayedTarget={registeredDictationTarget} />
+                        <DictationStrip
+                          displayedTarget={
+                            activeQuestionDictationTarget ?? registeredDictationTarget
+                          }
+                        />
                       ) : null}
                       <ComposerSurface.Host>
-                        <div ref={attachDraftHeroComposerAnchorRef} className="relative z-10">
+                        <div
+                          ref={attachDraftHeroComposerAnchorRef}
+                          className="relative z-10"
+                          data-normal-composer
+                          onFocusCapture={(event) => {
+                            if (
+                              event.target instanceof HTMLElement &&
+                              event.target.closest('[contenteditable="true"]')
+                            ) {
+                              dictationCoordinator.clearQuestionTarget();
+                              setQuestionDictationTarget(null);
+                              setNormalComposerFocusRevision((value) => value + 1);
+                            }
+                          }}
+                        >
                           <ChatComposer
                             composerRef={composerRef}
                             composerDraftTarget={composerDraftTarget}
                             environmentId={environmentId}
                             attachmentUploadsCapabilityKnown={attachmentUploadsCapabilityKnown}
                             supportsAttachmentUploads={supportsAttachmentUploads}
-                            supportsQuestionAttachments={supportsQuestionAttachments}
+
                             maxFileAttachmentBytes={maxFileAttachmentBytes}
                             routeKind={routeKind}
                             routeThreadRef={routeThreadRef}
@@ -9847,12 +9670,7 @@ export default function ChatView(props: ChatViewProps) {
                             environmentUnavailable={activeEnvironmentUnavailableState}
                             activePendingApproval={activePendingApproval}
                             pendingApprovals={pendingApprovals}
-                            pendingUserInputs={pendingUserInputs}
-                            activePendingProgress={activePendingProgress}
-                            activePendingResolvedAnswers={activePendingResolvedAnswers}
-                            activePendingIsResponding={activePendingIsResponding}
-                            activePendingDraftAnswers={activePendingDraftAnswers}
-                            activePendingQuestionIndex={activePendingQuestionIndex}
+
                             respondingRequestIds={respondingRequestIds}
                             showPlanFollowUpPrompt={showPlanFollowUpPrompt}
                             activeProposedPlan={activeProposedPlan}
@@ -9904,17 +9722,7 @@ export default function ChatView(props: ChatViewProps) {
                             onInterrupt={onInterrupt}
                             onImplementPlanInNewThread={onImplementPlanInNewThread}
                             onRespondToApproval={onRespondToApproval}
-                            onSelectActivePendingUserInputOption={
-                              onSelectActivePendingUserInputOption
-                            }
-                            onAdvanceActivePendingUserInput={onAdvanceActivePendingUserInput}
-                            onDismissActivePendingUserInput={onDismissUserInput}
-                            onPreviousActivePendingUserInputQuestion={
-                              onPreviousActivePendingUserInputQuestion
-                            }
-                            onChangeActivePendingUserInputCustomAnswer={
-                              onChangeActivePendingUserInputCustomAnswer
-                            }
+
                             onProviderModelSelect={onProviderModelSelect}
                             onOpenProviderSetup={openProviderSetup}
                             getModelDisabledReason={getModelDisabledReason}

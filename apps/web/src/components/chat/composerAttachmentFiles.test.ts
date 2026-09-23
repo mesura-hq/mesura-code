@@ -6,6 +6,7 @@ import { isVideoAttachment, videoMimeType } from "../../types";
 import {
   attachmentsToReleaseOnUploadCapabilityLoss,
   classifyComposerAttachmentFile,
+  validateComposerAttachmentFile,
   composerOtherFilesForPresentation,
   fileAttachmentCapabilityBlockReason,
   fileAttachmentStagingLimit,
@@ -348,4 +349,38 @@ describe("composer attachment files", () => {
       }),
     ).toBe(true);
   });
+});
+
+it("phase two rework shares unsupported image and file validation across question and normal drafts", () => {
+  const result = validateComposerAttachmentFile(
+    new File(["svg"], "diagram.svg", { type: "image/svg+xml" }),
+    100,
+  );
+  expect(result).toEqual({
+    ok: false,
+    error:
+      "'diagram.svg' is not a supported image type. Attach GIF, HEIC, HEIF, JPEG, PNG, or WebP images.",
+  });
+  expect(validateComposerAttachmentFile(new File([], "empty.txt"), 100)).toEqual({
+    ok: false,
+    error: "'empty.txt' is empty or could not be read.",
+  });
+  expect(validateComposerAttachmentFile(new File(["notes"], "notes.txt"), null)).toEqual({
+    ok: false,
+    error: "This server does not support file attachments.",
+  });
+  const normalized = validateComposerAttachmentFile(
+    new File(["image"], "photo.jpg", { type: "application/octet-stream" }),
+    100,
+  );
+  expect(normalized.ok && normalized.kind === "image" && normalized.file.type).toBe("image/jpeg");
+});
+
+it("phase two regression shared attachment validation names the rejected file and server limit", () => {
+  expect(validateComposerAttachmentFile(new File(["too large"], "notes.txt"), 4)).toEqual({
+    ok: false,
+    error: "'notes.txt' exceeds the 4 bytes attachment limit.",
+  });
+  const accepted = validateComposerAttachmentFile(new File(["fits"], "notes.txt"), 4);
+  expect(accepted.ok && accepted.kind === "file" && accepted.attachment.sizeBytes).toBe(4);
 });
