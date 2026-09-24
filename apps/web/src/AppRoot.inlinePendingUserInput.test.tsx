@@ -501,6 +501,27 @@ it("inline microphone pins its own answer before Shell reserves after focus move
   expect(fixture.respond).not.toHaveBeenCalled();
 });
 
+it("inline microphone explains a failed dictation start", async () => {
+  vi.stubGlobal("symmetriaDictationBridge", {
+    sendCommand: vi.fn(async () => {
+      throw new Error("Microphone access denied");
+    }),
+  });
+  await mountApp();
+  await act(async () => useDictationSessionStore.getState().setBridgeAvailable(true));
+
+  const microphone = container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Dictate into Timing"]',
+  );
+  expect(microphone).not.toBeNull();
+  await act(async () => microphone!.click());
+
+  await vi.waitFor(() => {
+    expect(microphone!.getAttribute("aria-label")).toBe("Microphone access denied");
+    expect(microphone!.getAttribute("data-dictation-start-error")).toBe("true");
+  });
+});
+
 it("phase two per-question upload state appears beside its own text field", async () => {
   const key = questionAttachmentDraftId(
     environmentId,

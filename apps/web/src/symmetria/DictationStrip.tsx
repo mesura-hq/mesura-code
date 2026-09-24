@@ -150,7 +150,7 @@ export const DictationMicrophoneButton = memo(function DictationMicrophoneButton
   const disabled = presentation.disabled || props.disabled;
   const explanation = props.disabled
     ? "Voice input is unavailable while this answer is sending"
-    : presentation.disabled
+    : presentation.disabled || error
       ? presentation.explanation
       : props.targetLabel
         ? `Dictate into ${props.targetLabel}`
