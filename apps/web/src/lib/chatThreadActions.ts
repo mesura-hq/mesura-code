@@ -5,7 +5,12 @@ import type {
   ProjectId,
   ScopedProjectRef,
 } from "@t3tools/contracts";
-import type { ComposerThreadDraftState, DraftThreadEnvMode } from "../composerDraftStore";
+import type {
+  ComposerThreadDraftState,
+  DraftThreadEnvMode,
+  DraftId,
+  useComposerDraftStore,
+} from "../composerDraftStore";
 
 type ComposerModelSelectionState = Pick<
   ComposerThreadDraftState,
@@ -54,6 +59,22 @@ export function resolveNewThreadModelSelectionOverride(input: {
     input.projectDefaultSelection ??
     (input.carrySourceDraftId === input.destinationDraftId ? null : input.carrySelection)
   );
+}
+
+/** Shared explicit-pick guard and complete-snapshot write for new draft defaults. */
+export function applyImplicitDraftModelDefaults(
+  store: Pick<
+    ReturnType<typeof useComposerDraftStore.getState>,
+    "getComposerDraft" | "applyStickyState" | "setModelSelection"
+  >,
+  draftId: DraftId,
+  selection: ModelSelection | null,
+  options: { seedSticky: boolean; clearWhenAbsent: boolean },
+): void {
+  if (hasExplicitComposerModelSelection(store.getComposerDraft(draftId))) return;
+  if (options.seedSticky) store.applyStickyState(draftId);
+  if (selection || options.clearWhenAbsent)
+    store.setModelSelection(draftId, selection, { replaceOptions: true });
 }
 
 export function hasExplicitComposerModelSelection(

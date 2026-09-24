@@ -1305,6 +1305,32 @@ describe("composerDraftStore project draft thread mapping", () => {
     expect(store.getComposerDraft(draftId)?.prompt).toBe("keep this prompt");
   });
 
+  it("P2 implementation preserves workspace intent across project retargeting and persisted drafts", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId, {
+      threadId,
+      envMode: "worktree",
+      envModeExplicit: false,
+    });
+    store.setPrompt(draftId, "Keep this draft");
+    store.setProjectDraftThreadId(otherProjectRef, draftId, { threadId });
+    expect(store.getDraftSession(draftId)).toMatchObject({
+      envMode: "worktree",
+      envModeExplicit: false,
+    });
+    store.setDraftThreadContext(draftId, { envMode: "local" });
+    store.setProjectDraftThreadId(projectRef, draftId, { threadId });
+    expect(store.getDraftSession(draftId)).toMatchObject({
+      envMode: "local",
+      envModeExplicit: true,
+    });
+    const persisted = partializeComposerDraftStoreState(useComposerDraftStore.getState());
+    expect(persisted.draftThreadsByThreadKey[draftId]).toMatchObject({
+      envMode: "local",
+      envModeExplicit: true,
+    });
+  });
+
   it("rotates a failed bootstrap thread id without losing its draft", () => {
     const store = useComposerDraftStore.getState();
     const retryThreadId = ThreadId.make("thread-retry");
@@ -1923,6 +1949,22 @@ describe("composerDraftStore modelSelection", () => {
     expect(
       draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionByProvider[CODEX_INSTANCE],
     ).toEqual(modelSelection(CODEX_DRIVER, "gpt-5.4"));
+  });
+
+  it("P2 implementation clears an unavailable implicit model snapshot while retaining the prompt and sticky choice", () => {
+    const store = useComposerDraftStore.getState();
+    const selection = modelSelection(CODEX_DRIVER, "removed-model");
+    store.setPrompt(threadRef, "Keep this draft prompt");
+    store.setStickyModelSelection(selection);
+    store.setModelSelection(threadRef, selection);
+    store.setModelSelection(threadRef, null, { replaceOptions: true });
+    const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
+    expect(draft?.prompt).toBe("Keep this draft prompt");
+    expect(draft?.activeProvider).toBeNull();
+    expect(draft?.modelSelectionByProvider).toEqual({});
+    expect(useComposerDraftStore.getState().stickyModelSelectionByProvider[CODEX_INSTANCE]).toEqual(
+      selection,
+    );
   });
 
   it("marks picker writes explicit and seeding writes non-explicit", () => {

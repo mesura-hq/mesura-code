@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Generated from MesuraProjectFile. Run node scripts/generate-mesura-schema.ts from the repository root.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Path to the local Mesura JSON Schema for editor validation."
+    },
+    "version": {
+      "type": "number",
+      "enum": [1]
+    },
+    "iconPath": {
+      "type": "string",
+      "description": "Workspace-relative icon path. Absolute paths and paths that escape the checkout are invalid. Use forward slashes as separators.",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^(?![A-Za-z]:)(?!\\/)[^\\\\]+$"
+    },
+    "defaultModelSelection": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+        },
+        "model": {
+          "type": "string",
+          "description": "Model slug understood by the provider driver.",
+          "minLength": 1
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "value": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              }
+            },
+            "required": ["id", "value"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["provider", "model"],
+      "additionalProperties": false
+    },
+    "defaultThreadEnvMode": {
+      "type": "string",
+      "enum": ["local", "worktree"]
+    }
+  },
+  "required": ["version"],
+  "additionalProperties": false,
+  "title": "Mesura repository defaults",
+  "description": "Portable defaults for .mesura.json at the checkout root. Scripts stay in t3.json."
+}

@@ -194,11 +194,14 @@ become plain text; the project exposes no git controls at all; or the window is 
 the toolbar collapses into its compact layout, which uses a different control the shortcut does not
 reach.
 
-New threads pick their workspace from a setting rather than from the last thread. The resolution
-order is the project's own setting, then a `defaultThreadEnvMode` entry in the project's `t3.json`,
-then the global default in **Settings**, which ships as the current checkout. Setting it per
-project is usually what you want: a repository where every thread is real work benefits from
-starting in a worktree, while somewhere you mostly ask questions does not, since each worktree is a
+An explicit workspace choice in a new-thread draft takes priority. Otherwise, `defaultThreadEnvMode`
+in the checkout's root `.mesura.json` wins, followed by the machine-local project setting,
+`defaultThreadEnvMode` in `t3.json`, the environment default in **Settings**, and the built-in
+current-checkout default. Edit `.mesura.json` in a code editor to make the preference portable.
+The Settings controls save machine-local values. See **Portable repository defaults** in the
+project settings guide for the file format. Setting it per project is usually what you want:
+a repository where every thread is real work benefits from starting in a worktree, while somewhere
+you mostly ask questions does not, since each worktree is a
 fresh directory that needs its own dependency install. Note also that new worktrees start from
 `origin` by default, so a thread opened that way will not see uncommitted work sitting in your
 checkout.

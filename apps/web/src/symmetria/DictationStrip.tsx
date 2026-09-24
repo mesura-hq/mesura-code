@@ -348,14 +348,19 @@ export const DictationStripBanner = memo(function DictationStripBanner(props: {
 
   // Attached composer banner, never a hand-styled surface — the dictation
   // strip block in mesura.css records why. Placement contract: the strip must
-  // render as the immediate previous sibling of `ComposerSurface.Host` inside
-  // `ComposerSurface.Shell`. ComposerBanner's Attachment fuses with the form's
-  // first banner through the next-sibling selector
-  // `[&+:has([data-chat-composer-form])...]`, so any element inserted between
-  // them breaks the seam — and CSS reports that as silence.
+  // render as a direct child of the composer's `ComposerBanner.Column`
+  // (ChatComposer's `dictationStrip` prop). There it joins the banner stack,
+  // and the Dock's side tabs such as Stash sit beside it. Rendered above the
+  // form instead, it fused onto the Dock and left the Stash tab hanging below
+  // it as a separate step. Column's child selectors (`w-full`,
+  // `last-child:mb-0`) match only a direct `composer-banner-attachment`
+  // child, so do not wrap the strip, and keep it last. Inside the form, the
+  // collapsed-controls marker stops a click on the strip from expanding a
+  // resting composer.
   return (
     <ComposerBanner.Attachment
       className="mesura-dictation-strip pointer-events-auto relative z-0"
+      data-chat-composer-collapsed-controls="true"
       data-phase={session.phase}
     >
       <ComposerBanner.Root
@@ -363,7 +368,7 @@ export const DictationStripBanner = memo(function DictationStripBanner(props: {
         aria-label={`Voice dictation: ${dictationPhaseLabel(session.phase)}`}
       >
         <div className="flex min-h-7 items-center gap-2 px-2">
-          <span className="w-12 shrink-0 font-mono text-[11px] text-secondary-label tabular-nums">
+          <span className="w-12 shrink-0 font-mono text-[11px] text-secondary-label tabular-nums @max-[280px]:hidden">
             {formatDictationTime(session)}
           </span>
           {terminalPresentation ? (

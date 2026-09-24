@@ -2,7 +2,9 @@ import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 
 import { ThreadEnvMode } from "./environment.ts";
+import { ProviderOptionSelection } from "./model.ts";
 import { ProjectScriptIcon } from "./orchestration.ts";
+import { ProviderDriverKind } from "./providerInstance.ts";
 
 /** File name of the checked-in T3 project file, resolved at the workspace root. */
 export const T3_PROJECT_FILE_NAME = "t3.json";
@@ -100,3 +102,54 @@ export const T3ProjectFile = Schema.Struct({
     "Checked-in project configuration for Mesura Code (t3.json at the repository root). See https://t3.codes for documentation.",
 });
 export type T3ProjectFile = typeof T3ProjectFile.Type;
+
+export const MESURA_PROJECT_FILE_NAME = ".mesura.json";
+
+const portableIconPath = trimmedNonEmpty(
+  {
+    description:
+      "Workspace-relative icon path. Absolute paths and paths that escape the checkout are invalid. Use forward slashes as separators.",
+  },
+  T3_PROJECT_FILE_PATH_MAX_LENGTH,
+).check(
+  Schema.isPattern(/^(?![A-Za-z]:)(?!\/)[^\\]+$/),
+  Schema.makeFilter(
+    (value) => {
+      if (value.includes("\0")) return false;
+      let depth = 0;
+      for (const segment of value.split("/")) {
+        if (segment === "..") depth -= 1;
+        else if (segment !== "." && segment !== "") depth += 1;
+        if (depth < 0) return false;
+      }
+      return depth > 0;
+    },
+    { message: "The icon path must stay inside the checkout and name a file." },
+  ),
+);
+
+/** A repository model names a driver, never an environment's provider instance. */
+export const PortableModelSelection = Schema.Struct({
+  provider: ProviderDriverKind,
+  model: trimmedNonEmpty({ description: "Model slug understood by the provider driver." }),
+  // Repository files have no legacy options object to migrate. Keep the canonical array.
+  options: Schema.optionalKey(Schema.Array(ProviderOptionSelection)),
+});
+export type PortableModelSelection = typeof PortableModelSelection.Type;
+
+/** Unknown versions fail as a whole so their fields cannot acquire version-1 semantics. */
+export const MesuraProjectFile = Schema.Struct({
+  $schema: Schema.optionalKey(
+    Schema.String.annotate({
+      description: "Path to the local Mesura JSON Schema for editor validation.",
+    }),
+  ),
+  version: Schema.Literal(1),
+  iconPath: Schema.optionalKey(portableIconPath),
+  defaultModelSelection: Schema.optionalKey(PortableModelSelection),
+  defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
+}).annotate({
+  title: "Mesura repository defaults",
+  description: "Portable defaults for .mesura.json at the checkout root. Scripts stay in t3.json.",
+});
+export type MesuraProjectFile = typeof MesuraProjectFile.Type;

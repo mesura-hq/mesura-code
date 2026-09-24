@@ -1,6 +1,8 @@
 import { createPendingUserInputProjection } from "../pendingUserInput";
 import type { SymmetriaDictationTarget } from "@symmetria/broker-contract";
 import { usePendingUserInputDraftStore } from "../pendingUserInputDraftStore";
+import { useRepositoryDefaults } from "~/lib/t3ProjectFileDefaults";
+import { applyImplicitDraftModelDefaults } from "~/lib/chatThreadActions";
 import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import type { UsageLimitSourceSnapshots } from "@t3tools/contracts";
@@ -1831,6 +1833,61 @@ export default function ChatView(props: ChatViewProps) {
     ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
     : null;
   const fallbackDraftProject = useProject(fallbackDraftProjectRef);
+  const draftRepository = useRepositoryDefaults(
+    environmentId,
+    activeServerThread
+      ? null
+      : (draftThread?.worktreePath ?? fallbackDraftProject?.workspaceRoot ?? null),
+    draftId,
+  );
+  const draftProjectSettings = useMemo(
+    () =>
+      resolveProjectSettings(
+        settings,
+        fallbackDraftProject?.id ?? null,
+        fallbackDraftProject,
+        draftRepository.defaults
+          ? {
+              repositoryDefaults: draftRepository.defaults,
+              providers:
+                environmentById.get(environmentId)?.serverConfig?.providers ?? EMPTY_PROVIDERS,
+            }
+          : undefined,
+      ),
+    [settings, fallbackDraftProject, draftRepository.defaults, environmentById, environmentId],
+  );
+  useEffect(() => {
+    if (activeServerThread || !draftId || !draftRepository.defaults) return;
+    const store = useComposerDraftStore.getState();
+    const session = store.getDraftSession(draftId);
+    if (
+      session?.envModeExplicit === false &&
+      draftRepository.defaults.defaultThreadEnvMode.value !== undefined &&
+      session.envMode !== draftProjectSettings.settings.defaultThreadEnvMode
+    ) {
+      store.setDraftThreadContext(draftId, {
+        envMode: draftProjectSettings.settings.defaultThreadEnvMode,
+        envModeExplicit: false,
+      });
+    }
+    if (!draftRepository.defaults.defaultModelSelection.value) return;
+
+    // Repository refresh preserves carried/sticky choices when the file omits the model.
+    applyImplicitDraftModelDefaults(
+      store,
+      draftId,
+      draftProjectSettings.settings.defaultModelSelection,
+      {
+        seedSticky: false,
+        clearWhenAbsent: true,
+      },
+    );
+  }, [activeServerThread, draftId, draftRepository.defaults, draftProjectSettings]);
+  useEffect(() => {
+    if (!activeServerThread && draftId && draftProjectSettings.modelDefaultWarning) {
+      console.warn(draftProjectSettings.modelDefaultWarning);
+    }
+  }, [activeServerThread, draftId, draftProjectSettings.modelDefaultWarning]);
   const localDraftError = activeServerThread
     ? null
     : ((draftId ? localDraftErrorsByDraftId[draftId]?.message : null) ?? null);
@@ -1876,14 +1933,10 @@ export default function ChatView(props: ChatViewProps) {
         ? buildLocalDraftThread(
             threadId,
             draftThread,
-            resolveProjectSettings(
-              settings,
-              fallbackDraftProject?.id ?? null,
-              fallbackDraftProject ?? undefined,
-            ).settings.defaultModelSelection ?? NO_PROVIDER_MODEL_SELECTION,
+            draftProjectSettings.settings.defaultModelSelection ?? NO_PROVIDER_MODEL_SELECTION,
           )
         : undefined,
-    [draftThread, fallbackDraftProject, settings, threadId],
+    [draftThread, draftProjectSettings, threadId],
   );
   // Promotion is data-driven: the draft route keeps rendering while the
   // server thread (same pre-allocated ref) starts, so live state must not
@@ -2112,8 +2165,11 @@ export default function ChatView(props: ChatViewProps) {
   const activeProject = useProject(activeProjectRef);
   // Environment settings with the active project's overrides applied.
   const activeProjectSettings = useMemo(
-    () => resolveProjectSettings(settings, activeProject?.id ?? null, activeProject ?? undefined),
-    [activeProject, settings],
+    () =>
+      isServerThread
+        ? resolveProjectSettings(settings, activeProject?.id ?? null, activeProject ?? undefined)
+        : draftProjectSettings,
+    [activeProject, settings, isServerThread, draftProjectSettings],
   );
   const activeProjectScripts = useMemo(
     () => (activeProject ? resolveProjectScripts(settings, activeProject) : []),
@@ -7182,6 +7238,7 @@ export default function ChatView(props: ChatViewProps) {
     queuedMessage?: QueuedComposerMessage,
   ) => {
     e?.preventDefault();
+    if (draftRepository.isPending) return;
     // Typed out in full rather than picked from the menu. Attachments or contexts
     // mean the user is sending a prompt, so those go through as usual.
     if (
@@ -8489,6 +8546,16 @@ export default function ChatView(props: ChatViewProps) {
     )
       ? questionDictationTarget
       : null;
+  // Keep the strip stable for ChatComposer while routing active question dictation to its field.
+  const dictationStrip = useMemo(
+    () =>
+      registeredDictationTarget ? (
+        <DictationStrip
+          displayedTarget={activeQuestionDictationTarget ?? registeredDictationTarget}
+        />
+      ) : null,
+    [activeQuestionDictationTarget, registeredDictationTarget],
+  );
 
   const onSubmitPlanFollowUp = useCallback(
     async ({
@@ -9598,13 +9665,6 @@ export default function ChatView(props: ChatViewProps) {
                     }
                   >
                     <ComposerSurface.Shell contextStrip={showComposerContextStrip}>
-                      {registeredDictationTarget ? (
-                        <DictationStrip
-                          displayedTarget={
-                            activeQuestionDictationTarget ?? registeredDictationTarget
-                          }
-                        />
-                      ) : null}
                       <ComposerSurface.Host>
                         <div
                           ref={attachDraftHeroComposerAnchorRef}
@@ -9646,15 +9706,17 @@ export default function ChatView(props: ChatViewProps) {
                             isSendBusy={isSendBusy}
                             isRevertingCheckpoint={isRevertingCheckpoint}
                             sendDisabledReason={
-                              isRevertingCheckpoint
-                                ? "Rewinding conversation"
-                                : feedbackUploading
-                                  ? "Sending feedback"
-                                  : threadDetailLoading
-                                    ? "Messages loading"
-                                    : worktreeSetupBlocksSend
-                                      ? "Preparing worktree"
-                                      : projectCloneSendBlockReason
+                              draftRepository.isPending
+                                ? "Loading project defaults"
+                                : isRevertingCheckpoint
+                                  ? "Rewinding conversation"
+                                  : feedbackUploading
+                                    ? "Sending feedback"
+                                    : threadDetailLoading
+                                      ? "Messages loading"
+                                      : worktreeSetupBlocksSend
+                                        ? "Preparing worktree"
+                                        : projectCloneSendBlockReason
                             }
                             isPreparingWorktree={isPreparingWorktree}
                             bannerItems={composerBannerItems}
@@ -9683,6 +9745,11 @@ export default function ChatView(props: ChatViewProps) {
                             providerStatuses={providerStatuses as ServerProvider[]}
                             providerCatalogKnown={serverConfig !== null}
                             activeProjectDefaultModelSelection={activeProjectDefaultModelSelection}
+                            requireExplicitModelSelection={
+                              !isServerThread &&
+                              draftRepository.defaults?.defaultModelSelection.value !== undefined &&
+                              draftProjectSettings.settings.defaultModelSelection === null
+                            }
                             activeThreadModelSelection={activeThread?.modelSelection}
                             activeContextWindow={activeContextWindow}
                             compactThreadUnavailable={compactThreadUnavailable}
@@ -9694,6 +9761,7 @@ export default function ChatView(props: ChatViewProps) {
                             terminalOpen={Boolean(terminalUiState.terminalOpen)}
                             gitCwd={gitCwd}
                             dictationStartControl={DICTATION_START_CONTROL}
+                            dictationStrip={dictationStrip}
                             pullRequestProjectId={
                               supportsPullRequests ? (activeProject?.id ?? null) : null
                             }

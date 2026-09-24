@@ -324,6 +324,7 @@ const PersistedDraftThreadState = Schema.Struct({
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
   envMode: DraftThreadEnvModeSchema,
+  envModeExplicit: Schema.optionalKey(Schema.Boolean),
   startFromOrigin: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   promotedTo: Schema.optionalKey(
     Schema.NullOr(
@@ -465,6 +466,8 @@ export interface DraftSessionState {
   branch: string | null;
   worktreePath: string | null;
   envMode: DraftThreadEnvMode;
+  /** False for a default seed. Missing legacy markers preserve intent on retarget; reopening resets them. */
+  envModeExplicit?: boolean;
   startFromOrigin: boolean;
   promotedTo?: ScopedThreadRef | null;
 }
@@ -537,6 +540,7 @@ interface ComposerDraftStoreState {
       worktreePath?: string | null;
       createdAt?: string;
       envMode?: DraftThreadEnvMode;
+      envModeExplicit?: boolean;
       startFromOrigin?: boolean;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
@@ -554,6 +558,7 @@ interface ComposerDraftStoreState {
       worktreePath?: string | null;
       createdAt?: string;
       envMode?: DraftThreadEnvMode;
+      envModeExplicit?: boolean;
       startFromOrigin?: boolean;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
@@ -570,6 +575,7 @@ interface ComposerDraftStoreState {
       projectRef?: ScopedProjectRef;
       createdAt?: string;
       envMode?: DraftThreadEnvMode;
+      envModeExplicit?: boolean;
       startFromOrigin?: boolean;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
@@ -599,7 +605,8 @@ interface ComposerDraftStoreState {
        * Replace the stored entry outright instead of preserving its
        * existing options when the incoming selection has none. Used when
        * the selection is a complete snapshot (e.g. carried from another
-       * thread) rather than a model-only change.
+       * thread) rather than a model-only change. A null complete snapshot clears
+       * the selection when repository defaults have no available model fallback.
        */
       replaceOptions?: boolean;
     },
@@ -1511,6 +1518,29 @@ function toProjectDraftSession(
   };
 }
 
+function resolveDraftEnvModeExplicit(
+  existing: DraftThreadState | undefined,
+  options:
+    | {
+        envModeExplicit?: boolean;
+        envMode?: DraftThreadEnvMode;
+        branch?: string | null;
+        worktreePath?: string | null;
+      }
+    | undefined,
+): boolean {
+  return (
+    options?.envModeExplicit ??
+    (options?.envMode !== undefined ||
+    options?.branch !== undefined ||
+    options?.worktreePath !== undefined
+      ? true
+      : existing
+        ? (existing.envModeExplicit ?? true)
+        : false)
+  );
+}
+
 function createDraftThreadState(
   projectRef: ScopedProjectRef,
   threadId: ThreadId,
@@ -1522,6 +1552,7 @@ function createDraftThreadState(
     worktreePath?: string | null;
     createdAt?: string;
     envMode?: DraftThreadEnvMode;
+    envModeExplicit?: boolean;
     startFromOrigin?: boolean;
     runtimeMode?: RuntimeMode;
     interactionMode?: ProviderInteractionMode;
@@ -1578,6 +1609,7 @@ function createDraftThreadState(
     worktreePath: nextWorktreePath,
     envMode:
       options?.envMode ?? (nextWorktreePath ? "worktree" : (existingThread?.envMode ?? "local")),
+    envModeExplicit: resolveDraftEnvModeExplicit(existingThread, options),
     startFromOrigin: nextStartFromOrigin,
     promotedTo: null,
   };
@@ -1612,6 +1644,7 @@ function draftThreadsEqual(left: DraftThreadState | undefined, right: DraftThrea
     left.branch === right.branch &&
     left.worktreePath === right.worktreePath &&
     left.envMode === right.envMode &&
+    left.envModeExplicit === right.envModeExplicit &&
     left.startFromOrigin === right.startFromOrigin &&
     scopedThreadRefsEqual(left.promotedTo, right.promotedTo)
   );
@@ -1765,6 +1798,9 @@ function normalizePersistedDraftThreads(
         branch: typeof branch === "string" ? branch : null,
         worktreePath: normalizedWorktreePath,
         envMode: normalizeDraftThreadEnvMode(candidateDraftThread.envMode, normalizedWorktreePath),
+        ...(typeof candidateDraftThread.envModeExplicit === "boolean"
+          ? { envModeExplicit: candidateDraftThread.envModeExplicit }
+          : {}),
         startFromOrigin,
         ...(candidateDraftThread.environmentSelection === "manual" ||
         candidateDraftThread.environmentSelection === "auto"
@@ -2553,6 +2589,9 @@ function toHydratedDraftThreadState(
     branch: persistedDraftThread.branch,
     worktreePath: persistedDraftThread.worktreePath,
     envMode: persistedDraftThread.envMode,
+    ...(persistedDraftThread.envModeExplicit !== undefined
+      ? { envModeExplicit: persistedDraftThread.envModeExplicit }
+      : {}),
     startFromOrigin: persistedDraftThread.startFromOrigin,
     ...(persistedDraftThread.environmentSelection
       ? { environmentSelection: persistedDraftThread.environmentSelection }
@@ -2846,6 +2885,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               worktreePath: nextWorktreePath,
               envMode:
                 options.envMode ?? (nextWorktreePath ? "worktree" : (existing.envMode ?? "local")),
+              envModeExplicit: resolveDraftEnvModeExplicit(existing, options),
               startFromOrigin: nextStartFromOrigin,
               promotedTo: existing.promotedTo ?? null,
             };
@@ -2861,6 +2901,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               nextDraftThread.branch === existing.branch &&
               nextDraftThread.worktreePath === existing.worktreePath &&
               nextDraftThread.envMode === existing.envMode &&
+              nextDraftThread.envModeExplicit === existing.envModeExplicit &&
               nextDraftThread.startFromOrigin === existing.startFromOrigin &&
               scopedThreadRefsEqual(nextDraftThread.promotedTo, existing.promotedTo);
             if (isUnchanged) {
@@ -3112,7 +3153,8 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               return state;
             }
             const base = existing ?? createEmptyThreadDraft();
-            const nextMap = { ...base.modelSelectionByProvider };
+            const clearSelection = normalized === null && opts?.replaceOptions === true;
+            const nextMap = clearSelection ? {} : { ...base.modelSelectionByProvider };
             if (normalized) {
               const current = nextMap[normalized.instanceId];
               if (normalized.options !== undefined || opts?.replaceOptions) {
@@ -3129,7 +3171,9 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                 );
               }
             }
-            const nextActiveProvider = normalized?.instanceId ?? base.activeProvider;
+            const nextActiveProvider = clearSelection
+              ? null
+              : (normalized?.instanceId ?? base.activeProvider);
             if (
               Equal.equals(base.modelSelectionByProvider, nextMap) &&
               base.activeProvider === nextActiveProvider &&

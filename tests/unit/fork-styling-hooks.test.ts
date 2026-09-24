@@ -65,16 +65,25 @@ for (const entry of STYLED_FORK_COMPONENTS) {
   });
 }
 
-it("mounts the dictation strip directly before the composer host", () => {
-  // ComposerBanner's Attachment fuses with the composer's first banner through
-  // the next-sibling selector `[&+:has([data-chat-composer-form])...]`, so the
-  // strip must be the immediate previous sibling of ComposerSurface.Host. An
-  // element inserted between them breaks the glass seam, and CSS reports that
-  // as silence.
+it("stacks the dictation strip inside the composer's banner column", () => {
+  // Inside ComposerBanner.Column the strip joins the attached-banner stack and
+  // the Dock's side tabs (Stash) sit beside it. Mounted above the form instead,
+  // it fused onto the Dock and left the Stash tab hanging below it as a step.
   assert.match(
-    read("apps/web/src/components/ChatView.tsx"),
-    /<DictationStrip[\s\S]{0,200}?\/>\s*\)\s*:\s*null}\s*<ComposerSurface\.Host>/,
-    "DictationStrip is no longer the immediate previous sibling of ComposerSurface.Host in ChatView",
+    read("apps/web/src/components/chat/ChatComposer.tsx"),
+    /\{dictationStrip\}\s*<\/ComposerBanner\.Column>/,
+    "ChatComposer no longer renders dictationStrip as the last child of ComposerBanner.Column",
+  );
+  const chatView = read("apps/web/src/components/ChatView.tsx");
+  assert.match(
+    chatView,
+    /dictationStrip=\{dictationStrip\}/,
+    "ChatView no longer hands the dictation strip to ChatComposer",
+  );
+  assert.equal(
+    chatView.match(/<DictationStrip\b/g)?.length,
+    1,
+    "DictationStrip must mount exactly once, through ChatComposer",
   );
 });
 
