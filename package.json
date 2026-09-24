@@ -20,6 +20,7 @@
     "icons:check": "node scripts/export-brand-icons.ts --check",
     "licenses:sync": "node scripts/sync-third-party-license-notices.ts",
     "icons:export:android": "node scripts/export-android-icons.ts",
+    "schema:mesura": "node scripts/generate-mesura-schema.ts && vp fmt packages/contracts/mesura.schema.json",
     "build": "vp run --filter './apps/*' build",
     "build:marketing": "vp run --filter @t3tools/marketing build",
     "build:desktop": "vp run --filter @t3tools/desktop --filter t3 build",

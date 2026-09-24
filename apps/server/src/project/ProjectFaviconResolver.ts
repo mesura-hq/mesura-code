@@ -6,6 +6,8 @@
  *
  * @module ProjectFaviconResolver
  */
+// @effect-diagnostics-next-line nodeBuiltinImport:off - FileSystem stat exposes only millisecond Date timestamps; rapid same-length saves need nanosecond metadata.
+import * as NodeFSP from "node:fs/promises";
 import * as Cache from "effect/Cache";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -16,14 +18,19 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
+import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 
+import { MESURA_PROJECT_FILE_NAME } from "@t3tools/contracts";
+import { expandHomePathWith } from "../pathExpansion.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as T3ProjectFileLoader from "./T3ProjectFileLoader.ts";
 
 // Resolution walks up to 12 well-known paths plus 7 source files, so a miss
 // costs ~20 filesystem probes. AssetAccess resolves on every project-favicon
-// asset URL, and a project's icon does not move, so the answer is cached.
+// asset URL, so the answer is cached. Each lookup checks .mesura.json metadata
+// to refresh repository edits without parsing unchanged files. Legacy t3.json
+// edits retain their existing TTL. A deleted cached icon triggers discovery.
 const FAVICON_CACHE_CAPACITY = 512;
 const FAVICON_POSITIVE_CACHE_TTL = Duration.minutes(10);
 const FAVICON_NEGATIVE_CACHE_TTL = Duration.minutes(1);
@@ -219,25 +226,34 @@ export const make = Effect.gen(function* () {
           }),
       ),
     );
-    // A grouped project's saved path can be absent from one checkout. Use it
-    // where it exists and retain automatic discovery for the other checkouts.
-    if (faviconPath !== undefined) {
-      const existing = yield* findExistingFile(projectCwd, [faviconPath], "filesystem");
-      if (existing) {
-        return existing;
-      }
-    }
-
-    // A t3.json iconPath takes precedence over the well-known locations.
-    const projectFile = yield* projectFileLoader.load(projectCwd);
-    if (Option.isSome(projectFile) && projectFile.value.iconPath !== undefined) {
+    const defaults = yield* projectFileLoader.loadRepositoryDefaults(projectCwd);
+    // A repository icon wins over the saved local icon. A stale candidate falls
+    // through to the local icon, t3.json, then automatic discovery.
+    const configuredCandidates = [
+      ...defaults.iconCandidates.filter((candidate) => candidate.source === "mesura"),
+      // A grouped project's saved path can be absent from one checkout. That
+      // is normal: use it where it exists and fall through silently elsewhere.
+      ...(faviconPath === undefined ? [] : [{ value: faviconPath, source: "project" as const }]),
+      ...defaults.iconCandidates.filter((candidate) => candidate.source === "t3"),
+    ];
+    for (const candidate of configuredCandidates) {
       const existing = yield* findExistingFile(
         projectCwd,
-        [projectFile.value.iconPath],
-        "workspace",
+        [candidate.value],
+        candidate.source === "project" ? "filesystem" : "workspace",
       );
       if (existing) {
         return existing;
+      }
+      if (candidate.source !== "project") {
+        yield* Effect.logWarning(
+          "Configured project icon is unavailable; trying the next candidate.",
+          {
+            workspaceRoot: projectCwd,
+            iconPath: candidate.value,
+            source: candidate.source,
+          },
+        );
       }
     }
 
@@ -295,16 +311,35 @@ export const make = Effect.gen(function* () {
     return null;
   });
 
-  const faviconCache = yield* Cache.makeWith<string, string | null, ProjectFaviconResolutionError>(
-    (key) => {
-      const { cwd, faviconPath } = parseFaviconCacheKey(key);
-      return resolvePathUncached(cwd, faviconPath);
+  const readRepositoryRevision = Effect.fn("ProjectFaviconResolver.readRepositoryRevision")(
+    function* (cwd: string) {
+      const configPath = path.join(expandHomePathWith(cwd.trim(), path), MESURA_PROJECT_FILE_NAME);
+      // Date.getTime() collapsed rapid equal-length saves into one revision.
+      // Preserve the filesystem's precision and detect timestamp-preserving
+      // writes through ctime, plus atomic editor replacements through inode.
+      return yield* Effect.tryPromise(() => NodeFSP.stat(configPath, { bigint: true })).pipe(
+        Effect.match({
+          onSuccess: (info) =>
+            `${info.mode}:${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`,
+          onFailure: (error) =>
+            Predicate.isObject(error.cause) && error.cause.code === "ENOENT" ? "missing" : null,
+        }),
+      );
     },
+  );
+
+  const faviconCache = yield* Cache.makeWith(
+    Effect.fn("ProjectFaviconResolver.loadCacheEntry")(function* (key: string) {
+      const { cwd, faviconPath } = parseFaviconCacheKey(key);
+      const revision = yield* readRepositoryRevision(cwd);
+      const resolvedPath = yield* resolvePathUncached(cwd, faviconPath);
+      return { revision, resolvedPath };
+    }),
     {
       capacity: FAVICON_CACHE_CAPACITY,
       timeToLive: Exit.match({
-        onSuccess: (value: string | null) =>
-          value === null ? FAVICON_NEGATIVE_CACHE_TTL : FAVICON_POSITIVE_CACHE_TTL,
+        onSuccess: (value) =>
+          value.resolvedPath === null ? FAVICON_NEGATIVE_CACHE_TTL : FAVICON_POSITIVE_CACHE_TTL,
         onFailure: () => Duration.zero,
       }),
     },
@@ -313,8 +348,18 @@ export const make = Effect.gen(function* () {
   const resolvePath: ProjectFaviconResolver["Service"]["resolvePath"] = Effect.fn(
     "ProjectFaviconResolver.resolvePath",
   )(function* (cwd, faviconPath) {
+    const revision = yield* readRepositoryRevision(cwd);
+    // Caching only by cwd previously hid edits behind the ten-minute TTL.
+    // Compare the last observed revision rather than retaining historical keys:
+    // deleting a config must not resurrect an earlier cached miss.
+    if (revision === null) return yield* resolvePathUncached(cwd, faviconPath);
     const key = faviconCacheKey(cwd, faviconPath);
-    const cached = yield* Cache.get(faviconCache, key);
+    let entry = yield* Cache.get(faviconCache, key);
+    if (entry.revision !== revision) {
+      yield* Cache.invalidate(faviconCache, key);
+      entry = yield* Cache.get(faviconCache, key);
+    }
+    const cached = entry.resolvedPath;
     if (cached === null) {
       return null;
     }
@@ -338,7 +383,7 @@ export const make = Effect.gen(function* () {
     }
 
     yield* Cache.invalidate(faviconCache, key);
-    return yield* Cache.get(faviconCache, key);
+    return (yield* Cache.get(faviconCache, key)).resolvedPath;
   });
 
   return ProjectFaviconResolver.of({ resolvePath });

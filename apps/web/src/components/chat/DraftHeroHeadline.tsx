@@ -1,13 +1,17 @@
 import type { DraftId } from "~/composerDraftStore";
 import { useComposerDraftStore } from "~/composerDraftStore";
-import { resolveEnvironmentMachineKind, type ScopedProjectRef } from "@t3tools/contracts";
+import {
+  DEFAULT_SERVER_SETTINGS,
+  resolveEnvironmentMachineKind,
+  type ScopedProjectRef,
+} from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { FolderPlusIcon } from "lucide-react";
 import { useCallback, useMemo } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
 import { useClientSettings } from "~/hooks/useSettings";
-import { hasExplicitComposerModelSelection } from "~/lib/chatThreadActions";
+import { applyImplicitDraftModelDefaults } from "~/lib/chatThreadActions";
 import { selectProjectGroupingSettings } from "~/logicalProject";
 import {
   buildSidebarProjectPickerEntries,
@@ -30,6 +34,7 @@ import {
 } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { readRepositoryDefaults } from "~/lib/t3ProjectFileDefaults";
 
 interface DraftHeroHeadlineProps {
   readonly draftId: DraftId | null;
@@ -51,9 +56,6 @@ export function DraftHeroHeadline({
   const setLogicalProjectDraftThreadId = useComposerDraftStore(
     (store) => store.setLogicalProjectDraftThreadId,
   );
-  const getComposerDraft = useComposerDraftStore((store) => store.getComposerDraft);
-  const applyStickyState = useComposerDraftStore((store) => store.applyStickyState);
-  const setModelSelection = useComposerDraftStore((store) => store.setModelSelection);
   const openAddProject = useCallback(() => openCommandPalette({ open: "add-project" }), []);
 
   const environmentLabelById = useMemo(
@@ -153,7 +155,7 @@ export function DraftHeroHeadline({
       <MenuPopup align="center" className="max-h-80 min-w-40! w-max max-w-64 overflow-y-auto">
         <MenuRadioGroup
           value={activeProjectKey}
-          onValueChange={(value) => {
+          onValueChange={async (value) => {
             const entry = projectEntryByKey.get(value as string);
             if (!entry || value === activeProjectKey) {
               return;
@@ -165,27 +167,58 @@ export function DraftHeroHeadline({
             // Project selection changes the target of the open draft in
             // place. The prompt stays in the same composer session, so the
             // sidebar only gets a draft row if the user later navigates away.
-            const currentDraft = getComposerDraft(draftId);
             setLogicalProjectDraftThreadId(
               entry.group.projectKey,
               scopeProjectRef(project.environmentId, project.id),
               draftId,
             );
-            if (!hasExplicitComposerModelSelection(currentDraft)) {
-              applyStickyState(draftId);
-              const environmentSettings = environments.find(
-                (environment) => environment.environmentId === project.environmentId,
-              )?.serverConfig?.settings;
-              const defaultModelSelection = environmentSettings
-                ? resolveProjectSettings(environmentSettings, project.id, project).settings
-                    .defaultModelSelection
-                : project.defaultModelSelection;
-              if (defaultModelSelection) {
-                setModelSelection(draftId, defaultModelSelection, {
-                  replaceOptions: true,
-                });
-              }
+            const retargetedSession = useComposerDraftStore.getState().getDraftSession(draftId);
+            const repositoryDefaults = await readRepositoryDefaults(
+              project.environmentId,
+              project.workspaceRoot,
+              draftId,
+              true,
+            );
+            const store = useComposerDraftStore.getState();
+            const currentSession = store.getDraftSession(draftId);
+            // A later project pick or promotion owns the draft after the read yields.
+            if (
+              !currentSession ||
+              currentSession.promotedTo ||
+              currentSession.environmentId !== project.environmentId ||
+              currentSession.projectId !== project.id
+            )
+              return;
+            const config = environments.find(
+              (environment) => environment.environmentId === project.environmentId,
+            )?.serverConfig;
+            const resolved = resolveProjectSettings(
+              config?.settings ?? DEFAULT_SERVER_SETTINGS,
+              project.id,
+              project,
+              {
+                repositoryDefaults,
+                providers: config?.providers ?? [],
+              },
+            );
+            if (resolved.modelDefaultWarning) console.warn(resolved.modelDefaultWarning);
+            // Explicit workspace choices carry across projects and also win during a late read.
+            if (currentSession === retargetedSession && currentSession.envModeExplicit === false) {
+              store.setDraftThreadContext(draftId, {
+                envMode: resolved.settings.defaultThreadEnvMode,
+                envModeExplicit: false,
+              });
             }
+            applyImplicitDraftModelDefaults(
+              store,
+              draftId,
+              resolved.settings.defaultModelSelection,
+              {
+                seedSticky:
+                  !resolved.modelDefaultWarning || resolved.settings.defaultModelSelection !== null,
+                clearWhenAbsent: !!resolved.modelDefaultWarning,
+              },
+            );
           }}
         >
           {projectPickerEntries.map(({ group }) => {

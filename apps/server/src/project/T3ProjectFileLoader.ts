@@ -1,6 +1,6 @@
 /**
- * T3ProjectFileLoader - Effect service that loads the checked-in `t3.json`
- * project file from a workspace root.
+ * T3ProjectFileLoader - Effect service that loads repository defaults from
+ * `.mesura.json` and the legacy `t3.json` at a workspace root.
  *
  * Loading is best-effort: a missing file resolves to `Option.none`, and
  * unreadable or invalid files are logged and treated as absent so callers
@@ -16,10 +16,20 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
-import { T3_PROJECT_FILE_NAME, type T3ProjectFile } from "@t3tools/contracts";
-import { T3ProjectFileFromJson } from "@t3tools/shared/t3ProjectFile";
+import {
+  MESURA_PROJECT_FILE_NAME,
+  T3_PROJECT_FILE_NAME,
+  type T3ProjectFile,
+} from "@t3tools/contracts";
+import {
+  MesuraProjectFileFromJson,
+  type RepositoryDefaults,
+  resolveRepositoryDefaults,
+  T3ProjectFileFromJson,
+} from "@t3tools/shared/t3ProjectFile";
 
 const decodeT3ProjectFileJson = Schema.decodeEffect(T3ProjectFileFromJson);
+const decodeMesuraProjectFileJson = Schema.decodeEffect(MesuraProjectFileFromJson);
 
 export class T3ProjectFileLoadError extends Schema.TaggedError<T3ProjectFileLoadError>()(
   "T3ProjectFileLoadError",
@@ -27,15 +37,16 @@ export class T3ProjectFileLoadError extends Schema.TaggedError<T3ProjectFileLoad
     operation: Schema.Literals(["read", "decode"]),
     workspaceRoot: Schema.String,
     filePath: Schema.String,
+    fileName: Schema.optionalKey(Schema.String),
     cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return `Failed to ${this.operation} ${T3_PROJECT_FILE_NAME} at ${this.filePath}.`;
+    return `Failed to ${this.operation} ${this.fileName ?? T3_PROJECT_FILE_NAME} at ${this.filePath}.`;
   }
 }
 
-/** Service tag for t3.json project file loading. */
+/** Service tag for repository file loading. */
 export class T3ProjectFileLoader extends Context.Service<
   T3ProjectFileLoader,
   {
@@ -46,6 +57,8 @@ export class T3ProjectFileLoader extends Context.Service<
      * `Option.none` (invalid files are logged as warnings).
      */
     readonly load: (workspaceRoot: string) => Effect.Effect<Option.Option<T3ProjectFile>>;
+    /** Read both files in this checkout and resolve their defaults independently per field. */
+    readonly loadRepositoryDefaults: (workspaceRoot: string) => Effect.Effect<RepositoryDefaults>;
   }
 >()("t3/project/T3ProjectFileLoader") {}
 
@@ -64,46 +77,63 @@ export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
-  const load: T3ProjectFileLoader["Service"]["load"] = Effect.fn("T3ProjectFileLoader.load")(
-    function* (workspaceRoot) {
-      const filePath = path.join(workspaceRoot, T3_PROJECT_FILE_NAME);
-      const raw = yield* fileSystem.readFileString(filePath).pipe(
-        Effect.map(Option.some),
-        Effect.catchTags({
-          PlatformError: (error) =>
-            error.reason._tag === "NotFound"
-              ? Effect.succeed(Option.none<string>())
-              : logT3ProjectFileLoadError(
-                  new T3ProjectFileLoadError({
-                    operation: "read",
-                    workspaceRoot,
-                    filePath,
-                    cause: error,
-                  }),
-                ).pipe(Effect.as(Option.none<string>())),
-        }),
-      );
-      if (Option.isNone(raw)) {
-        return Option.none<T3ProjectFile>();
-      }
-      return yield* decodeT3ProjectFileJson(raw.value).pipe(
-        Effect.map(Option.some),
-        Effect.catchTags({
-          SchemaError: (error) =>
-            logT3ProjectFileLoadError(
-              new T3ProjectFileLoadError({
-                operation: "decode",
-                workspaceRoot,
-                filePath,
-                cause: error,
-              }),
-            ).pipe(Effect.as(Option.none<T3ProjectFile>())),
-        }),
-      );
-    },
-  );
+  const loadFile = Effect.fn("T3ProjectFileLoader.loadFile")(function* <Value>(
+    workspaceRoot: string,
+    fileName: string,
+    decode: (contents: string) => Effect.Effect<Value, Schema.SchemaError>,
+  ) {
+    const filePath = path.join(workspaceRoot, fileName);
+    const raw = yield* fileSystem.readFileString(filePath).pipe(
+      Effect.map(Option.some),
+      Effect.catchTags({
+        PlatformError: (error) =>
+          error.reason._tag === "NotFound"
+            ? Effect.succeed(Option.none<string>())
+            : logT3ProjectFileLoadError(
+                new T3ProjectFileLoadError({
+                  operation: "read",
+                  workspaceRoot,
+                  filePath,
+                  fileName,
+                  cause: error,
+                }),
+              ).pipe(Effect.as(Option.none<string>())),
+      }),
+    );
+    if (Option.isNone(raw)) {
+      return Option.none<Value>();
+    }
+    return yield* decode(raw.value).pipe(
+      Effect.map(Option.some),
+      Effect.catchTags({
+        SchemaError: (error) =>
+          logT3ProjectFileLoadError(
+            new T3ProjectFileLoadError({
+              operation: "decode",
+              workspaceRoot,
+              filePath,
+              fileName,
+              cause: error,
+            }),
+          ).pipe(Effect.as(Option.none<Value>())),
+      }),
+    );
+  });
 
-  return T3ProjectFileLoader.of({ load });
+  const load: T3ProjectFileLoader["Service"]["load"] = (workspaceRoot) =>
+    loadFile(workspaceRoot, T3_PROJECT_FILE_NAME, decodeT3ProjectFileJson);
+
+  const loadRepositoryDefaults = Effect.fn("T3ProjectFileLoader.loadRepositoryDefaults")(function* (
+    workspaceRoot: string,
+  ) {
+    const [mesura, legacy] = yield* Effect.all([
+      loadFile(workspaceRoot, MESURA_PROJECT_FILE_NAME, decodeMesuraProjectFileJson),
+      load(workspaceRoot),
+    ]);
+    return resolveRepositoryDefaults(Option.getOrNull(mesura), Option.getOrNull(legacy));
+  });
+
+  return T3ProjectFileLoader.of({ load, loadRepositoryDefaults });
 });
 
 export const layer = Layer.effect(T3ProjectFileLoader, make);

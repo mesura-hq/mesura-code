@@ -38,14 +38,64 @@ checkouts and removal. Actions belong to a project: editing them creates the pro
 on each selected environment, and reset returns to the environment's shared list. A project's
 `t3.json` actions can be imported there.
 
-For workspace mode, a project's `t3.json` preference applies when the project has no override.
 Browser access changes apply when an agent session next starts.
+
+## Portable repository defaults
+
+Create `.mesura.json` at the repository root in your code editor. For example:
+
+```json
+{
+  "version": 1,
+  "iconPath": "assets/logo.svg",
+  "defaultModelSelection": {
+    "provider": "codex",
+    "model": "gpt-6-astra",
+    "options": [{ "id": "reasoningEffort", "value": "high" }]
+  },
+  "defaultThreadEnvMode": "worktree"
+}
+```
+
+Keep `version` set to `1`. The other fields are optional. Set `iconPath` to an existing
+image inside the checkout, relative to its root. Use forward slashes, not an absolute path.
+Set `defaultThreadEnvMode` to `"worktree"` for a new Git worktree or `"local"` for the current checkout.
+
+Use a provider kind, such as `codex`, and a model available on each environment where you use
+the project. Mesura Code resolves the model through that environment's enabled default provider
+instance and keeps only supported options. If the model is unavailable there, it uses an available
+fallback. If no usable model exists, select or configure a provider before starting work.
+
+Commit `.mesura.json` and the referenced image to carry these defaults with the repository.
+They apply on machines and checkouts that contain the file. Each environment still needs its own
+provider setup. Mesura Code reads the file. It does not create, edit, commit, or synchronize it.
+
+Save changes in your code editor, then start a new thread from that checkout. Existing threads
+keep their selections. Choosing a model in one thread does not change `.mesura.json` or set the
+repository default.
+
+New-thread defaults resolve each field in this order:
+
+1. An explicit choice in the draft.
+2. The field in `.mesura.json`.
+3. The machine-local project default.
+4. The field in `t3.json`, where supported, such as `defaultThreadEnvMode`.
+5. The environment default, then the built-in default.
+
+The model and workspace controls in **Settings** still save machine-local values on the selected
+environments. They do not edit `.mesura.json` or show its values. A valid file field takes priority.
+Omitting a field preserves its fallback. Keep scripts in `t3.json`; they continue to work alongside
+`.mesura.json`. A missing or invalid `.mesura.json` uses the existing defaults and icon detection.
+An invalid value in any field makes Mesura Code ignore the whole file, including its other valid fields.
 
 ## Project icons
 
-Select the project and open Project to choose an icon, emoji, monogram, or image. The choice applies to
-every checkout in the project group and appears on connected clients. Choose **Automatic** to let
-T3 Code detect an icon again.
+Select the project and open Project to choose an icon, emoji, monogram, or image for the project group.
+For images, each checkout uses the first available file: `iconPath` in `.mesura.json`, the saved image,
+`iconPath` in `t3.json`, then automatic detection. Thus, a valid repository image overrides an image
+chosen in Settings. Choose **Automatic** to clear the saved choice and use repository images or detection.
+
+On web and desktop, an explicit icon, emoji, or monogram choice takes priority over these images.
 
 Choose **Monogram** in the icon picker to set one or two letters or numbers and a color.
 
