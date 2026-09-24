@@ -38,7 +38,9 @@ import {
   useAttachmentUploadStore,
 } from "../../lib/attachmentUploadQueue";
 import { dictationCoordinator } from "../../symmetria/dictationCoordinator";
+import { DictationMicrophoneButton } from "../../symmetria/DictationStrip";
 import { cn } from "../../lib/utils";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export interface InlinePendingUserInputContext {
   environmentId: EnvironmentId;
@@ -486,9 +488,54 @@ function QuestionField({
           );
         })}
       </div>
-      <label htmlFor={id} className="mb-1.5 mt-3 block text-xs font-medium text-muted-foreground">
-        {question.options.length ? "Additional detail" : "Your answer"}
-      </label>
+      <div className="mb-1.5 mt-3 flex items-center justify-between gap-2">
+        <label htmlFor={id} className="text-xs font-medium text-muted-foreground">
+          {question.options.length ? "Additional detail" : "Your answer"}
+        </label>
+        {question.allowCustomAnswer !== false ? (
+          <div className="flex items-center gap-1">
+            {context.supportsAttachments ? (
+              <>
+                <input
+                  ref={fileInput}
+                  type="file"
+                  multiple
+                  hidden
+                  onChange={(event) => {
+                    void addFiles(Array.from(event.target.files ?? []));
+                    event.target.value = "";
+                  }}
+                />
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        disabled={!canAttach || context.unavailable}
+                        aria-label={`Attach files to ${question.question}`}
+                        onClick={() => fileInput.current?.click()}
+                        className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
+                      />
+                    }
+                  >
+                    <PaperclipIcon className="size-4" />
+                  </TooltipTrigger>
+                  <TooltipPopup>Attach files</TooltipPopup>
+                </Tooltip>
+              </>
+            ) : null}
+            <DictationMicrophoneButton
+              compact
+              disabled={disabled || context.unavailable}
+              targetLabel={question.header || question.question}
+              onBeforeStart={(reservation) => {
+                onFocus();
+                return dictationCoordinator.reserve(reservation);
+              }}
+            />
+          </div>
+        ) : null}
+      </div>
       <div>
         <textarea
           id={id}
@@ -587,29 +634,6 @@ function QuestionField({
           <p role="alert" className="mt-1 text-xs text-destructive">
             {attachmentError}
           </p>
-        ) : null}
-        {context.supportsAttachments && question.allowCustomAnswer !== false ? (
-          <>
-            <input
-              ref={fileInput}
-              type="file"
-              multiple
-              hidden
-              onChange={(event) => {
-                void addFiles(Array.from(event.target.files ?? []));
-                event.target.value = "";
-              }}
-            />
-            <button
-              type="button"
-              disabled={!canAttach || context.unavailable}
-              onClick={() => fileInput.current?.click()}
-              className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-            >
-              <PaperclipIcon className="size-3.5" />
-              Attach files
-            </button>
-          </>
         ) : null}
       </div>
     </div>

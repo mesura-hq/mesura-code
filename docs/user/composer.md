@@ -121,9 +121,10 @@ Use **Submit** once to send the whole request. If an answer is missing, Submit f
 and keeps every draft editable. Failed responses keep the drafts and offer **Retry**. The normal
 composer stays separate: it sends or queues a normal message, never a question answer.
 
-Focus a question's text field before dictating. Dictation appends to that question's draft and does
-not submit it. Use **Submit** when the complete request is ready. Files belong to their own question;
-wait for uploads to finish or retry or remove a failed upload.
+On Linux desktop, use the microphone beside a question's text field to dictate into that answer.
+Dictation appends to the question's draft and does not submit it. Use **Submit** when the complete
+request is ready. Files belong to their own question; wait for uploads to finish or retry or remove
+a failed upload.
 
 On mobile, pending requests appear as cards in the conversation, with all questions in each request
 together. Submit sends the complete request. The regular message composer stays separate. The web

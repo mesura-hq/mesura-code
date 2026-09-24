@@ -158,6 +158,9 @@ export function createDictationCoordinator(options: CoordinatorOptions = {}) {
   return {
     restoreSession,
     clearQuestionTarget,
+    releaseReservation: (sessionId: string): void => {
+      if (reservation?.sessionId === sessionId) reservation = null;
+    },
     registerComposer: (next: DictationComposerRegistration): (() => void) => {
       const token = Symbol("dictation-composer-registration");
       if (next.questionTarget) clearQuestionTarget();

@@ -219,6 +219,7 @@ import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environ
 import { questionAttachmentDraftId, useQuestionAttachmentPreparation } from "./questionAttachments";
 import * as attachmentUploads from "./lib/attachmentUploadQueue";
 import { dictationCoordinator } from "./symmetria/dictationCoordinator";
+import { useDictationSessionStore } from "./symmetria/dictationSessionStore";
 import { useQueuedMessageStore } from "./queuedMessageStore";
 
 const environmentId = EnvironmentId.make("phase-two-environment");
@@ -232,6 +233,7 @@ beforeEach(() => {
   fixture.pendingRowsVisible = true;
   fixture.savedThreads.clear();
   dictationCoordinator.restoreSession(null);
+  useDictationSessionStore.setState({ session: null, bridgeAvailable: false, error: null });
   usePendingUserInputDraftStore.setState({ requests: {} });
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   fixture.environments[0]!.connection.phase = "connected";
@@ -306,6 +308,7 @@ afterEach(async () => {
   useComposerDraftStore.getState().clearComposerContent(scopeThreadRef(environmentId, threadId));
   useQuestionAttachmentPreparation.setState({ counts: {} });
   useQueuedMessageStore.getState().drain(scopedThreadKey(scopeThreadRef(environmentId, threadId)));
+  useDictationSessionStore.setState({ session: null, bridgeAvailable: false, error: null });
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -431,6 +434,71 @@ it("phase two dictation targets a focused question without submitting the reques
   expect(questionField("scope")?.value).toBe("");
   expect(fixture.respond).not.toHaveBeenCalled();
   expect(fixture.startTurn).not.toHaveBeenCalled();
+});
+
+it("inline microphone pins its own answer before Shell reserves after focus moves", async () => {
+  let releaseBridge: () => void = () => undefined;
+  const bridgeReady = new Promise<void>((resolve) => {
+    releaseBridge = resolve;
+  });
+  let reservation: Awaited<ReturnType<typeof dictationCoordinator.reserve>> | null = null;
+  const sendCommand = vi.fn(async (command: unknown) => {
+    await bridgeReady;
+    reservation = await dictationCoordinator.reserve(
+      command as Parameters<typeof dictationCoordinator.reserve>[0],
+    );
+    return reservation;
+  });
+  vi.stubGlobal("symmetriaDictationBridge", { sendCommand });
+  await mountApp();
+  await act(async () => useDictationSessionStore.getState().setBridgeAvailable(true));
+
+  await act(async () => questionField("scope")!.focus());
+  const microphone = container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Dictate into Timing"]',
+  );
+  expect(microphone).not.toBeNull();
+  await act(async () => microphone!.click());
+  await vi.waitFor(() => expect(sendCommand).toHaveBeenCalledOnce());
+  const otherMicrophone = container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Dictate into Scope"]',
+  );
+  await act(async () => otherMicrophone!.click());
+  expect(sendCommand).toHaveBeenCalledOnce();
+  await act(async () => questionField("scope")!.focus());
+  await act(async () => releaseBridge());
+
+  const capturedReservation = reservation as Awaited<
+    ReturnType<typeof dictationCoordinator.reserve>
+  > | null;
+  if (!capturedReservation) throw new Error("Shell did not reserve the clicked question");
+  const startCommand = sendCommand.mock.calls[0]?.[0] as { sessionId: string } | undefined;
+  if (!startCommand) throw new Error("The microphone did not start Shell dictation");
+  expect(capturedReservation.target).toMatchObject({
+    kind: "draft",
+    draftId: questionAttachmentDraftId(
+      environmentId,
+      threadId,
+      ApprovalRequestId.make(requestId),
+      "timing",
+    ),
+  });
+  await act(async () => {
+    const receipt = await dictationCoordinator.deliver({
+      type: "dictation.deliver",
+      protocolVersion: { major: 1, minor: 2 },
+      sessionId: SymmetriaDictationSessionId.make(startCommand.sessionId),
+      commandId: CommandId.make("inline-microphone-transcript"),
+      createdAt: now,
+      target: capturedReservation.target,
+      mode: "inject",
+      text: "Tomorrow morning",
+    });
+    expect(receipt.outcome).toBe("inserted");
+  });
+  expect(questionField("timing")?.value).toBe("[voiced] Tomorrow morning");
+  expect(questionField("scope")?.value).toBe("");
+  expect(fixture.respond).not.toHaveBeenCalled();
 });
 
 it("phase two per-question upload state appears beside its own text field", async () => {
