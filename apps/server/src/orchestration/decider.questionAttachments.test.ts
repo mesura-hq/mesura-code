@@ -82,7 +82,90 @@ const request = {
     ],
   },
 };
+const messageRequest = {
+  ...request,
+  payload: {
+    ...request.payload,
+    responseMode: "message",
+    questions: [
+      {
+        ...request.payload.questions[0],
+        options: [{ label: "Keep", description: "Keep it", value: "Keep" }],
+      },
+    ],
+  },
+} as const;
 it.layer(NodeServices.layer)("question attachment answers", (it) => {
+  it.effect("message-mode answer sends the choice and note in one user message", () =>
+    Effect.gen(function* () {
+      const result = yield* decideOrchestrationCommand({
+        readModel,
+        command: {
+          ...command,
+          answers: { q: ["Keep", "Add a migration note"] },
+          attachmentsByQuestionId: undefined,
+        },
+        userInputActivity: messageRequest,
+      });
+      const events = Array.isArray(result) ? result : [result];
+      const sentMessage = events.find((event) => event.type === "thread.message-sent");
+      expect(sentMessage?.payload).toMatchObject({
+        role: "user",
+        text: expect.stringMatching(/Keep[\s\S]*Add a migration note/),
+      });
+    }),
+  );
+  it.effect("message-mode choice-only answers require the exact provider value", () =>
+    Effect.gen(function* () {
+      const value = " Keep\t";
+      const choiceRequest = {
+        ...messageRequest,
+        payload: {
+          ...messageRequest.payload,
+          questions: [
+            {
+              id: "q",
+              header: "Choice",
+              question: "Choose",
+              allowCustomAnswer: false,
+              options: [{ label: "Keep", description: "Keep", value }],
+            },
+          ],
+        },
+      };
+      for (const answer of ["Keep", [value, "A note"], "unknown"]) {
+        const result = yield* decideOrchestrationCommand({
+          readModel,
+          command: { ...command, answers: { q: answer }, attachmentsByQuestionId: undefined },
+          userInputActivity: choiceRequest,
+        }).pipe(Effect.result);
+        expect(result._tag).toBe("Failure");
+      }
+      const result = yield* decideOrchestrationCommand({
+        readModel,
+        command: { ...command, answers: { q: value }, attachmentsByQuestionId: undefined },
+        userInputActivity: choiceRequest,
+      });
+      const events = Array.isArray(result) ? result : [result];
+      expect(events.find((event) => event.type === "thread.message-sent")?.payload).toMatchObject({
+        text: `Choose\n${value}`,
+      });
+    }),
+  );
+  it.effect("message-mode still sends a plain text answer", () =>
+    Effect.gen(function* () {
+      const result = yield* decideOrchestrationCommand({
+        readModel,
+        command: { ...command, answers: { q: "Keep" }, attachmentsByQuestionId: undefined },
+        userInputActivity: messageRequest,
+      });
+      const events = Array.isArray(result) ? result : [result];
+      expect(events.find((event) => event.type === "thread.message-sent")?.payload).toMatchObject({
+        role: "user",
+        text: "Provide a spec\nKeep",
+      });
+    }),
+  );
   it.effect("persists the original answer with its attachment and emits a provider response", () =>
     Effect.gen(function* () {
       const result = yield* decideOrchestrationCommand({

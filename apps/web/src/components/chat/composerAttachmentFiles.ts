@@ -1,7 +1,9 @@
+import { randomUUID } from "../../lib/utils";
 import {
   type EnvironmentId,
   isProviderSendTurnSupportedImageMimeType,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
+  PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
 import {
   clampFileAttachmentUploadBytes,
@@ -9,8 +11,8 @@ import {
 } from "@t3tools/client-runtime/state/attachments";
 
 import type { ComposerFileAttachment, ComposerImageAttachment } from "../../composerDraftStore";
-import { isHeicImageFile } from "../../lib/imageCompression";
-import { isVideoAttachment } from "../../types";
+import { prepareImageForAttachment, isHeicImageFile } from "../../lib/imageCompression";
+import { videoMimeType, isVideoAttachment } from "../../types";
 
 type ComposerAttachmentFileKind = "image" | "file" | "unsupported-image";
 
@@ -174,4 +176,75 @@ export function shouldHandleComposerAttachmentPaste(input: {
   }
 
   return input.files.some((file) => classifyComposerAttachmentFile(file) === "file");
+}
+
+/** Shared validation and MIME normalization for message and question files. */
+export function validateComposerAttachmentFile(
+  file: File,
+  maxFileBytes: number | null,
+):
+  | { ok: true; kind: "image"; file: File }
+  | { ok: true; kind: "file"; attachment: ComposerFileAttachment }
+  | { ok: false; error: string } {
+  const kind = classifyComposerAttachmentFile(file);
+  if (kind === "unsupported-image")
+    return {
+      ok: false,
+      error: `'${file.name}' is not a supported image type. Attach GIF, HEIC, HEIF, JPEG, PNG, or WebP images.`,
+    };
+  if (kind === "image") return { ok: true, kind, file: normalizeComposerImageFileMimeType(file) };
+  if (maxFileBytes === null)
+    return { ok: false, error: "This server does not support file attachments." };
+  if (file.size <= 0) return { ok: false, error: `'${file.name}' is empty or could not be read.` };
+  if (file.size > maxFileBytes)
+    return { ok: false, error: fileAttachmentTooLargeMessage(file.name, maxFileBytes) };
+  const mimeType =
+    videoMimeType({ name: file.name, mimeType: file.type }) ??
+    (file.type || "application/octet-stream");
+  const normalized =
+    file.type === mimeType
+      ? file
+      : new File([file], file.name, { type: mimeType, lastModified: file.lastModified });
+  return {
+    ok: true,
+    kind,
+    attachment: {
+      type: "file",
+      id: randomUUID(),
+      name: file.name || "file",
+      mimeType,
+      sizeBytes: file.size,
+      file: normalized,
+    },
+  };
+}
+
+/** Images share compression, failure messages, and preview ownership on both surfaces. */
+export async function prepareComposerImageAttachment(
+  file: File,
+): Promise<{ ok: true; attachment: ComposerImageAttachment } | { ok: false; error: string }> {
+  const prepared = await prepareImageForAttachment(
+    normalizeComposerImageFileMimeType(file),
+    PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+  );
+  if (!prepared.ok)
+    return {
+      ok: false,
+      error:
+        prepared.reason === "unreadable"
+          ? `'${file.name}' could not be read as an image.`
+          : `'${file.name}' is too large to attach, even after compression.`,
+    };
+  return {
+    ok: true,
+    attachment: {
+      type: "image",
+      id: randomUUID(),
+      name: prepared.file.name || "image",
+      mimeType: prepared.file.type,
+      sizeBytes: prepared.file.size,
+      previewUrl: URL.createObjectURL(prepared.file),
+      file: prepared.file,
+    },
+  };
 }

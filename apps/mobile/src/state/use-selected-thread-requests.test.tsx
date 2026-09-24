@@ -2,34 +2,25 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const fixture = vi.hoisted(() => ({
-  drafts: {} as Record<string, unknown>,
-  uploads: {} as Record<string, unknown>,
+  drafts: {} as Record<string, import("./use-composer-drafts").ComposerDraft>,
+  uploads: {} as Record<
+    string,
+    import("../lib/composerAttachmentUploadQueue").ComposerAttachmentUploadState
+  >,
   preparations: {} as Record<string, number>,
-  preparationAtom: Symbol("preparation"),
 }));
 vi.mock("react-native", () => ({ Alert: { alert: vi.fn() } }));
-vi.mock("@effect/atom-react", () => ({
-  useAtomValue: (atom: unknown) =>
-    atom === "drafts"
-      ? fixture.drafts
-      : atom === "uploads"
-        ? fixture.uploads
-        : atom === fixture.preparationAtom
-          ? fixture.preparations
-          : {},
-}));
-vi.mock("./use-composer-drafts", () => ({
-  composerDraftsAtom: "drafts",
-  clearComposerDraft: vi.fn(),
-}));
-vi.mock("./composer-attachment-uploads", async () => ({
-  ...(await import("../lib/composerAttachmentUploadQueue")),
-  composerAttachmentUploadsAtom: "uploads",
-}));
-vi.mock("./question-attachments", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./question-attachments")>()),
-  questionAttachmentPreparationAtom: fixture.preparationAtom,
-}));
+vi.mock("./use-composer-drafts", async () => {
+  const { Atom } = await import("effect/unstable/reactivity");
+  return { composerDraftsAtom: Atom.make({}).pipe(Atom.keepAlive), clearComposerDraft: vi.fn() };
+});
+vi.mock("./composer-attachment-uploads", async () => {
+  const { Atom } = await import("effect/unstable/reactivity");
+  return {
+    ...(await import("../lib/composerAttachmentUploadQueue")),
+    composerAttachmentUploadsAtom: Atom.make({}).pipe(Atom.keepAlive),
+  };
+});
 vi.mock("./entities", () => ({
   useServerConfigs: () =>
     new Map([
@@ -54,31 +45,17 @@ vi.mock("./use-thread-selection", () => ({
     selectedThread: { environmentId: "environment-1", id: "thread-1" },
   }),
 }));
-vi.mock("./use-thread-detail", () => ({
-  useSelectedThreadDetail: () => ({
-    activities: [
-      {
-        id: "request-activity",
-        kind: "user-input.requested",
-        createdAt: "2026-09-08T00:00:00Z",
-        payload: {
-          requestId: "request-1",
-          questions: ["first", "second"].map((id) => ({
-            id,
-            header: id,
-            question: `Attach ${id} file`,
-            options: [],
-            allowCustomAnswer: true,
-          })),
-        },
-      },
-    ],
-  }),
-}));
+vi.mock("./use-thread-detail", () => ({ useSelectedThreadDetail: () => null }));
 
 import { ApprovalRequestId, EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { questionAttachmentDraftKey } from "./question-attachments";
-import { useSelectedThreadRequests } from "./use-selected-thread-requests";
+import { usePendingUserInputDrafts } from "./use-selected-thread-requests";
+import { RegistryContext } from "@effect/atom-react";
+import { appAtomRegistry } from "./atom-registry";
+import { composerDraftsAtom } from "./use-composer-drafts";
+import { composerAttachmentUploadsAtom } from "./composer-attachment-uploads";
+import { questionAttachmentPreparationAtom } from "./question-attachments";
+import { buildPendingUserInputAnswers } from "../lib/threadActivity";
 
 const environmentId = EnvironmentId.make("environment-1");
 const key = (question: string) =>
@@ -88,19 +65,45 @@ const key = (question: string) =>
     ApprovalRequestId.make("request-1"),
     question,
   );
+const request = {
+  requestId: ApprovalRequestId.make("request-1"),
+  createdAt: "2026-09-08T00:00:00Z",
+  dismissible: true,
+  questions: ["first", "second"].map((id) => ({
+    id,
+    header: id,
+    question: `Attach ${id} file`,
+    options: [],
+    allowCustomAnswer: true,
+    multiSelect: false,
+  })),
+};
 function submitButtonMarkup() {
+  appAtomRegistry.set(composerDraftsAtom, fixture.drafts);
+  appAtomRegistry.set(composerAttachmentUploadsAtom, fixture.uploads);
+  appAtomRegistry.set(questionAttachmentPreparationAtom, fixture.preparations);
   function Probe() {
-    const { activePendingUserInputAnswers } = useSelectedThreadRequests();
-    return <button disabled={activePendingUserInputAnswers === null}>Submit answers</button>;
+    const drafts = usePendingUserInputDrafts(environmentId, ThreadId.make("thread-1"), request);
+    return (
+      <button disabled={buildPendingUserInputAnswers(request.questions, drafts) === null}>
+        Submit answers
+      </button>
+    );
   }
-  return renderToStaticMarkup(<Probe />);
+  return renderToStaticMarkup(
+    <RegistryContext.Provider value={appAtomRegistry}>
+      <Probe />
+    </RegistryContext.Provider>,
+  );
 }
 beforeEach(() => {
+  appAtomRegistry.reset();
   fixture.preparations = {};
   fixture.drafts = Object.fromEntries(
     ["first", "second"].map((id) => [
       key(id),
       {
+        text: "",
         attachments: [
           {
             id,
@@ -121,7 +124,7 @@ describe("question attachment submission readiness", () => {
     undefined,
     { status: "uploading", progress: 0.5 },
     { status: "failed", reason: "Offline" },
-  ])("keeps Submit disabled until all question uploads finish: %j", (state) => {
+  ] as const)("keeps Submit disabled until all question uploads finish: %j", (state) => {
     if (state) fixture.uploads["environment-1:second"] = state;
     expect(submitButtonMarkup()).toContain("disabled");
     fixture.uploads["environment-1:second"] = { status: "ready" };

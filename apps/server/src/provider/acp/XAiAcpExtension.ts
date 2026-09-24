@@ -121,14 +121,9 @@ interface NormalizedXAiAnswer {
 }
 
 function answerValues(answer: unknown): ReadonlyArray<string> {
-  if (Array.isArray(answer)) {
-    return answer.flatMap((entry) => {
-      const text = typeof entry === "string" ? trimmed(entry) : undefined;
-      return text ? [text] : [];
-    });
-  }
-  const text = typeof answer === "string" ? trimmed(answer) : undefined;
-  return text ? [text] : [];
+  const values = Array.isArray(answer) ? answer : [answer];
+  // Match provider labels before normalizing free-text notes.
+  return values.filter((value): value is string => typeof value === "string" && value.length > 0);
 }
 
 function normalizeAnswerForXAi(
@@ -146,7 +141,11 @@ function normalizeAnswerForXAi(
     option: optionByLabel.get(value),
   }));
   const selectedLabels = resolvedValues.flatMap(({ option }) => (option ? [option.label] : []));
-  const notes = resolvedValues.flatMap(({ option, value }) => (option ? [] : [value]));
+  const notes = resolvedValues.flatMap(({ option, value }) => {
+    const note = option ? undefined : trimmed(value);
+    return note ? [note] : [];
+  });
+  if (selectedLabels.length === 0 && notes.length === 0) return undefined;
   const preview =
     question.multiSelect === true
       ? undefined

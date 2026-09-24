@@ -238,6 +238,15 @@ describe("Antigravity permissions and questions", () => {
     ).toEqual({ outcome: { outcome: "selected", optionId: " choice: opaque " } });
   });
 
+  it("Antigravity choice-only response rejects a note and keeps an exact ID", () => {
+    expect(
+      makeAntigravityUserInputResponse(questionRequest, { interaction_9960062f: ["1", "note"] }),
+    ).toBeUndefined();
+    expect(
+      makeAntigravityUserInputResponse(questionRequest, { interaction_9960062f: "1" }),
+    ).toEqual({ outcome: { outcome: "selected", optionId: "1" } });
+  });
+
   it("does not treat a question's reject choice as cancellation", () => {
     const request = {
       ...questionRequest,

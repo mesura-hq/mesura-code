@@ -11,7 +11,6 @@ import type {
 import { useKeyboardChatComposerInset, useKeyboardScrollToEnd } from "@legendapp/list/keyboard";
 import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
 import type { LegendListRef } from "@legendapp/list/react-native";
-import { HeaderHeightContext } from "@react-navigation/elements";
 import type {
   ApprovalRequestId,
   EnvironmentId,
@@ -24,37 +23,18 @@ import type {
   ServerConfig as T3ServerConfig,
   ThreadId,
   UsageLimitsReport,
-  UserInputQuestion,
 } from "@t3tools/contracts";
 import * as Haptics from "expo-haptics";
 import { BlurTargetView } from "expo-blur";
 import { GlassBlurTargetContext } from "../../lib/glassBlurTarget";
-import {
-  memo,
-  useCallback,
-  useContext,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import {
-  Alert,
-  AppState,
-  Keyboard,
-  Platform,
-  useWindowDimensions,
-  View,
-  type GestureResponderEvent,
-} from "react-native";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Alert, AppState, Platform, View, type GestureResponderEvent } from "react-native";
 import {
   KeyboardController,
   KeyboardStickyView,
   useKeyboardState,
 } from "react-native-keyboard-controller";
 import Animated, {
-  Easing,
   FadeInDown,
   FadeOut,
   ReduceMotion,
@@ -72,20 +52,13 @@ import type { ComposerEditorHandle } from "../../components/ComposerEditor";
 import type { StatusTone } from "../../components/StatusPill";
 import type { DraftComposerAttachment } from "../../lib/composerImages";
 import { CHAT_CONTENT_MAX_WIDTH, type LayoutVariant } from "../../lib/layout";
-import { IOS_NAV_BAR_HEIGHT } from "../../lib/layoutMetrics";
 import { editPendingThreadMessage } from "../../state/edit-pending-thread-message";
 import type { QueuedThreadMessage } from "../../state/thread-outbox-model";
 import { scopedThreadKey } from "../../lib/scopedEntities";
-import type {
-  PendingApproval,
-  PendingUserInput,
-  PendingUserInputDraftAnswer,
-  ThreadFeedEntry,
-} from "../../lib/threadActivity";
+import type { PendingApproval, PendingUserInput, ThreadFeedEntry } from "../../lib/threadActivity";
 import { PendingApprovalCard } from "./PendingApprovalCard";
 import { ComposerFeedback } from "./ComposerFeedback";
 import { ComposerUsageLimits } from "./ComposerUsageLimits";
-import { PendingUserInputCard } from "./PendingUserInputCard";
 import { ThreadCreationFailedCard } from "./ThreadCreationFailedCard";
 import {
   FLOATING_WORKING_CONTROL_COVERAGE,
@@ -93,22 +66,17 @@ import {
 } from "./floating-working-control";
 import { connectionFloatingStatus, type FloatingWorkingStatus } from "./floating-working-status";
 import {
-  derivePendingUserInputMaxHeight,
-  ESTIMATED_KEYBOARD_HEIGHT,
-  USER_INPUT_TOGGLE_DURATION_MS,
-} from "./pendingUserInputLayout";
-import {
   COMPOSER_COLLAPSED_CHROME,
   COMPOSER_EXPANDED_CHROME,
   COMPOSER_LAYOUT_TRANSITION,
   COMPOSER_TRANSITION_DURATION_MS,
   ThreadComposer,
 } from "./ThreadComposer";
-import { ThreadFeed } from "./ThreadFeed";
+import { ThreadFeed, type PendingUserInputFeedProps } from "./ThreadFeed";
 import type { ThreadContentPresentation } from "./threadContentPresentation";
 import { resolveThreadFeedSubmissionAnchor } from "./thread-feed-live-follow";
 
-export interface ThreadDetailScreenProps {
+export interface ThreadDetailScreenProps extends PendingUserInputFeedProps {
   readonly selectedThread: OrchestrationThreadShell;
   readonly contentPresentation: ThreadContentPresentation;
   readonly screenTone: StatusTone;
@@ -131,9 +99,6 @@ export interface ThreadDetailScreenProps {
   readonly activePendingApproval: PendingApproval | null;
   readonly respondingApprovalId: ApprovalRequestId | null;
   readonly activePendingUserInput: PendingUserInput | null;
-  readonly activePendingUserInputDrafts: Record<string, PendingUserInputDraftAnswer>;
-  readonly activePendingUserInputAnswers: Record<string, string | ReadonlyArray<string>> | null;
-  readonly respondingUserInputId: ApprovalRequestId | null;
   readonly draftMessage: string;
   readonly draftAttachments: ReadonlyArray<DraftComposerAttachment>;
   readonly connectionStateLabel: EnvironmentConnectionPhase;
@@ -169,18 +134,6 @@ export interface ThreadDetailScreenProps {
     requestId: ApprovalRequestId,
     decision: ProviderApprovalDecision,
   ) => Promise<unknown>;
-  readonly onSelectUserInputOption: (
-    requestId: ApprovalRequestId,
-    question: UserInputQuestion,
-    value: string,
-  ) => void;
-  readonly onChangeUserInputCustomAnswer: (
-    requestId: ApprovalRequestId,
-    questionId: string,
-    customAnswer: string,
-  ) => void;
-  readonly onSubmitUserInput: () => Promise<unknown>;
-  readonly onDismissUserInput: () => Promise<unknown>;
   readonly showContent?: boolean;
 }
 
@@ -254,11 +207,6 @@ function useStreamingHaptics(threadId: ThreadId, feed: ReadonlyArray<ThreadFeedE
   }, [threadId, feed]);
 }
 
-const USER_INPUT_TOGGLE_TIMING = {
-  duration: USER_INPUT_TOGGLE_DURATION_MS,
-  easing: Easing.out(Easing.cubic),
-};
-
 export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: ThreadDetailScreenProps) {
   const insets = useSafeAreaInsets();
   const isKeyboardVisible = useKeyboardState((state) => state.isVisible);
@@ -294,8 +242,6 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
       setKeyboardStateSuspect(false);
     }
   }, []);
-  const windowHeight = useWindowDimensions().height;
-  const navigationHeaderHeight = useContext(HeaderHeightContext) || insets.top + IOS_NAV_BAR_HEIGHT;
   const agentLabel = `${props.selectedThread.modelSelection.instanceId} agent`;
   const selectedThreadKey = scopedThreadKey(props.environmentId, props.selectedThread.id);
   const composerEditorRef = useRef<ComposerEditorHandle>(null);
@@ -406,15 +352,6 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
     (Boolean(props.loadEarlier) && props.selectedThread.latestUserMessageAt !== null);
   const composerChrome = composerExpanded ? COMPOSER_EXPANDED_CHROME : COMPOSER_COLLAPSED_CHROME;
   const composerOverlapHeight = composerChrome + composerBottomInset;
-  // While a user-input request is pending, the questionnaire owns the
-  // composer slot outright: expanded it is the full card, collapsed it is a
-  // composer-style bar in the same place (with its own stop control). The
-  // composer never mounts into the transition, which keeps the collapse and
-  // keyboard animations coherent. Collapse state is keyed by request id so a
-  // new request re-expands automatically.
-  const [collapsedUserInputRequestId, setCollapsedUserInputRequestId] =
-    useState<ApprovalRequestId | null>(null);
-  const activeUserInputRequestId = props.activePendingUserInput?.requestId ?? null;
   // The open /usage-limits panel for this thread, model and turn. Only the open
   // moment is stored: the rows read live provider data, so a redeemed reset
   // credit or refreshed probe shows through. Anything that spends quota closes
@@ -477,32 +414,6 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
       ),
     [],
   );
-  const userInputCollapsed =
-    activeUserInputRequestId !== null && collapsedUserInputRequestId === activeUserInputRequestId;
-  // The card's height RESERVES keyboard space at all times instead of
-  // tracking the keyboard: transforms (the sticky translation) apply
-  // same-frame on the UI thread while layout props lag a Yoga pass behind,
-  // so any height that follows the keyboard flashes the card over the nav
-  // header on the way up. With a constant height the keyboard transition is
-  // pure translation — frame-perfect by construction — and the resting card
-  // stays compact over the transcript. Before the first open the reserve is
-  // an estimate; once a real height is known the card corrects once,
-  // discretely.
-  const [lastKnownKeyboardHeight, setLastKnownKeyboardHeight] = useState(0);
-  useEffect(() => {
-    if (liveKeyboardHeight > 0 && liveKeyboardHeight !== lastKnownKeyboardHeight) {
-      setLastKnownKeyboardHeight(liveKeyboardHeight);
-    }
-  }, [lastKnownKeyboardHeight, liveKeyboardHeight]);
-  const pendingUserInputMaxHeight = derivePendingUserInputMaxHeight({
-    windowHeight,
-    keyboardHeight:
-      lastKnownKeyboardHeight > 0 ? lastKnownKeyboardHeight : ESTIMATED_KEYBOARD_HEIGHT,
-    navigationHeaderHeight,
-    // The questionnaire owns the composer slot, so only the composer's
-    // bottom inset still overlaps.
-    composerOverlapHeight: composerBottomInset,
-  });
   const estimatedOverlayHeight = composerOverlapHeight;
   // The overlay's measured height includes the home-indicator inset (the
   // composer pads it), but contentInsetAdjustmentBehavior="automatic" makes
@@ -520,18 +431,6 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
     -nativeInsetOvercount,
     Platform.OS === "ios" ? COMPOSER_TRANSITION_DURATION_MS : 0,
   );
-  // The expanded questionnaire is an absolute overlay on iOS, so it never
-  // changes the measured overlay height (that constancy is what keeps the
-  // feed from snapping on collapse/expand). The toggle choreography runs on
-  // SHARED VALUES set directly in the tap handler — one JS hop, then the
-  // card's rise/sink and the feed's end-inset glide animate in lockstep on
-  // the UI thread, keyboard-style, instead of waiting on React mount +
-  // onLayout + state round trips. Coverage (how far the card extends above
-  // the bar) is measured straight into a shared value by the card's
-  // onLayout, with no re-render.
-  const userInputCardProgress = useSharedValue(1);
-  const userInputInsetProgress = useSharedValue(1);
-  const userInputCardCoverage = useSharedValue(0);
   const floatingControlCoverage = useSharedValue(
     showFloatingStatus ? FLOATING_WORKING_CONTROL_COVERAGE : 0,
   );
@@ -541,22 +440,15 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
       { duration: 180, reduceMotion: ReduceMotion.System },
     );
   }, [floatingControlCoverage, showFloatingStatus]);
-  // Android renders the expanded card in-flow (it cannot hit-test the iOS
-  // overlay outside the bar's bounds), so its measured overlay height already
-  // includes the card — the coverage extra is iOS-only.
-  const userInputCoverageApplies = Platform.OS === "ios" && activeUserInputRequestId !== null;
   const combinedContentInsetEndAdjustment = useSharedValue(
     Math.max(0, estimatedOverlayHeight - nativeInsetOvercount),
   );
   useAnimatedReaction(
-    () =>
-      contentInsetEndAdjustment.value +
-      floatingControlCoverage.value +
-      (userInputCoverageApplies ? userInputInsetProgress.value * userInputCardCoverage.value : 0),
+    () => contentInsetEndAdjustment.value + floatingControlCoverage.value,
     (value) => {
       combinedContentInsetEndAdjustment.value = value;
     },
-    [userInputCoverageApplies],
+    [],
   );
   const { freeze, scrollMessageToEnd } = useKeyboardScrollToEnd({ listRef });
   const endFollowEnabledRef = useRef(true);
@@ -614,40 +506,6 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
     // checks follow state again so a user who scrolled up stays put.
     scheduleOverlayRepin(230);
   }, [scheduleOverlayRepin, selectedThreadKey, showFloatingStatus]);
-  const handleToggleUserInputCollapsed = useCallback(() => {
-    if (activeUserInputRequestId === null) {
-      return;
-    }
-    if (userInputCollapsed) {
-      // Expanding: card and feed glide start NOW, on the UI thread.
-      userInputCardProgress.value = withTiming(1, USER_INPUT_TOGGLE_TIMING);
-      userInputInsetProgress.value = withTiming(1, USER_INPUT_TOGGLE_TIMING);
-      setCollapsedUserInputRequestId(null);
-      scheduleOverlayRepin(USER_INPUT_TOGGLE_DURATION_MS + 50);
-    } else {
-      // Collapsing hides the custom-answer inputs; release the keyboard with
-      // them instead of leaving it up over a dead responder.
-      Keyboard.dismiss();
-      userInputCardProgress.value = withTiming(0, USER_INPUT_TOGGLE_TIMING);
-      // Instant: the sinking card still covers the strip being revealed, and
-      // animating the inset downward is what drifted the short-content end
-      // anchor.
-      userInputInsetProgress.value = 0;
-      setCollapsedUserInputRequestId(activeUserInputRequestId);
-      scheduleOverlayRepin(60);
-    }
-  }, [
-    activeUserInputRequestId,
-    scheduleOverlayRepin,
-    userInputCardProgress,
-    userInputCollapsed,
-    userInputInsetProgress,
-  ]);
-  useEffect(() => {
-    // A new request always arrives expanded.
-    userInputCardProgress.value = 1;
-    userInputInsetProgress.value = 1;
-  }, [activeUserInputRequestId, userInputCardProgress, userInputInsetProgress]);
   const showContent = props.showContent ?? true;
   const layoutVariant = props.layoutVariant ?? "compact";
   const isSplitLayout = layoutVariant === "split";
@@ -879,6 +737,12 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
             threadId={props.selectedThread.id}
             workspaceRoot={props.threadCwd}
             feed={props.selectedThreadFeed}
+            respondingUserInputIds={props.respondingUserInputIds}
+            onSelectUserInputOption={props.onSelectUserInputOption}
+            onChangeUserInputCustomAnswer={props.onChangeUserInputCustomAnswer}
+            onSubmitUserInput={props.onSubmitUserInput}
+            onDismissUserInput={props.onDismissUserInput}
+            onInputFocusChange={handleOwnedInputFocusChange}
             queuedMessages={props.queuedMessages}
             dispatchingMessageId={props.dispatchingMessageId}
             onEditPendingMessage={handleEditPendingMessage}
@@ -946,7 +810,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                     onDismiss={() => props.onDismissFeedback(submission.id)}
                   />
                 ))}
-                {usageLimitsReport && activeUserInputRequestId === null ? (
+                {usageLimitsReport ? (
                   <Animated.View
                     className="shrink-0 px-4 pb-3"
                     entering={FadeInDown.duration(220)}
@@ -972,16 +836,9 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                     />
                   </Animated.View>
                 ) : null}
-                {props.activePendingApproval || props.activePendingUserInput ? (
+                {props.activePendingApproval ? (
                   <Animated.View
                     className="shrink-0 gap-3 px-4 pb-3"
-                    // The questionnaire replaces the composer, so it must pad
-                    // the home indicator the composer normally covers.
-                    style={
-                      activeUserInputRequestId !== null
-                        ? { paddingBottom: composerBottomInset }
-                        : undefined
-                    }
                     entering={FadeInDown.duration(220)}
                     exiting={FadeOut.duration(140)}
                   >
@@ -992,39 +849,13 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                         onRespond={props.onRespondToApproval}
                       />
                     ) : null}
-                    {props.activePendingUserInput ? (
-                      <PendingUserInputCard
-                        pendingUserInput={props.activePendingUserInput}
-                        maxHeight={pendingUserInputMaxHeight}
-                        collapsed={userInputCollapsed}
-                        onToggleCollapsed={handleToggleUserInputCollapsed}
-                        onStopThread={props.onStopThread}
-                        cardProgress={userInputCardProgress}
-                        cardCoverage={userInputCardCoverage}
-                        onInputFocusChange={handleOwnedInputFocusChange}
-                        drafts={props.activePendingUserInputDrafts}
-                        answers={props.activePendingUserInputAnswers}
-                        respondingUserInputId={props.respondingUserInputId}
-                        onSelectOption={props.onSelectUserInputOption}
-                        onChangeCustomAnswer={props.onChangeUserInputCustomAnswer}
-                        onSubmit={props.onSubmitUserInput}
-                        onDismiss={props.onDismissUserInput}
-                      />
-                    ) : null}
                   </Animated.View>
                 ) : null}
               </View>
 
-              {/* Hidden (not unmounted) while a user-input request owns the
-                composer slot, so composer drafts and editor state survive.
-                A rejected creation has no thread to send to; the failure card
-                owns the slot instead. */}
+              {/* Keep the draft mounted when creation fails. */}
               <View
-                style={
-                  activeUserInputRequestId !== null || props.creationState?.kind === "failed"
-                    ? { display: "none" }
-                    : undefined
-                }
+                style={props.creationState?.kind === "failed" ? { display: "none" } : undefined}
               >
                 <GlassBlurTargetContext value={feedBlurTarget}>
                   <ThreadComposer

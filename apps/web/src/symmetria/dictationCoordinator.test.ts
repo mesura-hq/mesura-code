@@ -1,10 +1,12 @@
 import {
   SymmetriaDictationCommand,
+  SymmetriaComposerDraftId,
   SymmetriaDictationSession,
   type SymmetriaDictationTarget,
 } from "@symmetria/broker-contract";
 import {
   CommandId,
+  ApprovalRequestId,
   EnvironmentId,
   MessageId,
   ProjectId,
@@ -23,6 +25,7 @@ import {
   readPersistedDictationTarget,
   useComposerDraftStore,
 } from "../composerDraftStore";
+import { questionAttachmentDraftId } from "../questionAttachments";
 import { createDictationCoordinator } from "./dictationCoordinator";
 import { captureDictationTarget } from "./dictationTarget";
 
@@ -191,20 +194,6 @@ it("leaves every composer unchanged in clipboard mode", async () => {
   assert.equal(promptAt(threadB), "keep B");
 });
 
-it("marks a submitted pending answer for the Shell toast", async () => {
-  const coordinator = createTestCoordinator({
-    submit: async () => ({ kind: "answer-submitted" }),
-  });
-  coordinator.registerComposer({ target: targetA, projectName: "Project A", handle: null });
-  await coordinator.reserve(reserveRequest);
-
-  const receipt = await coordinator.deliver(deliver("submit"));
-
-  assert.equal(receipt.outcome, "inserted");
-  if (receipt.outcome !== "inserted") return;
-  assert.equal(receipt.action, "answer");
-});
-
 it("marks an accepted provider submission without waiting for provider execution", async () => {
   const messageId = MessageId.make("dictation-command-deliver");
   const coordinator = createTestCoordinator({
@@ -276,7 +265,7 @@ it("does not erase captured submission context when its own broker snapshot retu
   const coordinator = createTestCoordinator({
     submit: async (input) => {
       observedContext = input.submissionContext;
-      return { kind: "answer-submitted" };
+      return { kind: "refused", code: "unsupported_composer_action" };
     },
   });
   coordinator.registerComposer({
@@ -621,4 +610,67 @@ it("bounds command history across targets and removes an environment ledger", as
   clearComposerDraftsEnvironment(environmentId);
 
   assert.deepEqual(useComposerDraftStore.getState().appliedDictationCommandsByTargetKey, {});
+});
+
+it("phase two restored question dictation cannot fall back to a normal thread draft", async () => {
+  const coordinator = createTestCoordinator();
+  const target: SymmetriaDictationTarget = {
+    kind: "draft",
+    draftId: SymmetriaComposerDraftId.make(
+      questionAttachmentDraftId(
+        environmentId,
+        threadA.threadId,
+        ApprovalRequestId.make("pending"),
+        "scope",
+      ),
+    ),
+    futureThreadRef: threadA,
+  };
+  coordinator.restoreSession(
+    decodeSession({
+      protocolVersion: { major: 1, minor: 4 },
+      sessionId: "session-a",
+      target,
+      source: "shell",
+      phase: "processing",
+      mode: "submit",
+      projectName: null,
+      startedAt: reserveRequest.createdAt,
+      elapsedMs: 1000,
+      audioLevel: null,
+      graceRemainingMs: null,
+      presentation: { mesuraOwnsPresentation: false, leaseExpiresAt: null },
+    }),
+  );
+  coordinator.registerComposer({ target: targetB, projectName: null, handle: null });
+  const receipt = await coordinator.deliver(deliver("submit", "session-a", target));
+  assert.equal(receipt.outcome, "refused");
+  assert.isUndefined(promptAt(threadA));
+  assert.isUndefined(promptAt(threadB));
+});
+
+it("phase two rework composer metadata cannot steal focused question dictation ownership", async () => {
+  const coordinator = createTestCoordinator();
+  const releaseNormal = coordinator.registerComposer({
+    target: targetA,
+    projectName: null,
+    handle: null,
+  });
+  const releaseQuestion = coordinator.registerComposer({
+    target: targetB,
+    projectName: null,
+    handle: null,
+    questionTarget: {
+      isAvailable: () => true,
+      append: () => ({ application: "first", version: 1 }),
+    },
+  });
+  releaseNormal();
+  coordinator.registerComposer({ target: targetA, projectName: "Updated metadata", handle: null });
+  assert.deepEqual((await coordinator.reserve(reserveRequest)).target, targetB);
+  releaseQuestion();
+  assert.deepEqual(
+    (await coordinator.reserve({ ...reserveRequest, sessionId: "normal-after-unmount" })).target,
+    targetA,
+  );
 });

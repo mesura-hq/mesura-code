@@ -45,6 +45,62 @@ const makePromptCompletionRuntime = (env: NodeJS.ProcessEnv) =>
 const decodeXAiAskUserQuestionRequest = Schema.decodeUnknownSync(XAiAskUserQuestionRequest);
 
 describe("XAiAcpExtension", () => {
+  it("Grok response carries selected labels and a separate note", () => {
+    const response = makeXAiAskUserQuestionResponse(
+      {
+        sessionId: "session-1",
+        toolCallId: "tool-call-1",
+        mode: "default",
+        questions: [
+          {
+            id: "scope",
+            question: "Which scopes?",
+            multiSelect: true,
+            options: [{ label: "Workspace" }, { label: "Session" }],
+          },
+        ],
+      },
+      { scope: ["Workspace", "Session", "Keep both active"] },
+    );
+    expect(response).toEqual({
+      outcome: "accepted",
+      answers: { "Which scopes?": ["Workspace", "Session"] },
+      annotations: { "Which scopes?": { notes: "Keep both active" } },
+    });
+  });
+
+  it("Grok keeps whitespace in selected provider labels", () => {
+    const label = " Workspace\t";
+    expect(
+      makeXAiAskUserQuestionResponse(
+        {
+          sessionId: "session",
+          toolCallId: "tool",
+          mode: "default",
+          questions: [{ id: "scope", question: "Scope?", options: [{ label }] }],
+        },
+        { scope: [label, "Keep files"] },
+      ),
+    ).toMatchObject({
+      answers: { "Scope?": [label] },
+      annotations: { "Scope?": { notes: "Keep files" } },
+    });
+  });
+
+  it("Grok omits whitespace-only notes without creating an Other answer", () => {
+    expect(
+      makeXAiAskUserQuestionResponse(
+        {
+          sessionId: "session",
+          toolCallId: "tool",
+          mode: "default",
+          questions: [{ id: "scope", question: "Scope?", options: [{ label: "Workspace" }] }],
+        },
+        { scope: [" \t"] },
+      ),
+    ).toEqual({ outcome: "accepted", answers: {} });
+  });
+
   it("extracts questions from the real xAI ask_user_question payload shape", () => {
     const questions = extractXAiAskUserQuestions({
       sessionId: "session-1",

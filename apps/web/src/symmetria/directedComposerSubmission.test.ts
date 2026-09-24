@@ -7,7 +7,6 @@ import {
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
-import { ApprovalRequestId } from "@t3tools/contracts";
 import { assert, it } from "vite-plus/test";
 
 import {
@@ -53,7 +52,6 @@ it("submits an existing thread with fixed command and message identities", async
       starts.push(input);
       return true;
     },
-    answerQuestion: async () => true,
   });
 
   const result = await executor.submit(normalSubmission());
@@ -83,7 +81,6 @@ it("passes create-thread and prepare-worktree bootstrap for a reserved new chat"
       starts.push(input);
       return true;
     },
-    answerQuestion: async () => true,
   });
   const bootstrap = {
     createThread: {
@@ -111,50 +108,6 @@ it("passes create-thread and prepare-worktree bootstrap for a reserved new chat"
   assert.equal(starts[0]?.input.threadId, threadId);
 });
 
-// Acceptance: a text question is answered, not turned into a provider turn.
-it("submits dictated text as the pending question answer", async () => {
-  const answers: Array<unknown> = [];
-  let turnStarts = 0;
-  const executor = createDirectedComposerExecutor({
-    startTurn: async () => {
-      turnStarts += 1;
-      return true;
-    },
-    answerQuestion: async (input) => {
-      answers.push(input);
-      return true;
-    },
-  });
-
-  const result = await executor.submit(
-    normalSubmission({
-      prompt: "[voiced] Buenos Aires",
-      pendingAction: {
-        kind: "text-question",
-        requestId: ApprovalRequestId.make("question-request-a"),
-        questionId: "city",
-      },
-    }),
-  );
-
-  assert.equal(result.kind, "answer-submitted");
-  assert.equal(turnStarts, 0);
-  const answered = answers[0] as {
-    environmentId: EnvironmentId;
-    input: {
-      commandId: CommandId;
-      threadId: ThreadId;
-      requestId: string;
-      answers: unknown;
-    };
-  };
-  assert.equal(answered.environmentId, environmentId);
-  assert.equal(answered.input.commandId, commandId);
-  assert.equal(answered.input.threadId, threadId);
-  assert.equal(answered.input.requestId, "question-request-a");
-  assert.deepEqual(answered.input.answers, { city: "[voiced] Buenos Aires" });
-});
-
 // Acceptance: the plan follow-up uses the same mode decision as the composer.
 it("submits current plan follow-up text in plan mode", async () => {
   const starts: Array<{ input: { interactionMode: string; message: { text: string } } }> = [];
@@ -163,7 +116,6 @@ it("submits current plan follow-up text in plan mode", async () => {
       starts.push(input);
       return true;
     },
-    answerQuestion: async () => true,
   });
 
   await executor.submit(
@@ -188,10 +140,6 @@ it("refuses a button approval without dispatching text", async () => {
       dispatches += 1;
       return true;
     },
-    answerQuestion: async () => {
-      dispatches += 1;
-      return true;
-    },
   });
 
   const result = await executor.submit(
@@ -211,7 +159,6 @@ it("dispatches one turn request for a repeated command identity", async () => {
       starts += 1;
       return true;
     },
-    answerQuestion: async () => true,
   });
   const submission = normalSubmission();
 
@@ -228,7 +175,6 @@ it("dispatches one turn request for a repeated command identity", async () => {
 it("reports provider start failure after the user message was accepted", async () => {
   const executor = createDirectedComposerExecutor({
     startTurn: async () => false,
-    answerQuestion: async () => true,
   });
 
   assert.deepEqual(await executor.submit(normalSubmission()), {
@@ -244,62 +190,12 @@ it("allows an explicit broker retry to reuse an identity after provider start fa
       starts += 1;
       return starts > 1;
     },
-    answerQuestion: async () => true,
   });
   const submission = normalSubmission();
 
   assert.equal((await executor.submit(submission)).kind, "provider-start-failed");
   assert.equal((await executor.submit(submission)).kind, "turn-dispatched");
   assert.equal(starts, 2);
-});
-
-it("submits the active later question with all existing answers", async () => {
-  const answers: Array<
-    Parameters<Parameters<typeof createDirectedComposerExecutor>[0]["answerQuestion"]>[0]
-  > = [];
-  const executor = createDirectedComposerExecutor({
-    startTurn: async () => true,
-    answerQuestion: async (input) => {
-      answers.push(input);
-      return true;
-    },
-  });
-  const questions = [
-    {
-      id: "country",
-      header: "Country",
-      question: "Country?",
-      options: [{ label: "Argentina", description: "Argentina" }],
-      multiSelect: false,
-    },
-    {
-      id: "city",
-      header: "City",
-      question: "City?",
-      options: [{ label: "Buenos Aires", description: "Buenos Aires" }],
-      multiSelect: false,
-    },
-  ];
-
-  const result = await executor.submit(
-    normalSubmission({
-      prompt: "[voiced] Buenos Aires",
-      pendingAction: {
-        kind: "text-question",
-        requestId: ApprovalRequestId.make("question-request-b"),
-        questionId: "city",
-        questions,
-        draftAnswers: { country: { customAnswer: "Argentina" } },
-        questionIndex: 1,
-      },
-    }),
-  );
-
-  assert.equal(result.kind, "answer-submitted");
-  assert.deepEqual(answers[0]?.input.answers, {
-    country: "Argentina",
-    city: "[voiced] Buenos Aires",
-  });
 });
 
 it("shares provider refusal, worktree guard, and successful draft consumption", () => {

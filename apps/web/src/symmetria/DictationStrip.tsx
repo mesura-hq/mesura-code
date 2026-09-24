@@ -5,6 +5,7 @@ import {
   type SymmetriaDictationSession,
   type SymmetriaDictationTarget,
 } from "@symmetria/broker-contract";
+import { CommandId } from "@t3tools/contracts";
 import {
   CheckIcon,
   MicIcon,
@@ -35,9 +36,11 @@ import {
   shouldPresentDictationInMesura,
 } from "./dictationPresentation";
 import { useDictationSessionStore } from "./dictationSessionStore";
+import { dictationCoordinator, type DictationReservationRequest } from "./dictationCoordinator";
 
 const LEASE_DURATION_MS = 3_500;
 const LEASE_RENEWAL_MS = 1_500;
+const microphoneReservationPending = { current: false };
 
 const newIdentity = (kind: string): string => `mesura-${kind}-${randomUUID()}`;
 
@@ -76,37 +79,44 @@ const commandBase = (session: SymmetriaDictationSession, kind: string) => ({
   createdAt: new Date().toISOString(),
 });
 
-export const DictationMicrophoneButton = memo(function DictationMicrophoneButton() {
+export const DictationMicrophoneButton = memo(function DictationMicrophoneButton(props: {
+  onBeforeStart?: (request: DictationReservationRequest) => Promise<unknown> | void;
+  targetLabel?: string;
+  disabled?: boolean;
+  compact?: boolean;
+}) {
   const session = useDictationSessionStore((state) => state.session);
   const bridgeAvailable = useDictationSessionStore((state) => state.bridgeAvailable);
   const error = useDictationSessionStore((state) => state.error);
   const setError = useDictationSessionStore((state) => state.setError);
   const active = isActiveDictationSession(session);
-  const reservationPendingRef = useRef(false);
   const [reservationPending, setReservationPending] = useState(false);
+  const { onBeforeStart } = props;
 
   useEffect(() => {
     if (!active && bridgeAvailable) return;
-    reservationPendingRef.current = false;
+    microphoneReservationPending.current = false;
     setReservationPending(false);
   }, [active, bridgeAvailable]);
 
   const start = useCallback(async () => {
-    if (!claimDictationReservation(reservationPendingRef)) return;
+    if (!claimDictationReservation(microphoneReservationPending)) return;
     setReservationPending(true);
     setError(null);
+    const request: DictationReservationRequest & { readonly type: "dictation.reserve.request" } = {
+      type: "dictation.reserve.request",
+      protocolVersion: {
+        major: SYMMETRIA_PROTOCOL_MAJOR,
+        minor: SYMMETRIA_PROTOCOL_MINOR,
+      },
+      sessionId: newIdentity("session"),
+      commandId: CommandId.make(newIdentity("reserve")),
+      createdAt: new Date().toISOString(),
+      source: "mesura",
+    };
     try {
-      const result = await sendBridgeCommand({
-        type: "dictation.reserve.request",
-        protocolVersion: {
-          major: SYMMETRIA_PROTOCOL_MAJOR,
-          minor: SYMMETRIA_PROTOCOL_MINOR,
-        },
-        sessionId: newIdentity("session"),
-        commandId: newIdentity("reserve"),
-        createdAt: new Date().toISOString(),
-        source: "mesura",
-      });
+      await onBeforeStart?.(request);
+      const result = await sendBridgeCommand(request);
       if (
         typeof result === "object" &&
         result !== null &&
@@ -115,14 +125,21 @@ export const DictationMicrophoneButton = memo(function DictationMicrophoneButton
         throw new Error(String((result as Record<string, unknown>)["detail"] ?? "Unavailable"));
       }
     } catch (cause) {
-      if (!isActiveDictationSession(useDictationSessionStore.getState().session)) {
+      const currentSession = useDictationSessionStore.getState().session;
+      if (
+        !isActiveDictationSession(currentSession) ||
+        currentSession?.sessionId !== request.sessionId
+      ) {
+        dictationCoordinator.releaseReservation(request.sessionId);
+      }
+      if (!isActiveDictationSession(currentSession)) {
         setError(cause instanceof Error ? cause.message : String(cause));
       }
     } finally {
-      releaseDictationReservation(reservationPendingRef);
+      releaseDictationReservation(microphoneReservationPending);
       setReservationPending(false);
     }
-  }, [setError]);
+  }, [onBeforeStart, setError]);
 
   const presentation = dictationMicrophonePresentation({
     bridgeAvailable,
@@ -130,6 +147,14 @@ export const DictationMicrophoneButton = memo(function DictationMicrophoneButton
     active,
     reservationPending,
   });
+  const disabled = presentation.disabled || props.disabled;
+  const explanation = props.disabled
+    ? "Voice input is unavailable while this answer is sending"
+    : presentation.disabled || error
+      ? presentation.explanation
+      : props.targetLabel
+        ? `Dictate into ${props.targetLabel}`
+        : presentation.explanation;
 
   return (
     <Tooltip>
@@ -139,17 +164,18 @@ export const DictationMicrophoneButton = memo(function DictationMicrophoneButton
             type="button"
             size="icon-sm"
             variant="ghost"
-            aria-disabled={presentation.disabled}
-            aria-label={presentation.explanation}
+            aria-disabled={disabled}
+            aria-label={explanation}
             data-dictation-start-error={error ? "true" : undefined}
             data-dictation-start-pending={reservationPending ? "true" : undefined}
             className={cn(
               "rounded-full text-secondary-label transition-colors",
+              props.compact && "size-7 rounded-md text-muted-foreground",
               error && "text-destructive hover:text-destructive",
-              presentation.disabled && "cursor-default opacity-45",
+              disabled && "cursor-default opacity-45",
             )}
             onClick={() => {
-              if (!presentation.disabled) void start();
+              if (!disabled) void start();
             }}
           >
             <MicIcon className="size-4" />
@@ -157,7 +183,7 @@ export const DictationMicrophoneButton = memo(function DictationMicrophoneButton
         }
       />
       <TooltipPopup side="top" className="max-w-72">
-        {presentation.explanation}
+        {explanation}
       </TooltipPopup>
     </Tooltip>
   );

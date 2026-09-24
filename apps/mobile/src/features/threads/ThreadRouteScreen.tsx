@@ -941,9 +941,7 @@ function ThreadRouteContent(
           activePendingApproval={requests.activePendingApproval}
           respondingApprovalId={requests.respondingApprovalId}
           activePendingUserInput={requests.activePendingUserInput}
-          activePendingUserInputDrafts={requests.activePendingUserInputDrafts}
-          activePendingUserInputAnswers={requests.activePendingUserInputAnswers}
-          respondingUserInputId={requests.respondingUserInputId}
+          respondingUserInputIds={requests.respondingUserInputIds}
           draftMessage={composer.draftMessage}
           draftAttachments={composer.draftAttachments}
           connectionStateLabel={routeConnectionState}

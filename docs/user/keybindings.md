@@ -164,18 +164,13 @@ context window, and agent. It defaults to `alt+e`. Two cases make it do nothing,
 a provider that exposes none of those traits does not render the control at all, and a narrow
 composer folds the traits into its compact controls menu, which has no separate picker to open.
 
-`question.toggleCollapse` folds the question the agent is asking into its header, and unfolds it
-again. It defaults to `alt+q`. Folded, the card keeps one line — the question's label, its position
-in the set, and the question itself, cut to fit — and gives the rest of the height back to the
-thread behind it, which is usually where the answer is. The header is also a button, so a click on
-it does the same thing. The shortcut works while you type your own answer, which a click does not.
-Two things follow from the fold: the number keys that pick an option are off while the card is
-folded, because the numbers they name are not on screen, and the card unfolds by itself when the
-prompt moves to its next question.
+`question.toggleCollapse` defaults to `alt+q`. On web and desktop it jumps to the first pending
+request in the conversation and focuses its first unanswered field or option. If all answers are
+complete, it focuses the first question. The command keeps its existing name for saved keybindings;
+question cards stay expanded. With a question's option focused, number keys 1–9 select its options.
+Number keys typed in a text field remain text.
 
-Two situations make the shortcut do nothing. No question is waiting, so there is nothing to fold.
-Or an approval prompt has taken the same panel, and approvals are answered rather than folded. Like
-the other `Alt` defaults, it is also off while the terminal has focus.
+The shortcut does nothing when no question is pending or when the terminal has focus.
 
 Six defaults sit on `Alt` with a letter: `alt+e`, `alt+w`, `alt+b`, `alt+m`, `alt+q`, and `alt+u`.
 The app claims those chords before the character reaches the composer, which matters on two

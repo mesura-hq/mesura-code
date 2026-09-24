@@ -4401,13 +4401,29 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           } satisfies PermissionResult;
         }
 
-        // Return the answers to the SDK in the expected format:
-        // { questions: [...], answers: { questionText: selectedLabel } }
+        // The SDK uses comma-separated labels and a separate notes annotation.
+        // Keep text-only answers in answers for the existing custom-answer path.
+        const sdkAnswers: Record<string, string> = {};
+        const annotations: Record<string, { notes: string }> = {};
+        for (const question of questions) {
+          const answer = answers[question.id];
+          const values = (Array.isArray(answer) ? answer : [answer]).filter(
+            (value): value is string => typeof value === "string",
+          );
+          const labels = new Set(question.options.map((option) => option.label));
+          const selected = values.filter((value) => labels.has(value));
+          const notes = values.filter((value) => !labels.has(value));
+          sdkAnswers[question.id] = selected.length > 0 ? selected.join(", ") : notes.join("\n");
+          if (selected.length > 0 && notes.length > 0) {
+            annotations[question.id] = { notes: notes.join("\n") };
+          }
+        }
         return {
           behavior: "allow",
           updatedInput: {
             questions: toolInput.questions,
-            answers,
+            answers: sdkAnswers,
+            ...(Object.keys(annotations).length > 0 ? { annotations } : {}),
           },
         } satisfies PermissionResult;
       });

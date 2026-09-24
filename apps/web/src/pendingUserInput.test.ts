@@ -2,10 +2,6 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildPendingUserInputAnswers,
-  countAnsweredPendingUserInputQuestions,
-  decidePendingUserInputAdvance,
-  isPendingUserInputOptionShortcut,
-  derivePendingUserInputProgress,
   resolvePendingUserInputAnswer,
   setPendingUserInputCustomAnswer,
   togglePendingUserInputOptionSelection,
@@ -54,13 +50,13 @@ const nativeChoiceQuestion = {
 } as const;
 
 describe("resolvePendingUserInputAnswer", () => {
-  it("prefers a custom answer over selected options", () => {
+  it("keeps a custom answer with selected options", () => {
     expect(
       resolvePendingUserInputAnswer(singleSelectQuestion, {
         selectedOptionValues: ["Orchestration-first"],
         customAnswer: "Keep the existing envelope for one release",
       }),
-    ).toBe("Keep the existing envelope for one release");
+    ).toEqual(["Orchestration-first", "Keep the existing envelope for one release"]);
   });
 
   it("falls back to the selected option for single-select questions", () => {
@@ -79,9 +75,10 @@ describe("resolvePendingUserInputAnswer", () => {
     ).toEqual(["Server", "Web"]);
   });
 
-  it("clears the preset selection when a custom answer is entered", () => {
+  it("keeps the preset selection when a custom answer is entered", () => {
     expect(
       setPendingUserInputCustomAnswer(
+        multiSelectQuestion,
         {
           selectedOptionValues: ["Server", "Web"],
         },
@@ -89,6 +86,7 @@ describe("resolvePendingUserInputAnswer", () => {
       ),
     ).toEqual({
       customAnswer: "doesn't matter",
+      selectedOptionValues: ["Server", "Web"],
     });
   });
 
@@ -108,6 +106,72 @@ describe("resolvePendingUserInputAnswer", () => {
       }),
     ).toBeNull();
   });
+});
+
+it("web draft keeps a single choice and note in one answer", () => {
+  const selected = togglePendingUserInputOptionSelection(
+    singleSelectQuestion,
+    undefined,
+    "Orchestration-first",
+  );
+  const draft = setPendingUserInputCustomAnswer(
+    singleSelectQuestion,
+    selected,
+    "Keep the existing envelope",
+  );
+  expect(draft).toMatchObject({
+    selectedOptionValues: ["Orchestration-first"],
+    customAnswer: "Keep the existing envelope",
+  });
+  expect(buildPendingUserInputAnswers([singleSelectQuestion], { scope: draft })).toEqual({
+    scope: ["Orchestration-first", "Keep the existing envelope"],
+  });
+});
+
+it("web draft keeps multiple opaque values and a note unchanged", () => {
+  const question = { ...nativeChoiceQuestion, multiSelect: true, allowCustomAnswer: true };
+  const first = togglePendingUserInputOptionSelection(question, undefined, " first\t");
+  const second = togglePendingUserInputOptionSelection(question, first, "second");
+  const draft = setPendingUserInputCustomAnswer(question, second, "Use both results");
+  expect(draft.selectedOptionValues).toEqual([" first\t", "second"]);
+  expect(buildPendingUserInputAnswers([question], { result: draft })).toEqual({
+    result: [" first\t", "second", "Use both results"],
+  });
+});
+
+it("web draft waits for all text and attachment answers", () => {
+  const textQuestion = { ...singleSelectQuestion, id: "text", options: [] };
+  const attachmentQuestion = { ...singleSelectQuestion, id: "file", options: [] };
+  const questions = [textQuestion, attachmentQuestion];
+  const drafts = { text: { customAnswer: "Details" }, file: { attachmentCount: 1 } };
+  expect(buildPendingUserInputAnswers(questions, drafts)).toEqual({ text: "Details", file: "" });
+  expect(buildPendingUserInputAnswers(questions, { ...drafts, file: {} })).toBeNull();
+  expect(
+    buildPendingUserInputAnswers(questions, {
+      ...drafts,
+      file: { attachmentCount: 1, attachmentsBlocked: true },
+    }),
+  ).toBeNull();
+  expect(
+    buildPendingUserInputAnswers([{ ...attachmentQuestion, allowCustomAnswer: false }], {
+      file: { attachmentCount: 1 },
+    }),
+  ).toBeNull();
+});
+
+it("web choice-only questions require an exact listed value", () => {
+  expect(
+    buildPendingUserInputAnswers([nativeChoiceQuestion], {
+      result: { selectedOptionValues: [" first\t"] },
+    }),
+  ).toEqual({ result: " first\t" });
+  for (const value of ["Result", " first ", "unknown"]) {
+    expect(
+      buildPendingUserInputAnswers([nativeChoiceQuestion], {
+        result: { selectedOptionValues: [value], customAnswer: "Ignore this note" },
+      }),
+    ).toBeNull();
+  }
 });
 
 describe("togglePendingUserInputOptionSelection", () => {
@@ -211,97 +275,6 @@ describe("buildPendingUserInputAnswers", () => {
     const draft = togglePendingUserInputOptionSelection(question, undefined, value);
 
     expect(buildPendingUserInputAnswers([question], { result: draft })).toEqual({ result: value });
-    expect(derivePendingUserInputProgress([question], { result: draft }, 0)).toMatchObject({
-      selectedOptionValues: [value],
-      answeredQuestionCount: 1,
-      canAdvance: true,
-      isComplete: true,
-    });
-  });
-});
-
-describe("pending user input question progress", () => {
-  const questions = [
-    singleSelectQuestion,
-    {
-      id: "compat",
-      header: "Compat",
-      question: "How strict should compatibility be?",
-      options: [
-        {
-          label: "Keep current envelope",
-          description: "Preserve current wire format",
-        },
-      ],
-      multiSelect: false,
-    },
-  ] as const;
-
-  it("counts only answered questions", () => {
-    expect(
-      countAnsweredPendingUserInputQuestions(questions, {
-        scope: {
-          selectedOptionValues: ["Orchestration-first"],
-        },
-      }),
-    ).toBe(1);
-  });
-
-  it("derives the active question and advancement state", () => {
-    expect(
-      derivePendingUserInputProgress(
-        questions,
-        {
-          scope: {
-            selectedOptionValues: ["Orchestration-first"],
-          },
-        },
-        0,
-      ),
-    ).toMatchObject({
-      questionIndex: 0,
-      activeQuestion: questions[0],
-      selectedOptionValues: ["Orchestration-first"],
-      customAnswer: "",
-      resolvedAnswer: "Orchestration-first",
-      answeredQuestionCount: 1,
-      isLastQuestion: false,
-      isComplete: false,
-      canAdvance: true,
-    });
-  });
-
-  it("treats multi-select questions as answered when they have selected options", () => {
-    expect(
-      derivePendingUserInputProgress(
-        [multiSelectQuestion],
-        {
-          areas: {
-            selectedOptionValues: ["Server", "Web"],
-          },
-        },
-        0,
-      ),
-    ).toMatchObject({
-      selectedOptionValues: ["Server", "Web"],
-      resolvedAnswer: ["Server", "Web"],
-      canAdvance: true,
-      isComplete: true,
-    });
-  });
-
-  it("requires an option when custom answers are disabled", () => {
-    const drafts = { result: { customAnswer: "Use another result" } };
-
-    expect(buildPendingUserInputAnswers([nativeChoiceQuestion], drafts)).toBeNull();
-    expect(derivePendingUserInputProgress([nativeChoiceQuestion], drafts, 0)).toMatchObject({
-      customAnswer: "",
-      usingCustomAnswer: false,
-      resolvedAnswer: null,
-      answeredQuestionCount: 0,
-      canAdvance: false,
-      isComplete: false,
-    });
   });
 });
 
@@ -324,132 +297,10 @@ it("accepts attachment-only answers after every upload finishes", () => {
   ).toBeNull();
 });
 
-describe("decidePendingUserInputAdvance", () => {
-  const questions = [
-    singleSelectQuestion,
-    {
-      id: "compat",
-      header: "Compat",
-      question: "How strict should compatibility be?",
-      options: [
-        {
-          label: "Keep current envelope",
-          description: "Preserve current wire format",
-        },
-      ],
-      multiSelect: false,
-    },
-  ] as const;
-
-  const advanceFrom = (
-    draftAnswers: Parameters<typeof derivePendingUserInputProgress>[1],
-    questionIndex: number,
-  ) =>
-    decidePendingUserInputAdvance(
-      derivePendingUserInputProgress(questions, draftAnswers, questionIndex),
-    );
-
-  // The defect this pins: Enter reaches the submit path without reading the
-  // primary button's disabled state, so it used to walk past a question that
-  // had no answer. The prompt then could never be submitted, and nothing on
-  // screen said why.
-  it("refuses to leave the question on screen without an answer", () => {
-    expect(advanceFrom({}, 0)).toEqual({ kind: "blocked" });
-  });
-
-  it("moves to the next question once the one on screen is answered", () => {
-    expect(advanceFrom({ scope: { selectedOptionValues: ["Orchestration-first"] } }, 0)).toEqual({
-      kind: "go-to-question",
-      questionIndex: 1,
-    });
-  });
-
-  it("submits from the last question once every answer is in", () => {
-    expect(
-      advanceFrom(
-        {
-          scope: { selectedOptionValues: ["Orchestration-first"] },
-          compat: { customAnswer: "Keep it for one release window" },
-        },
-        1,
-      ),
-    ).toEqual({ kind: "submit" });
-  });
-
-  // The recovery path: the last question is answered, an earlier one is not,
-  // and the control that used to sit disabled now names that question and
-  // goes there.
-  it("goes back to the first unanswered question instead of refusing", () => {
-    expect(advanceFrom({ compat: { customAnswer: "Keep it for one release window" } }, 1)).toEqual({
-      kind: "go-to-question",
-      questionIndex: 0,
-    });
-  });
-});
-
-describe("first unanswered question in the derived progress", () => {
-  const questions = [
-    singleSelectQuestion,
-    {
-      id: "compat",
-      header: "Compat",
-      question: "How strict should compatibility be?",
-      options: [
-        {
-          label: "Keep current envelope",
-          description: "Preserve current wire format",
-        },
-      ],
-      multiSelect: false,
-    },
-  ] as const;
-
-  it("names the question whose answer is missing", () => {
-    expect(
-      derivePendingUserInputProgress(
-        questions,
-        { compat: { customAnswer: "Keep it for one release window" } },
-        1,
-      ).firstUnansweredQuestionIndex,
-    ).toBe(0);
-  });
-
-  // Distinct from `findFirstUnansweredPendingUserInputQuestionIndex`, which
-  // answers "the last one" for a complete set. Null here means there is
-  // nowhere to send the user, which is what the submit control reads.
-  it("is null once every question is answered", () => {
-    expect(
-      derivePendingUserInputProgress(
-        questions,
-        {
-          scope: { selectedOptionValues: ["Orchestration-first"] },
-          compat: { customAnswer: "Keep it for one release window" },
-        },
-        1,
-      ).firstUnansweredQuestionIndex,
-    ).toBeNull();
-  });
-});
-
-// Two listeners in two files depend on this answer agreeing with itself: the
-// panel acts on the digit, and ChatView's capture-phase handler has to let it
-// through instead of typing it into the custom answer.
-describe("isPendingUserInputOptionShortcut", () => {
-  it("claims a digit that names one of the options", () => {
-    expect(isPendingUserInputOptionShortcut(multiSelectQuestion, "2")).toBe(true);
-  });
-
-  it("leaves a digit past the last option alone", () => {
-    expect(isPendingUserInputOptionShortcut(multiSelectQuestion, "3")).toBe(false);
-  });
-
-  it("leaves zero, letters and multi-character keys alone", () => {
-    expect(isPendingUserInputOptionShortcut(multiSelectQuestion, "0")).toBe(false);
-    expect(isPendingUserInputOptionShortcut(multiSelectQuestion, "a")).toBe(false);
-    expect(isPendingUserInputOptionShortcut(multiSelectQuestion, "Enter")).toBe(false);
-  });
-
-  it("claims nothing when no question is on screen", () => {
-    expect(isPendingUserInputOptionShortcut(null, "1")).toBe(false);
+it("web shared setter refuses notes for an exact choice-only draft", () => {
+  const draft = { selectedOptionValues: [" first\t"] };
+  expect(setPendingUserInputCustomAnswer(nativeChoiceQuestion, draft, "Do not send")).toBe(draft);
+  expect(buildPendingUserInputAnswers([nativeChoiceQuestion], { result: draft })).toEqual({
+    result: " first\t",
   });
 });

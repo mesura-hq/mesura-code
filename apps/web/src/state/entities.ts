@@ -146,6 +146,14 @@ export function useThread(
   return useMemo(() => mergeEnvironmentThread(detail, shell), [detail, shell]);
 }
 
+/** Read the current scoped thread without tying delayed work to a mounted route. */
+export function readThread(ref: ScopedThreadRef): EnvironmentThread | null {
+  return mergeEnvironmentThread(
+    appAtomRegistry.get(environmentThreadDetails.detailAtom(ref)),
+    appAtomRegistry.get(environmentThreadShells.threadShellAtom(ref)),
+  );
+}
+
 export function readProject(ref: ScopedProjectRef): EnvironmentProject | null {
   return appAtomRegistry.get(environmentProjects.projectAtom(ref));
 }

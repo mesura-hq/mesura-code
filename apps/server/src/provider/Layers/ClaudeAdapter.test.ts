@@ -7213,6 +7213,76 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("encodes Claude AskUserQuestion selections and notes in native SDK fields", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "approval-required",
+      });
+      yield* Stream.take(adapter.streamEvents, 3).pipe(Stream.runDrain);
+      const canUseTool = harness.getLastCreateQueryInput()?.options.canUseTool;
+      if (!canUseTool) assert.fail("Expected canUseTool callback");
+      const questionNames = ["Single?", "Multiple?", "Only choices?", "Custom?"];
+      const input = {
+        questions: questionNames.map((question) => ({
+          question,
+          header: question,
+          options: [
+            { label: "React", description: "React.js" },
+            { label: "Vue", description: "Vue.js" },
+          ],
+          multiSelect: question !== "Single?",
+        })),
+      };
+      const permission = canUseTool("AskUserQuestion", input, {
+        signal: new AbortController().signal,
+        requestId: "native-fields",
+        toolUseID: "native-fields-tool",
+      });
+      const requested = yield* Stream.runHead(adapter.streamEvents);
+      if (
+        requested._tag !== "Some" ||
+        requested.value.type !== "user-input.requested" ||
+        requested.value.requestId === undefined
+      )
+        assert.fail("Expected a Claude question with a request ID");
+      yield* adapter.respondToUserInput(
+        session.threadId,
+        ApprovalRequestId.make(requested.value.requestId),
+        {
+          "Single?": ["React", "Keep the existing components"],
+          "Multiple?": ["React", "Vue", "Keep both frameworks"],
+          "Only choices?": ["React", "Vue"],
+          "Custom?": "Use Svelte",
+        },
+      );
+      yield* Stream.runHead(adapter.streamEvents);
+      const result = yield* Effect.promise(() => permission);
+      assert.deepEqual(result, {
+        behavior: "allow",
+        updatedInput: {
+          questions: input.questions,
+          answers: {
+            "Single?": "React",
+            "Multiple?": "React, Vue",
+            "Only choices?": "React, Vue",
+            "Custom?": "Use Svelte",
+          },
+          annotations: {
+            "Single?": { notes: "Keep the existing components" },
+            "Multiple?": { notes: "Keep both frameworks" },
+          },
+        },
+      });
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("routes AskUserQuestion through user-input flow even in full-access mode", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

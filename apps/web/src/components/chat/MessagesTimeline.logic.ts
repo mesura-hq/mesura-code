@@ -1,3 +1,6 @@
+import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { PendingUserInput } from "@t3tools/client-runtime/pending-requests";
+import { pendingUserInputRequestKey } from "../../pendingUserInput";
 import * as Equal from "effect/Equal";
 import { shallow } from "zustand/vanilla/shallow";
 import { renderCodexDirectivesForCopy } from "@t3tools/client-runtime/codex-markdown-directives";
@@ -314,6 +317,7 @@ export type TimelineLatestTurn = Pick<
 const LIVE_ACTIVITY_ROW_ID = "live-activity-row";
 
 export type MessagesTimelineRow =
+  | { kind: "pending-user-input"; id: string; createdAt: string; request: PendingUserInput }
   | {
       kind: "work";
       id: string;
@@ -877,8 +881,11 @@ function buildRevertTurnCountByUserMessageId(input: {
   return byUserMessageId;
 }
 
-export function deriveMessagesTimelineRows(input: {
+function deriveMessagesTimelineRowsWithoutPending(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>;
+  environmentId?: EnvironmentId;
+  threadId?: ThreadId;
+  pendingUserInputs?: ReadonlyArray<PendingUserInput>;
   latestTurn?: TimelineLatestTurn | null;
   runningTurnId?: TurnId | null;
   expandedTurnIds?: ReadonlySet<TurnId>;
@@ -1368,6 +1375,47 @@ export function deriveMessagesTimelineRows(input: {
   return rows;
 }
 
+/** Pending questions remain top-level rows even when their turn or work group is folded. */
+export function deriveMessagesTimelineRows(
+  input: Parameters<typeof deriveMessagesTimelineRowsWithoutPending>[0],
+): MessagesTimelineRow[] {
+  const requests = input.pendingUserInputs ?? [];
+  if (requests.length === 0 || !input.environmentId || !input.threadId)
+    return deriveMessagesTimelineRowsWithoutPending(input);
+  const byId = new Map(requests.map((request) => [request.requestId, request]));
+  const activityTimes = new Map<string, string>();
+  const timelineEntries = input.timelineEntries.filter((entry) => {
+    if (entry.kind !== "work") return true;
+    const requestId = entry.entry.questionAnswer?.requestId;
+    const request = requestId
+      ? byId.get(requestId)
+      : requests.find(
+          (request) =>
+            entry.entry.sourceActivityKind === "user-input.requested" &&
+            entry.createdAt === request.createdAt,
+        );
+    if (!request) return true;
+    activityTimes.set(request.requestId, entry.createdAt);
+    return false;
+  });
+  const rows = deriveMessagesTimelineRowsWithoutPending({ ...input, timelineEntries });
+  for (const request of byId.values()) {
+    const row: MessagesTimelineRow = {
+      kind: "pending-user-input",
+      id: `pending-user-input:${pendingUserInputRequestKey(input.environmentId, input.threadId, request.requestId)}`,
+      createdAt: request.createdAt,
+      request,
+    };
+    const activityTime = activityTimes.get(request.requestId);
+    const index = activityTime
+      ? rows.findIndex((entry) => entry.createdAt !== null && entry.createdAt > activityTime)
+      : -1;
+    if (index < 0) rows.push(row);
+    else rows.splice(index, 0, row);
+  }
+  return rows;
+}
+
 export const WORKTREE_SETUP_ROW_ID = "worktree-setup-row";
 
 /** True once the bootstrap handed off to the agent (async setup script may still run). */
@@ -1474,6 +1522,8 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
   if (a.kind !== b.kind || a.id !== b.id) return false;
 
   switch (a.kind) {
+    case "pending-user-input":
+      return a.request === (b as typeof a).request;
     case "working":
     case "thinking":
       return a.createdAt === (b as typeof a).createdAt;

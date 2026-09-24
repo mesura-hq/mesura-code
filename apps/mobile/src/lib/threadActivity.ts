@@ -2,8 +2,10 @@ import * as Option from "effect/Option";
 import { foldUserInputActivities } from "@t3tools/client-runtime/work-log/user-input";
 import * as Schema from "effect/Schema";
 import {
+  derivePendingRequests,
   requestKindFromRequestType,
   type PendingApproval,
+  type PendingUserInput,
 } from "@t3tools/client-runtime/pending-requests";
 import { UserInputAttachmentAnswerPayload, isToolLifecycleItemType } from "@t3tools/contracts";
 import type {
@@ -12,7 +14,6 @@ import type {
   OrchestrationThreadActivity,
   ToolLifecycleItemType,
   TurnId,
-  UserInputQuestion,
 } from "@t3tools/contracts";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 import {
@@ -45,12 +46,13 @@ import * as Order from "effect/Order";
 
 export type { PendingApproval, PendingUserInput } from "@t3tools/client-runtime/pending-requests";
 
-export interface PendingUserInputDraftAnswer {
-  readonly selectedOptionValues?: ReadonlyArray<string>;
-  readonly customAnswer?: string;
-  readonly attachmentCount?: number;
-  readonly attachmentsBlocked?: boolean;
-}
+export {
+  type PendingUserInputDraftAnswer,
+  setPendingUserInputCustomAnswer,
+  isPendingUserInputOptionSelected,
+  togglePendingUserInputOptionSelection,
+  buildPendingUserInputAnswers,
+} from "@t3tools/client-runtime/user-input-answers";
 
 export interface ThreadFeedActivity {
   readonly id: string;
@@ -139,6 +141,12 @@ interface DerivedWorkLogEntry extends WorkLogEntry {
 
 type RawThreadFeedEntry =
   | {
+      readonly type: "pending-user-input";
+      readonly id: string;
+      readonly createdAt: string;
+      readonly pendingUserInput: PendingUserInput;
+    }
+  | {
       readonly type: "message";
       readonly id: string;
       readonly createdAt: string;
@@ -153,7 +161,7 @@ type RawThreadFeedEntry =
     };
 
 export type ThreadFeedEntry =
-  | Extract<RawThreadFeedEntry, { type: "message" }>
+  | Extract<RawThreadFeedEntry, { type: "message" | "pending-user-input" }>
   | {
       readonly type: "activity-group";
       readonly id: string;
@@ -240,6 +248,10 @@ const activityEntriesCache = new WeakMap<
   ReadonlyArray<OrchestrationThreadActivity>,
   ReadonlyArray<Extract<RawThreadFeedEntry, { readonly type: "activity" }>>
 >();
+const pendingInputEntriesCache = new WeakMap<
+  ReadonlyArray<OrchestrationThreadActivity>,
+  ReadonlyArray<Extract<RawThreadFeedEntry, { type: "pending-user-input" }>>
+>();
 const messageEntriesCache = new WeakMap<
   OrchestrationThread["messages"][number],
   Extract<RawThreadFeedEntry, { readonly type: "message" }>
@@ -271,71 +283,6 @@ export function isContextCompactionActivityGroup(
 
 function isUserInputActivityGroup(entry: ThreadFeedActivityGroup): boolean {
   return entry.activities.some((activity) => activity.workEntry.questionAnswer !== undefined);
-}
-
-function normalizeDraftAnswer(value: string | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-function resolvePendingUserInputOptionValue(
-  question: UserInputQuestion,
-  value: string,
-): string | null {
-  if (question.options.some((option) => option.value === value)) {
-    return value;
-  }
-
-  const label = value.trim();
-  return label.length > 0 &&
-    question.options.some((option) => option.value === undefined && option.label.trim() === label)
-    ? label
-    : null;
-}
-
-function normalizeSelectedOptionValues(
-  question: UserInputQuestion,
-  value: ReadonlyArray<string> | undefined,
-): ReadonlyArray<string> {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return Array.from(
-    new Set(
-      value
-        .map((entry) => resolvePendingUserInputOptionValue(question, entry))
-        .filter((entry): entry is string => entry !== null),
-    ),
-  );
-}
-
-function resolvePendingUserInputAnswer(
-  question: UserInputQuestion,
-  draft: PendingUserInputDraftAnswer | undefined,
-): string | ReadonlyArray<string> | null {
-  if (draft?.attachmentsBlocked) return null;
-  const customAnswer =
-    question.allowCustomAnswer === false ? null : normalizeDraftAnswer(draft?.customAnswer);
-  if (customAnswer) {
-    return customAnswer;
-  }
-
-  const selectedOptionValues = normalizeSelectedOptionValues(question, draft?.selectedOptionValues);
-  if (question.multiSelect) {
-    return selectedOptionValues.length > 0
-      ? selectedOptionValues
-      : question.allowCustomAnswer !== false && (draft?.attachmentCount ?? 0) > 0
-        ? ""
-        : null;
-  }
-  return (
-    selectedOptionValues[0] ??
-    (question.allowCustomAnswer !== false && (draft?.attachmentCount ?? 0) > 0 ? "" : null)
-  );
 }
 
 /** Some providers settle agents through task.updated instead of task.completed. */
@@ -2124,93 +2071,6 @@ function liveToolActivitySummary(activity: ThreadFeedActivity, presentTense: boo
   return activity.detail ?? activity.summary;
 }
 
-export function setPendingUserInputCustomAnswer(
-  question: UserInputQuestion,
-  draft: PendingUserInputDraftAnswer | undefined,
-  customAnswer: string,
-): PendingUserInputDraftAnswer {
-  if (question.allowCustomAnswer === false) {
-    return draft ?? {};
-  }
-
-  const selectedOptionValues =
-    customAnswer.trim().length > 0
-      ? undefined
-      : normalizeSelectedOptionValues(question, draft?.selectedOptionValues);
-  return {
-    customAnswer,
-    ...(selectedOptionValues && selectedOptionValues.length > 0 ? { selectedOptionValues } : {}),
-  };
-}
-
-export function isPendingUserInputOptionSelected(
-  question: UserInputQuestion,
-  draft: PendingUserInputDraftAnswer | undefined,
-  optionValue: string,
-): boolean {
-  if (question.allowCustomAnswer !== false && normalizeDraftAnswer(draft?.customAnswer)) {
-    return false;
-  }
-
-  const resolvedOptionValue = resolvePendingUserInputOptionValue(question, optionValue);
-  return (
-    resolvedOptionValue !== null &&
-    normalizeSelectedOptionValues(question, draft?.selectedOptionValues).includes(
-      resolvedOptionValue,
-    )
-  );
-}
-
-export function togglePendingUserInputOptionSelection(
-  question: UserInputQuestion,
-  draft: PendingUserInputDraftAnswer | undefined,
-  optionValue: string,
-): PendingUserInputDraftAnswer {
-  const resolvedOptionValue = resolvePendingUserInputOptionValue(question, optionValue);
-  if (resolvedOptionValue === null) {
-    return draft ?? {};
-  }
-
-  if (question.multiSelect) {
-    const selectedOptionValues = normalizeSelectedOptionValues(
-      question,
-      draft?.selectedOptionValues,
-    );
-    const nextSelectedOptionValues = selectedOptionValues.includes(resolvedOptionValue)
-      ? selectedOptionValues.filter((value) => value !== resolvedOptionValue)
-      : [...selectedOptionValues, resolvedOptionValue];
-
-    return {
-      customAnswer: "",
-      ...(nextSelectedOptionValues.length > 0
-        ? { selectedOptionValues: nextSelectedOptionValues }
-        : {}),
-    };
-  }
-
-  return {
-    customAnswer: "",
-    selectedOptionValues: [resolvedOptionValue],
-  };
-}
-
-export function buildPendingUserInputAnswers(
-  questions: ReadonlyArray<UserInputQuestion>,
-  draftAnswers: Record<string, PendingUserInputDraftAnswer>,
-): Record<string, string | ReadonlyArray<string>> | null {
-  const answers: Record<string, string | ReadonlyArray<string>> = {};
-
-  for (const question of questions) {
-    const answer = resolvePendingUserInputAnswer(question, draftAnswers[question.id]);
-    if (answer === null) {
-      return null;
-    }
-    answers[question.id] = answer;
-  }
-
-  return answers;
-}
-
 export function buildThreadFeed(
   thread: Pick<OrchestrationThread, "messages" | "activities">,
   options?: {
@@ -2224,9 +2084,23 @@ export function buildThreadFeed(
     : loadedMessages;
   const oldestLoadedMessageCreatedAt =
     options?.loadedMessages !== undefined ? (loadedMessages[0]?.createdAt ?? null) : null;
+  let pendingEntries = pendingInputEntriesCache.get(thread.activities);
+  if (!pendingEntries) {
+    pendingEntries = derivePendingRequests(thread.activities).userInputs.map((request) => ({
+      type: "pending-user-input",
+      id: `pending-user-input:${request.requestId}`,
+      createdAt: request.createdAt,
+      pendingUserInput: request,
+    }));
+    pendingInputEntriesCache.set(thread.activities, pendingEntries);
+  }
+  const pendingRequestIds = new Set<string>(
+    pendingEntries.map((entry) => entry.pendingUserInput.requestId),
+  );
   const activityEntries = getThreadFeedActivityEntries(thread.activities).filter(
     (entry) =>
-      oldestLoadedMessageCreatedAt === null || entry.createdAt >= oldestLoadedMessageCreatedAt,
+      !pendingRequestIds.has(entry.activity.workEntry.questionAnswer?.requestId ?? "") &&
+      (oldestLoadedMessageCreatedAt === null || entry.createdAt >= oldestLoadedMessageCreatedAt),
   );
   const foldedAnswerMessageIds = new Set(
     activityEntries.flatMap((entry) =>
@@ -2248,6 +2122,7 @@ export function buildThreadFeed(
           return entry;
         }),
       ...activityEntries,
+      ...pendingEntries,
     ],
     (s) => new Date(s.createdAt),
     Order.Date,

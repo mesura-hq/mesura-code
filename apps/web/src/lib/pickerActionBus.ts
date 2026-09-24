@@ -10,11 +10,8 @@
  * state would mean threading it through components upstream rewrites weekly.
  * The bus lets the global keybinding handler in `ChatView` reach them instead.
  *
- * `question` is here for the second half of that reason alone. Its trigger is
- * an ordinary button that a synthetic click would reach, but the collapsed
- * state lives inside `ComposerPendingUserInputPanel`, which is upstream's and
- * moves often. Subscribing costs that file one effect; lifting the state to
- * `ChatView` would cost it, the composer, and everything between them.
+ * `question` reveals the pending question row in MessagesTimeline. Pending
+ * questions stay expanded so they cannot disappear inside a collapsed control.
  *
  * A target that is not currently rendered — a provider with no traits, a
  * workspace control locked once the thread owns a worktree, a thread with no

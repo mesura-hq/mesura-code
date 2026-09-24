@@ -1,3 +1,8 @@
+import { subscribePickerAction } from "../../lib/pickerActionBus";
+import {
+  InlinePendingUserInputCard,
+  type InlinePendingUserInputContext,
+} from "./InlinePendingUserInputCard";
 import { ArrowUpIcon, ClockIcon } from "lucide-react";
 import { ReadOnlySourcePreview } from "../files/AttachmentFilePreview";
 import { useRightPanelStore } from "~/rightPanelStore";
@@ -298,6 +303,8 @@ interface TimelineRowActivityState {
   latestTurnId: TurnId | null;
 }
 
+// Pending drafts must not invalidate the context consumed by ordinary message rows.
+const PendingUserInputCtx = createContext<InlinePendingUserInputContext | null>(null);
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
 const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
 
@@ -375,6 +382,7 @@ const TIMELINE_MAINTAIN_SCROLL_AT_END_SMOOTH = {
 // ---------------------------------------------------------------------------
 
 interface MessagesTimelineProps {
+  pendingUserInput?: InlinePendingUserInputContext | null;
   citationRequest?: AssistantCitationRequest | null;
   citationHistoryLoading?: boolean;
   onCiteAssistantText?: (
@@ -452,6 +460,7 @@ interface MessagesTimelineProps {
 // ---------------------------------------------------------------------------
 
 export const MessagesTimeline = memo(function MessagesTimeline({
+  pendingUserInput = null,
   citationRequest = null,
   citationHistoryLoading = false,
   onCiteAssistantText,
@@ -709,11 +718,29 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         : new Set(liveAgentTaskKey.length > 0 ? liveAgentTaskKey.split("\n") : []),
     [liveAgentTaskKey],
   );
+  const [focusRequestId, setFocusRequestId] = useState<
+    import("@t3tools/contracts").ApprovalRequestId | null
+  >(null);
+  const onQuestionFocused = useCallback(() => setFocusRequestId(null), []);
+  const pendingContext = useMemo(
+    () => (pendingUserInput ? { ...pendingUserInput, focusRequestId, onQuestionFocused } : null),
+    [pendingUserInput, focusRequestId, onQuestionFocused],
+  );
+  const pendingRequests = pendingUserInput?.requests;
+  const pendingEnvironmentId = pendingUserInput?.environmentId;
+  const pendingThreadId = pendingUserInput?.threadId;
   const rawRows = useMemo(() => {
     const previous = rowsProjectionRef.current;
     const projection = deriveMessagesTimelineRowsWithState(
       {
         timelineEntries,
+        ...(pendingRequests && pendingEnvironmentId && pendingThreadId
+          ? {
+              environmentId: pendingEnvironmentId,
+              threadId: pendingThreadId,
+              pendingUserInputs: pendingRequests,
+            }
+          : {}),
         latestTurn,
         runningTurnId,
         expandedTurnIds: paintedExpandedTurnIds,
@@ -734,6 +761,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     return projection.rows;
   }, [
     rowsProjectionRef,
+    pendingRequests,
+    pendingEnvironmentId,
+    pendingThreadId,
     listIdentityKey,
     workspaceRoot,
     timelineEntries,
@@ -750,6 +780,18 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     queuedMessages,
   ]);
   const rows = useStableRows(rawRows, listIdentityKey);
+  useEffect(
+    () =>
+      subscribePickerAction("question", () => {
+        const index = rows.findIndex((row) => row.kind === "pending-user-input");
+        if (index < 0) return;
+        onManualNavigation();
+        const row = rows[index];
+        if (row?.kind === "pending-user-input") setFocusRequestId(row.request.requestId);
+        void listRef.current?.scrollToIndex({ index, animated: false, viewOffset: 24 });
+      }),
+    [rows, listRef, onManualNavigation],
+  );
   const minimapItems = useMemo(() => deriveTimelineMinimapItems(rows), [rows]);
   const [timelineViewportElement, setTimelineViewportElement] = useState<HTMLDivElement | null>(
     null,
@@ -1017,88 +1059,90 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   }
 
   return (
-    <TimelineRowCtx value={sharedState}>
-      <TimelineRowActivityCtx value={activityState}>
-        <div
-          ref={setTimelineViewportElement}
-          className="relative h-full min-h-0"
-          data-assistant-citation-viewport="true"
-        >
-          {onCiteAssistantText && citationThreadRef ? (
-            <AssistantSelectionToolbar
-              viewport={timelineViewportElement}
-              threadRef={citationThreadRef}
-              onCite={onCiteAssistantText}
+    <PendingUserInputCtx value={pendingContext}>
+      <TimelineRowCtx value={sharedState}>
+        <TimelineRowActivityCtx value={activityState}>
+          <div
+            ref={setTimelineViewportElement}
+            className="relative h-full min-h-0"
+            data-assistant-citation-viewport="true"
+          >
+            {onCiteAssistantText && citationThreadRef ? (
+              <AssistantSelectionToolbar
+                viewport={timelineViewportElement}
+                threadRef={citationThreadRef}
+                onCite={onCiteAssistantText}
+              />
+            ) : null}
+            <LegendList<MessagesTimelineRow>
+              ref={listRef}
+              data={rows}
+              extraData={`${listIdentityKey}:${rows.length}`}
+              keyExtractor={keyExtractor}
+              getItemType={getItemType}
+              renderItem={renderItem}
+              estimatedItemSize={90}
+              initialScrollAtEnd={citationRequest === null}
+              // Legend needs a data refresh to mount new pins without a scroll event.
+              {...(readyCitationRequest ? { dataVersion: readyCitationRequest.key } : {})}
+              {...(citationAlwaysRender ? { alwaysRender: citationAlwaysRender } : {})}
+              onLoad={onCitationListLoad}
+              {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
+              contentInsetEndAdjustment={anchoredEndSpace ? contentInsetEndAdjustment : 0}
+              maintainScrollAtEnd={
+                citationPositioning ||
+                anchoredEndSpace ||
+                !liveFollowEnabled ||
+                disclosureToggleSettling
+                  ? false
+                  : isWorking && !prefersReducedMotion && settlingListIdentity === null
+                    ? TIMELINE_MAINTAIN_SCROLL_AT_END_SMOOTH
+                    : TIMELINE_MAINTAIN_SCROLL_AT_END
+              }
+              maintainVisibleContentPosition={
+                citationPositioning ? false : maintainVisibleContentPosition
+              }
+              maintainScrollAtEndThreshold={1}
+              onScroll={handleScroll}
+              onItemSizeChanged={reportContentOverflow}
+              className={cn(
+                "scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5",
+                topFadeEnabled && "topbar-scroll-fade",
+              )}
+              ListHeaderComponent={
+                loadEarlier !== null ? (
+                  <TimelineLoadEarlierHeader
+                    loading={loadEarlier.loading}
+                    onLoadEarlier={loadEarlier.onLoadEarlier}
+                    fade={topFadeEnabled}
+                  />
+                ) : topFadeEnabled ? (
+                  TIMELINE_LIST_FADE_HEADER
+                ) : (
+                  TIMELINE_LIST_HEADER
+                )
+              }
+              ListFooterComponent={timelineListFooter}
             />
-          ) : null}
-          <LegendList<MessagesTimelineRow>
-            ref={listRef}
-            data={rows}
-            extraData={`${listIdentityKey}:${rows.length}`}
-            keyExtractor={keyExtractor}
-            getItemType={getItemType}
-            renderItem={renderItem}
-            estimatedItemSize={90}
-            initialScrollAtEnd={citationRequest === null}
-            // Legend needs a data refresh to mount new pins without a scroll event.
-            {...(readyCitationRequest ? { dataVersion: readyCitationRequest.key } : {})}
-            {...(citationAlwaysRender ? { alwaysRender: citationAlwaysRender } : {})}
-            onLoad={onCitationListLoad}
-            {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
-            contentInsetEndAdjustment={anchoredEndSpace ? contentInsetEndAdjustment : 0}
-            maintainScrollAtEnd={
-              citationPositioning ||
-              anchoredEndSpace ||
-              !liveFollowEnabled ||
-              disclosureToggleSettling
-                ? false
-                : isWorking && !prefersReducedMotion && settlingListIdentity === null
-                  ? TIMELINE_MAINTAIN_SCROLL_AT_END_SMOOTH
-                  : TIMELINE_MAINTAIN_SCROLL_AT_END
-            }
-            maintainVisibleContentPosition={
-              citationPositioning ? false : maintainVisibleContentPosition
-            }
-            maintainScrollAtEndThreshold={1}
-            onScroll={handleScroll}
-            onItemSizeChanged={reportContentOverflow}
-            className={cn(
-              "scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5",
-              topFadeEnabled && "topbar-scroll-fade",
-            )}
-            ListHeaderComponent={
-              loadEarlier !== null ? (
-                <TimelineLoadEarlierHeader
-                  loading={loadEarlier.loading}
-                  onLoadEarlier={loadEarlier.onLoadEarlier}
-                  fade={topFadeEnabled}
-                />
-              ) : topFadeEnabled ? (
-                TIMELINE_LIST_FADE_HEADER
-              ) : (
-                TIMELINE_LIST_HEADER
-              )
-            }
-            ListFooterComponent={timelineListFooter}
-          />
-          <TimelineMinimap
-            items={minimapItems}
-            hasPersistentGutter={minimapHasPersistentGutter}
-            hitStripWidth={minimapHitStripWidth}
-            currentIndex={minimapCurrentIndex}
-            stripMap={minimapStripMap}
-            onSelect={(item) => {
-              onManualNavigation();
-              void listRef.current?.scrollToIndex({
-                index: item.rowIndex,
-                animated: true,
-                viewOffset: 24,
-              });
-            }}
-          />
-        </div>
-      </TimelineRowActivityCtx>
-    </TimelineRowCtx>
+            <TimelineMinimap
+              items={minimapItems}
+              hasPersistentGutter={minimapHasPersistentGutter}
+              hitStripWidth={minimapHitStripWidth}
+              currentIndex={minimapCurrentIndex}
+              stripMap={minimapStripMap}
+              onSelect={(item) => {
+                onManualNavigation();
+                void listRef.current?.scrollToIndex({
+                  index: item.rowIndex,
+                  animated: true,
+                  viewOffset: 24,
+                });
+              }}
+            />
+          </div>
+        </TimelineRowActivityCtx>
+      </TimelineRowCtx>
+    </PendingUserInputCtx>
   );
 });
 
@@ -1411,6 +1455,15 @@ function TimelineMinimapNavigationButton({
 type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"][number];
 type TimelineRow = MessagesTimelineRow;
 
+function PendingUserInputRow({
+  request,
+}: {
+  request: Extract<MessagesTimelineRow, { kind: "pending-user-input" }>["request"];
+}) {
+  const context = use(PendingUserInputCtx);
+  return context ? <InlinePendingUserInputCard request={request} context={context} /> : null;
+}
+
 const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
   const isExpandedToolGroup = row.kind === "work" && row.isExpandedToolGroup;
   const isExpandedToolGroupHeader =
@@ -1449,6 +1502,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       }
       data-message-role={row.kind === "message" ? row.message.role : undefined}
     >
+      {row.kind === "pending-user-input" ? <PendingUserInputRow request={row.request} /> : null}
       {row.kind === "work" ? (
         <WorkGroupSection
           anchorKey={row.id}
