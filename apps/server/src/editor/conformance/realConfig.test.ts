@@ -165,8 +165,15 @@ if (enabled)
             );
           }
 
+          // Neovim reports normal mode throughout; the flag is what says the
+          // next key picks a label. `settle` ends with a cursor read, which is
+          // where the flag is read too.
+          yield* bridge.settle;
+          assert.isTrue(bridge.jumping, "the session reports flash as jumping");
+
           yield* bridge.input("<Esc>");
           yield* bridge.settle;
+          assert.isFalse(bridge.jumping, "and not once the jump is abandoned");
           yield* assertMirrored(bridge);
         }).pipe(Effect.orDie),
       ),

@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 
-import { GridModel } from "./GridModel.ts";
+import { classifyRow, GridModel } from "./GridModel.ts";
 
 /** The `redraw` notification's params: one entry per event name, then its batches. */
 const redraw = (...events: ReadonlyArray<readonly unknown[]>) => events;
@@ -137,5 +137,131 @@ describe("GridModel", () => {
     writeRow(model, 0, " 1 abcd", 0);
 
     assert.isAbove(model.collect().overlays.length, 1);
+  });
+  it("moves rows on grid_scroll, so a scrolled window is not read as virtual text", () => {
+    const model = new GridModel();
+    attachedGrid(model, 10, 3);
+    model.setBufferLines(["one", "two", "three", "four"]);
+    writeRow(model, 0, "one");
+    writeRow(model, 1, "two");
+    writeRow(model, 2, "three");
+    assert.deepStrictEqual(model.collect().overlays, []);
+
+    // What Neovim sends for one line of `<C-e>`: the viewport, the region moved
+    // up a row, and only the row that came into view drawn.
+    model.applyRedraw(
+      redraw(
+        ["win_viewport", [2, 1000, 1, 4, 0, 0]],
+        ["grid_scroll", [2, 0, 3, 0, 10, 1, 0]],
+        [
+          "grid_line",
+          [
+            2,
+            2,
+            0,
+            [
+              ["f", 0, 1],
+              ["o", 0, 1],
+              ["u", 0, 1],
+              ["r", 0, 1],
+              [" ", 0, 6],
+            ],
+          ],
+        ],
+      ),
+    );
+
+    assert.deepStrictEqual(model.collect().overlays, []);
+  });
+
+  it("does not re-read the grid for a frame that drew nothing", () => {
+    const model = new GridModel();
+    attachedGrid(model, 10, 2);
+    model.setBufferLines(["abc"]);
+    writeRow(model, 0, "Xbc", 4);
+    const first = model.collect();
+    const second = model.collect();
+
+    assert.strictEqual(second.overlays, first.overlays);
+    assert.deepStrictEqual(second.changedRows, []);
+  });
+});
+
+describe("classifyRow", () => {
+  const notHostDrawn = () => false;
+  const cellsOf = (...cells: string[]) => cells;
+  const row = (text: string, cells: string[], highlights?: number[]) =>
+    classifyRow({
+      cells,
+      highlights: highlights ?? cells.map(() => 0),
+      text,
+      line: 7,
+      tabstop: 4,
+      isHostDrawn: notHostDrawn,
+    });
+
+  it("reads a tab as the blank cells up to the next tab stop", () => {
+    const result = row("\tab", cellsOf(" ", " ", " ", " ", "a", "b"));
+    assert.deepStrictEqual(result.overlays, []);
+  });
+
+  it("reports a label after a tab at the UTF-16 column of the character it covers", () => {
+    const result = row("\tab", cellsOf(" ", " ", " ", " ", "a", "Z"), [0, 0, 0, 0, 0, 9]);
+    assert.deepStrictEqual(result.overlays, [{ line: 7, col: 3, text: "Z", hl: 9 }]);
+  });
+
+  it("walks accents and wide characters without inventing labels", () => {
+    // é is one cell and one UTF-16 unit but two bytes; ⚠️ is two cells (the
+    // second drawn empty) and two UTF-16 units.
+    const result = row("é ⚠️ x", cellsOf("é", " ", "⚠️", "", " ", "x"));
+    assert.deepStrictEqual(result.overlays, []);
+  });
+
+  it("puts a label after an emoji on the character it covers", () => {
+    const result = row("⚠️ xy", cellsOf("⚠️", "", " ", "x", "Q"), [0, 0, 0, 0, 5]);
+    // ⚠️ is U+26A0 U+FE0F, two units, so "y" is UTF-16 index 4 → column 5.
+    assert.deepStrictEqual(result.overlays, [{ line: 7, col: 5, text: "Q", hl: 5 }]);
+  });
+
+  it("joins virtual text after the end of the line into one overlay, gap included", () => {
+    const cells = cellsOf("a", "b", " ", " ", "Y", "o", "u", ",", " ", "n", "o", "w", " ", " ");
+    const highlights = [0, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0];
+    const result = row("ab", cells, highlights);
+    assert.deepStrictEqual(result.overlays, [{ line: 7, col: 3, text: "  You, now", hl: 3 }]);
+  });
+
+  it("maps a highlight run over non-ASCII text to UTF-16 columns", () => {
+    const result = row(
+      "ñandú x",
+      cellsOf("ñ", "a", "n", "d", "ú", " ", "x"),
+      [8, 8, 8, 8, 8, 0, 0],
+    );
+    assert.deepStrictEqual(result.highlightRuns, [{ line: 7, startCol: 1, endCol: 6, hl: 8 }]);
+  });
+
+  it("keeps its place when a label covers half of a wide character", () => {
+    // Neovim blanks the half the label did not cover. Read against the next
+    // character, that blank consumed it and every label after was misplaced.
+    const result = row("中文x", cellsOf("a", " ", "文", "", "Q"), [9, 0, 0, 0, 5]);
+    assert.deepStrictEqual(result.overlays, [
+      { line: 7, col: 1, text: "a", hl: 9 },
+      { line: 7, col: 3, text: "Q", hl: 5 },
+    ]);
+  });
+
+  it("keeps its place when something wide is drawn over narrow text", () => {
+    const result = row("abcx", cellsOf("中", "", "c", "Q"), [9, 9, 0, 5]);
+    assert.deepStrictEqual(result.overlays, [
+      { line: 7, col: 1, text: "中", hl: 9 },
+      { line: 7, col: 4, text: "Q", hl: 5 },
+    ]);
+  });
+
+  it("reads a control or unprintable character in Neovim's spelling as the file's own", () => {
+    assert.deepStrictEqual(row("a\u0001b", cellsOf("a", "^", "A", "b")).overlays, []);
+    assert.deepStrictEqual(
+      row("a\u200bb", cellsOf("a", "<", "2", "0", "0", "b", ">", "b")).overlays,
+      [],
+    );
   });
 });

@@ -435,6 +435,8 @@ export function MonacoFileSurface({
   nvimModeRef.current = nvim.mode;
   const nvimActiveRef = useRef(nvim.active);
   nvimActiveRef.current = nvim.active;
+  const nvimJumpingRef = useRef(nvim.jumping);
+  nvimJumpingRef.current = nvim.jumping;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -467,9 +469,12 @@ export function MonacoFileSurface({
       // is how a developer leaves insert, visual or an operator, and a host
       // that blurred the editor instead would strand them in that mode with
       // the keyboard somewhere else. In plain normal mode there is nothing to
-      // leave, so Escape dismisses as it always did.
+      // leave, so Escape dismisses as it always did — except while flash waits
+      // for a label. Neovim reports plain normal mode then, and Escape is how
+      // the jump is abandoned; taken as a dismissal it left the labels up.
       isBlocked: () =>
-        hasOpenDraftRef.current || (nvimActiveRef.current && nvimModeRef.current !== "n"),
+        hasOpenDraftRef.current ||
+        (nvimActiveRef.current && (nvimModeRef.current !== "n" || nvimJumpingRef.current)),
       onDismiss: () => {},
     });
   }, []);
@@ -482,6 +487,7 @@ export function MonacoFileSurface({
       {nvim.active || nvim.fallback !== null ? (
         <NvimStatusStrip
           mode={nvim.mode}
+          jumping={nvim.jumping}
           cmdline={nvim.cmdline}
           message={nvim.message}
           fallback={nvim.fallback}

@@ -1,7 +1,11 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import type { EditorSessionEvent } from "@t3tools/contracts";
+import type * as Cause from "effect/Cause";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
@@ -36,7 +40,7 @@ class FakeNvim {
   readonly spawns: NvimSpawnInput[] = [];
   readonly calls: Array<{ method: string; params: ReadonlyArray<unknown> }> = [];
   readonly killed: string[] = [];
-  #outbound: Queue.Queue<Uint8Array> | null = null;
+  #outbound: Queue.Queue<Uint8Array, Cause.Done> | null = null;
   #responder: Responder = () => null;
   /** The buffer the fake pretends the window is on, as `mesura.open` returns. */
   #nextBufferNumber = 1;
@@ -44,6 +48,11 @@ class FakeNvim {
 
   respondWith(responder: Responder): void {
     this.#responder = responder;
+  }
+
+  /** Ends the current process's output, which is how Neovim exiting looks. */
+  crash(): void {
+    if (this.#outbound !== null) Queue.endUnsafe(this.#outbound);
   }
 
   /** Pushes a notification at the host, the way a real Neovim would. */
@@ -90,12 +99,13 @@ class FakeNvim {
     // through `this` inside the generator, which cannot see it.
     const { calls, killed } = this;
     const answer = (method: string, params: ReadonlyArray<unknown>) => this.#answer(method, params);
-    const setOutbound = (queue: Queue.Queue<Uint8Array>) => {
+    const setOutbound = (queue: Queue.Queue<Uint8Array, Cause.Done>) => {
       this.#outbound = queue;
     };
 
     return Effect.gen(function* () {
-      const outbound = yield* Queue.make<Uint8Array>();
+      // Typed to end, so `crash` can close it the way a dead process closes stdout.
+      const outbound = yield* Queue.make<Uint8Array, Cause.Done>();
       setOutbound(outbound);
       return {
         pid: 4242,
@@ -155,6 +165,29 @@ const createManager = (options: { readonly maxSessions?: number } = {}) =>
     return { manager, fake, root } satisfies Fixture;
   });
 
+/**
+ * Attaches through the websocket layer's stream and collects until it ends.
+ * Returns once the attachment has its snapshot, so what follows happens to a
+ * live attachment.
+ */
+const attachUntilEnd = (
+  manager: EditorSessionManager.EditorSessionManager["Service"],
+  threadId: string,
+) =>
+  Effect.gen(function* () {
+    const attached = yield* Deferred.make<void>();
+    const collecting = yield* Stream.runCollect(
+      EditorSessionManager.attachEventStream(manager, { threadId }).pipe(
+        Stream.tap(() => Deferred.succeed(attached, undefined)),
+      ),
+    ).pipe(
+      Effect.map((events) => [...events]),
+      Effect.forkChild,
+    );
+    yield* Deferred.await(attached);
+    return collecting;
+  });
+
 /** Collects everything an attachment reports, for the life of the scope. */
 const collect = (manager: EditorSessionManager.EditorSessionManager["Service"], threadId: string) =>
   Effect.gen(function* () {
@@ -169,6 +202,201 @@ const collect = (manager: EditorSessionManager.EditorSessionManager["Service"], 
 const layer = NodeServices.layer;
 
 it.layer(layer, { excludeTestServices: true })("EditorSessionManager", (it) => {
+  it.effect("starts Neovim in the thread's project, not the server's directory", () =>
+    Effect.gen(function* () {
+      const { manager, fake, root } = yield* createManager();
+      yield* manager.open({ threadId: "thread-cwd", cwd: root, relativePath: "a.ts", lines: [""] });
+      // Plugins root themselves at Neovim's working directory. Left at the
+      // server's own, neo-tree watched the whole home directory.
+      assert.strictEqual(fake.spawns[0]?.cwd, root);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("replaces a Neovim that exited, and the attachment keeps working", () =>
+    Effect.gen(function* () {
+      const { manager, fake, root } = yield* createManager();
+      fake.lines = ["const a = 1;"];
+      yield* manager.open({
+        threadId: "thread-exit",
+        cwd: root,
+        relativePath: "a.ts",
+        lines: ["const a = 1;"],
+      });
+      const restarted = yield* Deferred.make<void>();
+      const unsubscribe = yield* manager.attachStream({ threadId: "thread-exit" }, (event) =>
+        event.type === "message" && event.text.includes("restarted")
+          ? Deferred.succeed(restarted, undefined).pipe(Effect.asVoid)
+          : Effect.void,
+      );
+      yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
+
+      // `:q` typed into the editor, or the process killed: either way the
+      // output ends. Before, every later call on the thread waited forever.
+      fake.crash();
+      yield* Deferred.await(restarted);
+
+      assert.strictEqual(fake.spawns.length, 2, "a second Neovim was started");
+      assert.strictEqual(fake.spawns[1]?.cwd, root, "in the same project");
+      const reopen = fake.calls.findLast(
+        (call) => call.method === "nvim_exec_lua" && String(call.params[0]).includes("mesura.open"),
+      );
+      assert.isDefined(reopen, "the file was reopened");
+      assert.deepStrictEqual(
+        (reopen.params[1] as ReadonlyArray<unknown>)[1],
+        ["const a = 1;"],
+        "with the text the mirror held",
+      );
+      // And the thread answers again.
+      yield* manager.input({ threadId: "thread-exit", keys: "j" });
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("gives up after three restarts, and tells the attachment why", () =>
+    Effect.gen(function* () {
+      const { manager, fake, root } = yield* createManager();
+      yield* manager.open({
+        threadId: "thread-loop",
+        cwd: root,
+        relativePath: "a.ts",
+        lines: [""],
+      });
+      const messages = yield* Queue.make<string>();
+      const ends = yield* Queue.make<string | undefined>();
+      const unsubscribe = yield* manager.attachStream({ threadId: "thread-loop" }, (event) => {
+        if (event.type === "message") return Queue.offer(messages, event.text).pipe(Effect.asVoid);
+        if (event.type === "exited") return Queue.offer(ends, event.reason).pipe(Effect.asVoid);
+        return Effect.void;
+      });
+      yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
+
+      for (let restart = 1; restart <= 3; restart += 1) {
+        fake.crash();
+        assert.include(yield* Queue.take(messages), "restarted");
+      }
+      // A configuration that kills Neovim at start would otherwise loop.
+      fake.crash();
+      assert.include(yield* Queue.take(messages), "exited 4 times");
+      // Said as the reason the stream ends, so the client stops reopening a
+      // Neovim that only exits again.
+      assert.strictEqual(yield* Queue.take(ends), "gave-up");
+      // Behind the thread's lock, so it runs once the drop has finished.
+      const after = yield* Effect.result(manager.input({ threadId: "thread-loop", keys: "j" }));
+      assert.isTrue(Result.isFailure(after), "the session is gone");
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("fails an attachment to a thread with no session, rather than leaving it waiting", () =>
+    Effect.gen(function* () {
+      const { manager } = yield* createManager();
+      // What a client finds after a server restart: its thread's session went
+      // with the old process. The failure used to happen inside the stream's
+      // callback fiber, which nothing watched, so the stream stayed open and
+      // silent and the client never learned it had to open the file again.
+      const outcome = yield* Effect.result(
+        Stream.runDrain(EditorSessionManager.attachEventStream(manager, { threadId: "nobody" })),
+      );
+      assert.isTrue(Result.isFailure(outcome));
+      if (Result.isFailure(outcome)) {
+        assert.strictEqual(outcome.failure._tag, "EditorSessionLookupError");
+      }
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("ends an attachment with `exited` when its session is closed", () =>
+    Effect.gen(function* () {
+      const { manager, root } = yield* createManager();
+      yield* manager.open({ threadId: "thread-end", cwd: root, relativePath: "a.ts", lines: [""] });
+      const events = yield* attachUntilEnd(manager, "thread-end");
+
+      yield* manager.closeThread({ threadId: "thread-end" });
+
+      // The stream ends on its own; joining would wait forever otherwise.
+      assert.deepStrictEqual((yield* Fiber.join(events)).at(-1), {
+        type: "exited",
+        code: null,
+        reason: "closed",
+      });
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("tells an attachment its session was replaced when the project moves", () =>
+    Effect.gen(function* () {
+      const { manager, root } = yield* createManager();
+      yield* manager.open({
+        threadId: "thread-swap",
+        cwd: root,
+        relativePath: "a.ts",
+        lines: [""],
+      });
+      const events = yield* attachUntilEnd(manager, "thread-swap");
+
+      yield* manager.open({
+        threadId: "thread-swap",
+        cwd: `${root}/worktree`,
+        relativePath: "a.ts",
+        lines: [""],
+      });
+
+      // `replaced`, not `closed`: the client attaches again and opens nothing.
+      assert.deepStrictEqual((yield* Fiber.join(events)).at(-1), {
+        type: "exited",
+        code: null,
+        reason: "replaced",
+      });
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("tells attachments the server is stopping, and opens nothing after", () =>
+    Effect.gen(function* () {
+      const managerScope = yield* Scope.make();
+      const { manager, root } = yield* createManager().pipe(Scope.provide(managerScope));
+      yield* manager.open({
+        threadId: "thread-stop",
+        cwd: root,
+        relativePath: "a.ts",
+        lines: [""],
+      });
+      const events = yield* attachUntilEnd(manager, "thread-stop");
+
+      yield* Scope.close(managerScope, Exit.void);
+
+      // `stopping` makes the client wait for the reconnect rather than reopen
+      // against a server on its way out.
+      assert.deepStrictEqual((yield* Fiber.join(events)).at(-1), {
+        type: "exited",
+        code: null,
+        reason: "stopping",
+      });
+      const late = yield* Effect.result(
+        manager.open({ threadId: "thread-late", cwd: root, relativePath: "a.ts", lines: [""] }),
+      );
+      assert.isTrue(Result.isFailure(late), "an open after shutdown starts no Neovim");
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("starts a new Neovim when the thread's project moves", () =>
+    Effect.gen(function* () {
+      const { manager, fake, root } = yield* createManager();
+      yield* manager.open({
+        threadId: "thread-move",
+        cwd: root,
+        relativePath: "a.ts",
+        lines: [""],
+      });
+      const worktree = `${root}/worktree`;
+      yield* manager.open({
+        threadId: "thread-move",
+        cwd: worktree,
+        relativePath: "a.ts",
+        lines: [""],
+      });
+      assert.deepStrictEqual(
+        fake.spawns.map((spawn) => spawn.cwd),
+        [root, worktree],
+      );
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("points the mirror at the buffer it opened, before it answers", () =>
     Effect.gen(function* () {
       const { manager, fake, root } = yield* createManager();

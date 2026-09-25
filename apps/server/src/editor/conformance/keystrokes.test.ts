@@ -2,6 +2,7 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
@@ -71,7 +72,10 @@ const truth = (bridge: NvimBridge.Session) =>
     const lines = (yield* bridge.request("nvim_buf_get_lines", [0, 0, -1, false])) as string[];
     const cursor = (yield* bridge.request("nvim_win_get_cursor", [0])) as [number, number];
     const mode = (yield* bridge.request("nvim_get_mode", [])) as { mode: string };
-    return { lines, cursor: { line: cursor[0], col: cursor[1] + 1 }, mode: mode.mode };
+    // The wire counts columns in UTF-16 units, as Monaco does; Neovim in bytes.
+    const cursorLine = lines[cursor[0] - 1] ?? "";
+    const col = Buffer.from(cursorLine).subarray(0, cursor[1]).toString().length + 1;
+    return { lines, cursor: { line: cursor[0], col }, mode: mode.mode };
   });
 
 /** One case of the keystroke table. */
@@ -83,6 +87,10 @@ interface KeystrokeCase {
 
 const KEYSTROKE_CASES: ReadonlyArray<KeystrokeCase> = [
   { name: "j moves down", lines: ["one", "two", "three"], keys: ["j"] },
+  // Accents are two bytes and one UTF-16 unit, the emoji six bytes and two
+  // units: the byte column put the caret past the end of these lines.
+  { name: "$ lands on an accented line's last character", lines: ["café ñandú"], keys: ["$"] },
+  { name: "w crosses an emoji", lines: ["⚠️ aviso — sí"], keys: ["w", "w"] },
   { name: "dd deletes a line", lines: ["one", "two", "three"], keys: ["dd"] },
   { name: "ciw changes a word", lines: ["alpha beta"], keys: ["ciw", "gamma", "<Esc>"] },
   {
@@ -304,6 +312,21 @@ it.layer(layer, { excludeTestServices: true })("conformance: the command line", 
 
 it.layer(layer, { excludeTestServices: true })("conformance: an agent's write", (it) => {
   if (!nvimAvailable) return;
+
+  it.effect("lands at UTF-16 columns on a line outside ASCII", () =>
+    withNvim(["⚠️ café — ok"], (bridge) =>
+      Effect.gen(function* () {
+        // Monaco reports columns in UTF-16 units. "ok" starts at unit 10 and
+        // at byte 16, so an edit read as bytes lands inside the em dash.
+        yield* bridge.request("nvim_exec_lua", [
+          APPLY_EDITS_LUA,
+          [bridge.attachedBuffer, [[0, 10, 0, 12, ["OK"]]]],
+        ]);
+        yield* bridge.settle;
+        assert.deepStrictEqual([...bridge.lines], ["⚠️ café — OK"]);
+      }),
+    ),
+  );
 
   it.effect("is one undo step however many edits it carries", () =>
     withNvim(["alpha", "beta", "gamma"], (bridge) =>
@@ -637,7 +660,7 @@ it.layer(layer, { excludeTestServices: true })("conformance: the mirror equals N
     );
   }
 
-  it.effect("finds overlaid virtual text as virtual cells at the right columns", () =>
+  it.effect("finds overlaid virtual text as one overlay at the right column", () =>
     withNvim(["const value = 1;"], (bridge) =>
       Effect.gen(function* () {
         const namespace = (yield* bridge.request("nvim_create_namespace", [
@@ -652,13 +675,12 @@ it.layer(layer, { excludeTestServices: true })("conformance: the mirror equals N
         ]);
         yield* bridge.awaitFlush;
 
+        // One overlay, not one per cell: each overlay is a node on the client,
+        // and adjacent cells on one highlight are one piece of virtual text.
         const overlays = bridge.overlays;
         assert.deepStrictEqual(
           overlays.map((overlay) => [overlay.line, overlay.col, overlay.text]),
-          [
-            [1, 1, "X"],
-            [1, 2, "Y"],
-          ],
+          [[1, 1, "XY"]],
         );
       }),
     ),
@@ -683,6 +705,22 @@ it.layer(layer, { excludeTestServices: true })("conformance: the mirror equals N
         const expected = yield* truth(bridge);
         assert.deepStrictEqual(bridge.cursor, expected.cursor);
         assert.strictEqual(bridge.lines.length, 3);
+      }),
+    ),
+  );
+
+  it.effect("reports its own exit, and a request after it fails instead of waiting", () =>
+    withNvim(["one"], (bridge) =>
+      Effect.gen(function* () {
+        const exited = yield* Deferred.make<void>();
+        bridge.subscribe((event) => {
+          if (event.kind === "exited") Deferred.doneUnsafe(exited, Effect.void);
+        });
+        // What a developer typing `:qa!` into the editor does.
+        yield* bridge.input(":qa!<CR>");
+        yield* Deferred.await(exited);
+        const after = yield* Effect.result(bridge.request("nvim_eval", ["1"]));
+        assert.isTrue(Result.isFailure(after), "a request to an exited Neovim fails");
       }),
     ),
   );

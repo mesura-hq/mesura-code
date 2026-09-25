@@ -279,7 +279,12 @@ if (enabled)
           for (let index = 0; index < 20; index += 1) {
             flash.push(yield* probeUntilOverlays(bridge, "se"));
             yield* bridge.input("<Esc>");
-            yield* bridge.awaitFrame;
+            // `settle`, not the next frame. The next frame only came for free
+            // while the configuration's status line redrew on its own; with
+            // those plugins left out under Mesura an idle Neovim draws
+            // nothing, and an `<Esc>` that finds nothing to clear then waited
+            // for a frame that never came.
+            yield* bridge.settle;
           }
 
           const runs = [

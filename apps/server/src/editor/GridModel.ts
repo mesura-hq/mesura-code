@@ -13,6 +13,14 @@
  *   file's own, marked: a search match, an incremental-substitution preview;
  * - a blank is neither.
  *
+ * **Grid columns are screen cells, not buffer columns.** A tab is several
+ * cells, a wide character is two (the second drawn as an empty string), and a
+ * character outside ASCII is one cell but several bytes and possibly two
+ * UTF-16 units. `classifyRow` walks the buffer line and the row together, so
+ * what it reports is in UTF-16 columns — Monaco's unit — whatever the line
+ * holds. Comparing index for index read every character after the first tab
+ * or accent on a line as a phantom label.
+ *
  * **This only holds while Neovim draws no gutter.** With line numbers on, grid
  * column N is not buffer column N, every character on the line differs from the
  * one it is compared against, and a single flash jump produced 132 phantom
@@ -81,6 +89,17 @@ export class GridModel {
   #bufferLines: readonly string[] = [];
   #topLine = 0;
   #rowHashes: string[] = [];
+  #tabstop = 8;
+  /**
+   * Whether anything the classification reads moved since the last collect.
+   *
+   * A real configuration flushes about 230 times a second while idle, nearly
+   * always drawing nothing, so re-reading the whole grid on every one of them
+   * is work for no answer.
+   */
+  #dirty = true;
+  #overlays: GridOverlay[] = [];
+  #highlightRuns: HighlightRun[] = [];
   #cellsDrawn = 0;
   #cursorRow = -1;
   #cursorColumn = -1;
@@ -142,6 +161,14 @@ export class GridModel {
 
   setBufferLines(lines: readonly string[]): void {
     this.#bufferLines = lines;
+    this.#dirty = true;
+  }
+
+  /** The buffer's `tabstop`, which decides how many cells a tab is drawn as. */
+  setTabstop(tabstop: number): void {
+    if (!Number.isInteger(tabstop) || tabstop < 1 || tabstop === this.#tabstop) return;
+    this.#tabstop = tabstop;
+    this.#dirty = true;
   }
 
   /**
@@ -153,7 +180,10 @@ export class GridModel {
   setCurrentWindow(window: number): void {
     this.#currentWindow = window;
     const grid = [...this.#gridWindows].find(([, id]) => id === window)?.[0];
-    if (grid !== undefined) this.#bufferGridId = grid;
+    if (grid !== undefined && grid !== this.#bufferGridId) {
+      this.#bufferGridId = grid;
+      this.#dirty = true;
+    }
   }
 
   /** Applies one `redraw` notification's parameters. */
@@ -171,6 +201,7 @@ export class GridModel {
       case "grid_resize": {
         const [id, width, height] = batch as [number, number, number];
         this.#ensureGrid(id, width, height);
+        this.#touch(id);
         return;
       }
       case "grid_clear": {
@@ -178,6 +209,36 @@ export class GridModel {
         if (grid === undefined) return;
         for (const row of grid.cells) row.fill(" ");
         for (const row of grid.highlights) row.fill(0);
+        this.#touch(batch[0] as number);
+        return;
+      }
+      case "grid_destroy": {
+        const gridId = batch[0] as number;
+        this.#touch(gridId);
+        this.#grids.delete(gridId);
+        this.#gridWindows.delete(gridId);
+        if (this.#bufferGridId === gridId) this.#bufferGridId = null;
+        return;
+      }
+      case "grid_scroll": {
+        // Neovim scrolls by moving rows it already sent and drawing only the
+        // ones that came into view. Ignoring this left every moved row holding
+        // what it showed before the scroll, read against the line now under
+        // it: one `<C-d>` in a 442-line file produced 915 phantom overlays, and
+        // a closing tag from the top of the screen appeared mid-file.
+        const [gridId, top, bottom, left, right, rows] = batch as [
+          number,
+          number,
+          number,
+          number,
+          number,
+          number,
+        ];
+        const grid = this.#grids.get(gridId);
+        if (grid === undefined) return;
+        scrollRegion(grid.cells, top, bottom, left, right, rows);
+        scrollRegion(grid.highlights, top, bottom, left, right, rows);
+        this.#touch(gridId);
         return;
       }
       case "hl_attr_define": {
@@ -191,6 +252,9 @@ export class GridModel {
         for (const entry of info ?? []) {
           if (typeof entry?.hi_name === "string") groups.add(entry.hi_name);
         }
+        // A redefined id can change whether its cells are the host's own
+        // drawing, so the rows already read against the old one are stale.
+        if (this.#highlightDefinitions.has(id)) this.#dirty = true;
         this.#highlightDefinitions.set(id, { attributes, groups });
         return;
       }
@@ -206,6 +270,7 @@ export class GridModel {
         // snacks, noice) never arrive here at all; they report
         // `win_float_pos`, which is ignored.
         const [gridId, window] = batch as [number, { id?: number } | undefined];
+        this.#dirty = true;
         if (typeof window?.id === "number") {
           this.#gridWindows.set(gridId, window.id);
           if (window.id === this.#currentWindow) this.#bufferGridId = gridId;
@@ -225,6 +290,7 @@ export class GridModel {
         // own height counts screen rows, which a wrapped line makes two of.
         const [gridId, , topLine, botLine] = batch as [number, unknown, number, number];
         if (gridId !== this.#bufferGridId) return;
+        if (topLine !== this.#topLine) this.#dirty = true;
         this.#topLine = topLine;
         this.#botLine = botLine;
         return;
@@ -256,6 +322,7 @@ export class GridModel {
     ];
     const grid = this.#grids.get(gridId);
     if (grid === undefined || row >= grid.height) return;
+    this.#touch(gridId);
     let column = startColumn;
     let highlight = 0;
     for (const cell of cells) {
@@ -275,6 +342,11 @@ export class GridModel {
         column += 1;
       }
     }
+  }
+
+  /** Marks the classification stale when the grid drawn into is the one it reads. */
+  #touch(gridId: number): void {
+    if (this.#bufferGridId === null || gridId === this.#bufferGridId) this.#dirty = true;
   }
 
   #ensureGrid(id: number, width: number, height: number): Grid {
@@ -300,66 +372,44 @@ export class GridModel {
    */
   collect(): GridCollection {
     const grid = this.#bufferGridId === null ? undefined : this.#grids.get(this.#bufferGridId);
+    if (grid === undefined) return { overlays: [], highlightRuns: [], changedRows: [] };
+    if (!this.#dirty) {
+      return { overlays: this.#overlays, highlightRuns: this.#highlightRuns, changedRows: [] };
+    }
+    this.#dirty = false;
+
     const overlays: GridOverlay[] = [];
     const highlightRuns: HighlightRun[] = [];
     const changedRows: number[] = [];
-    if (grid === undefined) return { overlays, highlightRuns, changedRows };
+    const isHostDrawn = (highlight: number) => this.#isHostDrawn(highlight);
 
     for (let row = 0; row < grid.height; row += 1) {
-      const hash = `${grid.cells[row]!.join("")} ${grid.highlights[row]!.join(",")}`;
+      const bufferLine = this.#bufferLines[this.#topLine + row];
+      const line = this.#topLine + row + 1;
+      // The line and its text are part of the hash, not only the drawing: a
+      // row that shows a different line after a scroll owes the client that
+      // line's decorations even when the cells happen to be the same.
+      const hash = `${line}\u0000${bufferLine ?? ""}\u0000${grid.cells[row]!.join("")}\u0000${grid.highlights[row]!.join(",")}`;
       if (this.#rowHashes[row] !== hash) {
         this.#rowHashes[row] = hash;
         changedRows.push(row);
       }
-
-      const bufferLine = this.#bufferLines[this.#topLine + row];
       if (bufferLine === undefined) continue;
-      const line = this.#topLine + row + 1;
 
-      let runStart: number | null = null;
-      let runHighlight = 0;
-      const closeRun = (endColumnExclusive: number) => {
-        if (runStart === null) return;
-        highlightRuns.push({
-          line,
-          // One-based, with an exclusive end, which is the shape a Monaco
-          // range takes: a run over columns 2 to 5 is `startCol 2, endCol 6`.
-          startCol: runStart + 1,
-          endCol: endColumnExclusive + 1,
-          hl: runHighlight,
-        });
-        runStart = null;
-      };
-
-      for (let column = 0; column < grid.width; column += 1) {
-        const drawn = grid.cells[row]![column] ?? " ";
-        const actual = bufferLine[column] ?? " ";
-        const highlight = grid.highlights[row]![column] ?? 0;
-
-        if (drawn !== actual && drawn !== " " && drawn !== "") {
-          closeRun(column);
-          overlays.push({ line, col: column + 1, text: drawn, hl: highlight });
-          continue;
-        }
-
-        const marked =
-          drawn === actual && drawn !== " " && highlight !== 0 && !this.#isHostDrawn(highlight);
-        if (marked) {
-          if (runStart === null) {
-            runStart = column;
-            runHighlight = highlight;
-          } else if (runHighlight !== highlight) {
-            closeRun(column);
-            runStart = column;
-            runHighlight = highlight;
-          }
-          continue;
-        }
-        closeRun(column);
-      }
-      closeRun(grid.width);
+      const classified = classifyRow({
+        cells: grid.cells[row]!,
+        highlights: grid.highlights[row]!,
+        text: bufferLine,
+        line,
+        tabstop: this.#tabstop,
+        isHostDrawn,
+      });
+      overlays.push(...classified.overlays);
+      highlightRuns.push(...classified.highlightRuns);
     }
 
+    this.#overlays = overlays;
+    this.#highlightRuns = highlightRuns;
     return { overlays, highlightRuns, changedRows };
   }
 
@@ -371,4 +421,264 @@ export class GridModel {
     }
     return false;
   }
+}
+
+/** Moves rows `[top, bottom)` of one grid by `rows`, only within `[left, right)`. */
+function scrollRegion<T>(
+  grid: T[][],
+  top: number,
+  bottom: number,
+  left: number,
+  right: number,
+  rows: number,
+): void {
+  if (rows > 0) {
+    for (let row = top; row < bottom - rows; row += 1) {
+      const source = grid[row + rows];
+      const target = grid[row];
+      if (source === undefined || target === undefined) continue;
+      for (let column = left; column < right; column += 1) target[column] = source[column]!;
+    }
+    return;
+  }
+  for (let row = bottom - 1; row >= top - rows; row -= 1) {
+    const source = grid[row + rows];
+    const target = grid[row];
+    if (source === undefined || target === undefined) continue;
+    for (let column = left; column < right; column += 1) target[column] = source[column]!;
+  }
+}
+
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/** How many UTF-16 units the character starting at `index` takes, marks included. */
+function clusterLength(text: string, index: number): number {
+  const segments = graphemes.segment(text.slice(index, index + 32));
+  const first = segments[Symbol.iterator]().next();
+  return first.done === true ? 1 : Math.max(1, first.value.segment.length);
+}
+
+/**
+ * East Asian wide and fullwidth ranges, and emoji shown as emoji. An
+ * approximation of Neovim's own width table, good for the scripts and symbols
+ * a source file holds; a character it misjudges costs one misplaced overlay.
+ */
+const WIDE_CHARACTER =
+  /[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA000-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6\u{20000}-\u{3FFFD}]|\p{Emoji_Presentation}|\p{Extended_Pictographic}\uFE0F/u;
+
+/** How many screen cells a character takes when Neovim draws it as itself. */
+function cellWidth(cluster: string): number {
+  return WIDE_CHARACTER.test(cluster) ? 2 : 1;
+}
+
+/**
+ * The ways Neovim spells a character it cannot draw as itself: `^A` for a
+ * control character, `<200b>` for an unprintable one. Candidates rather than
+ * one answer, because the hex form's padding is Neovim's to choose; the cells
+ * decide which one it drew.
+ */
+function spelledForms(cluster: string): ReadonlyArray<string> {
+  const code = cluster.codePointAt(0) ?? 0;
+  if (code < 0x20) return [`^${String.fromCharCode(code + 64)}`];
+  if (code === 0x7f) return ["^?"];
+  const hex = code.toString(16);
+  return [`<${hex}>`, `<${hex.padStart(4, "0")}>`];
+}
+
+/** Whether `cells` from `column` on hold exactly `spelled`, one character per cell. */
+function cellsSpell(cells: ReadonlyArray<string>, column: number, spelled: string): boolean {
+  for (let index = 0; index < spelled.length; index += 1) {
+    if (cells[column + index] !== spelled[index]) return false;
+  }
+  return true;
+}
+
+export interface ClassifyRowInput {
+  readonly cells: ReadonlyArray<string>;
+  readonly highlights: ReadonlyArray<number>;
+  /** The buffer line the row shows. */
+  readonly text: string;
+  /** One-based. */
+  readonly line: number;
+  readonly tabstop: number;
+  readonly isHostDrawn: (highlight: number) => boolean;
+}
+
+/**
+ * Reads one drawn row against the buffer line under it.
+ *
+ * Walks both at once: a cell that holds the buffer's next character is the
+ * file's own text, and advances the buffer by that character's UTF-16 length;
+ * a tab is however many blank cells reach the next tab stop; an empty cell is
+ * the right half of a wide character and stands for nothing. What is left is
+ * drawn over the text or past its end, and is reported as an overlay at the
+ * UTF-16 column of the character it covers.
+ *
+ * Adjacent virtual cells on one highlight are one overlay, because each one
+ * becomes a node on the client: git blame at the end of a line is one label,
+ * not forty. Past the end of the line the overlay starts at the line's end and
+ * carries the blank gap before it in its text, since Monaco has no column
+ * there to put it at.
+ *
+ * Assumes the window is not scrolled sideways (`leftcol` 0), which holds while
+ * the client sizes the grid wider than the widest visible line.
+ */
+export function classifyRow(input: ClassifyRowInput): {
+  readonly overlays: GridOverlay[];
+  readonly highlightRuns: HighlightRun[];
+} {
+  const { cells, highlights, text, line, tabstop, isHostDrawn } = input;
+  const overlays: GridOverlay[] = [];
+  const highlightRuns: HighlightRun[] = [];
+
+  let position = 0;
+  /** The grid column the buffer text ended at, once it has. */
+  let endColumn: number | null = null;
+  // Initialised through a cast so the closures below that reassign them do not
+  // leave TypeScript narrowing them to `null` for the rest of the loop.
+  let overlay = null as { col: number; text: string; hl: number; lastColumn: number } | null;
+  let run = null as { start: number; hl: number } | null;
+  /**
+   * A buffer character that something else was drawn over, and the grid
+   * column its cells end at. A wide character under a one-cell label still
+   * owns the cell after the label, so that cell must not be read against the
+   * next character.
+   */
+  let covered = { at: 0, untilColumn: 0 };
+  /** The last column that drew something over the text. */
+  let lastOverlaidColumn = -2;
+
+  const closeOverlay = () => {
+    if (overlay === null) return;
+    const trimmed = overlay.text.trimEnd();
+    if (trimmed !== "") {
+      overlays.push({ line, col: overlay.col, text: trimmed, hl: overlay.hl });
+    }
+    overlay = null;
+  };
+  const closeRun = (endExclusive: number) => {
+    if (run === null) return;
+    // One-based, with an exclusive end, which is the shape a Monaco range
+    // takes: a run over UTF-16 columns 2 to 5 is `startCol 2, endCol 6`.
+    if (endExclusive > run.start) {
+      highlightRuns.push({ line, startCol: run.start + 1, endCol: endExclusive + 1, hl: run.hl });
+    }
+    run = null;
+  };
+  const addOverlay = (column: number, drawn: string, highlight: number, at: number) => {
+    if (overlay !== null && overlay.hl === highlight && overlay.lastColumn === column - 1) {
+      overlay.text += drawn;
+      overlay.lastColumn = column;
+      return;
+    }
+    closeOverlay();
+    const gap = endColumn === null ? "" : " ".repeat(Math.max(0, column - endColumn));
+    overlay = { col: at + 1, text: gap + drawn, hl: highlight, lastColumn: column };
+  };
+
+  for (let column = 0; column < cells.length; column += 1) {
+    const drawn = cells[column] ?? " ";
+    const highlight = highlights[column] ?? 0;
+
+    if (column < covered.untilColumn) {
+      // The rest of a covered wide character: its right half, blanked, or
+      // more of whatever was drawn over it.
+      if (drawn === "") {
+        if (overlay !== null && overlay.lastColumn === column - 1) overlay.lastColumn = column;
+      } else if (drawn === " ") {
+        closeOverlay();
+      } else {
+        addOverlay(column, drawn, highlight, covered.at);
+        lastOverlaidColumn = column;
+      }
+      continue;
+    }
+
+    if (drawn === "" && lastOverlaidColumn === column - 1 && position < text.length) {
+      // The right half of something wide drawn over the text, which covers
+      // the next buffer character as well.
+      const at = position;
+      const length = clusterLength(text, position);
+      covered = { at, untilColumn: column + cellWidth(text.slice(at, at + length)) };
+      position += length;
+      if (overlay !== null && overlay.lastColumn === column - 1) overlay.lastColumn = column;
+      continue;
+    }
+
+    if (drawn === "") {
+      // The right half of a wide character belongs to whatever the left half
+      // was, so an overlay made of wide characters stays one overlay.
+      if (overlay !== null && overlay.lastColumn === column - 1) overlay.lastColumn = column;
+      continue;
+    }
+
+    if (position >= text.length) {
+      endColumn ??= column;
+      closeRun(text.length);
+      if (drawn === " ") {
+        // Blanks inside virtual text on its own highlight belong to it:
+        // "You, 2 days ago" is one label. Trailing ones are trimmed at close.
+        if (overlay !== null && highlight !== 0 && overlay.hl === highlight) {
+          overlay.text += " ";
+          overlay.lastColumn = column;
+        } else {
+          closeOverlay();
+        }
+        continue;
+      }
+      addOverlay(column, drawn, highlight, text.length);
+      continue;
+    }
+
+    const at = position;
+    if (text[position] === "\t") {
+      const tabEnd = (Math.floor(column / tabstop) + 1) * tabstop;
+      if (column + 1 >= tabEnd) position += 1;
+      closeRun(at);
+      if (drawn === " ") closeOverlay();
+      else addOverlay(column, drawn, highlight, at);
+      continue;
+    }
+
+    if (text.startsWith(drawn, position)) {
+      position += drawn.length;
+      closeOverlay();
+      const marked = drawn !== " " && highlight !== 0 && !isHostDrawn(highlight);
+      if (!marked) {
+        closeRun(at);
+        continue;
+      }
+      if (run !== null && run.hl !== highlight) closeRun(at);
+      run ??= { start: at, hl: highlight };
+      continue;
+    }
+
+    const length = clusterLength(text, position);
+    const cluster = text.slice(position, position + length);
+    const spelled = spelledForms(cluster).find((form) => cellsSpell(cells, column, form));
+    if (spelled !== undefined) {
+      // The file's own character, in the only form Neovim can draw it. Monaco
+      // draws its own, so nothing is reported.
+      position += length;
+      closeOverlay();
+      closeRun(at);
+      column += spelled.length - 1;
+      continue;
+    }
+
+    // Something else was drawn where the buffer has this character.
+    position += length;
+    covered = { at, untilColumn: column + cellWidth(cluster) };
+    closeRun(at);
+    if (drawn === " ") {
+      closeOverlay();
+      continue;
+    }
+    addOverlay(column, drawn, highlight, at);
+    lastOverlaidColumn = column;
+  }
+  closeOverlay();
+  closeRun(Math.min(position, text.length));
+
+  return { overlays, highlightRuns };
 }

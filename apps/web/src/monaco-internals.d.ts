@@ -1,5 +1,5 @@
 /**
- * The one Monaco module this app reaches into that ships no types.
+ * The Monaco modules this app reaches into that ship no types.
  *
  * JSON is the only language the file panel colours whose grammar is not under
  * `languages/definitions`. Its tokenizer lives inside the language service, in
@@ -15,4 +15,14 @@ declare module "monaco-editor/languages/features/json/tokenization.js" {
   export function createTokenizationSupport(
     supportComments: boolean,
   ): import("monaco-editor").languages.TokensProvider;
+}
+
+/**
+ * The HTML grammar, which the Astro grammar in `monacoAstroLanguage.ts` builds
+ * on. Monaco loads it itself through `register.js`; only the module the loader
+ * points at is untyped.
+ */
+declare module "monaco-editor/languages/definitions/html/html.js" {
+  export const conf: import("monaco-editor").languages.LanguageConfiguration;
+  export const language: import("monaco-editor").languages.IMonarchLanguage;
 }

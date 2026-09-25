@@ -331,3 +331,34 @@ describe("applyEditorSessionEvent", () => {
     expect(after.latestEvent?.type).toBe("message");
   });
 });
+
+describe("flash's jump", () => {
+  it("is on while a mode event says so, and off with the next one that does not", () => {
+    // Neovim's own mode stays `n` throughout a flash jump, so the flag is the
+    // only thing that tells the strip the next key picks a label.
+    const jumping = fold(EMPTY_EDITOR_SESSION_STATE, [
+      snapshot(["one"]),
+      { type: "mode", mode: "n", blocking: false, jumping: true },
+    ]);
+    expect(jumping.jumping).toBe(true);
+    const done = applyEditorSessionEvent(jumping, { type: "mode", mode: "n", blocking: false });
+    expect(done.jumping).toBe(false);
+  });
+});
+
+describe("the session ending", () => {
+  it("records why, until a snapshot says a session is live again", () => {
+    const live = fold(EMPTY_EDITOR_SESSION_STATE, [snapshot(["one"])]);
+    expect(live.ended).toBeNull();
+    const stopped = applyEditorSessionEvent(live, {
+      type: "exited",
+      code: null,
+      reason: "stopping",
+    });
+    expect(stopped.ended).toBe("stopping");
+    // The subscription re-attaches on its own after a reconnect, into the same
+    // fold. A reason that outlived that would keep the panel recovering a
+    // session that is already back.
+    expect(applyEditorSessionEvent(stopped, snapshot(["one"])).ended).toBeNull();
+  });
+});

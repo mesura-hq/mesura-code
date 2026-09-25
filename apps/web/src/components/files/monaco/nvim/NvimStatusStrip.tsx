@@ -1,4 +1,5 @@
 import type { EditorCmdline } from "@t3tools/contracts";
+import { ZapIcon } from "lucide-react";
 
 import { describeMode } from "./nvimMode.ts";
 import { isErrorMessageKind } from "./nvimMessages.ts";
@@ -20,12 +21,14 @@ import { describeFallback, isSettingsFixable, type NvimFallback } from "./nvimFa
  */
 export function NvimStatusStrip({
   mode,
+  jumping,
   cmdline,
   message,
   fallback,
   onRetry,
 }: {
   readonly mode: string;
+  readonly jumping: boolean;
   readonly cmdline: EditorCmdline | null;
   readonly message: { readonly kind: string; readonly text: string } | null;
   readonly fallback: NvimFallback | null;
@@ -62,9 +65,21 @@ export function NvimStatusStrip({
       data-nvim-status-strip
       className="flex h-6 shrink-0 items-center gap-2 border-t border-border/50 px-2 text-[11px] text-muted-foreground"
     >
-      <span className="font-mono font-medium tracking-wide text-foreground">
-        {describeMode(mode)}
-      </span>
+      {jumping ? (
+        // Neovim still reports normal mode while flash waits for a label, so
+        // the strip says what the next key actually does.
+        <span
+          data-nvim-jumping
+          className="flex items-center gap-1 font-mono font-medium tracking-wide text-amber-600 dark:text-amber-400"
+        >
+          <ZapIcon aria-hidden className="size-3 fill-current" />
+          FLASH
+        </span>
+      ) : (
+        <span className="font-mono font-medium tracking-wide text-foreground">
+          {describeMode(mode)}
+        </span>
+      )}
       {cmdline === null ? null : <NvimCmdlineText cmdline={cmdline} />}
       {cmdline === null && message !== null ? (
         <span

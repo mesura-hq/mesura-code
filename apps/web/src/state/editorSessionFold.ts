@@ -1,6 +1,7 @@
 import type {
   EditorCmdline,
   EditorHighlightDefinition,
+  EditorSessionEndReason,
   EditorSessionEvent,
   EditorVisual,
 } from "@t3tools/contracts";
@@ -48,6 +49,8 @@ export interface EditorSessionState {
   readonly lines: ReadonlyArray<string>;
   readonly cursor: { readonly line: number; readonly col: number } | null;
   readonly mode: string;
+  /** flash is labelling jump targets; Neovim's own mode says `n` meanwhile. */
+  readonly jumping: boolean;
   readonly topline: number;
   /** The command line Neovim is showing, `null` when it is closed. */
   readonly cmdline: EditorCmdline | null;
@@ -69,6 +72,11 @@ export interface EditorSessionState {
    * told their file is saved.
    */
   readonly writeRequests: number;
+  /**
+   * Why the session ended, once it has. The attachment's stream stops here,
+   * so nothing after this describes a live Neovim.
+   */
+  readonly ended: EditorSessionEndReason | null;
   readonly latestEvent: EditorSessionEvent | null;
   readonly sequence: number;
 }
@@ -78,6 +86,7 @@ export const EMPTY_EDITOR_SESSION_STATE: EditorSessionState = {
   lines: [],
   cursor: null,
   mode: "n",
+  jumping: false,
   topline: 1,
   cmdline: null,
   message: null,
@@ -85,6 +94,7 @@ export const EMPTY_EDITOR_SESSION_STATE: EditorSessionState = {
   hlDefs: {},
   visual: null,
   writeRequests: 0,
+  ended: null,
   latestEvent: null,
   sequence: 0,
 };
@@ -137,7 +147,11 @@ export function applyEditorSessionEvent(
         lines: event.snapshot.lines,
         cursor: event.snapshot.cursor,
         mode: event.snapshot.mode,
+        jumping: event.snapshot.jumping ?? false,
         topline: event.snapshot.topline,
+        // A snapshot is a live session. The subscription re-attaches by itself
+        // when the connection comes back, so one can follow an `exited`.
+        ended: null,
       };
     case "lines":
       // A delta for another file is refused rather than applied. The event
@@ -157,7 +171,7 @@ export function applyEditorSessionEvent(
     case "cursor":
       return { ...base, cursor: { line: event.line, col: event.col } };
     case "mode":
-      return { ...base, mode: event.mode };
+      return { ...base, mode: event.mode, jumping: event.jumping ?? false };
     case "viewport":
       return { ...base, topline: event.topline };
     case "cmdline":
@@ -180,6 +194,8 @@ export function applyEditorSessionEvent(
       return { ...base, visual: event.visual };
     case "writeRequested":
       return { ...base, writeRequests: state.writeRequests + 1 };
+    case "exited":
+      return { ...base, ended: event.reason };
     default:
       return base;
   }

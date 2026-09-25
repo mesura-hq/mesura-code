@@ -220,8 +220,12 @@ export const makeNvimRpc = Effect.fn("NvimRpc.make")(function* (duplex: NvimRpcD
     return fatal;
   };
 
+  /** Set once the channel cannot answer again; later requests fail at once. */
+  let closedWith: NvimRpcError | null = null;
+
   /** Fails every waiting request, for a channel that cannot recover. */
   const abort = (failure: NvimRpcError) => {
+    closedWith ??= failure;
     for (const [, waiting] of pending) Deferred.doneUnsafe(waiting, Effect.fail(failure));
     pending.clear();
     Queue.endUnsafe(notifications);
@@ -238,33 +242,49 @@ export const makeNvimRpc = Effect.fn("NvimRpc.make")(function* (duplex: NvimRpcD
         abort(fatal);
       }),
     ),
+    // The output ending is the process ending. Without this, a request already
+    // waiting when Neovim died waited forever, and every request after it was
+    // written into a closed pipe and waited forever too — under the thread's
+    // lock, so the whole editor for that thread stopped answering.
+    Effect.andThen(() =>
+      Effect.sync(() => abort(new NvimRpcError({ method: "<closed>", message: "Neovim exited" }))),
+    ),
     // Interruption is how this fiber ends when the scope closes, and saying so
-    // every time would be noise. Anything else is a defect worth seeing.
+    // every time would be noise. Anything else is a defect worth seeing, and
+    // closes the channel the same way an ended output does: a read that failed
+    // leaves the requests waiting on it with nothing left to answer them.
     Effect.catchCause((cause) =>
       Cause.hasInterruptsOnly(cause)
         ? Effect.void
-        : Effect.logWarning("the Neovim read loop stopped", { cause }),
+        : Effect.logWarning("the Neovim read loop stopped", { cause }).pipe(
+            Effect.andThen(
+              Effect.sync(() =>
+                abort(
+                  new NvimRpcError({ method: "<closed>", message: "the Neovim channel failed" }),
+                ),
+              ),
+            ),
+          ),
     ),
     Effect.forkScoped,
   );
 
   yield* Effect.addFinalizer(() =>
     Effect.sync(() => {
-      for (const [, waiting] of pending) {
-        Deferred.doneUnsafe(
-          waiting,
-          Effect.fail(new NvimRpcError({ method: "<closed>", message: "the session closed" })),
-        );
-      }
+      closedWith ??= new NvimRpcError({ method: "<closed>", message: "the session closed" });
+      for (const [, waiting] of pending) Deferred.doneUnsafe(waiting, Effect.fail(closedWith));
       pending.clear();
     }),
   );
 
   const request: NvimRpc["request"] = (method, params) =>
     Effect.gen(function* () {
+      const deferred = yield* Deferred.make<unknown, NvimRpcError>();
+      // Checked with nothing that can yield between it and `pending.set`, so a
+      // close cannot land in between and leave this request unanswered.
+      if (closedWith !== null) return yield* closedWith;
       const messageId = nextMessageId;
       nextMessageId += 1;
-      const deferred = yield* Deferred.make<unknown, NvimRpcError>();
       pending.set(messageId, deferred);
       duplex.write(packNvimFrame([0, messageId, method, params]));
       return yield* Deferred.await(deferred);

@@ -95,6 +95,13 @@ export function shouldReadCursor(trigger: CursorReadTrigger): boolean {
 export type NvimBridgeEvent =
   | {
       /**
+       * Neovim's output ended, which is the process ending. Nothing after this
+       * is answered; the watcher decides whether a new process takes over.
+       */
+      readonly kind: "exited";
+    }
+  | {
+      /**
        * The cursor and the mode were re-read, and are now current.
        *
        * Its own kind rather than a second `flush`, because it is not a frame:
@@ -321,6 +328,8 @@ export declare namespace NvimBridge {
     readonly lines: ReadonlyArray<string>;
     readonly cursor: NvimCursor;
     readonly mode: string;
+    /** flash is labelling jump targets. Neovim's mode stays `n` meanwhile. */
+    readonly jumping: boolean;
     /** The selection Neovim is showing, `null` outside visual mode. */
     readonly visual: NvimVisual | null;
     readonly topLine: number;
@@ -555,6 +564,8 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
   let lines: string[] = [];
   let cursor: NvimCursor = { line: 1, col: 1 };
   let mode = "n";
+  /** Whether flash is labelling targets, read with the mode. */
+  let jumping = false;
   let overlays: ReadonlyArray<GridOverlay> = [];
   let highlightRuns: ReadonlyArray<HighlightRun> = [];
   let flushWaiters: Array<Deferred.Deferred<void>> = [];
@@ -564,6 +575,8 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
   let lastCursorMoves = 0;
   /** Whether a forked cursor read is already on its way. */
   let cursorRefreshPending = false;
+  /** A frame that wanted a cursor read while one was already on its way. */
+  let cursorRefreshAgain = false;
   /** A `mode_change` seen since the last frame was judged. */
   let pendingModeChange = false;
   /** A `win_viewport` seen since the last frame was judged. */
@@ -690,36 +703,96 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
       // the mode, because it is only meaningful read with them: `getpos("v")`
       // answers wherever the cursor is when no selection is running, so the
       // mode is what says whether the answer means anything.
-      `local position = vim.api.nvim_win_get_cursor(0)
+      //
+      // Columns leave here in UTF-16 units, which is what the wire and Monaco
+      // count in. Neovim counts bytes: on a line holding an accent or an emoji
+      // the raw byte column put the caret several characters to the right, and
+      // past the end of the line Monaco silently clamped it there.
+      `local attached = ...
+       local position = vim.api.nvim_win_get_cursor(0)
        local mode = vim.api.nvim_get_mode().mode
+       local function utf16_col(line, byte)
+         local text = vim.fn.getline(line)
+         return vim.str_utfindex(text, "utf-16", math.min(byte, #text), false) + 1
+       end
        local anchor = nil
        if mode:sub(1, 1) == "v" or mode:sub(1, 1) == "V" or mode:byte(1) == 22 then
          local other = vim.fn.getpos("v")
-         anchor = { line = other[2], col = other[3] }
+         anchor = { line = other[2], col = utf16_col(other[2], other[3] - 1) }
+       end
+       local tabstop = 8
+       local jumping = false
+       if attached ~= 0 and vim.api.nvim_buf_is_valid(attached) then
+         tabstop = vim.bo[attached].tabstop
+         -- flash draws in its own namespace. Looked up until flash, which loads
+         -- lazily, has created it, and cached after: this runs on every key.
+         mesura.flash_namespace = mesura.flash_namespace or vim.api.nvim_get_namespaces().flash
+         local flash = mesura.flash_namespace
+         if flash ~= nil then
+           -- A label is the one mark with virtual text; the backdrop and the
+           -- matches are plain highlights. Those stay up after an \`f\` motion,
+           -- for \`;\` to repeat it, when no label is waiting.
+           local marks = vim.api.nvim_buf_get_extmarks(attached, flash, 0, -1, { details = true })
+           for _, mark in ipairs(marks) do
+             if mark[4].virt_text ~= nil then
+               jumping = true
+               break
+             end
+           end
+         end
        end
        return {
          line = position[1],
-         col = position[2] + 1,
+         col = utf16_col(position[1], position[2]),
          mode = mode,
          anchor = anchor,
          window = vim.api.nvim_get_current_win(),
+         tabstop = tabstop,
+         jumping = jumping,
        }`,
-      [],
+      [attachedBuffer],
     ])) as {
       line: number;
       col: number;
       mode: string;
       anchor?: { line: number; col: number };
       window: number;
+      tabstop: number;
+      jumping: boolean;
     };
     cursor = { line: state.line, col: state.col };
     mode = state.mode;
+    jumping = state.jumping === true;
     visual =
       state.anchor === undefined
         ? null
         : { anchor: state.anchor, cursor: { line: state.line, col: state.col }, kind: state.mode };
+    grid.setTabstop(state.tabstop);
     grid.setCurrentWindow(state.window);
   });
+
+  /** Reads the cursor, then again for as long as frames asked while it was reading. */
+  const readCursorUntilCurrent = Effect.gen(function* () {
+    do {
+      cursorRefreshAgain = false;
+      yield* refreshCursorAndMode.pipe(
+        Effect.tapCause((cause) =>
+          Effect.logWarning("could not read the cursor after a frame", { cause }),
+        ),
+        Effect.catchCause(() => Effect.void),
+      );
+      // A `cursor` event carries the freshly read values to the manager, which
+      // reads them the same way it reads them from a frame. The drawing frame
+      // has already gone out by then.
+      tell({ kind: "cursor" });
+    } while (cursorRefreshAgain);
+  }).pipe(
+    Effect.ensuring(
+      Effect.sync(() => {
+        cursorRefreshPending = false;
+      }),
+    ),
+  );
 
   yield* rpc.notifications.pipe(
     Stream.runForEach((notification: { method: string; params: ReadonlyArray<unknown> }) =>
@@ -794,9 +867,12 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
         // `settle` — which has no timeout and is called under the thread's
         // lock — would never resolve, taking the thread with it.
         //
-        // One in flight at a time. A second trigger arriving while a refresh
-        // is pending is dropped rather than queued, which is what keeps a
-        // burst of typing to one round trip rather than one per frame.
+        // One in flight at a time. Triggers arriving while a read is pending
+        // collapse into one more read after it, which keeps a burst of typing
+        // to two round trips rather than one per frame. Dropping them instead
+        // lost the frame that ends a flash jump when it landed mid-read, and
+        // left the client showing FLASH with Escape routed to a Neovim that
+        // was no longer waiting for it.
         const trigger: CursorReadTrigger = {
           hasModeChange: pendingModeChange,
           hasViewport: pendingViewport,
@@ -806,26 +882,14 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
         };
         pendingModeChange = false;
         pendingViewport = false;
-        if (!cursorRefreshPending && shouldReadCursor(trigger)) {
+        if (shouldReadCursor(trigger)) {
           lastCursorMoves = grid.cursorMoves;
-          cursorRefreshPending = true;
-          yield* Effect.forkScoped(
-            refreshCursorAndMode.pipe(
-              Effect.tapCause((cause) =>
-                Effect.logWarning("could not read the cursor after a frame", { cause }),
-              ),
-              Effect.catchCause(() => Effect.void),
-              // A `cursor` event carries the freshly read values to the
-              // manager, which reads them the same way it reads them from a
-              // frame. The drawing frame below has already gone out by then.
-              Effect.ensuring(
-                Effect.sync(() => {
-                  cursorRefreshPending = false;
-                  tell({ kind: "cursor" });
-                }),
-              ),
-            ),
-          );
+          if (cursorRefreshPending) {
+            cursorRefreshAgain = true;
+          } else {
+            cursorRefreshPending = true;
+            yield* Effect.forkScoped(readCursorUntilCurrent);
+          }
         }
 
         tell({
@@ -836,6 +900,10 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
       }),
     ),
     Effect.catchCause(() => Effect.void),
+    // Reached only when the stream ends on its own, which `NvimRpc` makes it
+    // do when the process's output closes. A scope closing interrupts this
+    // fiber instead, so a session being stopped on purpose says nothing here.
+    Effect.andThen(() => Effect.sync(() => tell({ kind: "exited" }))),
     Effect.forkScoped,
   );
 
@@ -964,6 +1032,9 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
     },
     get mode() {
       return mode;
+    },
+    get jumping() {
+      return jumping;
     },
     get topLine() {
       return grid.topLine;

@@ -2,6 +2,7 @@
 import * as NodeOS from "node:os";
 import {
   type EditorHighlightDefinition,
+  type EditorSessionEndReason,
   EditorSessionLookupError,
   EditorSessionRpcError,
   EditorSessionSpawnError,
@@ -16,14 +17,18 @@ import {
   type EditorSessionSnapshot,
   type EditorSessionViewportInput,
 } from "@t3tools/contracts";
+import type * as Cause from "effect/Cause";
+import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
+import * as Stream from "effect/Stream";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import { ServerConfig } from "../config.ts";
@@ -31,6 +36,7 @@ import { ServerSettingsService } from "../serverSettings.ts";
 import { APPLY_EDITS_LUA, SET_CURSOR_LUA, SET_VIEWPORT_LUA } from "./hostPlugin.ts";
 import { NvimAdapter } from "./NvimAdapter.ts";
 import { NvimBridge } from "./NvimBridge.ts";
+import { makeEditorTrace, summarizeEditorEvent } from "./editorTrace.ts";
 
 /**
  * The editor sessions a server is holding, one per thread.
@@ -54,6 +60,9 @@ const DEFAULT_MAX_SESSIONS = 16;
 /** How many buffers one session keeps before closing the least recently used. */
 const MAX_BUFFERS_PER_SESSION = 32;
 
+/** How many times one session replaces a Neovim that exited before giving up. */
+const MAX_RESTARTS_PER_SESSION = 3;
+
 type Listener = (event: EditorSessionEvent) => Effect.Effect<void>;
 
 interface OpenBuffer {
@@ -64,8 +73,16 @@ interface OpenBuffer {
 
 interface Session {
   readonly threadId: string;
-  readonly bridge: NvimBridge.Session;
+  /** The project Neovim runs in. Kept so a replacement starts in the same place. */
+  readonly cwd: string;
+  /** Replaced when Neovim exits under a live session; see `restartSession`. */
+  bridge: NvimBridge.Session;
+  /** The session's lifetime: the outbox and the fiber draining it. */
   readonly scope: Scope.Closeable;
+  /** The Neovim process's lifetime, a child of `scope`. */
+  bridgeScope: Scope.Closeable;
+  /** How many times Neovim has been replaced in this session. */
+  restarts: number;
   readonly listeners: Set<Listener>;
   /**
    * Events on their way to the listeners.
@@ -92,6 +109,8 @@ export interface EditorSessionManagerOptions {
   readonly stateDir: string;
   readonly homeDir?: string | undefined;
   readonly maxSessions?: number | undefined;
+  /** A JSONL file to trace every call and event into. See `editorTrace.ts`. */
+  readonly tracePath?: string | undefined;
 }
 
 export class EditorSessionManager extends Context.Service<
@@ -195,8 +214,62 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
   let activityTick = 0;
   const now = () => (activityTick += 1);
 
+  /** Set once the manager is shutting down; see its finalizer. */
+  let stopping = false;
+
+  const trace = makeEditorTrace(
+    options.tracePath === undefined ? undefined : path.resolve(options.tracePath),
+  );
+  yield* Effect.addFinalizer(() => Effect.sync(trace.close));
+
+  /** Sessions whose Neovim exited, and the bridge that did, waiting to be replaced. */
+  const exits = yield* Queue.make<{
+    readonly session: Session;
+    readonly exited: NvimBridge.Session;
+  }>();
+
   const publish = (session: Session, event: EditorSessionEvent) => {
+    if (trace.enabled) {
+      trace.record({ dir: "out", thread: session.threadId, ...summarizeEditorEvent(event) });
+    }
     Queue.offerUnsafe(session.outbox, event);
+  };
+
+  /**
+   * `withThreadLock`, recording the call when tracing is on: how long it queued
+   * behind the lock and how long Neovim took to answer once it had it.
+   */
+  const withTracedLock = <A, E, R>(
+    threadId: string,
+    call: string,
+    /** A thunk, so the per-keystroke path allocates nothing while tracing is off. */
+    detail: () => Record<string, unknown>,
+    effect: Effect.Effect<A, E, R>,
+  ) => {
+    if (!trace.enabled) return withThreadLock(threadId, effect);
+    const queuedAt = performance.now();
+    return withThreadLock(
+      threadId,
+      Effect.suspend(() => {
+        const acquiredAt = performance.now();
+        const done = (outcome: string) =>
+          Effect.sync(() =>
+            trace.record({
+              dir: "in",
+              thread: threadId,
+              call,
+              ...detail(),
+              outcome,
+              waitedMs: Math.round(acquiredAt - queuedAt),
+              tookMs: Math.round(performance.now() - acquiredAt),
+            }),
+          );
+        return effect.pipe(
+          Effect.tap(() => done("ok")),
+          Effect.tapCause(() => done("failed")),
+        );
+      }),
+    );
   };
 
   /**
@@ -222,24 +295,40 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       return absolutePath;
     });
 
-  const stopSession = (session: Session) =>
+  /**
+   * Sends an event to the attachments now, not through the outbox.
+   *
+   * For what is said as a session goes: stopping it closes the scope of the
+   * fiber that drains the outbox, so a queued event would almost never arrive.
+   */
+  const deliverNow = (session: Session, event: EditorSessionEvent) =>
+    Effect.gen(function* () {
+      if (trace.enabled) {
+        trace.record({ dir: "out", thread: session.threadId, ...summarizeEditorEvent(event) });
+      }
+      yield* Effect.forEach([...session.listeners], (listener) => listener(event), {
+        discard: true,
+      });
+    });
+
+  /**
+   * Stops a session, and tells its attachments it is gone.
+   *
+   * Told rather than dropped silently: the attachment's stream ends on `exited`,
+   * and a client whose stream simply went quiet kept sending keys to a session
+   * that no longer existed, with nothing on screen saying so.
+   */
+  const stopSession = (session: Session, reason: EditorSessionEndReason) =>
     Effect.gen(function* () {
       session.unsubscribe?.();
       session.unsubscribe = null;
+      yield* deliverNow(session, { type: "exited", code: null, reason });
       session.listeners.clear();
       yield* Scope.close(session.scope, Effect.void as never).pipe(
         Effect.catchCause(() => Effect.void),
       );
     });
 
-  /**
-   * Lets the oldest unattached session go once there are too many.
-   *
-   * By `attachedClients` rather than by age alone: a session somebody is
-   * looking at must never be taken away underneath them, however long ago it
-   * was started. A session nobody is attached to costs a Neovim and its
-   * plugins, which is worth reclaiming.
-   */
   /**
    * Lets the oldest unattached session go once there are too many.
    *
@@ -274,15 +363,15 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       }
       return next;
     });
-    yield* Effect.forEach(doomed, stopSession, { discard: true });
+    // Nobody is attached to an evicted session, so the reason reaches no one.
+    yield* Effect.forEach(doomed, (session) => stopSession(session, "closed"), { discard: true });
   });
 
-  /** Starts a Neovim for a thread and wires its notifications to the listeners. */
-  const startSession = Effect.fn("EditorSessionManager.startSession")(function* (threadId: string) {
-    const scope = yield* Scope.make();
-    const bridge = yield* NvimBridge.spawn({
+  const spawnBridge = (threadId: string, cwd: string, scope: Scope.Closeable) =>
+    NvimBridge.spawn({
       cols: 120,
       rows: 40,
+      cwd,
       configDirectory: options.configDirectory,
       stateDir: options.stateDir,
       homeDir: options.homeDir ?? NodeOS.homedir(),
@@ -291,6 +380,25 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       Effect.provideService(NvimAdapter, adapter),
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.mapError((cause) => spawnErrorFor(threadId, cause)),
+    );
+
+  /**
+   * Starts a Neovim for a thread and wires its notifications to the listeners.
+   *
+   * `cwd` is the thread's project, and it is not optional in practice: the
+   * configuration's plugins root themselves at Neovim's working directory. Left
+   * at the server's own (the home directory, for the installed service),
+   * neo-tree built a tree of the whole home directory and re-rendered it on
+   * every edit — measured at 100% CPU and 1.7 GB, with each keystroke waiting
+   * ten seconds or more behind it.
+   */
+  const startSession = Effect.fn("EditorSessionManager.startSession")(function* (
+    threadId: string,
+    cwd: string,
+  ) {
+    const scope = yield* Scope.make();
+    const bridgeScope = yield* Scope.fork(scope);
+    const bridge = yield* spawnBridge(threadId, cwd, bridgeScope).pipe(
       Effect.tapCause(() => Scope.close(scope, Effect.void as never)),
     );
 
@@ -298,8 +406,11 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
 
     const session: Session = {
       threadId,
+      cwd,
       bridge,
       scope,
+      bridgeScope,
+      restarts: 0,
       outbox,
       listeners: new Set(),
       buffers: new Map(),
@@ -326,7 +437,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
     return session;
   });
 
-  const dropSession = (threadId: string) =>
+  const dropSession = (threadId: string, reason: EditorSessionEndReason) =>
     Effect.gen(function* () {
       let doomed: Session | undefined;
       yield* SynchronizedRef.update(sessions, (current) => {
@@ -336,7 +447,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         next.delete(threadId);
         return next;
       });
-      if (doomed !== undefined) yield* stopSession(doomed);
+      if (doomed !== undefined) yield* stopSession(doomed, reason);
     });
 
   const lookup = (threadId: string) =>
@@ -359,13 +470,35 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       ),
     );
 
-  const snapshotOf = (session: Session): EditorSessionSnapshot => ({
+  /**
+   * Where the session is now.
+   *
+   * `withHighlightDefinitions` is for a client that has none of them yet: one
+   * that just attached, or every client after a restart renumbered them.
+   * Definitions otherwise go out once per session, so a client that attached
+   * later — a reload, a second window — never had the colours: flash's labels
+   * were drawn with no background over the letters they replace, and its
+   * dimmed backdrop was not dimmed. A file switch leaves them out, because
+   * every attached client already holds them and a long session has thousands.
+   */
+  const snapshotOf = (
+    session: Session,
+    { withHighlightDefinitions }: { readonly withHighlightDefinitions: boolean },
+  ): EditorSessionSnapshot => ({
     relativePath: session.currentPath ?? "",
     lines: [...session.bridge.lines],
     cursor: session.bridge.cursor,
     mode: session.bridge.mode,
+    jumping: session.bridge.jumping,
     topline: Math.max(1, session.bridge.topLine + 1),
-    hlDefs: {},
+    hlDefs: withHighlightDefinitions
+      ? Object.fromEntries(
+          [...session.bridge.highlightDefinitions].map(([id, definition]) => [
+            String(id),
+            definition,
+          ]),
+        )
+      : {},
   });
 
   /** Forgets the least recently used buffers once a session holds too many. */
@@ -384,17 +517,38 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
     });
 
   const open = Effect.fn("EditorSessionManager.open")(function* (input: EditorSessionOpenInput) {
+    if (stopping) {
+      return yield* new EditorSessionRpcError({
+        threadId: input.threadId,
+        method: "open",
+        detail: "the server is stopping",
+      });
+    }
     const absolutePath = yield* resolveWithinRoot(input.threadId, input.cwd, input.relativePath);
 
     // Set inside the lock, read by the repair below. A local rather than
     // shared state: only this call can be inside the lock for this thread.
     let created = false;
 
-    return yield* withThreadLock(
+    return yield* withTracedLock(
       input.threadId,
+      "open",
+      () => ({ path: input.relativePath, lines: input.lines.length }),
       Effect.gen(function* () {
-        const existing = (yield* SynchronizedRef.get(sessions)).get(input.threadId);
-        const session = existing ?? (yield* startSession(input.threadId));
+        const cwd = path.resolve(input.cwd);
+        let existing = (yield* SynchronizedRef.get(sessions)).get(input.threadId);
+        // A thread whose project moved — it was given a worktree — gets a
+        // Neovim started in the new one. Plugins root themselves at Neovim's
+        // working directory, and a session keeps the one it started in.
+        if (existing !== undefined && existing.cwd !== cwd) {
+          yield* dropSession(input.threadId, "replaced");
+          existing = undefined;
+        }
+        const session = existing ?? (yield* startSession(input.threadId, cwd));
+        // Opening a file is someone asking for the editor, so the restart
+        // budget starts over. It exists to stop a configuration that kills
+        // Neovim at start from looping, not to count a day's worth of `:q`.
+        session.restarts = 0;
 
         if (existing === undefined) {
           created = true;
@@ -481,7 +635,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         );
 
         session.currentPath = input.relativePath;
-        const snapshot = snapshotOf(session);
+        const snapshot = snapshotOf(session, { withHighlightDefinitions: created });
         // Every attachment is told which file the session now has open, not
         // just the caller. One session serves the whole thread, so a client
         // that does not learn about the switch would keep applying this
@@ -492,7 +646,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         // A session that could not be opened is not a session. Left in the
         // map it would hold a Neovim, occupy one of the slots, and claim to be
         // showing a file it never opened.
-        Effect.tapCause(() => (created ? dropSession(input.threadId) : Effect.void)),
+        Effect.tapCause(() => (created ? dropSession(input.threadId, "closed") : Effect.void)),
       ),
     );
   });
@@ -513,11 +667,20 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
     let lastCursorLine = -1;
     let lastCursorCol = -1;
     let lastMode = "";
+    let lastJumping = false;
     let lastTopline = -1;
+    /** The lines Neovim showed at the last published frame, inclusive. */
+    let lastShownFrom = 1;
+    let lastShownTo = 0;
     const sentHighlightIds = new Set<number>();
     let lastVisual = "";
 
-    const unsubscribe = session.bridge.subscribe((event) => {
+    const bridge = session.bridge;
+    const unsubscribe = bridge.subscribe((event) => {
+      if (event.kind === "exited") {
+        Queue.offerUnsafe(exits, { session, exited: bridge });
+        return;
+      }
       if (event.kind === "lines") {
         // Attributed to the file the session has open. A delta with no name on
         // it is one the client cannot check, and this is the only place that
@@ -564,9 +727,15 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         lastCursorCol = col;
         publish(session, { type: "cursor", line, col });
       }
-      if (session.bridge.mode !== lastMode) {
+      if (session.bridge.mode !== lastMode || session.bridge.jumping !== lastJumping) {
         lastMode = session.bridge.mode;
-        publish(session, { type: "mode", mode: lastMode, blocking: false });
+        lastJumping = session.bridge.jumping;
+        publish(session, {
+          type: "mode",
+          mode: lastMode,
+          blocking: false,
+          jumping: lastJumping,
+        });
       }
 
       // The selection. Sent whenever it moves or ends, and compared as a whole
@@ -588,6 +757,16 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       // one of the two hundred frames a second an idle session produces.
       if (event.kind === "flush" && event.changedLines.length > 0) {
         const changed = new Set(event.changedLines);
+        // Lines that scrolled out of the window are erased too. Nothing redraws
+        // a line Neovim no longer shows, so a label on it would otherwise stay
+        // on the client for as long as Monaco keeps that line in view.
+        const shownFrom = session.bridge.topLine + 1;
+        const shownTo = Math.max(shownFrom, session.bridge.botLine);
+        for (let line = lastShownFrom; line <= lastShownTo; line += 1) {
+          if (line < shownFrom || line > shownTo) changed.add(line);
+        }
+        lastShownFrom = shownFrom;
+        lastShownTo = shownTo;
         // The definitions first, in the same frame. A run that arrives naming
         // a colour the client has never been given is drawn in no colour at
         // all, and the id is the only thing the drawing refers to.
@@ -633,7 +812,10 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
           const session = yield* requireSession(input.threadId);
           // The snapshot goes to this attachment alone, and before the listener
           // is registered, so a delta cannot arrive ahead of the state it edits.
-          yield* emit({ type: "snapshot", snapshot: snapshotOf(session) });
+          yield* emit({
+            type: "snapshot",
+            snapshot: snapshotOf(session, { withHighlightDefinitions: true }),
+          });
           session.listeners.add(emit);
           session.attachedClients += 1;
           // Returned rather than held in a scope, matching the terminal: the
@@ -652,16 +834,20 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
     // order the scheduler chose — a cursor move landing between an operator
     // and its motion is a different edit from the one asked for.
     input: (input) =>
-      withThreadLock(
+      withTracedLock(
         input.threadId,
+        "input",
+        () => ({ keys: input.keys }),
         Effect.gen(function* () {
           const session = yield* requireSession(input.threadId);
           yield* request(session, "nvim_input", [input.keys]);
         }),
       ),
     viewport: (input) =>
-      withThreadLock(
+      withTracedLock(
         input.threadId,
+        "viewport",
+        () => ({ topline: input.topline, rows: input.rows, cols: input.cols }),
         Effect.gen(function* () {
           const session = yield* requireSession(input.threadId);
           // The buffer's own grid, not the outer one. With `ext_multigrid` the
@@ -684,8 +870,10 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         }),
       ),
     setCursor: (input) =>
-      withThreadLock(
+      withTracedLock(
         input.threadId,
+        "setCursor",
+        () => ({ line: input.line, col: input.col }),
         Effect.gen(function* () {
           const session = yield* requireSession(input.threadId);
           // The window showing the mirror's buffer, not the current one. A
@@ -698,8 +886,10 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         }),
       ),
     replaceText: (input) =>
-      withThreadLock(
+      withTracedLock(
         input.threadId,
+        "replaceText",
+        () => ({ edits: input.edits.length }),
         Effect.gen(function* () {
           const session = yield* requireSession(input.threadId);
           if (input.edits.length === 0) return;
@@ -733,19 +923,146 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
   };
 
   const closeThread = (input: EditorSessionCloseInput) =>
-    withThreadLock(input.threadId, dropSession(input.threadId));
+    withThreadLock(input.threadId, dropSession(input.threadId, "closed"));
+
+  /**
+   * Puts a new Neovim under a session whose process exited.
+   *
+   * In the same session object, so the client's attachment — which holds the
+   * session's listeners, not the process — keeps working and simply receives a
+   * snapshot. The alternative left a thread whose editor answered nothing until
+   * the server restarted: the attachment stayed open to a session with no
+   * process behind it, and every call on it failed.
+   *
+   * The file is reopened with the text the mirror last held, which is the text
+   * the client is showing. Neovim's undo history does not survive, and the
+   * message says so. Bounded, because a configuration that kills Neovim at
+   * start would otherwise restart it forever.
+   */
+  const restartSession = (session: Session, exited: NvimBridge.Session) =>
+    withThreadLock(
+      session.threadId,
+      Effect.gen(function* () {
+        const current = (yield* SynchronizedRef.get(sessions)).get(session.threadId);
+        if (current !== session || session.bridge !== exited) return;
+
+        const openBuffer = [...session.buffers.values()].find(
+          (buffer) => buffer.relativePath === session.currentPath,
+        );
+        const lines = [...exited.lines];
+        session.unsubscribe?.();
+        session.unsubscribe = null;
+        yield* Scope.close(session.bridgeScope, Effect.void as never).pipe(
+          Effect.catchCause(() => Effect.void),
+        );
+
+        if (session.restarts >= MAX_RESTARTS_PER_SESSION) {
+          yield* giveUp(
+            session,
+            `Neovim exited ${session.restarts + 1} times; reopen the file to start it again.`,
+          );
+          return;
+        }
+        session.restarts += 1;
+        session.bridgeScope = yield* Scope.fork(session.scope);
+        session.bridge = yield* spawnBridge(session.threadId, session.cwd, session.bridgeScope);
+
+        if (openBuffer !== undefined) {
+          const buffer = yield* request(session, "nvim_exec_lua", [
+            "return mesura.open(...)",
+            [openBuffer.absolutePath, lines],
+          ]);
+          if (typeof buffer === "number") {
+            yield* session.bridge.followBuffer(buffer);
+            yield* session.bridge.settle;
+          }
+        }
+        // Wired only once the new Neovim is on the file. Before that it shows
+        // whatever it started on — a dashboard, a restored session — and its
+        // text would reach the clients as the file's.
+        wireNotifications(session);
+        publish(session, {
+          type: "snapshot",
+          snapshot: snapshotOf(session, { withHighlightDefinitions: true }),
+        });
+        publish(session, {
+          type: "message",
+          kind: "emsg",
+          text: "Neovim exited and was restarted. Undo history from before is gone.",
+        });
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("could not restart Neovim for a session", { cause }).pipe(
+            Effect.andThen(giveUp(session, "Neovim exited and could not be restarted.")),
+          ),
+        ),
+      ),
+    );
+
+  /** Drops a session whose Neovim cannot be replaced, and says why. */
+  const giveUp = (session: Session, text: string) =>
+    Effect.gen(function* () {
+      yield* deliverNow(session, { type: "message", kind: "emsg", text });
+      yield* dropSession(session.threadId, "gave-up");
+    });
+
+  // Each restart on its own fiber, so a slow one — a real configuration takes a
+  // plugin load — does not hold up another thread's. The thread's lock still
+  // orders restarts within one thread.
+  yield* Queue.take(exits).pipe(
+    Effect.flatMap(({ session, exited }) => Effect.forkScoped(restartSession(session, exited))),
+    Effect.forever,
+    Effect.forkScoped,
+  );
 
   // Every session is a child process, so the server stopping has to stop them.
+  // `stopping` also turns away an `open` that arrives after this has run: the
+  // session it started would be in no map, and its Neovim would outlive the
+  // manager until the process exited.
   yield* Effect.addFinalizer(() =>
     Effect.gen(function* () {
+      stopping = true;
       const current = yield* SynchronizedRef.get(sessions);
       yield* SynchronizedRef.set(sessions, new Map());
-      yield* Effect.forEach(current.values(), stopSession, { discard: true });
+      yield* Effect.forEach(current.values(), (session) => stopSession(session, "stopping"), {
+        discard: true,
+      });
     }),
   );
 
   return service;
 });
+
+/**
+ * One attachment as a stream, which is what the websocket layer serves.
+ *
+ * The attach runs on the stream's own fiber, so an attach that fails — no
+ * session for the thread, as after a server restart — fails the stream and the
+ * client hears it. REGRESSION: this was `Stream.callback` first, which runs its
+ * registration on a forked fiber nothing watches. The failure vanished there,
+ * the stream stayed open and silent, and the client never learned it had to
+ * open the file again. A session that ends sends `exited`, and the stream ends
+ * after it.
+ */
+export const attachEventStream = (
+  manager: EditorSessionManager["Service"],
+  input: EditorSessionAttachInput,
+): Stream.Stream<EditorSessionEvent, EditorSessionError> =>
+  Stream.unwrap(
+    Effect.gen(function* () {
+      const queue = yield* Queue.unbounded<EditorSessionEvent, Cause.Done>();
+      yield* Effect.acquireRelease(
+        manager.attachStream(input, (event) =>
+          Queue.offer(queue, event).pipe(
+            Effect.andThen(event.type === "exited" ? Queue.end(queue) : Effect.void),
+            Effect.asVoid,
+          ),
+        ),
+        (unsubscribe) => Effect.sync(unsubscribe),
+      );
+      return Stream.fromQueue(queue);
+    }),
+  );
 
 export const make = Effect.fn("EditorSessionManager.make")(function* () {
   const config = yield* ServerConfig;
@@ -756,6 +1073,9 @@ export const make = Effect.fn("EditorSessionManager.make")(function* () {
   return yield* makeWithOptions({
     configDirectory: current.neovimConfigDirectory,
     stateDir: config.neovimRuntimeDir,
+    tracePath: Option.getOrUndefined(
+      yield* Config.string("MESURA_EDITOR_TRACE").pipe(Config.option),
+    ),
   });
 });
 
