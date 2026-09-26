@@ -15,6 +15,7 @@ import { DEV_PROXIED_PATH_PREFIXES } from "@t3tools/shared/devProxy";
 import { loadRepoEnv } from "../../scripts/lib/public-config";
 import { thirdPartyLicensesPlugin } from "../../scripts/lib/third-party-licenses";
 import { tailwindPlugins } from "./vite/tailwind";
+import { monacoActionWidgetCssPlugin } from "./vite/monacoActionWidgetCss";
 
 const repoEnv = loadRepoEnv();
 Object.assign(process.env, repoEnv);
@@ -158,6 +159,8 @@ export default defineConfig(() => {
   return {
     assetsInclude: ["**/*.wasm"],
     plugins: [
+      // Fork: one Monaco CSS rule made every thread switch restyle the page.
+      monacoActionWidgetCssPlugin(),
       devCompressionPlugin(),
       thirdPartyLicensesPlugin({
         bundleName: "web",
