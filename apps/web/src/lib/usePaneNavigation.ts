@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import type { ResolvedKeybindingsConfig } from "@t3tools/contracts";
 
 import { findLastMatchingBinding, matchesShortcut, type ShortcutEventLike } from "../keybindings";
+import { registerDrawerFocusMark } from "./drawerFocusMark";
 import { isPreviewFocused } from "./previewFocus";
 import { isTerminalFocused } from "./terminalFocus";
 import {
@@ -463,6 +464,14 @@ export function usePaneNavigation(
   activeThreadKey: string | null = null,
 ): void {
   useEffect(() => registerSidebarThreadEntry(activeThreadKey), [activeThreadKey]);
+  useEffect(
+    () =>
+      registerDrawerFocusMark({
+        document: document as unknown as MinimalEventTarget,
+        root: document.documentElement,
+      }),
+    [],
+  );
   useEffect(
     () =>
       registerPaneNavigation({

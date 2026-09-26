@@ -96,3 +96,18 @@ it("keeps the fork's stylesheet loaded after upstream's", () => {
     "mesura.css is no longer imported, so every fork style override is inert",
   );
 });
+
+it("keeps :has() out of the fork's stylesheet", () => {
+  // The pane mark once used `:has()` anchored on the chat column. Chromium then
+  // re-checks it on every DOM change inside the column, and upstream's
+  // `group-has-*` utilities turn each re-check into a whole-subtree restyle, so
+  // every thread switch paid for it: 2.7× upstream's style work in a measured
+  // A/B, 4.4× with Monaco's CSS resident. The "Which pane has the keyboard"
+  // block in mesura.css holds the numbers and the replacement.
+  const rules = read("apps/web/src/mesura.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.notInclude(
+    rules,
+    ":has(",
+    "mesura.css uses :has() again; anchor the state on an attribute instead (see lib/drawerFocusMark.ts)",
+  );
+});
