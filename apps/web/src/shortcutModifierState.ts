@@ -28,15 +28,15 @@ export function areShortcutModifierStatesEqual(
 
 export function useShortcutModifierState(): ShortcutModifierState {
   const [state, setState] = useState(EMPTY_SHORTCUT_MODIFIER_STATE);
-  // The listeners compare against this and schedule nothing when no modifier
-  // changed. A functional `setState` that returned the current state did not
-  // skip the render: every keydown and keyup anywhere in the app re-rendered
-  // the whole sidebar, which made a held arrow key in the file tree drop
-  // frames. React only skips a same-value update before rendering when the
-  // component has no pending work, so the comparison has to happen here.
   const stateRef = useRef(state);
 
   useEffect(() => {
+    // Schedules nothing when no modifier changed. A functional `setState`
+    // that returned the current state did not skip the render: every keydown
+    // and keyup anywhere in the app re-rendered the whole sidebar, which made
+    // a held arrow key in the file tree drop frames. React only skips a
+    // same-value update before rendering when the component has no pending
+    // work, so the comparison has to happen here.
     const publish = (next: ShortcutModifierState) => {
       if (next === stateRef.current) return;
       stateRef.current = next;

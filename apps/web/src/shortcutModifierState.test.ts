@@ -160,13 +160,14 @@ describe("useShortcutModifierState", () => {
     act(() => {
       renderer = create(createElement(Probe));
     });
+    const reset = (type: "paste" | "blur") => act(() => events.dispatchEvent(new Event(type)));
     const press = (type: "keydown" | "keyup", init: Partial<KeyboardEvent>) =>
       act(() => {
         // `type` is a read-only getter on a real Event; the rest are plain fields.
         const { type: _type, ...fields } = keyboardEventLike(type, init);
         events.dispatchEvent(Object.assign(new Event(type), fields));
       });
-    return { seen, press };
+    return { seen, press, reset };
   }
 
   it("does not re-render for keys that leave the modifiers unchanged", () => {
@@ -193,5 +194,17 @@ describe("useShortcutModifierState", () => {
     press("keyup", { key: "Control" });
     expect(seen).toHaveLength(rendersAfterMount + 2);
     expect(seen.at(-1)).toEqual(emptyState());
+  });
+
+  it("resets held modifiers on paste and blur, and does not re-render when none are held", () => {
+    const { seen, press, reset } = mountCountingRenders();
+    press("keydown", { key: "Meta", metaKey: true });
+    const rendersWhileHeld = seen.length;
+    reset("paste");
+    expect(seen).toHaveLength(rendersWhileHeld + 1);
+    expect(seen.at(-1)).toEqual(emptyState());
+    reset("blur");
+    reset("paste");
+    expect(seen).toHaveLength(rendersWhileHeld + 1);
   });
 });
