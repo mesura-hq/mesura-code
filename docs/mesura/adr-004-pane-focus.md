@@ -102,11 +102,17 @@ the content for the same attention. An animated version was never on the table
 — it would repaint continuously and peg the GPU on a high-refresh display.
 
 - Rendered in `apps/web/src/mesura.css`, keyed on `:focus-within`. The
-  browser's own focus tree drives all of it: no React state, no re-render, no
-  listener.
+  browser's own focus tree drives it: no React state and no re-render.
 - The chat column hands its mark to the terminal drawer whenever focus is
   inside the drawer, because the drawer is rendered inside the column and a
-  rule without that clause lights both at once.
+  rule without that clause lights both at once. That clause is the one place a
+  listener is used: `lib/drawerFocusMark.ts` mirrors "focus is inside the
+  drawer" onto `<html>` as `[data-mesura-drawer-focused]`, written to the DOM
+  only when the answer changes. The first version asked it in CSS with
+  `:has()` anchored on the chat column, and that made every thread switch
+  restyle the whole column, measured against upstream v0.0.42 on the same
+  data. `mesura.css` carries the numbers, and
+  `tests/unit/fork-styling-hooks.test.ts` keeps `:has()` out of that file.
 - The pane roots are upstream's existing hooks: `[data-app-sidebar]`,
   `[data-chat-column-maximized-away]`, `[data-terminal-owner="drawer"]` and
   `[data-preview-panel-mode]`. The two header rows are `[data-chat-header]`
@@ -134,8 +140,10 @@ the content for the same attention. An animated version was never on the table
   drawer's prompt starts within 5 px of its left edge, so the frame's left
   line touches the first character there. The fix belongs to the drawer's
   padding, not to the frame.
-- Refinement to try later: `:has(:focus-visible)` instead of `:focus-within`,
-  so a pane entered with the mouse shows no mark until a key is pressed.
+- A pane entered with the mouse shows the mark before any key is pressed.
+  `:has(:focus-visible)` would fix that and is ruled out for the cost above; a
+  `focus-visible` check in the same listener is the way to do it if it is
+  ever wanted.
 
 ## Vertical navigation, and the collision it carries
 

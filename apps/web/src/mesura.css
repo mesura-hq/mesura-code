@@ -107,9 +107,26 @@
    those take a frame inset inside the pane instead.
 
    Driven by `:focus-within`, so the browser's own focus tree is the only
-   state involved: no React state, no re-render, no listener. Focus leaving
-   for a menu or the command palette drops the mark while that is open, which
-   is honest about where the keys are going.
+   state involved: no React state and no re-render. Focus leaving for a menu
+   or the command palette drops the mark while that is open, which is honest
+   about where the keys are going.
+
+   One question is answered by a listener instead: whether focus is inside the
+   terminal drawer, which renders inside the chat column and after its header.
+   `lib/drawerFocusMark.ts` mirrors it onto `<html>` as
+   `[data-mesura-drawer-focused]`.
+
+   Do not answer it with `:has()` again. That was the first version:
+   `[data-chat-column-maximized-away]:has([data-terminal-owner="drawer"]:focus-within)`.
+   A `:has()` anchored on the chat column makes Chromium re-check it on every
+   DOM change inside the column, and upstream's `group-has-*` utilities make
+   each re-check restyle the whole subtree. A thread switch replaces the whole
+   timeline, so every switch paid it. Measured 2026-09-25 against upstream
+   v0.0.42 on the same data (8 rapid thread switches, headless Chromium):
+   style work 418 ms upstream, 1,121 ms with the two `:has()` rules, and
+   1,847 ms once a file had been opened and Monaco's CSS was resident. Taking
+   out the two rules alone brought that last figure to 700 ms. The guard in
+   `tests/unit/fork-styling-hooks.test.ts` keeps `:has()` out of this file.
 
    Every rule below changes colour only. Never width, never `display`, never
    opacity on content: a geometry flip costs a layout pass and reads as jank
@@ -186,17 +203,14 @@
    terminal drawer whenever focus is inside the drawer, because the drawer is
    rendered inside the column and would otherwise light both. */
 [data-chat-column-maximized-away]:not(:focus-within) [data-chat-header] h2,
-[data-chat-column-maximized-away]:has([data-terminal-owner="drawer"]:focus-within)
-  [data-chat-header]
-  h2,
+[data-mesura-drawer-focused] [data-chat-header] h2,
 [data-preview-panel-mode]:not(:focus-within) [data-right-panel-tabbar] [data-active-tab="true"] {
   color: var(--muted-foreground);
 }
 
 /* Focused: the hairline appears. */
-[data-chat-column-maximized-away]:focus-within:not(
-    :has([data-terminal-owner="drawer"]:focus-within)
-  )
+:root:not([data-mesura-drawer-focused])
+  [data-chat-column-maximized-away]:focus-within
   [data-chat-header]::after,
 [data-preview-panel-mode]:focus-within [data-right-panel-tabbar]::after {
   background-color: var(--mesura-pane-focus-tint);
