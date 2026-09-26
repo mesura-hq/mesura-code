@@ -48,6 +48,7 @@ import {
   mergeWithDefaultKeybindings,
   DEFAULT_RESOLVED_KEYBINDINGS,
   ADDED_KEYBINDING_DEFAULTS,
+  DROPPED_KEYBINDING_DEFAULTS,
   RETIRED_KEYBINDING_DEFAULTS,
   addIntroducedKeybindingDefaults,
   compileResolvedKeybindingRule,
@@ -61,6 +62,7 @@ import { withCurrentKeybindingCommand } from "@t3tools/shared/renamedKeybindingC
 export {
   ADDED_KEYBINDING_DEFAULTS,
   DEFAULT_KEYBINDINGS,
+  DROPPED_KEYBINDING_DEFAULTS,
   RETIRED_KEYBINDING_DEFAULTS,
   compileResolvedKeybindingRule,
   compileResolvedKeybindingsConfig,
@@ -556,6 +558,13 @@ const make = Effect.gen(function* () {
           },
         );
       }
+      for (const rule of migration.dropped) {
+        yield* Effect.logInfo("removed a withdrawn default keybinding", {
+          path: keybindingsConfigPath,
+          command: rule.command,
+          key: rule.key,
+        });
+      }
       for (const addition of additions.results) {
         switch (addition.outcome) {
           case "applied":
@@ -669,7 +678,8 @@ const make = Effect.gen(function* () {
       // on the next startup; an early return added above this line would lose
       // it silently.
       const additionsChangedConfig = additions.results.some((entry) => entry.outcome === "applied");
-      if (migration.rewrites.length > 0 || additionsChangedConfig || defaultsToAppend.length > 0) {
+      const migrationChangedConfig = migration.rewrites.length > 0 || migration.dropped.length > 0;
+      if (migrationChangedConfig || additionsChangedConfig || defaultsToAppend.length > 0) {
         yield* writeConfigAtomically([...customConfig, ...defaultsToAppend]);
       }
       // Record offers whether or not they landed. A skipped addition was

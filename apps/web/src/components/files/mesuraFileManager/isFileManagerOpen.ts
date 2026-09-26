@@ -11,3 +11,17 @@ export function isFileManagerOpen(
 ): boolean {
   return page !== null && page.querySelector(`[${FILE_MANAGER_ROOT_ATTRIBUTE}]`) !== null;
 }
+
+/**
+ * Gives the file manager the keyboard when it is up; true when it took focus.
+ * For a surface that restores focus as it closes after opening the file
+ * manager, such as the command palette, which would otherwise hand focus back
+ * to the composer and leave the file manager's keys going to the chat.
+ */
+export function focusFileManager(
+  page: ParentNode | null = typeof document === "undefined" ? null : document,
+): boolean {
+  const root = page?.querySelector<HTMLElement>(`[${FILE_MANAGER_ROOT_ATTRIBUTE}]`) ?? null;
+  root?.focus({ preventScroll: true });
+  return root !== null;
+}

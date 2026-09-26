@@ -381,6 +381,21 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }),
   );
 
+  it.effect("never drops a rule it still ships", () =>
+    Effect.sync(() => {
+      // A dropped rule that is also a live default would be removed from the
+      // file and backfilled again on every startup.
+      for (const rule of Keybindings.DROPPED_KEYBINDING_DEFAULTS) {
+        assert.isFalse(
+          Keybindings.DEFAULT_KEYBINDINGS.some((entry) =>
+            Keybindings.isSameKeybindingRule(entry, rule),
+          ),
+          `dropped default ${rule.command} is still a live default`,
+        );
+      }
+    }),
+  );
+
   it.effect("ships no two defaults on the same shortcut context", () =>
     Effect.sync(() => {
       // Resolution is last-wins, so two defaults sharing key and `when` would
@@ -862,6 +877,57 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         { command: "diff.toggle", fromKey: "mod+d", toKey: "mod+shift+d" },
       ]);
     }),
+  );
+
+  it.effect("gives mod+shift+e back to the file manager in one startup", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      // An install from v0.0.42 until now: the effort picker holds
+      // mod+shift+e and the file manager sits on mod+alt+e. The drop has to
+      // run first, or the move sees mod+shift+e as taken and stays blocked.
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+shift+e", command: "composer.effort", when: "!terminalFocus" },
+        { key: "mod+alt+e", command: "fileTree.miller", when: "!terminalFocus" },
+        { key: "alt+e", command: "traitsPicker.toggle", when: "!terminalFocus" },
+      ]);
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepEqual(
+        persisted.filter((entry) => entry.key === "mod+shift+e"),
+        [{ key: "mod+shift+e", command: "fileTree.miller", when: "!terminalFocus" }],
+      );
+      // Not backfilled either: the command no longer ships a default.
+      assert.isFalse(persisted.some((entry) => entry.command === "composer.effort"));
+      // The picker stays reachable from the keyboard.
+      assert.isTrue(
+        persisted.some((entry) => entry.command === "traitsPicker.toggle" && entry.key === "alt+e"),
+      );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("keeps an effort binding the user chose", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+alt+r", command: "composer.effort", when: "!terminalFocus" },
+      ]);
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepEqual(
+        persisted.filter((entry) => entry.command === "composer.effort"),
+        [{ key: "mod+alt+r", command: "composer.effort", when: "!terminalFocus" }],
+      );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
 
   it.effect("moves the palette onto the key the favourite editor vacates", () =>

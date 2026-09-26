@@ -88,6 +88,13 @@ Added by the file manager run (2026-09-14, commits `c616be9a0` to `1b6708e3d`):
   `onOpenFile` receives Enter, `l` and a double click in the columns, not only the tree.
 - `packages/fm-ui/test/renderer/hostOpen.test.tsx` (new): the test for that seam.
 
+Added by the file manager chord work (2026-09-26):
+
+- `packages/fm-ui/src/App.tsx`: an optional `onDismiss` prop. `dismiss`, the action behind
+  `miller.escapeSwallow`, calls it after its own work, so a host hears only the Escape the cascade
+  had no other use for. The standalone passes nothing and keeps its window up.
+- `packages/fm-ui/test/renderer/hostDismiss.test.tsx` (new): the test for that seam.
+
 Every edit is written so that the file manager's own `App.tsx` and its existing tests need no
 change. A maintainer of the file manager should be able to accept the branch as is.
 

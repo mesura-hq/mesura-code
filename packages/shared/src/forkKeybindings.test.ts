@@ -21,9 +21,9 @@ import { DEFAULT_KEYBINDINGS } from "./keybindings.ts";
 const FORK_BINDINGS = [
   { command: "composer.attachFiles", key: "alt+a" },
   { command: "fileTree.toggle", key: "mod+e" },
-  // Moved off mod+shift+e when v0.0.42 gave that chord to composer.effort.
-  // mod+alt keeps the letter, so the mnemonic survives the move.
-  { command: "fileTree.miller", key: "mod+alt+e" },
+  // Back on mod+shift+e: v0.0.42 gave the chord to composer.effort, and the
+  // fork withdrew that default because alt+e opens the same picker.
+  { command: "fileTree.miller", key: "mod+shift+e" },
 ] as const;
 
 describe("fork keybindings", () => {

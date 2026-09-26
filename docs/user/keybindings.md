@@ -27,7 +27,7 @@ and logs a warning instead.
 ## Composer controls
 
 Use `mod+shift+m` to choose a model and `mod+shift+h` to choose a host.
-Use `mod+shift+e` for effort, `mod+shift+a` for access mode, `mod+shift+x` for the
+Use `alt+e` for effort, `mod+shift+a` for access mode, `mod+shift+x` for the
 workspace, and `mod+shift+g` for the Git branch. The workspace menu includes the
 current checkout, a new worktree, and the previous worktree when available.
 Use `mod+shift+l` to reuse the previous worktree directly.
@@ -106,8 +106,11 @@ them works in the desktop app and stays silent in a browser.
 `filePicker.toggle` opens file search for the active project and defaults to `mod+p`.
 `fileTree.toggle` reaches the file tree in the files panel and leaves it again; it defaults to
 `mod+e`. `fileTree.miller` opens the file manager over the window and closes it again; it defaults
-to `mod+alt+e`, and it keeps working while the file manager is open, when the other shortcuts
-wait.
+to `mod+shift+e`, and it keeps working while the file manager is open, when the other shortcuts
+wait. Firefox and Zen keep `mod+shift+e` for themselves, so in those browsers open the file
+manager from the command palette (`mod+o`) with **Open file manager**. Inside the file manager, Escape first
+cancels whatever is in progress (a dialog, a selection, the overview), and the next Escape closes
+it.
 Both reach the app from inside the editor, and neither runs while the terminal has focus.
 `projectSearch.toggle` searches inside the active project's files and defaults to `mod+alt+g`.
 Repeating either shortcut closes that search, and switching shortcuts replaces the open search.
@@ -326,11 +329,15 @@ The command palette, open-in-favourite-editor and the preview's address bar move
 `alt+o` and `mod+alt+l`, because `mod+k` and `mod+l` are now pane chords. Those three rules are
 rewritten in place on the next start, so a chord you had already changed yourself is left alone.
 
-Four more move because this release adds composer controls on `mod+shift+` with a letter, and each
-of those letters was already taken here. The file tree's Miller view goes to `mod+alt+e`, the
-thread search to `mod+alt+k`, the project's content search to `mod+alt+g`, and the preview's
-address bar to `mod+alt+l`. Each keeps its letter and changes only a modifier, and each rule is
-rewritten in place on the next start.
+Three more move because this release adds composer controls on `mod+shift+` with a letter, and
+each of those letters was already taken here. The thread search goes to `mod+alt+k`, the project's
+content search to `mod+alt+g`, and the preview's address bar to `mod+alt+l`. Each keeps its letter
+and changes only a modifier, and each rule is rewritten in place on the next start.
+
+The file manager keeps `mod+shift+e`. The effort shortcut that release put there is removed,
+because `alt+e` opens the same picker. On the next start, a config that still has effort on
+`mod+shift+e` loses that rule, and the file manager moves back from `mod+alt+e`. An effort or file
+manager chord you set yourself is left alone.
 
 `alt+m` for the model picker, the `ctrl+tab` pair for thread navigation, and `j` and `k` for the
 sidebar's list are second defaults for commands your file already binds, so they are added once on

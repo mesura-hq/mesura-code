@@ -125,6 +125,9 @@ chat's bundle. Focus is taken on mount and restored on unmount. The start direct
 worktree or its project root; a momentarily empty projection keeps the last target, and only the
 thread leaving the route closes the layer. A file under the project opens through
 `useRightPanelStore.openFile` and closes the layer; anything else goes to the host's `open`.
+Escape closes the layer through `App`'s `onDismiss`, which hears only the Escape the file manager's
+own cascade had no use for: a dialog, a pending chord, flash, a selection and the overview each take
+an Escape first. The standalone swallows that last Escape and keeps its window up.
 
 The vendored `useKeyDispatch` stays as it is: it attaches to `window` only while `App` is mounted.
 The host's chords stand down through one guard: `resolveShortcutCommand` returns `null` for every
@@ -147,6 +150,16 @@ old id is rewritten on load by `RENAMED_KEYBINDING_COMMANDS` (`packages/shared`)
 issue, so the startup backfill keeps running. The file keeps the old id until the user edits a
 binding.
 
+Upstream ships `composer.effort` on the same chord since v0.0.42. The fork withdraws that default
+through `DROPPED_KEYBINDING_DEFAULTS`, because `alt+e` (`traitsPicker.toggle`) opens the same picker.
+A sync that takes upstream's line back puts two defaults on one chord, and `forkKeybindings.test.ts`
+fails on it.
+
+The command palette's **Open file manager** row is the second way in, and the one that always
+works: Firefox and Zen keep `Ctrl+Shift+E` for their Network Monitor, so the page never sees it
+there. The palette hands focus back to the composer as it closes, after the layer has mounted; its
+`finalFocus` calls `focusFileManager()` first, or the file manager's keys would go to the chat.
+
 ## Upstream files touched
 
 Everything above is fork-owned except these, measured on 2026-09-14 as commits on `upstream/main`
@@ -159,6 +172,7 @@ in the previous three months:
 | `apps/server/src/server.ts`                          |      56 | the host layer and the preview route                |
 | `pnpm-workspace.yaml`                                |      44 | `fm-main` as a member; `overrides.electron`         |
 | `packages/contracts/src/rpc.ts`                      |      39 | four `WS_METHODS` and four `Rpc.make`               |
+| `apps/web/src/components/CommandPalette.tsx`         |      56 | the Open file manager row; one `finalFocus` line    |
 | `apps/web/src/components/RightPanelTabs.tsx`         |      37 | one entry in the launcher's blocking-layer list     |
 | `packages/shared/package.json`                       |      36 | one subpath export                                  |
 | `apps/web/src/components/files/FilePreviewPanel.tsx` |      32 | the overview element and import removed             |
@@ -170,6 +184,6 @@ in the previous three months:
 | `packages/client-runtime/src/rpc/client.ts`          |      14 | one member of the subscription tag union            |
 | `packages/contracts/src/keybindings.ts`              |      13 | one command id renamed                              |
 | `apps/web/src/keybindings.ts`                        |       9 | one import, one call in the loop, one fork function |
-| `packages/shared/src/keybindings.ts`                 |       8 | one default renamed                                 |
+| `packages/shared/src/keybindings.ts`                 |       8 | one default renamed; `composer.effort`'s withdrawn  |
 | `apps/web/src/routes/_chat.tsx`                      |       8 | one import; the layer returned instead of `null`    |
-| `apps/server/src/keybindings.ts`                     |       5 | one import, two call sites wrapped                  |
+| `apps/server/src/keybindings.ts`                     |       5 | one import, two call sites wrapped, drops persisted |
