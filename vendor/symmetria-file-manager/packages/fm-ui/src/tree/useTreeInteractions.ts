@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import { useViewportFlash } from "../flash/useViewportFlash.ts";
 import type { FlashSceneAdapter } from "../overview/flashTargets.ts";
 import type { OverviewModel } from "../overview/useOverview.ts";
@@ -27,9 +27,16 @@ export function useTreeInteractions(
   const ref = useRef(viewport);
   ref.current = viewport;
   const search = useTreeSearch(root, model, state, record, viewport);
+  // Serialises every row, so it must follow `rows`, not the render: a cursor
+  // move renders the tree and keeps `rows`. Computed per render, a project of
+  // 25,000 rows built about two megabytes of string on every held key.
+  const generation = useMemo(
+    () => JSON.stringify(state.rows.map((row) => [row.path, row.expanded, row.status])),
+    [state.rows],
+  );
   const flash = useViewportFlash({
     viewport: ref,
-    generation: JSON.stringify(state.rows.map((row) => [row.path, row.expanded, row.status])),
+    generation,
     port,
     adapter: TREE_SCENE,
     stopCamera: cancel,
