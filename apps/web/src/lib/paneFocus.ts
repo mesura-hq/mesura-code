@@ -23,11 +23,14 @@ export type PaneDirection = "left" | "right" | "up" | "down";
  */
 export const PANE_ORDER: ReadonlyArray<PaneId> = ["sidebar", "chat", "panel"];
 
+/** The terminal drawer's root, shared with the pane mark in `drawerFocusMark.ts`. */
+export const TERMINAL_DRAWER_SELECTOR = '[data-terminal-owner="drawer"]';
+
 const PANE_ROOT_SELECTOR: Record<PaneId, string> = {
   sidebar: "[data-app-sidebar]",
   chat: "[data-chat-column-maximized-away]",
   panel: "[data-preview-panel-mode]",
-  terminal: '[data-terminal-owner="drawer"]',
+  terminal: TERMINAL_DRAWER_SELECTOR,
 };
 
 /**

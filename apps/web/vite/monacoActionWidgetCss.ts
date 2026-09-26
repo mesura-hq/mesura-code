@@ -26,6 +26,11 @@ export const MONACO_EMPTY_DETAIL_HAS = ":has(.detail:not(:empty))";
 const ACTION_WIDGET_CSS =
   /[\\/]monaco-editor[\\/]esm[\\/]vs[\\/]platform[\\/]actionWidget[\\/]browser[\\/]actionWidget\.css(?:\?.*)?$/;
 
+/** Whether a module id is the Monaco stylesheet this plugin rewrites. */
+export function isMonacoActionWidgetCss(id: string): boolean {
+  return ACTION_WIDGET_CSS.test(id);
+}
+
 /** Returns the rewritten CSS, or null when Monaco no longer ships the rule. */
 export function rewriteMonacoActionWidgetCss(css: string): string | null {
   if (!css.includes(MONACO_STYLE_ATTRIBUTE_HAS)) return null;
@@ -33,22 +38,34 @@ export function rewriteMonacoActionWidgetCss(css: string): string | null {
 }
 
 export function monacoActionWidgetCssPlugin(): Plugin {
+  let isBuild = false;
+  let rewroteRule = false;
   return {
     name: "mesura:monaco-action-widget-css",
     enforce: "pre",
+    configResolved(config) {
+      isBuild = config.command === "build";
+    },
     transform(code, id) {
-      if (!ACTION_WIDGET_CSS.test(id)) return null;
+      if (!isMonacoActionWidgetCss(id)) return null;
       const rewritten = rewriteMonacoActionWidgetCss(code);
       if (rewritten === null) {
-        // A Monaco bump changed the rule. Say so at build time instead of
-        // silently shipping whatever replaced it; the guard test in
-        // tests/unit/monaco-css-has.test.ts names what to check.
         this.warn(
           `${MONACO_STYLE_ATTRIBUTE_HAS} not found in ${id}; re-check Monaco's :has() rules`,
         );
         return null;
       }
+      rewroteRule = true;
       return { code: rewritten, map: null };
+    },
+    buildEnd() {
+      // Monaco is always in the production graph, so a build that never
+      // rewrote the rule means the file moved or was renamed in a Monaco bump.
+      if (isBuild && !rewroteRule) {
+        this.warn(
+          "Monaco's actionWidget.css was never rewritten; re-check apps/web/vite/monacoActionWidgetCss.ts",
+        );
+      }
     },
   };
 }

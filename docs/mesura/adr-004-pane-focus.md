@@ -110,9 +110,8 @@ the content for the same attention. An animated version was never on the table
   drawer" onto `<html>` as `[data-mesura-drawer-focused]`, written to the DOM
   only when the answer changes. The first version asked it in CSS with
   `:has()` anchored on the chat column, and that made every thread switch
-  restyle the whole column: in an A/B against upstream v0.0.42 on the same
-  data, 2.7× upstream's style work during rapid switching, 4.4× once Monaco's
-  CSS was resident. `mesura.css` carries the numbers, and
+  restyle the whole column, measured against upstream v0.0.42 on the same
+  data. `mesura.css` carries the numbers, and
   `tests/unit/fork-styling-hooks.test.ts` keeps `:has()` out of that file.
 - The pane roots are upstream's existing hooks: `[data-app-sidebar]`,
   `[data-chat-column-maximized-away]`, `[data-terminal-owner="drawer"]` and

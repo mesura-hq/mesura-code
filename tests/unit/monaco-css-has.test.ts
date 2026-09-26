@@ -5,6 +5,7 @@ import * as NodePath from "node:path";
 import { assert, it } from "vite-plus/test";
 
 import {
+  isMonacoActionWidgetCss,
   MONACO_EMPTY_DETAIL_HAS,
   MONACO_STYLE_ATTRIBUTE_HAS,
   rewriteMonacoActionWidgetCss,
@@ -35,12 +36,18 @@ function monacoCssFiles(directory: string): string[] {
   });
 }
 
+const actionWidgetCssPath = NodePath.join(
+  monacoRoot,
+  "esm/vs/platform/actionWidget/browser/actionWidget.css",
+);
+
 it("rewrites Monaco's style-attribute :has() to the equivalent :empty check", () => {
-  const css = NodeFS.readFileSync(
-    NodePath.join(monacoRoot, "esm/vs/platform/actionWidget/browser/actionWidget.css"),
-    "utf8",
-  );
-  const rewritten = rewriteMonacoActionWidgetCss(css);
+  // The plugin keys on the module id; a drift between its pattern and the real
+  // path would stop the rewrite without any other signal.
+  assert.isTrue(isMonacoActionWidgetCss(actionWidgetCssPath));
+  assert.isTrue(isMonacoActionWidgetCss(`${actionWidgetCssPath}?direct`));
+
+  const rewritten = rewriteMonacoActionWidgetCss(NodeFS.readFileSync(actionWidgetCssPath, "utf8"));
   assert.isNotNull(
     rewritten,
     `Monaco no longer ships ${MONACO_STYLE_ATTRIBUTE_HAS}; re-check the plugin`,
@@ -61,9 +68,10 @@ it("rewrites Monaco's style-attribute :has() to the equivalent :empty check", ()
 
 it("finds no other Monaco :has() that reads an attribute the app rewrites constantly", () => {
   const offenders = monacoCssFiles(NodePath.join(monacoRoot, "esm")).flatMap((file) => {
-    const css =
-      rewriteMonacoActionWidgetCss(NodeFS.readFileSync(file, "utf8")) ??
-      NodeFS.readFileSync(file, "utf8");
+    // Only the file the plugin rewrites is checked after the rewrite; every
+    // other file ships as it is, so it is checked as it is.
+    const raw = NodeFS.readFileSync(file, "utf8");
+    const css = isMonacoActionWidgetCss(file) ? (rewriteMonacoActionWidgetCss(raw) ?? raw) : raw;
     return [...css.matchAll(/:has\([^{]*\[(style|class)\b/g)].map(
       (match) => `${NodePath.relative(monacoRoot, file)}: ${match[0]}`,
     );

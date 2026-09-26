@@ -14,9 +14,9 @@
  * boundary invalidates nothing.
  */
 
-export const DRAWER_FOCUS_MARK_ATTRIBUTE = "data-mesura-drawer-focused";
+import { TERMINAL_DRAWER_SELECTOR } from "./paneFocus";
 
-const DRAWER_SELECTOR = '[data-terminal-owner="drawer"]';
+export const DRAWER_FOCUS_MARK_ATTRIBUTE = "data-mesura-drawer-focused";
 
 interface FocusEventLike {
   readonly target: unknown;
@@ -29,14 +29,16 @@ interface MarkRoot {
   removeAttribute(name: string): void;
 }
 
-interface FocusEventSource {
+export interface FocusEventSource {
   addEventListener(type: string, listener: (event: never) => void, capture: boolean): void;
   removeEventListener(type: string, listener: (event: never) => void, capture: boolean): void;
 }
 
+// Structural rather than `instanceof Element`, so the node test harness can
+// pass plain objects; a focus target without `closest` is never in the drawer.
 function isInsideDrawer(node: unknown): boolean {
   const closest = (node as { closest?: (selector: string) => unknown } | null)?.closest;
-  return typeof closest === "function" && closest.call(node, DRAWER_SELECTOR) != null;
+  return typeof closest === "function" && closest.call(node, TERMINAL_DRAWER_SELECTOR) != null;
 }
 
 function applyMark(root: MarkRoot, drawerFocused: boolean): void {
@@ -48,14 +50,18 @@ function applyMark(root: MarkRoot, drawerFocused: boolean): void {
 /**
  * Keeps the mark in step with focus until the returned cleanup runs.
  *
- * `focusout` reads `relatedTarget`, the element about to receive focus, so a
- * move from the drawer to anywhere else clears the mark in the same event.
- * A drawer that unmounts while it holds focus fires no event; the composer
- * takes focus back when the drawer closes, and that `focusin` clears it.
+ * It starts from the element focused at registration, so a remount (dev
+ * StrictMode, HMR, a route change) while the drawer holds focus keeps the
+ * mark. `focusout` reads `relatedTarget`, the element about to receive focus,
+ * so a move from the drawer to anywhere else clears the mark in the same
+ * event. A drawer that unmounts while it holds focus fires no event; the
+ * composer takes focus back when the drawer closes, and that `focusin` clears
+ * it.
  */
 export function registerDrawerFocusMark(input: {
   readonly document: FocusEventSource;
   readonly root: MarkRoot;
+  readonly getActiveElement: () => unknown;
 }): () => void {
   const onFocusIn = (event: FocusEventLike) => applyMark(input.root, isInsideDrawer(event.target));
   const onFocusOut = (event: FocusEventLike) =>
@@ -63,6 +69,7 @@ export function registerDrawerFocusMark(input: {
 
   input.document.addEventListener("focusin", onFocusIn as (event: never) => void, true);
   input.document.addEventListener("focusout", onFocusOut as (event: never) => void, true);
+  applyMark(input.root, isInsideDrawer(input.getActiveElement()));
   return () => {
     input.document.removeEventListener("focusin", onFocusIn as (event: never) => void, true);
     input.document.removeEventListener("focusout", onFocusOut as (event: never) => void, true);
