@@ -106,9 +106,9 @@ them works in the desktop app and stays silent in a browser.
 `filePicker.toggle` opens file search for the active project and defaults to `mod+p`.
 `fileTree.toggle` reaches the file tree in the files panel and leaves it again; it defaults to
 `mod+e`. `fileTree.miller` opens the file manager over the window and closes it again; it defaults
-to `mod+shift+e`, and it keeps working while the file manager is open, when the other shortcuts
-wait. Firefox and Zen keep `mod+shift+e` for themselves, so in those browsers open the file
-manager from the command palette (`mod+o`) with **Open file manager**. Inside the file manager, Escape first
+to `mod+shift+e` and `mod+alt+e`, and it keeps working while the file manager is open, when the
+other shortcuts wait. Firefox and Zen keep `mod+shift+e` for themselves, so in those browsers use
+`mod+alt+e`, or **Open file manager** in the command palette (`mod+o`). Inside the file manager, Escape first
 cancels whatever is in progress (a dialog, a selection, the overview), and the next Escape closes
 it.
 Both reach the app from inside the editor, and neither runs while the terminal has focus.
@@ -334,10 +334,9 @@ each of those letters was already taken here. The thread search goes to `mod+alt
 content search to `mod+alt+g`, and the preview's address bar to `mod+alt+l`. Each keeps its letter
 and changes only a modifier, and each rule is rewritten in place on the next start.
 
-The file manager keeps `mod+shift+e`. The effort shortcut that release put there is removed,
-because `alt+e` opens the same picker. On the next start, a config that still has effort on
-`mod+shift+e` loses that rule, and the file manager moves back from `mod+alt+e`. An effort or file
-manager chord you set yourself is left alone.
+The file manager gets `mod+shift+e` back and keeps `mod+alt+e`. The effort shortcut that release
+put on `mod+shift+e` is removed, because `alt+e` opens the same picker. Both changes happen once, on
+the next start: bind either chord again afterwards and your choice stays.
 
 `alt+m` for the model picker, the `ctrl+tab` pair for thread navigation, and `j` and `k` for the
 sidebar's list are second defaults for commands your file already binds, so they are added once on

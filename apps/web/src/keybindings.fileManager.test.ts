@@ -50,6 +50,14 @@ describe("host chords while the file manager is open", () => {
     expect(resolveShortcutCommand(modShiftChord("E"), DEFAULT_RESOLVED_KEYBINDINGS, linux)).toBe(
       "fileTree.miller",
     );
+    // The browser-safe second chord: Firefox and Zen keep mod+shift+e.
+    expect(
+      resolveShortcutCommand(
+        { key: "e", ctrlKey: true, metaKey: false, shiftKey: false, altKey: true },
+        DEFAULT_RESOLVED_KEYBINDINGS,
+        linux,
+      ),
+    ).toBe("fileTree.miller");
     // `editor.openFavorite` answers to alt+o, not mod+o. The pane-navigation
     // work moved it there to free mod+k for `pane.focusUp`, which pushed
     // `commandPalette.toggle` onto mod+o. Asserting mod+o here instead would

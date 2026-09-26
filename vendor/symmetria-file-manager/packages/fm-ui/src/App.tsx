@@ -564,7 +564,12 @@ function browsingFlash(
   return miller;
 }
 
-/** `dismiss` as the key actions define it, then the host's own answer to a stray Escape. */
+/**
+ * `dismiss` as the key actions define it, then the host's own answer to a
+ * stray Escape. `dismiss` also clears a status message, which is not a step of
+ * its own: that same Escape closes the host's layer. A picker window routes its
+ * cancel through `dismiss` too, so a host that ever shows one hears it here.
+ */
 function useHostDismiss(
   actions: KeyWiring["actions"],
   onDismiss: (() => void) | undefined,

@@ -8,7 +8,7 @@
  * and it must hear only the Escape the cascade had no other use for: one
  * that clears a selection is still the selection's.
  */
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../../src/App.tsx";
@@ -44,6 +44,21 @@ describe("a host's dismiss callback", () => {
     await act(async () => undefined);
     fireEvent.keyDown(window, { key: "Escape" });
     await act(async () => undefined);
+    expect(onDismiss).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    await act(async () => undefined);
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not hear the Escape that closes the overview, only the next one", async () => {
+    const onDismiss = vi.fn();
+    await mount(onDismiss);
+
+    fireEvent.keyDown(window, { key: "o", ctrlKey: true });
+    await screen.findByTestId("connected-groups");
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByTestId("connected-groups")).toBeNull());
     expect(onDismiss).not.toHaveBeenCalled();
 
     fireEvent.keyDown(window, { key: "Escape" });

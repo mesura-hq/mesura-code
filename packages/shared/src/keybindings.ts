@@ -77,8 +77,11 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // Fork addition: a new command on a free chord, installed by the per-command
   // startup backfill; no RETIRED or ADDED entry, as with alt+q below.
   { key: "mod+e", command: "fileTree.toggle", when: "!terminalFocus" },
-  // mod+shift+e again since the effort picker stopped using it; see
-  // DROPPED_KEYBINDING_DEFAULTS below.
+  // Two chords, and the label shows the last. mod+shift+e is the file
+  // manager's own, back since the effort picker gave it up (see
+  // WITHDRAWN_KEYBINDING_DEFAULTS); Firefox and Zen keep it for their Network
+  // Monitor, so mod+alt+e stays as the chord a browser lets through.
+  { key: "mod+alt+e", command: "fileTree.miller", when: "!terminalFocus" },
   { key: "mod+shift+e", command: "fileTree.miller", when: "!terminalFocus" },
   { key: "alt+u", command: "usage.peek" },
   { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
@@ -240,16 +243,11 @@ export const RETIRED_KEYBINDING_DEFAULTS: ReadonlyArray<{
     toKey: "mod+alt+l",
   },
   {
-    // fileTree.miller took mod+alt+e while v0.0.42's composer.effort held
-    // mod+shift+e, and returns now that DROPPED_KEYBINDING_DEFAULTS frees it.
-    // The migration drops before it moves, so both land in one startup.
-    from: { key: "mod+alt+e", command: "fileTree.miller", when: "!terminalFocus" },
-    toKey: "mod+shift+e",
-  },
-  {
     // A fork-only command that shipped on a mod+shift+ chord v0.0.42 has since
     // claimed, against pullRequest.copyNumber. It keeps its letter and takes
     // mod+alt, so an installed config follows without relearning the mnemonic.
+    // fileTree.miller took the same move once and has no entry any more: it
+    // keeps mod+alt+e and regains mod+shift+e through ADDED and WITHDRAWN.
     from: { key: "mod+shift+k", command: "threadSearch.toggle", when: "!terminalFocus" },
     toKey: "mod+alt+k",
   },
@@ -269,21 +267,6 @@ export const RETIRED_KEYBINDING_DEFAULTS: ReadonlyArray<{
     from: { key: "mod+k", command: "commandPalette.toggle", when: "!terminalFocus" },
     toKey: "mod+o",
   },
-];
-
-/**
- * Defaults that shipped and were withdrawn with no replacement key.
- *
- * The same problem as a moved default: a config written before the
- * withdrawal keeps the rule, and whatever now ships on its chord silently
- * gets nothing. Startup removes each rule here from a config, before it
- * rewrites retired defaults, so a rewrite onto the freed chord is not blocked.
- *
- * A rule must match exactly — key, command, and `when` — so one the user
- * edited is theirs and stays.
- */
-export const DROPPED_KEYBINDING_DEFAULTS: ReadonlyArray<KeybindingRule> = [
-  { key: "mod+shift+e", command: "composer.effort", when: "!terminalFocus" },
 ];
 
 /**
@@ -346,7 +329,66 @@ export const ADDED_KEYBINDING_DEFAULTS: ReadonlyArray<AddedKeybindingDefault> = 
     rule: { key: "k", command: "thread.previous", when: "sidebarFocus && !sidebarSearchFocus" },
     insertBefore: { key: "ctrl+shift+tab", command: "thread.previous", when: "!terminalFocus" },
   },
+  // Appended, so it is the last fileTree.miller rule and the label, as on a
+  // fresh install. Lands only once WITHDRAWN has freed mod+shift+e.
+  {
+    id: "2026-09-file-manager-mod-shift-e",
+    rule: { key: "mod+shift+e", command: "fileTree.miller", when: "!terminalFocus" },
+  },
 ];
+
+/**
+ * Defaults that shipped and were withdrawn with no replacement key.
+ *
+ * The same problem as a moved default: a config written before the
+ * withdrawal keeps the rule, and whatever now ships on its chord silently
+ * gets nothing. Startup removes each rule here from a config once, before it
+ * rewrites retired defaults and adds introduced ones, so an addition can land
+ * on the chord a withdrawal frees in the same startup.
+ *
+ * Once, like ADDED_KEYBINDING_DEFAULTS and in the same ledger: the id is
+ * recorded whether or not the rule was there, so a user who binds it again
+ * afterwards keeps it. A rule must match exactly — key, command, and `when` —
+ * so one the user edited is theirs and stays. Never edit or reuse an id.
+ */
+export interface WithdrawnKeybindingDefault {
+  readonly id: string;
+  readonly rule: KeybindingRule;
+}
+
+export const WITHDRAWN_KEYBINDING_DEFAULTS: ReadonlyArray<WithdrawnKeybindingDefault> = [
+  {
+    id: "2026-09-withdraw-composer-effort-mod-shift-e",
+    rule: { key: "mod+shift+e", command: "composer.effort", when: "!terminalFocus" },
+  },
+];
+
+export interface WithdrawnKeybindingResult {
+  readonly id: string;
+  readonly rule: KeybindingRule;
+  /** `dropped` removed the rule; `absent` found nothing to remove. Both are recorded. */
+  readonly outcome: "dropped" | "absent";
+}
+
+/** Removes every withdrawn default the ledger has not recorded yet. */
+export function dropWithdrawnKeybindingDefaults(input: {
+  readonly config: ReadonlyArray<KeybindingRule>;
+  readonly appliedIds: ReadonlySet<string>;
+}): {
+  readonly config: ReadonlyArray<KeybindingRule>;
+  readonly results: ReadonlyArray<WithdrawnKeybindingResult>;
+} {
+  let config = input.config;
+  const results: WithdrawnKeybindingResult[] = [];
+  for (const withdrawn of WITHDRAWN_KEYBINDING_DEFAULTS) {
+    if (input.appliedIds.has(withdrawn.id)) continue;
+    const kept = config.filter((rule) => !isSameKeybindingRule(rule, withdrawn.rule));
+    const outcome = kept.length === config.length ? "absent" : "dropped";
+    results.push({ id: withdrawn.id, rule: withdrawn.rule, outcome });
+    config = kept;
+  }
+  return { config, results };
+}
 
 export type IntroducedKeybindingAdditionOutcome =
   /** Appended to the config. */
@@ -455,9 +497,9 @@ function claimsShortcutContext(
 }
 
 /**
- * Removes every dropped default still present in a user config, then rewrites
- * any retired default onto its current key. Returns the config unchanged when
- * nothing was dropped or moved, so callers can skip the write.
+ * Rewrites any retired default still present in a user config onto its current
+ * key. Returns the config unchanged when nothing moved, so callers can skip the
+ * write.
  *
  * Three things keep this from damaging a config:
  *
@@ -475,19 +517,12 @@ export function migrateRetiredKeybindingDefaults(config: ReadonlyArray<Keybindin
   readonly config: ReadonlyArray<KeybindingRule>;
   readonly rewrites: ReadonlyArray<RetiredKeybindingRewrite>;
   readonly blocked: ReadonlyArray<BlockedRetiredKeybindingRewrite>;
-  readonly dropped: ReadonlyArray<KeybindingRule>;
 } {
   const rewrites: RetiredKeybindingRewrite[] = [];
   const blocked: BlockedRetiredKeybindingRewrite[] = [];
   const next: KeybindingRule[] = [];
-  const dropped = config.filter((rule) =>
-    DROPPED_KEYBINDING_DEFAULTS.some((entry) => isSameKeybindingRule(entry, rule)),
-  );
-  // The claim check below runs against what survives the drop: a withdrawn
-  // rule still in the file must not block a move onto the chord it vacates.
-  const kept = dropped.length === 0 ? config : config.filter((rule) => !dropped.includes(rule));
 
-  for (const rule of kept) {
+  for (const rule of config) {
     const retired = RETIRED_KEYBINDING_DEFAULTS.find((entry) =>
       isSameKeybindingRule(entry.from, rule),
     );
@@ -505,7 +540,7 @@ export function migrateRetiredKeybindingDefaults(config: ReadonlyArray<Keybindin
     // Checked against the destination's context, not the source's: a rewrite
     // that only narrows `when` stays on its key, so the source context would
     // ask whether the rule collides with itself.
-    const claimedByAnother = kept.some(
+    const claimedByAnother = config.some(
       (entry) => entry !== rule && claimsShortcutContext(entry, retired.toKey, destinationWhen),
     );
     if (claimedByAnother) {
@@ -534,9 +569,9 @@ export function migrateRetiredKeybindingDefaults(config: ReadonlyArray<Keybindin
     next.push(destination);
   }
 
-  return rewrites.length === 0 && dropped.length === 0
-    ? { config, rewrites, blocked, dropped }
-    : { config: next, rewrites, blocked, dropped };
+  return rewrites.length === 0
+    ? { config, rewrites, blocked }
+    : { config: next, rewrites, blocked };
 }
 
 function normalizeKeyToken(token: string): string {

@@ -157,8 +157,10 @@ import { AzureDevOpsIcon, BitbucketIcon, GitHubIcon, GitLabIcon, ForgejoIcon } f
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { ProjectFilePicker } from "./files/ProjectFilePicker";
-import { useFileManagerStore } from "./files/mesuraFileManager/fileManagerStore";
-import { focusFileManager } from "./files/mesuraFileManager/isFileManagerOpen";
+import {
+  keepFocusInFileManager,
+  openFileManager,
+} from "./files/mesuraFileManager/fileManagerToggle";
 import { ProjectScopePicker } from "./projects/ProjectScopePicker";
 import { ThreadSearchPicker } from "./threads/ThreadSearchPicker";
 import { openLinkPullRequestDialog } from "./pullRequest/LinkPullRequestDialog";
@@ -598,7 +600,7 @@ function CommandPaletteDialog(props: {
       data-testid="command-palette"
       finalFocus={() => {
         // Fork: a row that opened the file manager hands it the keyboard.
-        if (focusFileManager()) return false;
+        if (keepFocusInFileManager()) return false;
         composerHandleRef?.current?.focusAtEnd();
         return false;
       }}
@@ -1702,7 +1704,7 @@ function OpenCommandPaletteDialog(props: {
       icon: <Columns3Icon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "fileTree.miller",
       run: async () => {
-        useFileManagerStore.getState().setOpen(true);
+        openFileManager(routeThreadRef);
       },
     });
   }

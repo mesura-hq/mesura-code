@@ -15,6 +15,7 @@ import { useEnvironmentQuery } from "~/state/query";
 
 import { installFileManagerBridge } from "./bridgeInstall";
 import { useFileManagerStore } from "./fileManagerStore";
+import { closeFileManager } from "./fileManagerToggle";
 import { type FileManagerTarget, fileManagerTarget } from "./fileManagerTarget";
 import { FILE_MANAGER_ROOT_ATTRIBUTE } from "./isFileManagerOpen";
 import { decideOpenFromFileManager } from "./openFromFileManager";
@@ -28,9 +29,6 @@ import "./fileManager.css";
 const FileManagerApp = lazy(() =>
   import("@symmetria/fm-ui/App").then((module) => ({ default: module.App })),
 );
-
-/** The layer's ways out: a stray Escape, a file opened, a lost session, the thread leaving the route. */
-const closeFileManager = () => useFileManagerStore.getState().setOpen(false);
 
 interface MesuraFileManagerLayerProps {
   readonly routeThreadRef: ScopedThreadRef | null;

@@ -140,9 +140,9 @@ already skips `[role="dialog"][aria-modal="true"]`.
 
 ## Chords
 
-| Command           | Default       | Where it is decided                           |
-| ----------------- | ------------- | --------------------------------------------- |
-| `fileTree.miller` | `mod+shift+e` | `runFileManagerToggle` (`mesuraFileManager/`) |
+| Command           | Default                    | Where it is decided                           |
+| ----------------- | -------------------------- | --------------------------------------------- |
+| `fileTree.miller` | `mod+shift+e`, `mod+alt+e` | `runFileManagerToggle` (`mesuraFileManager/`) |
 
 `when: "!terminalFocus"`, dispatched from the tree's window capture-phase listener, and a member of
 `APP_SHORTCUTS_THAT_OUTRANK_NEOVIM`. The command replaced `fileTree.overview`; a stored rule with the
@@ -150,15 +150,25 @@ old id is rewritten on load by `RENAMED_KEYBINDING_COMMANDS` (`packages/shared`)
 issue, so the startup backfill keeps running. The file keeps the old id until the user edits a
 binding.
 
-Upstream ships `composer.effort` on the same chord since v0.0.42. The fork withdraws that default
-through `DROPPED_KEYBINDING_DEFAULTS`, because `alt+e` (`traitsPicker.toggle`) opens the same picker.
-A sync that takes upstream's line back puts two defaults on one chord, and `forkKeybindings.test.ts`
-fails on it.
+Upstream ships `composer.effort` on `mod+shift+e` since v0.0.42. The fork withdraws that default,
+because `alt+e` (`traitsPicker.toggle`) opens the same picker. `mod+alt+e` stays as the second
+default because Firefox and Zen keep `mod+shift+e`; the last rule is the label.
 
-The command palette's **Open file manager** row is the second way in, and the one that always
-works: Firefox and Zen keep `Ctrl+Shift+E` for their Network Monitor, so the page never sees it
-there. The palette hands focus back to the composer as it closes, after the layer has mounted; its
-`finalFocus` calls `focusFileManager()` first, or the file manager's keys would go to the chat.
+An installed config reaches the new shape once, through the offer ledger
+(`keybindings.applied.json`): `WITHDRAWN_KEYBINDING_DEFAULTS` removes the exact effort rule, then
+`ADDED_KEYBINDING_DEFAULTS` appends `mod+shift+e` for the file manager. Both record their id whether
+or not they changed anything, so a user who binds either chord again afterwards keeps it. A
+retired-default rewrite would not do: it runs on every startup and would undo that choice.
+
+The withdrawn line sits inside upstream's `DEFAULT_KEYBINDINGS`, beside the other composer
+defaults, so an upstream edit there conflicts at the next sync. A resolution that takes upstream's
+line back puts two defaults on one chord, and `forkKeybindings.test.ts` and the server's "ships no
+two defaults on the same shortcut context" test both fail on it.
+
+The command palette's **Open file manager** row is the entry point that needs no chord. The palette
+hands focus back to the composer as it closes; its `finalFocus` asks `keepFocusInFileManager()`
+first, which reads the store rather than the page, so the file manager keeps the keyboard whether or
+not the layer has mounted by then.
 
 ## Upstream files touched
 
@@ -186,4 +196,4 @@ in the previous three months:
 | `apps/web/src/keybindings.ts`                        |       9 | one import, one call in the loop, one fork function |
 | `packages/shared/src/keybindings.ts`                 |       8 | one default renamed; `composer.effort`'s withdrawn  |
 | `apps/web/src/routes/_chat.tsx`                      |       8 | one import; the layer returned instead of `null`    |
-| `apps/server/src/keybindings.ts`                     |       5 | one import, two call sites wrapped, drops persisted |
+| `apps/server/src/keybindings.ts`                     |       5 | two call sites wrapped; withdrawals run and logged  |

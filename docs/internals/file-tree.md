@@ -112,10 +112,10 @@ thrown. Keys are never evicted.
 
 ## Chords
 
-| Command           | Default       | Where it is decided                           |
-| ----------------- | ------------- | --------------------------------------------- |
-| `fileTree.toggle` | `mod+e`       | `decideFileTreeShortcut`                      |
-| `fileTree.miller` | `mod+shift+e` | `runFileManagerToggle` (`mesuraFileManager/`) |
+| Command           | Default                    | Where it is decided                           |
+| ----------------- | -------------------------- | --------------------------------------------- |
+| `fileTree.toggle` | `mod+e`                    | `decideFileTreeShortcut`                      |
+| `fileTree.miller` | `mod+shift+e`, `mod+alt+e` | `runFileManagerToggle` (`mesuraFileManager/`) |
 
 Both are `when: "!terminalFocus"`, dispatched from one window capture-phase listener installed by
 the chat route, and members of `APP_SHORTCUTS_THAT_OUTRANK_NEOVIM` as defence should that listener

@@ -13,7 +13,10 @@ import * as ServerConfig from "./config.ts";
 import * as Keybindings from "./keybindings.ts";
 // The migration itself lives in the shared package; the server module wires
 // it up but does not re-export it.
-import { migrateRetiredKeybindingDefaults } from "@t3tools/shared/keybindings";
+import {
+  dropWithdrawnKeybindingDefaults,
+  migrateRetiredKeybindingDefaults,
+} from "@t3tools/shared/keybindings";
 import { KeybindingsConfigError } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
@@ -381,18 +384,54 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }),
   );
 
-  it.effect("never drops a rule it still ships", () =>
+  it.effect("never withdraws a rule it still ships", () =>
     Effect.sync(() => {
-      // A dropped rule that is also a live default would be removed from the
-      // file and backfilled again on every startup.
-      for (const rule of Keybindings.DROPPED_KEYBINDING_DEFAULTS) {
+      // A withdrawn rule that is also a live default would be removed from an
+      // upgraded config while a fresh install still gets it.
+      for (const { rule } of Keybindings.WITHDRAWN_KEYBINDING_DEFAULTS) {
         assert.isFalse(
           Keybindings.DEFAULT_KEYBINDINGS.some((entry) =>
             Keybindings.isSameKeybindingRule(entry, rule),
           ),
-          `dropped default ${rule.command} is still a live default`,
+          `withdrawn default ${rule.command} is still a live default`,
         );
       }
+    }),
+  );
+
+  it.effect("withdraws only an exact match, and records the offer either way", () =>
+    Effect.sync(() => {
+      const withdrawn = {
+        key: "mod+shift+e",
+        command: "composer.effort",
+        when: "!terminalFocus",
+      } as const;
+      const other = { key: "mod+j", command: "terminal.toggle" } as const;
+      const exact = dropWithdrawnKeybindingDefaults({
+        config: [withdrawn, other],
+        appliedIds: new Set(),
+      });
+      assert.deepEqual(exact.config, [other]);
+      assert.deepEqual(
+        exact.results.map((entry) => entry.outcome),
+        ["dropped"],
+      );
+
+      // No `when` is a different rule, and so the user's own.
+      const edited = { key: "mod+shift+e", command: "composer.effort" } as const;
+      const kept = dropWithdrawnKeybindingDefaults({ config: [edited], appliedIds: new Set() });
+      assert.deepEqual(kept.config, [edited]);
+      assert.deepEqual(
+        kept.results.map((entry) => entry.outcome),
+        ["absent"],
+      );
+
+      const recorded = dropWithdrawnKeybindingDefaults({
+        config: [withdrawn],
+        appliedIds: new Set(kept.results.map((entry) => entry.id)),
+      });
+      assert.deepEqual(recorded.config, [withdrawn]);
+      assert.deepEqual(recorded.results, []);
     }),
   );
 
@@ -897,15 +936,51 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       });
 
       const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      // Both chords, mod+shift+e last so it is the label, as on a fresh install.
       assert.deepEqual(
-        persisted.filter((entry) => entry.key === "mod+shift+e"),
-        [{ key: "mod+shift+e", command: "fileTree.miller", when: "!terminalFocus" }],
+        persisted.filter((entry) => entry.command === "fileTree.miller"),
+        [
+          { key: "mod+alt+e", command: "fileTree.miller", when: "!terminalFocus" },
+          { key: "mod+shift+e", command: "fileTree.miller", when: "!terminalFocus" },
+        ],
       );
       // Not backfilled either: the command no longer ships a default.
       assert.isFalse(persisted.some((entry) => entry.command === "composer.effort"));
       // The picker stays reachable from the keyboard.
       assert.isTrue(
         persisted.some((entry) => entry.command === "traitsPicker.toggle" && entry.key === "alt+e"),
+      );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("drops and adds once, so a later choice of the user's stands", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      const sync = Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+shift+e", command: "composer.effort", when: "!terminalFocus" },
+        { key: "mod+alt+e", command: "fileTree.miller", when: "!terminalFocus" },
+      ]);
+      yield* sync;
+
+      // The user takes mod+shift+e back for the effort picker, the exact rule
+      // that was withdrawn, and so gives the file manager's copy up.
+      const afterFirst = yield* readKeybindingsConfig(keybindingsConfigPath);
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        ...afterFirst.filter(
+          (entry) => !(entry.command === "fileTree.miller" && entry.key === "mod+shift+e"),
+        ),
+        { key: "mod+shift+e", command: "composer.effort", when: "!terminalFocus" },
+      ]);
+      yield* sync;
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepEqual(
+        persisted.filter((entry) => entry.key === "mod+shift+e"),
+        [{ key: "mod+shift+e", command: "composer.effort", when: "!terminalFocus" }],
       );
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
