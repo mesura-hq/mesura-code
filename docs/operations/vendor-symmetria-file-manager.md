@@ -95,6 +95,13 @@ Added by the file manager chord work (2026-09-26):
   had no other use for. The standalone passes nothing and keeps its window up.
 - `packages/fm-ui/test/renderer/hostDismiss.test.tsx` (new): the test for that seam.
 
+Added by the tree arrow-key fix (2026-09-26):
+
+- `packages/fm-ui/src/tree/useTreeInteractions.ts`: the flash `generation` is memoised on
+  `state.rows`. It serialised every row on every render, and a cursor move renders the tree; with
+  the 25,000 rows of a whole project listing, a held arrow key dropped frames. The standalone's
+  scanner rarely yields that many rows, so the cost showed only here.
+
 Every edit is written so that the file manager's own `App.tsx` and its existing tests need no
 change. A maintainer of the file manager should be able to accept the branch as is.
 
@@ -102,8 +109,10 @@ change. A maintainer of the file manager should be able to accept the branch as 
 
 - **Never format, lint or test the vendored tree from here.** The root `vite.config.ts` excludes
   the `vendor` directory from `fmt`, `lint` and `test`; the file manager has its own biome and
-  anti-slop configuration, and edits are formatted with its biome:
-  `/home/dev/symmetria-file-manager/node_modules/.bin/biome format --write <file>`.
+  anti-slop configuration, and edits are formatted with its biome, run from inside
+  `vendor/symmetria-file-manager` with a path relative to it:
+  `/home/dev/symmetria-file-manager/node_modules/.bin/biome format --write <file>`. From the
+  repository root it refuses to run, because it finds two root configurations.
 - **Only four packages are workspace members**: `fm-core`, `fm-ui`, `fm-search` and `fm-main`,
   listed by explicit path in `pnpm-workspace.yaml`. `app/` is not, because it would install a
   second Electron beside the desktop's. `fm-main` is the file manager's privileged half, run by the

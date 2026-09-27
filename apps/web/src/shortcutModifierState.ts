@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export interface ShortcutModifierState {
   metaKey: boolean;
@@ -28,10 +28,22 @@ export function areShortcutModifierStatesEqual(
 
 export function useShortcutModifierState(): ShortcutModifierState {
   const [state, setState] = useState(EMPTY_SHORTCUT_MODIFIER_STATE);
+  const stateRef = useRef(state);
 
   useEffect(() => {
+    // Schedules nothing when no modifier changed. A functional `setState`
+    // that returned the current state did not skip the render: every keydown
+    // and keyup anywhere in the app re-rendered the whole sidebar, which made
+    // a held arrow key in the file tree drop frames. React only skips a
+    // same-value update before rendering when the component has no pending
+    // work, so the comparison has to happen here.
+    const publish = (next: ShortcutModifierState) => {
+      if (next === stateRef.current) return;
+      stateRef.current = next;
+      setState(next);
+    };
     const onKeyboardEvent = (event: KeyboardEvent) => {
-      setState((current) => shortcutModifierStateAfterKeyboardEvent(current, event));
+      publish(shortcutModifierStateAfterKeyboardEvent(stateRef.current, event));
     };
     // Dictation tools (Wispr Flow) paste with a synthetic ⌘V whose Meta keyup
     // never reaches the page, so the tracked state stays "⌘ held" forever and
@@ -39,9 +51,9 @@ export function useShortcutModifierState(): ShortcutModifierState {
     // treat it like a blur and reset. A physically held modifier re-registers
     // on the next real key event.
     const onResetEvent = () => {
-      setState((current) =>
-        areShortcutModifierStatesEqual(current, EMPTY_SHORTCUT_MODIFIER_STATE)
-          ? current
+      publish(
+        areShortcutModifierStatesEqual(stateRef.current, EMPTY_SHORTCUT_MODIFIER_STATE)
+          ? stateRef.current
           : EMPTY_SHORTCUT_MODIFIER_STATE,
       );
     };
