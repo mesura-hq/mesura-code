@@ -19,32 +19,34 @@ import { DEFAULT_KEYBINDINGS } from "./keybindings.ts";
  */
 
 const FORK_BINDINGS = [
-  { command: "composer.attachFiles", key: "alt+a" },
-  { command: "fileTree.toggle", key: "mod+e" },
-  // Moved off mod+shift+e when v0.0.42 gave that chord to composer.effort.
-  // mod+alt keeps the letter, so the mnemonic survives the move.
-  { command: "fileTree.miller", key: "mod+alt+e" },
+  { command: "composer.attachFiles", keys: ["alt+a"] },
+  { command: "fileTree.toggle", keys: ["mod+e"] },
+  // mod+shift+e is back since the fork withdrew v0.0.42's composer.effort
+  // default there (alt+e opens the same picker). mod+alt+e stays because
+  // Firefox and Zen keep mod+shift+e. The last one is the label.
+  { command: "fileTree.miller", keys: ["mod+alt+e", "mod+shift+e"] },
 ] as const;
 
 describe("fork keybindings", () => {
-  for (const { command, key } of FORK_BINDINGS) {
+  for (const { command, keys } of FORK_BINDINGS) {
     describe(command, () => {
-      it(`binds ${key} outside the terminal`, () => {
+      it(`binds ${keys.join(" and ")} outside the terminal, in that order`, () => {
         const bindings = DEFAULT_KEYBINDINGS.filter((binding) => binding.command === command);
 
-        expect(bindings).toHaveLength(1);
-        expect(bindings[0]?.key).toBe(key);
+        // Order matters: the last binding is the label.
+        expect(bindings.map((binding) => binding.key)).toEqual(keys);
         // Not while a terminal owns the keyboard, where the chord belongs to the shell.
-        expect(bindings[0]?.when).toBe("!terminalFocus");
+        for (const binding of bindings) expect(binding.when).toBe("!terminalFocus");
       });
 
       it("registers the command so a user can rebind it", () => {
         expect(STATIC_KEYBINDING_COMMANDS).toContain(command);
       });
 
-      it(`leaves ${key} free of any other command`, () => {
+      it(`leaves ${keys.join(" and ")} free of any other command`, () => {
         const collisions = DEFAULT_KEYBINDINGS.filter(
-          (binding) => binding.key === key && binding.command !== command,
+          (binding) =>
+            (keys as ReadonlyArray<string>).includes(binding.key) && binding.command !== command,
         );
 
         expect(collisions).toEqual([]);

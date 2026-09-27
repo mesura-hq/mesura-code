@@ -15,6 +15,7 @@ import { useEnvironmentQuery } from "~/state/query";
 
 import { installFileManagerBridge } from "./bridgeInstall";
 import { useFileManagerStore } from "./fileManagerStore";
+import { closeFileManager } from "./fileManagerToggle";
 import { type FileManagerTarget, fileManagerTarget } from "./fileManagerTarget";
 import { FILE_MANAGER_ROOT_ATTRIBUTE } from "./isFileManagerOpen";
 import { decideOpenFromFileManager } from "./openFromFileManager";
@@ -59,7 +60,7 @@ export function MesuraFileManagerLayer({
     lastTarget.current = target;
   });
   useEffect(() => {
-    if (open && routeThreadRef === null) useFileManagerStore.getState().setOpen(false);
+    if (open && routeThreadRef === null) closeFileManager();
   }, [open, routeThreadRef]);
   if (!open || target === null || routeThreadRef === null) return null;
   return (
@@ -92,7 +93,7 @@ function OpenFileManager({ routeThreadRef, environmentId, cwd }: OpenFileManager
   const [bridge, setBridge] = useState<WsBridge | null>(null);
   useEffect(() => {
     const created = createWsBridge(createFileManagerTransport(environmentId), {
-      close: () => useFileManagerStore.getState().setOpen(false),
+      close: closeFileManager,
       httpBaseUrl: () => latest.current.httpBaseUrl ?? "",
       clipboard: {
         writeText: (text) => navigator.clipboard.writeText(text),
@@ -111,7 +112,7 @@ function OpenFileManager({ routeThreadRef, environmentId, cwd }: OpenFileManager
             description: "Open it again to reconnect.",
           }),
         );
-        useFileManagerStore.getState().setOpen(false);
+        closeFileManager();
       },
     });
     const remove = installFileManagerBridge(created);
@@ -139,7 +140,7 @@ function OpenFileManager({ routeThreadRef, environmentId, cwd }: OpenFileManager
     const decision = decideOpenFromFileManager(cwd, absolutePath);
     if (decision.kind === "editor") {
       useRightPanelStore.getState().openFile(routeThreadRef, decision.relativePath);
-      useFileManagerStore.getState().setOpen(false);
+      closeFileManager();
       return;
     }
     void openPath(absolutePath).then((result) => {
@@ -161,7 +162,7 @@ function OpenFileManager({ routeThreadRef, environmentId, cwd }: OpenFileManager
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (showing || event.key !== "Escape") return;
     event.preventDefault();
-    useFileManagerStore.getState().setOpen(false);
+    closeFileManager();
   };
   return createPortal(
     <div
@@ -175,7 +176,12 @@ function OpenFileManager({ routeThreadRef, environmentId, cwd }: OpenFileManager
     >
       {showing ? (
         <Suspense fallback={null}>
-          <FileManagerApp startPath={cwd} homePath={homePath} onOpenFile={onOpenFile} />
+          <FileManagerApp
+            startPath={cwd}
+            homePath={homePath}
+            onOpenFile={onOpenFile}
+            onDismiss={closeFileManager}
+          />
         </Suspense>
       ) : (
         <p className="mesura-file-manager-notice">{host.error ?? "Opening the file manager…"}</p>

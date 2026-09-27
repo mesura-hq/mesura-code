@@ -77,7 +77,12 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // Fork addition: a new command on a free chord, installed by the per-command
   // startup backfill; no RETIRED or ADDED entry, as with alt+q below.
   { key: "mod+e", command: "fileTree.toggle", when: "!terminalFocus" },
+  // Two chords, and the label shows the last. mod+shift+e is the file
+  // manager's own, back since the effort picker gave it up (see
+  // WITHDRAWN_KEYBINDING_DEFAULTS); Firefox and Zen keep it for their Network
+  // Monitor, so mod+alt+e stays as the chord a browser lets through.
   { key: "mod+alt+e", command: "fileTree.miller", when: "!terminalFocus" },
+  { key: "mod+shift+e", command: "fileTree.miller", when: "!terminalFocus" },
   { key: "alt+u", command: "usage.peek" },
   { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
@@ -88,7 +93,9 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "alt+m", command: "modelPicker.toggle", when: "!terminalFocus" },
   { key: "mod+shift+m", command: "modelPicker.toggle", when: "!terminalFocus" },
   { key: "mod+shift+h", command: "composer.host", when: "!terminalFocus" },
-  { key: "mod+shift+e", command: "composer.effort", when: "!terminalFocus" },
+  // Fork: upstream's `mod+shift+e` for composer.effort is withdrawn; the chord
+  // is fileTree.miller's, and alt+e (traitsPicker.toggle) opens the same
+  // picker. The command stays, unbound, for anyone who wants it back.
   { key: "mod+shift+a", command: "composer.mode", when: "!terminalFocus" },
   { key: "mod+shift+x", command: "composer.workspace", when: "!terminalFocus" },
   { key: "mod+shift+g", command: "composer.branch", when: "!terminalFocus" },
@@ -236,14 +243,11 @@ export const RETIRED_KEYBINDING_DEFAULTS: ReadonlyArray<{
     toKey: "mod+alt+l",
   },
   {
-    // Fork-only commands that shipped on a mod+shift+ chord v0.0.42 has since
-    // claimed: fileTree.miller against composer.effort, threadSearch.toggle
-    // against pullRequest.copyNumber. Each keeps its letter and takes mod+alt,
-    // so an installed config follows without relearning the mnemonic.
-    from: { key: "mod+shift+e", command: "fileTree.miller", when: "!terminalFocus" },
-    toKey: "mod+alt+e",
-  },
-  {
+    // A fork-only command that shipped on a mod+shift+ chord v0.0.42 has since
+    // claimed, against pullRequest.copyNumber. It keeps its letter and takes
+    // mod+alt, so an installed config follows without relearning the mnemonic.
+    // fileTree.miller took the same move once and has no entry any more: it
+    // keeps mod+alt+e and regains mod+shift+e through ADDED and WITHDRAWN.
     from: { key: "mod+shift+k", command: "threadSearch.toggle", when: "!terminalFocus" },
     toKey: "mod+alt+k",
   },
@@ -325,7 +329,66 @@ export const ADDED_KEYBINDING_DEFAULTS: ReadonlyArray<AddedKeybindingDefault> = 
     rule: { key: "k", command: "thread.previous", when: "sidebarFocus && !sidebarSearchFocus" },
     insertBefore: { key: "ctrl+shift+tab", command: "thread.previous", when: "!terminalFocus" },
   },
+  // Appended, so it is the last fileTree.miller rule and the label, as on a
+  // fresh install. Lands only once WITHDRAWN has freed mod+shift+e.
+  {
+    id: "2026-09-file-manager-mod-shift-e",
+    rule: { key: "mod+shift+e", command: "fileTree.miller", when: "!terminalFocus" },
+  },
 ];
+
+/**
+ * Defaults that shipped and were withdrawn with no replacement key.
+ *
+ * The same problem as a moved default: a config written before the
+ * withdrawal keeps the rule, and whatever now ships on its chord silently
+ * gets nothing. Startup removes each rule here from a config once, before it
+ * rewrites retired defaults and adds introduced ones, so an addition can land
+ * on the chord a withdrawal frees in the same startup.
+ *
+ * Once, like ADDED_KEYBINDING_DEFAULTS and in the same ledger: the id is
+ * recorded whether or not the rule was there, so a user who binds it again
+ * afterwards keeps it. A rule must match exactly — key, command, and `when` —
+ * so one the user edited is theirs and stays. Never edit or reuse an id.
+ */
+export interface WithdrawnKeybindingDefault {
+  readonly id: string;
+  readonly rule: KeybindingRule;
+}
+
+export const WITHDRAWN_KEYBINDING_DEFAULTS: ReadonlyArray<WithdrawnKeybindingDefault> = [
+  {
+    id: "2026-09-withdraw-composer-effort-mod-shift-e",
+    rule: { key: "mod+shift+e", command: "composer.effort", when: "!terminalFocus" },
+  },
+];
+
+export interface WithdrawnKeybindingResult {
+  readonly id: string;
+  readonly rule: KeybindingRule;
+  /** `dropped` removed the rule; `absent` found nothing to remove. Both are recorded. */
+  readonly outcome: "dropped" | "absent";
+}
+
+/** Removes every withdrawn default the ledger has not recorded yet. */
+export function dropWithdrawnKeybindingDefaults(input: {
+  readonly config: ReadonlyArray<KeybindingRule>;
+  readonly appliedIds: ReadonlySet<string>;
+}): {
+  readonly config: ReadonlyArray<KeybindingRule>;
+  readonly results: ReadonlyArray<WithdrawnKeybindingResult>;
+} {
+  let config = input.config;
+  const results: WithdrawnKeybindingResult[] = [];
+  for (const withdrawn of WITHDRAWN_KEYBINDING_DEFAULTS) {
+    if (input.appliedIds.has(withdrawn.id)) continue;
+    const kept = config.filter((rule) => !isSameKeybindingRule(rule, withdrawn.rule));
+    const outcome = kept.length === config.length ? "absent" : "dropped";
+    results.push({ id: withdrawn.id, rule: withdrawn.rule, outcome });
+    config = kept;
+  }
+  return { config, results };
+}
 
 export type IntroducedKeybindingAdditionOutcome =
   /** Appended to the config. */

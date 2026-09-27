@@ -42,6 +42,7 @@ import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import {
   ArrowLeftIcon,
+  Columns3Icon,
   CornerLeftUpIcon,
   FileSearchIcon,
   FolderIcon,
@@ -156,6 +157,10 @@ import { AzureDevOpsIcon, BitbucketIcon, GitHubIcon, GitLabIcon, ForgejoIcon } f
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { ProjectFilePicker } from "./files/ProjectFilePicker";
+import {
+  keepFocusInFileManager,
+  openFileManager,
+} from "./files/mesuraFileManager/fileManagerToggle";
 import { ProjectScopePicker } from "./projects/ProjectScopePicker";
 import { ThreadSearchPicker } from "./threads/ThreadSearchPicker";
 import { openLinkPullRequestDialog } from "./pullRequest/LinkPullRequestDialog";
@@ -594,6 +599,8 @@ function CommandPaletteDialog(props: {
       data-palette-mode={props.mode}
       data-testid="command-palette"
       finalFocus={() => {
+        // Fork: a row that opened the file manager hands it the keyboard.
+        if (keepFocusInFileManager()) return false;
         composerHandleRef?.current?.focusAtEnd();
         return false;
       }}
@@ -659,7 +666,7 @@ function OpenCommandPaletteDialog(props: {
   const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const availableSettingsSearchItems = useAvailableSettingsSearchItems();
-  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
+  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread, routeThreadRef } =
     useHandleNewThread();
   const projects = useProjects();
   const referenceThreadRef =
@@ -1682,6 +1689,25 @@ function OpenCommandPaletteDialog(props: {
       openOverlayMode("files");
     },
   });
+
+  // Fork: the Symmetria file manager, the palette route to `fileTree.miller`.
+  // A browser can keep that chord for itself (Firefox and Zen open their
+  // Network Monitor on it), so this row is the entry point that always works.
+  // Offered exactly where the chord works: the layer starts at the project of
+  // the thread on the route, so a draft, which has none yet, gets no row.
+  if (routeThreadRef !== null) {
+    actionItems.push({
+      kind: "action",
+      value: "action:open-file-manager",
+      searchTerms: ["file manager", "miller", "columns", "browse files", "symmetria"],
+      title: "Open file manager",
+      icon: <Columns3Icon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "fileTree.miller",
+      run: async () => {
+        openFileManager(routeThreadRef);
+      },
+    });
+  }
 
   actionItems.push({
     kind: "action",

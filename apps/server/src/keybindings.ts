@@ -49,9 +49,11 @@ import {
   DEFAULT_RESOLVED_KEYBINDINGS,
   ADDED_KEYBINDING_DEFAULTS,
   RETIRED_KEYBINDING_DEFAULTS,
+  WITHDRAWN_KEYBINDING_DEFAULTS,
   addIntroducedKeybindingDefaults,
   compileResolvedKeybindingRule,
   compileResolvedKeybindingsConfig,
+  dropWithdrawnKeybindingDefaults,
   isSameKeybindingRule,
   migrateRetiredKeybindingDefaults,
   parseKeybindingShortcut,
@@ -62,6 +64,7 @@ export {
   ADDED_KEYBINDING_DEFAULTS,
   DEFAULT_KEYBINDINGS,
   RETIRED_KEYBINDING_DEFAULTS,
+  WITHDRAWN_KEYBINDING_DEFAULTS,
   compileResolvedKeybindingRule,
   compileResolvedKeybindingsConfig,
   isSameKeybindingRule,
@@ -408,7 +411,11 @@ const make = Effect.gen(function* () {
     return { keybindings, issues };
   });
 
-  const allIntroducedIds = () => new Set(ADDED_KEYBINDING_DEFAULTS.map((entry) => entry.id));
+  // Withdrawals share the ledger: each is offered once, like an addition.
+  const allIntroducedIds = () =>
+    new Set(
+      [...ADDED_KEYBINDING_DEFAULTS, ...WITHDRAWN_KEYBINDING_DEFAULTS].map((entry) => entry.id),
+    );
 
   const readAppliedAdditionIds = Effect.gen(function* () {
     const exists = yield* fs.exists(keybindingsAppliedPath).pipe(Effect.orElseSucceed(() => false));
@@ -524,13 +531,17 @@ const make = Effect.gen(function* () {
         yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
         return;
       }
-      // Retired defaults are rewritten before the conflict scan below, so a
-      // default whose key was freed by the rewrite is no longer seen as taken
-      // and gets backfilled in the same startup rather than a later one.
-      const migration = migrateRetiredKeybindingDefaults(runtimeConfig.keybindings);
+      const appliedAdditionIds = yield* readAppliedAdditionIds;
+      // Withdrawn defaults go first, then retired ones are rewritten, both
+      // before the conflict scan below, so a key either frees is no longer seen
+      // as taken and gets backfilled in the same startup rather than a later one.
+      const withdrawals = dropWithdrawnKeybindingDefaults({
+        config: runtimeConfig.keybindings,
+        appliedIds: appliedAdditionIds,
+      });
+      const migration = migrateRetiredKeybindingDefaults(withdrawals.config);
       // Introduced defaults run after the rewrite so an addition can land on a
       // key the rewrite just freed.
-      const appliedAdditionIds = yield* readAppliedAdditionIds;
       const additions = addIntroducedKeybindingDefaults({
         config: migration.config,
         appliedIds: appliedAdditionIds,
@@ -538,6 +549,14 @@ const make = Effect.gen(function* () {
         claimsShortcutContext: hasSameShortcutContext,
       });
       const customConfig = additions.config;
+      for (const withdrawal of withdrawals.results) {
+        if (withdrawal.outcome !== "dropped") continue;
+        yield* Effect.logInfo("removed a withdrawn default keybinding", {
+          path: keybindingsConfigPath,
+          command: withdrawal.rule.command,
+          key: withdrawal.rule.key,
+        });
+      }
       for (const rewrite of migration.rewrites) {
         // Info rather than warning: the rewrite is expected and self-healing,
         // and it runs at most once per retired default.
@@ -669,15 +688,22 @@ const make = Effect.gen(function* () {
       // on the next startup; an early return added above this line would lose
       // it silently.
       const additionsChangedConfig = additions.results.some((entry) => entry.outcome === "applied");
-      if (migration.rewrites.length > 0 || additionsChangedConfig || defaultsToAppend.length > 0) {
+      const withdrawalsChangedConfig = withdrawals.results.some(
+        (entry) => entry.outcome === "dropped",
+      );
+      if (
+        withdrawalsChangedConfig ||
+        migration.rewrites.length > 0 ||
+        additionsChangedConfig ||
+        defaultsToAppend.length > 0
+      ) {
         yield* writeConfigAtomically([...customConfig, ...defaultsToAppend]);
       }
       // Record offers whether or not they landed. A skipped addition was
       // considered and declined; retrying it every boot would only re-log.
-      if (additions.results.length > 0) {
-        yield* writeAppliedAdditionIds(
-          new Set([...appliedAdditionIds, ...additions.results.map((entry) => entry.id)]),
-        );
+      const offeredIds = [...withdrawals.results, ...additions.results].map((entry) => entry.id);
+      if (offeredIds.length > 0) {
+        yield* writeAppliedAdditionIds(new Set([...appliedAdditionIds, ...offeredIds]));
       }
       yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
     }),

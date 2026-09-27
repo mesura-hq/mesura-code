@@ -182,6 +182,13 @@ function flashHostFor(tabs: Tabs, preview: Preview, cursorPath: string | null): 
 
 export interface AppProps {
   readonly onOpenFile?: (path: string) => void;
+  /**
+   * A stray Escape: one the cascade found nothing else to do with, after
+   * modals, chords, flash, pickers and the selection. The standalone window
+   * stays up on it, so it passes nothing; a host that shows the file manager
+   * as a layer over its own interface closes the layer here.
+   */
+  readonly onDismiss?: () => void;
   /** Overridden by tests, which must not depend on the real location. */
   readonly startPath?: string;
   /** Overridden by tests, for the same reason. */
@@ -359,7 +366,11 @@ export function App(props: AppProps = {}) {
   // After the preview, because a session may label the directory it shows.
   const millerFlash = useFlash(flashHostFor(tabs, previewing.preview, cursorPath));
 
-  const { actions, modes, state } = useKeyActions(
+  const {
+    actions: keyActions,
+    modes,
+    state,
+  } = useKeyActions(
     tabs,
     ops,
     search,
@@ -370,6 +381,7 @@ export function App(props: AppProps = {}) {
     previewing.toggleAudio,
     millerFlash.start,
   );
+  const actions = useHostDismiss(keyActions, props.onDismiss);
 
   const context = browsingContext(
     picker.state.active,
@@ -550,4 +562,29 @@ function browsingFlash(
   if (context.view === "overview")
     return { active: overview.flashActive, onKey: overview.onFlashKey, chrome: null };
   return miller;
+}
+
+/**
+ * `dismiss` as the key actions define it, then the host's own answer to a
+ * stray Escape. `dismiss` also clears a status message, which is not a step of
+ * its own: that same Escape closes the host's layer. A picker window routes its
+ * cancel through `dismiss` too, so a host that ever shows one hears it here.
+ */
+function useHostDismiss(
+  actions: KeyWiring["actions"],
+  onDismiss: (() => void) | undefined,
+): KeyWiring["actions"] {
+  return useMemo(
+    () =>
+      onDismiss === undefined
+        ? actions
+        : {
+            ...actions,
+            dismiss: () => {
+              actions.dismiss();
+              onDismiss();
+            },
+          },
+    [actions, onDismiss],
+  );
 }

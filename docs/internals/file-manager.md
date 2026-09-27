@@ -125,6 +125,9 @@ chat's bundle. Focus is taken on mount and restored on unmount. The start direct
 worktree or its project root; a momentarily empty projection keeps the last target, and only the
 thread leaving the route closes the layer. A file under the project opens through
 `useRightPanelStore.openFile` and closes the layer; anything else goes to the host's `open`.
+Escape closes the layer through `App`'s `onDismiss`, which hears only the Escape the file manager's
+own cascade had no use for: a dialog, a pending chord, flash, a selection and the overview each take
+an Escape first. The standalone swallows that last Escape and keeps its window up.
 
 The vendored `useKeyDispatch` stays as it is: it attaches to `window` only while `App` is mounted.
 The host's chords stand down through one guard: `resolveShortcutCommand` returns `null` for every
@@ -137,15 +140,35 @@ already skips `[role="dialog"][aria-modal="true"]`.
 
 ## Chords
 
-| Command           | Default       | Where it is decided                           |
-| ----------------- | ------------- | --------------------------------------------- |
-| `fileTree.miller` | `mod+shift+e` | `runFileManagerToggle` (`mesuraFileManager/`) |
+| Command           | Default                    | Where it is decided                           |
+| ----------------- | -------------------------- | --------------------------------------------- |
+| `fileTree.miller` | `mod+shift+e`, `mod+alt+e` | `runFileManagerToggle` (`mesuraFileManager/`) |
 
 `when: "!terminalFocus"`, dispatched from the tree's window capture-phase listener, and a member of
 `APP_SHORTCUTS_THAT_OUTRANK_NEOVIM`. The command replaced `fileTree.overview`; a stored rule with the
 old id is rewritten on load by `RENAMED_KEYBINDING_COMMANDS` (`packages/shared`), without a config
 issue, so the startup backfill keeps running. The file keeps the old id until the user edits a
 binding.
+
+Upstream ships `composer.effort` on `mod+shift+e` since v0.0.42. The fork withdraws that default,
+because `alt+e` (`traitsPicker.toggle`) opens the same picker. `mod+alt+e` stays as the second
+default because Firefox and Zen keep `mod+shift+e`; the last rule is the label.
+
+An installed config reaches the new shape once, through the offer ledger
+(`keybindings.applied.json`): `WITHDRAWN_KEYBINDING_DEFAULTS` removes the exact effort rule, then
+`ADDED_KEYBINDING_DEFAULTS` appends `mod+shift+e` for the file manager. Both record their id whether
+or not they changed anything, so a user who binds either chord again afterwards keeps it. A
+retired-default rewrite would not do: it runs on every startup and would undo that choice.
+
+The withdrawn line sits inside upstream's `DEFAULT_KEYBINDINGS`, beside the other composer
+defaults, so an upstream edit there conflicts at the next sync. A resolution that takes upstream's
+line back puts two defaults on one chord, and `forkKeybindings.test.ts` and the server's "ships no
+two defaults on the same shortcut context" test both fail on it.
+
+The command palette's **Open file manager** row is the entry point that needs no chord. The palette
+hands focus back to the composer as it closes; its `finalFocus` asks `keepFocusInFileManager()`
+first, which reads the store rather than the page, so the file manager keeps the keyboard whether or
+not the layer has mounted by then.
 
 ## Upstream files touched
 
@@ -159,6 +182,7 @@ in the previous three months:
 | `apps/server/src/server.ts`                          |      56 | the host layer and the preview route                |
 | `pnpm-workspace.yaml`                                |      44 | `fm-main` as a member; `overrides.electron`         |
 | `packages/contracts/src/rpc.ts`                      |      39 | four `WS_METHODS` and four `Rpc.make`               |
+| `apps/web/src/components/CommandPalette.tsx`         |      56 | the Open file manager row; one `finalFocus` line    |
 | `apps/web/src/components/RightPanelTabs.tsx`         |      37 | one entry in the launcher's blocking-layer list     |
 | `packages/shared/package.json`                       |      36 | one subpath export                                  |
 | `apps/web/src/components/files/FilePreviewPanel.tsx` |      32 | the overview element and import removed             |
@@ -170,6 +194,6 @@ in the previous three months:
 | `packages/client-runtime/src/rpc/client.ts`          |      14 | one member of the subscription tag union            |
 | `packages/contracts/src/keybindings.ts`              |      13 | one command id renamed                              |
 | `apps/web/src/keybindings.ts`                        |       9 | one import, one call in the loop, one fork function |
-| `packages/shared/src/keybindings.ts`                 |       8 | one default renamed                                 |
+| `packages/shared/src/keybindings.ts`                 |       8 | one default renamed; `composer.effort`'s withdrawn  |
 | `apps/web/src/routes/_chat.tsx`                      |       8 | one import; the layer returned instead of `null`    |
-| `apps/server/src/keybindings.ts`                     |       5 | one import, two call sites wrapped                  |
+| `apps/server/src/keybindings.ts`                     |       5 | two call sites wrapped; withdrawals run and logged  |
