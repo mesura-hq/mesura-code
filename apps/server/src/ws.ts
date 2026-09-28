@@ -1965,6 +1965,34 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "orchestration" },
           ),
+        [ORCHESTRATION_WS_METHODS.listThreadSearchCatalog]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.listThreadSearchCatalog,
+            projectionSnapshotQuery.listThreadSearchCatalog(input).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationSearchThreadsError({
+                    message: "Failed to list thread search catalog",
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.searchThreadEvidence]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.searchThreadEvidence,
+            projectionSnapshotQuery.searchThreadEvidence(input).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationSearchThreadsError({
+                    message: "Failed to search thread evidence",
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
         [ORCHESTRATION_WS_METHODS.subscribeShell]: (input) =>
           observeRpcStreamEffect(
             ORCHESTRATION_WS_METHODS.subscribeShell,

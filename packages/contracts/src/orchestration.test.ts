@@ -37,6 +37,17 @@ import {
   SnapShotAccessibility,
   isProviderSendTurnSupportedImageMimeType,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
+  ORCHESTRATION_WS_METHODS,
+  OrchestrationSearchThreadsInput,
+  OrchestrationThreadSearchCatalogInput,
+  OrchestrationThreadSearchEvidenceInput,
+  OrchestrationThreadSearchEvidencePage,
+  THREAD_SEARCH_CATALOG_MAX_PAGE_SIZE,
+  THREAD_SEARCH_CURSOR_MAX_LENGTH,
+  THREAD_SEARCH_EVIDENCE_EXCERPT_MAX_LENGTH,
+  THREAD_SEARCH_EVIDENCE_MAX_PAGE_SIZE,
+  THREAD_SEARCH_TITLE_MAX_LENGTH,
+  OrchestrationThreadSearchCatalogPage,
 } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
@@ -1603,4 +1614,98 @@ it("isProviderSendTurnSupportedImageMimeType accepts raster formats and rejects 
   assert.strictEqual(isProviderSendTurnSupportedImageMimeType("image/png"), true);
   assert.strictEqual(isProviderSendTurnSupportedImageMimeType("IMAGE/JPEG"), true);
   assert.strictEqual(isProviderSendTurnSupportedImageMimeType("image/svg+xml"), false);
+});
+
+// Agent thread search, phase 1: the evidence contract bounds every request and
+// every response field, so one environment cannot be asked to scan or return
+// an unbounded amount of history in a single RPC.
+it("bounds thread search catalog and evidence pages, cursors, queries, and excerpts", () => {
+  const acceptsCatalogInput = Schema.is(OrchestrationThreadSearchCatalogInput);
+  const acceptsEvidenceInput = Schema.is(OrchestrationThreadSearchEvidenceInput);
+  const acceptsEvidencePage = Schema.is(OrchestrationThreadSearchEvidencePage);
+  const oversizedCursor = "c".repeat(THREAD_SEARCH_CURSOR_MAX_LENGTH + 1);
+
+  assert.isTrue(acceptsCatalogInput({}));
+  assert.isTrue(acceptsCatalogInput({ limit: THREAD_SEARCH_CATALOG_MAX_PAGE_SIZE }));
+  assert.isFalse(acceptsCatalogInput({ limit: THREAD_SEARCH_CATALOG_MAX_PAGE_SIZE + 1 }));
+  assert.isFalse(acceptsCatalogInput({ limit: 0 }));
+  assert.isFalse(acceptsCatalogInput({ cursor: oversizedCursor }));
+
+  assert.isTrue(acceptsEvidenceInput({ query: "needle" }));
+  assert.isTrue(
+    acceptsEvidenceInput({ query: "needle", limit: THREAD_SEARCH_EVIDENCE_MAX_PAGE_SIZE }),
+  );
+  assert.isFalse(
+    acceptsEvidenceInput({ query: "needle", limit: THREAD_SEARCH_EVIDENCE_MAX_PAGE_SIZE + 1 }),
+  );
+  assert.isFalse(acceptsEvidenceInput({ query: "n" }));
+  assert.isFalse(acceptsEvidenceInput({ query: "n".repeat(201) }));
+  assert.isFalse(acceptsEvidenceInput({ query: "needle", cursor: oversizedCursor }));
+
+  const evidence = {
+    threadId: "thread-1",
+    projectId: "project-1",
+    title: "Thread",
+    projectTitle: "Project",
+    archivedAt: null,
+    source: "user",
+    messageCreatedAt: "2026-06-01T00:00:00.000Z",
+    excerpt: "e".repeat(THREAD_SEARCH_EVIDENCE_EXCERPT_MAX_LENGTH),
+  };
+  assert.isTrue(acceptsEvidencePage({ matches: [evidence], nextCursor: null }));
+  assert.isFalse(
+    acceptsEvidencePage({
+      matches: [
+        { ...evidence, excerpt: "e".repeat(THREAD_SEARCH_EVIDENCE_EXCERPT_MAX_LENGTH + 1) },
+      ],
+      nextCursor: null,
+    }),
+  );
+});
+
+it("bounds thread and project titles in thread search catalog and evidence pages", () => {
+  const acceptsCatalogPage = Schema.is(OrchestrationThreadSearchCatalogPage);
+  const acceptsEvidencePage = Schema.is(OrchestrationThreadSearchEvidencePage);
+  const bounded = "t".repeat(THREAD_SEARCH_TITLE_MAX_LENGTH);
+  const oversized = `${bounded}t`;
+  const entry = {
+    threadId: "thread-1",
+    projectId: "project-1",
+    title: bounded,
+    projectTitle: bounded,
+    archivedAt: null,
+    updatedAt: "2026-06-01T00:00:00.000Z",
+  };
+  const match = {
+    threadId: "thread-1",
+    projectId: "project-1",
+    title: bounded,
+    projectTitle: bounded,
+    archivedAt: null,
+    source: "user",
+    messageCreatedAt: "2026-06-01T00:00:00.000Z",
+    excerpt: "excerpt",
+  };
+  assert.isTrue(acceptsCatalogPage({ threads: [entry], nextCursor: null }));
+  assert.isFalse(
+    acceptsCatalogPage({ threads: [{ ...entry, title: oversized }], nextCursor: null }),
+  );
+  assert.isFalse(
+    acceptsCatalogPage({ threads: [{ ...entry, projectTitle: oversized }], nextCursor: null }),
+  );
+  assert.isTrue(acceptsEvidencePage({ matches: [match], nextCursor: null }));
+  assert.isFalse(
+    acceptsEvidencePage({ matches: [{ ...match, title: oversized }], nextCursor: null }),
+  );
+  assert.isFalse(
+    acceptsEvidencePage({ matches: [{ ...match, projectTitle: oversized }], nextCursor: null }),
+  );
+});
+
+it("keeps the lexical thread search contract at fifty active matches per request", () => {
+  const acceptsSearchInput = Schema.is(OrchestrationSearchThreadsInput);
+  assert.strictEqual(ORCHESTRATION_WS_METHODS.searchThreads, "orchestration.searchThreads");
+  assert.isTrue(acceptsSearchInput({ query: "needle", limit: 50 }));
+  assert.isFalse(acceptsSearchInput({ query: "needle", limit: 51 }));
+  assert.isFalse(acceptsSearchInput({ query: "n" }));
 });

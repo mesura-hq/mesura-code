@@ -1031,6 +1031,8 @@ const buildAppUnderTest = (options?: {
               updatedAt: "1970-01-01T00:00:00.000Z",
             }),
           searchThreads: () => Effect.succeed({ matches: [] }),
+          listThreadSearchCatalog: () => Effect.succeed({ threads: [], nextCursor: null }),
+          searchThreadEvidence: () => Effect.succeed({ matches: [], nextCursor: null }),
           getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
           getProjectShellById: () => Effect.succeed(Option.none()),
           getThreadShellById: () => Effect.succeed(Option.none()),
@@ -8492,6 +8494,119 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         },
       ]);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  // Agent thread search, phase 1: the evidence RPCs are reached through the
+  // real websocket entry point, with only the projection query stubbed.
+  it.effect("routes the thread search catalog and evidence RPCs for an authorized client", () =>
+    Effect.gen(function* () {
+      const catalogInputs: Array<unknown> = [];
+      const evidenceInputs: Array<unknown> = [];
+      const catalogEntry = {
+        threadId: ThreadId.make("thread-archived"),
+        projectId: ProjectId.make("project-a"),
+        title: "Archived thread",
+        projectTitle: "Project A",
+        archivedAt: "2026-06-02T00:00:00.000Z",
+        updatedAt: "2026-06-01T00:00:00.000Z",
+      };
+      const evidenceMatch = {
+        threadId: ThreadId.make("thread-archived"),
+        projectId: ProjectId.make("project-a"),
+        title: "Archived thread",
+        projectTitle: "Project A",
+        archivedAt: "2026-06-02T00:00:00.000Z",
+        source: "assistant" as const,
+        messageCreatedAt: "2026-06-01T00:00:00.000Z",
+        excerpt: "The obsidian cache used the wrong clock.",
+      };
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            listThreadSearchCatalog: (input: unknown) =>
+              Effect.sync(() => {
+                catalogInputs.push(input);
+                return { threads: [catalogEntry], nextCursor: "catalog-next" };
+              }),
+            searchThreadEvidence: (input: unknown) =>
+              Effect.sync(() => {
+                evidenceInputs.push(input);
+                return { matches: [evidenceMatch], nextCursor: null };
+              }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const [catalog, evidence] = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.all([
+            client[ORCHESTRATION_WS_METHODS.listThreadSearchCatalog]({ limit: 2 }),
+            client[ORCHESTRATION_WS_METHODS.searchThreadEvidence]({
+              query: "obsidian cache",
+              cursor: "evidence-cursor",
+              limit: 5,
+            }),
+          ]),
+        ),
+      );
+      assert.deepEqual(catalog, { threads: [catalogEntry], nextCursor: "catalog-next" });
+      assert.deepEqual(evidence, { matches: [evidenceMatch], nextCursor: null });
+      assert.deepEqual(catalogInputs, [{ limit: 2 }]);
+      assert.deepEqual(evidenceInputs, [
+        { query: "obsidian cache", cursor: "evidence-cursor", limit: 5 },
+      ]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "rejects thread search catalog and evidence reads without the orchestration read scope",
+    () =>
+      Effect.gen(function* () {
+        let projectionReads = 0;
+        yield* buildAppUnderTest({
+          layers: {
+            projectionSnapshotQuery: {
+              listThreadSearchCatalog: () =>
+                Effect.sync(() => {
+                  projectionReads += 1;
+                  return { threads: [], nextCursor: null };
+                }),
+              searchThreadEvidence: () =>
+                Effect.sync(() => {
+                  projectionReads += 1;
+                  return { matches: [], nextCursor: null };
+                }),
+            },
+          },
+        });
+
+        const { body: tokenBody } = yield* exchangeAccessToken(defaultDesktopBootstrapToken, {
+          scope: "access:write",
+        });
+        const wsTicketResponse = yield* HttpClient.post("/api/auth/websocket-ticket", {
+          headers: { authorization: `Bearer ${tokenBody.access_token ?? ""}` },
+        });
+        const { ticket } = yield* responseJsonEffect<{ readonly ticket: string }>(wsTicketResponse);
+        const wsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?wsTicket=${encodeURIComponent(ticket)}`;
+        const errors = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            Effect.all([
+              client[ORCHESTRATION_WS_METHODS.listThreadSearchCatalog]({}).pipe(Effect.flip),
+              client[ORCHESTRATION_WS_METHODS.searchThreadEvidence]({
+                query: "obsidian cache",
+              }).pipe(Effect.flip),
+            ]),
+          ),
+        );
+        for (const error of errors) {
+          assert.equal(error._tag, "EnvironmentAuthorizationError");
+          if (error._tag === "EnvironmentAuthorizationError") {
+            assert.equal(error.requiredScope, "orchestration:read");
+          }
+        }
+        assert.equal(projectionReads, 0);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("routes websocket rpc orchestration shell snapshot errors", () =>

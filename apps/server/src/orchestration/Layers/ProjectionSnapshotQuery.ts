@@ -16,6 +16,8 @@ import {
   OrchestrationThreadDetailSnapshot,
   ProjectScript,
   ProjectIconOverride,
+  THREAD_SEARCH_EVIDENCE_EXCERPT_MAX_LENGTH,
+  THREAD_SEARCH_TITLE_MAX_LENGTH,
   TurnId,
   type OrchestrationCheckpointSummary,
   type OrchestrationLatestTurn,
@@ -68,6 +70,14 @@ import {
   decodeThreadDetailPageCursor,
   encodeThreadDetailPageCursor,
 } from "../threadDetailCursor.ts";
+import {
+  decodeThreadSearchCatalogCursor,
+  decodeThreadSearchEvidenceCursor,
+  encodeThreadSearchCatalogCursor,
+  encodeThreadSearchEvidenceCursor,
+  threadSearchEvidenceKey,
+  type ThreadSearchEvidencePosition,
+} from "../threadSearchCursor.ts";
 import { projectActivityPayload } from "../ActivityPayloadProjection.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
@@ -193,6 +203,90 @@ const ProjectionThreadSearchRow = Schema.Struct({
   matchText: Schema.String,
   messageCreatedAt: Schema.NullOr(IsoDateTime),
 });
+const ThreadSearchCatalogRequest = Schema.Struct({
+  afterCreatedAt: Schema.NullOr(Schema.String),
+  afterThreadId: Schema.NullOr(Schema.String),
+  limit: Schema.Int,
+});
+const ThreadSearchCatalogRow = Schema.Struct({
+  threadId: ThreadId,
+  projectId: ProjectId,
+  title: Schema.String,
+  projectTitle: Schema.String,
+  archivedAt: Schema.NullOr(IsoDateTime),
+  createdAt: Schema.String,
+  updatedAt: IsoDateTime,
+});
+// The global route reads beforeScanId alone. The thread route reads the other
+// two: no beforeCreatedAt means a first page, a beforeCreatedAt without a
+// beforeMessageId means the boundary row is gone (see threadSearchEvidenceScan).
+const ThreadSearchEvidenceScanBound = {
+  threadId: Schema.NullOr(Schema.String),
+  beforeScanId: Schema.Number,
+  beforeCreatedAt: Schema.NullOr(Schema.String),
+  beforeMessageId: Schema.NullOr(Schema.String),
+};
+const ThreadSearchEvidenceBoundaryRequest = Schema.Struct({
+  threadId: Schema.String,
+  scanId: Schema.Number,
+  createdAt: Schema.String,
+});
+const ThreadSearchEvidenceBoundaryRow = Schema.Struct({
+  messageId: Schema.String,
+});
+const ThreadSearchEvidenceWindowRequest = Schema.Struct({
+  ...ThreadSearchEvidenceScanBound,
+  scanBudget: Schema.Int,
+});
+const ThreadSearchEvidenceWindowRow = Schema.Struct({
+  scanId: Schema.Number,
+  createdAt: Schema.String,
+  messageId: Schema.String,
+});
+const ThreadSearchEvidenceRequest = Schema.Struct({
+  ...ThreadSearchEvidenceScanBound,
+  pattern: Schema.String,
+  query: Schema.String,
+  floorScanId: Schema.Number,
+  floorCreatedAt: Schema.String,
+  floorMessageId: Schema.String,
+  limit: Schema.Int,
+});
+const ThreadSearchEvidenceRow = Schema.Struct({
+  scanId: Schema.Number,
+  messageId: MessageId,
+  threadId: ThreadId,
+  projectId: ProjectId,
+  title: Schema.String,
+  projectTitle: Schema.String,
+  archivedAt: Schema.NullOr(IsoDateTime),
+  source: OrchestrationThreadSearchSource,
+  messageCreatedAt: IsoDateTime,
+  matchWindow: Schema.String,
+  clippedBefore: Schema.Number,
+  clippedAfter: Schema.Number,
+});
+const THREAD_SEARCH_CATALOG_DEFAULT_PAGE_SIZE = 100;
+const THREAD_SEARCH_EVIDENCE_DEFAULT_PAGE_SIZE = 20;
+/**
+ * Messages one evidence request may examine. A leading-wildcard LIKE cannot use
+ * an index, so the page limit alone would not bound the scan: a rare term
+ * would read the whole history before LIMIT applies. Each request instead
+ * reads at most this many messages, newest rowid first, and its cursor
+ * resumes the scan. A page can therefore hold no matches yet still return a
+ * `nextCursor`.
+ */
+export const THREAD_SEARCH_EVIDENCE_SCAN_BUDGET = 2_000;
+// Exclusive upper rowid bound for a first global page; SQLite rowids are signed 64-bit.
+const THREAD_SEARCH_FIRST_SCAN_ID = Number.MAX_SAFE_INTEGER;
+// One code point past the title limit, so truncateSearchTitle can tell a title
+// SQLite cut from one that was exactly the limit, and mark the cut.
+const THREAD_SEARCH_TITLE_SQL_LENGTH = THREAD_SEARCH_TITLE_MAX_LENGTH + 1;
+const THREAD_SEARCH_EXCERPT_LEADING_CONTEXT = 160;
+// SQLite returns only this many characters around each match, so a page never
+// copies whole transcripts out of the database to build its excerpts.
+const THREAD_SEARCH_MATCH_WINDOW_LEAD = THREAD_SEARCH_EVIDENCE_EXCERPT_MAX_LENGTH;
+const THREAD_SEARCH_MATCH_WINDOW_LENGTH = THREAD_SEARCH_EVIDENCE_EXCERPT_MAX_LENGTH * 3;
 const WorkspaceRootLookupInput = Schema.Struct({
   workspaceRoot: Schema.String,
 });
@@ -295,20 +389,55 @@ function foldAsciiCase(value: string): string {
   return value.replace(/[A-Z]/g, (character) => character.toLowerCase());
 }
 
+/**
+ * Caps a title at the contract limit, in UTF-16 units as the schema counts
+ * them, and marks the cut without leaving half a surrogate pair behind. SQLite
+ * already bounded the title to THREAD_SEARCH_TITLE_SQL_LENGTH code points.
+ */
+function truncateSearchTitle(title: string): string {
+  if (title.length <= THREAD_SEARCH_TITLE_MAX_LENGTH) {
+    return title;
+  }
+  const cut = title.slice(0, THREAD_SEARCH_TITLE_MAX_LENGTH - 1);
+  const lastCode = cut.charCodeAt(cut.length - 1);
+  const safeCut = lastCode >= 0xd800 && lastCode <= 0xdbff ? cut.slice(0, -1) : cut;
+  return `${safeCut}…`;
+}
+
 function buildSearchSnippet(text: string, query: string): string {
+  return buildSearchExcerpt(text, query, { maxLength: 240, leadingContext: 72 });
+}
+
+/**
+ * Cuts whitespace-normalized text to `maxLength` around the first match.
+ * `clippedBefore`/`clippedAfter` mark text that is already a window of a longer
+ * message, so the ellipses stay honest about the missing context.
+ */
+function buildSearchExcerpt(
+  text: string,
+  query: string,
+  options: {
+    readonly maxLength: number;
+    readonly leadingContext: number;
+    readonly clippedBefore?: boolean;
+    readonly clippedAfter?: boolean;
+  },
+): string {
   const normalizedText = text.replace(/\s+/g, " ").trim();
-  if (normalizedText.length <= 240) {
+  const clippedBefore = options.clippedBefore === true;
+  const clippedAfter = options.clippedAfter === true;
+  if (!clippedBefore && !clippedAfter && normalizedText.length <= options.maxLength) {
     return normalizedText;
   }
 
   const normalizedQuery = foldAsciiCase(query.replace(/\s+/g, " ").trim());
   const matchIndex = foldAsciiCase(normalizedText).indexOf(normalizedQuery);
-  const bodyLength = 236;
-  const idealStart = Math.max(0, matchIndex - 72);
-  const start = Math.min(idealStart, normalizedText.length - bodyLength);
+  const bodyLength = options.maxLength - 4;
+  const idealStart = Math.max(0, matchIndex - options.leadingContext);
+  const start = Math.max(0, Math.min(idealStart, normalizedText.length - bodyLength));
   const end = Math.min(normalizedText.length, start + bodyLength);
-  return `${start > 0 ? "…" : ""}${normalizedText.slice(start, end)}${
-    end < normalizedText.length ? "…" : ""
+  return `${start > 0 || clippedBefore ? "…" : ""}${normalizedText.slice(start, end)}${
+    end < normalizedText.length || clippedAfter ? "…" : ""
   }`;
 }
 
@@ -1104,6 +1233,211 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           thread_id ASC
         LIMIT ${limit}
       `,
+  });
+
+  // Keyset order on the immutable created_at, so a thread updated mid-walk
+  // neither repeats nor slips past the cursor.
+  const listThreadSearchCatalogRows = SqlSchema.findAll({
+    Request: ThreadSearchCatalogRequest,
+    Result: ThreadSearchCatalogRow,
+    execute: ({ afterCreatedAt, afterThreadId, limit }) =>
+      sql`
+        SELECT
+          threads.thread_id AS "threadId",
+          threads.project_id AS "projectId",
+          substr(threads.title, 1, ${THREAD_SEARCH_TITLE_SQL_LENGTH}) AS "title",
+          substr(projects.title, 1, ${THREAD_SEARCH_TITLE_SQL_LENGTH}) AS "projectTitle",
+          threads.archived_at AS "archivedAt",
+          threads.created_at AS "createdAt",
+          threads.updated_at AS "updatedAt"
+        FROM projection_threads AS threads
+        INNER JOIN projection_projects AS projects
+          ON projects.project_id = threads.project_id
+        WHERE threads.deleted_at IS NULL
+          AND projects.deleted_at IS NULL
+          AND (
+            ${afterCreatedAt} IS NULL
+            OR threads.created_at < ${afterCreatedAt}
+            OR (threads.created_at = ${afterCreatedAt} AND threads.thread_id > ${afterThreadId})
+          )
+        ORDER BY threads.created_at DESC, threads.thread_id ASC
+        LIMIT ${limit}
+      `,
+  });
+
+  // The scan route of one evidence request (see ThreadSearchEvidencePosition).
+  // A global walk reads the table by rowid. A walk inside one thread reads
+  // idx_projection_thread_messages_thread_created_id in (created_at,
+  // message_id) order; sorting that thread by rowid instead would read all of
+  // its messages before LIMIT applies. Row-value comparisons let SQLite turn
+  // the keyset bounds into a range on that index. A thread cursor stores the
+  // boundary's rowid instead of its message_id, which has no length limit and
+  // would outgrow the cursor; findThreadSearchEvidenceBoundary recovers the id.
+  //
+  // When the boundary row is gone (a revert deleted it), the walk resumes at
+  // `created_at <= boundary timestamp`: matches sharing that timestamp can
+  // repeat, and none are skipped. A sentinel id above every real id cannot do
+  // this: SQLite compares TEXT as UTF-8 bytes, and a U+FFFF sentinel
+  // (EF BF BF) sorts below every id that starts above U+FFFF (F0 and up).
+  const threadSearchEvidenceThreadUpperBound = (bound: {
+    readonly beforeCreatedAt: string | null;
+    readonly beforeMessageId: string | null;
+  }) =>
+    bound.beforeCreatedAt === null
+      ? sql``
+      : bound.beforeMessageId === null
+        ? sql`AND messages.created_at <= ${bound.beforeCreatedAt}`
+        : sql`AND (messages.created_at, messages.message_id) < (${bound.beforeCreatedAt}, ${bound.beforeMessageId})`;
+
+  const threadSearchEvidenceScan = (bound: {
+    readonly threadId: string | null;
+    readonly beforeScanId: number;
+    readonly beforeCreatedAt: string | null;
+    readonly beforeMessageId: string | null;
+  }) =>
+    bound.threadId === null
+      ? {
+          below: sql`messages.rowid < ${bound.beforeScanId}`,
+          atOrAbove: (floor: { readonly scanId: number }) => sql`messages.rowid >= ${floor.scanId}`,
+          order: sql`messages.rowid DESC`,
+          pageOrder: sql`scan_id DESC`,
+        }
+      : {
+          below: sql`
+            messages.thread_id = ${bound.threadId}
+            ${threadSearchEvidenceThreadUpperBound(bound)}
+          `,
+          atOrAbove: (floor: { readonly createdAt: string; readonly messageId: string }) =>
+            sql`(messages.created_at, messages.message_id) >= (${floor.createdAt}, ${floor.messageId})`,
+          order: sql`messages.created_at DESC, messages.message_id DESC`,
+          pageOrder: sql`created_at DESC, message_id DESC`,
+        };
+
+  // The message_id of a thread cursor's boundary row, by rowid. None when the
+  // row is gone or no longer matches the cursor's thread and timestamp.
+  const findThreadSearchEvidenceBoundary = SqlSchema.findOneOption({
+    Request: ThreadSearchEvidenceBoundaryRequest,
+    Result: ThreadSearchEvidenceBoundaryRow,
+    execute: ({ threadId, scanId, createdAt }) =>
+      sql`
+        SELECT message_id AS "messageId"
+        FROM projection_thread_messages
+        WHERE rowid = ${scanId}
+          AND thread_id = ${threadId}
+          AND created_at = ${createdAt}
+      `,
+  });
+
+  // Lowest position of the next scan window: the scan-budget-th message below
+  // the cursor. No row means the window reaches the start of the history.
+  const findThreadSearchEvidenceWindowFloor = SqlSchema.findOneOption({
+    Request: ThreadSearchEvidenceWindowRequest,
+    Result: ThreadSearchEvidenceWindowRow,
+    execute: ({ scanBudget, ...bound }) => {
+      const scan = threadSearchEvidenceScan(bound);
+      return sql`
+        SELECT
+          messages.rowid AS "scanId",
+          messages.created_at AS "createdAt",
+          messages.message_id AS "messageId"
+        FROM projection_thread_messages AS messages
+        WHERE ${scan.below}
+        ORDER BY ${scan.order}
+        LIMIT 1 OFFSET ${scanBudget - 1}
+      `;
+    },
+  });
+
+  // Unlike searchActiveThreadRows this includes archived threads, returns every
+  // matching message, and scans one rowid window per request. A final assistant
+  // answer counts only once its turn has settled: the projector links
+  // assistant_message_id while a turn is still running, and that interim text
+  // must not become evidence. The settled-turn lookup uses the
+  // (thread_id, turn_id) unique index, so its cost follows the window size.
+  // Only the page's rows are joined back for a bounded window around the match.
+  const searchThreadEvidenceRows = SqlSchema.findAll({
+    Request: ThreadSearchEvidenceRequest,
+    Result: ThreadSearchEvidenceRow,
+    execute: ({ pattern, query, floorScanId, floorCreatedAt, floorMessageId, limit, ...bound }) => {
+      const scan = threadSearchEvidenceScan(bound);
+      return sql`
+        WITH page AS (
+          SELECT
+            messages.rowid AS scan_id,
+            messages.message_id AS message_id,
+            threads.thread_id AS thread_id,
+            threads.project_id AS project_id,
+            substr(threads.title, 1, ${THREAD_SEARCH_TITLE_SQL_LENGTH}) AS thread_title,
+            substr(projects.title, 1, ${THREAD_SEARCH_TITLE_SQL_LENGTH}) AS project_title,
+            threads.archived_at AS archived_at,
+            messages.role AS role,
+            messages.created_at AS created_at
+          -- CROSS JOIN pins messages as the outer loop. With INNER JOIN the
+          -- planner starts from undeleted threads and reads every message of
+          -- each through the thread index, which scans the whole history
+          -- instead of the rowid window.
+          FROM projection_thread_messages AS messages
+          CROSS JOIN projection_threads AS threads
+            ON threads.thread_id = messages.thread_id
+          CROSS JOIN projection_projects AS projects
+            ON projects.project_id = threads.project_id
+          WHERE ${scan.below}
+            AND ${scan.atOrAbove({
+              scanId: floorScanId,
+              createdAt: floorCreatedAt,
+              messageId: floorMessageId,
+            })}
+            AND threads.deleted_at IS NULL
+            AND projects.deleted_at IS NULL
+            AND messages.is_streaming = 0
+            AND (
+              messages.role = 'user'
+              OR (
+                messages.role = 'assistant'
+                AND EXISTS (
+                  SELECT 1
+                  FROM projection_turns AS turns
+                  WHERE turns.thread_id = messages.thread_id
+                    AND turns.turn_id = messages.turn_id
+                    AND turns.assistant_message_id = messages.message_id
+                    AND turns.state IN ('completed', 'interrupted', 'error')
+                )
+              )
+            )
+            AND messages.text LIKE ${pattern} ESCAPE '!'
+          ORDER BY ${scan.order}
+          LIMIT ${limit}
+        ),
+        located AS (
+          SELECT
+            page.*,
+            messages.text AS text,
+            length(messages.text) AS text_length,
+            max(
+              1,
+              instr(lower(messages.text), lower(${query})) - ${THREAD_SEARCH_MATCH_WINDOW_LEAD}
+            ) AS window_start
+          FROM page
+          INNER JOIN projection_thread_messages AS messages
+            ON messages.message_id = page.message_id
+        )
+        SELECT
+          scan_id AS "scanId",
+          message_id AS "messageId",
+          thread_id AS "threadId",
+          project_id AS "projectId",
+          thread_title AS "title",
+          project_title AS "projectTitle",
+          archived_at AS "archivedAt",
+          CASE role WHEN 'user' THEN 'user' ELSE 'assistant' END AS "source",
+          created_at AS "messageCreatedAt",
+          substr(text, window_start, ${THREAD_SEARCH_MATCH_WINDOW_LENGTH}) AS "matchWindow",
+          window_start > 1 AS "clippedBefore",
+          window_start + ${THREAD_SEARCH_MATCH_WINDOW_LENGTH} - 1 < text_length AS "clippedAfter"
+        FROM located
+        ORDER BY ${scan.pageOrder}
+      `;
+    },
   });
 
   const getActiveProjectRowByWorkspaceRoot = SqlSchema.findOneOption({
@@ -2992,6 +3326,157 @@ pending_approval_requests AS (
     };
   });
 
+  const listThreadSearchCatalog: ProjectionSnapshotQueryShape["listThreadSearchCatalog"] =
+    Effect.fn("ProjectionSnapshotQuery.listThreadSearchCatalog")(function* (input) {
+      const limit = input.limit ?? THREAD_SEARCH_CATALOG_DEFAULT_PAGE_SIZE;
+      const after = decodeThreadSearchCatalogCursor(input.cursor);
+      // One extra row tells whether another page exists without a COUNT.
+      const rows = yield* listThreadSearchCatalogRows({
+        afterCreatedAt: after?.afterCreatedAt ?? null,
+        afterThreadId: after?.afterThreadId ?? null,
+        limit: limit + 1,
+      }).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "ProjectionSnapshotQuery.listThreadSearchCatalog:query",
+            "ProjectionSnapshotQuery.listThreadSearchCatalog:decodeRows",
+          ),
+        ),
+      );
+      const pageRows = rows.slice(0, limit);
+      const boundary = rows.length > limit ? pageRows.at(-1) : undefined;
+      return {
+        threads: pageRows.map((row) => ({
+          threadId: row.threadId,
+          projectId: row.projectId,
+          title: truncateSearchTitle(row.title),
+          projectTitle: truncateSearchTitle(row.projectTitle),
+          archivedAt: row.archivedAt,
+          updatedAt: row.updatedAt,
+        })),
+        nextCursor:
+          boundary === undefined
+            ? null
+            : encodeThreadSearchCatalogCursor({
+                afterCreatedAt: boundary.createdAt,
+                afterThreadId: boundary.threadId,
+              }),
+      };
+    });
+
+  const searchThreadEvidence: ProjectionSnapshotQueryShape["searchThreadEvidence"] = Effect.fn(
+    "ProjectionSnapshotQuery.searchThreadEvidence",
+  )(function* (input) {
+    const limit = input.limit ?? THREAD_SEARCH_EVIDENCE_DEFAULT_PAGE_SIZE;
+    const threadId = input.threadId ?? null;
+    const searchKey = threadSearchEvidenceKey(foldAsciiCase(input.query), threadId);
+    const positionOf = (row: {
+      readonly scanId: number;
+      readonly createdAt: string;
+      readonly messageId: string;
+    }): ThreadSearchEvidencePosition =>
+      threadId === null
+        ? { kind: "rowid", beforeScanId: row.scanId }
+        : { kind: "thread", beforeCreatedAt: row.createdAt, beforeScanId: row.scanId };
+    // The search key covers the thread filter, so a decoded position always
+    // belongs to this request's route; the kind check only narrows the type.
+    const cursorPosition = decodeThreadSearchEvidenceCursor(input.cursor, searchKey)?.position;
+    const threadBoundary =
+      threadId !== null && cursorPosition?.kind === "thread" ? cursorPosition : undefined;
+    const threadBoundaryMessageId =
+      threadBoundary === undefined
+        ? Option.none<string>()
+        : yield* findThreadSearchEvidenceBoundary({
+            threadId: threadId ?? "",
+            scanId: threadBoundary.beforeScanId,
+            createdAt: threadBoundary.beforeCreatedAt,
+          }).pipe(
+            Effect.map(Option.map((row) => row.messageId)),
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.searchThreadEvidence:boundary",
+                "ProjectionSnapshotQuery.searchThreadEvidence:decodeBoundary",
+              ),
+            ),
+          );
+    const bound = {
+      threadId,
+      beforeScanId:
+        cursorPosition?.kind === "rowid"
+          ? cursorPosition.beforeScanId
+          : THREAD_SEARCH_FIRST_SCAN_ID,
+      beforeCreatedAt: threadBoundary?.beforeCreatedAt ?? null,
+      beforeMessageId: Option.getOrNull(threadBoundaryMessageId),
+    };
+    const windowFloor = yield* findThreadSearchEvidenceWindowFloor({
+      ...bound,
+      scanBudget: THREAD_SEARCH_EVIDENCE_SCAN_BUDGET,
+    }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.searchThreadEvidence:window",
+          "ProjectionSnapshotQuery.searchThreadEvidence:decodeWindow",
+        ),
+      ),
+    );
+    // Without a floor the window runs to the start: rowid 0 and the empty key
+    // sort below every row.
+    const floor = Option.getOrElse(windowFloor, () => ({
+      scanId: 0,
+      createdAt: "",
+      messageId: "",
+    }));
+    const rows = yield* searchThreadEvidenceRows({
+      ...bound,
+      pattern: `%${escapeLikePattern(input.query)}%`,
+      query: input.query,
+      floorScanId: floor.scanId,
+      floorCreatedAt: floor.createdAt,
+      floorMessageId: floor.messageId,
+      limit: limit + 1,
+    }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.searchThreadEvidence:query",
+          "ProjectionSnapshotQuery.searchThreadEvidence:decodeRows",
+        ),
+      ),
+    );
+    const pageRows = rows.slice(0, limit);
+    // More matches in this window resume after the last one delivered; an
+    // exhausted but full window resumes below its floor; otherwise the scan
+    // reached the start of the history.
+    const lastRow = rows.length > limit ? pageRows.at(-1) : undefined;
+    const nextPosition =
+      lastRow !== undefined
+        ? positionOf({ ...lastRow, createdAt: lastRow.messageCreatedAt })
+        : Option.isSome(windowFloor)
+          ? positionOf(windowFloor.value)
+          : undefined;
+    return {
+      matches: pageRows.map((row) => ({
+        messageId: row.messageId,
+        threadId: row.threadId,
+        projectId: row.projectId,
+        title: truncateSearchTitle(row.title),
+        projectTitle: truncateSearchTitle(row.projectTitle),
+        archivedAt: row.archivedAt,
+        source: row.source,
+        messageCreatedAt: row.messageCreatedAt,
+        excerpt: buildSearchExcerpt(row.matchWindow, input.query, {
+          maxLength: THREAD_SEARCH_EVIDENCE_EXCERPT_MAX_LENGTH,
+          leadingContext: THREAD_SEARCH_EXCERPT_LEADING_CONTEXT,
+          clippedBefore: row.clippedBefore === 1,
+          clippedAfter: row.clippedAfter === 1,
+        }),
+      })),
+      nextCursor:
+        nextPosition === undefined
+          ? null
+          : encodeThreadSearchEvidenceCursor({ position: nextPosition, searchKey }),
+    };
+  });
+
   const getActiveProjectByWorkspaceRoot: ProjectionSnapshotQueryShape["getActiveProjectByWorkspaceRoot"] =
     (workspaceRoot) =>
       getActiveProjectRowByWorkspaceRoot({ workspaceRoot }).pipe(
@@ -3756,6 +4241,8 @@ pending_approval_requests AS (
     getShellSnapshot,
     getArchivedShellSnapshot,
     searchThreads,
+    listThreadSearchCatalog,
+    searchThreadEvidence,
     getSnapshotSequence,
     getCounts,
     getEventReplayStats,

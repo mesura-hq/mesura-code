@@ -39,6 +39,8 @@ export const ORCHESTRATION_WS_METHODS = {
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   searchThreads: "orchestration.searchThreads",
+  listThreadSearchCatalog: "orchestration.listThreadSearchCatalog",
+  searchThreadEvidence: "orchestration.searchThreadEvidence",
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
@@ -2240,6 +2242,93 @@ export const OrchestrationSearchThreadsResult = Schema.Struct({
 });
 export type OrchestrationSearchThreadsResult = typeof OrchestrationSearchThreadsResult.Type;
 
+// Agent thread search reads history page by page instead of widening
+// searchThreads, which the lexical picker depends on staying active-only. The
+// same single-connection constraint applies: every page, cursor, and excerpt is
+// bounded so no request scans or returns an unbounded share of the history.
+export const THREAD_SEARCH_CATALOG_MAX_PAGE_SIZE = 200;
+export const THREAD_SEARCH_EVIDENCE_MAX_PAGE_SIZE = 50;
+export const THREAD_SEARCH_EVIDENCE_EXCERPT_MAX_LENGTH = 480;
+export const THREAD_SEARCH_CURSOR_MAX_LENGTH = 512;
+export const THREAD_SEARCH_TITLE_MAX_LENGTH = 200;
+const ThreadSearchTitle = Schema.String.check(Schema.isMaxLength(THREAD_SEARCH_TITLE_MAX_LENGTH));
+
+/** Opaque keyset cursor returned as `nextCursor`; clients pass it back unchanged. */
+export const OrchestrationThreadSearchCursor = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(THREAD_SEARCH_CURSOR_MAX_LENGTH),
+);
+
+export const OrchestrationThreadSearchCatalogInput = Schema.Struct({
+  cursor: Schema.optionalKey(OrchestrationThreadSearchCursor),
+  limit: Schema.optionalKey(
+    Schema.Int.check(
+      Schema.isBetween({ minimum: 1, maximum: THREAD_SEARCH_CATALOG_MAX_PAGE_SIZE }),
+    ),
+  ),
+});
+export type OrchestrationThreadSearchCatalogInput =
+  typeof OrchestrationThreadSearchCatalogInput.Type;
+
+export const OrchestrationThreadSearchCatalogEntry = Schema.Struct({
+  threadId: ThreadId,
+  projectId: ProjectId,
+  title: ThreadSearchTitle,
+  projectTitle: ThreadSearchTitle,
+  archivedAt: Schema.NullOr(IsoDateTime),
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationThreadSearchCatalogEntry =
+  typeof OrchestrationThreadSearchCatalogEntry.Type;
+
+export const OrchestrationThreadSearchCatalogPage = Schema.Struct({
+  threads: Schema.Array(OrchestrationThreadSearchCatalogEntry).check(
+    Schema.isMaxLength(THREAD_SEARCH_CATALOG_MAX_PAGE_SIZE),
+  ),
+  nextCursor: Schema.NullOr(OrchestrationThreadSearchCursor),
+});
+export type OrchestrationThreadSearchCatalogPage = typeof OrchestrationThreadSearchCatalogPage.Type;
+
+export const OrchestrationThreadSearchEvidenceInput = Schema.Struct({
+  query: TrimmedString.check(Schema.isMinLength(2), Schema.isMaxLength(200)),
+  /** Restricts evidence to one thread, to inspect a candidate in depth. */
+  threadId: Schema.optionalKey(ThreadId),
+  cursor: Schema.optionalKey(OrchestrationThreadSearchCursor),
+  limit: Schema.optionalKey(
+    Schema.Int.check(
+      Schema.isBetween({ minimum: 1, maximum: THREAD_SEARCH_EVIDENCE_MAX_PAGE_SIZE }),
+    ),
+  ),
+});
+export type OrchestrationThreadSearchEvidenceInput =
+  typeof OrchestrationThreadSearchEvidenceInput.Type;
+
+export const OrchestrationThreadSearchEvidence = Schema.Struct({
+  messageId: Schema.optionalKey(MessageId),
+  threadId: ThreadId,
+  projectId: ProjectId,
+  title: ThreadSearchTitle,
+  projectTitle: ThreadSearchTitle,
+  archivedAt: Schema.NullOr(IsoDateTime),
+  source: OrchestrationThreadSearchSource,
+  messageCreatedAt: IsoDateTime,
+  excerpt: Schema.String.check(Schema.isMaxLength(THREAD_SEARCH_EVIDENCE_EXCERPT_MAX_LENGTH)),
+});
+export type OrchestrationThreadSearchEvidence = typeof OrchestrationThreadSearchEvidence.Type;
+
+/**
+ * Each request scans a bounded slice of history, so `matches` can be empty
+ * while `nextCursor` is set: the walk is over only when `nextCursor` is null.
+ */
+export const OrchestrationThreadSearchEvidencePage = Schema.Struct({
+  matches: Schema.Array(OrchestrationThreadSearchEvidence).check(
+    Schema.isMaxLength(THREAD_SEARCH_EVIDENCE_MAX_PAGE_SIZE),
+  ),
+  nextCursor: Schema.NullOr(OrchestrationThreadSearchCursor),
+});
+export type OrchestrationThreadSearchEvidencePage =
+  typeof OrchestrationThreadSearchEvidencePage.Type;
+
 export const OrchestrationGetWorkflowScriptInput = Schema.Struct({
   threadId: ThreadId,
   /** Absolute path from the workflow's runHandles.scriptPath. The server
@@ -2308,6 +2397,14 @@ export const OrchestrationRpcSchemas = {
   searchThreads: {
     input: OrchestrationSearchThreadsInput,
     output: OrchestrationSearchThreadsResult,
+  },
+  listThreadSearchCatalog: {
+    input: OrchestrationThreadSearchCatalogInput,
+    output: OrchestrationThreadSearchCatalogPage,
+  },
+  searchThreadEvidence: {
+    input: OrchestrationThreadSearchEvidenceInput,
+    output: OrchestrationThreadSearchEvidencePage,
   },
   getArchivedShellSnapshot: {
     input: Schema.Struct({}),
