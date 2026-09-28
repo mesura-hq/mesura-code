@@ -42,6 +42,7 @@ export * from "./device.ts";
 export * from "./preview.ts";
 export * from "./previewAutomation.ts";
 export * from "./resourceTelemetry.ts";
+export * from "./hostStats.ts";
 export * from "./usage.ts";
 export * from "./accountLimits.ts";
 export * from "./fileManager.ts";
