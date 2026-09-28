@@ -119,6 +119,22 @@
       "types": "./src/state/entities.ts",
       "default": "./src/state/entities.ts"
     },
+    "./factory/plan-model": {
+      "types": "./src/factory/planModel.ts",
+      "default": "./src/factory/planModel.ts"
+    },
+    "./factory/occurrence-keys": {
+      "types": "./src/factory/occurrenceKeys.ts",
+      "default": "./src/factory/occurrenceKeys.ts"
+    },
+    "./factory/plan-activities": {
+      "types": "./src/factory/planActivities.ts",
+      "default": "./src/factory/planActivities.ts"
+    },
+    "./factory/testing": {
+      "types": "./src/factory/testing.ts",
+      "default": "./src/factory/testing.ts"
+    },
     "./state/factory": {
       "types": "./src/state/factory.ts",
       "default": "./src/state/factory.ts"

@@ -11,9 +11,9 @@ import {
   deriveFactoryPlanDocumentModel,
   type FactoryPlanPhaseCard,
   type FactoryPlanSectionModel,
-} from "./factoryPlanModel";
+} from "@t3tools/client-runtime/factory/plan-model";
 import { MermaidDiagram } from "./MermaidDiagram";
-import { occurrenceKeys } from "./occurrenceKeys";
+import { occurrenceKeys } from "@t3tools/client-runtime/factory/occurrence-keys";
 
 interface MarkdownScope {
   readonly environmentId: EnvironmentId;

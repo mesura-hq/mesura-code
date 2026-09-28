@@ -5,7 +5,7 @@ import {
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
-/** One presented plan file, as the timeline places it: its latest activity. */
+/** One presented plan file, as a thread's timeline or feed places it: its latest activity. */
 export interface FactoryPlanTimelineItem {
   /** The `factory.plan` activity id, stable per plan file across revisions. */
   readonly id: string;
@@ -32,6 +32,7 @@ function factoryPlanItem(activity: OrchestrationThreadActivity): FactoryPlanTime
 /**
  * The plan cards of a thread: the latest `factory.plan` activity per id, in
  * time order. A payload that does not decode shows nothing rather than a row.
+ * Web places these in its timeline and mobile in its feed.
  */
 export function deriveFactoryPlanTimelineItems(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
@@ -49,5 +50,6 @@ export function deriveFactoryPlanTimelineItems(
     const item = factoryPlanItem(activity);
     if (item !== null) items.push(item);
   }
-  return items.toSorted((left, right) => left.createdAt.localeCompare(right.createdAt));
+  // Sorted in place on a fresh array: Hermes has no `toSorted`.
+  return items.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 }

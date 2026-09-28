@@ -5,7 +5,7 @@ import {
   type FactorySnapshotState,
 } from "@t3tools/client-runtime/state/factory";
 
-import { factoryEnvironment } from "../state/factory";
+import { factoryEnvironment } from "../../state/factory";
 
 /** A stored plan body by digest; the answer never changes, so it stays cached. */
 export function useFactorySnapshot(

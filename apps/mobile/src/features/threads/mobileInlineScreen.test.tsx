@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 // Entry point: ThreadDetailScreen with real ThreadFeed, PendingUserInputCard,
 // QuestionAttachments, request state, attachment strip, and thread-work-log.
+// The Factory plan card specs mount the same entry point; only the stored plan
+// body (`factoryEnvironment.factorySnapshot`) and navigation are stubbed.
 // Native hosts use DOM controls. Geometry tests cover keyboard ownership and
 // scroll routing; physical keyboard occlusion still requires device verification.
 import { act, useState, useImperativeHandle, useRef, type Ref } from "react";
@@ -31,6 +33,16 @@ const fixture = vi.hoisted(() => ({
   record: vi.fn(),
   uploads: {} as Record<string, { status: string; progress?: number; reason?: string }>,
   configs: new Map(),
+  navigation: {
+    navigate: vi.fn(),
+    push: vi.fn(),
+    replace: vi.fn(),
+    reset: vi.fn(),
+    dispatch: vi.fn(),
+    goBack: vi.fn(),
+  },
+  factorySnapshots: {} as Record<string, string>,
+  factorySnapshotAtoms: new Map<string, unknown>(),
 }));
 vi.mock("react-native", () => {
   const View = ({
@@ -317,7 +329,7 @@ vi.mock("./ThreadComposer", () => ({
 import { ThreadDetailScreen, type ThreadDetailScreenProps } from "./ThreadDetailScreen";
 
 vi.mock("@react-navigation/native", () => ({
-  useNavigation: () => ({ navigate: vi.fn() }),
+  useNavigation: () => fixture.navigation,
   useFocusEffect: () => undefined,
   useIsFocused: () => true,
 }));
@@ -377,6 +389,29 @@ vi.mock("../../state/use-thread-detail", () => ({
   useSelectedThreadDetail: () => ({ activities: fixture.activities }),
 }));
 vi.mock("../../state/entities", () => ({ useServerConfigs: () => fixture.configs }));
+// The plan body a `factory.plan` activity names by digest, as the server's
+// factoryReadSnapshot RPC would answer it; an unknown digest stays loading.
+vi.mock("../../state/factory", async () => {
+  const { AsyncResult, Atom } = await import("effect/unstable/reactivity");
+  return {
+    factoryEnvironment: {
+      factorySnapshot: ({ input }: { input: { digest: string } }) => {
+        const markdown = fixture.factorySnapshots[input.digest];
+        const key = `${input.digest}:${markdown === undefined ? "loading" : "ready"}`;
+        let atom = fixture.factorySnapshotAtoms.get(key);
+        if (atom === undefined) {
+          atom = Atom.make(
+            markdown === undefined
+              ? AsyncResult.initial(true)
+              : AsyncResult.success({ digest: input.digest, markdown }),
+          );
+          fixture.factorySnapshotAtoms.set(key, atom);
+        }
+        return atom;
+      },
+    },
+  };
+});
 vi.mock("../../state/threads", () => ({
   threadEnvironment: { respondToUserInput: "respond", dismissUserInput: "dismiss" },
 }));
@@ -579,6 +614,9 @@ beforeEach(() => {
   fixture.respond.mockResolvedValue({ _tag: "Success", value: undefined });
   fixture.dismiss.mockClear();
   fixture.send.mockClear();
+  for (const method of Object.values(fixture.navigation)) method.mockClear();
+  fixture.factorySnapshots = {};
+  fixture.factorySnapshotAtoms.clear();
   fixture.configs = new Map([
     [
       environmentId,
@@ -1158,4 +1196,73 @@ it("mobile phase3 repair AC4 reveals the measured answer above keyboard and comp
   fixture.inputY = 470;
   await act(async () => fixture.keyboardShown?.());
   expect(fixture.scrollToOffset).not.toHaveBeenCalled();
+});
+
+// Factory plan card (phase 3 of factory-in-chat). The emulator alone shows the
+// card's look and that Back restores the feed's scroll position; these pin the
+// card's content, its Open action and that opening it leaves the feed alone.
+import {
+  FACTORY_PLAN_DIGEST,
+  makeFactoryPlanActivity,
+  readFactoryPlanFixture,
+} from "../factory/factoryPlan.test-support";
+
+const factoryPlanId = "factory-plan:plan-md";
+function showFactoryPlan() {
+  fixture.activities = [
+    makeFactoryPlanActivity({ id: factoryPlanId, createdAt: "2026-09-23T10:00:00.000Z" }),
+  ];
+  fixture.factorySnapshots = { [FACTORY_PLAN_DIGEST]: readFactoryPlanFixture() };
+}
+function factoryPlanCard() {
+  const row = conversation().querySelector<HTMLElement>(`[data-feed-row="${factoryPlanId}"]`);
+  expect(row, "Expected the plan's own feed row").not.toBeNull();
+  return row!;
+}
+function factoryPlanOpenButton() {
+  const open = Array.from(factoryPlanCard().querySelectorAll<HTMLButtonElement>("button")).find(
+    (node) => node.textContent?.trim() === "Open" || node.getAttribute("aria-label") === "Open",
+  );
+  expect(open, "Expected the plan card's Open button").toBeDefined();
+  return open!;
+}
+
+it("factory plan card shows the title, the Context section and one line per phase in the Android feed", async () => {
+  showFactoryPlan();
+  await mount();
+  const text = factoryPlanCard().textContent ?? "";
+  expect(text).toContain("Plan: the Software Factory inside Mesura Code");
+  expect(text).toContain(
+    "Mesura Code is the app the developer uses every day to direct coding agents",
+  );
+  expect(text).toContain("Snapshot a plan and present it to the thread · 8 criteria");
+  expect(text).toContain("Render the plan card and the Factory pane on the web · 1 criterion");
+  // Only the Context section renders inline: not the next section's body.
+  expect(text).not.toContain("The planning skill writes three files");
+  // Never a work-log row: the activity's summary is not shown anywhere.
+  expect(conversation().textContent).not.toContain("Presented a plan");
+});
+
+it("factory plan card Open navigates to the thread's Factory screen for that plan", async () => {
+  showFactoryPlan();
+  await mount();
+  await act(async () => factoryPlanOpenButton().click());
+  expect(fixture.navigation.navigate).toHaveBeenCalledExactlyOnceWith("ThreadFactory", {
+    environmentId: "inline-screen-environment",
+    threadId: "inline-screen-thread",
+    planId: factoryPlanId,
+  });
+});
+
+it("factory plan card Open pushes the Factory screen above the feed without moving or replacing it", async () => {
+  fixture.geometry = true;
+  showFactoryPlan();
+  await mount();
+  await act(async () => factoryPlanOpenButton().click());
+  expect(fixture.navigation.navigate).toHaveBeenCalledOnce();
+  for (const method of ["push", "replace", "reset", "dispatch", "goBack"] as const) {
+    expect(fixture.navigation[method], method).not.toHaveBeenCalled();
+  }
+  expect(fixture.scrollToOffset).not.toHaveBeenCalled();
+  expect(factoryPlanCard().textContent).toContain("Plan: the Software Factory inside Mesura Code");
 });

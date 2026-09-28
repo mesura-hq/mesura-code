@@ -14,9 +14,9 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { deriveTimelineEntriesWithState, deriveWorkLogEntries } from "../session-logic";
 import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
-import { makeFactoryPlanActivity } from "./factoryPlan.fixtures";
+import { makeFactoryPlanActivity } from "@t3tools/client-runtime/factory/testing";
 import { openFactoryPlanInRightPanel } from "./factoryRightPanel";
-import { deriveFactoryPlanTimelineItems } from "./factoryPlanTimeline";
+import { deriveFactoryPlanTimelineItems } from "@t3tools/client-runtime/factory/plan-activities";
 
 const ref = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("factory-thread"));
 const planId = "factory-plan:plan-md";

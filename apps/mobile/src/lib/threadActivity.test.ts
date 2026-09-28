@@ -26,6 +26,12 @@ import {
   type ThreadFeedEntry,
   type WorkLogEntry,
 } from "./threadActivity";
+import {
+  FACTORY_OTHER_PLAN_DIGEST,
+  FACTORY_REVISED_PLAN_DIGEST,
+  makeFactoryPlanActivity,
+  makeFactoryPlanPayload,
+} from "../features/factory/factoryPlan.test-support";
 
 // Match Hermes: these ES2023 array methods are absent on mobile.
 beforeEach(() => {
@@ -3449,6 +3455,243 @@ describe("quiet timeline: nested agents", () => {
       },
     ]);
   });
+});
+
+// Phase 3, criterion 1: a presented plan is a card of its own in the feed —
+// never a work-log row — and a turn fold does not hide it. The card's pixels
+// are the emulator's to show; these pin the entry the feed renders it from.
+describe("factory plan feed entries", () => {
+  const factoryTurnId = TurnId.make("factory-turn");
+  const settledFactoryTurn = {
+    turnId: factoryTurnId,
+    state: "completed" as const,
+    requestedAt: "2026-09-28T10:00:00.000Z",
+    startedAt: "2026-09-28T10:00:01.000Z",
+    completedAt: "2026-09-28T10:00:20.000Z",
+    assistantMessageId: MessageId.make("factory-assistant-final"),
+  };
+  const factoryUserMessage = {
+    id: MessageId.make("factory-user"),
+    role: "user" as const,
+    text: "Plan the factory in chat.",
+    turnId: null,
+    streaming: false,
+    createdAt: "2026-09-28T10:00:00.000Z",
+    updatedAt: "2026-09-28T10:00:00.000Z",
+  };
+  const factoryAssistantMessage = (id: string, text: string, at: string) => ({
+    id: MessageId.make(id),
+    role: "assistant" as const,
+    text,
+    turnId: factoryTurnId,
+    streaming: false,
+    createdAt: at,
+    updatedAt: at,
+  });
+  const factoryToolActivity = (id: string, at: string) =>
+    makeActivity({
+      id: EventId.make(id),
+      kind: "tool.completed",
+      tone: "tool",
+      summary: "Read files",
+      createdAt: at,
+      turnId: factoryTurnId,
+      payload: { title: "Read files", itemType: "file_read", status: "completed" },
+    });
+  const factoryPlanEntries = (feed: ReadonlyArray<ThreadFeedEntry>) =>
+    feed.filter((entry) => entry.type === "factory-plan");
+  const workLogActivityIds = (feed: ReadonlyArray<ThreadFeedEntry>) =>
+    feed.flatMap((entry) =>
+      entry.type === "activity-group"
+        ? entry.activities.map((activity) => activity.id)
+        : entry.type === "agent-spawn"
+          ? [entry.activity.id]
+          : [],
+    );
+
+  it("emits a presented plan as one factory-plan entry at its place in the feed, carrying its payload", () => {
+    const payload = makeFactoryPlanPayload({ presentedAt: "2026-09-28T10:00:05.000Z" });
+    const thread = makeThread({
+      id: ThreadId.make("factory-plan-entry"),
+      projectId: ProjectId.make("project-1"),
+      title: "Factory plan entry",
+      messages: [
+        factoryUserMessage,
+        factoryAssistantMessage(
+          "factory-assistant-final",
+          "The plan is ready.",
+          "2026-09-28T10:00:09.000Z",
+        ),
+      ],
+      activities: [
+        makeFactoryPlanActivity({
+          id: "factory-plan:entry",
+          createdAt: "2026-09-28T10:00:05.000Z",
+          payload,
+        }),
+      ],
+    });
+
+    const feed = buildThreadFeed(thread);
+
+    expect(feed.map((entry) => entry.id)).toEqual([
+      "factory-user",
+      "factory-plan:entry",
+      "factory-assistant-final",
+    ]);
+    expect(feed[1]).toMatchObject({
+      type: "factory-plan",
+      id: "factory-plan:entry",
+      createdAt: "2026-09-28T10:00:05.000Z",
+      plan: payload,
+    });
+  });
+
+  it("keeps one factory-plan entry per plan file, placed at its latest presentation", () => {
+    const revised = makeFactoryPlanPayload({
+      digest: FACTORY_REVISED_PLAN_DIGEST,
+      title: "Plan: revised",
+      presentedAt: "2026-09-28T10:00:08.000Z",
+    });
+    const other = makeFactoryPlanPayload({
+      digest: FACTORY_OTHER_PLAN_DIGEST,
+      planPath: "/home/dev/plans/other/plan.md",
+      title: "Plan: another file",
+      presentedAt: "2026-09-28T10:00:06.000Z",
+    });
+    const thread = makeThread({
+      id: ThreadId.make("factory-plan-per-file"),
+      projectId: ProjectId.make("project-1"),
+      title: "Factory plan per file",
+      activities: [
+        makeFactoryPlanActivity({
+          id: "factory-plan:first",
+          createdAt: "2026-09-28T10:00:04.000Z",
+        }),
+        makeFactoryPlanActivity({
+          id: "factory-plan:other",
+          createdAt: "2026-09-28T10:00:06.000Z",
+          payload: other,
+        }),
+        makeFactoryPlanActivity({
+          id: "factory-plan:first",
+          createdAt: "2026-09-28T10:00:08.000Z",
+          payload: revised,
+        }),
+      ],
+    });
+
+    const entries = factoryPlanEntries(buildThreadFeed(thread));
+
+    expect(entries.map((entry) => entry.id)).toEqual(["factory-plan:other", "factory-plan:first"]);
+    expect(entries[1]).toMatchObject({ createdAt: "2026-09-28T10:00:08.000Z", plan: revised });
+  });
+
+  it("never shows a Factory activity as a work-log row, and drops a plan whose payload does not decode", () => {
+    const thread = makeThread({
+      id: ThreadId.make("factory-no-work-log"),
+      projectId: ProjectId.make("project-1"),
+      title: "Factory activities are not tool rows",
+      activities: [
+        factoryToolActivity("factory-tool-before", "2026-09-28T10:00:02.000Z"),
+        makeFactoryPlanActivity({
+          id: "factory-plan:decodes",
+          createdAt: "2026-09-28T10:00:03.000Z",
+          turnId: factoryTurnId,
+        }),
+        makeFactoryPlanActivity({
+          id: "factory-plan:broken",
+          createdAt: "2026-09-28T10:00:04.000Z",
+          turnId: factoryTurnId,
+          payload: { title: "no digest" },
+        }),
+        makeActivity({
+          id: EventId.make("factory-run:one"),
+          kind: "factory.run",
+          summary: "Factory run",
+          createdAt: "2026-09-28T10:00:05.000Z",
+          turnId: factoryTurnId,
+          payload: { runId: "run-1" },
+        }),
+        makeActivity({
+          id: EventId.make("factory-report:one"),
+          kind: "factory.report",
+          summary: "Factory report",
+          createdAt: "2026-09-28T10:00:06.000Z",
+          turnId: factoryTurnId,
+          payload: { runId: "run-1" },
+        }),
+        factoryToolActivity("factory-tool-after", "2026-09-28T10:00:07.000Z"),
+      ],
+    });
+
+    const feed = buildThreadFeed(thread);
+    const rows = deriveThreadFeedPresentation(feed, null, new Set(), new Set());
+    const factoryIds = new Set([
+      "factory-plan:decodes",
+      "factory-plan:broken",
+      "factory-run:one",
+      "factory-report:one",
+    ]);
+
+    for (const view of [feed, rows]) {
+      expect(workLogActivityIds(view).filter((id) => factoryIds.has(id))).toEqual([]);
+    }
+    expect(workLogActivityIds(feed)).toEqual(["factory-tool-before", "factory-tool-after"]);
+    expect(factoryPlanEntries(feed).map((entry) => entry.id)).toEqual(["factory-plan:decodes"]);
+    expect(feed.some((entry) => entry.id === "factory-plan:broken")).toBe(false);
+  });
+
+  it.each([
+    { placement: "inside the folded turn", turnId: factoryTurnId },
+    { placement: "with no turn", turnId: null },
+  ])(
+    "keeps a plan card visible when a turn fold hides the work around it ($placement)",
+    ({ turnId }) => {
+      const thread = makeThread({
+        id: ThreadId.make("factory-plan-fold"),
+        projectId: ProjectId.make("project-1"),
+        title: "Factory plan survives a fold",
+        latestTurn: settledFactoryTurn,
+        messages: [
+          factoryUserMessage,
+          factoryAssistantMessage(
+            "factory-assistant-first",
+            "Reading the repository.",
+            "2026-09-28T10:00:02.000Z",
+          ),
+          factoryAssistantMessage(
+            "factory-assistant-final",
+            "The plan is ready.",
+            "2026-09-28T10:00:20.000Z",
+          ),
+        ],
+        activities: [
+          factoryToolActivity("factory-fold-tool-before", "2026-09-28T10:00:04.000Z"),
+          makeFactoryPlanActivity({
+            id: "factory-plan:folded",
+            createdAt: "2026-09-28T10:00:10.000Z",
+            turnId,
+          }),
+          factoryToolActivity("factory-fold-tool-after", "2026-09-28T10:00:15.000Z"),
+        ],
+      });
+
+      const feed = buildThreadFeed(thread);
+      const collapsed = deriveThreadFeedPresentation(feed, thread.latestTurn, new Set());
+
+      expect(collapsed.some((row) => row.type === "turn-fold" && !row.expanded)).toBe(true);
+      expect(workLogActivityIds(collapsed)).toEqual([]);
+      expect(factoryPlanEntries(collapsed).map((row) => row.id)).toEqual(["factory-plan:folded"]);
+
+      const expanded = deriveThreadFeedPresentation(
+        feed,
+        thread.latestTurn,
+        new Set([factoryTurnId]),
+      );
+      expect(factoryPlanEntries(expanded).map((row) => row.id)).toEqual(["factory-plan:folded"]);
+    },
+  );
 });
 
 it("accepts ready attachment-only answers while preserving selected options", () => {

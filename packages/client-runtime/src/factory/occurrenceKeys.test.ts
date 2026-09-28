@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { occurrenceKeys } from "./occurrenceKeys";
+import { occurrenceKeys } from "./occurrenceKeys.ts";
 
 describe("occurrenceKeys", () => {
   it("gives repeated strings distinct keys and keeps the first occurrence bare", () => {

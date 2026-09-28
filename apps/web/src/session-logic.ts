@@ -33,7 +33,7 @@ import {
 } from "@t3tools/contracts";
 import { contextCompactionActivityDetailFromHistory } from "@t3tools/shared/timelineActivity";
 
-import type { FactoryPlanTimelineItem } from "./factory/factoryPlanTimeline";
+import type { FactoryPlanTimelineItem } from "@t3tools/client-runtime/factory/plan-activities";
 
 import {
   isImageAttachment,

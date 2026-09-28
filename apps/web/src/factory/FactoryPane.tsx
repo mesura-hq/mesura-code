@@ -3,7 +3,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { Spinner } from "../components/ui/spinner";
 import { Toggle, ToggleGroup } from "../components/ui/toggle-group";
 import type { RightPanelSurface } from "../rightPanelStore";
-import type { FactoryPlanTimelineItem } from "./factoryPlanTimeline";
+import type { FactoryPlanTimelineItem } from "@t3tools/client-runtime/factory/plan-activities";
 import { FactoryPlanDocument } from "./FactoryPlanDocument";
 import { useFactorySnapshot } from "./useFactorySnapshot";
 

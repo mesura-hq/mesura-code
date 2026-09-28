@@ -8,9 +8,12 @@ import { Button } from "../components/ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu";
 import { Skeleton } from "../components/ui/skeleton";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
-import type { FactoryPlanTimelineItem } from "./factoryPlanTimeline";
-import { readFactoryPlanContext, summarizeFactoryPlanCard } from "./factoryPlanModel";
-import { occurrenceKeys } from "./occurrenceKeys";
+import type { FactoryPlanTimelineItem } from "@t3tools/client-runtime/factory/plan-activities";
+import {
+  readFactoryPlanContext,
+  summarizeFactoryPlanCard,
+} from "@t3tools/client-runtime/factory/plan-model";
+import { occurrenceKeys } from "@t3tools/client-runtime/factory/occurrence-keys";
 import { useFactorySnapshot } from "./useFactorySnapshot";
 
 function FactoryPlanContext({
@@ -23,9 +26,11 @@ function FactoryPlanContext({
   cwd: string | undefined;
 }) {
   const snapshot = useFactorySnapshot(environmentId, digest);
+  // Keyed to the body itself: only a new plan text reparses it.
+  const markdown = snapshot.status === "ready" ? snapshot.markdown : null;
   const context = useMemo(
-    () => (snapshot.status === "ready" ? readFactoryPlanContext(snapshot.markdown) : null),
-    [snapshot],
+    () => (markdown === null ? null : readFactoryPlanContext(markdown)),
+    [markdown],
   );
   if (snapshot.status === "loading") {
     return (

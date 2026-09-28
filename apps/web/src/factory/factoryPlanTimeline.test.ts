@@ -36,8 +36,8 @@ import {
   FACTORY_REVISED_PLAN_DIGEST,
   makeFactoryPlanActivity,
   makeFactoryPlanPayload,
-} from "./factoryPlan.fixtures";
-import { deriveFactoryPlanTimelineItems } from "./factoryPlanTimeline";
+} from "@t3tools/client-runtime/factory/testing";
+import { deriveFactoryPlanTimelineItems } from "@t3tools/client-runtime/factory/plan-activities";
 
 const time = (second: number) => new Date(Date.UTC(2026, 8, 28, 10, 0, second)).toISOString();
 

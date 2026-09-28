@@ -178,7 +178,7 @@ import {
   type RightPanelSurface,
   useRightPanelStore,
 } from "../rightPanelStore";
-import { deriveFactoryPlanTimelineItems } from "../factory/factoryPlanTimeline";
+import { deriveFactoryPlanTimelineItems } from "@t3tools/client-runtime/factory/plan-activities";
 import { openFactoryPlanInRightPanel } from "../factory/factoryRightPanel";
 import {
   isPreviewSupportedInRuntime,

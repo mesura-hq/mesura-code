@@ -10,17 +10,17 @@
  * Which sections exist, in which order, what each phase card and decision
  * holds, and which sections are folded, is decided here.
  */
+/// <reference types="vite-plus/client" />
 import { splitFactoryDocument } from "@t3tools/shared/factoryDocument";
 import { describe, expect, it } from "vite-plus/test";
 
-import { makeFactoryPlanPayload, readFactoryPlanFixture } from "./factoryPlan.fixtures";
+import planMarkdown from "../../../shared/src/fixtures/factory-in-chat.plan.md?raw";
 import {
   deriveFactoryPlanDocumentModel,
   readFactoryPlanContext,
   summarizeFactoryPlanCard,
-} from "./factoryPlanModel";
-
-const planMarkdown = readFactoryPlanFixture();
+} from "./planModel.ts";
+import { makeFactoryPlanPayload } from "./testing.ts";
 
 describe("factory plan card content (phase 2 fence)", () => {
   it("summarizes the plan card with its title, phase count and one line per phase", () => {

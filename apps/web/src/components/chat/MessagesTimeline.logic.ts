@@ -32,7 +32,7 @@ import {
 } from "../../session-logic";
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
 import type { QueuedComposerMessage } from "../../queuedMessageStore";
-import type { FactoryPlanTimelineItem } from "../../factory/factoryPlanTimeline";
+import type { FactoryPlanTimelineItem } from "@t3tools/client-runtime/factory/plan-activities";
 import {
   type MessageId,
   type OrchestrationLatestTurn,
