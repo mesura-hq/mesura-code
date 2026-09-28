@@ -685,7 +685,7 @@ export const ClaudeSettings = makeProviderSettingsSchema(
       Schema.annotateKey({
         title: "Offer compaction on resume",
         description:
-          "Suggest compacting a large session that has been idle for over an hour. Off keeps the full history without asking.",
+          "Suggest compacting a large session when you return to it after a long pause. Off keeps the full history without asking.",
         providerSettingsForm: { control: "switch" },
       }),
     ),

@@ -6301,6 +6301,7 @@ export default function ChatView(props: ChatViewProps) {
         ? "Compaction is unavailable for this provider"
         : "Compacting is unavailable right now"
     : null;
+  // Mesura: per-instance Claude switch, see chat/resumeCompactionSetting.ts.
   const resumeCompactionOffered = isResumeCompactionOffered(settings, activeProviderInstanceId);
   const resumeCompactionBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
     if (

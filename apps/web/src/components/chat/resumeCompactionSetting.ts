@@ -29,6 +29,7 @@ export function isResumeCompactionOffered(
     ? settings.providerInstances[resolvedInstanceId]
     : undefined;
   if (explicitInstance) {
+    if (explicitInstance.driver !== CLAUDE_DRIVER_KIND) return true;
     return readOfferResumeCompaction(explicitInstance.config) ?? true;
   }
   if (resolvedInstanceId !== defaultInstanceId) return true;
