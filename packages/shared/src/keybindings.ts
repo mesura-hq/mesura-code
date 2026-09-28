@@ -73,7 +73,13 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+alt+shift+t", command: "themeEditor.toggle" },
   { key: "mod+s", command: "composer.stash", when: "!terminalFocus" },
   { key: "mod+shift+enter", command: "thread.steerQueuedMessage", when: "!terminalFocus" },
+  // Two chords, and the label shows the last. The developer's Hyprland binds
+  // ALT+A globally, so alt+a never reaches the app on that machine; mod+alt+a
+  // matches the mod+alt family (mod+alt+r renames the thread). alt+a stays for
+  // every machine where it still arrives. Existing configs get mod+alt+a from
+  // ADDED_KEYBINDING_DEFAULTS.
   { key: "alt+a", command: "composer.attachFiles", when: "!terminalFocus" },
+  { key: "mod+alt+a", command: "composer.attachFiles", when: "!terminalFocus" },
   // Fork addition: a new command on a free chord, installed by the per-command
   // startup backfill; no RETIRED or ADDED entry, as with alt+q below.
   { key: "mod+e", command: "fileTree.toggle", when: "!terminalFocus" },
@@ -111,6 +117,9 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // entry: that mechanism exists for a SECOND default on a command a config
   // already binds.
   { key: "alt+q", command: "question.toggleCollapse", when: "!terminalFocus" },
+  // A new command on a free chord, so the per-command startup backfill
+  // installs it, as with alt+q above.
+  { key: "mod+alt+r", command: "thread.rename", when: "!terminalFocus" },
   // Directional pane focus, deliberately unconditional: the chord has one
   // meaning in every pane, which is what stops two surfaces claiming a key.
   // New commands, so the per-command startup backfill installs them and no
@@ -334,6 +343,12 @@ export const ADDED_KEYBINDING_DEFAULTS: ReadonlyArray<AddedKeybindingDefault> = 
   {
     id: "2026-09-file-manager-mod-shift-e",
     rule: { key: "mod+shift+e", command: "fileTree.miller", when: "!terminalFocus" },
+  },
+  // Appended, so it is the last composer.attachFiles rule and the label, as
+  // on a fresh install.
+  {
+    id: "2026-09-attach-files-mod-alt-a",
+    rule: { key: "mod+alt+a", command: "composer.attachFiles", when: "!terminalFocus" },
   },
 ];
 

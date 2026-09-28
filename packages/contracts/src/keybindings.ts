@@ -158,6 +158,12 @@ export const STATIC_KEYBINDING_COMMANDS = [
   // to a new name. A rename orphans the rule in every config that already has
   // it, silently.
   "question.toggleCollapse",
+  // Opens the chat header's inline title rename for the open thread, the
+  // same field a double-click on the title opens. Upstream has no keyboard
+  // route to it. Kept out of THREAD_KEYBINDING_COMMANDS: that group is
+  // traversal, dispatched by the sidebar, and this acts on the open thread
+  // from the chat header. The rename warning above applies to this id too.
+  "thread.rename",
   // Settle and un-settle in one command. Kept out of THREAD_KEYBINDING_COMMANDS
   // because that group is traversal, dispatched by the sidebar; this acts on the
   // open thread's lifecycle and is dispatched by the chat view. The rename

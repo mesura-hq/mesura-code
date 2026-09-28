@@ -32,6 +32,7 @@ import {
 } from "../ProjectScriptsControl";
 import { type RemoteOpenMode } from "../../remoteOpen";
 import { useThreadActionMenu } from "~/hooks/useThreadActionMenu";
+import { useThreadRenameShortcut } from "~/hooks/useThreadRenameShortcut";
 import { readLocalApi } from "~/localApi";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -123,6 +124,7 @@ export const ChatHeader = memo(function ChatHeader({
   activeThreadTitle,
   isServerThread,
   activeProject,
+  keybindings,
   rightPanelOpen,
   onNewThreadInProject,
   onOpenProjectSettings,
@@ -179,6 +181,11 @@ export const ChatHeader = memo(function ChatHeader({
     },
     [activeThreadEnvironmentId, activeThreadId, activeThreadTitle, updateThreadMetadata],
   );
+  useThreadRenameShortcut({
+    keybindings,
+    enabled: isServerThread && renamingTitle === null,
+    onStartRename: startRename,
+  });
   const { openMenu, closeMenu } = useThreadActionMenu({
     threadRef: isServerThread ? activeThreadRef : null,
     projectCwd: activeProjectCwd,
