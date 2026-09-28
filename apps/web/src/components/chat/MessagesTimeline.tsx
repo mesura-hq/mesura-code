@@ -2280,6 +2280,7 @@ function FactoryPlanTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "fa
         factoryPlan={row.factoryPlan}
         environmentId={ctx.activeThreadEnvironmentId}
         cwd={ctx.markdownCwd}
+        threadRef={ctx.threadRef}
         onOpen={ctx.onOpenFactoryPlan}
       />
     </div>

@@ -196,6 +196,7 @@ import {
   ThreadMarkdownImageView,
 } from "./ThreadMarkdownImage";
 import { FactoryPlanCard } from "../factory/FactoryPlanCard";
+import type { FactoryPlanApprovalContext } from "../factory/useFactoryPlanApproval";
 
 const WIDE_MARKDOWN_BLOCK_OPTIONS = {
   // Native iOS blockquotes and adjacent selectable text are separate layout
@@ -277,6 +278,8 @@ export interface ThreadFeedProps extends PendingUserInputFeedProps {
   readonly onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void;
   /** Opens a presented plan, by its `factory.plan` activity id, on the Factory screen. */
   readonly onOpenFactoryPlan?: (planId: string) => void;
+  /** Routes and Approve for the plan cards. */
+  readonly factoryPlanApproval?: FactoryPlanApprovalContext;
   /** Non-null when older turns exist beyond the loaded window. */
   readonly loadEarlier?: {
     readonly loading: boolean;
@@ -1360,6 +1363,7 @@ function renderFeedEntry(
     | "environmentId"
     | "onUseArtifactTemplate"
     | "onOpenFactoryPlan"
+    | "factoryPlanApproval"
     | "skills"
     | "dispatchingMessageId"
     | "onEditPendingMessage"
@@ -1429,6 +1433,7 @@ function renderFeedEntry(
         plan={entry.plan}
         environmentId={props.environmentId}
         onOpen={onOpenFactoryPlan ? () => onOpenFactoryPlan(entry.id) : undefined}
+        approval={props.factoryPlanApproval}
         renderMarkdown={(markdown) => (
           <MarkdownImageAvailableWidthContext value={props.markdownContentWidth}>
             <AssistantMarkdownContent
@@ -2312,8 +2317,12 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       themeAppearance,
       userBubbleColor,
       viewportWidth,
+      // Rows re-render only on a new item or new extraData; the plan cards
+      // read their provider lists and approvals from here.
+      factoryPlanApproval: props.factoryPlanApproval,
     }),
     [
+      props.factoryPlanApproval,
       props.respondingUserInputIds,
       props.dispatchingMessageId,
       unsettledTurnId,
@@ -2782,6 +2791,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
                 skills: props.skills,
                 onUseArtifactTemplate: props.onUseArtifactTemplate,
                 onOpenFactoryPlan: props.onOpenFactoryPlan,
+                factoryPlanApproval: props.factoryPlanApproval,
               },
             )
           )}
@@ -2825,6 +2835,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       props.environmentId,
       props.onUseArtifactTemplate,
       props.onOpenFactoryPlan,
+      props.factoryPlanApproval,
       props.skills,
       renderMarkdownImage,
       renderViewedImage,

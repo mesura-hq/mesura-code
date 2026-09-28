@@ -1,6 +1,17 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  FactoryPlanActivityPayload,
+  ScopedThreadRef,
+} from "@t3tools/contracts";
+import {
+  defaultFactoryRoutes,
+  readyFactoryRoutes,
+  reconcileFactoryRouteSlots,
+  validateFactoryRoutes,
+  type FactoryRouteSlots,
+} from "@t3tools/client-runtime/factory/routes";
 import { EllipsisIcon, Maximize2Icon } from "lucide-react";
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
 
 import ChatMarkdown from "../components/ChatMarkdown";
 import { Badge } from "../components/ui/badge";
@@ -14,6 +25,8 @@ import {
   summarizeFactoryPlanCard,
 } from "@t3tools/client-runtime/factory/plan-model";
 import { occurrenceKeys } from "@t3tools/client-runtime/factory/occurrence-keys";
+import { FactoryApprovedRoutes, FactoryRoutePicker } from "./FactoryRoutePicker";
+import { useFactoryPlanApproval } from "./useFactoryPlanApproval";
 import { useFactorySnapshot } from "./useFactorySnapshot";
 
 function FactoryPlanContext({
@@ -49,6 +62,81 @@ function FactoryPlanContext({
 }
 
 /**
+ * The card's foot: the route per role and Approve, or the routes an approval
+ * of these bytes carried. The rows are card-local until Approve sends them.
+ */
+function FactoryPlanApprovalSection({
+  threadRef,
+  plan,
+}: {
+  threadRef: ScopedThreadRef;
+  plan: FactoryPlanActivityPayload;
+}) {
+  const { state, providers, approve, sending } = useFactoryPlanApproval(threadRef, plan);
+  // Untouched rows follow the provider lists as they load; the first edit
+  // takes them over.
+  const [edited, setEdited] = useState<FactoryRouteSlots | null>(null);
+  const defaults = useMemo(() => defaultFactoryRoutes(providers), [providers]);
+  // Edits are held to the provider lists as they are now, so Approve never
+  // sends a model or level the server stopped offering.
+  const slots = useMemo(
+    () => (edited === null ? defaults : reconcileFactoryRouteSlots(edited, providers)),
+    [edited, defaults, providers],
+  );
+  const routes = readyFactoryRoutes(slots);
+  const { implementer, reviewer, verifier } = slots;
+  const violations =
+    implementer.status === "ready" && reviewer.status === "ready" && verifier.status === "ready"
+      ? validateFactoryRoutes({
+          implementer: implementer.route,
+          reviewer: reviewer.route,
+          verifier: verifier.route,
+        })
+      : [];
+
+  if (state.kind === "approved") {
+    return (
+      <div className="mt-3 flex flex-col gap-2 border-t border-border/60 pt-3">
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary">Approved</Badge>
+          <p className="text-xs text-muted-foreground">Routes for this build</p>
+        </div>
+        <FactoryApprovedRoutes
+          routes={state.routes}
+          routesBlock={state.routesBlock}
+          providers={providers}
+        />
+      </div>
+    );
+  }
+  return (
+    <div className="mt-3 flex flex-col gap-2 border-t border-border/60 pt-3">
+      <div className="flex items-center gap-2">
+        <p className="text-xs font-medium text-muted-foreground">Routes</p>
+        {state.kind === "changed" ? <Badge variant="outline">Changed since approval</Badge> : null}
+      </div>
+      <FactoryRoutePicker slots={slots} providers={providers} onChange={setEdited} />
+      {violations.map((violation) => (
+        <p key={violation} className="text-xs text-destructive">
+          {violation}
+        </p>
+      ))}
+      <div className="flex justify-end">
+        <Button
+          size="xs"
+          disabled={routes === null || sending}
+          onClick={() => {
+            if (routes !== null) void approve(routes);
+          }}
+        >
+          Approve
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
  * A plan the Software Factory presented to this thread. Only the Context
  * section renders inline; Open shows the whole plan in the Factory pane.
  */
@@ -56,11 +144,14 @@ export const FactoryPlanCard = memo(function FactoryPlanCard({
   factoryPlan,
   environmentId,
   cwd,
+  threadRef,
   onOpen,
 }: {
   factoryPlan: FactoryPlanTimelineItem;
   environmentId: EnvironmentId;
   cwd: string | undefined;
+  /** The thread the plan was presented to; without one the card has no Approve. */
+  threadRef: ScopedThreadRef | null;
   onOpen: ((planId: string) => void) | null;
 }) {
   const { plan } = factoryPlan;
@@ -107,6 +198,7 @@ export const FactoryPlanCard = memo(function FactoryPlanCard({
           ))}
         </ol>
       </div>
+      {threadRef === null ? null : <FactoryPlanApprovalSection threadRef={threadRef} plan={plan} />}
     </div>
   );
 });

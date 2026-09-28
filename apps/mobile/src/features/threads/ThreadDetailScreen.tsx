@@ -58,6 +58,7 @@ import { scopedThreadKey } from "../../lib/scopedEntities";
 import type { PendingApproval, PendingUserInput, ThreadFeedEntry } from "../../lib/threadActivity";
 import { PendingApprovalCard } from "./PendingApprovalCard";
 import { useOpenFactoryPlan } from "../factory/useOpenFactoryPlan";
+import { useFactoryPlanApprovalContext } from "../factory/useFactoryPlanApproval";
 import { ComposerFeedback } from "./ComposerFeedback";
 import { ComposerUsageLimits } from "./ComposerUsageLimits";
 import { ThreadCreationFailedCard } from "./ThreadCreationFailedCard";
@@ -656,6 +657,13 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   }, []);
 
   const openFactoryPlan = useOpenFactoryPlan(props.environmentId, props.selectedThread.id);
+  const factoryPlanApproval = useFactoryPlanApprovalContext({
+    environmentId: props.environmentId,
+    thread: props.selectedThread,
+    feed: props.selectedThreadFeed,
+    queuedMessages: props.queuedMessages,
+    serverConfig: props.serverConfig,
+  });
 
   const handleUseArtifactTemplate = useCallback(
     (template: CodexArtifactTemplate) => {
@@ -770,6 +778,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
             skills={selectedProviderSkills}
             onUseArtifactTemplate={handleUseArtifactTemplate}
             onOpenFactoryPlan={openFactoryPlan}
+            factoryPlanApproval={factoryPlanApproval}
             loadEarlier={props.loadEarlier ?? null}
           />
         </BlurTargetView>
