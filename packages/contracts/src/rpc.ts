@@ -62,6 +62,11 @@ import {
   WorktreeSetupSubscribeInput,
 } from "./worktreeSetup.ts";
 import {
+  FactoryReadSnapshotError,
+  FactoryReadSnapshotInput,
+  FactoryReadSnapshotResult,
+} from "./factory.ts";
+import {
   GitActionProgressEvent,
   VcsSwitchRefInput,
   VcsSwitchRefResult,
@@ -299,6 +304,7 @@ export const WS_METHODS = {
   projectsRemove: "projects.remove",
   projectsListEntries: "projects.listEntries",
   projectsReadFile: "projects.readFile",
+  factoryReadSnapshot: "factory.readSnapshot",
   projectsSearchContents: "projects.searchContents",
   projectsSearchEntries: "projects.searchEntries",
   projectsWriteFile: "projects.writeFile",
@@ -1052,6 +1058,12 @@ const WsSubscribeVcsStatusRpc = Rpc.make(WS_METHODS.subscribeVcsStatus, {
   stream: true,
 });
 
+const WsFactoryReadSnapshotRpc = Rpc.make(WS_METHODS.factoryReadSnapshot, {
+  payload: FactoryReadSnapshotInput,
+  success: FactoryReadSnapshotResult,
+  error: Schema.Union([FactoryReadSnapshotError, EnvironmentAuthorizationError]),
+});
+
 const WsSubscribeProjectFileRpc = Rpc.make(WS_METHODS.subscribeProjectFile, {
   payload: ProjectReadFileInput,
   success: ProjectFileWatchEvent,
@@ -1568,6 +1580,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeWorktreeSetupRpc,
   WsWorktreeSetupCancelRpc,
   WsSubscribeProjectFileRpc,
+  WsFactoryReadSnapshotRpc,
   WsVcsPullRpc,
   WsVcsRefreshStatusRpc,
   WsGitRunStackedActionRpc,

@@ -47,6 +47,8 @@ export interface ServerDerivedPaths {
   readonly attachmentsDir: string;
   /** Screenshots the agent asks the collaborative browser to keep for the user. */
   readonly browserArtifactsDir: string;
+  /** Plan and report bytes the Software Factory presented, one file per sha256. */
+  readonly factorySnapshotsDir: string;
   readonly logsDir: string;
   readonly serverLogPath: string;
   readonly serverTracePath: string;
@@ -151,6 +153,7 @@ export const deriveServerPaths = Effect.fn(function* (
     worktreesDir: join(baseDir, "worktrees"),
     attachmentsDir,
     browserArtifactsDir: join(stateDir, "browser-artifacts"),
+    factorySnapshotsDir: join(stateDir, "factory-snapshots"),
     logsDir,
     serverLogPath: join(logsDir, "server.log"),
     serverTracePath: join(logsDir, "server.trace.ndjson"),

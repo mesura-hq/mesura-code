@@ -6987,6 +6987,52 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
   );
 
+  it.effect("routes websocket rpc factory.readSnapshot by digest and refuses anything else", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-factory-snapshot-" });
+      const { factorySnapshotsDir } = yield* ServerConfig.deriveServerPaths(baseDir, undefined);
+      const markdown = "# Plan: stored\n\n## Context\n\nExact bytes, accents included: é.\n";
+      const digest = NodeCrypto.createHash("sha256").update(markdown).digest("hex");
+      yield* fs.makeDirectory(factorySnapshotsDir, { recursive: true });
+      yield* fs.writeFileString(path.join(factorySnapshotsDir, digest), markdown);
+      // What a lookup that skipped the digest shape check would find and return.
+      yield* fs.writeFileString(path.join(factorySnapshotsDir, digest.toUpperCase()), "planted");
+
+      yield* buildAppUnderTest({ config: { baseDir } });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.all({
+            found: client[WS_METHODS.factoryReadSnapshot]({ digest }),
+            unknown: client[WS_METHODS.factoryReadSnapshot]({ digest: "0".repeat(64) }).pipe(
+              Effect.flip,
+            ),
+            uppercase: client[WS_METHODS.factoryReadSnapshot]({
+              digest: digest.toUpperCase(),
+            }).pipe(Effect.flip),
+            traversal: client[WS_METHODS.factoryReadSnapshot]({
+              digest: "../../userdata/state.sqlite",
+            }).pipe(Effect.flip),
+          }),
+        ),
+      );
+
+      assert.equal(response.found.markdown, markdown);
+      assert.include(response.unknown, { _tag: "FactoryReadSnapshotError", reason: "not-found" });
+      assert.include(response.uppercase, {
+        _tag: "FactoryReadSnapshotError",
+        reason: "invalid-digest",
+      });
+      assert.include(response.traversal, {
+        _tag: "FactoryReadSnapshotError",
+        reason: "invalid-digest",
+      });
+    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
+  );
+
   it.effect("routes websocket rpc projects.searchEntries excludes gitignored files", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

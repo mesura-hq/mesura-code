@@ -27,6 +27,10 @@
       "types": "./src/projectFavicon.ts",
       "import": "./src/projectFavicon.ts"
     },
+    "./factoryDocument": {
+      "types": "./src/factoryDocument.ts",
+      "import": "./src/factoryDocument.ts"
+    },
     "./model": {
       "types": "./src/model.ts",
       "import": "./src/model.ts"
