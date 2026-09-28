@@ -12,7 +12,8 @@ import { getTerminalFocusOwner } from "../lib/terminalFocus";
  * listener lives beside it rather than in ChatView, and the upstream header
  * carries one call to this hook and nothing else.
  *
- * `enabled` is false for drafts, which have no server thread to rename.
+ * `enabled` is false for drafts, which have no server thread to rename, and
+ * while the rename field is already open, so a second press does nothing.
  */
 export function useThreadRenameShortcut(input: {
   readonly keybindings: ResolvedKeybindingsConfig;

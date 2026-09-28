@@ -181,7 +181,11 @@ export const ChatHeader = memo(function ChatHeader({
     },
     [activeThreadEnvironmentId, activeThreadId, activeThreadTitle, updateThreadMetadata],
   );
-  useThreadRenameShortcut({ keybindings, enabled: isServerThread, onStartRename: startRename });
+  useThreadRenameShortcut({
+    keybindings,
+    enabled: isServerThread && renamingTitle === null,
+    onStartRename: startRename,
+  });
   const { openMenu, closeMenu } = useThreadActionMenu({
     threadRef: isServerThread ? activeThreadRef : null,
     projectCwd: activeProjectCwd,
