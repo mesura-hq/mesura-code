@@ -66,8 +66,25 @@ describe("ProviderSettingsForm helpers", () => {
       "binaryPath",
       "homePath",
       "autoCompactWindow",
+      "offerResumeCompaction",
       "launchArgs",
     ]);
+  });
+
+  it("stores the Claude resume compaction switch only when it is turned off", () => {
+    const claude = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("claudeAgent")];
+    const field = deriveProviderSettingsFields(claude!).find(
+      (candidate) => candidate.key === "offerResumeCompaction",
+    );
+    expect(field?.control).toBe("switch");
+    expect(field?.defaultBooleanValue).toBe(true);
+
+    expect(nextProviderConfigWithFieldValue({}, field!, false)).toEqual({
+      offerResumeCompaction: false,
+    });
+    expect(
+      nextProviderConfigWithFieldValue({ offerResumeCompaction: false }, field!, true),
+    ).toBeUndefined();
   });
 
   it("preserves unknown config keys while omitting empty configurable fields", () => {

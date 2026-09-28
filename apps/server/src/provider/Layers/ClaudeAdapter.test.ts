@@ -7059,6 +7059,38 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("keeps the full history without asking when resume compaction is off", () => {
+    const harness = makeHarness({ claudeConfig: { offerResumeCompaction: false } });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: RESUME_THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        resumeCursor: { resume: "550e8400-e29b-41d4-a716-446655440000" },
+        runtimeMode: "full-access",
+      });
+      yield* Stream.take(adapter.streamEvents, 3).pipe(Stream.runDrain);
+
+      const onUserDialog = harness.getLastCreateQueryInput()?.options.onUserDialog;
+      assert.equal(typeof onUserDialog, "function");
+      if (!onUserDialog) return;
+
+      const result = yield* Effect.promise(() =>
+        onUserDialog(
+          {
+            dialogKind: "resume_return",
+            payload: { sessionAgeMinutes: 145, estimatedTokens: 275123 },
+          },
+          { signal: new AbortController().signal, requestId: "request-dialog" },
+        ),
+      );
+      assert.deepEqual(result, { behavior: "completed", result: "continue" });
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("handles AskUserQuestion via user-input.requested/resolved lifecycle", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

@@ -678,9 +678,20 @@ export const ClaudeSettings = makeProviderSettingsSchema(
         },
       }),
     ),
+    // Mesura: one switch for both resume prompts, the composer banner and
+    // Claude Code's own `resume_return` dialog. Off keeps the full history.
+    offerResumeCompaction: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(true)),
+      Schema.annotateKey({
+        title: "Offer compaction on resume",
+        description:
+          "Suggest compacting a large session when you return to it after a long pause. Off keeps the full history without asking.",
+        providerSettingsForm: { control: "switch" },
+      }),
+    ),
   },
   {
-    order: ["binaryPath", "homePath", "autoCompactWindow", "launchArgs"],
+    order: ["binaryPath", "homePath", "autoCompactWindow", "offerResumeCompaction", "launchArgs"],
   },
 );
 export type ClaudeSettings = typeof ClaudeSettings.Type;
@@ -1339,6 +1350,7 @@ const ClaudeSettingsPatch = Schema.Struct({
   autoCompactWindow: Schema.optionalKey(
     TrimmedString.check(Schema.isPattern(CLAUDE_AUTO_COMPACT_WINDOW_PATTERN)),
   ),
+  offerResumeCompaction: Schema.optionalKey(Schema.Boolean),
 });
 
 const CursorSettingsPatch = Schema.Struct({
