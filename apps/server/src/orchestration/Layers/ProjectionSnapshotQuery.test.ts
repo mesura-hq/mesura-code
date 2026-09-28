@@ -4,6 +4,7 @@ import {
   ComposerContextId,
   CheckpointRef,
   EventId,
+  FACTORY_ACTIVITY_RETENTION_LIMIT,
   MessageId,
   ProjectId,
   ThreadId,
@@ -3184,6 +3185,67 @@ projectionSnapshotLayer("ProjectionSnapshotQuery windowed thread detail", (it) =
             rawOutput: { content: "failed output" },
           },
         });
+      }
+    }),
+  );
+
+  it.effect("keeps the newest Factory activities past the activity window within a bound", () =>
+    Effect.gen(function* () {
+      yield* seedFanOutThread();
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+      const factoryCount = FACTORY_ACTIVITY_RETENTION_LIMIT + 4;
+
+      yield* sql`DELETE FROM projection_thread_activities`;
+      // Factory activities first (sequence 1..20), then 500 newer tool rows.
+      yield* sql`
+        WITH RECURSIVE activity_rows(sequence) AS (
+          SELECT 1
+          UNION ALL
+          SELECT sequence + 1 FROM activity_rows WHERE sequence < ${factoryCount + 500}
+        )
+        INSERT INTO projection_thread_activities (
+          activity_id, thread_id, turn_id, tone, kind, summary, payload_json, sequence, created_at
+        )
+        SELECT
+          CASE
+            WHEN sequence <= ${factoryCount} THEN printf('factory-%04d', sequence)
+            ELSE printf('activity-%04d', sequence)
+          END,
+          'thread-w',
+          NULL,
+          'info',
+          CASE
+            WHEN sequence > ${factoryCount} THEN 'tool.completed'
+            WHEN sequence % 3 = 0 THEN 'factory.run'
+            WHEN sequence % 3 = 1 THEN 'factory.plan'
+            ELSE 'factory.report'
+          END,
+          'factory',
+          json_object('sequence', sequence),
+          sequence,
+          '2026-03-01T00:04:00.000Z'
+        FROM activity_rows
+      `;
+
+      const expectedFactoryIds = Array.from(
+        { length: FACTORY_ACTIVITY_RETENTION_LIMIT },
+        (_, index) => `factory-${String(index + 5).padStart(4, "0")}`,
+      );
+      const factoryIdsOf = (activities: ReadonlyArray<OrchestrationThreadActivity>) =>
+        activities.filter((activity) => activity.kind.startsWith("factory.")).map((a) => a.id);
+
+      const detail = yield* snapshotQuery.getThreadDetailById(threadW);
+      assert.equal(detail._tag, "Some");
+      if (detail._tag === "Some") {
+        assert.equal(detail.value.activities.length, 500 + FACTORY_ACTIVITY_RETENTION_LIMIT);
+        assert.deepStrictEqual(factoryIdsOf(detail.value.activities), expectedFactoryIds);
+      }
+
+      const snapshot = yield* snapshotQuery.getThreadDetailSnapshot(threadW);
+      assert.equal(snapshot._tag, "Some");
+      if (snapshot._tag === "Some") {
+        assert.deepStrictEqual(factoryIdsOf(snapshot.value.thread.activities), expectedFactoryIds);
       }
     }),
   );

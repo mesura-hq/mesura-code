@@ -10,6 +10,35 @@ import { Button } from "./ui/button";
 import { setMarkdownTaskChecked } from "./files/filePreviewMode";
 
 vi.mock("@effect/atom-react", () => ({ useAtomValue: () => null }));
+// A stand-in for the Mermaid library: counts imports so a spec can prove it
+// loads only when a diagram is shown, and fails on sources that do not parse.
+const mermaidStub = vi.hoisted(() => ({
+  imports: 0,
+  configs: [] as Array<Record<string, unknown>>,
+  rendered: [] as string[],
+  failOnce: false,
+}));
+vi.mock("mermaid", () => {
+  mermaidStub.imports += 1;
+  return {
+    default: {
+      initialize: (config: Record<string, unknown>) => mermaidStub.configs.push(config),
+      parse: async (source: string) => {
+        if (source.includes("-->>>")) throw new Error("Parse error on line 2: unexpected -->>>");
+        return true;
+      },
+      render: async (id: string, source: string) => {
+        if (source.includes("-->>>")) throw new Error("Parse error on line 2: unexpected -->>>");
+        if (mermaidStub.failOnce) {
+          mermaidStub.failOnce = false;
+          throw new Error("Temporary render failure");
+        }
+        mermaidStub.rendered.push(source);
+        return { svg: `<svg id="${id}" data-stub="mermaid-diagram"></svg>` };
+      },
+    },
+  };
+});
 vi.mock("../hooks/useTheme", () => ({ useTheme: () => ({ resolvedTheme: "dark" }) }));
 vi.mock("../hooks/useSettings", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../hooks/useSettings")>();
@@ -858,5 +887,92 @@ describe("ChatMarkdown Windows file links", () => {
     expect(html).not.toContain("javascript:");
     expect(html).not.toContain("d:alert");
     expect(html).not.toContain("chat-markdown-file-link");
+  });
+});
+
+describe("ChatMarkdown mermaid diagrams (phase 2 fence)", () => {
+  async function mount(text: string) {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    let renderer: ReactTestRenderer | undefined;
+    await act(async () => {
+      renderer = create(<ChatMarkdown cwd="/tmp/project" text={text} />);
+    });
+    await flushMermaidLoader();
+    return renderer!;
+  }
+
+  // The loader resolves on a later task than the commit that requested it.
+  async function flushMermaidLoader() {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+  }
+
+  it("draws a mermaid fence as a diagram in chat and loads mermaid only when one is shown", async () => {
+    try {
+      const plain = await mount("No diagram here, only `code`.");
+      await act(async () => plain.unmount());
+      expect(mermaidStub.imports).toBe(0);
+
+      const source = "flowchart LR\n  A --> B";
+      const diagram = await mount("```mermaid\n" + source + "\n```");
+      const output = JSON.stringify(diagram.toJSON());
+      await act(async () => diagram.unmount());
+      expect(mermaidStub.imports).toBe(1);
+      expect(mermaidStub.rendered).toContain(source);
+      expect(output).toContain('data-stub=\\"mermaid-diagram\\"');
+      expect(mermaidStub.configs.at(-1)).toMatchObject({ securityLevel: "strict", theme: "dark" });
+
+      const second = await mount("```mermaid\nflowchart TD\n  C --> D\n```");
+      await act(async () => second.unmount());
+      // The dynamic import is cached: a second diagram does not load mermaid again.
+      expect(mermaidStub.imports).toBe(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("shows a mermaid diagram's source and the parse error when it does not parse", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const source = "flowchart LR\n  A -->>> B";
+    const renderer = await mount("```mermaid\n" + source + "\n```");
+    try {
+      const output = JSON.stringify(renderer.toJSON());
+      expect(output).not.toContain('data-stub=\\"mermaid-diagram\\"');
+      expect(output).toContain("A -->>> B");
+      expect(output).toContain("Parse error on line 2: unexpected -->>>");
+    } finally {
+      await act(async () => renderer.unmount());
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("draws a mermaid diagram after Try again when its first render failed", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mermaidStub.failOnce = true;
+    const renderer = await mount("```mermaid\nflowchart LR\n  Retry --> Drawn\n```");
+    try {
+      expect(JSON.stringify(renderer.toJSON())).toContain("Temporary render failure");
+      const retry = renderer.root
+        .findAllByType(Button)
+        .find((instance) => instance.props.children === "Try again");
+      if (!retry) throw new Error("Missing Try again button");
+      await act(async () => {
+        (retry.props as ComponentProps<typeof Button>).onClick?.(
+          {} as Parameters<NonNullable<ComponentProps<typeof Button>["onClick"]>>[0],
+        );
+      });
+      await flushMermaidLoader();
+      const output = JSON.stringify(renderer.toJSON());
+      expect(output).not.toContain("Temporary render failure");
+      expect(output).toContain('data-stub=\\"mermaid-diagram\\"');
+    } finally {
+      await act(async () => renderer.unmount());
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
   });
 });

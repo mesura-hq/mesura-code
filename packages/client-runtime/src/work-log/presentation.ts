@@ -1,4 +1,5 @@
 import {
+  FACTORY_ACTIVITY_KINDS,
   isToolLifecycleItemType,
   type AssetResource,
   type RuntimeItemStatus,
@@ -22,6 +23,14 @@ export function isWorktreeSetupActivity(kind: string): boolean {
     kind === "setup-script.started" ||
     kind === "worktree-setup"
   );
+}
+
+/**
+ * Activities the Software Factory writes. Each has its own card (plan, run,
+ * report), so none of them is ever a work-log row.
+ */
+export function isFactoryActivity(kind: string): boolean {
+  return FACTORY_ACTIVITY_KINDS.includes(kind);
 }
 
 export type WorkLogToolLifecycleStatus = RuntimeItemStatus | "stopped";

@@ -10,6 +10,19 @@ import { IsoDateTime, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchema
 export const FACTORY_PLAN_ACTIVITY_KIND = "factory.plan";
 export const FACTORY_RUN_ACTIVITY_KIND = "factory.run";
 export const FACTORY_REPORT_ACTIVITY_KIND = "factory.report";
+export const FACTORY_ACTIVITY_KINDS: ReadonlyArray<string> = [
+  FACTORY_PLAN_ACTIVITY_KIND,
+  FACTORY_RUN_ACTIVITY_KIND,
+  FACTORY_REPORT_ACTIVITY_KIND,
+];
+
+/**
+ * How many of a thread's newest Factory activities the server keeps past its
+ * 500-activity window. A build buries its plan under about a thousand tool
+ * calls, and each activity is replaced in place by id, so a few ids per plan
+ * file and run cover a thread; the bound keeps a pathological thread finite.
+ */
+export const FACTORY_ACTIVITY_RETENTION_LIMIT = 16;
 
 /** The sha256 of a stored document, as 64 lowercase hex characters. */
 export const FACTORY_SNAPSHOT_DIGEST_PATTERN = /^[0-9a-f]{64}$/;

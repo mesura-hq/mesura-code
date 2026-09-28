@@ -1,6 +1,7 @@
 import {
   CommandId,
   EventId,
+  FACTORY_ACTIVITY_RETENTION_LIMIT,
   ProjectId,
   ProviderDriverKind,
   ThreadId,
@@ -1235,5 +1236,99 @@ describe("orchestration projector", () => {
       expect(thread?.activities).toHaveLength(501);
       expect(thread?.activities[0]?.id).toBe(`worktree-setup:${threadId}`);
     }),
+  );
+
+  effectIt.effect(
+    "keeps the newest Factory plan, run and report activities past the activity retention cap",
+    () =>
+      Effect.gen(function* () {
+        const threadId = "thread-factory-retained";
+        const at = (sequence: number) =>
+          `2026-03-01T10:${String(Math.floor(sequence / 60)).padStart(2, "0")}:${String(sequence % 60).padStart(2, "0")}.000Z`;
+        const activityEvent = (sequence: number, id: string, kind: string, payload = {}) =>
+          makeEvent({
+            sequence,
+            type: "thread.activity-appended",
+            aggregateKind: "thread",
+            aggregateId: threadId,
+            occurredAt: at(sequence),
+            commandId: `cmd-factory-activity-${sequence}`,
+            payload: {
+              threadId,
+              activity: {
+                id,
+                tone: "info",
+                kind,
+                summary: kind,
+                payload,
+                turnId: null,
+                createdAt: at(sequence),
+              },
+            },
+          });
+        const seed = (factoryActivities: ReadonlyArray<readonly [string, string, object?]>) =>
+          Effect.gen(function* () {
+            let model = yield* projectEvent(
+              createEmptyReadModel(at(0)),
+              makeEvent({
+                sequence: 1,
+                type: "thread.created",
+                aggregateKind: "thread",
+                aggregateId: threadId,
+                occurredAt: at(1),
+                commandId: "cmd-create-factory-retained",
+                payload: {
+                  threadId,
+                  projectId: "project-1",
+                  title: "factory retained",
+                  modelSelection: {
+                    provider: ProviderDriverKind.make("codex"),
+                    model: "gpt-5-codex",
+                  },
+                  runtimeMode: "full-access",
+                  branch: null,
+                  worktreePath: null,
+                  createdAt: at(1),
+                  updatedAt: at(1),
+                },
+              }),
+            );
+            let sequence = 2;
+            for (const [id, kind, payload] of factoryActivities) {
+              model = yield* projectEvent(model, activityEvent(sequence++, id, kind, payload));
+            }
+            for (let index = 0; index < 600; index += 1) {
+              model = yield* projectEvent(
+                model,
+                activityEvent(sequence++, `tool-${index}`, "tool.completed"),
+              );
+            }
+            return model.threads.find((entry) => entry.id === threadId)?.activities ?? [];
+          });
+
+        // A revised plan replaces its activity in place: one card per plan file survives.
+        const cards = yield* seed([
+          ["factory-plan:plan-md", "factory.plan", { revision: 1 }],
+          ["factory-run:run-1", "factory.run"],
+          ["factory-plan:plan-md", "factory.plan", { revision: 2 }],
+          ["factory-report:run-1", "factory.report"],
+        ]);
+        expect(cards).toHaveLength(503);
+        expect(cards.slice(0, 3).map((activity) => [activity.id, activity.payload])).toEqual([
+          ["factory-run:run-1", {}],
+          ["factory-plan:plan-md", { revision: 2 }],
+          ["factory-report:run-1", {}],
+        ]);
+
+        // The retention is bounded: only the newest Factory activities outlive the window.
+        const many = yield* seed(
+          Array.from({ length: FACTORY_ACTIVITY_RETENTION_LIMIT + 4 }, (_, index) => [
+            `factory-plan:${index}`,
+            "factory.plan",
+          ]),
+        );
+        expect(many).toHaveLength(500 + FACTORY_ACTIVITY_RETENTION_LIMIT);
+        expect(many[0]?.id).toBe("factory-plan:4");
+      }),
   );
 });

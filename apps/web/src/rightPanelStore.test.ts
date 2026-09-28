@@ -918,3 +918,71 @@ describe("rightPanelStore", () => {
     ).toEqual(["terminal:term-1", "browser:tab-b", "browser:tab-c"]);
   });
 });
+
+describe("right panel state persisted before the Factory surface (phase 2 guards)", () => {
+  const storageKey = "t3code:right-panel-state:v2";
+  const v13ThreadState = {
+    isOpen: true,
+    activeSurfaceId: "agents",
+    surfaces: [
+      { id: "browser:tab-a", kind: "preview", resourceId: "tab-a" },
+      { id: "diff", kind: "diff" },
+      { id: "files", kind: "files" },
+      {
+        id: "file:src/main.ts",
+        kind: "file",
+        relativePath: "src/main.ts",
+        revealLine: 12,
+        revealRequestId: 3,
+      },
+      {
+        id: "terminal:term-1",
+        kind: "terminal",
+        resourceId: "term-1",
+        terminalIds: ["term-1", "term-2"],
+        activeTerminalId: "term-2",
+        splitDirection: "vertical",
+      },
+      pullRequestSurface({ projectId: "project-1", repository: "owner/repo", number: 7 }),
+      { id: "pull-requests", kind: "pull-requests" },
+      { id: "agents", kind: "agents" },
+      { id: "device", kind: "device" },
+    ],
+  };
+
+  it("loads right panel state persisted under storage version 13 unchanged", async () => {
+    const storage = useRightPanelStore.persist.getOptions().storage!;
+    await storage.setItem(storageKey, {
+      state: { byThreadKey: { "env-1:thread-A": v13ThreadState } },
+      version: 13,
+    });
+
+    await useRightPanelStore.persist.rehydrate();
+
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual(
+      v13ThreadState,
+    );
+    await storage.removeItem(storageKey);
+  });
+
+  it("keeps a persisted Factory surface through the storage migration", () => {
+    const threadState = {
+      isOpen: true,
+      activeSurfaceId: "factory",
+      surfaces: [
+        { id: "diff", kind: "diff" },
+        {
+          id: "factory",
+          kind: "factory",
+          tab: "plan",
+          planId: "factory-plan:plan-md",
+          runId: null,
+        },
+      ],
+    };
+
+    expect(
+      migratePersistedRightPanelState({ byThreadKey: { "env-1:thread-A": threadState } }),
+    ).toEqual({ byThreadKey: { "env-1:thread-A": threadState } });
+  });
+});

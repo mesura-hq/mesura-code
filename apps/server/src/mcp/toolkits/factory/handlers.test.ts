@@ -582,9 +582,11 @@ it.layer(NodeServices.layer)("factory toolkit present_plan", (it) => {
             "What I read before planning",
           ],
         });
-        const phases = (activity?.payload as { readonly phases: ReadonlyArray<unknown> }).phases;
+        const phases = (
+          activity?.payload as { readonly phases: ReadonlyArray<unknown> } | undefined
+        )?.phases;
         expect(phases).toHaveLength(11);
-        expect(phases[0]).toEqual({
+        expect(phases?.[0]).toEqual({
           title: "Snapshot a plan and present it to the thread",
           acceptanceCount: 8,
         });

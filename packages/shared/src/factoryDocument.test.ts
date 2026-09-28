@@ -3,7 +3,12 @@ import * as NodeFS from "node:fs";
 
 import { describe, expect, it } from "vite-plus/test";
 
-import { readFactoryPhases, splitFactoryDocument } from "./factoryDocument.ts";
+import {
+  readFactoryPhases,
+  splitFactoryArchitecture,
+  splitFactoryDecisions,
+  splitFactoryDocument,
+} from "./factoryDocument.ts";
 
 // A plan exactly as the planning skill wrote it; the formatter skips the fixtures directory.
 const factoryInChatPlan = NodeFS.readFileSync(
@@ -181,5 +186,116 @@ describe("readFactoryPhases", () => {
       if (result.ok) continue;
       expect(result.reason.trim().length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("splitFactoryArchitecture", () => {
+  it("keeps a wrapped legend entry's continuation lines in the entry", () => {
+    const architecture = splitFactoryArchitecture(
+      [
+        "The reading.",
+        "",
+        "- `TR` — the service that tails the events",
+        "  and folds them into the run state",
+        "- `PANE` — the Factory surface",
+        "",
+        "Legend: highlighted boxes are new.",
+      ].join("\n"),
+    );
+
+    expect(architecture.legend).toEqual([
+      { id: "TR", text: "the service that tails the events and folds them into the run state" },
+      { id: "PANE", text: "the Factory surface" },
+    ]);
+    expect(architecture.body).toBe("The reading.\n\n\nLegend: highlighted boxes are new.");
+  });
+
+  it("leaves a legend-shaped line inside a fence in the body", () => {
+    const architecture = splitFactoryArchitecture(
+      ["```text", "- `SP` — not a legend entry", "```", "- `ST` — the coordinator"].join("\n"),
+    );
+
+    expect(architecture.legend).toEqual([{ id: "ST", text: "the coordinator" }]);
+    expect(architecture.body).toBe("```text\n- `SP` — not a legend entry\n```");
+  });
+
+  it("reads an unclosed mermaid fence to the end of the section as the diagram", () => {
+    const architecture = splitFactoryArchitecture(
+      ["Before.", "```mermaid", "flowchart LR", "  A --> B"].join("\n"),
+    );
+
+    expect(architecture.diagram).toBe("flowchart LR\n  A --> B");
+    expect(architecture.body).toBe("Before.");
+  });
+
+  it("keeps edge legend lines in the body and draws only the first mermaid fence", () => {
+    const architecture = splitFactoryArchitecture(
+      [
+        "```mermaid",
+        "flowchart LR",
+        "```",
+        "- `A -> B` — the edge a reader could not guess",
+        "```mermaid",
+        "flowchart TD",
+        "```",
+      ].join("\n"),
+    );
+
+    expect(architecture.diagram).toBe("flowchart LR");
+    expect(architecture.legend).toEqual([]);
+    expect(architecture.body).toBe(
+      "- `A -> B` — the edge a reader could not guess\n```mermaid\nflowchart TD\n```",
+    );
+  });
+
+  it("returns no diagram for an architecture section without a mermaid fence", () => {
+    expect(splitFactoryArchitecture("Only prose.")).toEqual({
+      diagram: null,
+      body: "Only prose.",
+      legend: [],
+    });
+  });
+});
+
+describe("splitFactoryDecisions", () => {
+  it("folds list, quote and fenced paragraphs into the argument of the decision above", () => {
+    const decisions = splitFactoryDecisions(
+      [
+        "The events file is the only record.",
+        "Two records drift.",
+        "",
+        "- the ledger is generated",
+        "- notes keep free prose",
+        "",
+        "```json",
+        '{ "v": 1 }',
+        "",
+        "```",
+        "",
+        "Mermaid is pinned.",
+      ].join("\n"),
+    );
+
+    expect(decisions).toEqual([
+      {
+        verdict: "The events file is the only record.",
+        argument:
+          'Two records drift.\n\n- the ledger is generated\n- notes keep free prose\n\n```json\n{ "v": 1 }\n\n```',
+      },
+      { verdict: "Mermaid is pinned.", argument: "" },
+    ]);
+  });
+
+  it("starts a new decision at every prose paragraph, its first line the verdict", () => {
+    expect(splitFactoryDecisions("First verdict.\nWhy.\n\nSecond verdict.\nWhy not.")).toEqual([
+      { verdict: "First verdict.", argument: "Why." },
+      { verdict: "Second verdict.", argument: "Why not." },
+    ]);
+  });
+
+  it("reads no decisions from a section with no verdict line", () => {
+    expect(splitFactoryDecisions("")).toEqual([]);
+    expect(splitFactoryDecisions("\n  \n")).toEqual([]);
+    expect(splitFactoryDecisions("- a list\n- with no verdict\n\nThen prose.")).toEqual([]);
   });
 });

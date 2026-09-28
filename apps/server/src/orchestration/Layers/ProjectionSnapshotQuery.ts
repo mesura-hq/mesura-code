@@ -2,6 +2,8 @@ import {
   AgentSessionImportSource,
   ApprovalRequestId,
   ChatAttachment,
+  FACTORY_ACTIVITY_KINDS,
+  FACTORY_ACTIVITY_RETENTION_LIMIT,
   OrchestrationMessageContext,
   CheckpointRef,
   IsoDateTime,
@@ -1859,11 +1861,22 @@ pending_approval_requests AS (
           FROM user_input_lifecycle
           WHERE request_order = 1
             AND kind = 'user-input.requested'
+          UNION ALL
+          SELECT activity_id
+          FROM (
+            SELECT activity_id
+            FROM projection_thread_activities
+            WHERE thread_id = ${threadId}
+              AND ${sql.in("kind", FACTORY_ACTIVITY_KINDS)}
+            ORDER BY sequence DESC, created_at DESC, activity_id DESC
+            LIMIT ${FACTORY_ACTIVITY_RETENTION_LIMIT}
+          )
         )
   `;
 
   // Blocking request payloads must remain available even if they predate the
-  // recent activity window. Each CTE returns at most one unresolved row per
+  // recent activity window, and so must the newest Factory plan, run and report
+  // cards (bounded by FACTORY_ACTIVITY_RETENTION_LIMIT, matching the projector). Each CTE returns at most one unresolved row per
   // request, so the merge below stays bounded by actionable work.
   const listPinnedThreadActivityRowsByThread = SqlSchema.findAll({
     Request: ThreadIdLookupInput,

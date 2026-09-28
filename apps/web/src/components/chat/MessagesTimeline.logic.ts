@@ -32,6 +32,7 @@ import {
 } from "../../session-logic";
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
 import type { QueuedComposerMessage } from "../../queuedMessageStore";
+import type { FactoryPlanTimelineItem } from "../../factory/factoryPlanTimeline";
 import {
   type MessageId,
   type OrchestrationLatestTurn,
@@ -392,6 +393,12 @@ export type MessagesTimelineRow =
       proposedPlan: ProposedPlan;
     }
   | {
+      kind: "factory-plan";
+      id: string;
+      createdAt: string;
+      factoryPlan: FactoryPlanTimelineItem;
+    }
+  | {
       kind: "working";
       id: string;
       createdAt: string | null;
@@ -551,6 +558,10 @@ function timelineEntryTurnId(entry: TimelineEntry): TurnId | null {
   }
   if (entry.kind === "proposed-plan") {
     return entry.proposedPlan.turnId;
+  }
+  // A plan card belongs to no turn, so a turn fold never hides it.
+  if (entry.kind === "factory-plan") {
+    return null;
   }
   return entry.kind === "work" ? (entry.entry.turnId ?? null) : null;
 }
@@ -1258,6 +1269,16 @@ function deriveMessagesTimelineRowsWithoutPending(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "factory-plan") {
+      nextRows.push({
+        kind: "factory-plan",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        factoryPlan: timelineEntry.factoryPlan,
+      });
+      continue;
+    }
+
     const assistantResponseStillInProgress =
       timelineEntry.message.role === "assistant" &&
       timelineEntry.message.turnId !== null &&
@@ -1552,6 +1573,8 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
 
     case "proposed-plan":
       return a.proposedPlan === (b as typeof a).proposedPlan;
+    case "factory-plan":
+      return a.factoryPlan === (b as typeof a).factoryPlan;
 
     case "queued-message": {
       const bq = b as typeof a;

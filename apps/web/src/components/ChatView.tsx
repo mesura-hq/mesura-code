@@ -178,6 +178,8 @@ import {
   type RightPanelSurface,
   useRightPanelStore,
 } from "../rightPanelStore";
+import { deriveFactoryPlanTimelineItems } from "../factory/factoryPlanTimeline";
+import { openFactoryPlanInRightPanel } from "../factory/factoryRightPanel";
 import {
   isPreviewSupportedInRuntime,
   setActivePreviewTab,
@@ -617,6 +619,7 @@ const DevicePanel = lazy(() =>
   import("./device/DevicePanel").then((module) => ({ default: module.DevicePanel })),
 );
 const FilePreviewPanel = lazy(() => import("./files/FilePreviewPanel"));
+const FactoryPane = lazy(() => import("../factory/FactoryPane"));
 const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
 const TYPE_TO_FOCUS_EDITABLE_SELECTOR = [
   "input",
@@ -2935,6 +2938,10 @@ export default function ChatView(props: ChatViewProps) {
     [threadActivities],
   );
   const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities]);
+  const factoryPlans = useMemo(
+    () => deriveFactoryPlanTimelineItems(threadActivities),
+    [threadActivities],
+  );
   // Native subagent fold: memoized by activity-list identity, shared by the
   // Agents surface, live strip, and workflow cards. v2Projection is null
   // until orchestration-v2 lands (source precedence lives in the derive).
@@ -3450,6 +3457,7 @@ export default function ChatView(props: ChatViewProps) {
       activeThread?.proposedPlans ?? [],
       workLogEntries,
       previous?.threadKey === activeThreadKey ? previous.projection : null,
+      factoryPlans,
     );
     timelineProjectionRef.current = { threadKey: activeThreadKey, projection };
     return projection.entries;
@@ -3459,6 +3467,7 @@ export default function ChatView(props: ChatViewProps) {
     activeThread?.proposedPlans,
     timelineMessages,
     workLogEntries,
+    factoryPlans,
   ]);
   const displayedTimeline = resolveThreadSwitchTimeline({
     loading: timelineEntries.length === 0 && threadSyncPhase !== null,
@@ -4497,6 +4506,23 @@ export default function ChatView(props: ChatViewProps) {
     activeThreadRef?.environmentId ?? null,
   );
   const [deviceSetupThread, setDeviceSetupThread] = useState<ScopedThreadRef | null>(null);
+  const addFactorySurface = useCallback(() => {
+    if (!activeThreadRef) return;
+    useRightPanelStore.getState().open(activeThreadRef, "factory");
+  }, [activeThreadRef]);
+  const openFactoryPlan = useCallback(
+    (planId: string) => {
+      if (!activeThreadRef) return;
+      openFactoryPlanInRightPanel({
+        ref: activeThreadRef,
+        planId,
+        maximizeKey: routeThreadKey,
+        useRightPanelSheet: shouldUseRightPanelSheet,
+        setMaximizedRightPanelThreadKey,
+      });
+    },
+    [activeThreadRef, routeThreadKey, shouldUseRightPanelSheet],
+  );
   const addDeviceSurface = useCallback(() => {
     if (!activeThreadRef) return;
     if (!deviceState.onboardingCompleted || deviceState.hostStatus === "disabled") {
@@ -9325,6 +9351,15 @@ export default function ChatView(props: ChatViewProps) {
         environmentId={activeThreadRef?.environmentId ?? null}
         threadId={activeThreadRef?.threadId ?? null}
       />
+    ) : renderedRightPanelSurface?.kind === "factory" ? (
+      <Suspense fallback={null}>
+        <FactoryPane
+          surface={renderedRightPanelSurface}
+          factoryPlans={factoryPlans}
+          environmentId={activeThreadRef.environmentId}
+          cwd={gitCwd ?? undefined}
+        />
+      </Suspense>
     ) : renderedRightPanelSurface?.kind === "device" ? (
       <Suspense fallback={null}>
         <DevicePanel
@@ -9522,6 +9557,7 @@ export default function ChatView(props: ChatViewProps) {
                       onCiteAssistantText: citeAssistantText,
                       agentPanelModel,
                       onOpenAgents: addAgentsSurface,
+                      onOpenFactoryPlan: openFactoryPlan,
                       onUseArtifactTemplate: useArtifactTemplate,
                     }
                   : {})}
@@ -9981,6 +10017,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddPullRequest={addPullRequestSurface}
           onAddPullRequests={addPullRequestsSurface}
           onAddAgents={addAgentsSurface}
+          onAddFactory={factoryPlans.length > 0 ? addFactorySurface : undefined}
           onAddDevice={addDeviceSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
           terminalAvailable={activeProject !== null}
@@ -10039,6 +10076,7 @@ export default function ChatView(props: ChatViewProps) {
             onAddPullRequest={addPullRequestSurface}
             onAddPullRequests={addPullRequestsSurface}
             onAddAgents={addAgentsSurface}
+            onAddFactory={factoryPlans.length > 0 ? addFactorySurface : undefined}
             onAddDevice={addDeviceSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
             terminalAvailable={activeProject !== null}

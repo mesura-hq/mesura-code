@@ -193,3 +193,144 @@ export function readFactoryPhases(
   }
   return { ok: true, phases };
 }
+
+export interface FactoryLegendEntry {
+  /** The diagram node the entry names, e.g. `SP`. */
+  readonly id: string;
+  readonly text: string;
+}
+
+export interface FactoryArchitecture {
+  /** The first `mermaid` fence's source, or null when the section has none. */
+  readonly diagram: string | null;
+  /** The section without the diagram and without its legend lines. */
+  readonly body: string;
+  readonly legend: ReadonlyArray<FactoryLegendEntry>;
+}
+
+// The legend grammar of the plan page (`lib/flow/plan-html.ts` in the Pi
+// checkout), so a plan reads the same in the app as on its page.
+const LEGEND_NODE_LINE = /^[-*+]\s+`([A-Za-z0-9_]+)`\s+[—-]\s+(.+)$/;
+const LIST_ITEM_START = /^\s*[-*+]\s+/;
+/** Block openers that interrupt a paragraph, so they never continue a legend entry. */
+const BLOCK_START =
+  /^\s*(?:#{1,6}\s|>|\d+[.)]\s|<[A-Za-z!/?]|(?:-\s*){3,}$|(?:\*\s*){3,}$|(?:_\s*){3,}$|=+\s*$|-+\s*$)/;
+
+/** Markdown's lazy continuation: a non-blank line that opens no block belongs to the item above. */
+function continuesListItem(line: string): boolean {
+  if (line.trim() === "") return false;
+  return !LIST_ITEM_START.test(line) && !BLOCK_START.test(line);
+}
+
+/**
+ * Lifts the diagram and the `- \`NODE\` — what it is` legend out of an
+ * architecture section, leaving the reading prose in order. A wrapped legend
+ * entry keeps its continuation lines; lines inside fences are never legend.
+ */
+export function splitFactoryArchitecture(body: string): FactoryArchitecture {
+  const kept: Array<string> = [];
+  const legend: Array<{ id: string; text: string }> = [];
+  let diagram: string | null = null;
+  let captured: Array<string> | null = null;
+  let open: OpenFence | null = null;
+  let entry: { id: string; text: string } | null = null;
+  for (const line of body.split(/\r?\n/)) {
+    if (open !== null) {
+      const closing = closesFence(line, open);
+      if (closing) open = null;
+      if (captured !== null) {
+        if (!closing) captured.push(line);
+        else {
+          diagram = captured.join("\n");
+          captured = null;
+        }
+        continue;
+      }
+      kept.push(line);
+      continue;
+    }
+    const opened = fenceOpenedBy(line);
+    if (opened !== null) {
+      entry = null;
+      open = opened;
+      const isMermaid = opened.info.split(/\s+/)[0]!.toLowerCase() === "mermaid";
+      if (isMermaid && diagram === null) captured = [];
+      else kept.push(line);
+      continue;
+    }
+    if (entry !== null && continuesListItem(line)) {
+      entry.text = `${entry.text} ${line.trim()}`;
+      continue;
+    }
+    entry = null;
+    const node = LEGEND_NODE_LINE.exec(line);
+    if (node !== null) {
+      entry = { id: node[1]!, text: node[2]!.trim() };
+      legend.push(entry);
+      continue;
+    }
+    kept.push(line);
+  }
+  // An unclosed diagram fence runs to the end of the section, as markdown reads it.
+  if (captured !== null) diagram = captured.join("\n");
+  return { diagram, body: kept.join("\n").trim(), legend };
+}
+
+export interface FactoryDecision {
+  /** The decision's first line, which the plan contract keeps a verdict on its own. */
+  readonly verdict: string;
+  /** Everything after the verdict up to the next decision, folded behind it. */
+  readonly argument: string;
+}
+
+/** A paragraph that opens a block rather than prose: it continues an argument. */
+const CONTINUATION_START = /^(?:\s|[-*+]\s|\d+[.)]\s|>)/;
+
+/** Paragraphs of a section, split on blank lines outside fenced code. */
+function paragraphsOf(body: string): ReadonlyArray<ReadonlyArray<string>> {
+  const paragraphs: Array<Array<string>> = [];
+  let current: Array<string> = [];
+  let open: OpenFence | null = null;
+  for (const line of body.split(/\r?\n/)) {
+    if (open === null && line.trim() === "") {
+      if (current.length > 0) paragraphs.push(current);
+      current = [];
+      continue;
+    }
+    if (open !== null) {
+      if (closesFence(line, open)) open = null;
+    } else {
+      open = fenceOpenedBy(line);
+    }
+    current.push(line);
+  }
+  if (current.length > 0) paragraphs.push(current);
+  return paragraphs;
+}
+
+/**
+ * One decision per prose paragraph of a `Decisions` section: its first line is
+ * the verdict, the rest its argument. A paragraph that opens a list, a quote,
+ * a fence or an indented block continues the argument above it. A section
+ * whose first paragraph is not prose has no verdict to fold under, and yields
+ * no decisions, so the caller shows it as plain markdown.
+ */
+export function splitFactoryDecisions(body: string): ReadonlyArray<FactoryDecision> {
+  const decisions: Array<{ verdict: string; argument: Array<string> }> = [];
+  for (const paragraph of paragraphsOf(body)) {
+    const first = paragraph[0]!;
+    const continues = CONTINUATION_START.test(first) || fenceOpenedBy(first) !== null;
+    if (continues) {
+      const previous = decisions[decisions.length - 1];
+      if (previous === undefined) return [];
+      previous.argument.push(paragraph.join("\n"));
+      continue;
+    }
+    const rest = paragraph.slice(1).join("\n").trim();
+    decisions.push({ verdict: first.trim(), argument: rest === "" ? [] : [rest] });
+  }
+  return decisions.map((decision) => ({
+    verdict: decision.verdict,
+    argument: decision.argument.join("\n\n"),
+  }));
+}

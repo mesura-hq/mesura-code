@@ -13,6 +13,7 @@ import {
   commandDetailRepeatsCommand,
   extractCommandOutputText,
   extractWorkLogToolLifecycleStatus,
+  isFactoryActivity,
   isWorktreeSetupActivity,
   workEntryIndicatesToolFailure,
   workEntryIndicatesToolSuccess,
@@ -31,6 +32,8 @@ import {
   type TurnId,
 } from "@t3tools/contracts";
 import { contextCompactionActivityDetailFromHistory } from "@t3tools/shared/timelineActivity";
+
+import type { FactoryPlanTimelineItem } from "./factory/factoryPlanTimeline";
 
 import {
   isImageAttachment,
@@ -150,12 +153,19 @@ export type TimelineEntry =
       kind: "work";
       createdAt: string;
       entry: WorkLogEntry;
+    }
+  | {
+      id: string;
+      kind: "factory-plan";
+      createdAt: string;
+      factoryPlan: FactoryPlanTimelineItem;
     };
 
 export interface TimelineEntriesProjection {
   readonly messages: ReadonlyArray<ChatMessage>;
   readonly proposedPlans: ReadonlyArray<ProposedPlan>;
   readonly workEntries: ReadonlyArray<WorkLogEntry>;
+  readonly factoryPlans: ReadonlyArray<FactoryPlanTimelineItem>;
   readonly entries: TimelineEntry[];
 }
 
@@ -475,6 +485,7 @@ export function deriveWorkLogEntries(
     ) {
       continue;
     }
+    if (isFactoryActivity(activity.kind)) continue;
     if (activity.kind === "tool.started") continue;
     // Agent task.started rows are CTA seeds: they carry the true spawn turn,
     // which is the batch key (completions of background subagents arrive
@@ -1471,6 +1482,15 @@ function timelineEntryFromProposedPlan(proposedPlan: ProposedPlan): TimelineEntr
   };
 }
 
+function timelineEntryFromFactoryPlan(factoryPlan: FactoryPlanTimelineItem): TimelineEntry {
+  return {
+    id: factoryPlan.id,
+    kind: "factory-plan",
+    createdAt: factoryPlan.createdAt,
+    factoryPlan,
+  };
+}
+
 function timelineEntryFromWork(workEntry: WorkLogEntry): TimelineEntry {
   return {
     id: workEntry.id,
@@ -1492,6 +1512,8 @@ function timelineEntrySourceOrder(entry: TimelineEntry): number {
       return 1;
     case "work":
       return 2;
+    case "factory-plan":
+      return 3;
   }
 }
 
@@ -1678,16 +1700,19 @@ export function deriveTimelineEntriesWithState(
   proposedPlans: ReadonlyArray<ProposedPlan>,
   workEntries: ReadonlyArray<WorkLogEntry>,
   previous: TimelineEntriesProjection | null = null,
+  factoryPlans: ReadonlyArray<FactoryPlanTimelineItem> = [],
 ): TimelineEntriesProjection {
   if (
     previous !== null &&
     previous.proposedPlans.length === proposedPlans.length &&
     previous.workEntries.length === workEntries.length &&
+    previous.factoryPlans.length === factoryPlans.length &&
     hasExactArrayPrefix(previous.proposedPlans, proposedPlans) &&
-    hasExactArrayPrefix(previous.workEntries, workEntries)
+    hasExactArrayPrefix(previous.workEntries, workEntries) &&
+    hasExactArrayPrefix(previous.factoryPlans, factoryPlans)
   ) {
     const entries = replaceStreamingTimelineMessages(messages, previous);
-    if (entries !== null) return { messages, proposedPlans, workEntries, entries };
+    if (entries !== null) return { messages, proposedPlans, workEntries, factoryPlans, entries };
   }
   const foldedAnswerMessageIds = new Set(
     workEntries.flatMap((entry) =>
@@ -1701,7 +1726,8 @@ export function deriveTimelineEntriesWithState(
     !previous.entries.some((entry) => entry.kind === "message" && !showMessage(entry.message)) &&
     hasExactArrayPrefix(previous.messages, messages) &&
     hasExactArrayPrefix(previous.proposedPlans, proposedPlans) &&
-    hasExactArrayPrefix(previous.workEntries, workEntries);
+    hasExactArrayPrefix(previous.workEntries, workEntries) &&
+    hasExactArrayPrefix(previous.factoryPlans, factoryPlans);
 
   if (canAppend) {
     const messageRows = messages
@@ -1712,13 +1738,17 @@ export function deriveTimelineEntriesWithState(
       .slice(previous.proposedPlans.length)
       .map(timelineEntryFromProposedPlan);
     const workRows = workEntries.slice(previous.workEntries.length).map(timelineEntryFromWork);
-    const suffix = [...messageRows, ...proposedPlanRows, ...workRows].toSorted(
+    const factoryPlanRows = factoryPlans
+      .slice(previous.factoryPlans.length)
+      .map(timelineEntryFromFactoryPlan);
+    const suffix = [...messageRows, ...proposedPlanRows, ...workRows, ...factoryPlanRows].toSorted(
       compareTimelineEntriesByCreatedAt,
     );
     return {
       messages,
       proposedPlans,
       workEntries,
+      factoryPlans,
       entries: mergeTimelineEntrySuffix(previous.entries, suffix),
     };
   }
@@ -1726,11 +1756,13 @@ export function deriveTimelineEntriesWithState(
   const messageRows = messages.filter(showMessage).map(timelineEntryFromMessage);
   const proposedPlanRows = proposedPlans.map(timelineEntryFromProposedPlan);
   const workRows = workEntries.map(timelineEntryFromWork);
+  const factoryPlanRows = factoryPlans.map(timelineEntryFromFactoryPlan);
   return {
     messages,
     proposedPlans,
     workEntries,
-    entries: [...messageRows, ...proposedPlanRows, ...workRows].toSorted(
+    factoryPlans,
+    entries: [...messageRows, ...proposedPlanRows, ...workRows, ...factoryPlanRows].toSorted(
       compareTimelineEntriesByCreatedAt,
     ),
   };
