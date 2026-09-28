@@ -31,6 +31,8 @@ Use `alt+e` for effort, `mod+shift+a` for access mode, `mod+shift+x` for the
 workspace, and `mod+shift+g` for the Git branch. The workspace menu includes the
 current checkout, a new worktree, and the previous worktree when available.
 Use `mod+shift+l` to reuse the previous worktree directly.
+Use `mod+alt+a` to attach files. `alt+a` does the same where your desktop
+does not keep `Alt+A` for itself.
 
 In the model picker, press Left in an empty search field or Shift+Tab to reach
 the provider list. Use Up/Down to move and Enter to choose. Right returns to
@@ -275,6 +277,12 @@ Three defaults moved to make room, and an existing config is rewritten on the ne
 Inside a terminal, `Ctrl+L` no longer clears the screen, because it now moves to the right panel.
 Type `clear` instead.
 
+### Renaming a thread
+
+`thread.rename` opens the open thread's title for editing, the same field a double-click on the
+title opens, and defaults to `mod+alt+r`. `Enter` saves and `Escape` cancels. A thread you have not
+sent a message to yet has no title to rename, so the shortcut does nothing there.
+
 ### Settling a thread
 
 `thread.toggleSettled` settles the open thread, or brings a settled one back to Active, and
@@ -338,8 +346,8 @@ The file manager gets `mod+shift+e` back and keeps `mod+alt+e`. The effort short
 put on `mod+shift+e` is removed, because `alt+e` opens the same picker. Both changes happen once, on
 the next start: bind either chord again afterwards and your choice stays.
 
-`alt+m` for the model picker, the `ctrl+tab` pair for thread navigation, and `j` and `k` for the
-sidebar's list are second defaults for commands your file already binds, so they are added once on
+`alt+m` for the model picker, the `ctrl+tab` pair for thread navigation, `j` and `k` for the
+sidebar's list, and `mod+alt+a` for attaching files are second defaults for commands your file already binds, so they are added once on
 that same start. If any of those keys is already yours, that one is skipped and your rule stands.
 
 The full command list and the current defaults are shown in **Settings** → **Keybindings**, which
