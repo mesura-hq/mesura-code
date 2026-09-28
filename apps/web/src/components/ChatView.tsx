@@ -259,6 +259,7 @@ import {
   useEnvironmentSettings,
 } from "../hooks/useSettings";
 import { useNowMinute } from "../hooks/useNowMinute";
+import { isResumeCompactionOffered } from "./chat/resumeCompactionSetting";
 import { usePanelAnimationSettings, usePanelPresence } from "../panelAnimations";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useRemoveClonedProject } from "../hooks/useRemoveClonedProject";
@@ -6300,8 +6301,10 @@ export default function ChatView(props: ChatViewProps) {
         ? "Compaction is unavailable for this provider"
         : "Compacting is unavailable right now"
     : null;
+  const resumeCompactionOffered = isResumeCompactionOffered(settings, activeProviderInstanceId);
   const resumeCompactionBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
     if (
+      !resumeCompactionOffered ||
       !activeThread ||
       !activeContextWindow ||
       resumeCompactionKey === null ||
@@ -6364,6 +6367,7 @@ export default function ChatView(props: ChatViewProps) {
     pendingUserInputs.length,
     phase,
     resumeCompactionKey,
+    resumeCompactionOffered,
     resumeCompactionPermanentlyDismissed,
     selectedProvider,
   ]);

@@ -4435,6 +4435,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         if (request.dialogKind !== "resume_return") {
           return { behavior: "cancelled" as const };
         }
+        if (!claudeSettings.offerResumeCompaction) {
+          return { behavior: "completed" as const, result: "continue" };
+        }
 
         const context = yield* Ref.get(contextRef);
         if (!context) {
