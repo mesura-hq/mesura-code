@@ -84,6 +84,7 @@ vi.mock("./features/connection/ConnectionsRouteScreen", () =>
 vi.mock("./features/diagnostics/SettingsDiagnosticsRouteScreen", () =>
   stubs.stubModule("SettingsDiagnosticsRouteScreen"),
 );
+vi.mock("./features/factory/FactoryRouteScreen", () => stubs.stubModule("FactoryRouteScreen"));
 vi.mock("./features/files/AttachmentFileScreen", () => stubs.stubModule("AttachmentFileScreen"));
 vi.mock("./features/files/ThreadFilesRouteScreen", () =>
   stubs.stubModule("ThreadFilesTreeScreen", "ThreadFileScreen"),
@@ -244,6 +245,7 @@ describe("guard: the deep links that exist keep their destinations", () => {
     ["t3code-dev://connections", ["Connections"]],
     ["t3code-dev://new/draft", ["NewTaskSheet", "NewTaskDraft"]],
     ["t3code-dev://threads/env-1/thread-1/terminal", ["ThreadTerminal"]],
+    ["t3code-dev://threads/env-1/thread-1/factory", ["ThreadFactory"]],
     ["t3code-dev://no/such/route", ["NotFound"]],
   ])("stack linking guard: %s keeps its route", (url, names) => {
     expect(openedRoute(url).names).toEqual(names);
