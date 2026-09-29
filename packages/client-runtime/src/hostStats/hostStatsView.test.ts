@@ -1,11 +1,11 @@
 /**
- * Phase 5 fence: the Hosts dock's formatting and view logic. The views come
+ * The Hosts dock's and the mobile Hosts screen's formatting and view logic. The views come
  * from the shared projection (`projectHostStats`) over histories folded from
  * real snapshot messages, so these specs read what the dock will render.
  */
 import { describe, expect, it } from "vite-plus/test";
 
-import type { HostStatsRow } from "@t3tools/client-runtime/host-stats";
+import type { HostStatsRow } from "./projectHostStats.ts";
 
 import {
   HOST_STATS_AGE_REFRESH_MS,
@@ -26,7 +26,7 @@ import {
   sparklineReading,
   sparklineRuns,
   sparklineSlotAt,
-} from "./HostsPanel.logic";
+} from "./hostStatsView.ts";
 import {
   HOUR,
   MINUTE,
@@ -37,7 +37,7 @@ import {
   hostStatsFleet,
   hostView,
   projectFleet,
-} from "./hostStatsFixtures";
+} from "./hostStatsFixtures.ts";
 
 /** Host clock of every fixture: the current bucket starts at 12:00 UTC, series[0] at 00:05. */
 const NOW = Date.parse("2026-09-29T12:02:30.000Z");
@@ -222,6 +222,37 @@ describe("Hosts dock trust states", () => {
     expect(
       hostStatusLine({ ...live, state: "offline", rows: null, lastReadingAgeMs: null }),
     ).toEqual({ text: "Offline · no reading this session" });
+  });
+
+  // Review P1-1 (phase 6): a history a client held across a released
+  // subscription is recent but not current. It never reads as live, whatever
+  // its age, and its agents never count toward the live total.
+  function heldFleetViews(nowLocal = NOW) {
+    const fleet = hostStatsFleet(NOW);
+    const subscriptions = new Map(
+      [...fleet.subscriptions].map(([environmentId, subscription]) => [
+        environmentId,
+        { ...subscription, held: true },
+      ]),
+    );
+    return projectFleet({ ...fleet, subscriptions }, nowLocal);
+  }
+
+  it("host stats view: a held reading within the stale threshold reads as updating, with its age", () => {
+    const held = hostView(heldFleetViews(NOW + 60 * SECOND), "vigilia-home");
+    expect(held.state).toBe("updating");
+    expect(held.rows).not.toBeNull();
+    expect(hostIsDimmed(held)).toBe(true);
+    expect(hostStatusLine(held)).toEqual({ text: "Updating · last reading 1m ago" });
+  });
+
+  it("host stats view: a held reading past the stale threshold reads as stale, and offline stays offline", () => {
+    expect(hostView(heldFleetViews(), "arch-laptop").state).toBe("stale");
+    expect(hostView(heldFleetViews(), "conversa").state).toBe("offline");
+  });
+
+  it("host stats view: a held reading's agents do not count toward the live total", () => {
+    expect(hostFleetSummary(heldFleetViews())).toBe("3 of 4 online · 0 agents running");
   });
 
   it("counts connected hosts as online and sums agents from live readings only", () => {

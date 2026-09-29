@@ -1,18 +1,25 @@
 /**
- * Mesura: formatting and view logic for the Hosts dock. Every decision about
- * whether a number can be trusted is the shared projection's
- * (`@t3tools/client-runtime/host-stats`); this module only says it in words and
+ * Mesura: formatting and view logic for host stats, shared by the web Hosts
+ * dock and the mobile Hosts screen so both say the same thing in the same
+ * words. Every decision about whether a number can be trusted is the
+ * projection's (`projectHostStats`); this module only says it in words and
  * turns series into sparkline geometry.
  */
-import type {
-  HostStatsHostView,
-  HostStatsRow,
-  HostStatsRowId,
-} from "@t3tools/client-runtime/host-stats";
+import type { HostStatsHostView, HostStatsRow, HostStatsRowId } from "./projectHostStats.ts";
 
-import { formatCompactDuration } from "./AccountLimitsPanel.logic";
+/** A duration as its two largest units: "3m", "2h 5m", "1d 3h". Shared by both sidebar docks. */
+export function formatCompactDuration(milliseconds: number): string {
+  const minutes = Math.max(0, Math.floor(milliseconds / 60_000));
+  if (minutes < 1) return "less than 1m";
+  const days = Math.floor(minutes / 1_440);
+  const hours = Math.floor((minutes % 1_440) / 60);
+  const remainingMinutes = minutes % 60;
+  if (days > 0) return `${days}d${hours > 0 ? ` ${hours}h` : ""}`;
+  if (hours > 0) return `${hours}h${remainingMinutes > 0 ? ` ${remainingMinutes}m` : ""}`;
+  return `${minutes}m`;
+}
 
-/** How often the open dock re-projects, so the ages on screen move. */
+/** How often an open dock or a visible Hosts screen re-projects, so the ages on screen move. */
 export const HOST_STATS_AGE_REFRESH_MS = 15_000;
 
 /** The rows drawn on the `38px 1fr 76px` grid. Servers are a chip line under them. */
@@ -231,6 +238,10 @@ export function hostStatusLine(host: HostStatsHostView): HostStatusLine | null {
       return { text: "Waiting for the first reading" };
     case "needs-update":
       return { text: "Update Mesura Code on this host" };
+    case "updating":
+      return {
+        text: `Updating · last reading ${age === null ? "unknown" : formatReadingAge(age)}`,
+      };
     case "stale":
       return { text: `Stale · last reading ${age === null ? "unknown" : formatReadingAge(age)}` };
     case "offline":
@@ -243,9 +254,17 @@ export function hostStatusLine(host: HostStatsHostView): HostStatusLine | null {
   }
 }
 
-/** Stale and offline hosts keep their values on screen, dimmed. */
+/** Updating, stale and offline hosts keep their values on screen, dimmed. */
 export function hostIsDimmed(host: HostStatsHostView): boolean {
-  return host.state === "stale" || host.state === "offline";
+  return host.state === "updating" || host.state === "stale" || host.state === "offline";
+}
+
+/** The header shows uptime only while the host is reachable and has a reading. */
+export function hostShowsUptime(host: HostStatsHostView): boolean {
+  return (
+    host.uptimeMs !== null &&
+    (host.state === "live" || host.state === "updating" || host.state === "stale")
+  );
 }
 
 /**

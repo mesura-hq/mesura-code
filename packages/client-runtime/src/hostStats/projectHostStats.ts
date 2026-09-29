@@ -57,7 +57,17 @@ export interface HostStatsHistory {
   readonly newestServerNow: number;
 }
 
-export type HostStatsHostState = "live" | "stale" | "offline" | "needs-update" | "pending";
+/**
+ * `updating`: connected, showing a history an earlier subscription read, before
+ * the current one delivers. It is recent, but not current, so it is never live.
+ */
+export type HostStatsHostState =
+  | "live"
+  | "updating"
+  | "stale"
+  | "offline"
+  | "needs-update"
+  | "pending";
 
 export type HostStatsRowId =
   | "cpu"
@@ -128,6 +138,12 @@ export interface HostStatsHostView {
 export interface HostStatsSubscription {
   readonly history: HostStatsHistory | null;
   readonly failed: boolean;
+  /**
+   * The history was read by an earlier subscription and the current one has
+   * not delivered yet: a client that keeps readings across a release (mobile)
+   * sets it. Such a history is never live, whatever its age.
+   */
+  readonly held?: boolean;
 }
 
 const NEVER_SUBSCRIBED: HostStatsSubscription = { history: null, failed: false };
@@ -399,7 +415,9 @@ function hostState(
   // failure that never retries: with no sample read, waiting would be forever.
   if (lastReadingAgeMs === null) return subscription.failed ? "needs-update" : "pending";
   // Judged by sample age, never by the socket: a stalled server keeps it open.
-  return lastReadingAgeMs > HOST_STATS_STALE_AFTER_MS ? "stale" : "live";
+  if (lastReadingAgeMs > HOST_STATS_STALE_AFTER_MS) return "stale";
+  // A number shown as current must come from the current subscription.
+  return subscription.held === true ? "updating" : "live";
 }
 
 const NOT_AVAILABLE: HostStatsRow = {

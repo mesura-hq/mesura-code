@@ -53,6 +53,7 @@ const ACTION_ICONS: Record<string, AppSymbolName> = {
   appearance: "paintbrush",
   environments: "desktopcomputer",
   usage: "chart.bar.xaxis",
+  hosts: "server.rack",
   archive: "archivebox",
   files: "doc.text",
   terminal: "terminal",
@@ -213,6 +214,17 @@ export function CommandPalette(props: {
           navigation.navigate("SettingsSheet", {
             screen: "SettingsContent",
             params: { screen: "SettingsUsage" },
+          }),
+      },
+      {
+        key: "hosts",
+        kind: "action",
+        title: "Hosts",
+        searchTerms: ["machines", "servers", "cpu", "memory", "health"],
+        run: () =>
+          navigation.navigate("SettingsSheet", {
+            screen: "SettingsContent",
+            params: { screen: "SettingsHosts" },
           }),
       },
       {

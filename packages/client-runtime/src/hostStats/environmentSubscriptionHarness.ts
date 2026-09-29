@@ -63,11 +63,14 @@ export interface MountedEnvironmentSubscription<M, A> {
   readonly current: () => A | null;
   /** The atom's whole result, failure included. */
   readonly result: () => AsyncResult.AsyncResult<A, unknown>;
+  /** Removes the mounted listener, as a view that stops reading the atom does. */
+  readonly release: () => Promise<void>;
   readonly dispose: () => void;
 }
 
 export async function mountEnvironmentSubscription<M, A>(
   transform: (messages: Stream.Stream<M>) => Stream.Stream<A>,
+  options: { readonly idleTtlMs?: number } = {},
 ): Promise<MountedEnvironmentSubscription<M, A>> {
   const messages = await Effect.runPromise(Queue.unbounded<M>());
   const supervisor = await Effect.runPromise(makeConnectedSupervisor);
@@ -80,12 +83,13 @@ export async function mountEnvironmentSubscription<M, A>(
   );
   const family = createEnvironmentSubscriptionAtomFamily(runtime, {
     label: "test.environment-subscription-harness",
+    ...(options.idleTtlMs === undefined ? {} : { idleTtlMs: options.idleTtlMs }),
     subscribe: () => transform(Stream.fromQueue(messages)),
   });
   const atom = family({ environmentId: TARGET.environmentId, input: {} });
   const registry = AtomRegistry.make();
   const seen: A[] = [];
-  registry.subscribe(
+  const unsubscribe = registry.subscribe(
     atom,
     (result) => {
       const value = AsyncResult.value(result);
@@ -101,6 +105,10 @@ export async function mountEnvironmentSubscription<M, A>(
     seen,
     current: () => Option.getOrNull(AsyncResult.value(registry.get(atom))),
     result: () => registry.get(atom),
+    release: async () => {
+      unsubscribe();
+      await settle();
+    },
     dispose: () => registry.dispose(),
   };
 }

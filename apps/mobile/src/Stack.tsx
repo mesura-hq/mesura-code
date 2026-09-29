@@ -68,6 +68,7 @@ import {
 import { SettingsProjectGroupingRouteScreen } from "./features/settings/SettingsProjectGroupingRouteScreen";
 import { UsageLimitAccountScreen } from "./features/usage/UsageLimitsPooled";
 import { UsageRouteScreen } from "./features/usage/UsageRouteScreen";
+import { HostsRouteScreen } from "./features/hosts/HostsRouteScreen";
 import { SettingsRouteScreen } from "./features/settings/SettingsRouteScreen";
 import { ShowcaseCaptureCoordinator } from "./features/showcase/ShowcaseCaptureCoordinator";
 import {
@@ -240,6 +241,14 @@ const SettingsContentStack = createNativeStackNavigator({
       linking: "usage",
       options: {
         title: "Usage",
+      },
+    }),
+    // Mesura: every connected host's health, the web Hosts dock's rows.
+    SettingsHosts: createNativeStackScreen({
+      screen: HostsRouteScreen,
+      linking: "hosts",
+      options: {
+        title: "Hosts",
       },
     }),
   },

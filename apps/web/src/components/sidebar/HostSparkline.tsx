@@ -7,7 +7,7 @@ import {
   sparklinePath,
   sparklineSlotAt,
   type SparklineGeometry,
-} from "./HostsPanel.logic";
+} from "@t3tools/client-runtime/host-stats/view";
 
 /**
  * Colour by level, from theme tokens only: the line is the foreground at 55 %

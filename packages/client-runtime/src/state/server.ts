@@ -626,6 +626,13 @@ export function createServerEnvironmentAtoms<R, E>(
     /** Whether this surface renders quota from configured usage-limit sources. */
     readonly usageLimitSources?: boolean;
     readonly usageLimitsCommand?: boolean;
+    /**
+     * Mesura: how long a released `hostStats` stream stays open. Web keeps it
+     * five minutes so a re-peek is instant. Mobile passes 0: its sessions stay
+     * up in the background, so only a zero TTL lets the Hosts screen release
+     * the stream, and the screen keeps the last readings itself.
+     */
+    readonly hostStatsIdleTtlMs?: number;
   },
 ) {
   const configScheduler = createAtomCommandScheduler();
@@ -1042,7 +1049,7 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:host-stats",
       tag: WS_METHODS.subscribeHostStats,
       transform: accumulateHostStatsMessages,
-      idleTtlMs: 5 * 60_000,
+      idleTtlMs: options.hostStatsIdleTtlMs ?? 5 * 60_000,
     }),
     resourceTelemetryHistory: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:resource-telemetry-history",

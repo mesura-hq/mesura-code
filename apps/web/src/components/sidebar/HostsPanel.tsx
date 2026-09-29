@@ -23,12 +23,13 @@ import {
   hostIsDimmed,
   hostRowDisplay,
   hostServersLine,
+  hostShowsUptime,
   hostStatusLine,
   sparklineMax,
   sparklineReading,
   type HostStatsAgeClock,
   type HostsDockRowId,
-} from "./HostsPanel.logic";
+} from "@t3tools/client-runtime/host-stats/view";
 import type { SidebarDockController } from "./sidebarDockController";
 
 const SPARKLINE_HEIGHT = 20;
@@ -162,7 +163,7 @@ function HostSection(props: {
 }) {
   const { host, index, open } = props;
   const status = hostStatusLine(host);
-  const showsUptime = host.uptimeMs !== null && (host.state === "live" || host.state === "stale");
+  const showsUptime = hostShowsUptime(host);
   const servers = host.rows === null ? null : hostServersLine(host.rows.servers);
   return (
     // Hosts arrive a beat apart and leave together, as the usage dock's rows do.

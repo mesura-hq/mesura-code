@@ -14,7 +14,7 @@ import {
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { SUBSCRIPTION_ICON_BY_NAMESPACE } from "../chat/providerIconUtils";
 import { ScrollArea } from "../ui/scroll-area";
-import { formatCompactDuration } from "./AccountLimitsPanel.logic";
+import { formatCompactDuration } from "@t3tools/client-runtime/host-stats/view";
 import { useSidebarDockController, type SidebarDockController } from "./sidebarDockController";
 
 /**

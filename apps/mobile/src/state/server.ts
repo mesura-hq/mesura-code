@@ -9,6 +9,8 @@ export const serverEnvironment = createServerEnvironmentAtoms(connectionAtomRunt
   initialConfigValueAtom: environmentSession.initialConfigValueAtom,
   usageLimitSources: true,
   usageLimitsCommand: true,
+  // Mesura: the Hosts screen releases its streams on blur and in the background.
+  hostStatsIdleTtlMs: 0,
 });
 export const environmentServerConfigsAtom = createEnvironmentServerConfigsAtom({
   catalogValueAtom: environmentCatalog.catalogValueAtom,

@@ -76,7 +76,7 @@ import {
   SLOTS,
   STALE_HOST_AGE_MS,
   hostStatsFleet,
-} from "./hostStatsFixtures";
+} from "@t3tools/client-runtime/host-stats/fixtures";
 
 const ROW_IDS = [
   "cpu",

@@ -613,6 +613,7 @@ function GeneralSettingsSection() {
       ) : null}
       <AutoSettleSettingsRows />
       <SettingsRow icon="chart.bar.xaxis" label="Usage" target="SettingsUsage" />
+      <SettingsRow icon="server.rack" label="Hosts" target="SettingsHosts" />
     </SettingsSection>
   );
 }

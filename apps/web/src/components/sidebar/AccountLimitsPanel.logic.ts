@@ -182,15 +182,3 @@ export function transitionUsagePeekKeyUp(
     releasedRequiredModifier(event, state.shortcut, platform);
   return closes ? { state: closeHeldUsagePeek(), handled: true } : { state, handled: false };
 }
-
-/** A duration as its two largest units: "3m", "2h 5m", "1d 3h". Shared by both sidebar docks. */
-export function formatCompactDuration(milliseconds: number): string {
-  const minutes = Math.max(0, Math.floor(milliseconds / 60_000));
-  if (minutes < 1) return "less than 1m";
-  const days = Math.floor(minutes / 1_440);
-  const hours = Math.floor((minutes % 1_440) / 60);
-  const remainingMinutes = minutes % 60;
-  if (days > 0) return `${days}d${hours > 0 ? ` ${hours}h` : ""}`;
-  if (hours > 0) return `${hours}h${remainingMinutes > 0 ? ` ${remainingMinutes}m` : ""}`;
-  return `${minutes}m`;
-}
