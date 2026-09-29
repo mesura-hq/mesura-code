@@ -20,8 +20,10 @@ import {
   MINUTE,
   SECOND,
   hostHistory,
+  NO_ACCESS_HOST_ID,
   hostPresentation,
   hostStatsFleet,
+  withNoAccessHost,
 } from "@t3tools/client-runtime/host-stats/fixtures";
 import type { EnvironmentId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -374,6 +376,16 @@ describe("criterion 4: every environment, with the web dock's rows, states and l
     expect(text(hostRow("conversa", "cpu"))).toContain("17%");
   });
 
+  it("hosts screen says a host that refused this phone needs pairing again, not an update", async () => {
+    loadFleet(withNoAccessHost(hostStatsFleet(NOW)));
+    await mount();
+
+    const refused = text(hostSection(NO_ACCESS_HOST_ID));
+    expect(refused).toContain("No access · pair again with full access");
+    expect(refused).not.toContain("Update Mesura Code");
+    expect(text(container)).toContain("4 of 5 online · 4 agents running");
+  });
+
   it("hosts screen breaks a sparkline where the host has no bucket", async () => {
     loadFleet(troubledFleet());
     await mount();
@@ -472,6 +484,19 @@ describe("criterion 6: the screen holds subscriptions only while it is seen", ()
     await setFocused(true);
     expect(transport.held).toContain("vigilia-home");
     expect(transport.held).toContain("arch-laptop");
+  });
+
+  it("hosts screen subscribes a refused host again when the screen is seen again", async () => {
+    // Pairing again happens on another screen: returning restarts the refused stream.
+    loadFleet(withNoAccessHost(hostStatsFleet(NOW)));
+    await mount();
+    const before = transport.reads.get(NO_ACCESS_HOST_ID) ?? 0;
+    expect(transport.held).toContain(NO_ACCESS_HOST_ID);
+
+    await setFocused(false);
+    expect(transport.held).not.toContain(NO_ACCESS_HOST_ID);
+    await setFocused(true);
+    expect(transport.reads.get(NO_ACCESS_HOST_ID)).toBe(before + 1);
   });
 
   it("hosts screen releases every subscription while the app is in the background", async () => {

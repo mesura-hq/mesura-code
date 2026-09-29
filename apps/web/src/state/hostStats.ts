@@ -3,7 +3,7 @@
  * `hostStats` subscription. The projection itself is the shared model's
  * (`projectHostStats`); the dock runs it on its own clock so ages can move.
  */
-import { useAtomValue } from "@effect/atom-react";
+import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import type { EnvironmentPresentation } from "@t3tools/client-runtime/connection";
 import {
   readHostStatsSubscription,
@@ -11,7 +11,7 @@ import {
 } from "@t3tools/client-runtime/host-stats";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
-import { useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
 
 import { environmentPresentations } from "./presentation";
 import { serverEnvironment } from "./server";
@@ -22,6 +22,9 @@ export interface HostStatsSources {
 }
 
 const NO_SUBSCRIPTIONS: ReadonlyMap<EnvironmentId, HostStatsSubscription> = new Map();
+
+const hostStatsTarget = (environmentId: EnvironmentId) =>
+  serverEnvironment.hostStats({ environmentId, input: {} });
 
 /**
  * Subscribes only while `enabled`, which the dock sets while it is open. A
@@ -39,9 +42,7 @@ export function useHostStatsSources(enabled: boolean): HostStatsSources {
         for (const environmentId of presentations.keys()) {
           subscriptions.set(
             environmentId,
-            readHostStatsSubscription(
-              get(serverEnvironment.hostStats({ environmentId, input: {} })),
-            ),
+            readHostStatsSubscription(get(hostStatsTarget(environmentId))),
           );
         }
         return { presentations, subscriptions };
@@ -49,6 +50,20 @@ export function useHostStatsSources(enabled: boolean): HostStatsSources {
     [enabled],
   );
   const sources = useAtomValue(sourcesAtom);
+  // A refused subscription ends its stream (`accumulateHostStatsMessages`) and
+  // outlives a closed dock for its idle TTL. Opening the dock starts it again,
+  // so a device paired again in Settings, where the dock does not exist, reads
+  // its hosts on return. Nothing else restarts: the TTL keeps a re-peek instant.
+  const registry = useContext(RegistryContext);
+  useEffect(() => {
+    if (!enabled) return;
+    for (const environmentId of registry.get(environmentPresentations.presentationsAtom).keys()) {
+      const target = hostStatsTarget(environmentId);
+      if (readHostStatsSubscription(registry.get(target)).unauthorized === true) {
+        registry.refresh(target);
+      }
+    }
+  }, [enabled, registry]);
   // React's "store information from previous renders" pattern: a conditional
   // set during render, which React applies before it paints.
   const [lastRead, setLastRead] = useState<HostStatsSources | null>(null);

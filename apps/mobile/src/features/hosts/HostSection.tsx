@@ -19,7 +19,7 @@ import { SymbolView } from "../../components/AppSymbol";
 import { AppText as Text } from "../../components/AppText";
 import { cn } from "../../lib/cn";
 import { HostSparkline } from "./HostSparkline";
-import { hostRowAccessibilityLabel } from "./hostsScreen.logic";
+import { hostBarFillClass, hostRowAccessibilityLabel } from "./hostsScreen.logic";
 
 const SPARKLINE_HEIGHT = 22;
 const STEP_SPARKLINE_HEIGHT = 18;
@@ -28,12 +28,6 @@ function levelTextClass(level: HostStatsLevel | null): string | undefined {
   if (level === "crit") return "text-danger-foreground";
   if (level === "warn") return "text-warning-foreground";
   return undefined;
-}
-
-function levelBarClass(level: HostStatsLevel | null): string {
-  if (level === "crit") return "bg-danger";
-  if (level === "warn") return "bg-warning";
-  return "bg-foreground-muted";
 }
 
 /**
@@ -66,7 +60,7 @@ const HostRow = memo(function HostRow(props: {
         {visual === "bar" ? (
           <View className="h-1.5 flex-row overflow-hidden rounded-full bg-subtle">
             <View
-              className={cn("h-full rounded-full", levelBarClass(row.level))}
+              className={cn("h-full rounded-full", hostBarFillClass(row.level))}
               style={{ flex: Math.min(100, Math.max(0, row.value ?? 0)) }}
             />
             <View style={{ flex: 100 - Math.min(100, Math.max(0, row.value ?? 0)) }} />
@@ -108,7 +102,7 @@ const HostRow = memo(function HostRow(props: {
 /**
  * One host as a card: its name, platform and uptime, the line that says why
  * its numbers are not current, then one row per metric and the servers line.
- * Stale and offline hosts keep their last numbers, dimmed, under that line.
+ * Stale, offline and no-access hosts keep their last numbers, dimmed, under that line.
  */
 export const HostSection = memo(function HostSection(props: { readonly host: HostStatsHostView }) {
   const { host } = props;

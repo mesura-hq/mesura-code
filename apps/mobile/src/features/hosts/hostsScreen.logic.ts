@@ -2,7 +2,8 @@
  * Mesura: what the mobile Hosts screen adds to the shared host stats view
  * logic (`@t3tools/client-runtime/host-stats/view`): the readings it keeps
  * across a released subscription, the environments a pull resubscribes, and
- * the words a screen reader hears for a row whose level is only a colour.
+ * the words a screen reader hears for a row whose level is only a colour, and
+ * the fill of a bar row.
  */
 import type { EnvironmentPresentation } from "@t3tools/client-runtime/connection";
 import type {
@@ -10,6 +11,7 @@ import type {
   HostStatsRow,
   HostStatsSubscription,
 } from "@t3tools/client-runtime/host-stats";
+import type { HostStatsLevel } from "@t3tools/client-runtime/host-stats/levels";
 import type { HostRowDisplay } from "@t3tools/client-runtime/host-stats/view";
 import type { EnvironmentId } from "@t3tools/contracts";
 
@@ -42,7 +44,7 @@ export function holdLastReadings(
     merged.set(
       environmentId,
       subscription.history === null && kept !== undefined
-        ? { history: kept, failed: subscription.failed, held: true }
+        ? { ...subscription, history: kept, held: true }
         : subscription,
     );
   }
@@ -92,4 +94,16 @@ export function hostRowAccessibilityLabel(display: HostRowDisplay, row: HostStat
   const word = LEVEL_WORD[level];
   const reading = [display.label, display.value, display.suffix].filter(Boolean).join(" ");
   return word === null ? reading : `${reading}, ${word}`;
+}
+
+/**
+ * A bar row's fill: the Usage screen meter's solid amber and red for a warning
+ * and a critical level (`WindowRow` in `UsageLimitsSection.tsx`). The theme's
+ * `bg-warning` and `bg-danger` are pale surface tints, not fills: a swap bar at
+ * 98 % drawn with them read as pale pink.
+ */
+export function hostBarFillClass(level: HostStatsLevel | null): string {
+  if (level === "crit") return "bg-red-500";
+  if (level === "warn") return "bg-amber-500";
+  return "bg-foreground-muted";
 }

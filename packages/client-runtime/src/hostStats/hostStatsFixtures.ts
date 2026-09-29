@@ -235,6 +235,29 @@ export function hostStatsFleet(now: number): HostStatsFleet {
   };
 }
 
+/** The host `withNoAccessHost` adds: connected, but its server refused this device's token. */
+export const NO_ACCESS_HOST_ID = "locked-box";
+
+/**
+ * `fleet` plus a connected host whose server refused the subscription because
+ * this device's token lacks `orchestration:read`. `history` is what the client
+ * read before the refusal, if anything.
+ */
+export function withNoAccessHost(
+  fleet: HostStatsFleet,
+  history: HostStatsHistory | null = null,
+): HostStatsFleet {
+  const presentation = hostPresentation({ id: NO_ACCESS_HOST_ID });
+  const environmentId = presentation.entry.target.environmentId;
+  return {
+    presentations: new Map([...fleet.presentations, [environmentId, presentation]]),
+    subscriptions: new Map([
+      ...fleet.subscriptions,
+      [environmentId, { history, failed: true, unauthorized: true }],
+    ]),
+  };
+}
+
 export function projectFleet(
   fleet: HostStatsFleet,
   nowLocal: number,

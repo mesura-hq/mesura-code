@@ -7,6 +7,7 @@
  * is built by applying real messages, never by hand.
  */
 import {
+  EnvironmentAuthorizationError,
   EnvironmentId,
   HOST_STATS_CONTRACT_VERSION,
   type HostStatsBucket,
@@ -220,6 +221,7 @@ function project(
     readonly presentation: EnvironmentPresentation;
     readonly history?: HostStatsHistory | null;
     readonly failed?: boolean;
+    readonly unauthorized?: boolean;
   }>,
   nowLocal: number,
   extraHistories: ReadonlyArray<readonly [EnvironmentId, HostStatsHistory | null]> = [],
@@ -233,7 +235,11 @@ function project(
         (host) =>
           [
             host.presentation.entry.target.environmentId,
-            { history: host.history ?? null, failed: host.failed ?? false },
+            {
+              history: host.history ?? null,
+              failed: host.failed ?? false,
+              ...(host.unauthorized === undefined ? {} : { unauthorized: host.unauthorized }),
+            },
           ] as const,
       ),
       ...extraHistories.map(
@@ -878,6 +884,168 @@ describe("host stats subscriptions that failed", () => {
     const view = onlyHost(
       project(
         [{ presentation: presentation({ id: "a", phase: "reconnecting" }), failed: true }],
+        T0,
+      ),
+    );
+    expect(view.state).toBe("offline");
+  });
+});
+
+describe("host stats subscriptions the server refused for authorization", () => {
+  const REFUSED = "refused" as const;
+  const OTHER_FAILURE = "other-failure" as const;
+  type Scripted = HostStatsMessage | typeof REFUSED | typeof OTHER_FAILURE;
+  const OTHER_FAILURE_ERROR = { _tag: "RpcClientError", message: "socket closed" } as const;
+  type OtherFailure = typeof OTHER_FAILURE_ERROR;
+  const refusal = () =>
+    new EnvironmentAuthorizationError({
+      message: "This client lacks orchestration:read.",
+      requiredScope: "orchestration:read",
+    });
+
+  /** A stream the server refuses at `REFUSED`, and fails some other way at `OTHER_FAILURE`. */
+  async function mountScripted() {
+    const subscription = await mountEnvironmentSubscription<Scripted, HostStatsSubscription>(
+      (messages) =>
+        accumulateHostStatsMessages(
+          messages.pipe(
+            Stream.mapEffect(
+              (
+                message,
+              ): Effect.Effect<HostStatsMessage, EnvironmentAuthorizationError | OtherFailure> =>
+                message === REFUSED
+                  ? Effect.fail(refusal())
+                  : message === OTHER_FAILURE
+                    ? Effect.fail(OTHER_FAILURE_ERROR)
+                    : Effect.succeed(message),
+            ),
+          ),
+          { initialDelayMs: 0, maxDelayMs: 0 },
+        ),
+    );
+    mounted.push(subscription as MountedEnvironmentSubscription<unknown, unknown>);
+    return subscription;
+  }
+
+  const recovery = snapshot({
+    serverNow: SNAPSHOT_AT + 5 * MINUTE,
+    buckets: [bucket(CURRENT_BUCKET, { cpuAvg: 71 })],
+    latest: sample(SNAPSHOT_AT + 5 * MINUTE - 5 * SECOND, { cpuPercent: 72 }),
+  });
+
+  it("host stats marks a refused subscription unauthorized and never subscribes again", async () => {
+    const subscription = await mountScripted();
+    for (const message of [FIRST_SNAPSHOT, UPDATES[0], REFUSED] as const) {
+      await subscription.offerBurst([message]);
+    }
+    const refused = readHostStatsSubscription(subscription.result());
+    expect(refused.failed).toBe(true);
+    expect(refused.unauthorized).toBe(true);
+    expect(historyOf(refused.history).latest).toEqual(UPDATES[0].sample);
+
+    // A retry would read this snapshot; a refused token does not become valid by waiting.
+    await subscription.offerBurst([recovery]);
+    const after = readHostStatsSubscription(subscription.result());
+    expect(after.unauthorized).toBe(true);
+    expect(historyOf(after.history).latest).toEqual(UPDATES[0].sample);
+  });
+
+  it("host stats still retries a failure that is not an authorization refusal", async () => {
+    const subscription = await mountScripted();
+    for (const message of [FIRST_SNAPSHOT, OTHER_FAILURE] as const) {
+      await subscription.offerBurst([message]);
+    }
+    const failed = readHostStatsSubscription(subscription.result());
+    expect(failed.failed).toBe(true);
+    expect(failed.unauthorized ?? false).toBe(false);
+
+    await subscription.offerBurst([recovery]);
+    const recovered = readHostStatsSubscription(subscription.result());
+    expect(recovered.failed).toBe(false);
+    expect(recovered.unauthorized ?? false).toBe(false);
+    expect(historyOf(recovered.history).latest).toEqual(recovery.latest);
+  });
+
+  it("host stats reads an authorization refusal in the atom result as unauthorized", () => {
+    expect(
+      readHostStatsSubscription(
+        AsyncResult.failure<HostStatsSubscription, EnvironmentAuthorizationError>(
+          Cause.fail(refusal()),
+        ),
+      ),
+    ).toEqual({ history: null, failed: true, unauthorized: true });
+  });
+
+  it("host stats shows a connected server that refused this device as no-access, not needs-update", () => {
+    const view = onlyHost(
+      project([{ presentation: presentation({ id: "a" }), failed: true, unauthorized: true }], T0),
+    );
+    expect(view.state).toBe("no-access");
+    expect(view.rows).toBeNull();
+  });
+
+  it("host stats keeps a history read before the refusal as no-access and ages it", () => {
+    const history = applyAll([
+      snapshot({
+        serverNow: T0,
+        buckets: [bucket(CURRENT_BUCKET)],
+        latest: sample(T0 - 10 * SECOND),
+      }),
+    ]);
+    const at = (nowLocal: number) =>
+      onlyHost(
+        project(
+          [{ presentation: presentation({ id: "a" }), history, failed: true, unauthorized: true }],
+          nowLocal,
+        ),
+      );
+    const fresh = at(T0);
+    expect(fresh.state).toBe("no-access");
+    expect(fresh.lastReadingAgeMs).toBe(10 * SECOND);
+    expect(rowsOf(fresh).cpu.availability).toBe("available");
+    const later = at(T0 + 200 * SECOND);
+    expect(later.state).toBe("no-access");
+    expect(later.lastReadingAgeMs).toBe(210 * SECOND);
+  });
+
+  it("host stats shows a refusal as no-access even over a held history of another contract version", () => {
+    const olderContract = applyAll([
+      snapshot({
+        serverNow: T0,
+        buckets: [],
+        latest: null,
+        contractVersion: HOST_STATS_CONTRACT_VERSION + 1,
+      }),
+    ]);
+    for (const capability of [true, false] as const) {
+      const view = onlyHost(
+        project(
+          [
+            {
+              presentation: presentation({ id: "a", capability }),
+              history: olderContract,
+              failed: true,
+              unauthorized: true,
+            },
+          ],
+          T0,
+        ),
+      );
+      expect(view.state).toBe("no-access");
+      expect(view.rows).toBeNull();
+    }
+  });
+
+  it("host stats shows a disconnected server that refused this device as offline", () => {
+    const view = onlyHost(
+      project(
+        [
+          {
+            presentation: presentation({ id: "a", phase: "reconnecting" }),
+            failed: true,
+            unauthorized: true,
+          },
+        ],
         T0,
       ),
     );

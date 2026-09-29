@@ -23,6 +23,7 @@ import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
 import { AsyncResult } from "effect/unstable/reactivity";
 
 import type { EnvironmentPresentation } from "../connection/presentation.ts";
@@ -58,8 +59,11 @@ export interface HostStatsHistory {
 }
 
 /**
- * `updating`: connected, showing a history an earlier subscription read, before
- * the current one delivers. It is recent, but not current, so it is never live.
+ * - `updating`: connected, showing a history an earlier subscription read, before
+ *   the current one delivers. It is recent, but not current, so it is never live.
+ * - `no-access`: connected, but the server refused the subscription because this
+ *   client's token lacks `orchestration:read`. A history read before the refusal
+ *   stays on screen and keeps ageing, but is never live.
  */
 export type HostStatsHostState =
   | "live"
@@ -67,6 +71,7 @@ export type HostStatsHostState =
   | "stale"
   | "offline"
   | "needs-update"
+  | "no-access"
   | "pending";
 
 export type HostStatsRowId =
@@ -139,6 +144,12 @@ export interface HostStatsSubscription {
   readonly history: HostStatsHistory | null;
   readonly failed: boolean;
   /**
+   * Set with `failed` when the server refused the subscription: this client's
+   * token lacks `orchestration:read`. It is never retried, since waiting does
+   * not grant a scope; pairing again does.
+   */
+  readonly unauthorized?: boolean;
+  /**
    * The history was read by an earlier subscription and the current one has
    * not delivered yet: a client that keeps readings across a release (mobile)
    * sets it. Such a history is never live, whatever its age.
@@ -147,6 +158,13 @@ export interface HostStatsSubscription {
 }
 
 const NEVER_SUBSCRIBED: HostStatsSubscription = { history: null, failed: false };
+
+/** Whether the server refused the subscription for a missing scope, rather than failing otherwise. */
+export function isHostStatsAuthorizationFailure(cause: Cause.Cause<unknown>): boolean {
+  return Option.exists(Cause.findErrorOption(cause), (error) =>
+    Predicate.isTagged(error, "EnvironmentAuthorizationError"),
+  );
+}
 
 /**
  * Reads a `hostStats` atom result. A failed subscription keeps the history it
@@ -157,9 +175,10 @@ export function readHostStatsSubscription<E>(
   result: AsyncResult.AsyncResult<HostStatsSubscription, E>,
 ): HostStatsSubscription {
   const subscription = Option.getOrElse(AsyncResult.value(result), () => NEVER_SUBSCRIBED);
-  return AsyncResult.isFailure(result) && !subscription.failed
-    ? { ...subscription, failed: true }
-    : subscription;
+  if (!AsyncResult.isFailure(result) || subscription.failed) return subscription;
+  return isHostStatsAuthorizationFailure(result.cause)
+    ? { ...subscription, failed: true, unauthorized: true }
+    : { ...subscription, failed: true };
 }
 
 export interface ProjectHostStatsInput {
@@ -325,9 +344,7 @@ export function hostStatsRetryDelayMs(
 
 type HostStatsStreamEvent =
   | { readonly _tag: "message"; readonly message: HostStatsMessage }
-  | { readonly _tag: "failed" };
-
-const FAILED_EVENT: HostStatsStreamEvent = { _tag: "failed" };
+  | { readonly _tag: "failed"; readonly unauthorized: boolean };
 
 /**
  * The `transform` of the `hostStats` subscription atom.
@@ -341,6 +358,10 @@ const FAILED_EVENT: HostStatsStreamEvent = { _tag: "failed" };
  *   history, and subscribes again after `hostStatsRetryDelayMs`, so a host
  *   recovers while the dock stays open. The delay resets once an attempt
  *   delivers an update after its snapshot.
+ * - An authorization refusal ends the stream instead: the token will not gain
+ *   the scope by waiting. The web dock starts it again each time it opens,
+ *   and the mobile screen whenever it is seen again, since it releases its
+ *   streams on leaving; that is where a device paired again returns to.
  */
 export function accumulateHostStatsMessages<E, R>(
   messages: Stream.Stream<HostStatsMessage, E, R>,
@@ -348,21 +369,24 @@ export function accumulateHostStatsMessages<E, R>(
 ): Stream.Stream<HostStatsSubscription, never, R> {
   return Stream.suspend(() => {
     let failuresInARow = 0;
+    let refused = false;
     const attempt = messages.pipe(
       Stream.map((message): HostStatsStreamEvent => {
         if (message.type === "sample") failuresInARow = 0;
         return { _tag: "message", message };
       }),
-      Stream.catchCause((cause) =>
-        Cause.hasInterruptsOnly(cause)
-          ? Stream.fromEffect(Effect.interrupt)
-          : Stream.make(FAILED_EVENT),
-      ),
+      Stream.catchCause((cause) => {
+        if (Cause.hasInterruptsOnly(cause)) return Stream.fromEffect(Effect.interrupt);
+        refused = isHostStatsAuthorizationFailure(cause);
+        const failed: HostStatsStreamEvent = { _tag: "failed", unauthorized: refused };
+        return Stream.make(failed);
+      }),
     );
     const attempts = (): Stream.Stream<HostStatsStreamEvent, never, R> =>
       attempt.pipe(
         Stream.concat(
           Stream.suspend(() => {
+            if (refused) return Stream.empty;
             const delayMs = hostStatsRetryDelayMs(failuresInARow, retry);
             failuresInARow += 1;
             return Stream.fromEffect(Effect.sleep(delayMs)).pipe(
@@ -379,12 +403,19 @@ export function accumulateHostStatsMessages<E, R>(
           Effect.map(Clock.currentTimeMillis, (receivedAtLocal) => {
             const next: HostStatsSubscription =
               event._tag === "failed"
-                ? { history: current.history, failed: true }
+                ? {
+                    history: current.history,
+                    failed: true,
+                    ...(event.unauthorized ? { unauthorized: true } : {}),
+                  }
                 : {
                     history: applyHostStatsMessage(current.history, event.message, receivedAtLocal),
                     failed: false,
                   };
-            const changed = next.history !== current.history || next.failed !== current.failed;
+            const changed =
+              next.history !== current.history ||
+              next.failed !== current.failed ||
+              next.unauthorized !== current.unauthorized;
             return changed ? ([next, [next]] as const) : ([current, []] as const);
           }),
       ),
@@ -404,15 +435,18 @@ function hostState(
   lastReadingAgeMs: number | null,
 ): HostStatsHostState {
   const history = subscription.history;
+  const connected = presentation.connection.phase === "connected";
+  // The current refusal outranks anything held: pairing again is what the user must do,
+  // whatever an earlier subscription read. What it read stays, dimmed, whatever its age.
+  if (connected && subscription.unauthorized === true) return "no-access";
   if (history !== null && history.contractVersion !== HOST_STATS_CONTRACT_VERSION) {
     return "needs-update";
   }
-  const connected = presentation.connection.phase === "connected";
   if (connected && hasHostStatsCapability(presentation) === false) return "needs-update";
   // Offline keeps and labels what was read; it never hides it.
   if (!connected) return "offline";
-  // The subscription surfaces a message it cannot decode, or a refusal, as a
-  // failure that never retries: with no sample read, waiting would be forever.
+  // Any other failure before a sample, a message this client cannot decode
+  // among them, means the server speaks another contract: waiting will not fix it.
   if (lastReadingAgeMs === null) return subscription.failed ? "needs-update" : "pending";
   // Judged by sample age, never by the socket: a stalled server keeps it open.
   if (lastReadingAgeMs > HOST_STATS_STALE_AFTER_MS) return "stale";
@@ -614,7 +648,12 @@ function projectHost(
   const lastReadingAgeMs =
     hostNow === null || latest === null ? null : Math.max(0, hostNow - latest.sampledAt);
   const state = hostState(presentation, subscription, lastReadingAgeMs);
-  const readable = state !== "needs-update" && history !== null && hostNow !== null;
+  // A history of another contract version is never read, whatever the state says.
+  const readable =
+    state !== "needs-update" &&
+    history !== null &&
+    history.contractVersion === HOST_STATS_CONTRACT_VERSION &&
+    hostNow !== null;
   const seriesStartMs = readable ? windowStart(history, hostNow) : null;
   return {
     environmentId,

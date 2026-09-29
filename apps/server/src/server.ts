@@ -105,6 +105,7 @@ import * as HostStatsCollector from "./hostStats/HostStatsCollector.ts";
 import * as HostAgentCounts from "./hostStats/HostAgentCounts.ts";
 import * as HostStatsService from "./hostStats/HostStatsService.ts";
 import * as MesuraServerDiscovery from "./hostStats/mesuraServerDiscovery.ts";
+import * as ServerRuntimeRegistry from "./hostStats/serverRuntimeRegistry.ts";
 import * as WorkspaceFileWatcher from "./workspace/WorkspaceFileWatcher.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
@@ -242,11 +243,13 @@ const ResourceDiagnosticsLayerLive = Layer.mergeAll(
 // diagnostics above by providing PersistenceLayerLive itself, because that
 // constant is declared further down. It sits in ProviderRuntimeLayerLive, the
 // block of that chain upstream changes least (1 commit in 3 months, against 3
-// for RuntimeDependenciesLive).
+// for RuntimeDependenciesLive). It also registers this server in the per-user
+// runtime registry that discovery reads, for as long as the server runs.
 const HostStatsLayerLive = HostStatsService.layer.pipe(
   Layer.provideMerge(HostStatsCollector.layer),
   Layer.provide(MesuraServerDiscovery.layer),
   Layer.provide(HostAgentCounts.layer),
+  Layer.merge(ServerRuntimeRegistry.layer),
 );
 
 const RelayClientLive = Layer.unwrap(

@@ -71,11 +71,13 @@ import { SidebarProvider } from "../ui/sidebar";
 import { SidebarChromeFooter } from "./SidebarChrome";
 import { requestSidebarDockPin } from "./sidebarDockController";
 import {
+  NO_ACCESS_HOST_ID,
   PRIMARY_GAP_SLOTS,
   SECOND,
   SLOTS,
   STALE_HOST_AGE_MS,
   hostStatsFleet,
+  withNoAccessHost,
 } from "@t3tools/client-runtime/host-stats/fixtures";
 
 const ROW_IDS = [
@@ -433,6 +435,16 @@ describe("Hosts dock criterion 4: the Rows layout", () => {
 });
 
 describe("Hosts dock criterion 5: stale, offline and outdated hosts", () => {
+  it("tells a device without access to pair again instead of updating the host", async () => {
+    fixture.sources = withNoAccessHost(hostStatsFleet(now));
+    await mountSidebar();
+    await press("keydown", ALT_S);
+    const refused = hostSection(NO_ACCESS_HOST_ID);
+    expect(refused.dataset.hostState).toBe("no-access");
+    expect(refused.textContent).toContain("No access · pair again with full access");
+    expect(refused.textContent).not.toContain("Update Mesura Code");
+  });
+
   it("marks a stale host with the age of its last reading and keeps its values", async () => {
     await mountSidebar();
     await press("keydown", ALT_S);

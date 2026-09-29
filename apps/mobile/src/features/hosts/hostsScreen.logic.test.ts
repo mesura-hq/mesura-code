@@ -16,6 +16,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   holdLastReadings,
+  hostBarFillClass,
   hostRowAccessibilityLabel,
   hostsToResubscribe,
   nextHeldReadings,
@@ -124,5 +125,31 @@ describe("what a screen reader hears for a row", () => {
     expect(hostRowAccessibilityLabel(hostRowDisplay("cpu", rows.cpu), rows.cpu)).toBe(
       "CPU 17% ld 20.0, warning",
     );
+  });
+});
+
+describe("hosts screen bar fills", () => {
+  it("hosts logic: warning and critical bars fill with the Usage meter's solid amber and red", () => {
+    // The theme's `bg-warning` and `bg-danger` are pale surface tints: a 98 % swap bar read pale pink.
+    expect(hostBarFillClass("crit")).toBe("bg-red-500");
+    expect(hostBarFillClass("warn")).toBe("bg-amber-500");
+    expect(hostBarFillClass("ok")).toBe("bg-foreground-muted");
+    expect(hostBarFillClass(null)).toBe("bg-foreground-muted");
+  });
+});
+
+describe("a refused subscription over held readings", () => {
+  it("hosts logic: a refused subscription with no history keeps its refusal over the held reading", () => {
+    const held = hostHistory({ now: NOW, latestAgeMs: 20 * SECOND });
+    const merged = holdLastReadings(
+      new Map([[HOME, held]]),
+      new Map([[HOME, { history: null, failed: true, unauthorized: true }]]),
+    );
+    expect(merged.get(HOME)).toEqual({
+      history: held,
+      failed: true,
+      unauthorized: true,
+      held: true,
+    });
   });
 });

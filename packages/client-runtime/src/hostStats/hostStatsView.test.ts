@@ -20,6 +20,7 @@ import {
   hostIsDimmed,
   hostRowDisplay,
   hostServersLine,
+  hostShowsUptime,
   hostStatusLine,
   sparklineMax,
   sparklinePath,
@@ -30,13 +31,16 @@ import {
 import {
   HOUR,
   MINUTE,
+  NO_ACCESS_HOST_ID,
   PRIMARY_GAP_SLOTS,
   SECOND,
   SLOTS,
   gib,
+  hostHistory,
   hostStatsFleet,
   hostView,
   projectFleet,
+  withNoAccessHost,
 } from "./hostStatsFixtures.ts";
 
 /** Host clock of every fixture: the current bucket starts at 12:00 UTC, series[0] at 00:05. */
@@ -205,6 +209,30 @@ describe("Hosts dock trust states", () => {
     expect(old.rows).toBeNull();
     expect(hostStatusLine(old)).toEqual({ text: "Update Mesura Code on this host" });
     expect(hostIsDimmed(old)).toBe(false);
+  });
+
+  it("host stats view: a host that refused this device says so, dims what it held and adds no agents", () => {
+    // Its last reading is 20 s old with 4 agents: fresh, yet not current.
+    const fleet = withNoAccessHost(
+      hostStatsFleet(NOW),
+      hostHistory({ now: NOW, latestAgeMs: 20 * SECOND }),
+    );
+    const views = projectFleet(fleet, NOW);
+    const refused = hostView(views, NO_ACCESS_HOST_ID);
+    expect(refused.state).toBe("no-access");
+    expect(hostStatusLine(refused)).toEqual({ text: "No access · pair again with full access" });
+    expect(hostIsDimmed(refused)).toBe(true);
+    expect(hostShowsUptime(refused)).toBe(false);
+    expect(hostFleetSummary(views)).toBe("4 of 5 online · 4 agents running");
+  });
+
+  it("host stats view: a host that refused this device before any reading says so too", () => {
+    const refused = hostView(
+      projectFleet(withNoAccessHost(hostStatsFleet(NOW)), NOW),
+      NO_ACCESS_HOST_ID,
+    );
+    expect(refused.rows).toBeNull();
+    expect(hostStatusLine(refused)).toEqual({ text: "No access · pair again with full access" });
   });
 
   it("gives a live host no status line and full strength", () => {

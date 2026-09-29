@@ -14,9 +14,20 @@ import {
   type PersistedServerRuntimeState,
   readPersistedServerRuntimeState,
 } from "../serverRuntimeState.ts";
+import {
+  currentRegistryLocation,
+  readServerRuntimeRegistry,
+  serverRuntimeRegistryDirectories,
+} from "./serverRuntimeRegistry.ts";
 
 export interface MesuraServerDiscoveryOptions {
   readonly procRoot: string;
+  /**
+   * The per-user runtime registry directories (`serverRuntimeRegistry.ts`),
+   * read before `/proc`: an entry names a base dir that argv and environment
+   * cannot, such as one passed through `--bootstrap-fd`.
+   */
+  readonly registryDirectories: ReadonlyArray<string>;
   /** Only processes of this user are considered: the counting server's own uid. */
   readonly uid: number;
   /**
@@ -39,11 +50,12 @@ export class MesuraServerDiscovery extends Context.Service<
 >()("t3/hostStats/mesuraServerDiscovery") {}
 
 /**
- * How far a runtime file's `startedAt` may sit from its process's start time.
- * A server writes the file once it listens, which took 9.2 s on vigilia-home at
- * boot; a PID reused by an unrelated process is off by far more.
+ * How far a runtime file's or registry entry's `startedAt` may sit from its
+ * process's start time. A server writes the runtime file once it listens,
+ * which took 9.2 s on vigilia-home at boot, so a slower boot needs headroom;
+ * a PID reused by an unrelated process is off by minutes or hours.
  */
-export const RUNTIME_FILE_START_WINDOW_MS = 10_000;
+export const RUNTIME_FILE_START_WINDOW_MS = 60_000;
 
 /** `/proc/<pid>/stat` counts start time in USER_HZ, which the kernel ABI fixes at 100. */
 const CLOCK_TICKS_PER_SECOND = 100;
@@ -105,6 +117,17 @@ function realUid(status: string): number | null {
   return Number.isInteger(uid) ? uid : null;
 }
 
+type ServerKind = "installed" | "dev";
+
+/** A server fronting a dev web server records its `devUrl`; every other one is installed. */
+const serverKind = (devUrl: string | undefined): ServerKind =>
+  devUrl === undefined ? "installed" : "dev";
+
+/** Whether a record's `startedAt` was written by the process that started at `processStartMs`. */
+function startedWith(startedAt: string, processStartMs: number): boolean {
+  return Math.abs(Date.parse(startedAt) - processStartMs) <= RUNTIME_FILE_START_WINDOW_MS;
+}
+
 const bootTimeMs = (procRoot: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -127,7 +150,7 @@ export const make = Effect.fn("makeMesuraServerDiscovery")(function* (
    * Where a candidate keeps its state, resolved as its own CLI would: `--base-dir`,
    * then `T3CODE_HOME`, then the default under its own `HOME`, which may not be
    * ours. A desktop app passing its base dir through the bootstrap fd is not
-   * visible here and falls back to that default.
+   * visible here and falls back to that default; the registry finds it instead.
    */
   const stateHomeOf = (argv: ReadonlyArray<string>, environ: string, cwd: string) =>
     Effect.gen(function* () {
@@ -156,34 +179,62 @@ export const make = Effect.fn("makeMesuraServerDiscovery")(function* (
           path.join(stateHome, directory, "server-runtime.json"),
         );
         if (Option.isNone(state) || state.value.pid !== pid) continue;
-        const startedAtMs = Date.parse(state.value.startedAt);
-        if (Math.abs(startedAtMs - processStartMs) <= RUNTIME_FILE_START_WINDOW_MS) return state;
+        if (startedWith(state.value.startedAt, processStartMs)) return state;
       }
       return Option.none<PersistedServerRuntimeState>();
+    });
+
+  /** The start time of the process at `processDir` when it belongs to this user; null otherwise. */
+  const ownProcessStartMs = (processDir: string, bootedAtMs: number) =>
+    Effect.gen(function* () {
+      if (realUid(yield* fs.readFileString(path.join(processDir, "status"))) !== options.uid) {
+        return null;
+      }
+      const ticks = startTicks(yield* fs.readFileString(path.join(processDir, "stat")));
+      return ticks === null ? null : bootedAtMs + (ticks * 1000) / CLOCK_TICKS_PER_SECOND;
+    });
+
+  /**
+   * The registry entries of live servers of this user, one per PID. An entry
+   * is checked like a runtime file: its process runs, is ours, and started
+   * with it. A stale entry, for a dead or reused PID, is skipped.
+   */
+  const registeredServers = (bootedAtMs: number) =>
+    Effect.gen(function* () {
+      const entries = (yield* Effect.forEach(
+        options.registryDirectories,
+        readServerRuntimeRegistry,
+      )).flat();
+      const servers = new Map<number, ServerKind>();
+      for (const entry of entries) {
+        if (entry.pid === options.self.pid || servers.has(entry.pid)) continue;
+        const processStartMs = yield* ownProcessStartMs(
+          path.join(options.procRoot, String(entry.pid)),
+          bootedAtMs,
+        ).pipe(Effect.catchCause(() => Effect.succeed(null)));
+        if (processStartMs === null || !startedWith(entry.startedAt, processStartMs)) continue;
+        servers.set(entry.pid, serverKind(entry.devUrl));
+      }
+      return servers;
     });
 
   /** The kind of server `pid` is, or null when it is not a live Mesura Code server. */
   const classify = (pid: number, bootedAtMs: number) =>
     Effect.gen(function* () {
       const processDir = path.join(options.procRoot, String(pid));
-      if (realUid(yield* fs.readFileString(path.join(processDir, "status"))) !== options.uid) {
-        return null;
-      }
+      const processStartMs = yield* ownProcessStartMs(processDir, bootedAtMs);
+      if (processStartMs === null) return null;
       const argv = (yield* fs.readFileString(path.join(processDir, "cmdline")))
         .split("\0")
         .filter((entry) => entry.length > 0);
       const cwd = yield* fs.readLink(path.join(processDir, "cwd"));
       if (!namesServerEntry(argv, cwd, path)) return null;
 
-      const ticks = startTicks(yield* fs.readFileString(path.join(processDir, "stat")));
-      if (ticks === null) return null;
-      const processStartMs = bootedAtMs + (ticks * 1000) / CLOCK_TICKS_PER_SECOND;
-
       const environ = yield* fs.readFileString(path.join(processDir, "environ"));
       const stateHome = yield* stateHomeOf(argv, environ, cwd);
       const state = yield* ownRuntimeState(pid, stateHome, processStartMs);
       if (Option.isNone(state)) return null;
-      return state.value.devUrl === undefined ? ("installed" as const) : ("dev" as const);
+      return serverKind(state.value.devUrl);
     }).pipe(
       // The process exited, or its files are not ours to read: it is not counted.
       Effect.catchCause(() => Effect.succeed(null)),
@@ -191,13 +242,18 @@ export const make = Effect.fn("makeMesuraServerDiscovery")(function* (
 
   const discoverOnLinux = Effect.gen(function* () {
     const bootedAtMs = yield* bootTimeMs(options.procRoot);
+    const registered = yield* registeredServers(bootedAtMs);
+    // A registered server is counted from its entry, never again from /proc.
     const pids = (yield* fs.readDirectory(options.procRoot))
       .filter((entry) => /^\d+$/.test(entry))
       .map(Number)
-      .filter((pid) => pid !== options.self.pid);
-    const kinds = yield* Effect.forEach(pids, (pid) => classify(pid, bootedAtMs), {
-      concurrency: 16,
-    });
+      .filter((pid) => pid !== options.self.pid && !registered.has(pid));
+    const kinds = [
+      ...registered.values(),
+      ...(yield* Effect.forEach(pids, (pid) => classify(pid, bootedAtMs), {
+        concurrency: 16,
+      })),
+    ];
     return {
       installed: selfCount.installed + kinds.filter((kind) => kind === "installed").length,
       dev: selfCount.dev + kinds.filter((kind) => kind === "dev").length,
@@ -224,6 +280,10 @@ export const layer = Layer.effect(
     const uid = yield* HostProcessUserId;
     return yield* make({
       procRoot: "/proc",
+      registryDirectories:
+        uid === undefined
+          ? []
+          : serverRuntimeRegistryDirectories(yield* currentRegistryLocation(uid)),
       // No POSIX uid means no /proc to walk; discovery is null there anyway.
       uid: uid ?? -1,
       defaultStateHome: yield* resolveBaseDir(undefined),

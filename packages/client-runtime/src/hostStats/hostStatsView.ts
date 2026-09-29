@@ -238,6 +238,8 @@ export function hostStatusLine(host: HostStatsHostView): HostStatusLine | null {
       return { text: "Waiting for the first reading" };
     case "needs-update":
       return { text: "Update Mesura Code on this host" };
+    case "no-access":
+      return { text: "No access · pair again with full access" };
     case "updating":
       return {
         text: `Updating · last reading ${age === null ? "unknown" : formatReadingAge(age)}`,
@@ -254,9 +256,14 @@ export function hostStatusLine(host: HostStatsHostView): HostStatusLine | null {
   }
 }
 
-/** Updating, stale and offline hosts keep their values on screen, dimmed. */
+/** Updating, stale, offline and no-access hosts keep their values on screen, dimmed. */
 export function hostIsDimmed(host: HostStatsHostView): boolean {
-  return host.state === "updating" || host.state === "stale" || host.state === "offline";
+  return (
+    host.state === "updating" ||
+    host.state === "stale" ||
+    host.state === "offline" ||
+    host.state === "no-access"
+  );
 }
 
 /** The header shows uptime only while the host is reachable and has a reading. */
