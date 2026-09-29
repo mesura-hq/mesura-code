@@ -63,6 +63,16 @@ describe("RPC authorization scopes", () => {
     );
   });
 
+  it("streams a Software Factory run to any client that may read the thread", () => {
+    // The run state is a read of what the thread already shows, like the snapshot it links to.
+    expect(requiredScopeForRpcMethod(WS_METHODS.subscribeFactoryRun)).toBe(
+      AuthOrchestrationReadScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.subscribeFactoryRun)).toBe(
+      requiredScopeForRpcMethod(WS_METHODS.factoryReadSnapshot),
+    );
+  });
+
   it("rejects unknown RPC method names", () => {
     for (const method of ["server.notRegistered", "toString", "constructor"]) {
       expect(() => requiredScopeForRpcMethod(method)).toThrow(

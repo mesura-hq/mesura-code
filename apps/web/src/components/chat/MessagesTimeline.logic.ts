@@ -32,6 +32,12 @@ import {
 } from "../../session-logic";
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
 import type { QueuedComposerMessage } from "../../queuedMessageStore";
+import type {
+  FactoryPlanTimelineItem,
+  FactoryReportTimelineItem,
+} from "@t3tools/client-runtime/factory/plan-activities";
+import type { FactoryRunTimelineItem } from "@t3tools/client-runtime/factory/run-activities";
+import { placeFactoryRunRow } from "../../factory/factoryRunRow";
 import {
   type MessageId,
   type OrchestrationLatestTurn,
@@ -392,6 +398,24 @@ export type MessagesTimelineRow =
       proposedPlan: ProposedPlan;
     }
   | {
+      kind: "factory-plan";
+      id: string;
+      createdAt: string;
+      factoryPlan: FactoryPlanTimelineItem;
+    }
+  | {
+      kind: "factory-report";
+      id: string;
+      createdAt: string;
+      factoryReport: FactoryReportTimelineItem;
+    }
+  | {
+      kind: "factory-run";
+      id: string;
+      createdAt: string;
+      factoryRun: FactoryRunTimelineItem;
+    }
+  | {
       kind: "working";
       id: string;
       createdAt: string | null;
@@ -551,6 +575,10 @@ function timelineEntryTurnId(entry: TimelineEntry): TurnId | null {
   }
   if (entry.kind === "proposed-plan") {
     return entry.proposedPlan.turnId;
+  }
+  // A plan or report card belongs to no turn, so a turn fold never hides it.
+  if (entry.kind === "factory-plan" || entry.kind === "factory-report") {
+    return null;
   }
   return entry.kind === "work" ? (entry.entry.turnId ?? null) : null;
 }
@@ -900,6 +928,8 @@ function deriveMessagesTimelineRowsWithoutPending(input: {
   worktreeSetup?: WorktreeSetupSnapshot | null;
   /** Messages sent during the running turn, rendered after the live rows. */
   queuedMessages?: ReadonlyArray<QueuedComposerMessage>;
+  /** The thread's attached Software Factory run, placed by `placeFactoryRunRow`. */
+  factoryRun?: FactoryRunTimelineItem | null;
 }): MessagesTimelineRow[] {
   const turnDiffSummaryByAssistantMessageId = new Map<MessageId, TurnDiffSummary>();
   for (const summary of input.turnDiffSummaries) {
@@ -1258,6 +1288,26 @@ function deriveMessagesTimelineRowsWithoutPending(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "factory-plan") {
+      nextRows.push({
+        kind: "factory-plan",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        factoryPlan: timelineEntry.factoryPlan,
+      });
+      continue;
+    }
+
+    if (timelineEntry.kind === "factory-report") {
+      nextRows.push({
+        kind: "factory-report",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        factoryReport: timelineEntry.factoryReport,
+      });
+      continue;
+    }
+
     const assistantResponseStillInProgress =
       timelineEntry.message.role === "assistant" &&
       timelineEntry.message.turnId !== null &&
@@ -1375,8 +1425,15 @@ function deriveMessagesTimelineRowsWithoutPending(input: {
   return rows;
 }
 
-/** Pending questions remain top-level rows even when their turn or work group is folded. */
+/** Every row of the timeline, with the Software Factory run card placed by `placeFactoryRunRow`. */
 export function deriveMessagesTimelineRows(
+  input: Parameters<typeof deriveMessagesTimelineRowsWithoutPending>[0],
+): MessagesTimelineRow[] {
+  return placeFactoryRunRow(deriveMessagesTimelineRowsWithPending(input), input.factoryRun ?? null);
+}
+
+/** Pending questions remain top-level rows even when their turn or work group is folded. */
+function deriveMessagesTimelineRowsWithPending(
   input: Parameters<typeof deriveMessagesTimelineRowsWithoutPending>[0],
 ): MessagesTimelineRow[] {
   const requests = input.pendingUserInputs ?? [];
@@ -1552,6 +1609,12 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
 
     case "proposed-plan":
       return a.proposedPlan === (b as typeof a).proposedPlan;
+    case "factory-plan":
+      return a.factoryPlan === (b as typeof a).factoryPlan;
+    case "factory-report":
+      return a.factoryReport === (b as typeof a).factoryReport;
+    case "factory-run":
+      return a.factoryRun === (b as typeof a).factoryRun;
 
     case "queued-message": {
       const bq = b as typeof a;

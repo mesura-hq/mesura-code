@@ -154,6 +154,10 @@ import {
   SnapShotAttachmentDetails,
 } from "./SnapShotAttachmentDetails";
 import { ProposedPlanCard } from "./ProposedPlanCard";
+import { FactoryPlanCard } from "../../factory/FactoryPlanCard";
+import { FactoryReportCard } from "../../factory/FactoryReportCard";
+import { FactoryRunCard } from "../../factory/FactoryRunCard";
+import type { FactoryRunTimelineItem } from "@t3tools/client-runtime/factory/run-activities";
 import { ChangedFilesCard } from "./ChangedFilesTree";
 import {
   CHAT_TIMELINE_ANCHOR_OFFSET,
@@ -287,6 +291,9 @@ interface TimelineRowSharedState {
   agentPanelModel: AgentPanelModel;
   expandedSpawnEntryIds: ReadonlySet<string>;
   onOpenAgents: () => void;
+  onOpenFactoryPlan: ((planId: string) => void) | null;
+  onOpenFactoryRun: ((runId: string) => void) | null;
+  onOpenFactoryReport: ((runId: string) => void) | null;
   onCancelWorktreeSetup: (() => void) | null;
   onWorktreeSetupWorkLocally: (() => void) | null;
   onOpenWorktreeSetupTerminal: ((terminalId: string) => void) | null;
@@ -391,6 +398,13 @@ interface MessagesTimelineProps {
   ) => boolean;
   agentPanelModel?: AgentPanelModel;
   onOpenAgents?: () => void;
+  /** Opens a presented Software Factory plan in the right panel. */
+  onOpenFactoryPlan?: (planId: string) => void;
+  /** The thread's attached Software Factory run, and its card's Open. */
+  factoryRun?: FactoryRunTimelineItem | null;
+  onOpenFactoryRun?: (runId: string) => void;
+  /** A report card's Open: that run's report in the right panel. */
+  onOpenFactoryReport?: (runId: string) => void;
   isWorking: boolean;
   isPreparingWorktree?: boolean;
   isCompacting?: boolean;
@@ -474,6 +488,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   activeTurnStartedAt,
   agentPanelModel,
   onOpenAgents = NOOP_OPEN_AGENTS,
+  onOpenFactoryPlan,
+  factoryRun = null,
+  onOpenFactoryRun,
+  onOpenFactoryReport,
   listRef,
   timelineEntries,
   latestTurn,
@@ -752,6 +770,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         liveAgentTaskIds,
         worktreeSetup,
         queuedMessages,
+        factoryRun,
       },
       previous?.threadKey === listIdentityKey && previous.workspaceRoot === workspaceRoot
         ? previous.projection
@@ -778,6 +797,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     liveAgentTaskIds,
     worktreeSetup,
     queuedMessages,
+    factoryRun,
   ]);
   const rows = useStableRows(rawRows, listIdentityKey);
   useEffect(
@@ -982,6 +1002,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       agentPanelModel: agentPanelModel ?? EMPTY_AGENT_PANEL_MODEL,
       expandedSpawnEntryIds: paintedExpandedSpawnEntryIds,
       onOpenAgents,
+      onOpenFactoryPlan: onOpenFactoryPlan ?? null,
+      onOpenFactoryRun: onOpenFactoryRun ?? null,
+      onOpenFactoryReport: onOpenFactoryReport ?? null,
       onCancelWorktreeSetup: onCancelWorktreeSetup ?? null,
       onWorktreeSetupWorkLocally: onWorktreeSetupWorkLocally ?? null,
       onOpenWorktreeSetupTerminal: onOpenWorktreeSetupTerminal ?? null,
@@ -1015,6 +1038,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       agentPanelModel,
       paintedExpandedSpawnEntryIds,
       onOpenAgents,
+      onOpenFactoryPlan,
+      onOpenFactoryRun,
+      onOpenFactoryReport,
       onCancelWorktreeSetup,
       onWorktreeSetupWorkLocally,
       onOpenWorktreeSetupTerminal,
@@ -1521,6 +1547,9 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       ) : null}
       {row.kind === "assistant-meta" ? <AssistantMetaTimelineRow row={row} /> : null}
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
+      {row.kind === "factory-plan" ? <FactoryPlanTimelineRow row={row} /> : null}
+      {row.kind === "factory-run" ? <FactoryRunTimelineRow row={row} /> : null}
+      {row.kind === "factory-report" ? <FactoryReportTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
       {row.kind === "thinking" ? <ThinkingTimelineRow /> : null}
       {row.kind === "worktree-setup" ? <WorktreeSetupTimelineRow row={row} /> : null}
@@ -2259,6 +2288,48 @@ function ProposedPlanTimelineRow({
         threadRef={ctx.threadRef ?? undefined}
         cwd={ctx.markdownCwd}
         workspaceRoot={ctx.workspaceRoot}
+      />
+    </div>
+  );
+}
+
+function FactoryPlanTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "factory-plan" }> }) {
+  const ctx = use(TimelineRowCtx);
+  return (
+    <div className="min-w-0 px-1 py-0.5">
+      <FactoryPlanCard
+        factoryPlan={row.factoryPlan}
+        environmentId={ctx.activeThreadEnvironmentId}
+        cwd={ctx.markdownCwd}
+        threadRef={ctx.threadRef}
+        onOpen={ctx.onOpenFactoryPlan}
+      />
+    </div>
+  );
+}
+
+function FactoryRunTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "factory-run" }> }) {
+  const ctx = use(TimelineRowCtx);
+  return (
+    <div className="min-w-0 px-1 py-0.5">
+      <FactoryRunCard factoryRun={row.factoryRun} onOpen={ctx.onOpenFactoryRun} />
+    </div>
+  );
+}
+
+function FactoryReportTimelineRow({
+  row,
+}: {
+  row: Extract<TimelineRow, { kind: "factory-report" }>;
+}) {
+  const ctx = use(TimelineRowCtx);
+  return (
+    <div className="min-w-0 px-1 py-0.5">
+      <FactoryReportCard
+        factoryReport={row.factoryReport}
+        environmentId={ctx.activeThreadEnvironmentId}
+        cwd={ctx.markdownCwd}
+        onOpen={ctx.onOpenFactoryReport}
       />
     </div>
   );

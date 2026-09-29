@@ -48,3 +48,4 @@ export * from "./accountLimits.ts";
 export * from "./fileManager.ts";
 export * from "./rpc.ts";
 export * from "./worktreeSetup.ts";
+export * from "./factory.ts";

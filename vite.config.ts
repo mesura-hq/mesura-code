@@ -80,6 +80,10 @@ export default defineConfig({
       // pins. `vp run generate` owns these bytes; a formatter pass would move
       // the checksum without any schema having changed.
       "packages/symmetria-broker-contract/schema/**",
+      // Real documents as the planning skill writes them. The formatter would
+      // turn the phases block's ```json fence into ````json and collapse its
+      // arrays, so the parser would be tested against text no skill produces.
+      "packages/shared/src/fixtures/**",
       // The vendored Symmetria File Manager subtree keeps its own formatter
       // (biome); formatting it here would make every subtree sync a conflict.
       "vendor/**",

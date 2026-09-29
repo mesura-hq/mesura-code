@@ -143,6 +143,7 @@ import {
 } from "../threadRoutes";
 import { formatRelativeTimeLabel, parseTimestampDate } from "../timestampFormat";
 import type { SidebarThreadSummary } from "../types";
+import { FactoryRunThreadLabel } from "../factory/FactoryRunThreadLabel";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
@@ -1945,6 +1946,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               )}
               {terminalStatusIcon}
               {prBadge}
+              <FactoryRunThreadLabel run={thread.factoryRun} />
               {diff ? (
                 <span className="shrink-0 font-mono">
                   <span className="text-diff-addition-foreground">+{diff.insertions}</span>{" "}

@@ -37,6 +37,7 @@ import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as FactoryRunTracker from "./factory/FactoryRunTracker.ts";
 import * as OrchestrationReactor from "./orchestration/Services/OrchestrationReactor.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerSettings from "./serverSettings.ts";
@@ -748,6 +749,9 @@ export const reconcileProviderSessions = Effect.gen(function* () {
 
 const decodeWorktreeSetupSnapshot = Schema.decodeUnknownOption(WorktreeSetupSnapshot);
 
+/** Mesura: follows again the Software Factory runs a restart left unfinished. */
+export const reattachFactoryRuns = FactoryRunTracker.reattachFactoryRuns;
+
 /**
  * A worktree bootstrap records its setup snapshot on the thread while it runs
  * and settles it when it finishes. The bootstrap itself lives only in memory,
@@ -971,6 +975,7 @@ export const make = (options?: StartupOptions) =>
 
       yield* runStartupPhase("provider-sessions.reconcile", reconcileProviderSessions);
       yield* runStartupPhase("worktree-setups.reconcile", reconcileWorktreeSetups);
+      yield* runStartupPhase("factory-runs.reattach", reattachFactoryRuns);
 
       yield* Effect.logDebug("startup phase: syncing clean projects");
       yield* runStartupPhase("projects.auto-pull", syncAutoPullProjects);

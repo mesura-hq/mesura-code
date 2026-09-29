@@ -8,6 +8,8 @@ export function SegmentedControl<Value extends number | string>(props: {
     readonly value: Value;
     readonly label: string;
     readonly accessibilityLabel?: string;
+    /** Shown but not selectable, for a view that does not exist yet. */
+    readonly disabled?: boolean;
   }[];
   readonly selected: Value;
   readonly onSelect: (value: Value) => void;
@@ -46,16 +48,19 @@ export function SegmentedControl<Value extends number | string>(props: {
       />
       {props.options.map((option) => {
         const active = option.value === props.selected;
+        const disabled = option.disabled === true;
         return (
           <Pressable
             key={String(option.value)}
             accessibilityRole={Platform.OS === "ios" ? "button" : (props.role ?? "button")}
             accessibilityLabel={option.accessibilityLabel ?? option.label}
-            accessibilityState={{ selected: active }}
+            accessibilityState={{ selected: active, disabled }}
+            disabled={disabled}
             onPress={() => props.onSelect(option.value)}
             className={cn(
               "flex-1 items-center justify-center rounded-full",
               compact ? "h-9" : "h-11",
+              disabled && "opacity-40",
             )}
           >
             <Text

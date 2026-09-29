@@ -195,6 +195,10 @@ import {
   ThreadMarkdownImageUnavailable,
   ThreadMarkdownImageView,
 } from "./ThreadMarkdownImage";
+import { FactoryPlanCard } from "../factory/FactoryPlanCard";
+import { FactoryReportCard } from "../factory/FactoryReportCard";
+import { FactoryRunCard } from "../factory/FactoryRunCard";
+import type { FactoryPlanApprovalContext } from "../factory/useFactoryPlanApproval";
 
 const WIDE_MARKDOWN_BLOCK_OPTIONS = {
   // Native iOS blockquotes and adjacent selectable text are separate layout
@@ -274,6 +278,14 @@ export interface ThreadFeedProps extends PendingUserInputFeedProps {
   readonly onEndFollowEnabledChange?: (enabled: boolean) => void;
   readonly skills?: ReadonlyArray<SelectableMarkdownSkill>;
   readonly onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void;
+  /** Opens a presented plan, by its `factory.plan` activity id, on the Factory screen. */
+  readonly onOpenFactoryPlan?: (planId: string) => void;
+  /** Opens an attached run, by its run id, on the Factory screen's Run tab. */
+  readonly onOpenFactoryRun?: (runId: string) => void;
+  /** Opens a written report, by its run id, on the Factory screen's Report tab. */
+  readonly onOpenFactoryReport?: (runId: string) => void;
+  /** Routes and Approve for the plan cards. */
+  readonly factoryPlanApproval?: FactoryPlanApprovalContext;
   /** Non-null when older turns exist beyond the loaded window. */
   readonly loadEarlier?: {
     readonly loading: boolean;
@@ -1356,6 +1368,10 @@ function renderFeedEntry(
     ThreadFeedProps,
     | "environmentId"
     | "onUseArtifactTemplate"
+    | "onOpenFactoryPlan"
+    | "onOpenFactoryRun"
+    | "onOpenFactoryReport"
+    | "factoryPlanApproval"
     | "skills"
     | "dispatchingMessageId"
     | "onEditPendingMessage"
@@ -1415,6 +1431,64 @@ function renderFeedEntry(
           tintColor={iconSubtleColor}
         />
       </Pressable>
+    );
+  }
+
+  if (entry.type === "factory-plan") {
+    const onOpenFactoryPlan = props.onOpenFactoryPlan;
+    return (
+      <FactoryPlanCard
+        plan={entry.plan}
+        environmentId={props.environmentId}
+        onOpen={onOpenFactoryPlan ? () => onOpenFactoryPlan(entry.id) : undefined}
+        approval={props.factoryPlanApproval}
+        renderMarkdown={(markdown) => (
+          <MarkdownImageAvailableWidthContext value={props.markdownContentWidth}>
+            <AssistantMarkdownContent
+              markdown={markdown}
+              markdownStyles={markdownStyles.assistant}
+              linkHandlers={props.markdownLinkHandlers}
+              renderImage={props.renderMarkdownImage}
+              skills={props.skills}
+            />
+          </MarkdownImageAvailableWidthContext>
+        )}
+      />
+    );
+  }
+
+  if (entry.type === "factory-report") {
+    const onOpenFactoryReport = props.onOpenFactoryReport;
+    const runId = entry.report.runId;
+    return (
+      <FactoryReportCard
+        report={entry.report}
+        run={entry.run}
+        environmentId={props.environmentId}
+        onOpen={onOpenFactoryReport ? () => onOpenFactoryReport(runId) : undefined}
+        renderMarkdown={(markdown) => (
+          <MarkdownImageAvailableWidthContext value={props.markdownContentWidth}>
+            <AssistantMarkdownContent
+              markdown={markdown}
+              markdownStyles={markdownStyles.assistant}
+              linkHandlers={props.markdownLinkHandlers}
+              renderImage={props.renderMarkdownImage}
+              skills={props.skills}
+            />
+          </MarkdownImageAvailableWidthContext>
+        )}
+      />
+    );
+  }
+
+  if (entry.type === "factory-run") {
+    const onOpenFactoryRun = props.onOpenFactoryRun;
+    const runId = entry.run.runId;
+    return (
+      <FactoryRunCard
+        run={entry.run}
+        onOpen={onOpenFactoryRun ? () => onOpenFactoryRun(runId) : undefined}
+      />
     );
   }
 
@@ -2286,8 +2360,12 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       themeAppearance,
       userBubbleColor,
       viewportWidth,
+      // Rows re-render only on a new item or new extraData; the plan cards
+      // read their provider lists and approvals from here.
+      factoryPlanApproval: props.factoryPlanApproval,
     }),
     [
+      props.factoryPlanApproval,
       props.respondingUserInputIds,
       props.dispatchingMessageId,
       unsettledTurnId,
@@ -2755,6 +2833,10 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
                 markdownContentWidth,
                 skills: props.skills,
                 onUseArtifactTemplate: props.onUseArtifactTemplate,
+                onOpenFactoryPlan: props.onOpenFactoryPlan,
+                onOpenFactoryRun: props.onOpenFactoryRun,
+                onOpenFactoryReport: props.onOpenFactoryReport,
+                factoryPlanApproval: props.factoryPlanApproval,
               },
             )
           )}
@@ -2797,6 +2879,10 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       onToggleWorkRow,
       props.environmentId,
       props.onUseArtifactTemplate,
+      props.onOpenFactoryPlan,
+      props.onOpenFactoryRun,
+      props.onOpenFactoryReport,
+      props.factoryPlanApproval,
       props.skills,
       renderMarkdownImage,
       renderViewedImage,

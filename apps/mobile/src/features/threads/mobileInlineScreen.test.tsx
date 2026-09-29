@@ -1,9 +1,12 @@
 // @vitest-environment happy-dom
 // Entry point: ThreadDetailScreen with real ThreadFeed, PendingUserInputCard,
 // QuestionAttachments, request state, attachment strip, and thread-work-log.
+// The Factory plan card specs mount the same entry point; only the stored plan
+// body (`factoryEnvironment.factorySnapshot`), navigation and the thread outbox
+// (`enqueueThreadOutboxMessage`, where Approve sends its message) are stubbed.
 // Native hosts use DOM controls. Geometry tests cover keyboard ownership and
 // scroll routing; physical keyboard occlusion still requires device verification.
-import { act, useState, useImperativeHandle, useRef, type Ref } from "react";
+import { act, memo, useMemo, useState, useImperativeHandle, useRef, type Ref } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 import type { ReactNode } from "react";
@@ -31,6 +34,22 @@ const fixture = vi.hoisted(() => ({
   record: vi.fn(),
   uploads: {} as Record<string, { status: string; progress?: number; reason?: string }>,
   configs: new Map(),
+  navigation: {
+    navigate: vi.fn(),
+    push: vi.fn(),
+    replace: vi.fn(),
+    reset: vi.fn(),
+    dispatch: vi.fn(),
+    goBack: vi.fn(),
+  },
+  factorySnapshots: {} as Record<string, string>,
+  factorySnapshotAtoms: new Map<string, unknown>(),
+  /** The `subscribeFactoryRun` item every run's stream answers with; null stays loading. A report card must never ask for it. */
+  factoryRunItem: null as unknown,
+  factoryRunAtoms: new Map<string, unknown>(),
+  serverConfig: null as unknown,
+  enqueue: vi.fn(async (_message: unknown) => undefined),
+  queuedMessages: [] as unknown[],
 }));
 vi.mock("react-native", () => {
   const View = ({
@@ -136,6 +155,8 @@ vi.mock("react-native", () => {
     ScrollView: ({ children, horizontal }: { children?: ReactNode; horizontal?: boolean }) => (
       <div data-native-scroll={horizontal ? "horizontal" : "vertical"}>{children}</div>
     ),
+    Modal: ({ visible, children }: { visible?: boolean; children?: ReactNode }) =>
+      visible === false ? null : <div data-native-modal="true">{children}</div>,
     Image: () => null,
     ActivityIndicator: () => null,
     StyleSheet: {
@@ -163,15 +184,35 @@ vi.mock("react-native", () => {
     useWindowDimensions: () => ({ height: 800, width: 390, fontScale: 1, scale: 1 }),
   };
 });
+// Legend List 3.3.5 memoizes a mounted row on its item and `extraData`
+// (`getRenderedItem` in `useMemo([itemKey, data, extraData])`): a new
+// `renderItem` alone never reaches it. The mock keeps that rule, so state a
+// row reads has to travel in its item or in `extraData`, as on the phone.
+const LegendListRow = memo(
+  function LegendListRow(props: {
+    item: unknown;
+    index: number;
+    extraData: unknown;
+    renderItem: (input: { item: unknown; index: number }) => ReactNode;
+  }) {
+    return <>{props.renderItem({ item: props.item, index: props.index })}</>;
+  },
+  (previous, next) =>
+    previous.item === next.item &&
+    previous.index === next.index &&
+    previous.extraData === next.extraData,
+);
 vi.mock("@legendapp/list/keyboard", () => ({
   KeyboardAwareLegendList: ({
     ref,
     data,
+    extraData,
     renderItem,
     ListHeaderComponent,
   }: {
     ref?: Ref<unknown>;
     data: ReadonlyArray<{ id: string }>;
+    extraData?: unknown;
     renderItem: (input: { item: unknown; index: number }) => ReactNode;
     ListHeaderComponent?: ReactNode;
   }) => {
@@ -190,7 +231,12 @@ vi.mock("@legendapp/list/keyboard", () => ({
           fixture.feedRowRenders(item.id);
           return (
             <div data-feed-row={item.id} key={item.id}>
-              {renderItem({ item, index })}
+              <LegendListRow
+                item={item}
+                index={index}
+                extraData={extraData}
+                renderItem={renderItem}
+              />
             </div>
           );
         })}
@@ -317,7 +363,7 @@ vi.mock("./ThreadComposer", () => ({
 import { ThreadDetailScreen, type ThreadDetailScreenProps } from "./ThreadDetailScreen";
 
 vi.mock("@react-navigation/native", () => ({
-  useNavigation: () => ({ navigate: vi.fn() }),
+  useNavigation: () => fixture.navigation,
   useFocusEffect: () => undefined,
   useIsFocused: () => true,
 }));
@@ -339,8 +385,11 @@ vi.mock("react-native-nitro-markdown", () => ({
     <span>{markdown ?? children}</span>
   ),
 }));
+// One theme object, as the app's theme hook returns while the theme holds:
+// the feed's `extraData` is derived from it.
+const stableTheme = vi.hoisted(() => new Proxy({}, { get: () => "#333333" }));
 vi.mock("../../lib/useUniwindTheme", () => ({
-  useUniwindTheme: () => new Proxy({}, { get: () => "#333333" }),
+  useUniwindTheme: () => stableTheme,
 }));
 vi.mock("../../lib/useFontFamily", () => ({ useFontFamily: () => "sans-serif" }));
 vi.mock("../../native/SelectableMarkdownText", () => ({
@@ -352,9 +401,12 @@ vi.mock("../../components/NativePresentation", () => ({
 }));
 vi.mock("./useFileChipShare", () => ({ useFileChipShare: () => vi.fn() }));
 vi.mock("./markdownCodeHighlightState", () => ({ useMarkdownCodeHighlight: () => null }));
+// Stable across renders, as the real hook's memoized colors are: the feed's
+// `extraData` holds them, and a fresh object would re-render every row.
+const stableReviewCommentColors = vi.hoisted(() => ({}));
 vi.mock("../review/ReviewCommentCard", () => ({
   ReviewCommentCard: () => null,
-  useReviewCommentColors: () => ({}),
+  useReviewCommentColors: () => stableReviewCommentColors,
 }));
 vi.mock("./ThreadMarkdownImage", async () => ({
   MarkdownImageAvailableWidthContext: (await import("react")).createContext(0),
@@ -377,11 +429,54 @@ vi.mock("../../state/use-thread-detail", () => ({
   useSelectedThreadDetail: () => ({ activities: fixture.activities }),
 }));
 vi.mock("../../state/entities", () => ({ useServerConfigs: () => fixture.configs }));
+// The plan body a `factory.plan` activity names by digest, as the server's
+// factoryReadSnapshot RPC would answer it; an unknown digest stays loading.
+vi.mock("../../state/factory", async () => {
+  const { AsyncResult, Atom } = await import("effect/unstable/reactivity");
+  return {
+    factoryEnvironment: {
+      factorySnapshot: ({ input }: { input: { digest: string } }) => {
+        const markdown = fixture.factorySnapshots[input.digest];
+        const key = `${input.digest}:${markdown === undefined ? "loading" : "ready"}`;
+        let atom = fixture.factorySnapshotAtoms.get(key);
+        if (atom === undefined) {
+          atom = Atom.make(
+            markdown === undefined
+              ? AsyncResult.initial(true)
+              : AsyncResult.success({ digest: input.digest, markdown }),
+          );
+          fixture.factorySnapshotAtoms.set(key, atom);
+        }
+        return atom;
+      },
+      factoryRun: ({ input }: { input: { threadId: string; runId: string } }) => {
+        const key = `${input.threadId}:${input.runId}:${fixture.factoryRunItem === null ? "loading" : "ready"}`;
+        let atom = fixture.factoryRunAtoms.get(key);
+        if (atom === undefined) {
+          atom = Atom.make(
+            fixture.factoryRunItem === null
+              ? AsyncResult.initial(true)
+              : AsyncResult.success(fixture.factoryRunItem),
+          );
+          fixture.factoryRunAtoms.set(key, atom);
+        }
+        return atom;
+      },
+    },
+  };
+});
 vi.mock("../../state/threads", () => ({
   threadEnvironment: { respondToUserInput: "respond", dismissUserInput: "dismiss" },
 }));
 vi.mock("../../state/use-atom-command", () => ({
   useAtomCommand: (command: string) => (command === "respond" ? fixture.respond : fixture.dismiss),
+}));
+// Approve's message ids come from `makeQueuedMessageMetadata`, which reads
+// expo-crypto; its native module does not load under happy-dom.
+vi.mock("expo-crypto", () => ({ randomUUID: () => globalThis.crypto.randomUUID() }));
+vi.mock("../../state/thread-outbox", async () => ({
+  ...(await import("../../state/thread-outbox-model")),
+  enqueueThreadOutboxMessage: fixture.enqueue,
 }));
 vi.mock("../../lib/useNativePaste", () => ({ useNativePaste: () => vi.fn() }));
 vi.mock("expo-paste-input", () => ({
@@ -478,12 +573,18 @@ const selectedThread = {
   projectId: ProjectId.make("inline-screen-project"),
   title: "Inline fence",
   modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+  runtimeMode: "full-access",
+  interactionMode: "default",
   latestTurn: null,
   latestUserMessageAt: null,
 };
 function ScreenHarness() {
   const requests = useSelectedThreadRequests();
   const [draftMessage, setDraftMessage] = useState("");
+  // Memoized as the route screen's feed is: a render that changes neither the
+  // messages nor the activities hands the list the same entries.
+  const { messages, activities } = fixture;
+  const feed = useMemo(() => buildThreadFeed({ messages, activities }), [messages, activities]);
   const props = {
     ...requests,
     selectedThread: {
@@ -492,10 +593,7 @@ function ScreenHarness() {
       environmentId: EnvironmentId.make(fixture.selectedThread.environmentId),
     },
     environmentId: EnvironmentId.make(fixture.selectedThread.environmentId),
-    selectedThreadFeed: buildThreadFeed({
-      messages: fixture.messages,
-      activities: fixture.activities,
-    }),
+    selectedThreadFeed: feed,
     contentPresentation: { kind: "ready" },
     screenTone: "neutral",
     connectionStateLabel: "connected",
@@ -507,10 +605,10 @@ function ScreenHarness() {
     isCompacting: false,
     draftMessage,
     draftAttachments: [],
-    queuedMessages: [],
+    queuedMessages: fixture.queuedMessages,
     dispatchingMessageId: null,
     selectedThreadQueueCount: 0,
-    serverConfig: null,
+    serverConfig: fixture.serverConfig,
     projectWorkspaceRoot: null,
     threadCwd: null,
     onChangeDraftMessage: setDraftMessage,
@@ -579,6 +677,15 @@ beforeEach(() => {
   fixture.respond.mockResolvedValue({ _tag: "Success", value: undefined });
   fixture.dismiss.mockClear();
   fixture.send.mockClear();
+  for (const method of Object.values(fixture.navigation)) method.mockClear();
+  fixture.factorySnapshots = {};
+  fixture.factorySnapshotAtoms.clear();
+  fixture.factoryRunItem = null;
+  fixture.factoryRunAtoms.clear();
+  fixture.serverConfig = null;
+  fixture.enqueue.mockReset();
+  fixture.enqueue.mockResolvedValue(undefined);
+  fixture.queuedMessages = [];
   fixture.configs = new Map([
     [
       environmentId,
@@ -1158,4 +1265,715 @@ it("mobile phase3 repair AC4 reveals the measured answer above keyboard and comp
   fixture.inputY = 470;
   await act(async () => fixture.keyboardShown?.());
   expect(fixture.scrollToOffset).not.toHaveBeenCalled();
+});
+
+// Factory plan card (phase 3 of factory-in-chat). The emulator alone shows the
+// card's look and that Back restores the feed's scroll position; these pin the
+// card's content, its Open action and that opening it leaves the feed alone.
+import {
+  FACTORY_PLAN_DIGEST,
+  makeFactoryPlanActivity,
+  readFactoryPlanFixture,
+} from "../factory/factoryPlan.test-support";
+
+const factoryPlanId = "factory-plan:plan-md";
+function showFactoryPlan() {
+  fixture.activities = [
+    makeFactoryPlanActivity({ id: factoryPlanId, createdAt: "2026-09-23T10:00:00.000Z" }),
+  ];
+  fixture.factorySnapshots = { [FACTORY_PLAN_DIGEST]: readFactoryPlanFixture() };
+}
+function factoryPlanCard() {
+  const row = conversation().querySelector<HTMLElement>(`[data-feed-row="${factoryPlanId}"]`);
+  expect(row, "Expected the plan's own feed row").not.toBeNull();
+  return row!;
+}
+function factoryPlanOpenButton() {
+  const open = Array.from(factoryPlanCard().querySelectorAll<HTMLButtonElement>("button")).find(
+    (node) => node.textContent?.trim() === "Open" || node.getAttribute("aria-label") === "Open",
+  );
+  expect(open, "Expected the plan card's Open button").toBeDefined();
+  return open!;
+}
+
+it("factory plan card shows the title, the Context section and one line per phase in the Android feed", async () => {
+  showFactoryPlan();
+  await mount();
+  const text = factoryPlanCard().textContent ?? "";
+  expect(text).toContain("Plan: the Software Factory inside Mesura Code");
+  expect(text).toContain(
+    "Mesura Code is the app the developer uses every day to direct coding agents",
+  );
+  expect(text).toContain("Snapshot a plan and present it to the thread · 8 criteria");
+  expect(text).toContain("Render the plan card and the Factory pane on the web · 1 criterion");
+  // Only the Context section renders inline: not the next section's body.
+  expect(text).not.toContain("The planning skill writes three files");
+  // Never a work-log row: the activity's summary is not shown anywhere.
+  expect(conversation().textContent).not.toContain("Presented a plan");
+});
+
+it("factory plan card Open navigates to the thread's Factory screen for that plan", async () => {
+  showFactoryPlan();
+  await mount();
+  await act(async () => factoryPlanOpenButton().click());
+  expect(fixture.navigation.navigate).toHaveBeenCalledExactlyOnceWith("ThreadFactory", {
+    environmentId: "inline-screen-environment",
+    threadId: "inline-screen-thread",
+    planId: factoryPlanId,
+  });
+});
+
+it("factory plan card Open pushes the Factory screen above the feed without moving or replacing it", async () => {
+  fixture.geometry = true;
+  showFactoryPlan();
+  await mount();
+  await act(async () => factoryPlanOpenButton().click());
+  expect(fixture.navigation.navigate).toHaveBeenCalledOnce();
+  for (const method of ["push", "replace", "reset", "dispatch", "goBack"] as const) {
+    expect(fixture.navigation[method], method).not.toHaveBeenCalled();
+  }
+  expect(fixture.scrollToOffset).not.toHaveBeenCalled();
+  expect(factoryPlanCard().textContent).toContain("Plan: the Software Factory inside Mesura Code");
+});
+
+// Routes and Approve on the plan card (phase 4 of factory-in-chat). The
+// provider model lists arrive as the screen's `serverConfig`; Approve queues
+// one message through the thread outbox. The emulator alone shows the lists'
+// look and the budget field's keyboard.
+import {
+  FACTORY_DEFAULT_TEST_ROUTES,
+  FACTORY_OTHER_PLAN_DIGEST,
+  FACTORY_REVISED_PLAN_DIGEST,
+  makeFactoryRouteProviders,
+  readFactoryApprovalMessage,
+  writeFactoryApprovalMessage,
+} from "@t3tools/client-runtime/factory/testing";
+import type { ServerProvider } from "@t3tools/contracts";
+import { makeFactoryPlanPayload } from "../factory/factoryPlan.test-support";
+
+const factoryPlan = makeFactoryPlanPayload();
+const ROUTE_ROLES = ["Implementer", "Reviewer", "Verifier"] as const;
+const LEVEL_LABELS = new Set(["Low", "Medium", "High", "Extra High", "Max"]);
+
+function showFactoryPlanWithProviders(
+  providers: ReadonlyArray<ServerProvider> = makeFactoryRouteProviders(),
+) {
+  showFactoryPlan();
+  fixture.serverConfig = {
+    environment: {
+      capabilities: {
+        questionAttachments: true,
+        attachmentUploads: true,
+        fileAttachments: { maxUploadBytes: 1048576 },
+      },
+    },
+    providers,
+    usageLimitSources: [],
+  };
+  fixture.configs.set(environmentId, fixture.serverConfig);
+}
+function showApprovals(texts: ReadonlyArray<string>) {
+  fixture.messages = texts.map((text, index) => ({
+    id: MessageId.make(`factory-approval-${index}`),
+    role: "user" as const,
+    text,
+    turnId: null,
+    streaming: false,
+    createdAt: "2026-09-23T10:00:01.000Z",
+    updatedAt: "2026-09-23T10:00:01.000Z",
+  }));
+}
+function cardButton(label: string): HTMLButtonElement | undefined {
+  return Array.from(factoryPlanCard().querySelectorAll<HTMLButtonElement>("button")).find(
+    (node) => node.getAttribute("aria-label") === label || node.textContent?.trim() === label,
+  );
+}
+function requireCardButton(label: string): HTMLButtonElement {
+  const match = cardButton(label);
+  expect(match, `Expected ${label}; card: ${factoryPlanCard().textContent}`).toBeDefined();
+  return match!;
+}
+const isRouteControl = (node: Element) =>
+  /^(Implementer|Reviewer|Verifier) (model|reasoning)$/.test(node.getAttribute("aria-label") ?? "");
+/** The choices an open list shows: model names or level labels, outside the row controls. */
+function listedChoices(kind: "model" | "level"): HTMLButtonElement[] {
+  return Array.from(container.querySelectorAll<HTMLButtonElement>("button")).filter((node) => {
+    if (isRouteControl(node)) return false;
+    const text = node.textContent?.trim() ?? "";
+    return kind === "model" ? /^(Claude|GPT)/.test(text) : LEVEL_LABELS.has(text);
+  });
+}
+async function openChoices(label: string, kind: "model" | "level") {
+  await act(async () => requireCardButton(label).click());
+  return listedChoices(kind).map((node) => node.textContent?.trim() ?? "");
+}
+async function chooseRoute(label: string, choice: string) {
+  await act(async () => requireCardButton(label).click());
+  const option = listedChoices(label.endsWith(" model") ? "model" : "level").find(
+    (node) => node.textContent?.trim() === choice,
+  );
+  expect(option, `Expected ${label} to list ${choice}`).toBeDefined();
+  await act(async () => option!.click());
+}
+function budgetField() {
+  return factoryPlanCard().querySelector<HTMLTextAreaElement>(
+    'textarea[aria-label="Implementer budget"]',
+  );
+}
+async function approveOnPhone() {
+  const approveControl = requireCardButton("Approve");
+  expect(approveControl.disabled).toBe(false);
+  await act(async () => approveControl.click());
+  expect(fixture.enqueue).toHaveBeenCalledOnce();
+  return fixture.enqueue.mock.calls[0]![0] as {
+    environmentId: string;
+    threadId: string;
+    text: string;
+    modelSelection?: unknown;
+    runtimeMode?: string;
+  };
+}
+
+it("mobile phase4 AC1 ends the plan card with implementer, reviewer and verifier rows showing the defaults", async () => {
+  showFactoryPlanWithProviders();
+  await mount();
+  const card = factoryPlanCard();
+  const lastPhase = Array.from(card.querySelectorAll("span")).find(
+    (node) =>
+      node.textContent === "Render the plan card and the Factory pane on the web · 1 criterion",
+  );
+  expect(lastPhase).toBeDefined();
+  let previous: Element = lastPhase!;
+  for (const role of ROUTE_ROLES) {
+    const model = requireCardButton(`${role} model`);
+    const level = requireCardButton(`${role} reasoning`);
+    expect(previous.compareDocumentPosition(model) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(card.textContent).toContain(role);
+    previous = level;
+  }
+  // Criterion 2 through the card: newest Opus at high, Sol at high, Luna at max.
+  expect(requireCardButton("Implementer model").textContent).toContain("Claude Opus 5.5");
+  expect(requireCardButton("Reviewer model").textContent).toContain("GPT-6 Sol");
+  expect(requireCardButton("Verifier model").textContent).toContain("GPT-6 Luna");
+  expect(requireCardButton("Implementer reasoning").textContent).toContain("High");
+  expect(requireCardButton("Reviewer reasoning").textContent).toContain("High");
+  expect(requireCardButton("Verifier reasoning").textContent).toContain("Max");
+  expect(requireCardButton("Approve").disabled).toBe(false);
+});
+
+it("mobile phase4 AC3 gives a Claude implementer an editable 25 dollar budget and queues the edited amount", async () => {
+  showFactoryPlanWithProviders();
+  await mount();
+  expect(budgetField()?.value).toBe("25");
+  await type(budgetField()!, "40");
+  const queued = await approveOnPhone();
+  expect(readFactoryApprovalMessage(queued.text).routes).toEqual({
+    ...FACTORY_DEFAULT_TEST_ROUTES,
+    implementer: { ...FACTORY_DEFAULT_TEST_ROUTES.implementer, budgetUsd: 40 },
+  });
+});
+
+it("mobile phase4 AC4 lists only Codex models for the verifier and the other family for the reviewer", async () => {
+  showFactoryPlanWithProviders();
+  await mount();
+  const verifier = await openChoices("Verifier model", "model");
+  expect(verifier.length).toBeGreaterThan(0);
+  expect(
+    verifier.every((name) => name.startsWith("GPT")),
+    verifier.join(", "),
+  ).toBe(true);
+  await chooseRoute("Implementer model", "GPT-6 Sol");
+  expect(requireCardButton("Reviewer model").textContent).toContain("Claude Opus 5.5");
+  expect(budgetField()).toBeNull();
+  const reviewer = await openChoices("Reviewer model", "model");
+  expect(reviewer.length).toBeGreaterThan(0);
+  expect(
+    reviewer.every((name) => name.startsWith("Claude")),
+    reviewer.join(", "),
+  ).toBe(true);
+});
+
+it("mobile phase4 AC5 shows a role without a model as unavailable with the reason and keeps Approve disabled", async () => {
+  showFactoryPlanWithProviders(
+    makeFactoryRouteProviders({ codex: [{ slug: "gpt-6-sol", name: "GPT-6 Sol" }] }),
+  );
+  await mount();
+  const text = factoryPlanCard().textContent ?? "";
+  expect(text).toMatch(/unavailable/i);
+  expect(text).toMatch(/luna/i);
+  const approveControl = requireCardButton("Approve");
+  expect(approveControl.disabled).toBe(true);
+  await act(async () => approveControl.click());
+  expect(fixture.enqueue).not.toHaveBeenCalled();
+});
+
+it("mobile phase4 AC6 queues one approval message with the digest line, the routes block and the thread's model", async () => {
+  showFactoryPlanWithProviders();
+  await mount();
+  await chooseRoute("Verifier reasoning", "Extra High");
+  const queued = await approveOnPhone();
+  expect(queued.environmentId).toBe(environmentId);
+  expect(queued.threadId).toBe(threadId);
+  const message = readFactoryApprovalMessage(queued.text);
+  expect(message.firstLine).toBe(`Approve plan sha256:${FACTORY_PLAN_DIGEST}`);
+  expect(queued.text).toContain(`Plan: ${factoryPlan.planPath}`);
+  expect(queued.text).toContain(`Intent: ${factoryPlan.intentPath}`);
+  expect(message.routes).toEqual({
+    ...FACTORY_DEFAULT_TEST_ROUTES,
+    verifier: { ...FACTORY_DEFAULT_TEST_ROUTES.verifier, effort: "xhigh" },
+  });
+  expect(queued.modelSelection).toEqual(selectedThread.modelSelection);
+  expect(queued.runtimeMode).toBe("full-access");
+  expect(fixture.send).not.toHaveBeenCalled();
+});
+
+const phoneApprovedRoutes = {
+  ...FACTORY_DEFAULT_TEST_ROUTES,
+  reviewer: { harness: "codex" as const, model: "gpt-6-astra", effort: "xhigh" },
+};
+
+it("mobile phase4 AC7 shows the approved routes read-only and hides Approve for the approved digest", async () => {
+  showFactoryPlanWithProviders();
+  showApprovals([
+    writeFactoryApprovalMessage({
+      digest: FACTORY_PLAN_DIGEST,
+      planPath: factoryPlan.planPath,
+      intentPath: factoryPlan.intentPath,
+      routes: phoneApprovedRoutes,
+    }),
+  ]);
+  await mount();
+  expect(cardButton("Approve")).toBeUndefined();
+  for (const role of ROUTE_ROLES) {
+    expect(cardButton(`${role} model`), role).toBeUndefined();
+    expect(cardButton(`${role} reasoning`), role).toBeUndefined();
+  }
+  expect(budgetField()).toBeNull();
+  const text = factoryPlanCard().textContent ?? "";
+  expect(text).toMatch(/GPT-6 Astra|gpt-6-astra/);
+  expect(text).toMatch(/Extra High|xhigh/i);
+  expect(text).not.toContain("Changed since approval");
+});
+
+it("mobile phase4 AC7 reads Changed since approval with editable rows when the plan changed after approval", async () => {
+  showFactoryPlanWithProviders();
+  showApprovals([
+    writeFactoryApprovalMessage({
+      digest: FACTORY_REVISED_PLAN_DIGEST,
+      planPath: factoryPlan.planPath,
+      intentPath: factoryPlan.intentPath,
+      routes: phoneApprovedRoutes,
+    }),
+  ]);
+  await mount();
+  expect(factoryPlanCard().textContent).toContain("Changed since approval");
+  expect(requireCardButton("Implementer model")).toBeDefined();
+  expect(requireCardButton("Approve").disabled).toBe(false);
+});
+
+it("mobile phase4 AC7 ignores an approval of another plan file", async () => {
+  showFactoryPlanWithProviders();
+  showApprovals([
+    writeFactoryApprovalMessage({
+      digest: FACTORY_OTHER_PLAN_DIGEST,
+      planPath: "/home/dev/plans/another-feature/plan.md",
+      intentPath: "/home/dev/plans/another-feature/intent.md",
+      routes: phoneApprovedRoutes,
+    }),
+  ]);
+  await mount();
+  expect(factoryPlanCard().textContent).not.toContain("Changed since approval");
+  expect(requireCardButton("Approve").disabled).toBe(false);
+});
+
+it("mobile phase4 guard sends the composer's own message beside a plan card without queueing an approval", async () => {
+  showFactoryPlanWithProviders();
+  await mount();
+  await type(container.querySelector('[aria-label="Message"]')!, "A normal follow-up");
+  await press("Send message");
+  expect(fixture.send).toHaveBeenCalledOnce();
+  expect(fixture.enqueue).not.toHaveBeenCalled();
+  expect(factoryPlanCard().textContent).toContain("Plan: the Software Factory inside Mesura Code");
+});
+
+it("mobile phase4 decision 4 shows an approval without routes as approved with sf-team choosing them", async () => {
+  showFactoryPlanWithProviders();
+  showApprovals([
+    `Approve plan sha256:${FACTORY_PLAN_DIGEST}\nPlan: ${factoryPlan.planPath}\nBuild it with sf-team.`,
+  ]);
+  await mount();
+  expect(cardButton("Approve")).toBeUndefined();
+  expect(cardButton("Implementer model")).toBeUndefined();
+  expect(factoryPlanCard().textContent).toMatch(/routes chosen by sf-team/i);
+});
+
+it("mobile phase4 decision 5 keeps Approve disabled while the message is queued", async () => {
+  let release: () => void = () => undefined;
+  fixture.enqueue.mockImplementationOnce(
+    () =>
+      new Promise<undefined>((resolve) => {
+        release = () => resolve(undefined);
+      }),
+  );
+  showFactoryPlanWithProviders();
+  await mount();
+  await act(async () => requireCardButton("Approve").click());
+  expect(fixture.enqueue).toHaveBeenCalledOnce();
+  expect(requireCardButton("Approve").disabled).toBe(true);
+  await act(async () => requireCardButton("Approve").click());
+  expect(fixture.enqueue).toHaveBeenCalledOnce();
+  await act(async () => release());
+  expect(requireCardButton("Approve").disabled).toBe(true);
+});
+
+it("mobile phase4 decision 5 enables Approve again when the outbox refuses the message", async () => {
+  fixture.enqueue.mockRejectedValueOnce(new Error("disk full"));
+  showFactoryPlanWithProviders();
+  await mount();
+  await act(async () => requireCardButton("Approve").click());
+  await vi.waitFor(() => expect(requireCardButton("Approve").disabled).toBe(false));
+  expect(fixture.enqueue).toHaveBeenCalledOnce();
+});
+
+it("mobile phase4 decision 5 reads an Approve waiting in the outbox as approved", async () => {
+  showFactoryPlanWithProviders();
+  fixture.queuedMessages = [
+    {
+      environmentId,
+      threadId,
+      messageId: MessageId.make("queued-approval"),
+      commandId: "queued-approval-command",
+      text: writeFactoryApprovalMessage({
+        digest: FACTORY_PLAN_DIGEST,
+        planPath: factoryPlan.planPath,
+        intentPath: factoryPlan.intentPath,
+        routes: phoneApprovedRoutes,
+      }),
+      attachments: [],
+      createdAt: "2026-09-23T10:00:02.000Z",
+    },
+  ];
+  await mount();
+  expect(cardButton("Approve")).toBeUndefined();
+  expect(factoryPlanCard().textContent).toMatch(/GPT-6 Astra/);
+});
+
+it("mobile phase4 P1-1 disables Approve when an edited route's provider is turned off", async () => {
+  showFactoryPlanWithProviders();
+  await mount();
+  await chooseRoute("Reviewer model", "GPT-6 Astra");
+  expect(requireCardButton("Approve").disabled).toBe(false);
+  showFactoryPlanWithProviders(makeFactoryRouteProviders({ codexProvider: { enabled: false } }));
+  await mount();
+  expect(factoryPlanCard().textContent).toMatch(/Codex is turned off/);
+  expect(requireCardButton("Approve").disabled).toBe(true);
+  await act(async () => requireCardButton("Approve").click());
+  expect(fixture.enqueue).not.toHaveBeenCalled();
+});
+
+it("mobile phase4 P1-4 says an approval's unreadable routes block could not be read", async () => {
+  showFactoryPlanWithProviders();
+  showApprovals([
+    [
+      `Approve plan sha256:${FACTORY_PLAN_DIGEST}`,
+      `Plan: ${factoryPlan.planPath}`,
+      "Build it with sf-team in this thread, with these routes:",
+      "```json",
+      "{ not json",
+      "```",
+    ].join("\n"),
+  ]);
+  await mount();
+  expect(cardButton("Approve")).toBeUndefined();
+  expect(factoryPlanCard().textContent).toContain("The approval's routes block could not be read.");
+});
+
+it("mobile phase4 verify2 re-validates a mounted card's edited route when only the provider list changes", async () => {
+  showFactoryPlanWithProviders();
+  await mount();
+  await chooseRoute("Reviewer model", "GPT-6 Astra");
+  expect(requireCardButton("Approve").disabled).toBe(false);
+  // Only the server config changes, as when Codex is turned off in Settings:
+  // the feed's entries stay the same objects.
+  fixture.serverConfig = {
+    ...(fixture.serverConfig as object),
+    providers: makeFactoryRouteProviders({ codexProvider: { enabled: false } }),
+  };
+  await mount();
+  expect(factoryPlanCard().textContent).toMatch(/Codex is turned off/);
+  expect(requireCardButton("Approve").disabled).toBe(true);
+  // And back: turning Codex on again restores the edited route.
+  fixture.serverConfig = {
+    ...(fixture.serverConfig as object),
+    providers: makeFactoryRouteProviders(),
+  };
+  await mount();
+  expect(requireCardButton("Reviewer model").textContent).toContain("GPT-6 Astra");
+  expect(requireCardButton("Approve").disabled).toBe(false);
+});
+
+// Run card (phase 8 of factory-in-chat): acceptance criteria 3, 5 and 6 on
+// Android, through the same ThreadDetailScreen entry point. A new activity
+// with the run's id replaces the old one, as the server's run tracker does.
+// The emulator alone shows the tones' colours and the phase marks' shapes.
+import { factoryRunActivityId } from "@t3tools/contracts";
+import {
+  makeFactoryRunActivityAt,
+  type FactoryRunFixturePoint,
+} from "../factory/factoryRun.test-support";
+
+const factoryRunRowId = factoryRunActivityId(threadId, "invoice-csv-export");
+function showFactoryRunAt(point: FactoryRunFixturePoint) {
+  fixture.messages = [
+    {
+      id: MessageId.make("factory-run-approve"),
+      role: "user" as const,
+      text: "Build the approved plan",
+      turnId: null,
+      streaming: false,
+      createdAt: "2026-09-28T08:58:00.000Z",
+      updatedAt: "2026-09-28T08:58:00.000Z",
+    },
+  ] as typeof fixture.messages;
+  fixture.activities = [
+    {
+      id: EventId.make("factory-run-coordinator-command"),
+      kind: "tool.completed",
+      tone: "tool",
+      summary: "Ran command",
+      createdAt: "2026-09-28T09:30:00.000Z",
+      turnId: null,
+      payload: { title: "Ran command", itemType: "command_execution", status: "completed" },
+    },
+    makeFactoryRunActivityAt({ threadId, point }),
+  ];
+}
+function factoryRunCard() {
+  const row = conversation().querySelector<HTMLElement>(`[data-feed-row="${factoryRunRowId}"]`);
+  expect(
+    row,
+    `Expected the run's own feed row; feed: ${conversation().textContent}`,
+  ).not.toBeNull();
+  return row!;
+}
+
+it("phase8 android AC5 renders the run card in the feed with its request, status, phase, node, returns and cost", async () => {
+  showFactoryRunAt("verify");
+  await mount();
+  const text = factoryRunCard().textContent ?? "";
+
+  expect(text).toContain("Let accountants export the invoice list as a CSV file");
+  expect(text).toContain("phase 1/2 · Verify ①");
+  expect(text).toContain("Serialize the filtered invoice list as CSV");
+  expect(text).toContain("1/5 returns");
+  expect(text).toContain("$10.03");
+  // Live: the last row of the feed, below the coordinator's newest command.
+  const rows = Array.from(conversation().querySelectorAll<HTMLElement>("[data-feed-row]"));
+  expect(rows.at(-1)).toBe(factoryRunCard());
+  // Never a work-log row: the activity's summary is not shown anywhere.
+  expect(conversation().textContent).not.toContain("Software Factory run");
+});
+
+it("phase8 android AC3 shows the stop question on the run card and reads waiting", async () => {
+  showFactoryRunAt("waiting");
+  await mount();
+  const text = factoryRunCard().textContent ?? "";
+
+  expect(text).toContain("waiting");
+  expect(text).toContain("Name the file after the filter range or after the export date?");
+});
+
+it("phase8 android AC6 updates the run card in place as events arrive without remounting its feed row", async () => {
+  showFactoryRunAt("verify");
+  await mount();
+  const row = factoryRunCard();
+  const card = row.firstElementChild;
+  expect(card).not.toBeNull();
+
+  fixture.activities = [
+    ...fixture.activities.filter((activity) => activity.id !== factoryRunRowId),
+    makeFactoryRunActivityAt({ threadId, point: "review" }),
+  ];
+  await mount();
+  expect(factoryRunCard()).toBe(row);
+  expect(row.firstElementChild).toBe(card);
+  expect(row.textContent).toContain("phase 1/2 · Review");
+
+  fixture.activities = [
+    ...fixture.activities.filter((activity) => activity.id !== factoryRunRowId),
+    makeFactoryRunActivityAt({ threadId, point: "waiting" }),
+  ];
+  await mount();
+  expect(factoryRunCard()).toBe(row);
+  expect(row.firstElementChild).toBe(card);
+  expect(row.textContent).toContain(
+    "Name the file after the filter range or after the export date?",
+  );
+});
+
+it("phase8 android run card of a summary without phase marks renders without marks", async () => {
+  showFactoryRunAt("verify");
+  fixture.activities = [
+    ...fixture.activities.filter((activity) => activity.id !== factoryRunRowId),
+    makeFactoryRunActivityAt({ threadId, point: "verify", withoutMarks: true }),
+  ];
+  await mount();
+  const text = factoryRunCard().textContent ?? "";
+
+  expect(text).toContain("phase 1/2 · Verify ①");
+  expect(text).toContain("Let accountants export the invoice list as a CSV file");
+  expect(text).not.toContain("✓1");
+  // With marks, the same run shows one mark per phase.
+  showFactoryRunAt("answered");
+  await mount();
+  expect(factoryRunCard().textContent).toContain("✓1");
+});
+
+// Run card Open (phase 10 of factory-in-chat, criterion 1): the card opens the
+// thread's Factory screen on its Run tab, for this run, above the feed. The
+// screen it opens is mounted in `FactoryRouteScreen.test.tsx`.
+function factoryRunOpenButton() {
+  const open = Array.from(factoryRunCard().querySelectorAll<HTMLButtonElement>("button")).find(
+    (node) => node.textContent?.trim() === "Open" || node.getAttribute("aria-label") === "Open",
+  );
+  expect(
+    open,
+    `Expected the run card's Open button; card: ${factoryRunCard().textContent}`,
+  ).toBeDefined();
+  return open!;
+}
+
+it("phase10 android AC1 run card Open navigates to the Run tab of the thread's Factory screen for that run", async () => {
+  showFactoryRunAt("verify");
+  await mount();
+  await act(async () => factoryRunOpenButton().click());
+  expect(fixture.navigation.navigate).toHaveBeenCalledExactlyOnceWith("ThreadFactory", {
+    environmentId: "inline-screen-environment",
+    threadId: "inline-screen-thread",
+    tab: "run",
+    runId: "invoice-csv-export",
+  });
+});
+
+it("phase10 android AC1 run card Open pushes the Factory screen above the feed without moving or replacing it", async () => {
+  fixture.geometry = true;
+  showFactoryRunAt("verify");
+  await mount();
+  await act(async () => factoryRunOpenButton().click());
+  expect(fixture.navigation.navigate).toHaveBeenCalledOnce();
+  for (const method of ["push", "replace", "reset", "dispatch", "goBack"] as const) {
+    expect(fixture.navigation[method], method).not.toHaveBeenCalled();
+  }
+  expect(fixture.scrollToOffset).not.toHaveBeenCalled();
+  expect(factoryRunCard().textContent).toContain("phase 1/2 · Verify ①");
+});
+
+// Report card (phase 11 of factory-in-chat, criteria 1 and 6 on Android):
+// the report a run wrote is a card in the feed with its Context, its What was
+// built bullets, the coverage and the degraded count, and Open lands on the
+// Factory screen's Report tab. The body is the `factoryReadSnapshot` answer
+// for the activity's digest; the numbers come from the run stream's state.
+// The screen it opens is mounted in `FactoryRouteScreen.test.tsx`.
+import {
+  FACTORY_REPORT_DIGEST,
+  makeFactoryReportActivity,
+  makeFactoryRunState,
+} from "@t3tools/client-runtime/factory/testing";
+import { factoryReportActivityId } from "@t3tools/contracts";
+
+import {
+  readFactoryReportFixture,
+  readFactoryRunEventsFixture,
+} from "../factory/factoryRun.test-support";
+
+const factoryReportRowId = factoryReportActivityId(threadId, "invoice-csv-export");
+function showFactoryReport(
+  point: FactoryRunFixturePoint = "degraded",
+  markdown: string = readFactoryReportFixture(),
+) {
+  showFactoryRunAt(point);
+  fixture.activities = [...fixture.activities, makeFactoryReportActivity({ threadId })];
+  fixture.factorySnapshots = { [FACTORY_REPORT_DIGEST]: markdown };
+  // The stream would answer, but a card must not ask: its numbers are the run's activity.
+  fixture.factoryRunItem = {
+    state: makeFactoryRunState(readFactoryRunEventsFixture(), point),
+    roles: [],
+  };
+}
+/** Run streams the feed opened: a card on screen must open none. */
+const openedRunStreams = () => fixture.factoryRunAtoms.size;
+function factoryReportCard() {
+  const row = conversation().querySelector<HTMLElement>(`[data-feed-row="${factoryReportRowId}"]`);
+  expect(
+    row,
+    `Expected the report's own feed row; feed: ${conversation().textContent}`,
+  ).not.toBeNull();
+  return row!;
+}
+
+it("phase11 android AC1 renders the report card in the feed with its Context, What was built bullets, coverage and degraded count", async () => {
+  showFactoryReport();
+  await mount();
+  const text = factoryReportCard().textContent ?? "";
+
+  expect(text).toContain("Accountants close each month from the invoice list");
+  expect(text).toContain("Export the invoices the current filter shows as a CSV file.");
+  expect(text).toContain("Keep every amount with two decimals and its invoice currency.");
+  expect(text).toContain(
+    "Download the file from an Export button on the invoices page, named after the export date.",
+  );
+  expect(text).toContain("4/5 criteria passed");
+  expect(text).toContain("1 degraded phase");
+  expect(text).not.toContain("The export is one endpoint beside the list endpoint");
+  expect(factoryReportCard()).not.toBe(factoryRunCard());
+  expect(openedRunStreams()).toBe(0);
+});
+
+it("phase11 android AC6 report card reads coverage and degraded count from the run state, not from report.md", async () => {
+  showFactoryReport(
+    "done",
+    readFactoryReportFixture().replace(
+      "Accountants close each month from the invoice list",
+      "Every one of the 5 criteria passed and 2 phases degraded. Accountants close each month from the invoice list",
+    ),
+  );
+  await mount();
+  const text = factoryReportCard().textContent ?? "";
+
+  expect(text).toContain("4/5 criteria passed");
+  expect(text).toContain("0 degraded phases");
+  expect(openedRunStreams()).toBe(0);
+});
+
+it("phase11 android AC1 report card Open navigates to the Report tab of the thread's Factory screen for that run", async () => {
+  showFactoryReport();
+  await mount();
+  const open = Array.from(factoryReportCard().querySelectorAll<HTMLButtonElement>("button")).find(
+    (node) => node.textContent?.trim() === "Open" || node.getAttribute("aria-label") === "Open",
+  );
+  expect(
+    open,
+    `Expected the report card's Open; card: ${factoryReportCard().textContent}`,
+  ).toBeDefined();
+  await act(async () => open!.click());
+  expect(fixture.navigation.navigate).toHaveBeenCalledExactlyOnceWith("ThreadFactory", {
+    environmentId: "inline-screen-environment",
+    threadId: "inline-screen-thread",
+    tab: "report",
+    runId: "invoice-csv-export",
+  });
+});
+
+it("phase11 android review P1-1 report card keeps its degraded count when the run's summary lost its phase marks", async () => {
+  showFactoryReport();
+  fixture.activities = [
+    ...fixture.activities.filter((activity) => activity.id !== factoryRunRowId),
+    makeFactoryRunActivityAt({ threadId, point: "degraded", withoutMarks: true }),
+  ];
+  await mount();
+  const text = factoryReportCard().textContent ?? "";
+
+  expect(text).toContain("1 degraded phase");
+  expect(text).toContain("4/5 criteria passed");
+  expect(openedRunStreams()).toBe(0);
 });

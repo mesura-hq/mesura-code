@@ -119,6 +119,50 @@
       "types": "./src/state/entities.ts",
       "default": "./src/state/entities.ts"
     },
+    "./factory/plan-model": {
+      "types": "./src/factory/planModel.ts",
+      "default": "./src/factory/planModel.ts"
+    },
+    "./factory/occurrence-keys": {
+      "types": "./src/factory/occurrenceKeys.ts",
+      "default": "./src/factory/occurrenceKeys.ts"
+    },
+    "./factory/plan-activities": {
+      "types": "./src/factory/planActivities.ts",
+      "default": "./src/factory/planActivities.ts"
+    },
+    "./factory/routes": {
+      "types": "./src/factory/routes.ts",
+      "default": "./src/factory/routes.ts"
+    },
+    "./factory/plan-approval": {
+      "types": "./src/factory/planApproval.ts",
+      "default": "./src/factory/planApproval.ts"
+    },
+    "./factory/run-activities": {
+      "types": "./src/factory/runActivities.ts",
+      "default": "./src/factory/runActivities.ts"
+    },
+    "./factory/run-presentation": {
+      "types": "./src/factory/runPresentation.ts",
+      "default": "./src/factory/runPresentation.ts"
+    },
+    "./factory/report-view": {
+      "types": "./src/factory/reportView.ts",
+      "default": "./src/factory/reportView.ts"
+    },
+    "./factory/run-view": {
+      "types": "./src/factory/runView.ts",
+      "default": "./src/factory/runView.ts"
+    },
+    "./factory/testing": {
+      "types": "./src/factory/testing.ts",
+      "default": "./src/factory/testing.ts"
+    },
+    "./state/factory": {
+      "types": "./src/state/factory.ts",
+      "default": "./src/state/factory.ts"
+    },
     "./state/filesystem": {
       "types": "./src/state/filesystem.ts",
       "default": "./src/state/filesystem.ts"

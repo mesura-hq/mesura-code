@@ -40,6 +40,7 @@ import {
   deriveTimelineEntries,
   deriveTimelineEntriesWithState,
   type WorkLogEntry,
+  type TimelineEntry,
   type TimelineEntriesProjection,
 } from "../../session-logic";
 import { isImageAttachment, type ChatMessage, type TurnDiffSummary } from "../../types";
@@ -3502,5 +3503,84 @@ describe("computeStableMessagesTimelineRows", () => {
 
     expect(reordered).not.toBe(initial);
     expect(reordered.result).toEqual([initial.result[1], initial.result[0]]);
+  });
+});
+
+describe("proposed plan rows in a folded turn", () => {
+  const turnId = "turn-1" as never;
+  const at = (second: number) => `2026-01-01T00:00:${String(second).padStart(2, "0")}Z`;
+  const messages: ChatMessage[] = [
+    {
+      id: "user-1" as never,
+      role: "user",
+      text: "Plan it",
+      turnId: null,
+      createdAt: at(0),
+      updatedAt: at(0),
+      streaming: false,
+    },
+    {
+      id: "assistant-first" as never,
+      role: "assistant",
+      text: "Reading the code",
+      turnId,
+      createdAt: at(5),
+      updatedAt: at(6),
+      streaming: false,
+    },
+    {
+      id: "assistant-final" as never,
+      role: "assistant",
+      text: "The plan is ready",
+      turnId,
+      createdAt: at(20),
+      updatedAt: at(22),
+      streaming: false,
+    },
+  ];
+  const work: WorkLogEntry[] = [
+    { id: "work-1", createdAt: at(8), turnId, label: "Ran command", tone: "tool" },
+  ];
+  const rowsFor = (entries: ReadonlyArray<TimelineEntry>, expanded: boolean) =>
+    deriveMessagesTimelineRows({
+      timelineEntries: entries,
+      ...(expanded ? { expandedTurnIds: new Set([turnId]) } : {}),
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaries: [],
+      supportsConversationRollback: false,
+    });
+
+  it("keeps an upstream proposed plan card visible when its turn folds (guard)", () => {
+    const proposedPlan = {
+      id: "plan-1" as never,
+      turnId,
+      planMarkdown: "# Ship it\n\n1. Build",
+      implementedAt: null,
+      implementationThreadId: null,
+      createdAt: at(9),
+      updatedAt: at(9),
+    };
+    const entries = deriveTimelineEntries(messages, [proposedPlan], work);
+
+    const collapsed = rowsFor(entries, false);
+    expect(collapsed.map((row) => row.kind)).toEqual([
+      "message",
+      "turn-fold",
+      "proposed-plan",
+      "message",
+    ]);
+    expect(collapsed.find((row) => row.kind === "proposed-plan")).toMatchObject({
+      id: "plan-1",
+      proposedPlan,
+    });
+    expect(rowsFor(entries, true).map((row) => row.kind)).toEqual([
+      "message",
+      "turn-fold",
+      "message",
+      "work",
+      "proposed-plan",
+      "message",
+    ]);
   });
 });
