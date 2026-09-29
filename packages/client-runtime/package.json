@@ -231,6 +231,10 @@
       "types": "./src/state/agentThreadSearch.ts",
       "default": "./src/state/agentThreadSearch.ts"
     },
+    "./state/agent-thread-search-presentation": {
+      "types": "./src/state/agentThreadSearchPresentation.ts",
+      "default": "./src/state/agentThreadSearchPresentation.ts"
+    },
     "./state/thread-token-search": {
       "types": "./src/state/threadTokenSearch.ts",
       "default": "./src/state/threadTokenSearch.ts"

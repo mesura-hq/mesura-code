@@ -57,6 +57,7 @@ import {
 import { AndroidHomeFabLayout } from "../home/AndroidHomeFab";
 import { HomeListOptionsProvider } from "../home/home-list-options";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
+import type { ThreadSearchMode } from "../threads/AgentThreadSearch";
 import { ThreadNavigationSidebar } from "../threads/ThreadNavigationSidebar";
 import { WORKSPACE_PANE_TIMING } from "./workspace-pane-animation";
 import { WorkspaceInspectorPane } from "./workspace-inspector-pane";
@@ -249,6 +250,8 @@ function AdaptiveWorkspaceLayoutContent(
     null,
   );
   const [primarySidebarSearchQuery, setPrimarySidebarSearchQuery] = useState("");
+  const [primarySidebarSearchMode, setPrimarySidebarSearchMode] =
+    useState<ThreadSearchMode>("exact");
   const [focusedAuxiliaryPaneRole, setFocusedAuxiliaryPaneRole] =
     useState<WorkspaceAuxiliaryPaneRole | null>(null);
   const baseLayout = useMemo(() => deriveLayout({ width, height }), [height, width]);
@@ -595,6 +598,8 @@ function AdaptiveWorkspaceLayoutContent(
                     onSelectThread={handleSelectThread}
                     onSearchQueryChange={setPrimarySidebarSearchQuery}
                     searchQuery={primarySidebarSearchQuery}
+                    searchMode={primarySidebarSearchMode}
+                    onSearchModeChange={setPrimarySidebarSearchMode}
                   />
                 </AndroidHomeFabLayout>
               </View>

@@ -98,9 +98,13 @@ function actionFailureTitle(action: ThreadListAction): string {
   return "Could not delete thread";
 }
 
+/** What an action needs of a thread; list rows pass the whole shell. */
+type ThreadActionTarget = Pick<EnvironmentThreadShell, "environmentId" | "id"> &
+  Partial<Pick<EnvironmentThreadShell, "session">>;
+
 /** Resolves to true iff the action was dispatched and succeeded. */
-function useThreadActionExecutor(
-  onCompleted?: (action: ThreadListAction, thread: EnvironmentThreadShell) => void,
+function useThreadActionExecutor<Thread extends ThreadActionTarget = EnvironmentThreadShell>(
+  onCompleted?: (action: ThreadListAction, thread: Thread) => void,
 ) {
   const archiveMutation = useAtomCommand(threadEnvironment.archive, { reportFailure: false });
   const unarchiveMutation = useAtomCommand(threadEnvironment.unarchive, { reportFailure: false });
@@ -110,7 +114,7 @@ function useThreadActionExecutor(
   const inFlightThreadKeys = useRef(new Set<string>());
 
   const executeAction = useCallback(
-    async (action: ThreadListAction, thread: EnvironmentThreadShell) => {
+    async (action: ThreadListAction, thread: Thread) => {
       const key = scopedThreadKey(thread.environmentId, thread.id);
       if (inFlightThreadKeys.current.has(key)) {
         return false;
@@ -726,4 +730,16 @@ export function useArchivedThreadListActions(
   const confirmDeleteThread = useConfirmDeleteThread(executeAction);
 
   return { unarchiveThread, confirmDeleteThread };
+}
+
+/**
+ * Fork addition: unarchives a thread the caller knows only by its scoped ref,
+ * such as an agent thread search result, with the archived list's failure
+ * alert and refresh. Resolves to true iff the unarchive succeeded.
+ */
+export function useUnarchiveThreadRef(): (
+  thread: Pick<EnvironmentThreadShell, "environmentId" | "id">,
+) => Promise<boolean> {
+  const executeAction = useThreadActionExecutor<ThreadActionTarget>();
+  return useCallback((thread) => executeAction("unarchive", thread), [executeAction]);
 }

@@ -6,8 +6,6 @@ import {
   agentSearchResultValue,
   buildThreadSearchCandidates,
   buildThreadSearchGroups,
-  composeAgentSearchDescription,
-  describeAgentSearchCoverage,
   THREAD_SEARCH_CONTENT_GROUP,
   THREAD_SEARCH_RECENT_GROUP,
   THREAD_SEARCH_TITLE_GROUP,
@@ -228,60 +226,6 @@ describe("guards", () => {
       contentMatchKeys: new Set([sameIdElsewhere]),
     });
     expect(built[0]?.hasContentMatch).toBe(false);
-  });
-});
-
-describe("composeAgentSearchDescription", () => {
-  it("agent description keeps every turn in order when they fit", () => {
-    expect(composeAgentSearchDescription(["file tree lag", "on the laptop"], 100)).toBe(
-      "file tree lag\non the laptop",
-    );
-  });
-
-  it("agent description drops the oldest turns so the newest refinement survives the limit", () => {
-    expect(
-      composeAgentSearchDescription(["a very old first description", "second", "newest"], 20),
-    ).toBe("second\nnewest");
-  });
-
-  it("agent description clamps a single overlong turn from its end", () => {
-    expect(composeAgentSearchDescription(["abcdefghij"], 4)).toBe("abcd");
-  });
-});
-
-describe("describeAgentSearchCoverage", () => {
-  it("agent coverage is silent when the search saw everything", () => {
-    expect(
-      describeAgentSearchCoverage({
-        unavailableEnvironments: [],
-        budgetExhausted: false,
-        unreadEvidence: false,
-      }),
-    ).toEqual([]);
-  });
-
-  it("agent coverage names unreachable environments, an exhausted budget, and unread evidence together", () => {
-    expect(
-      describeAgentSearchCoverage({
-        unavailableEnvironments: [{ label: "Vigilia" }, { label: "Laptop" }],
-        budgetExhausted: true,
-        unreadEvidence: true,
-      }),
-    ).toEqual([
-      "Could not reach Vigilia, Laptop, so their threads were not searched.",
-      "The search stopped at its work limit, so older matches may be missing.",
-      "Some matching messages were found but not reviewed.",
-    ]);
-  });
-
-  it("agent coverage reports unread evidence when the budget held", () => {
-    expect(
-      describeAgentSearchCoverage({
-        unavailableEnvironments: [],
-        budgetExhausted: false,
-        unreadEvidence: true,
-      }),
-    ).toEqual(["Some matching messages were found but not reviewed."]);
   });
 });
 

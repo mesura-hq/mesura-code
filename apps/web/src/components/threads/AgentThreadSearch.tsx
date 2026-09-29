@@ -6,6 +6,16 @@ import type {
   AgentThreadSearchResult,
 } from "@t3tools/client-runtime/state/agent-thread-search";
 import {
+  AGENT_SEARCH_HINT_TEXT,
+  AGENT_SEARCH_NO_ENVIRONMENT_TEXT,
+  AGENT_SEARCH_PROGRESS_TEXT,
+  AGENT_SEARCH_UNEXPECTED_FAILURE_TEXT,
+  composeAgentSearchDescription,
+  describeAgentSearchCoverage,
+  describeAgentSearchVerdict,
+  resolveAgentSearchModelEnvironmentId,
+} from "@t3tools/client-runtime/state/agent-thread-search-presentation";
+import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
@@ -44,11 +54,7 @@ import {
 } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
 import { Kbd, KbdGroup } from "../ui/kbd";
-import {
-  agentSearchResultValue,
-  composeAgentSearchDescription,
-  describeAgentSearchCoverage,
-} from "./threadSearchPicker.logic";
+import { agentSearchResultValue } from "./threadSearchPicker.logic";
 
 /** The one agent search this popup owns; mobile surfaces use their own key. */
 const AGENT_THREAD_SEARCH_SURFACE = "web-thread-search-picker";
@@ -146,11 +152,10 @@ export function AgentThreadSearch(props: {
         })),
     [environments],
   );
-  const modelEnvironmentId =
-    primaryEnvironmentId !== null &&
-    searchEnvironments.some((environment) => environment.environmentId === primaryEnvironmentId)
-      ? primaryEnvironmentId
-      : (searchEnvironments[0]?.environmentId ?? null);
+  const modelEnvironmentId = resolveAgentSearchModelEnvironmentId(
+    searchEnvironments,
+    primaryEnvironmentId,
+  );
 
   // Explicit rather than left to atom disposal: leaving agent mode must stop
   // the search even if the registry keeps an idle atom alive.
@@ -421,22 +426,14 @@ function AgentConversation(props: {
 }) {
   const { turns, search, settled } = props;
   if (!props.canSearch) {
-    return (
-      <AgentNotice role="alert">
-        No environment is connected, so there is nothing to search.
-      </AgentNotice>
-    );
+    return <AgentNotice role="alert">{AGENT_SEARCH_NO_ENVIRONMENT_TEXT}</AgentNotice>;
   }
   if (turns.length === 0) {
-    return (
-      <AgentNotice>
-        Describe a conversation in your own words — a topic, a decision, a project. Every connected
-        environment is searched, archived threads included.
-      </AgentNotice>
-    );
+    return <AgentNotice>{AGENT_SEARCH_HINT_TEXT}</AgentNotice>;
   }
 
   const coverageNotes = settled === null ? [] : describeAgentSearchCoverage(settled.coverage);
+  const verdict = settled === null ? null : describeAgentSearchVerdict(settled);
   return (
     <div className="flex flex-col gap-1.5 px-3 pt-2 pb-1 text-sm">
       <ol className="flex flex-col gap-1" aria-label="Your descriptions">
@@ -448,21 +445,18 @@ function AgentConversation(props: {
       </ol>
       {search.waiting ? (
         <p className="text-muted-foreground text-xs" role="status">
-          Searching connected environments…
+          {AGENT_SEARCH_PROGRESS_TEXT}
         </p>
       ) : AsyncResult.isFailure(search) ? (
         <p className="text-destructive-foreground text-xs" role="alert">
-          The search failed unexpectedly. Try again.
+          {AGENT_SEARCH_UNEXPECTED_FAILURE_TEXT}
         </p>
-      ) : settled?.status === "failed" ? (
-        <p className="text-destructive-foreground text-xs" role="alert">
-          {settled.failure === "model"
-            ? "The search model failed. Try again, or check the text model in Settings."
-            : "Could not read thread history from the connected environments. Try again."}
-        </p>
-      ) : settled?.status === "noConfidentMatch" ? (
-        <p className="text-xs" role="status">
-          No confident match. Add a detail you remember and search again.
+      ) : verdict !== null ? (
+        <p
+          className={verdict.tone === "alert" ? "text-destructive-foreground text-xs" : "text-xs"}
+          role={verdict.tone}
+        >
+          {verdict.text}
         </p>
       ) : null}
       {coverageNotes.map((note) => (

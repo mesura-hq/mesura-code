@@ -434,6 +434,8 @@ const config: ExpoConfig = {
     "./plugins/withIosSceneLifecycle.cjs",
     "./plugins/withAndroidCleartextTraffic.cjs",
     "./plugins/withAndroidGradleHeap.cjs",
+    // Fork addition: the default NDK's libc++ cannot load libfbjni.so; see the plugin.
+    "./plugins/withAndroidNdkVersion.cjs",
     "./plugins/withAndroidModernPopupMenu.cjs",
     "./plugins/withAndroidModernAlertDialog.cjs",
     "./plugins/withAndroidPredictiveBackCompat.cjs",
