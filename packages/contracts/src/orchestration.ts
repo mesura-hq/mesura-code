@@ -41,6 +41,7 @@ export const ORCHESTRATION_WS_METHODS = {
   searchThreads: "orchestration.searchThreads",
   listThreadSearchCatalog: "orchestration.listThreadSearchCatalog",
   searchThreadEvidence: "orchestration.searchThreadEvidence",
+  reasonThreadSearch: "orchestration.reasonThreadSearch",
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
@@ -2329,6 +2330,90 @@ export const OrchestrationThreadSearchEvidencePage = Schema.Struct({
 export type OrchestrationThreadSearchEvidencePage =
   typeof OrchestrationThreadSearchEvidencePage.Type;
 
+// One bounded reasoning step of agent thread search. The caller labels each
+// piece of evidence with an opaque `ref` and maps the model's refs back itself,
+// so the model never sees or returns environment or thread IDs. The request
+// names no model: the answering environment uses its own configured
+// textGenerationModelSelection.
+export const THREAD_SEARCH_DESCRIPTION_MAX_LENGTH = 1_000;
+export const THREAD_SEARCH_REASONING_MAX_EVIDENCE = 60;
+export const THREAD_SEARCH_REASONING_MAX_TERMS = 24;
+export const THREAD_SEARCH_STEP_MAX_TERMS = 8;
+export const THREAD_SEARCH_STEP_MAX_INSPECT = 5;
+export const THREAD_SEARCH_STEP_MAX_RANKED = 10;
+export const THREAD_SEARCH_REASON_MAX_LENGTH = 280;
+export const THREAD_SEARCH_REF_MAX_LENGTH = 64;
+
+const ThreadSearchRef = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(THREAD_SEARCH_REF_MAX_LENGTH),
+);
+/** A term the caller can pass straight to searchThreadEvidence as its query. */
+const ThreadSearchTerm = TrimmedString.check(Schema.isMinLength(2), Schema.isMaxLength(200));
+
+export const OrchestrationThreadSearchReasoningEvidence = Schema.Struct({
+  ref: ThreadSearchRef,
+  threadTitle: ThreadSearchTitle,
+  projectTitle: ThreadSearchTitle,
+  environmentLabel: ThreadSearchTitle,
+  archived: Schema.Boolean,
+  /** Null for a catalog entry offered by title alone, with an empty excerpt. */
+  source: Schema.NullOr(OrchestrationThreadSearchSource),
+  excerpt: Schema.String.check(Schema.isMaxLength(THREAD_SEARCH_EVIDENCE_EXCERPT_MAX_LENGTH)),
+});
+export type OrchestrationThreadSearchReasoningEvidence =
+  typeof OrchestrationThreadSearchReasoningEvidence.Type;
+
+export const OrchestrationThreadSearchReasoningInput = Schema.Struct({
+  description: TrimmedString.check(
+    Schema.isPattern(/\S/),
+    Schema.isMaxLength(THREAD_SEARCH_DESCRIPTION_MAX_LENGTH),
+  ),
+  searchedTerms: Schema.Array(ThreadSearchTerm).check(
+    Schema.isMaxLength(THREAD_SEARCH_REASONING_MAX_TERMS),
+  ),
+  evidence: Schema.Array(OrchestrationThreadSearchReasoningEvidence).check(
+    Schema.isMaxLength(THREAD_SEARCH_REASONING_MAX_EVIDENCE),
+  ),
+});
+export type OrchestrationThreadSearchReasoningInput =
+  typeof OrchestrationThreadSearchReasoningInput.Type;
+
+const ThreadSearchStepTerms = Schema.Array(ThreadSearchTerm).check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(THREAD_SEARCH_STEP_MAX_TERMS),
+);
+
+export const OrchestrationThreadSearchRankedRef = Schema.Struct({
+  ref: ThreadSearchRef,
+  reason: Schema.String.check(Schema.isMaxLength(THREAD_SEARCH_REASON_MAX_LENGTH)),
+});
+export type OrchestrationThreadSearchRankedRef = typeof OrchestrationThreadSearchRankedRef.Type;
+
+/**
+ * The only answers a model can give: three bounded reads and a final ranking.
+ * The caller decides whether it performs a requested read; an empty `ranked`
+ * means no confident match.
+ */
+export const OrchestrationThreadSearchStep = Schema.Union([
+  Schema.Struct({ action: Schema.Literal("broaden"), terms: ThreadSearchStepTerms }),
+  Schema.Struct({ action: Schema.Literal("readMore"), terms: ThreadSearchStepTerms }),
+  Schema.Struct({
+    action: Schema.Literal("inspect"),
+    refs: Schema.Array(ThreadSearchRef).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(THREAD_SEARCH_STEP_MAX_INSPECT),
+    ),
+  }),
+  Schema.Struct({
+    action: Schema.Literal("finish"),
+    ranked: Schema.Array(OrchestrationThreadSearchRankedRef).check(
+      Schema.isMaxLength(THREAD_SEARCH_STEP_MAX_RANKED),
+    ),
+  }),
+]);
+export type OrchestrationThreadSearchStep = typeof OrchestrationThreadSearchStep.Type;
+
 export const OrchestrationGetWorkflowScriptInput = Schema.Struct({
   threadId: ThreadId,
   /** Absolute path from the workflow's runHandles.scriptPath. The server
@@ -2405,6 +2490,10 @@ export const OrchestrationRpcSchemas = {
   searchThreadEvidence: {
     input: OrchestrationThreadSearchEvidenceInput,
     output: OrchestrationThreadSearchEvidencePage,
+  },
+  reasonThreadSearch: {
+    input: OrchestrationThreadSearchReasoningInput,
+    output: OrchestrationThreadSearchStep,
   },
   getArchivedShellSnapshot: {
     input: Schema.Struct({}),

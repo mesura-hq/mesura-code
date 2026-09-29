@@ -22,6 +22,13 @@ import * as TextGeneration from "./TextGeneration.ts";
 import { sanitizeThreadTitle } from "./TextGenerationUtils.ts";
 import { makeClaudeTextGeneration } from "./ClaudeTextGeneration.ts";
 import { writeFakeCli } from "../testUtils/fakeCli.ts";
+import {
+  THREAD_SEARCH_FINISH_MODEL_OUTPUT,
+  THREAD_SEARCH_FINISH_STEP,
+  THREAD_SEARCH_FORBIDDEN_MODEL_OUTPUT,
+  THREAD_SEARCH_STEP_REQUEST,
+  THREAD_SEARCH_QUOTED_EXCERPT,
+} from "./ThreadSearchStep.testFixtures.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
 const ClaudeTextGenerationTestLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
@@ -576,6 +583,82 @@ it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGeneration", (it) => {
           });
 
           expect(generated.title).toBe("New thread");
+        }),
+    ),
+  );
+
+  // Agent thread search, phase 2. The fake CLI already refuses any run with
+  // tools, permission prompts, skills, MCP servers, or hooks enabled.
+  it.effect("Claude answers a schema-checked thread search step outside the project", () =>
+    withFakeClaudeEnv(
+      {
+        output: JSON.stringify({
+          structured_output: JSON.parse(THREAD_SEARCH_FINISH_MODEL_OUTPUT),
+        }),
+        // The search step schema, not another task's, reaches --json-schema.
+        argsMustContain: '"readMore"',
+        cwdMustNotBe: process.cwd(),
+        stdinMustContain: THREAD_SEARCH_QUOTED_EXCERPT,
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const step = yield* textGeneration.generateThreadSearchStep({
+            ...THREAD_SEARCH_STEP_REQUEST,
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
+            },
+          });
+          expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
+        }),
+    ),
+  );
+
+  // `claude -p` saves every session transcript unless told not to; a search
+  // step must leave no durable conversation behind.
+  it.effect("Claude runs a thread search step without saving the session", () =>
+    withFakeClaudeEnv(
+      {
+        output: JSON.stringify({
+          structured_output: JSON.parse(THREAD_SEARCH_FINISH_MODEL_OUTPUT),
+        }),
+        argsMustContain: "--no-session-persistence",
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const step = yield* textGeneration.generateThreadSearchStep({
+            ...THREAD_SEARCH_STEP_REQUEST,
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
+            },
+          });
+          expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
+        }),
+    ),
+  );
+
+  it.effect("Claude rejects a write action as a thread search step", () =>
+    withFakeClaudeEnv(
+      {
+        output: JSON.stringify({
+          structured_output: JSON.parse(THREAD_SEARCH_FORBIDDEN_MODEL_OUTPUT),
+        }),
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const error = yield* textGeneration
+            .generateThreadSearchStep({
+              ...THREAD_SEARCH_STEP_REQUEST,
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("claudeAgent"),
+                model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
+              },
+            })
+            .pipe(Effect.flip);
+          expect(error._tag).toBe("TextGenerationError");
+          expect(error.operation).toBe("generateThreadSearchStep");
+          expect(error.detail).toMatch(/invalid structured output/i);
         }),
     ),
   );

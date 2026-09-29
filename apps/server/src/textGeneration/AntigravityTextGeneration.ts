@@ -18,7 +18,10 @@ import * as Stream from "effect/Stream";
 import { type AcpError, AcpRequestError } from "effect-acp/errors";
 
 import { applyAntigravityAcpModelSelection } from "../provider/acp/AntigravityAcpSupport.ts";
-import { removeAntigravitySessionFiles } from "../provider/acp/AntigravitySessionFiles.ts";
+import {
+  removeAntigravitySessionFiles,
+  removeAntigravitySessionFilesOrFail,
+} from "../provider/acp/AntigravitySessionFiles.ts";
 import type { AcpSessionRuntime } from "../provider/acp/AcpSessionRuntime.ts";
 import type * as TextGeneration from "./TextGeneration.ts";
 import {
@@ -27,6 +30,11 @@ import {
   buildPrContentPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
+import {
+  buildThreadSearchStepPrompt,
+  THREAD_SEARCH_STEP_TIMEOUT_MS,
+  toThreadSearchStep,
+} from "./ThreadSearchPrompt.ts";
 import {
   sanitizeCommitSubject,
   sanitizePrTitle,
@@ -125,8 +133,12 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
       readonly prompt: string;
       readonly outputSchema: S;
       readonly modelSelection: ModelSelection;
+      readonly timeoutMs?: number;
+      /** Fail when the native session files cannot be removed, instead of logging it. */
+      readonly reportCleanupFailure?: boolean;
     }) {
       const { operation } = input;
+      const cleanupFailure = yield* Ref.make<Option.Option<unknown>>(Option.none());
       const scope = yield* Scope.make();
       yield* Effect.addFinalizer((exit) => Scope.close(scope, exit));
       const helper = Effect.gen(function* () {
@@ -140,16 +152,19 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
 
         const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "t3-antigravity-text-" });
         let sessionId: string | undefined;
-        yield* Effect.addFinalizer(() =>
-          removeAntigravitySessionFiles({
-            profileDirectory: options.profileDirectory,
-            sessionId,
-            cwd,
-          }).pipe(
+        yield* Effect.addFinalizer(() => {
+          const sessionFiles = { profileDirectory: options.profileDirectory, sessionId, cwd };
+          return (
+            input.reportCleanupFailure
+              ? removeAntigravitySessionFilesOrFail(sessionFiles).pipe(
+                  Effect.catch((cause) => Ref.set(cleanupFailure, Option.some(cause))),
+                )
+              : removeAntigravitySessionFiles(sessionFiles)
+          ).pipe(
             Effect.provideService(FileSystem.FileSystem, fs),
             Effect.provideService(Path.Path, path),
-          ),
-        );
+          );
+        });
 
         const rawResult = yield* Effect.gen(function* () {
           const runtime = yield* options.makeRuntime(cwd);
@@ -303,7 +318,7 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
         );
       }).pipe(
         Effect.scoped,
-        Effect.timeoutOption(ANTIGRAVITY_TIMEOUT_MS),
+        Effect.timeoutOption(input.timeoutMs ?? ANTIGRAVITY_TIMEOUT_MS),
         Effect.flatMap(
           Option.match({
             onNone: () =>
@@ -318,9 +333,18 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
         ),
       );
 
-      return yield* options
+      const result = yield* options
         .withProcess(Scope.close(scope, Exit.void), helper)
-        .pipe(Effect.provideService(Scope.Scope, scope));
+        .pipe(Effect.provideService(Scope.Scope, scope), Effect.exit);
+      const failedCleanup = yield* Ref.get(cleanupFailure);
+      if (Option.isSome(failedCleanup)) {
+        return yield* new TextGenerationError({
+          operation,
+          detail: "Antigravity could not remove its session files, so its transcript may remain.",
+          cause: failedCleanup.value,
+        });
+      }
+      return yield* result;
     },
     (effect, input) =>
       effect.pipe(
@@ -405,10 +429,23 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
       };
     });
 
+  const generateThreadSearchStep: TextGeneration.TextGeneration["Service"]["generateThreadSearchStep"] =
+    Effect.fn("AntigravityTextGeneration.generateThreadSearchStep")(function* (input) {
+      const generated = yield* runAntigravityJson({
+        operation: "generateThreadSearchStep",
+        ...buildThreadSearchStepPrompt(input),
+        modelSelection: input.modelSelection,
+        timeoutMs: THREAD_SEARCH_STEP_TIMEOUT_MS,
+        reportCleanupFailure: true,
+      });
+      return yield* toThreadSearchStep("Antigravity", generated);
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateThreadSearchStep,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

@@ -76,6 +76,17 @@ describe("RPC authorization scopes", () => {
     );
   });
 
+  // Agent thread search, phase 2: a reasoning step runs the environment's
+  // model like every other text-generation task, which all require operate.
+  it("requires the orchestration operate scope to reason a thread search step", () => {
+    expect(requiredScopeForRpcMethod(ORCHESTRATION_WS_METHODS.reasonThreadSearch)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.gitRunStackedAction)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+  });
+
   it("rejects unknown RPC method names", () => {
     for (const method of ["server.notRegistered", "toString", "constructor"]) {
       expect(() => requiredScopeForRpcMethod(method)).toThrow(

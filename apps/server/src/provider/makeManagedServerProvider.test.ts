@@ -299,6 +299,9 @@ describe("makeManagedServerProvider", () => {
             start: Effect.void,
             ready: Effect.void,
             getSettings: Ref.get(serverSettingsRef),
+            getConfiguredTextGenerationModelSelection: Ref.get(serverSettingsRef).pipe(
+              Effect.map((settings) => settings.textGenerationModelSelection),
+            ),
             updateSettings: () => Effect.die(new Error("unused in this test")),
             streamChanges: Stream.empty,
             subscribeChanges: PubSub.subscribe(serverSettingsChanges).pipe(

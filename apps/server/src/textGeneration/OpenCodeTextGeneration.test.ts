@@ -3,6 +3,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
@@ -14,6 +15,13 @@ import * as OpenCodeRuntime from "../provider/opencodeRuntime.ts";
 import * as OpenCodeServerOwner from "../provider/OpenCodeServerOwner.ts";
 import * as OpenCodeTextGeneration from "./OpenCodeTextGeneration.ts";
 import * as TextGeneration from "./TextGeneration.ts";
+import {
+  THREAD_SEARCH_FINISH_MODEL_OUTPUT,
+  THREAD_SEARCH_FINISH_STEP,
+  THREAD_SEARCH_FORBIDDEN_MODEL_OUTPUT,
+  THREAD_SEARCH_STEP_REQUEST,
+  THREAD_SEARCH_QUOTED_EXCERPT,
+} from "./ThreadSearchStep.testFixtures.ts";
 
 const runtimeMock = {
   state: {
@@ -23,6 +31,16 @@ const runtimeMock = {
     authHeaders: [] as Array<string | null>,
     closeCalls: [] as string[],
     sessionCreateCalls: 0,
+    sessionCreateInputs: [] as unknown[],
+    sessionDeleteCalls: [] as string[],
+    sessionAbortCalls: [] as string[],
+    sessionDeleteError: undefined as unknown,
+    sessionDeleteHangs: false,
+    sessionAbortHangs: false,
+    /** When set, session.create answers only once `releaseSessionCreate` runs. */
+    sessionCreateGate: undefined as Promise<void> | undefined,
+    promptStarted: 0,
+    promptHangs: false,
     connectionError: undefined as Error | undefined,
     sessionCreateError: undefined as unknown,
     sessionResult: undefined as { data?: { id: string } } | undefined,
@@ -38,6 +56,15 @@ const runtimeMock = {
     this.state.authHeaders.length = 0;
     this.state.closeCalls.length = 0;
     this.state.sessionCreateCalls = 0;
+    this.state.sessionCreateInputs.length = 0;
+    this.state.sessionDeleteCalls.length = 0;
+    this.state.sessionAbortCalls.length = 0;
+    this.state.sessionDeleteError = undefined;
+    this.state.sessionDeleteHangs = false;
+    this.state.sessionAbortHangs = false;
+    this.state.sessionCreateGate = undefined;
+    this.state.promptStarted = 0;
+    this.state.promptHangs = false;
     this.state.connectionError = undefined;
     this.state.sessionCreateError = undefined;
     this.state.sessionResult = undefined;
@@ -94,14 +121,33 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntime.OpenCodeRuntimeShape = {
   createOpenCodeSdkClient: ({ baseUrl, serverPassword }) =>
     ({
       session: {
-        create: async () => {
+        create: async (input: unknown) => {
           runtimeMock.state.sessionCreateCalls += 1;
+          runtimeMock.state.sessionCreateInputs.push(input);
+          if (runtimeMock.state.sessionCreateGate !== undefined) {
+            await runtimeMock.state.sessionCreateGate;
+          }
           if (runtimeMock.state.sessionCreateError !== undefined) {
             throw runtimeMock.state.sessionCreateError;
           }
           return runtimeMock.state.sessionResult ?? { data: { id: `${baseUrl}/session` } };
         },
+        delete: async (input: { readonly sessionID: string }) => {
+          runtimeMock.state.sessionDeleteCalls.push(input.sessionID);
+          if (runtimeMock.state.sessionDeleteHangs) return new Promise<never>(() => {});
+          if (runtimeMock.state.sessionDeleteError !== undefined) {
+            throw runtimeMock.state.sessionDeleteError;
+          }
+          return { data: true };
+        },
+        abort: async (input: { readonly sessionID: string }) => {
+          runtimeMock.state.sessionAbortCalls.push(input.sessionID);
+          if (runtimeMock.state.sessionAbortHangs) return new Promise<never>(() => {});
+          return { data: true };
+        },
         prompt: async (input: { readonly parts: ReadonlyArray<unknown> }) => {
+          runtimeMock.state.promptStarted += 1;
+          if (runtimeMock.state.promptHangs) return new Promise<never>(() => {});
           runtimeMock.state.promptUrls.push(baseUrl);
           runtimeMock.state.promptParts.push(input.parts);
           runtimeMock.state.authHeaders.push(
@@ -540,6 +586,288 @@ it.layer(OpenCodeTextGenerationTestLayer)("OpenCodeTextGeneration", (it) => {
           providerMessage: "Model did not produce structured output",
         });
         expect(error.cause).not.toHaveProperty("cause");
+      }),
+    ),
+  );
+
+  // Agent thread search, phase 2: the step runs in a session that denies every
+  // OpenCode permission, so the model cannot reach a file or shell tool.
+  it.effect("OpenCode answers a schema-checked thread search step in a deny-all session", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        runtimeMock.state.promptResult = {
+          data: { parts: [{ type: "text", text: THREAD_SEARCH_FINISH_MODEL_OUTPUT }] },
+        };
+
+        const step = yield* textGeneration.generateThreadSearchStep({
+          ...THREAD_SEARCH_STEP_REQUEST,
+          modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+        });
+
+        expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
+        expect(runtimeMock.state.sessionCreateInputs).toEqual([
+          expect.objectContaining({
+            permission: [{ permission: "*", pattern: "*", action: "deny" }],
+          }),
+        ]);
+        expect(runtimeMock.state.promptParts[0]).toEqual([
+          expect.objectContaining({
+            type: "text",
+            text: expect.stringContaining(THREAD_SEARCH_QUOTED_EXCERPT),
+          }),
+        ]);
+      }),
+    ),
+  );
+
+  // A search step keeps no saved transcript: OpenCode's own session is deleted
+  // after every step, and aborted first when the step times out. Other
+  // text-generation tasks keep OpenCode's sessions as they always have.
+  const THREAD_SEARCH_SESSION_ID = "http://127.0.0.1:4301/session";
+  const threadSearchStepOnOpenCode = (textGeneration: TextGeneration.TextGeneration["Service"]) =>
+    textGeneration.generateThreadSearchStep({
+      ...THREAD_SEARCH_STEP_REQUEST,
+      modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+    });
+  // The SDK mock answers with real promises; yield so they settle between checks.
+  const waitForMockPromises = (isReady: () => boolean) =>
+    Effect.gen(function* () {
+      for (let attempt = 0; attempt < 10_000 && !isReady(); attempt += 1) {
+        yield* Effect.yieldNow;
+      }
+      expect(isReady()).toBe(true);
+    });
+
+  it.effect("keeps OpenCode sessions for existing text generation tasks", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        yield* textGeneration.generateCommitMessage(DEFAULT_COMMIT_MESSAGE_INPUT);
+        expect(runtimeMock.state.sessionDeleteCalls).toEqual([]);
+        expect(runtimeMock.state.sessionAbortCalls).toEqual([]);
+      }),
+    ),
+  );
+
+  it.effect("OpenCode deletes its session after a successful thread search step", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        runtimeMock.state.promptResult = {
+          data: { parts: [{ type: "text", text: THREAD_SEARCH_FINISH_MODEL_OUTPUT }] },
+        };
+
+        expect(yield* threadSearchStepOnOpenCode(textGeneration)).toEqual(
+          THREAD_SEARCH_FINISH_STEP,
+        );
+        expect(runtimeMock.state.sessionDeleteCalls).toEqual([THREAD_SEARCH_SESSION_ID]);
+        expect(runtimeMock.state.sessionAbortCalls).toEqual([]);
+      }),
+    ),
+  );
+
+  it.effect("OpenCode deletes its session after invalid thread search output", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        runtimeMock.state.promptResult = {
+          data: { parts: [{ type: "text", text: THREAD_SEARCH_FORBIDDEN_MODEL_OUTPUT }] },
+        };
+
+        const error = yield* threadSearchStepOnOpenCode(textGeneration).pipe(Effect.flip);
+
+        expect(error.detail).toMatch(/invalid structured output/i);
+        expect(runtimeMock.state.sessionDeleteCalls).toEqual([THREAD_SEARCH_SESSION_ID]);
+      }),
+    ),
+  );
+
+  it.effect("OpenCode aborts and deletes a timed-out thread search step", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        runtimeMock.state.promptHangs = true;
+        const step = yield* threadSearchStepOnOpenCode(textGeneration).pipe(Effect.forkChild);
+        yield* waitForMockPromises(() => runtimeMock.state.promptStarted > 0);
+        yield* TestClock.adjust(Duration.millis(60_000));
+
+        const error = yield* Fiber.join(step).pipe(Effect.flip);
+
+        expect(error._tag).toBe("TextGenerationError");
+        expect(error.operation).toBe("generateThreadSearchStep");
+        expect(error.detail).toMatch(/timed out/i);
+        expect(runtimeMock.state.sessionAbortCalls).toEqual([THREAD_SEARCH_SESSION_ID]);
+        expect(runtimeMock.state.sessionDeleteCalls).toEqual([THREAD_SEARCH_SESSION_ID]);
+      }),
+    ).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("OpenCode aborts and deletes a cancelled thread search step", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        runtimeMock.state.promptHangs = true;
+        const step = yield* threadSearchStepOnOpenCode(textGeneration).pipe(Effect.forkChild);
+        yield* waitForMockPromises(() => runtimeMock.state.promptStarted > 0);
+
+        yield* Fiber.interrupt(step);
+
+        expect(runtimeMock.state.sessionAbortCalls).toEqual([THREAD_SEARCH_SESSION_ID]);
+        expect(runtimeMock.state.sessionDeleteCalls).toEqual([THREAD_SEARCH_SESSION_ID]);
+      }),
+    ),
+  );
+
+  // Review P1-3: a session whose creation is still in flight when the step is
+  // cancelled or times out is still owned by the step, and deleted on arrival.
+  const holdSessionCreate = () => {
+    let release = () => {};
+    runtimeMock.state.sessionCreateGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return release;
+  };
+
+  it.effect("OpenCode deletes a search session created after the step was cancelled", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        const releaseSessionCreate = holdSessionCreate();
+        const step = yield* threadSearchStepOnOpenCode(textGeneration).pipe(Effect.forkChild);
+        yield* waitForMockPromises(() => runtimeMock.state.sessionCreateCalls > 0);
+
+        const interruption = yield* Fiber.interrupt(step).pipe(Effect.forkChild);
+        // Let the interrupt land while creation is still in flight.
+        for (let turn = 0; turn < 50; turn += 1) yield* Effect.yieldNow;
+        releaseSessionCreate();
+        yield* Fiber.join(interruption);
+
+        expect(runtimeMock.state.promptStarted).toBe(0);
+        expect(runtimeMock.state.sessionDeleteCalls).toEqual([THREAD_SEARCH_SESSION_ID]);
+      }),
+    ),
+  );
+
+  it.effect("OpenCode deletes a search session created after the step timed out", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        const releaseSessionCreate = holdSessionCreate();
+        const step = yield* threadSearchStepOnOpenCode(textGeneration).pipe(Effect.forkChild);
+        yield* waitForMockPromises(() => runtimeMock.state.sessionCreateCalls > 0);
+        yield* TestClock.adjust(Duration.millis(60_000));
+        releaseSessionCreate();
+
+        const error = yield* Fiber.join(step).pipe(Effect.flip);
+
+        expect(error.detail).toMatch(/timed out/i);
+        expect(error.detail).not.toMatch(/could not delete/i);
+        expect(runtimeMock.state.promptStarted).toBe(0);
+        expect(runtimeMock.state.sessionDeleteCalls).toEqual([THREAD_SEARCH_SESSION_ID]);
+      }),
+    ).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("OpenCode still deletes a timed-out search session when abort stalls", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        runtimeMock.state.promptHangs = true;
+        runtimeMock.state.sessionAbortHangs = true;
+        const step = yield* threadSearchStepOnOpenCode(textGeneration).pipe(Effect.forkChild);
+        yield* waitForMockPromises(() => runtimeMock.state.promptStarted > 0);
+        yield* TestClock.adjust(Duration.millis(60_000));
+        yield* waitForMockPromises(() => runtimeMock.state.sessionAbortCalls.length > 0);
+        yield* TestClock.adjust(Duration.millis(2_000));
+
+        const error = yield* Fiber.join(step).pipe(Effect.flip);
+
+        expect(error.detail).toMatch(/timed out/i);
+        expect(error.detail).not.toMatch(/could not delete/i);
+        expect(runtimeMock.state.sessionDeleteCalls).toEqual([THREAD_SEARCH_SESSION_ID]);
+      }),
+    ).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("OpenCode deletes its session after a failed thread search prompt", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        runtimeMock.state.promptRequestError = new Error("provider rejected the request");
+
+        const error = yield* threadSearchStepOnOpenCode(textGeneration).pipe(Effect.flip);
+
+        expect(error.detail).toMatch(/session\.prompt request failed/i);
+        expect(runtimeMock.state.sessionDeleteCalls).toEqual([THREAD_SEARCH_SESSION_ID]);
+      }),
+    ),
+  );
+
+  it.effect("OpenCode deletes a search session that arrives after the cleanup bound", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        const releaseSessionCreate = holdSessionCreate();
+        const step = yield* threadSearchStepOnOpenCode(textGeneration).pipe(Effect.forkChild);
+        yield* waitForMockPromises(() => runtimeMock.state.sessionCreateCalls > 0);
+        yield* TestClock.adjust(Duration.millis(60_000));
+        yield* TestClock.adjust(Duration.millis(5_000));
+
+        // Past the bound the step cannot confirm deletion, so it must say so.
+        const error = yield* Fiber.join(step).pipe(Effect.flip);
+        expect(error.detail).toMatch(/timed out/i);
+        expect(error.detail).toMatch(/could not delete/i);
+
+        releaseSessionCreate();
+        yield* waitForMockPromises(() => runtimeMock.state.sessionDeleteCalls.length > 0);
+        expect(runtimeMock.state.sessionDeleteCalls).toEqual([THREAD_SEARCH_SESSION_ID]);
+        expect(runtimeMock.state.promptStarted).toBe(0);
+      }),
+    ).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("OpenCode reports a thread search session it could not delete", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        runtimeMock.state.promptResult = {
+          data: { parts: [{ type: "text", text: THREAD_SEARCH_FINISH_MODEL_OUTPUT }] },
+        };
+        runtimeMock.state.sessionDeleteError = new Error("session is busy");
+
+        const error = yield* threadSearchStepOnOpenCode(textGeneration).pipe(Effect.flip);
+
+        expect(error._tag).toBe("TextGenerationError");
+        expect(error.operation).toBe("generateThreadSearchStep");
+        expect(error.detail).toMatch(/could not delete/i);
+      }),
+    ),
+  );
+
+  it.effect("OpenCode bounds the cleanup of a thread search session", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        runtimeMock.state.promptResult = {
+          data: { parts: [{ type: "text", text: THREAD_SEARCH_FINISH_MODEL_OUTPUT }] },
+        };
+        runtimeMock.state.sessionDeleteHangs = true;
+        const step = yield* threadSearchStepOnOpenCode(textGeneration).pipe(Effect.forkChild);
+        yield* waitForMockPromises(() => runtimeMock.state.sessionDeleteCalls.length > 0);
+        yield* TestClock.adjust(Duration.millis(10_000));
+
+        const error = yield* Fiber.join(step).pipe(Effect.flip);
+
+        expect(error.detail).toMatch(/could not delete/i);
+      }),
+    ).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("OpenCode rejects a write action as a thread search step", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        runtimeMock.state.promptResult = {
+          data: { parts: [{ type: "text", text: THREAD_SEARCH_FORBIDDEN_MODEL_OUTPUT }] },
+        };
+
+        const error = yield* textGeneration
+          .generateThreadSearchStep({
+            ...THREAD_SEARCH_STEP_REQUEST,
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          })
+          .pipe(Effect.flip);
+
+        expect(error).toBeInstanceOf(TextGenerationError);
+        expect(error.operation).toBe("generateThreadSearchStep");
+        expect(error.detail).toMatch(/invalid structured output/i);
       }),
     ),
   );

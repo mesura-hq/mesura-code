@@ -82,6 +82,7 @@ import {
   VcsRemoveWorktreeInput,
   GitResolvePullRequestResult,
   GitRunStackedActionInput,
+  TextGenerationError,
   VcsStatusInput,
   VcsStatusResult,
   VcsStatusStreamEvent,
@@ -1406,6 +1407,13 @@ const WsOrchestrationSearchThreadEvidenceRpc = Rpc.make(
   },
 );
 
+// Runs one bounded reasoning step on this environment's configured text model.
+const WsOrchestrationReasonThreadSearchRpc = Rpc.make(ORCHESTRATION_WS_METHODS.reasonThreadSearch, {
+  payload: OrchestrationRpcSchemas.reasonThreadSearch.input,
+  success: OrchestrationRpcSchemas.reasonThreadSearch.output,
+  error: Schema.Union([TextGenerationError, EnvironmentAuthorizationError]),
+});
+
 const WsOrchestrationGetArchivedShellSnapshotRpc = Rpc.make(
   ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot,
   {
@@ -1648,6 +1656,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationSearchThreadsRpc,
   WsOrchestrationListThreadSearchCatalogRpc,
   WsOrchestrationSearchThreadEvidenceRpc,
+  WsOrchestrationReasonThreadSearchRpc,
   WsOrchestrationGetArchivedShellSnapshotRpc,
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,

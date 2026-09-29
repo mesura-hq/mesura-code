@@ -29,6 +29,11 @@ import {
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
 import {
+  buildThreadSearchStepPrompt,
+  THREAD_SEARCH_STEP_TIMEOUT_MS,
+  toThreadSearchStep,
+} from "./ThreadSearchPrompt.ts";
+import {
   normalizeCliError,
   sanitizeCommitSubject,
   sanitizePrTitle,
@@ -39,6 +44,71 @@ import { codexModelFamily, getModelSelectionStringOptionValue } from "@t3tools/s
 import { getCodexServiceTierOptionValue } from "../codexModelOptions.ts";
 
 const CODEX_TIMEOUT_MS = 180_000;
+
+/**
+ * Arguments for a Codex step that reasons over untrusted text.
+ * `--ignore-user-config` skips config.toml (MCP servers, plugins, profiles)
+ * while auth still loads from CODEX_HOME. Codex applies `--disable` over any
+ * `--enable`, so launch args cannot restore a tool.
+ *
+ * Checked against real codex-cli 0.156.0 through a local Responses endpoint:
+ * the model then sees only `request_user_input` and `apply_patch`. Codex picks
+ * `apply_patch` per model and offers no switch for it, so writes rest on the
+ * read-only sandbox and the never-approve policy, pinned here after launch args
+ * so those cannot relax them; the probe saw every patch rejected. An unknown
+ * feature name fails the run, and `tools.view_image` is ignored by that version,
+ * which is why `view_image` is disabled as a feature.
+ */
+const CODEX_NO_TOOLS_ARGS: ReadonlyArray<string> = [
+  "--ignore-user-config",
+  "--ignore-rules",
+  ...[
+    "shell_tool",
+    "unified_exec",
+    "apps",
+    "plugins",
+    "remote_plugin",
+    "hooks",
+    "multi_agent",
+    "browser_use",
+    "browser_use_external",
+    "computer_use",
+    "image_generation",
+    "memories",
+    "goals",
+    "skill_search",
+    "tool_suggest",
+    "sleep_tool",
+    "view_image",
+  ].flatMap((feature) => ["--disable", feature]),
+  "--config",
+  'web_search="disabled"',
+  "--config",
+  'sandbox_mode="read-only"',
+  "--config",
+  'approval_policy="never"',
+];
+
+const isMcpServerOverride = (value: string) => /^mcp_servers[.=]/.test(value);
+
+/** Drop `-c mcp_servers.…` overrides, which `--ignore-user-config` does not skip. */
+function withoutMcpServerOverrides(execArgs: ReadonlyArray<string>): ReadonlyArray<string> {
+  const kept: Array<string> = [];
+  for (let index = 0; index < execArgs.length; index++) {
+    const arg = execArgs[index];
+    if (arg === undefined) continue;
+    const next = execArgs[index + 1];
+    if ((arg === "--config" || arg === "-c") && next !== undefined) {
+      if (!isMcpServerOverride(next)) kept.push(arg, next);
+      index++;
+      continue;
+    }
+    const inline = /^(?:--config|-c)=(.*)$/.exec(arg);
+    if (inline?.[1] !== undefined && isMcpServerOverride(inline[1])) continue;
+    kept.push(arg);
+  }
+  return kept;
+}
 const encodeJsonString = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 /**
  * Build a Codex text-generation closure bound to a specific `CodexSettings`
@@ -103,7 +173,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle",
+      | "generateThreadTitle"
+      | "generateThreadSearchStep",
     value: unknown,
   ): Effect.Effect<string, TextGenerationError> =>
     encodeJsonString(value).pipe(
@@ -159,18 +230,25 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     imagePaths = [],
     cleanupPaths = [],
     modelSelection,
+    timeoutMs = CODEX_TIMEOUT_MS,
+    isolateTools = false,
   }: {
     operation:
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
-    cwd: string;
+      | "generateThreadTitle"
+      | "generateThreadSearchStep";
+    /** Undefined runs Codex in an empty temporary directory instead of a project. */
+    cwd: string | undefined;
     prompt: string;
     outputSchemaJson: S;
     imagePaths?: ReadonlyArray<string>;
     cleanupPaths?: ReadonlyArray<string>;
     modelSelection: ModelSelection;
+    timeoutMs?: number;
+    /** Run with no tools at all; see `CODEX_NO_TOOLS_ARGS`. */
+    isolateTools?: boolean;
   }): Effect.fn.Return<S["Type"], TextGenerationError, S["DecodingServices"]> {
     const schemaJson = yield* encodeJsonForOperation(
       operation,
@@ -180,6 +258,15 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     const outputPath = yield* writeTempFile(operation, "codex-output", "");
 
     const runCodexCommand = Effect.fn("runCodexJson.runCodexCommand")(function* () {
+      const workingDirectory =
+        cwd ??
+        (yield* fileSystem
+          .makeTempDirectoryScoped({ prefix: "t3code-codex-search-" })
+          .pipe(
+            Effect.mapError((cause) =>
+              normalizeCliError("codex", operation, cause, "Failed to create working directory"),
+            ),
+          ));
       const models = yield* getModels;
       const requestedModel = modelSelection.model;
       const model =
@@ -197,7 +284,12 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         codexConfig.binaryPath || "codex",
         [
           "exec",
-          ...codexExecLaunchArgs(launchArgs),
+          ...(isolateTools
+            ? [
+                ...withoutMcpServerOverrides(codexExecLaunchArgs(launchArgs)),
+                ...CODEX_NO_TOOLS_ARGS,
+              ]
+            : codexExecLaunchArgs(launchArgs)),
           "--ephemeral",
           "--skip-git-repo-check",
           "-s",
@@ -221,7 +313,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           ...resolvedEnvironment,
           ...(codexConfig.homePath ? { CODEX_HOME: expandHomePath(codexConfig.homePath) } : {}),
         },
-        cwd,
+        cwd: workingDirectory,
         shell: spawnCommand.shell,
         stdin: {
           stream: Stream.encodeText(Stream.make(prompt)),
@@ -273,7 +365,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     return yield* Effect.gen(function* () {
       yield* runCodexCommand().pipe(
         Effect.scoped,
-        Effect.timeoutOption(CODEX_TIMEOUT_MS),
+        Effect.timeoutOption(timeoutMs),
         Effect.flatMap(
           Option.match({
             onNone: () =>
@@ -417,10 +509,26 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       } satisfies TextGeneration.ThreadTitleGenerationResult;
     });
 
+  const generateThreadSearchStep: TextGeneration.TextGeneration["Service"]["generateThreadSearchStep"] =
+    Effect.fn("CodexTextGeneration.generateThreadSearchStep")(function* (input) {
+      const { prompt, outputSchema } = buildThreadSearchStepPrompt(input);
+      const generated = yield* runCodexJson({
+        operation: "generateThreadSearchStep",
+        cwd: undefined,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+        timeoutMs: THREAD_SEARCH_STEP_TIMEOUT_MS,
+        isolateTools: true,
+      });
+      return yield* toThreadSearchStep("Codex", generated);
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateThreadSearchStep,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

@@ -201,6 +201,16 @@ export class ServerSettingsService extends Context.Service<
     /** Read the current settings. */
     readonly getSettings: Effect.Effect<ServerSettings, ServerSettingsError>;
 
+    /**
+     * The text-generation selection exactly as configured. `getSettings`
+     * replaces it when its provider is disabled; a task that must not switch
+     * providers silently reads this instead and reports the disabled provider.
+     */
+    readonly getConfiguredTextGenerationModelSelection: Effect.Effect<
+      ModelSelection,
+      ServerSettingsError
+    >;
+
     /** Patch settings and persist. Returns the new full settings object. */
     readonly updateSettings: (
       patch: ServerSettingsPatch,
@@ -241,6 +251,9 @@ const makeTest = (overrides: DeepPartial<ServerSettings> = {}) =>
       start: Effect.void,
       ready: Effect.void,
       getSettings: Ref.get(currentSettingsRef).pipe(Effect.map(resolveTextGenerationProvider)),
+      getConfiguredTextGenerationModelSelection: Ref.get(currentSettingsRef).pipe(
+        Effect.map((settings) => settings.textGenerationModelSelection),
+      ),
       updateSettings: (patch) =>
         Ref.get(currentSettingsRef).pipe(
           Effect.map((currentSettings) => applyServerSettingsPatch(currentSettings, patch)),
@@ -962,6 +975,9 @@ const make = Effect.gen(function* () {
     getSettings: getSettingsFromCache.pipe(
       Effect.flatMap(materializeProviderEnvironmentSecrets),
       Effect.map(resolveTextGenerationProvider),
+    ),
+    getConfiguredTextGenerationModelSelection: getSettingsFromCache.pipe(
+      Effect.map((settings) => settings.textGenerationModelSelection),
     ),
     updateSettings: (patch) =>
       writeSemaphore.withPermits(1)(

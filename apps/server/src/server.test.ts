@@ -54,6 +54,7 @@ import {
 } from "@t3tools/shared/dpop";
 import { RELAY_HEALTH_REQUEST_TYP, RELAY_MINT_REQUEST_TYP } from "@t3tools/shared/relayJwt";
 import * as RelayClient from "@t3tools/shared/relayClient";
+import { createModelSelection } from "@t3tools/shared/model";
 import { assert, it } from "@effect/vitest";
 import { assertFailure, assertInclude, assertTrue } from "@effect/vitest/utils";
 import * as Clock from "effect/Clock";
@@ -149,6 +150,8 @@ import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import * as SourceControlProviderRegistry from "./sourceControl/SourceControlProviderRegistry.ts";
+import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import * as EditorSessionManager from "./editor/Manager.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
@@ -789,6 +792,15 @@ const buildAppUnderTest = (options?: {
             refresh: Effect.void,
             ...options?.layers?.usageLimitSources,
           }),
+          // The real text-generation router, over the ProviderInstanceRegistry
+          // mock below, so a test chooses the answering provider by its instances.
+          TextGeneration.layer.pipe(
+            Layer.provide(
+              Layer.mock(SourceControlProviderRegistry.SourceControlProviderRegistry)({
+                resolveLink: () => Effect.die("Server tests do not resolve source control links"),
+              }),
+            ),
+          ),
         ),
       ),
       Layer.provide(
@@ -840,6 +852,11 @@ const buildAppUnderTest = (options?: {
           start: Effect.void,
           ready: Effect.void,
           getSettings: Effect.succeed(DEFAULT_SERVER_SETTINGS),
+          // Without a fallback of its own, the configured selection is what
+          // the test's getSettings reports.
+          getConfiguredTextGenerationModelSelection: (
+            options?.layers?.serverSettings?.getSettings ?? Effect.succeed(DEFAULT_SERVER_SETTINGS)
+          ).pipe(Effect.map((settings) => settings.textGenerationModelSelection)),
           updateSettings: () => Effect.succeed(DEFAULT_SERVER_SETTINGS),
           streamChanges: Stream.empty,
           ...options?.layers?.serverSettings,
@@ -8607,6 +8624,291 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         }
         assert.equal(projectionReads, 0);
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  // Agent thread search, phase 2: one bounded reasoning step, answered by the
+  // model this environment configured, through the real websocket entry point
+  // and the real text-generation router. Only provider instances are stubbed.
+  const threadSearchReasoningRequest = {
+    description: "the conversation where the cache used the wrong clock",
+    searchedTerms: ["cache clock"],
+    evidence: [
+      {
+        ref: "e1",
+        threadTitle: "Cache review",
+        projectTitle: "Project A",
+        environmentLabel: "vigilia-home",
+        archived: true,
+        source: "assistant" as const,
+        excerpt: "The cache used the wall clock.",
+      },
+    ],
+  };
+  const makeThreadSearchInstance = (
+    instanceId: ProviderInstanceId,
+    generateThreadSearchStep: TextGeneration.TextGeneration["Service"]["generateThreadSearchStep"],
+  ): ProviderInstance => ({
+    instanceId,
+    driverKind: ProviderDriverKind.make("codex"),
+    enabled: true,
+    displayName: undefined,
+    continuationIdentity: {
+      driverKind: ProviderDriverKind.make("codex"),
+      continuationKey: `${instanceId}:thread-search-test`,
+    },
+    get adapter(): never {
+      throw new Error("Thread search reasoning must not start a provider session.");
+    },
+    get snapshot(): never {
+      throw new Error("Thread search reasoning must not probe the provider.");
+    },
+    textGeneration: {
+      generateCommitMessage: () => Effect.die("Thread search must not write commit messages."),
+      generatePrContent: () => Effect.die("Thread search must not write change requests."),
+      generateBranchName: () => Effect.die("Thread search must not name branches."),
+      generateThreadTitle: () => Effect.die("Thread search must not title threads."),
+      generateThreadSearchStep,
+    },
+  });
+
+  it.effect(
+    "reasons a thread search step with the environment's configured text generation model",
+    () =>
+      Effect.gen(function* () {
+        const configuredSelection = createModelSelection(
+          ProviderInstanceId.make("opencode_small"),
+          "openai/gpt-5-mini",
+        );
+        const receivedInputs: Array<unknown> = [];
+        let dispatchedCommands = 0;
+        const instances = new Map([
+          [
+            ProviderInstanceId.make("codex"),
+            makeThreadSearchInstance(ProviderInstanceId.make("codex"), () =>
+              Effect.die("The unconfigured provider must not answer."),
+            ),
+          ],
+          [
+            configuredSelection.instanceId,
+            makeThreadSearchInstance(configuredSelection.instanceId, (input) =>
+              Effect.sync(() => {
+                receivedInputs.push(input);
+                return {
+                  action: "finish" as const,
+                  ranked: [{ ref: "e1", reason: "Names the cache clock mistake." }],
+                };
+              }),
+            ),
+          ],
+        ]);
+        yield* buildAppUnderTest({
+          layers: {
+            serverSettings: {
+              getSettings: Effect.succeed({
+                ...DEFAULT_SERVER_SETTINGS,
+                // A custom small-model instance, as the Providers UI configures one.
+                providerInstances: {
+                  [configuredSelection.instanceId]: {
+                    driver: ProviderDriverKind.make("opencode"),
+                    enabled: true,
+                    config: {},
+                  },
+                },
+                textGenerationModelSelection: configuredSelection,
+              }),
+            },
+            providerInstanceRegistry: {
+              getInstance: (instanceId) => Effect.succeed(instances.get(instanceId)),
+              listInstances: Effect.succeed([...instances.values()]),
+            },
+            orchestrationEngine: {
+              dispatch: () =>
+                Effect.sync(() => {
+                  dispatchedCommands += 1;
+                  return { sequence: 0 };
+                }),
+            },
+          },
+        });
+
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const step = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.reasonThreadSearch](threadSearchReasoningRequest),
+          ),
+        );
+
+        assert.deepEqual(step, {
+          action: "finish",
+          ranked: [{ ref: "e1", reason: "Names the cache clock mistake." }],
+        });
+        assert.deepEqual(receivedInputs, [
+          { ...threadSearchReasoningRequest, modelSelection: configuredSelection },
+        ]);
+        // No durable conversation: the step never becomes an orchestration command.
+        assert.equal(dispatchedCommands, 0);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "fails thread search reasoning with a typed error when the configured provider is unavailable",
+    () =>
+      Effect.gen(function* () {
+        let dispatchedCommands = 0;
+        yield* buildAppUnderTest({
+          layers: {
+            serverSettings: {
+              getSettings: Effect.succeed({
+                ...DEFAULT_SERVER_SETTINGS,
+                textGenerationModelSelection: createModelSelection(
+                  ProviderInstanceId.make("missing_small_model"),
+                  "gpt-5.6-luna",
+                ),
+              }),
+            },
+            orchestrationEngine: {
+              dispatch: () =>
+                Effect.sync(() => {
+                  dispatchedCommands += 1;
+                  return { sequence: 0 };
+                }),
+            },
+          },
+        });
+
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const error = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.reasonThreadSearch](threadSearchReasoningRequest).pipe(
+              Effect.flip,
+            ),
+          ),
+        );
+
+        assert.equal(error._tag, "TextGenerationError");
+        if (error._tag === "TextGenerationError") {
+          assert.equal(error.operation, "generateThreadSearchStep");
+          assertInclude(error.detail, "missing_small_model");
+        }
+        assert.equal(dispatchedCommands, 0);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  // The settings service replaces a disabled text-generation selection with the
+  // first enabled provider for every other task. A search step must instead
+  // honor the configured selection and fail, never answer on another provider.
+  it.effect(
+    "fails thread search reasoning with a typed error when the configured provider is disabled",
+    () =>
+      Effect.gen(function* () {
+        const settingsService = yield* ServerSettings.ServerSettingsService.pipe(
+          Effect.provide(
+            ServerSettings.layerTest({
+              textGenerationModelSelection: createModelSelection(
+                ProviderInstanceId.make("opencode"),
+                "openai/gpt-5-mini",
+              ),
+              providers: { opencode: { enabled: false }, codex: { enabled: true } },
+            }),
+          ),
+        );
+        // Guard: the fallback other text-generation tasks rely on is still there.
+        assert.notEqual(
+          (yield* settingsService.getSettings).textGenerationModelSelection.instanceId,
+          ProviderInstanceId.make("opencode"),
+        );
+        let dispatchedCommands = 0;
+        const answeringProviders: Array<string> = [];
+        const instances = [
+          ProviderInstanceId.make("codex"),
+          ProviderInstanceId.make("opencode"),
+        ].map((instanceId) =>
+          makeThreadSearchInstance(instanceId, () =>
+            Effect.sync(() => {
+              answeringProviders.push(instanceId);
+              return { action: "finish" as const, ranked: [] };
+            }),
+          ),
+        );
+        yield* buildAppUnderTest({
+          layers: {
+            serverSettings: settingsService,
+            providerInstanceRegistry: {
+              getInstance: (instanceId) =>
+                Effect.succeed(instances.find((instance) => instance.instanceId === instanceId)),
+              listInstances: Effect.succeed(instances),
+            },
+            orchestrationEngine: {
+              dispatch: () =>
+                Effect.sync(() => {
+                  dispatchedCommands += 1;
+                  return { sequence: 0 };
+                }),
+            },
+          },
+        });
+
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const error = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.reasonThreadSearch](threadSearchReasoningRequest).pipe(
+              Effect.flip,
+            ),
+          ),
+        );
+
+        assert.equal(error._tag, "TextGenerationError");
+        if (error._tag === "TextGenerationError") {
+          assert.equal(error.operation, "generateThreadSearchStep");
+          assertInclude(error.detail, "opencode");
+          assertInclude(error.detail, "disabled");
+        }
+        assert.deepEqual(answeringProviders, []);
+        assert.equal(dispatchedCommands, 0);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects thread search reasoning without the orchestration operate scope", () =>
+    Effect.gen(function* () {
+      let modelCalls = 0;
+      const instanceId = ProviderInstanceId.make("codex");
+      const instance = makeThreadSearchInstance(instanceId, () =>
+        Effect.sync(() => {
+          modelCalls += 1;
+          return { action: "finish" as const, ranked: [] };
+        }),
+      );
+      yield* buildAppUnderTest({
+        layers: {
+          providerInstanceRegistry: {
+            getInstance: () => Effect.succeed(instance),
+            listInstances: Effect.succeed([instance]),
+          },
+        },
+      });
+
+      const { body: tokenBody } = yield* exchangeAccessToken(defaultDesktopBootstrapToken, {
+        scope: "orchestration:read",
+      });
+      const wsTicketResponse = yield* HttpClient.post("/api/auth/websocket-ticket", {
+        headers: { authorization: `Bearer ${tokenBody.access_token ?? ""}` },
+      });
+      const { ticket } = yield* responseJsonEffect<{ readonly ticket: string }>(wsTicketResponse);
+      const wsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?wsTicket=${encodeURIComponent(ticket)}`;
+      const error = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.reasonThreadSearch](threadSearchReasoningRequest).pipe(
+            Effect.flip,
+          ),
+        ),
+      );
+
+      assert.equal(error._tag, "EnvironmentAuthorizationError");
+      if (error._tag === "EnvironmentAuthorizationError") {
+        assert.equal(error.requiredScope, "orchestration:operate");
+      }
+      assert.equal(modelCalls, 0);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("routes websocket rpc orchestration shell snapshot errors", () =>

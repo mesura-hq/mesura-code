@@ -1,5 +1,6 @@
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -17,6 +18,11 @@ import {
   buildPrContentPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
+import {
+  buildThreadSearchStepPrompt,
+  THREAD_SEARCH_STEP_TIMEOUT_MS,
+  toThreadSearchStep,
+} from "./ThreadSearchPrompt.ts";
 import {
   sanitizeCommitSubject,
   sanitizePrTitle,
@@ -41,6 +47,7 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
 ) {
   const crypto = yield* Crypto.Crypto;
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const fileSystem = yield* FileSystem.FileSystem;
   const resolvedEnvironment = environment ?? process.env;
 
   const runCursorJson = <S extends Schema.Top>({
@@ -49,24 +56,40 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
     prompt,
     outputSchemaJson,
     modelSelection,
+    timeoutMs = CURSOR_TIMEOUT_MS,
   }: {
     operation:
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
-    cwd: string;
+      | "generateThreadTitle"
+      | "generateThreadSearchStep";
+    /** Undefined runs the agent in an empty temporary directory instead of a project. */
+    cwd: string | undefined;
     prompt: string;
     outputSchemaJson: S;
     modelSelection: ModelSelection;
+    timeoutMs?: number;
   }): Effect.Effect<S["Type"], TextGenerationError, S["DecodingServices"]> =>
     Effect.gen(function* () {
+      const workingDirectory =
+        cwd ??
+        (yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3code-cursor-search-" }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new TextGenerationError({
+                operation,
+                detail: "Failed to create Cursor working directory.",
+                cause,
+              }),
+          ),
+        ));
       const outputRef = yield* Ref.make("");
       const runtime = yield* makeCursorAcpRuntime({
         cursorSettings,
         environment: resolvedEnvironment,
         childProcessSpawner: commandSpawner,
-        cwd,
+        cwd: workingDirectory,
         clientInfo: { name: "t3-code-git-text", version: "0.0.0" },
       }).pipe(Effect.provideService(Crypto.Crypto, crypto));
 
@@ -104,7 +127,7 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
           prompt: [{ type: "text", text: prompt }],
         });
       }).pipe(
-        Effect.timeoutOption(CURSOR_TIMEOUT_MS),
+        Effect.timeoutOption(timeoutMs),
         Effect.flatMap(
           Option.match({
             onNone: () =>
@@ -261,10 +284,25 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
       } satisfies TextGeneration.ThreadTitleGenerationResult;
     });
 
+  const generateThreadSearchStep: TextGeneration.TextGeneration["Service"]["generateThreadSearchStep"] =
+    Effect.fn("CursorTextGeneration.generateThreadSearchStep")(function* (input) {
+      const { prompt, outputSchema } = buildThreadSearchStepPrompt(input);
+      const generated = yield* runCursorJson({
+        operation: "generateThreadSearchStep",
+        cwd: undefined,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+        timeoutMs: THREAD_SEARCH_STEP_TIMEOUT_MS,
+      });
+      return yield* toThreadSearchStep("Cursor Agent", generated);
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateThreadSearchStep,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

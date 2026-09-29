@@ -27,6 +27,11 @@ import {
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
 import {
+  buildThreadSearchStepPrompt,
+  THREAD_SEARCH_STEP_TIMEOUT_MS,
+  toThreadSearchStep,
+} from "./ThreadSearchPrompt.ts";
+import {
   normalizeCliError,
   sanitizeCommitSubject,
   sanitizePrTitle,
@@ -102,7 +107,8 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle",
+      | "generateThreadTitle"
+      | "generateThreadSearchStep",
     value: unknown,
     detail: string,
   ): Effect.Effect<string, TextGenerationError> =>
@@ -127,16 +133,20 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     prompt,
     outputSchemaJson,
     modelSelection,
+    timeoutMs = CLAUDE_TIMEOUT_MS,
   }: {
     operation:
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
-    cwd: string;
+      | "generateThreadTitle"
+      | "generateThreadSearchStep";
+    /** Undefined runs Claude in an empty temporary directory instead of a project. */
+    cwd: string | undefined;
     prompt: string;
     outputSchemaJson: S;
     modelSelection: ModelSelection;
+    timeoutMs?: number;
   }): Effect.fn.Return<S["Type"], TextGenerationError, S["DecodingServices"]> {
     const catalog = yield* scopedModelCatalog;
     const resolvedModelSelection = {
@@ -187,7 +197,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     const runClaudeCommand = Effect.fn("runClaudeJson.runClaudeCommand")(function* () {
       // Titles need only the supplied prompt, not configuration from the checkout.
       const workingDirectory =
-        operation === "generateThreadTitle"
+        operation === "generateThreadTitle" || cwd === undefined
           ? yield* fileSystem
               .makeTempDirectoryScoped({ prefix: "t3code-claude-title-" })
               .pipe(
@@ -216,6 +226,8 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
           "--strict-mcp-config",
           "--permission-mode",
           "dontAsk",
+          // A search step must leave no saved conversation behind.
+          ...(operation === "generateThreadSearchStep" ? ["--no-session-persistence"] : []),
         ],
         { env: claudeEnvironment },
       );
@@ -267,7 +279,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
 
     const rawStdout = yield* runClaudeCommand().pipe(
       Effect.scoped,
-      Effect.timeoutOption(CLAUDE_TIMEOUT_MS),
+      Effect.timeoutOption(timeoutMs),
       Effect.flatMap(
         Option.match({
           onNone: () =>
@@ -410,10 +422,25 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       };
     });
 
+  const generateThreadSearchStep: TextGeneration.TextGeneration["Service"]["generateThreadSearchStep"] =
+    Effect.fn("ClaudeTextGeneration.generateThreadSearchStep")(function* (input) {
+      const { prompt, outputSchema } = buildThreadSearchStepPrompt(input);
+      const generated = yield* runClaudeJson({
+        operation: "generateThreadSearchStep",
+        cwd: undefined,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+        timeoutMs: THREAD_SEARCH_STEP_TIMEOUT_MS,
+      });
+      return yield* toThreadSearchStep("Claude", generated);
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateThreadSearchStep,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

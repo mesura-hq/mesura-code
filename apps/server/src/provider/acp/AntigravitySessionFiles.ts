@@ -8,8 +8,12 @@ const decodeSessionMetadata = Schema.decodeEffect(
   Schema.fromJsonString(Schema.Struct({ cwd: Schema.String })),
 );
 
-/** Call after the process closes. The unique temporary cwd proves which session we own. */
-export const removeAntigravitySessionFiles = Effect.fn("removeAntigravitySessionFiles")(
+/**
+ * Call after the process closes. The unique temporary cwd proves which session
+ * we own. Fails when a file cannot be removed, for callers that must report a
+ * transcript left behind.
+ */
+export const removeAntigravitySessionFilesOrFail = Effect.fn("removeAntigravitySessionFiles")(
   function* (input: {
     readonly profileDirectory: string;
     readonly sessionId: string | undefined;
@@ -39,5 +43,12 @@ export const removeAntigravitySessionFiles = Effect.fn("removeAntigravitySession
       force: true,
     });
   },
-  Effect.catch(() => Effect.logWarning("Could not remove temporary Antigravity session files.")),
 );
+
+/** Best-effort form of `removeAntigravitySessionFilesOrFail`: a failure is only logged. */
+export const removeAntigravitySessionFiles = (
+  input: Parameters<typeof removeAntigravitySessionFilesOrFail>[0],
+) =>
+  removeAntigravitySessionFilesOrFail(input).pipe(
+    Effect.catch(() => Effect.logWarning("Could not remove temporary Antigravity session files.")),
+  );
