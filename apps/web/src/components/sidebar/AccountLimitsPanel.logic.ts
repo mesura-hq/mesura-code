@@ -1,4 +1,8 @@
-import type { KeybindingShortcut, ResolvedKeybindingsConfig } from "@t3tools/contracts";
+import type {
+  KeybindingCommand,
+  KeybindingShortcut,
+  ResolvedKeybindingsConfig,
+} from "@t3tools/contracts";
 
 import {
   findEffectiveShortcutForCommand,
@@ -31,7 +35,12 @@ export interface UsagePeekKeyboardLifecycle {
   readonly getState: () => UsagePeekState;
 }
 
+/** The held-chord commands of the sidebar's docks: Alt+U for usage, Alt+S for hosts. */
+export type SidebarPeekCommand = Extract<KeybindingCommand, "usage.peek" | "hosts.peek">;
+
 export function createUsagePeekKeyboardLifecycle(input: {
+  /** Defaults to the usage dock's `usage.peek`. */
+  readonly command?: SidebarPeekCommand;
   readonly keybindings: ResolvedKeybindingsConfig;
   readonly platform: string;
   readonly getContext: () => Partial<ShortcutMatchContext>;
@@ -51,6 +60,7 @@ export function createUsagePeekKeyboardLifecycle(input: {
         input.keybindings,
         input.platform,
         input.getContext(),
+        input.command,
       );
       update(transition.state);
       return transition;
@@ -129,8 +139,10 @@ export function transitionUsagePeekKeyDown(
   keybindings: ResolvedKeybindingsConfig,
   platform: string,
   context?: Partial<ShortcutMatchContext>,
+  // Trailing and defaulted so the usage dock's calls read as they always did.
+  command: SidebarPeekCommand = "usage.peek",
 ): UsagePeekTransition {
-  const shortcut = findEffectiveShortcutForCommand(keybindings, "usage.peek", {
+  const shortcut = findEffectiveShortcutForCommand(keybindings, command, {
     platform,
     ...(context ? { context } : {}),
   });

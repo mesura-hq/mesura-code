@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "pid": 3800,
+  "port": 4181,
+  "origin": "http://127.0.0.1:4181",
+  "devUrl": "http://localhost:5880/",
+  "startedAt": "2026-09-29T03:29:44.000Z"
+}

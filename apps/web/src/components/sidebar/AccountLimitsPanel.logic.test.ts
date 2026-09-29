@@ -222,3 +222,144 @@ describe("Usage peek lifecycle", () => {
     bridge.dispose();
   });
 });
+
+// Phase 5 fence, criterion 1: the Hosts dock peeks on its own command with the
+// usage dock's rules. The command is a trailing argument so every Alt+U call
+// above stays as it was written.
+function hostsBindings(value = shortcut({ key: "s" })): ResolvedKeybindingsConfig {
+  return [
+    { command: "usage.peek", shortcut: shortcut() },
+    { command: "hosts.peek", shortcut: value },
+  ];
+}
+
+function hostsKeyEvent(overrides: Partial<UsagePeekKeyboardEvent> = {}): UsagePeekKeyboardEvent {
+  return keyEvent({ key: "s", code: "KeyS", ...overrides });
+}
+
+describe("held Hosts peek transitions", () => {
+  it("opens the hosts peek on Alt+S and closes it when S is released", () => {
+    const opened = transitionUsagePeekKeyDown(
+      INITIAL_USAGE_PEEK_STATE,
+      hostsKeyEvent(),
+      hostsBindings(),
+      "Linux",
+      undefined,
+      "hosts.peek",
+    );
+    expect(opened.handled).toBe(true);
+    expect(opened.state.held).toBe(true);
+
+    const closed = transitionUsagePeekKeyUp(opened.state, hostsKeyEvent(), "Linux");
+    expect(closed.handled).toBe(true);
+    expect(closed.state).toEqual(INITIAL_USAGE_PEEK_STATE);
+  });
+
+  it("closes the hosts peek when Alt is released before S", () => {
+    const opened = transitionUsagePeekKeyDown(
+      INITIAL_USAGE_PEEK_STATE,
+      hostsKeyEvent(),
+      hostsBindings(),
+      "Linux",
+      undefined,
+      "hosts.peek",
+    );
+    expect(opened.state.held).toBe(true);
+    const closed = transitionUsagePeekKeyUp(
+      opened.state,
+      hostsKeyEvent({ key: "Alt", code: "AltLeft", altKey: false }),
+      "Linux",
+    );
+    expect(closed.handled).toBe(true);
+    expect(closed.state.held).toBe(false);
+  });
+
+  it("swallows a repeated Alt+S without reopening the hosts peek", () => {
+    const repeated = transitionUsagePeekKeyDown(
+      INITIAL_USAGE_PEEK_STATE,
+      hostsKeyEvent({ repeat: true }),
+      hostsBindings(),
+      "Linux",
+      undefined,
+      "hosts.peek",
+    );
+    expect(repeated.handled).toBe(true);
+    expect(repeated.state.held).toBe(false);
+  });
+
+  it("opens the hosts peek from the physical S key on a non-Latin layout", () => {
+    const opened = transitionUsagePeekKeyDown(
+      INITIAL_USAGE_PEEK_STATE,
+      hostsKeyEvent({ key: "ы" }),
+      hostsBindings(),
+      "Linux",
+      undefined,
+      "hosts.peek",
+    );
+    expect(opened.state.held).toBe(true);
+  });
+
+  it("honors a terminal-focus condition on the hosts peek binding", () => {
+    const conditional: ResolvedKeybindingsConfig = [
+      {
+        command: "hosts.peek",
+        shortcut: shortcut({ key: "s" }),
+        whenAst: { type: "identifier", name: "terminalFocus" },
+      },
+    ];
+    const at = (terminalFocus: boolean) =>
+      transitionUsagePeekKeyDown(
+        INITIAL_USAGE_PEEK_STATE,
+        hostsKeyEvent(),
+        conditional,
+        "Linux",
+        { terminalFocus },
+        "hosts.peek",
+      );
+    expect(at(false).handled).toBe(false);
+    expect(at(true).state.held).toBe(true);
+  });
+
+  it("keeps the two peeks on their own chords", () => {
+    const hostsOnAltU = transitionUsagePeekKeyDown(
+      INITIAL_USAGE_PEEK_STATE,
+      keyEvent(),
+      hostsBindings(),
+      "Linux",
+      undefined,
+      "hosts.peek",
+    );
+    expect(hostsOnAltU.handled).toBe(false);
+    const usageOnAltS = transitionUsagePeekKeyDown(
+      INITIAL_USAGE_PEEK_STATE,
+      hostsKeyEvent(),
+      hostsBindings(),
+      "Linux",
+      undefined,
+      "usage.peek",
+    );
+    expect(usageOnAltS.handled).toBe(false);
+  });
+});
+
+describe("Hosts peek lifecycle", () => {
+  it("drives the hosts peek through its own lifecycle and closes it on blur and visibility loss", () => {
+    const states: boolean[] = [];
+    const lifecycle = createUsagePeekKeyboardLifecycle({
+      command: "hosts.peek",
+      keybindings: hostsBindings(),
+      platform: "Linux",
+      getContext: () => ({ terminalFocus: false }),
+      onStateChange: (state) => states.push(state.held),
+    });
+
+    expect(lifecycle.keyDown(keyEvent()).handled).toBe(false);
+    expect(lifecycle.keyDown(hostsKeyEvent()).state.held).toBe(true);
+    lifecycle.close();
+    expect(lifecycle.getState().held).toBe(false);
+    lifecycle.keyDown(hostsKeyEvent());
+    lifecycle.visibilityChange(false);
+    expect(lifecycle.getState().held).toBe(false);
+    expect(states).toEqual([false, true, false, true, false]);
+  });
+});

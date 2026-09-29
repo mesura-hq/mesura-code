@@ -46,6 +46,7 @@ import {
   EditorId,
   WorktreeSetupSnapshot,
   type WorktreeSetupStageId,
+  type HostStatsMessage,
 } from "@t3tools/contracts";
 import {
   computeDpopAccessTokenHash,
@@ -196,6 +197,7 @@ import * as DesktopTelemetryReceiver from "./resourceTelemetry/DesktopTelemetryR
 import * as NativeTelemetryClient from "./resourceTelemetry/NativeTelemetryClient.ts";
 import * as ResourceAttribution from "./resourceTelemetry/ResourceAttribution.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
+import * as HostStatsService from "./hostStats/HostStatsService.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as AccountLimitsService from "./usage/AccountLimitsService.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
@@ -572,6 +574,7 @@ const buildAppUnderTest = (options?: {
     desktopTelemetryReceiver?: Partial<
       DesktopTelemetryReceiver.DesktopTelemetryReceiver["Service"]
     >;
+    hostStats?: Partial<HostStatsService.HostStatsServiceShape>;
     factoryRunTracker?: FactoryRunTracker.FactoryRunTracker["Service"];
   };
 }) =>
@@ -1243,6 +1246,9 @@ const buildAppUnderTest = (options?: {
         // layers to this fixture, which took it past that.
       )
       .pipe(
+        Layer.provide(
+          Layer.mock(HostStatsService.HostStatsService)({ ...options?.layers?.hostStats }),
+        ),
         Layer.provideMerge(ServerSecretStore.layer),
         Layer.provide(workspaceAndProjectServicesLayer),
         Layer.provideMerge(FetchHttpClient.layer),
@@ -6490,6 +6496,178 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assertTrue(Option.isSome(snapshot));
       assert.equal(snapshot.value.processes.length, 0);
       assert.equal(snapshot.value.groups.backend.processCount, 0);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  // Mesura: the hosts dock stream. HostStatsRpc.test.ts pins the messages the
+  // service builds; this pins that the route carries them unchanged, in order.
+  it.effect("streams host stats over websocket as a snapshot followed by samples", () =>
+    Effect.gen(function* () {
+      const noon = Date.parse("2026-09-28T12:00:00.000Z");
+      const bucket = {
+        start: noon,
+        sampleCount: 1,
+        cpuAvg: 25,
+        cpuMax: 25,
+        memUsedAvg: 4_000,
+        swapUsedAvg: 0,
+        diskUsedAvg: 100_000,
+        gpuBusyAvg: null,
+        gpuBusyMax: null,
+        cpuTempMax: 45,
+        netRxAvg: 1_000,
+        netTxAvg: 100,
+        agentsRunningMax: 1,
+      };
+      const sample = {
+        sampledAt: noon,
+        cpuPercent: 25,
+        load1: 1,
+        cpuCount: 16,
+        memUsedBytes: 4_000,
+        memTotalBytes: 16_000,
+        swapUsedBytes: 0,
+        swapTotalBytes: 8_000,
+        diskUsedBytes: 100_000,
+        diskTotalBytes: 500_000,
+        gpus: null,
+        cpuTemperatureC: 45,
+        netRxBytesPerSec: 1_000,
+        netTxBytesPerSec: 100,
+        agentsRunning: 1,
+        agentSessionsOpen: 2,
+        mesuraServers: { installed: 1, dev: 1 },
+      };
+      const snapshot = {
+        type: "snapshot" as const,
+        contractVersion: 1 as const,
+        serverNow: noon,
+        sampleIntervalMs: 60_000,
+        bucketMs: 300_000,
+        windowMs: 43_200_000,
+        host: {
+          hostname: "vigilia-home",
+          platform: "linux",
+          arch: "x64",
+          cpuCount: 16,
+          bootedAt: 1_790_621_781_000,
+        },
+        buckets: {
+          firstStart: noon - 300_000,
+          bucketMs: 300_000,
+          slots: [0],
+          columns: {
+            sampleCount: [5],
+            cpuAvg: [25],
+            cpuMax: [30],
+            memUsedAvg: [4_000],
+            swapUsedAvg: [0],
+            diskUsedAvg: [100_000],
+            gpuBusyAvg: [null],
+            gpuBusyMax: [null],
+            cpuTempMax: [45],
+            netRxAvg: [1_000],
+            netTxAvg: [100],
+            agentsRunningMax: [0],
+          },
+        },
+        latest: null,
+      };
+      const update = { type: "sample" as const, serverNow: noon, sample, bucket };
+      yield* buildAppUnderTest({
+        layers: {
+          hostStats: {
+            subscribe: Effect.succeed({ latest: snapshot, changes: Stream.make(update) }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const messages = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.subscribeHostStats]({}).pipe(Stream.take(2), Stream.runCollect),
+        ),
+      );
+
+      assert.deepEqual(Array.from(messages), [snapshot, update]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  // Mesura: the real HostStatsService behind the real route, as a client meets
+  // it. The clock stays still, so no RPC timer fires; each sampleOnce is one
+  // loop iteration and must reach the socket as exactly one message.
+  it.effect("streams a real host stats service over websocket, one message per sample", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      // The test clock's own time; moving it would move the app's session clock too.
+      const noon = yield* Clock.currentTimeMillis;
+      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "host-stats-ws-" });
+      const service = yield* HostStatsService.makeHostStatsService({
+        historyPath: path.join(directory, HostStatsService.HOST_STATS_HISTORY_FILE_NAME),
+        readSample: Effect.map(Clock.currentTimeMillis, (sampledAt) => ({
+          sampledAt,
+          cpuPercent: 25,
+          load1: 1,
+          cpuCount: 16,
+          memUsedBytes: 4_000,
+          memTotalBytes: 16_000,
+          swapUsedBytes: 0,
+          swapTotalBytes: 8_000,
+          diskUsedBytes: 100_000,
+          diskTotalBytes: 500_000,
+          gpus: null,
+          cpuTemperatureC: 45,
+          netRxBytesPerSec: 1_000,
+          netTxBytesPerSec: 100,
+          agentsRunning: 1,
+          agentSessionsOpen: 2,
+          mesuraServers: { installed: 1, dev: 1 },
+        })),
+      });
+      yield* service.sampleOnce;
+      yield* buildAppUnderTest({ layers: { hostStats: { subscribe: service.subscribe } } });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const [snapshot, first, second, beforeSampling] = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.gen(function* () {
+            const received = yield* Queue.unbounded<HostStatsMessage>();
+            // Three messages end the stream the way a client unsubscribes; interrupting
+            // a live stream instead would wait on RPC timers the test clock never runs.
+            const consumer = yield* client[WS_METHODS.subscribeHostStats]({}).pipe(
+              Stream.take(3),
+              Stream.runForEach((message) => Queue.offer(received, message)),
+              Effect.forkScoped({ startImmediately: true }),
+            );
+            const snapshot = yield* Queue.take(received);
+            const beforeSampling = yield* Queue.size(received);
+            yield* service.sampleOnce;
+            const first = yield* Queue.take(received);
+            yield* service.sampleOnce;
+            const second = yield* Queue.take(received);
+            yield* Fiber.join(consumer);
+            return [snapshot, first, second, beforeSampling] as const;
+          }),
+        ),
+      );
+
+      assert.equal(snapshot.type, "snapshot");
+      if (snapshot.type === "snapshot") {
+        assert.equal(snapshot.serverNow, noon);
+        assert.equal(snapshot.latest?.sampledAt, noon);
+        assert.deepEqual(snapshot.buckets.slots, [0]);
+        assert.deepEqual(snapshot.buckets.columns.sampleCount, [1]);
+      }
+      assert.equal(first.type, "sample");
+      assert.equal(second.type, "sample");
+      if (first.type === "sample" && second.type === "sample") {
+        assert.deepEqual([first.bucket.sampleCount, second.bucket.sampleCount], [2, 3]);
+        assert.deepEqual(first.sample.mesuraServers, { installed: 1, dev: 1 });
+        assert.equal(first.serverNow, noon);
+      }
+      // Nothing arrives between the snapshot and the first sample.
+      assert.equal(beforeSampling, 0);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

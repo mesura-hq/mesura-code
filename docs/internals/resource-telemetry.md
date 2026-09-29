@@ -11,7 +11,11 @@ protocol. A missing or failed collector leaves the server running.
 The native child owns sampling and bounded in-memory history. The server requests
 continuous snapshots only while diagnostics has live subscribers and fetches
 history on demand. Consuming host power for background scheduling must not retain
-live diagnostics. There is no telemetry database or recurring shell-probe fallback.
+live diagnostics. Diagnostics keeps no telemetry database and has no recurring
+shell-probe fallback. The Hosts dock's sampler is separate: it persists 12 hours of
+five-minute buckets to `host-stats-history.json` in the state directory, and its
+only process probe is `nvidia-smi`, which it skips while the NVIDIA GPU is
+runtime-suspended (see `apps/server/src/hostStats/`).
 
 History has independent bounds for age, snapshot count, process rows, and retained
 bytes. A count limit alone cannot bound memory when command lines vary in size.

@@ -167,6 +167,10 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       desktop servers whose app predates the remote trigger, where clients
       must keep telling the user to update the app on that machine. */
   desktopAppUpdate: Schema.optionalKey(Schema.Boolean),
+  /** Mesura: server streams its host's stats over `subscribeHostStats`. Absent on
+      servers from before the hosts dock, so clients show "needs update" for them
+      rather than subscribing to a method they do not have. */
+  hostStats: Schema.optionalKey(Schema.Boolean),
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 

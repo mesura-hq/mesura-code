@@ -90,6 +90,10 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+alt+e", command: "fileTree.miller", when: "!terminalFocus" },
   { key: "mod+shift+e", command: "fileTree.miller", when: "!terminalFocus" },
   { key: "alt+u", command: "usage.peek" },
+  // Fork addition: the Hosts dock's held peek, on a free chord, so the
+  // per-command startup backfill installs it; no RETIRED or ADDED entry. No
+  // `when` clause, like alt+u: both docks open over a focused terminal too.
+  { key: "alt+s", command: "hosts.peek" },
   { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+n", command: "chat.newLocal", when: "!terminalFocus" },

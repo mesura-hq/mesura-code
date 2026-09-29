@@ -51,6 +51,7 @@ import {
   LinkIcon,
   MessagesSquareIcon,
   PaletteIcon,
+  ServerIcon,
   SettingsIcon,
   SquarePenIcon,
   FolderSearchIcon,
@@ -162,6 +163,8 @@ import {
   openFileManager,
 } from "./files/mesuraFileManager/fileManagerToggle";
 import { ProjectScopePicker } from "./projects/ProjectScopePicker";
+import { requestSidebarDockPin } from "./sidebar/sidebarDockController";
+import { useIsMobile } from "../hooks/useMediaQuery";
 import { ThreadSearchPicker } from "./threads/ThreadSearchPicker";
 import { openLinkPullRequestDialog } from "./pullRequest/LinkPullRequestDialog";
 import { ProjectContentSearchDialog } from "./search/ProjectContentSearchDialog";
@@ -668,6 +671,8 @@ function OpenCommandPaletteDialog(props: {
   const availableSettingsSearchItems = useAvailableSettingsSearchItems();
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread, routeThreadRef } =
     useHandleNewThread();
+  // Fork: the sidebar docks never exist at a mobile width; see "Show hosts".
+  const isMobileViewport = useIsMobile();
   const projects = useProjects();
   const referenceThreadRef =
     pathname === "/pull-requests"
@@ -1708,6 +1713,22 @@ function OpenCommandPaletteDialog(props: {
       },
     });
   }
+
+  // Fork: pins the sidebar's Hosts dock, which Alt+S only peeks. The dock's
+  // controller leaves a utility page and expands the sidebar first, so the row
+  // is offered everywhere the dock can exist: every wide viewport.
+  if (!isMobileViewport)
+    actionItems.push({
+      kind: "action",
+      value: "action:show-hosts",
+      searchTerms: ["hosts", "machines", "servers", "cpu", "memory", "swap", "disk", "load"],
+      title: "Show hosts",
+      icon: <ServerIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "hosts.peek",
+      run: async () => {
+        requestSidebarDockPin("hosts");
+      },
+    });
 
   actionItems.push({
     kind: "action",

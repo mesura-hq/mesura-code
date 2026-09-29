@@ -35,6 +35,7 @@ import {
 import { EnvironmentRegistry } from "../connection/registry.ts";
 import { EnvironmentSupervisor } from "../connection/supervisor.ts";
 import { safeErrorLogAttributes } from "../errors/safeLog.ts";
+import { accumulateHostStatsMessages } from "../hostStats/projectHostStats.ts";
 import { EnvironmentCacheStore } from "../platform/persistence.ts";
 import {
   isRpcClientError,
@@ -625,6 +626,13 @@ export function createServerEnvironmentAtoms<R, E>(
     /** Whether this surface renders quota from configured usage-limit sources. */
     readonly usageLimitSources?: boolean;
     readonly usageLimitsCommand?: boolean;
+    /**
+     * Mesura: how long a released `hostStats` stream stays open. Web keeps it
+     * five minutes so a re-peek is instant. Mobile passes 0: its sessions stay
+     * up in the background, so only a zero TTL lets the Hosts screen release
+     * the stream, and the screen keeps the last readings itself.
+     */
+    readonly hostStatsIdleTtlMs?: number;
   },
 ) {
   const configScheduler = createAtomCommandScheduler();
@@ -1034,6 +1042,14 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:resource-telemetry",
       tag: WS_METHODS.subscribeResourceTelemetry,
       idleTtlMs: 0,
+    }),
+    // Mesura: the value is the folded history and whether the stream failed, not the last
+    // message; failures retry with a bounded delay. See accumulateHostStatsMessages.
+    hostStats: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:server:host-stats",
+      tag: WS_METHODS.subscribeHostStats,
+      transform: accumulateHostStatsMessages,
+      idleTtlMs: options.hostStatsIdleTtlMs ?? 5 * 60_000,
     }),
     resourceTelemetryHistory: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:resource-telemetry-history",

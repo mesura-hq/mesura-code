@@ -51,6 +51,8 @@ export function HomeHeader(props: {
   readonly onThreadSortOrderChange: (sortOrder: SidebarThreadSortOrder) => void;
   readonly onOpenEnvironments: () => void;
   readonly onOpenSettings: () => void;
+  /** Mesura: the Hosts screen. Android's header shows a server button for it. */
+  readonly onOpenHosts: () => void;
   readonly onStartNewTask: () => void;
 }) {
   if (Platform.OS === "android") {
@@ -261,6 +263,20 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
             {/* Built identically to the filter button so the two circles
                 match exactly (ControlPill sizes via Tailwind classes and
                 resolves to a different box). */}
+            {/* Mesura: the Hosts screen, one tap from Home, built like the gear. */}
+            <Pressable
+              accessibilityLabel="Open hosts"
+              accessibilityRole="button"
+              onPress={props.onOpenHosts}
+              className="size-11 items-center justify-center rounded-full bg-subtle"
+            >
+              <SymbolView
+                name="server.rack"
+                size={17}
+                tintColorClassName={"accent-icon"}
+                type="monochrome"
+              />
+            </Pressable>
             <Pressable
               accessibilityLabel="Open settings"
               accessibilityRole="button"

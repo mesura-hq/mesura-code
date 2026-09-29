@@ -156,6 +156,7 @@ import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as HostResources from "./resourceTelemetry/HostResources.ts";
+import { HostStatsService } from "./hostStats/HostStatsService.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import * as UsageService from "./usage/UsageService.ts";
@@ -674,6 +675,7 @@ const makeWsRpcLayer = (
       const hostResources = yield* HostResources.HostResources;
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
+      const hostStats = yield* HostStatsService;
       const usage = yield* UsageService.UsageService;
       const accountLimits = yield* AccountLimitsService;
       const relayClient = yield* RelayClient.RelayClient;
@@ -3765,6 +3767,17 @@ const makeWsRpcLayer = (
             WS_METHODS.subscribeResourceTelemetry,
             Stream.unwrap(
               Effect.map(resourceTelemetry.subscribe, ({ latest, changes }) =>
+                Stream.concat(Stream.make(latest), changes),
+              ),
+            ),
+            { "rpc.aggregate": "server" },
+          ),
+        // Mesura: the hosts dock. The snapshot first, then one message per sample.
+        [WS_METHODS.subscribeHostStats]: (_input) =>
+          observeRpcStream(
+            WS_METHODS.subscribeHostStats,
+            Stream.unwrap(
+              Effect.map(hostStats.subscribe, ({ latest, changes }) =>
                 Stream.concat(Stream.make(latest), changes),
               ),
             ),

@@ -228,6 +228,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.deepEqual(keysFor("modelPicker.toggle"), ["alt+m", "mod+shift+m"]);
       assert.equal(soleKeyFor("themeEditor.toggle"), "mod+alt+shift+t");
       assert.equal(soleKeyFor("usage.peek"), "alt+u");
+      assert.equal(soleKeyFor("hosts.peek"), "alt+s");
       assert.equal(soleKeyFor("filePicker.toggle"), "mod+p");
       assert.equal(soleKeyFor("projectSearch.toggle"), "mod+alt+g");
       assert.equal(soleKeyFor("projectScope.toggle"), "mod+shift+f");
@@ -505,6 +506,33 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
           .filter((entry) => entry.command === "projectScope.toggle")
           .map((entry) => entry.key),
         ["mod+shift+f"],
+      );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("installs the hosts peek on alt+s in a config written before it existed", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      // A config from before the Hosts dock: every other default, and no
+      // hosts.peek at all. The per-command startup backfill has to add it.
+      yield* writeKeybindingsConfig(
+        keybindingsConfigPath,
+        Keybindings.DEFAULT_KEYBINDINGS.filter((rule) => rule.command !== "hosts.peek"),
+      );
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepEqual(
+        persisted.filter((entry) => entry.command === "hosts.peek").map((entry) => entry.key),
+        ["alt+s"],
+      );
+      assert.deepEqual(
+        persisted.filter((entry) => entry.command === "usage.peek").map((entry) => entry.key),
+        ["alt+u"],
       );
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
