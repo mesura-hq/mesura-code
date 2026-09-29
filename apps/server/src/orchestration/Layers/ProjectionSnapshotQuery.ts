@@ -2,6 +2,8 @@ import {
   AgentSessionImportSource,
   ApprovalRequestId,
   ChatAttachment,
+  FACTORY_ACTIVITY_KINDS,
+  FACTORY_ACTIVITY_RETENTION_LIMIT,
   OrchestrationMessageContext,
   CheckpointRef,
   IsoDateTime,
@@ -56,6 +58,7 @@ import {
 import { ProjectionCheckpoint } from "../../persistence/Services/ProjectionCheckpoints.ts";
 import { ThreadBackgroundLivenessService } from "../ThreadBackgroundLiveness.ts";
 import { ThreadPlanProgressService } from "../ThreadPlanProgress.ts";
+import { FactoryRunShellSummaries } from "../../factory/FactoryRunShellSummaries.ts";
 import { ProjectionProject } from "../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionState } from "../../persistence/Services/ProjectionState.ts";
 import { ProjectionThreadActivity } from "../../persistence/Services/ProjectionThreadActivities.ts";
@@ -506,6 +509,15 @@ function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: st
 const makeProjectionSnapshotQuery = Effect.gen(function* () {
   const threadBackgroundLiveness = yield* ThreadBackgroundLivenessService;
   const threadPlanProgress = yield* ThreadPlanProgressService;
+  // Mesura: optional, so the query's many test layers need no Software Factory. A thread
+  // without a run carries no `factoryRun` key at all, which keeps its shell bytes unchanged.
+  const factoryRunShellSummaries = yield* Effect.serviceOption(FactoryRunShellSummaries);
+  const factoryRunOf = (threadId: string) => {
+    const factoryRun = Option.isSome(factoryRunShellSummaries)
+      ? factoryRunShellSummaries.value.get(threadId)
+      : null;
+    return factoryRun === null ? {} : { factoryRun };
+  };
   const sql = yield* SqlClient.SqlClient;
   const repositoryIdentityResolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
   const repositoryIdentityResolutionConcurrency = 4;
@@ -1472,9 +1484,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     );
 
   const listActivityRowsByKind = SqlSchema.findAll({
-    Request: Schema.Struct({ kind: Schema.String }),
+    Request: Schema.Struct({ kind: Schema.String, includeArchived: Schema.Boolean }),
     Result: ProjectionThreadActivityDbRowSchema,
-    execute: ({ kind }) => sql`
+    execute: ({ kind, includeArchived }) => sql`
       SELECT
         a.activity_id AS "activityId",
         a.thread_id AS "threadId",
@@ -1489,13 +1501,16 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       JOIN projection_threads t ON t.thread_id = a.thread_id
       WHERE a.kind = ${kind}
         AND t.deleted_at IS NULL
-        AND t.archived_at IS NULL
+        AND (${includeArchived ? 1 : 0} = 1 OR t.archived_at IS NULL)
       ORDER BY a.created_at ASC, a.activity_id ASC
     `,
   });
 
-  const listActivitiesByKind: ProjectionSnapshotQueryShape["listActivitiesByKind"] = (kind) =>
-    listActivityRowsByKind({ kind }).pipe(
+  const listActivitiesByKind: ProjectionSnapshotQueryShape["listActivitiesByKind"] = (
+    kind,
+    options,
+  ) =>
+    listActivityRowsByKind({ kind, includeArchived: options?.includeArchived === true }).pipe(
       Effect.map((rows) => rows.map(mapThreadActivityRow)),
       Effect.mapError(
         toPersistenceSqlOrDecodeError(
@@ -1859,11 +1874,22 @@ pending_approval_requests AS (
           FROM user_input_lifecycle
           WHERE request_order = 1
             AND kind = 'user-input.requested'
+          UNION ALL
+          SELECT activity_id
+          FROM (
+            SELECT activity_id
+            FROM projection_thread_activities
+            WHERE thread_id = ${threadId}
+              AND ${sql.in("kind", FACTORY_ACTIVITY_KINDS)}
+            ORDER BY sequence DESC, created_at DESC, activity_id DESC
+            LIMIT ${FACTORY_ACTIVITY_RETENTION_LIMIT}
+          )
         )
   `;
 
   // Blocking request payloads must remain available even if they predate the
-  // recent activity window. Each CTE returns at most one unresolved row per
+  // recent activity window, and so must the newest Factory plan, run and report
+  // cards (bounded by FACTORY_ACTIVITY_RETENTION_LIMIT, matching the projector). Each CTE returns at most one unresolved row per
   // request, so the merge below stays bounded by actionable work.
   const listPinnedThreadActivityRowsByThread = SqlSchema.findAll({
     Request: ThreadIdLookupInput,
@@ -2739,6 +2765,7 @@ pending_approval_requests AS (
                           row.threadId,
                         ),
                         planProgress: threadPlanProgress.getThreadPlanProgress(row.threadId),
+                        ...factoryRunOf(row.threadId),
                       } satisfies OrchestrationThreadShell)
                     : Result.failVoid,
                 ),
@@ -2902,6 +2929,7 @@ pending_approval_requests AS (
                     row.threadId,
                   ),
                   planProgress: threadPlanProgress.getThreadPlanProgress(row.threadId),
+                  ...factoryRunOf(row.threadId),
                 })),
                 updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
               };
@@ -3258,6 +3286,7 @@ pending_approval_requests AS (
           threadRow.value.threadId,
         ),
         planProgress: threadPlanProgress.getThreadPlanProgress(threadRow.value.threadId),
+        ...factoryRunOf(threadRow.value.threadId),
       } satisfies OrchestrationThreadShell);
     });
 

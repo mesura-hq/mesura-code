@@ -8,6 +8,8 @@ import type {
   ThreadPullRequestLink,
 } from "@t3tools/contracts";
 import {
+  FACTORY_ACTIVITY_KINDS,
+  FACTORY_ACTIVITY_RETENTION_LIMIT,
   isImportedAgentSessionMessageId,
   OrchestrationCheckpointSummary,
   OrchestrationMessage,
@@ -76,10 +78,17 @@ function retainThreadActivities(activities: OrchestrationThread["activities"]) {
     }
   }
   const pendingActivities = new Set(pending.values());
+  // Plan, run and report cards outlive the window, like the snapshot's pinned rows.
+  const factoryActivities = new Set(
+    activities
+      .filter((activity) => FACTORY_ACTIVITY_KINDS.includes(activity.kind))
+      .slice(-FACTORY_ACTIVITY_RETENTION_LIMIT),
+  );
   return activities.filter(
     (activity, index) =>
       index >= recentStart ||
       pendingActivities.has(activity) ||
+      factoryActivities.has(activity) ||
       // The worktree setup record is upserted under one id for the thread's
       // whole life and is the only durable copy of a running setup; an async
       // setup script can outlast a chatty first turn.

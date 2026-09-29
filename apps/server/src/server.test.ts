@@ -72,6 +72,7 @@ import * as Ref from "effect/Ref";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
 import * as Tracer from "effect/Tracer";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -127,6 +128,9 @@ import {
   OrchestrationThreadSettleBlockedError,
 } from "./orchestration/Errors.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import { OrchestrationProjectionSnapshotQueryLive } from "./orchestration/Layers/ProjectionSnapshotQuery.ts";
+import * as ThreadBackgroundLiveness from "./orchestration/ThreadBackgroundLiveness.ts";
+import * as ThreadPlanProgress from "./orchestration/ThreadPlanProgress.ts";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor.ts";
 import * as PullRequestSyncReactor from "./orchestration/PullRequestSyncReactor.ts";
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
@@ -153,6 +157,9 @@ import * as EditorSessionManager from "./editor/Manager.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
+import * as FactoryRunShellSummaries from "./factory/FactoryRunShellSummaries.ts";
+import * as FactoryRunTracker from "./factory/FactoryRunTracker.ts";
+import * as FactorySnapshotStore from "./factory/FactorySnapshotStore.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as BrowserTraceCollector from "./observability/BrowserTraceCollector.ts";
@@ -565,6 +572,7 @@ const buildAppUnderTest = (options?: {
     desktopTelemetryReceiver?: Partial<
       DesktopTelemetryReceiver.DesktopTelemetryReceiver["Service"]
     >;
+    factoryRunTracker?: FactoryRunTracker.FactoryRunTracker["Service"];
   };
 }) =>
   Effect.gen(function* () {
@@ -943,6 +951,13 @@ const buildAppUnderTest = (options?: {
             ...options?.layers?.terminalManager,
           }),
           WorktreeSetupTracker.layer,
+          options?.layers?.factoryRunTracker
+            ? Layer.succeed(FactoryRunTracker.FactoryRunTracker, options.layers.factoryRunTracker)
+            : FactoryRunTracker.layer.pipe(
+                Layer.provide(
+                  Layer.mergeAll(FactorySnapshotStore.layer, FactoryRunShellSummaries.layer),
+                ),
+              ),
           ProjectCloneTracker.layer.pipe(
             Layer.provide(
               Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({
@@ -6985,6 +7000,291 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         truncated: false,
       });
     }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
+  );
+
+  it.effect("routes websocket rpc factory.readSnapshot by digest and refuses anything else", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-factory-snapshot-" });
+      const { factorySnapshotsDir } = yield* ServerConfig.deriveServerPaths(baseDir, undefined);
+      const markdown = "# Plan: stored\n\n## Context\n\nExact bytes, accents included: é.\n";
+      const digest = NodeCrypto.createHash("sha256").update(markdown).digest("hex");
+      yield* fs.makeDirectory(factorySnapshotsDir, { recursive: true });
+      yield* fs.writeFileString(path.join(factorySnapshotsDir, digest), markdown);
+      // What a lookup that skipped the digest shape check would find and return.
+      yield* fs.writeFileString(path.join(factorySnapshotsDir, digest.toUpperCase()), "planted");
+
+      yield* buildAppUnderTest({ config: { baseDir } });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.all({
+            found: client[WS_METHODS.factoryReadSnapshot]({ digest }),
+            unknown: client[WS_METHODS.factoryReadSnapshot]({ digest: "0".repeat(64) }).pipe(
+              Effect.flip,
+            ),
+            uppercase: client[WS_METHODS.factoryReadSnapshot]({
+              digest: digest.toUpperCase(),
+            }).pipe(Effect.flip),
+            traversal: client[WS_METHODS.factoryReadSnapshot]({
+              digest: "../../userdata/state.sqlite",
+            }).pipe(Effect.flip),
+          }),
+        ),
+      );
+
+      assert.equal(response.found.markdown, markdown);
+      assert.include(response.unknown, { _tag: "FactoryReadSnapshotError", reason: "not-found" });
+      assert.include(response.uppercase, {
+        _tag: "FactoryReadSnapshotError",
+        reason: "invalid-digest",
+      });
+      assert.include(response.traversal, {
+        _tag: "FactoryReadSnapshotError",
+        reason: "invalid-digest",
+      });
+    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
+  );
+
+  it.effect("routes websocket rpc factory.subscribeRun to the state of an attached run", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      // The run id is the run directory's name, as sf-team names it.
+      const runDir = path.join(
+        yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-factory-run-" }),
+        "ws-run",
+      );
+      yield* fs.makeDirectory(runDir);
+      const line = (fields: Record<string, unknown>) =>
+        `${encodeTestJson({ v: 1, at: "2026-09-28T09:00:00.000Z", ...fields })}\n`;
+      yield* fs.writeFileString(
+        path.join(runDir, "events.jsonl"),
+        [
+          line({
+            type: "run.started",
+            runId: "ws-run",
+            request: "Stream a run over the websocket",
+            planPath: "/srv/plans/ws-run/plan.md",
+            intentPath: null,
+            planDigest: `sha256:${"c".repeat(64)}`,
+            routes: {
+              implementer: { harness: "claude", model: "claude-opus-5-5", effort: "high" },
+              verifier: { harness: "codex", model: "gpt-6-luna", effort: "max" },
+              reviewer: { harness: "codex", model: "gpt-6-sol", effort: "high" },
+            },
+            returnsBudget: 5,
+            phases: [{ index: 1, title: "The only phase", acceptance: ["It streams"] }],
+          }),
+          line({ type: "phase.started", phase: 1 }),
+          line({ type: "node.entered", phase: 1, node: "fence" }),
+        ].join(""),
+      );
+      // A real tracker, following a real run directory, behind the real RPC.
+      const trackerContext = yield* Layer.build(
+        FactoryRunTracker.layer.pipe(
+          Layer.provideMerge(
+            Layer.mergeAll(
+              Layer.mock(OrchestrationEngine.OrchestrationEngineService)({
+                dispatch: () => Effect.succeed({ sequence: 1 }),
+              }),
+              FactorySnapshotStore.layer,
+              FactoryRunShellSummaries.layer,
+            ),
+          ),
+          Layer.provideMerge(
+            ServerConfig.layerTest(process.cwd(), { prefix: "t3-ws-factory-run-state-" }),
+          ),
+        ),
+      );
+      const tracker = yield* FactoryRunTracker.FactoryRunTracker.pipe(
+        Effect.provide(trackerContext),
+      );
+      const { runId } = yield* tracker.attach(defaultThreadId, runDir);
+
+      yield* buildAppUnderTest({ layers: { factoryRunTracker: tracker } });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const first = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.subscribeFactoryRun]({ threadId: defaultThreadId, runId }).pipe(
+            Stream.runHead,
+            Effect.map(Option.getOrThrow),
+          ),
+        ),
+      );
+
+      assert.equal(runId, "ws-run");
+      assert.equal(first.state.runId, "ws-run");
+      assert.equal(first.state.status, "running");
+      assert.equal(first.state.currentNode, "fence");
+      assert.deepEqual(
+        first.state.phases.map((phase) => phase.status),
+        ["running"],
+      );
+      assert.deepEqual(first.roles, []);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
+  );
+
+  it.effect(
+    "a subscribed shell stream carries a factory run's new node with the run's next event",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const at = (second: number) => `2026-09-28T09:00:${String(second).padStart(2, "0")}.000Z`;
+        const line = (second: number, fields: Record<string, unknown>) =>
+          `${encodeTestJson({ v: 1, at: at(second), ...fields })}\n`;
+        const runDir = path.join(
+          yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-factory-shell-" }),
+          "shell-run",
+        );
+        yield* fs.makeDirectory(runDir);
+        const eventsPath = path.join(runDir, "events.jsonl");
+        yield* fs.writeFileString(
+          eventsPath,
+          [
+            line(0, {
+              type: "run.started",
+              runId: "shell-run",
+              request: "Label a thread with its run",
+              planPath: "/srv/plans/shell-run/plan.md",
+              intentPath: null,
+              planDigest: `sha256:${"d".repeat(64)}`,
+              routes: {
+                implementer: { harness: "claude", model: "claude-opus-5-5", effort: "high" },
+                verifier: { harness: "codex", model: "gpt-6-luna", effort: "max" },
+                reviewer: { harness: "codex", model: "gpt-6-sol", effort: "high" },
+              },
+              returnsBudget: 5,
+              phases: [
+                { index: 1, title: "First", acceptance: ["It labels"] },
+                { index: 2, title: "Second", acceptance: ["It moves"] },
+              ],
+            }),
+            line(1, { type: "phase.started", phase: 1 }),
+            line(1, { type: "node.entered", phase: 1, node: "fence" }),
+          ].join(""),
+        );
+
+        // The engine publishes each dispatched activity as the domain event a real one would.
+        const liveEvents = yield* PubSub.unbounded<OrchestrationEvent>();
+        let sequence = 1;
+        const context = yield* Layer.build(
+          Layer.mergeAll(
+            FactoryRunTracker.layer.pipe(
+              Layer.provide(
+                Layer.mock(OrchestrationEngine.OrchestrationEngineService)({
+                  dispatch: (command) =>
+                    Effect.gen(function* () {
+                      if (command.type !== "thread.activity.append") return { sequence };
+                      sequence += 1;
+                      yield* PubSub.publish(liveEvents, {
+                        sequence,
+                        eventId: EventId.make(`event-factory-run-${sequence}`),
+                        aggregateKind: "thread",
+                        aggregateId: command.threadId,
+                        occurredAt: command.createdAt,
+                        commandId: command.commandId,
+                        causationEventId: null,
+                        correlationId: null,
+                        metadata: {},
+                        type: "thread.activity-appended",
+                        payload: { threadId: command.threadId, activity: command.activity },
+                      } satisfies Extract<
+                        OrchestrationEvent,
+                        { type: "thread.activity-appended" }
+                      >);
+                      return { sequence };
+                    }),
+                }),
+              ),
+              Layer.provide(FactorySnapshotStore.layer),
+            ),
+            OrchestrationProjectionSnapshotQueryLive.pipe(
+              Layer.provide(ThreadBackgroundLiveness.layer),
+              Layer.provide(ThreadPlanProgress.layer),
+              Layer.provide(RepositoryIdentityResolver.layer),
+            ),
+          ).pipe(
+            Layer.provideMerge(FactoryRunShellSummaries.layer),
+            Layer.provideMerge(SqlitePersistenceMemory),
+            Layer.provideMerge(
+              ServerConfig.layerTest(process.cwd(), { prefix: "t3-ws-factory-shell-state-" }),
+            ),
+          ),
+        );
+        const tracker = yield* FactoryRunTracker.FactoryRunTracker.pipe(Effect.provide(context));
+        const query = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery.pipe(
+          Effect.provide(context),
+        );
+        const sql = yield* SqlClient.SqlClient.pipe(Effect.provide(context));
+        yield* sql`INSERT INTO projection_projects
+          (project_id, title, workspace_root, scripts_json, created_at, updated_at, deleted_at)
+          VALUES ('project-factory', 'Project', '/project', '[]', ${at(0)}, ${at(0)}, NULL)`;
+        yield* sql`INSERT INTO projection_threads
+          (thread_id, project_id, title, model_selection_json, runtime_mode, interaction_mode, created_at, updated_at)
+          VALUES (${defaultThreadId}, 'project-factory', 'Run thread', '{"instanceId":"claudeAgent","model":"claude-opus-5-5"}', 'full-access', 'default', ${at(0)}, ${at(0)})`;
+        yield* tracker.attach(defaultThreadId, runDir);
+
+        yield* buildAppUnderTest({
+          layers: {
+            factoryRunTracker: tracker,
+            orchestrationEngine: {
+              streamDomainEvents: Stream.fromPubSub(liveEvents),
+              latestSequence: Effect.sync(() => sequence),
+            },
+            projectionSnapshotQuery: {
+              getShellSnapshot: query.getShellSnapshot,
+              getThreadShellById: query.getThreadShellById,
+            },
+          },
+        });
+
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const isRunUpsert = (item: OrchestrationShellStreamItem) =>
+          item.kind === "thread-upserted" &&
+          item.thread.id === defaultThreadId &&
+          item.thread.factoryRun?.node === "implement";
+        // One subscription throughout: the run event lands after it has synchronized.
+        const items = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.subscribeShell]({ requestCompletionMarker: true }).pipe(
+              Stream.tap((item) =>
+                item.kind === "synchronized"
+                  ? fs
+                      .writeFileString(
+                        eventsPath,
+                        line(20, { type: "node.entered", phase: 1, node: "implement" }),
+                        { flag: "a" },
+                      )
+                      .pipe(Effect.andThen(tracker.drain(defaultThreadId, "shell-run")))
+                  : Effect.void,
+              ),
+              Stream.takeUntil(isRunUpsert),
+              Stream.runCollect,
+            ),
+          ),
+        ).pipe(Effect.timeout("5 seconds"));
+
+        const [snapshot] = items;
+        assert.equal(snapshot?.kind, "snapshot");
+        assert.deepEqual(
+          snapshot?.kind === "snapshot"
+            ? snapshot.snapshot.threads.find((thread) => thread.id === defaultThreadId)?.factoryRun
+            : null,
+          { status: "running", phaseIndex: 1, phaseCount: 2, node: "fence" },
+        );
+        const upserted = items.at(-1);
+        assert.deepEqual(upserted?.kind === "thread-upserted" ? upserted.thread.factoryRun : null, {
+          status: "running",
+          phaseIndex: 1,
+          phaseCount: 2,
+          node: "implement",
+        });
+      }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
   );
 
   it.effect("routes websocket rpc projects.searchEntries excludes gitignored files", () =>

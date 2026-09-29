@@ -24,6 +24,7 @@ import {
   commandDetailRepeatsCommand,
   extractCommandOutputText,
   extractWorkLogToolLifecycleStatus,
+  isFactoryActivity,
   isWorktreeSetupActivity,
   liveActivityToolStatus,
   normalizeCompactToolLabel,
@@ -40,6 +41,17 @@ import {
 } from "@t3tools/client-runtime/work-log/presentation";
 import { extractToolActivityPresentation } from "@t3tools/client-runtime/work-log/tool-presentation";
 import { commandProgramName } from "@t3tools/client-runtime/work-log/command-label";
+import {
+  deriveFactoryTimelineItems,
+  type FactoryPlanTimelineItem,
+  type FactoryReportTimelineItem,
+  type FactoryTimelineItem,
+} from "@t3tools/client-runtime/factory/plan-activities";
+import {
+  getFactoryRunFeedEntry,
+  isLiveFactoryRunEntry,
+  type FactoryRunFeedEntry,
+} from "../features/factory/factoryRunFeed";
 
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
@@ -140,6 +152,23 @@ interface DerivedWorkLogEntry extends WorkLogEntry {
 }
 
 type RawThreadFeedEntry =
+  | FactoryRunFeedEntry
+  | {
+      /** A plan the Software Factory presented: its own card, never folded with a turn. */
+      readonly type: "factory-plan";
+      readonly id: string;
+      readonly createdAt: string;
+      readonly plan: FactoryPlanTimelineItem["plan"];
+    }
+  | {
+      /** A report a run wrote: its own card, never folded with a turn. */
+      readonly type: "factory-report";
+      readonly id: string;
+      readonly createdAt: string;
+      readonly report: FactoryReportTimelineItem["report"];
+      /** The run's latest `factory.run` payload: the card's numbers, without the run stream. */
+      readonly run: NonNullable<FactoryReportTimelineItem["run"]>["run"] | null;
+    }
   | {
       readonly type: "pending-user-input";
       readonly id: string;
@@ -161,7 +190,12 @@ type RawThreadFeedEntry =
     };
 
 export type ThreadFeedEntry =
-  | Extract<RawThreadFeedEntry, { type: "message" | "pending-user-input" }>
+  | Extract<
+      RawThreadFeedEntry,
+      {
+        type: "message" | "pending-user-input" | "factory-plan" | "factory-report" | "factory-run";
+      }
+    >
   | {
       readonly type: "activity-group";
       readonly id: string;
@@ -251,6 +285,15 @@ const activityEntriesCache = new WeakMap<
 const pendingInputEntriesCache = new WeakMap<
   ReadonlyArray<OrchestrationThreadActivity>,
   ReadonlyArray<Extract<RawThreadFeedEntry, { type: "pending-user-input" }>>
+>();
+const factoryPlanEntriesCache = new WeakMap<
+  ReadonlyArray<OrchestrationThreadActivity>,
+  ReadonlyArray<Extract<RawThreadFeedEntry, { type: "factory-plan" | "factory-report" }>>
+>();
+// Items are cached per activity, so one entry per item keeps unchanged rows referentially equal.
+const factoryPlanEntryByItem = new WeakMap<
+  FactoryTimelineItem,
+  Extract<RawThreadFeedEntry, { type: "factory-plan" | "factory-report" }>
 >();
 const messageEntriesCache = new WeakMap<
   OrchestrationThread["messages"][number],
@@ -365,6 +408,8 @@ function deriveWorkLogEntries(
   for (const activity of foldUserInputActivities(ordered)) {
     // Mobile has no setup card, so a failed setup surfaces as an error row.
     if (activity.tone !== "error" && isWorktreeSetupActivity(activity.kind)) continue;
+    // Factory activities render as their own cards (see getFactoryPlanEntries).
+    if (isFactoryActivity(activity.kind)) continue;
     if (activity.kind === "tool.started") continue;
     // Like web: an agent's task.started row anchors its batch. It has a fixed
     // id and timestamp, unlike progress ticks, whose stable per-task id is
@@ -1719,6 +1764,9 @@ export function deriveThreadFeedPresentation(
       entry.type !== "thinking" &&
       entry.type !== "agent-spawn",
   );
+  // A live run's card is placed last, below; it is never the active tail.
+  const liveRun = sourceFeed.find(isLiveFactoryRunEntry);
+  if (liveRun !== undefined) sourceFeed.splice(sourceFeed.indexOf(liveRun), 1);
   const activeTailGroup = sourceFeed.findLast(
     (entry) => entry.type !== "message" || !isEmptyMessage(entry),
   );
@@ -1796,6 +1844,8 @@ export function deriveThreadFeedPresentation(
   ) {
     result.push(thinkingRow(activeWorkStartedAt, unsettledTurnId));
   }
+  // A live run's card follows everything, the live slot included.
+  if (liveRun !== undefined) result.push(liveRun);
   return result;
 }
 
@@ -2102,6 +2152,20 @@ export function buildThreadFeed(
       !pendingRequestIds.has(entry.activity.workEntry.questionAnswer?.requestId ?? "") &&
       (oldestLoadedMessageCreatedAt === null || entry.createdAt >= oldestLoadedMessageCreatedAt),
   );
+  const factoryPlanEntries = getFactoryPlanEntries(thread.activities).filter(
+    (entry) =>
+      oldestLoadedMessageCreatedAt === null || entry.createdAt >= oldestLoadedMessageCreatedAt,
+  );
+  const factoryRunEntry = getFactoryRunFeedEntry(thread.activities);
+  const liveFactoryRun =
+    factoryRunEntry !== null && isLiveFactoryRunEntry(factoryRunEntry) ? factoryRunEntry : null;
+  const placedFactoryRun =
+    factoryRunEntry !== null &&
+    liveFactoryRun === null &&
+    (oldestLoadedMessageCreatedAt === null ||
+      factoryRunEntry.createdAt >= oldestLoadedMessageCreatedAt)
+      ? [factoryRunEntry]
+      : [];
   const foldedAnswerMessageIds = new Set(
     activityEntries.flatMap((entry) =>
       entry.activity.workEntry.questionAnswer
@@ -2123,12 +2187,40 @@ export function buildThreadFeed(
         }),
       ...activityEntries,
       ...pendingEntries,
+      ...factoryPlanEntries,
+      ...placedFactoryRun,
     ],
     (s) => new Date(s.createdAt),
     Order.Date,
   );
 
-  return groupAdjacentActivities(entries);
+  const grouped = groupAdjacentActivities(entries);
+  if (liveFactoryRun !== null) grouped.push(liveFactoryRun);
+  return grouped;
+}
+
+function getFactoryPlanEntries(activities: ReadonlyArray<OrchestrationThreadActivity>) {
+  const cached = factoryPlanEntriesCache.get(activities);
+  if (cached) return cached;
+  const entries = deriveFactoryTimelineItems(activities).map((item) => {
+    let entry = factoryPlanEntryByItem.get(item);
+    if (!entry) {
+      entry =
+        item.kind === "plan"
+          ? { type: "factory-plan", id: item.id, createdAt: item.createdAt, plan: item.plan }
+          : {
+              type: "factory-report",
+              id: item.id,
+              createdAt: item.createdAt,
+              report: item.report,
+              run: item.run?.run ?? null,
+            };
+      factoryPlanEntryByItem.set(item, entry);
+    }
+    return entry;
+  });
+  factoryPlanEntriesCache.set(activities, entries);
+  return entries;
 }
 
 function getThreadFeedActivityEntries(activities: ReadonlyArray<OrchestrationThreadActivity>) {

@@ -25,6 +25,7 @@ import {
   TurnId,
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import { FactoryRunShellSummary } from "./factory.ts";
 import {
   PullRequestActor,
   PullRequestChecksState,
@@ -871,6 +872,8 @@ export const OrchestrationThreadShell = Schema.Struct({
       }),
     ),
   ),
+  /** Mesura: the Software Factory run attached to this thread, for its status label. */
+  factoryRun: Schema.optional(Schema.NullOr(FactoryRunShellSummary)),
 });
 export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
 

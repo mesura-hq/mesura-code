@@ -29,6 +29,7 @@ const RIGHT_PANEL_KINDS = [
   "pull-request",
   "pull-requests",
   "agents",
+  "factory",
 ] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
@@ -85,7 +86,22 @@ export type RightPanelSurface =
     }
   /** The thread's linked pull requests, one singleton tab beside any number of `pull-request` tabs. */
   | { id: "pull-requests"; kind: "pull-requests" }
-  | { id: "agents"; kind: "agents" };
+  | { id: "agents"; kind: "agents" }
+  /** The Software Factory's plan, run and report for this thread: one tab, whose selection moves. */
+  | {
+      id: "factory";
+      kind: "factory";
+      tab: FactoryPanelTab;
+      planId: string | null;
+      runId: string | null;
+    };
+
+export type FactoryPanelTab = "plan" | "run" | "report";
+export interface FactoryPanelSelection {
+  tab: FactoryPanelTab;
+  planId?: string | null;
+  runId?: string | null;
+}
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
 // v9 removed the "plan" surface kind (plans render inline in the transcript).
@@ -132,6 +148,8 @@ interface RightPanelStoreState {
     kind: Exclude<RightPanelKind, "file" | "terminal" | "pull-request">,
   ) => void;
   openDevice: (ref: ScopedThreadRef, target: DeviceTabTarget, automatic?: boolean) => void;
+  /** Open the Factory surface on a selection, replacing the one it showed. */
+  openFactory: (ref: ScopedThreadRef, selection: FactoryPanelSelection) => void;
   renameDevice: (ref: ScopedThreadRef, surfaceId: string, title: string) => void;
   openBrowser: (ref: ScopedThreadRef, tabId: string | null) => void;
   openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
@@ -178,6 +196,13 @@ const EMPTY_THREAD_STATE: ThreadRightPanelState = {
   activeSurfaceId: null,
   surfaces: [],
 };
+const factorySurface = (selection: FactoryPanelSelection): RightPanelSurface => ({
+  id: "factory",
+  kind: "factory",
+  tab: selection.tab,
+  planId: selection.planId ?? null,
+  runId: selection.runId ?? null,
+});
 
 const singletonSurface = (
   kind: Exclude<RightPanelKind, "file" | "preview" | "terminal" | "pull-request">,
@@ -193,6 +218,8 @@ const singletonSurface = (
       return { id: "agents", kind };
     case "device":
       return { id: "device", kind };
+    case "factory":
+      return factorySurface({ tab: "plan" });
   }
 };
 
@@ -535,6 +562,21 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
                 ),
               },
               existing ?? surface,
+            );
+          }),
+        ),
+      openFactory: (ref, selection) =>
+        set((state) =>
+          userAction(state, scopedThreadKey(ref), (current) => {
+            const surface = factorySurface(selection);
+            return upsertSurface(
+              {
+                ...current,
+                surfaces: current.surfaces.map((entry) =>
+                  entry.id === surface.id ? surface : entry,
+                ),
+              },
+              surface,
             );
           }),
         ),

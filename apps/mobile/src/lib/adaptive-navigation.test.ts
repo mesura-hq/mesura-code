@@ -14,6 +14,16 @@ describe("isBaseThreadRoute", () => {
     expect(isBaseThreadRoute("/threads/environment/thread/files")).toBe(false);
     expect(isBaseThreadRoute("/threads/environment/thread/review")).toBe(false);
   });
+
+  // Guard for the `ThreadFactory` route (`threads/:environmentId/:threadId/factory`):
+  // it is nested thread content, so selecting a peer thread replaces it.
+  it("treats the thread's Factory screen as nested thread content, not the thread detail", () => {
+    const pathname = "/threads/environment/thread/factory";
+    expect(isBaseThreadRoute(pathname)).toBe(false);
+    expect(resolveThreadSelectionNavigationAction({ usesSplitView: true, pathname })).toBe(
+      "replace",
+    );
+  });
 });
 
 describe("resolveThreadSelectionNavigationAction", () => {

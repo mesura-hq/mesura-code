@@ -480,6 +480,14 @@
       "generatedNotice": {
         "licenseId": "MIT"
       }
+    },
+    {
+      "license": "MIT",
+      "name": "khroma",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": ["Copyright (c) 2019-present Fabio Spampinato, Andrew Maney"]
+      }
     }
   ]
 }

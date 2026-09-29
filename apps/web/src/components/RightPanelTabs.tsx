@@ -19,6 +19,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Factory,
   FileDiff,
   Files,
   GitPullRequest,
@@ -118,6 +119,8 @@ interface RightPanelTabsProps {
   onAddPullRequests: () => void;
   onAddAgents: () => void;
   onAddDevice: () => void;
+  /** Opens the Software Factory surface; absent while the thread has nothing to show there. */
+  onAddFactory?: (() => void) | undefined;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -148,6 +151,8 @@ export function shouldOpenDefaultBrowserProfileFromMenuClick(
   return pointerType !== "touch";
 }
 
+const NOOP = () => {};
+
 const SURFACE_DISABLED_REASONS = {
   browser: "Browser previews are only available in the Mesura Code desktop app.",
   terminal: "Terminal surfaces are only available from a project thread.",
@@ -157,6 +162,7 @@ const SURFACE_DISABLED_REASONS = {
   pullRequests: "No linked pull requests are available for this thread.",
   agents: "Agents are only available from a thread.",
   device: "Devices are only available from a thread.",
+  factory: "The Software Factory opens once a plan is presented in this thread.",
 } as const;
 
 /** Overlays that must win over the launcher's letter shortcuts. */
@@ -183,6 +189,7 @@ const SURFACE_UNAVAILABLE_HINTS = {
   pullRequests: "No linked pull requests available.",
   agents: "Available from a thread.",
   device: "Available from a thread.",
+  factory: "Available once a plan is presented.",
 } as const;
 
 type TabContextMenuAction =
@@ -323,6 +330,8 @@ function RightPanelEmptyState(props: {
   onAddPullRequests: () => void;
   onAddAgents: () => void;
   onAddDevice: () => void;
+  /** Opens the Software Factory surface; absent while the thread has nothing to show there. */
+  onAddFactory?: (() => void) | undefined;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -408,6 +417,15 @@ function RightPanelEmptyState(props: {
       available: props.deviceAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.device,
       onClick: props.onAddDevice,
+      badgeCount: 0,
+    },
+    {
+      label: "Software Factory",
+      icon: Factory,
+      shortcut: "S",
+      available: props.onAddFactory !== undefined,
+      disabledReason: SURFACE_UNAVAILABLE_HINTS.factory,
+      onClick: props.onAddFactory ?? NOOP,
       badgeCount: 0,
     },
   ] as const;
@@ -632,6 +650,8 @@ function surfaceTitle(
       return "Pull requests";
     case "agents":
       return "Agents";
+    case "factory":
+      return "Software Factory";
     case "device":
       return surface.title ?? surface.target?.name ?? "Device";
     case "preview": {
@@ -717,6 +737,8 @@ function SurfaceIcon({
       return <GitPullRequestArrow className="size-3 shrink-0" />;
     case "agents":
       return <Bot className="size-3 shrink-0" />;
+    case "factory":
+      return <Factory className="size-3 shrink-0" />;
     case "device":
       return surface.target?.platform === "ios" ? (
         <AppleIcon className="size-3 shrink-0" />
@@ -926,6 +948,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       available: props.deviceAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.device,
       onClick: props.onAddDevice,
+    },
+    {
+      label: "Software Factory",
+      icon: Factory,
+      shortcut: "S",
+      available: props.onAddFactory !== undefined,
+      disabledReason: SURFACE_DISABLED_REASONS.factory,
+      onClick: props.onAddFactory ?? NOOP,
     },
   ] as const;
 
@@ -1399,6 +1429,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddPullRequests={props.onAddPullRequests}
             onAddAgents={props.onAddAgents}
             onAddDevice={props.onAddDevice}
+            onAddFactory={props.onAddFactory}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}
