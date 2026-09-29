@@ -56,3 +56,25 @@ export const HostStatsSample = Schema.Struct({
   mesuraServers: Schema.NullOr(HostStatsMesuraServers),
 });
 export type HostStatsSample = typeof HostStatsSample.Type;
+
+/**
+ * Five minutes of samples folded together. An average ignores null samples,
+ * and a metric that was null in every sample of the bucket stays null.
+ */
+export const HostStatsBucket = Schema.Struct({
+  /** Epoch milliseconds, aligned to a bucket boundary on the server's clock. */
+  start: NonNegativeInt,
+  sampleCount: NonNegativeInt,
+  cpuAvg: Schema.NullOr(Percent),
+  cpuMax: Schema.NullOr(Percent),
+  memUsedAvg: Schema.NullOr(NonNegativeFinite),
+  swapUsedAvg: Schema.NullOr(NonNegativeFinite),
+  diskUsedAvg: Schema.NullOr(NonNegativeFinite),
+  gpuBusyAvg: Schema.NullOr(Percent),
+  gpuBusyMax: Schema.NullOr(Percent),
+  cpuTempMax: Schema.NullOr(Schema.Finite),
+  netRxAvg: Schema.NullOr(NonNegativeFinite),
+  netTxAvg: Schema.NullOr(NonNegativeFinite),
+  agentsRunningMax: Schema.NullOr(NonNegativeInt),
+});
+export type HostStatsBucket = typeof HostStatsBucket.Type;

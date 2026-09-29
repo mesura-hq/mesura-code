@@ -100,6 +100,9 @@ import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import * as FileManagerHost from "./fileManager/FileManagerHost.ts";
 import { fileManagerPreviewRouteLayer } from "./fileManager/previewRoute.ts";
+// Mesura: the hosts dock's sampler.
+import * as HostStatsCollector from "./hostStats/HostStatsCollector.ts";
+import * as HostStatsService from "./hostStats/HostStatsService.ts";
 import * as WorkspaceFileWatcher from "./workspace/WorkspaceFileWatcher.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
@@ -229,6 +232,8 @@ const ResourceDiagnosticsLayerLive = Layer.mergeAll(
   ResourceTelemetryLayerLive,
   ProcessDiagnostics.layer.pipe(Layer.provide(ResourceTelemetryLayerLive)),
   ProcessResourceMonitor.layer.pipe(Layer.provide(ResourceTelemetryLayerLive)),
+  // Mesura: samples this host for the hosts dock.
+  HostStatsService.layer.pipe(Layer.provideMerge(HostStatsCollector.layer)),
 );
 
 const RelayClientLive = Layer.unwrap(
