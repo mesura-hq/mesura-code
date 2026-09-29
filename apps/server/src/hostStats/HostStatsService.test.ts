@@ -14,7 +14,7 @@
  * offset, reports rates on every read, and can die or hang on a chosen read.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { HostStatsBucket, type HostStatsSample } from "@t3tools/contracts";
+import { HostStatsBucket, type HostStatsMessage, type HostStatsSample } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -25,6 +25,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import type * as LogLevel from "effect/LogLevel";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
@@ -35,9 +36,11 @@ import * as TestClock from "effect/testing/TestClock";
 
 import * as ServerConfig from "../config.ts";
 import { ServerActivation } from "../serverActivation.ts";
+import { HostAgentCounts } from "./HostAgentCounts.ts";
 import { HostStatsCollector } from "./HostStatsCollector.ts";
 import * as HostStatsServiceModule from "./HostStatsService.ts";
 import { BUCKET_MS } from "./hostStatsBuckets.ts";
+import { MesuraServerDiscovery } from "./mesuraServerDiscovery.ts";
 
 const at = (iso: string) => Date.parse(iso);
 const NOON = at("2026-09-28T12:00:00.000Z");
@@ -181,6 +184,13 @@ const sampleAtTime = (service: HostStatsServiceModule.HostStatsServiceShape, tim
 const bucketStarts = (buckets: ReadonlyArray<HostStatsBucket>) =>
   buckets.map((bucket) => bucket.start);
 
+/**
+ * The sample a stream message carries: an update's sample, or the snapshot's
+ * latest one. Phase 3 made `subscribe` emit the wire messages.
+ */
+const sampledAtOf = (message: HostStatsMessage) =>
+  message.type === "sample" ? message.sample.sampledAt : (message.latest?.sampledAt ?? null);
+
 // ---------------------------------------------------------------------------
 
 it.layer(NodeServices.layer)("HostStatsService phase 2 fence", (it) => {
@@ -198,6 +208,21 @@ it.layer(NodeServices.layer)("HostStatsService phase 2 fence", (it) => {
               Layer.succeed(
                 HostStatsCollector,
                 HostStatsCollector.of({ read: collector.readSample }),
+              ),
+            ),
+            // Phase 3: each sample also reads the agent counts and the server count.
+            Layer.provide(
+              Layer.succeed(
+                HostAgentCounts,
+                HostAgentCounts.of({
+                  read: Effect.succeed({ agentsRunning: 0, agentSessionsOpen: 0 }),
+                }),
+              ),
+            ),
+            Layer.provide(
+              Layer.succeed(
+                MesuraServerDiscovery,
+                MesuraServerDiscovery.of({ discover: Effect.succeed({ installed: 1, dev: 0 }) }),
               ),
             ),
             Layer.provide(ServerConfig.layerTest(directory, directory)),
@@ -483,9 +508,10 @@ it.layer(NodeServices.layer)("HostStatsService phase 2 fence", (it) => {
         // The jump opens a bucket, so this iteration writes the history file
         // before it sleeps; a read-4 barrier would race that real IO against
         // `TestClock.adjust`. The published sample marks the fold as done.
-        yield* changes.pipe(
-          Stream.filter((sample) => sample?.sampledAt === NOON + 12 * MINUTE),
-          Stream.runHead,
+        const third = yield* changes.pipe(Stream.take(3), Stream.runLast);
+        assert.strictEqual(
+          Option.map(third, sampledAtOf).pipe(Option.getOrNull),
+          NOON + 12 * MINUTE,
         );
 
         const latest = yield* service.latest;
@@ -654,23 +680,17 @@ it.layer(NodeServices.layer)("HostStatsService phase 2 regression", (it) => {
         const { service } = yield* startService(historyPath, collector.readSample);
 
         const before = yield* service.subscribe;
-        assert.isNull(before.latest);
+        assert.isNull(sampledAtOf(before.latest));
         yield* sampleAtTime(service, NOON);
         yield* sampleAtTime(service, NOON + MINUTE);
         const changes = yield* before.changes.pipe(Stream.take(2), Stream.runCollect);
-        assert.deepStrictEqual(
-          changes.map((sample) => sample?.sampledAt),
-          [NOON, NOON + MINUTE],
-        );
+        assert.deepStrictEqual(changes.map(sampledAtOf), [NOON, NOON + MINUTE]);
 
         const after = yield* service.subscribe;
-        assert.strictEqual(after.latest?.sampledAt, NOON + MINUTE);
+        assert.strictEqual(sampledAtOf(after.latest), NOON + MINUTE);
         yield* sampleAtTime(service, NOON + 2 * MINUTE);
         const next = yield* after.changes.pipe(Stream.take(1), Stream.runCollect);
-        assert.deepStrictEqual(
-          next.map((sample) => sample?.sampledAt),
-          [NOON + 2 * MINUTE],
-        );
+        assert.deepStrictEqual(next.map(sampledAtOf), [NOON + 2 * MINUTE]);
       }),
   );
 

@@ -1,0 +1,8 @@
+Name:	MainThread
+Umask:	0022
+State:	S (sleeping)
+Tgid:	8080
+Pid:	8080
+PPid:	730
+Uid:	1000	1000	1000	1000
+Gid:	1000	1000	1000	1000

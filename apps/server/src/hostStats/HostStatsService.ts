@@ -1,4 +1,9 @@
-import type { HostStatsBucket, HostStatsSample } from "@t3tools/contracts";
+import type {
+  HostStatsBucket,
+  HostStatsMessage,
+  HostStatsMesuraServers,
+  HostStatsSample,
+} from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -15,6 +20,7 @@ import * as Semaphore from "effect/Semaphore";
 
 import { writeFileStringAtomically } from "../atomicWrite.ts";
 import { ServerConfig } from "../config.ts";
+import type { ProjectionRepositoryError } from "../persistence/Errors.ts";
 import { forkParked } from "../serverActivation.ts";
 import {
   subscribeBeforeSnapshot,
@@ -32,17 +38,20 @@ import {
   validateLoadedBuckets,
   WINDOW_MS,
 } from "./hostStatsBuckets.ts";
+import { HostAgentCounts, type HostAgentCountsReading } from "./HostAgentCounts.ts";
+import { makeSampleMessage, makeSnapshotMessage, readHostFacts } from "./hostStatsWire.ts";
+import { MesuraServerDiscovery } from "./mesuraServerDiscovery.ts";
 
 export interface HostStatsServiceShape {
   /** The most recent sample, or null before the first one. */
   readonly latest: Effect.Effect<HostStatsSample | null>;
   /** Every bucket held, oldest first. */
   readonly buckets: Effect.Effect<ReadonlyArray<HostStatsBucket>>;
-  readonly subscribe: Effect.Effect<
-    SnapshotSubscription<HostStatsSample | null>,
-    never,
-    Scope.Scope
-  >;
+  /**
+   * What `subscribeHostStats` streams: a snapshot of everything held, then one
+   * message per sample. Every subscriber shares the one sampling loop.
+   */
+  readonly subscribe: Effect.Effect<SnapshotSubscription<HostStatsMessage>, never, Scope.Scope>;
   /** One loop iteration: read, fold, persist a closed bucket, publish. */
   readonly sampleOnce: Effect.Effect<void>;
   /** Samples at once, then every 60 seconds; a failed iteration is logged and skipped. */
@@ -129,7 +138,10 @@ export const makeHostStatsService = Effect.fn("makeHostStatsService")(function* 
 
   const state = yield* Ref.make<HostStatsState>({ buckets: loaded, latest: null, unsaved: false });
   const mutex = yield* Semaphore.make(1);
-  const changes = yield* PubSub.sliding<HostStatsSample | null>(8);
+  const changes = yield* PubSub.sliding<HostStatsMessage>(8);
+  // Read once: the facts do not change while the server runs, and a boot time
+  // derived from uptime on every snapshot would drift by the time between reads.
+  const host = yield* readHostFacts(loadedAt);
 
   const persist = Effect.gen(function* () {
     const { buckets } = yield* Ref.get(state);
@@ -161,12 +173,18 @@ export const makeHostStatsService = Effect.fn("makeHostStatsService")(function* 
       Effect.gen(function* () {
         const previous = yield* Ref.get(state);
         const sample = dropRatesAcrossGap(read, previous.latest?.sampledAt ?? null);
-        yield* Ref.set(state, {
-          buckets: foldSample(previous.buckets, sample, sample.sampledAt, WINDOW_MS),
-          latest: sample,
-          unsaved: true,
-        });
-        yield* PubSub.publish(changes, sample);
+        const buckets = foldSample(previous.buckets, sample, sample.sampledAt, WINDOW_MS);
+        yield* Ref.set(state, { buckets, latest: sample, unsaved: true });
+        const start = bucketStartFor(sample.sampledAt, BUCKET_MS);
+        const bucket = buckets.find((held) => held.start === start);
+        // A sample older than the window folds into no bucket held; clients get the sample alone.
+        if (bucket !== undefined) {
+          const serverNow = yield* Clock.currentTimeMillis;
+          yield* PubSub.publish(
+            changes,
+            makeSampleMessage(serverNow, sample, toWireBucket(bucket)),
+          );
+        }
         // Closure follows the previous sample's bucket, not the newest bucket held:
         // a loaded bucket one interval ahead (the clock moved back) stays newest
         // while the current bucket closes beneath it.
@@ -190,25 +208,75 @@ export const makeHostStatsService = Effect.fn("makeHostStatsService")(function* 
   );
 
   const latest = Ref.get(state).pipe(Effect.map((current) => current.latest));
+  const buckets = Ref.get(state).pipe(Effect.map((current) => current.buckets.map(toWireBucket)));
+
+  const snapshot: Effect.Effect<HostStatsMessage> = Effect.gen(function* () {
+    const serverNow = yield* Clock.currentTimeMillis;
+    const current = yield* Ref.get(state);
+    return makeSnapshotMessage({
+      serverNow,
+      host,
+      buckets: current.buckets.map(toWireBucket),
+      latest: current.latest,
+    });
+  });
 
   return {
     latest,
-    buckets: Ref.get(state).pipe(Effect.map((current) => current.buckets.map(toWireBucket))),
-    subscribe: subscribeBeforeSnapshot(changes, latest, mutex),
+    buckets,
+    subscribe: subscribeBeforeSnapshot(changes, snapshot, mutex),
     sampleOnce,
     run,
   } satisfies HostStatsServiceShape;
 });
+
+/**
+ * One sample of this host: the collector reads the machine, this server's
+ * projection counts its agents, and `/proc` counts the Mesura Code servers.
+ * A failed count nulls only its own fields; a null never means zero.
+ */
+export const readHostSample = (input: {
+  readonly collect: Effect.Effect<HostStatsSample>;
+  readonly agentCounts: Effect.Effect<HostAgentCountsReading, ProjectionRepositoryError>;
+  readonly mesuraServers: Effect.Effect<HostStatsMesuraServers | null>;
+}): Effect.Effect<HostStatsSample> =>
+  Effect.all(
+    [
+      input.collect,
+      input.agentCounts.pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("hostStats.agentCounts.failed", { cause: Cause.pretty(cause) }).pipe(
+            Effect.as(null),
+          ),
+        ),
+      ),
+      input.mesuraServers,
+    ],
+    { concurrency: "unbounded" },
+  ).pipe(
+    Effect.map(([sample, counts, mesuraServers]) => ({
+      ...sample,
+      agentsRunning: counts?.agentsRunning ?? null,
+      agentSessionsOpen: counts?.agentSessionsOpen ?? null,
+      mesuraServers,
+    })),
+  );
 
 export const layer = Layer.effect(
   HostStatsService,
   Effect.gen(function* () {
     const config = yield* ServerConfig;
     const collector = yield* HostStatsCollector;
+    const agentCounts = yield* HostAgentCounts;
+    const discovery = yield* MesuraServerDiscovery;
     const path = yield* Path.Path;
     const service = yield* makeHostStatsService({
       historyPath: path.join(config.stateDir, HOST_STATS_HISTORY_FILE_NAME),
-      readSample: collector.read,
+      readSample: readHostSample({
+        collect: collector.read,
+        agentCounts: agentCounts.read,
+        mesuraServers: discovery.discover,
+      }),
     });
     // Parked until activation, so a self-update trial never samples.
     yield* forkParked(

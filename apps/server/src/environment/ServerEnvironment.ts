@@ -245,6 +245,8 @@ export const make = Effect.gen(function* () {
           }
         : {}),
       ...(desktopAppUpdate ? { desktopAppUpdate: true } : {}),
+      // Mesura: the hosts dock.
+      hostStats: true,
     },
   };
 

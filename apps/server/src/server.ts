@@ -102,7 +102,9 @@ import * as FileManagerHost from "./fileManager/FileManagerHost.ts";
 import { fileManagerPreviewRouteLayer } from "./fileManager/previewRoute.ts";
 // Mesura: the hosts dock's sampler.
 import * as HostStatsCollector from "./hostStats/HostStatsCollector.ts";
+import * as HostAgentCounts from "./hostStats/HostAgentCounts.ts";
 import * as HostStatsService from "./hostStats/HostStatsService.ts";
+import * as MesuraServerDiscovery from "./hostStats/mesuraServerDiscovery.ts";
 import * as WorkspaceFileWatcher from "./workspace/WorkspaceFileWatcher.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
@@ -232,8 +234,19 @@ const ResourceDiagnosticsLayerLive = Layer.mergeAll(
   ResourceTelemetryLayerLive,
   ProcessDiagnostics.layer.pipe(Layer.provide(ResourceTelemetryLayerLive)),
   ProcessResourceMonitor.layer.pipe(Layer.provide(ResourceTelemetryLayerLive)),
-  // Mesura: samples this host for the hosts dock.
-  HostStatsService.layer.pipe(Layer.provideMerge(HostStatsCollector.layer)),
+);
+
+// Mesura: samples this host for the hosts dock. It counts agents through
+// SqlClient, which only layers inside the runtime core chain can see: that
+// chain provides PersistenceLayerLive after them. It cannot join the resource
+// diagnostics above by providing PersistenceLayerLive itself, because that
+// constant is declared further down. It sits in ProviderRuntimeLayerLive, the
+// block of that chain upstream changes least (1 commit in 3 months, against 3
+// for RuntimeDependenciesLive).
+const HostStatsLayerLive = HostStatsService.layer.pipe(
+  Layer.provideMerge(HostStatsCollector.layer),
+  Layer.provide(MesuraServerDiscovery.layer),
+  Layer.provide(HostAgentCounts.layer),
 );
 
 const RelayClientLive = Layer.unwrap(
@@ -480,6 +493,7 @@ const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   // Subscribes to `account.rate-limits.updated` so usage bars track live
   // telemetry instead of waiting for the next status probe.
   Layer.provideMerge(ProviderUsageLimitsIngestionLive),
+  Layer.provideMerge(HostStatsLayerLive),
   Layer.provideMerge(ProviderLayerLive),
   Layer.provideMerge(OrchestrationLayerLive),
 );

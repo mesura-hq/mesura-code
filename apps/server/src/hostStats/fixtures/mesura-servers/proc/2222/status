@@ -1,0 +1,8 @@
+Name:	bash
+Umask:	0022
+State:	S (sleeping)
+Tgid:	2222
+Pid:	2222
+PPid:	730
+Uid:	1000	1000	1000	1000
+Gid:	1000	1000	1000	1000

@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "pid": 9999,
+  "port": 13999,
+  "origin": "http://127.0.0.1:13999",
+  "devUrl": "http://localhost:5999/",
+  "startedAt": "2026-09-27T10:00:00.000Z"
+}

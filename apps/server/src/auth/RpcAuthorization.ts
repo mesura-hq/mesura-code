@@ -118,6 +118,9 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.fileManagerQuery]: AuthOrchestrationReadScope,
   [WS_METHODS.fileManagerMutate]: AuthOrchestrationOperateScope,
   [WS_METHODS.fileManagerSubscribeEvents]: AuthOrchestrationReadScope,
+  // Mesura: the hosts dock reads what server.getHostResources reads, and more
+  // of it; the same scope, so a client that may see one may see the other.
+  [WS_METHODS.subscribeHostStats]: AuthOrchestrationReadScope,
   [WS_METHODS.assetsCreateUrl]: AuthOrchestrationReadScope,
   [WS_METHODS.attachmentsCreateUploadUrl]: AuthOrchestrationOperateScope,
   [WS_METHODS.attachmentsDelete]: AuthOrchestrationOperateScope,
