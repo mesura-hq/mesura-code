@@ -342,3 +342,177 @@ describe("factory plan card in the web timeline (phase 2 fence)", () => {
     expect(planEntry(grown)).toBe(planEntry(first));
   });
 });
+
+// Phase 11 fence, criterion 1: the report card takes the plan card's
+// time-ordered path. `deriveFactoryTimelineItems` yields a thread's plans and
+// reports; `deriveTimelineEntriesWithState` and `deriveMessagesTimelineRows`
+// place a `factory-report` row with the same null turn and the same row rule.
+import {
+  makeFactoryReportActivity,
+  makeFactoryReportPayload,
+} from "@t3tools/client-runtime/factory/testing";
+import { deriveFactoryTimelineItems } from "@t3tools/client-runtime/factory/plan-activities";
+
+const factoryThreadId = "factory-thread";
+
+/** What `ChatView` feeds `MessagesTimeline`, with plans and reports from one derivation. */
+function projectFactory(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  messages: ReadonlyArray<ChatMessage>,
+  options: {
+    readonly previous?: TimelineEntriesProjection | null;
+    readonly expandedTurnIds?: ReadonlySet<TurnId>;
+  } = {},
+) {
+  const timeline = deriveTimelineEntriesWithState(
+    messages,
+    [],
+    deriveWorkLogEntries(activities),
+    options.previous ?? null,
+    deriveFactoryTimelineItems(activities),
+  );
+  const rows = deriveMessagesTimelineRows({
+    timelineEntries: timeline.entries,
+    ...(options.expandedTurnIds ? { expandedTurnIds: new Set(options.expandedTurnIds) } : {}),
+    isWorking: false,
+    activeTurnStartedAt: null,
+    turnDiffSummaries: [],
+    supportsConversationRollback: false,
+  });
+  return { timeline, rows };
+}
+
+const factoryReportRows = (rows: ReturnType<typeof project>["rows"]) =>
+  rows.flatMap((row) => (row.kind === "factory-report" ? [row] : []));
+
+describe("phase11 web report card in the timeline", () => {
+  it("phase11 web AC1 renders a factory.report activity as one report card at its place in time, after the plan card", () => {
+    const messages = [
+      message("user-1", "user", 0),
+      message("assistant-1", "assistant", 10, "turn-1"),
+      message("user-2", "user", 20),
+    ];
+    const payload = makeFactoryReportPayload({ writtenAt: time(15) });
+    let thread = appendActivity(
+      makeThread(messages),
+      makeFactoryPlanActivity({ createdAt: time(5) }),
+    );
+    thread = appendActivity(
+      thread,
+      makeFactoryReportActivity({ threadId: factoryThreadId, payload, createdAt: time(15) }),
+    );
+
+    const { rows } = projectFactory(thread.activities, messages);
+
+    expect(rows.map((row) => row.kind)).toEqual([
+      "message",
+      "factory-plan",
+      "message",
+      "factory-report",
+      "message",
+    ]);
+    expect(factoryReportRows(rows)[0]?.factoryReport.report).toEqual(payload);
+    expect(factoryReportRows(rows)[0]?.id).toBe(
+      `factory-report:${factoryThreadId}:invoice-csv-export`,
+    );
+    // Never a work-log row.
+    expect(rows.some((row) => row.kind === "work")).toBe(false);
+  });
+
+  it("phase11 web AC1 keeps a report card visible when the turn that wrote it folds", () => {
+    const messages = [
+      message("user-1", "user", 0),
+      message("assistant-first", "assistant", 5, "turn-1"),
+      message("assistant-final", "assistant", 20, "turn-1"),
+    ];
+    const toolRun: OrchestrationThreadActivity = {
+      id: EventId.make("tool-report"),
+      tone: "tool",
+      kind: "tool.completed",
+      summary: "Ran command",
+      payload: {},
+      turnId: TurnId.make("turn-1"),
+      createdAt: time(8),
+    };
+    const payload = makeFactoryReportPayload({ writtenAt: time(9) });
+    const activities = [
+      toolRun,
+      makeFactoryReportActivity({
+        threadId: factoryThreadId,
+        payload,
+        createdAt: time(9),
+        turnId: TurnId.make("turn-1"),
+      }),
+    ];
+
+    const collapsed = projectFactory(activities, messages).rows;
+    expect(collapsed.map((row) => row.kind)).toEqual([
+      "message",
+      "turn-fold",
+      "factory-report",
+      "message",
+    ]);
+    expect(factoryReportRows(collapsed)[0]?.factoryReport.report).toEqual(payload);
+
+    const expanded = projectFactory(activities, messages, {
+      expandedTurnIds: new Set([TurnId.make("turn-1")]),
+    }).rows;
+    expect(expanded.map((row) => row.kind)).toEqual([
+      "message",
+      "turn-fold",
+      "message",
+      "work",
+      "factory-report",
+      "message",
+    ]);
+  });
+
+  it("phase11 web AC1 drops a factory.report activity whose payload does not decode, without a tool row", () => {
+    const messages = [message("user-1", "user", 0)];
+    const activities = [
+      {
+        ...makeFactoryReportActivity({ threadId: factoryThreadId, createdAt: time(5) }),
+        payload: { runId: "invoice-csv-export", digest: "not-a-digest" },
+      },
+    ];
+
+    expect(projectFactory(activities, messages).rows.map((row) => row.kind)).toEqual(["message"]);
+  });
+
+  it("phase11 web AC1 keeps the report card's timeline entry while unrelated rows stream", () => {
+    const activities = [
+      makeFactoryReportActivity({ threadId: factoryThreadId, createdAt: time(5) }),
+    ];
+    const firstItems = deriveFactoryTimelineItems(activities);
+    const secondItems = deriveFactoryTimelineItems([...activities]);
+    expect(secondItems[0]).toBe(firstItems[0]);
+
+    const streaming = { ...message("assistant-1", "assistant", 10, "turn-1"), streaming: true };
+    const messages = [message("user-1", "user", 0), streaming];
+    const first = deriveTimelineEntriesWithState(messages, [], [], null, firstItems);
+    const grown = deriveTimelineEntriesWithState(
+      [messages[0]!, { ...streaming, text: "Wrote the report" }],
+      [],
+      [],
+      first,
+      secondItems,
+    );
+
+    const reportEntry = (projection: TimelineEntriesProjection) =>
+      projection.entries.find((entry) => entry.kind === "factory-report");
+    expect(reportEntry(grown)).toBeDefined();
+    expect(reportEntry(grown)).toBe(reportEntry(first));
+  });
+
+  it("phase11 web AC1 lists a thread's plans and reports from one derivation, in time order", () => {
+    const report = makeFactoryReportActivity({ threadId: factoryThreadId, createdAt: time(30) });
+    const plan = makeFactoryPlanActivity({ createdAt: time(5) });
+
+    const items = deriveFactoryTimelineItems([report, plan]);
+
+    expect(items.map((item) => [item.kind, item.id])).toEqual([
+      ["plan", "factory-plan:plan-md"],
+      ["report", `factory-report:${factoryThreadId}:invoice-csv-export`],
+    ]);
+  });
+});

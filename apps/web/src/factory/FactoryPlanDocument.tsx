@@ -12,21 +12,22 @@ import {
   type FactoryPlanPhaseCard,
   type FactoryPlanSectionModel,
 } from "@t3tools/client-runtime/factory/plan-model";
+import type { FactoryArchitecture } from "@t3tools/shared/factoryDocument";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { occurrenceKeys } from "@t3tools/client-runtime/factory/occurrence-keys";
 
-interface MarkdownScope {
+export interface MarkdownScope {
   readonly environmentId: EnvironmentId;
   readonly cwd: string | undefined;
 }
 
-function Markdown({ text, scope }: { text: string; scope: MarkdownScope }) {
+export function Markdown({ text, scope }: { text: string; scope: MarkdownScope }) {
   if (text.trim() === "") return null;
   return <ChatMarkdown text={text} cwd={scope.cwd} environmentId={scope.environmentId} />;
 }
 
 /** Closed until the reader opens it; the panel mounts its content only while open. */
-function Fold({ summary, children }: { summary: ReactNode; children: ReactNode }) {
+export function Fold({ summary, children }: { summary: ReactNode; children: ReactNode }) {
   return (
     <Collapsible>
       <CollapsibleTrigger className="group flex w-full items-center gap-1.5 text-left text-sm text-foreground/90">
@@ -133,29 +134,42 @@ function SectionBody({
       );
     }
     case "architecture":
-      return (
-        <div className="flex flex-col gap-3">
-          {section.diagram !== null ? (
-            <div className="overflow-hidden rounded-2xl border border-border/70 bg-card/60">
-              <MermaidDiagram source={section.diagram} theme={theme} />
-            </div>
-          ) : null}
-          <Markdown text={section.body} scope={scope} />
-          {section.legend.length > 0 ? (
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-              {section.legend.map((entry) => (
-                <div key={entry.id} className="contents">
-                  <dt className="font-mono text-xs text-foreground">{entry.id}</dt>
-                  <dd className="text-foreground/80">
-                    <Markdown text={entry.text} scope={scope} />
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          ) : null}
-        </div>
-      );
+      return <ArchitectureBody architecture={section} scope={scope} theme={theme} />;
   }
+}
+
+/** An Architecture section of a plan or a report: the diagram drawn, its reading, its legend. */
+export function ArchitectureBody({
+  architecture,
+  scope,
+  theme,
+}: {
+  architecture: FactoryArchitecture;
+  scope: MarkdownScope;
+  theme: "light" | "dark";
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      {architecture.diagram !== null ? (
+        <div className="overflow-hidden rounded-2xl border border-border/70 bg-card/60">
+          <MermaidDiagram source={architecture.diagram} theme={theme} />
+        </div>
+      ) : null}
+      <Markdown text={architecture.body} scope={scope} />
+      {architecture.legend.length > 0 ? (
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+          {architecture.legend.map((entry) => (
+            <div key={entry.id} className="contents">
+              <dt className="font-mono text-xs text-foreground">{entry.id}</dt>
+              <dd className="text-foreground/80">
+                <Markdown text={entry.text} scope={scope} />
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+    </div>
+  );
 }
 
 /**

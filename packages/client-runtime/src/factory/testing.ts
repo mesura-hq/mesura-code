@@ -8,11 +8,14 @@
 import {
   EventId,
   FACTORY_PLAN_ACTIVITY_KIND,
+  FACTORY_REPORT_ACTIVITY_KIND,
   FACTORY_RUN_ACTIVITY_KIND,
+  factoryReportActivityId,
   factoryRunActivityId,
   ProviderDriverKind,
   ProviderInstanceId,
   type FactoryPlanActivityPayload,
+  type FactoryReportActivityPayload,
   type FactoryRunState,
   type FactoryRunSummary,
   type OrchestrationThreadActivity,
@@ -358,5 +361,56 @@ export function makeFactoryRunActivity(input: {
     payload: { threadId: input.threadId, ...input.summary },
     turnId: input.turnId ?? null,
     createdAt: input.createdAt ?? input.summary.startedAt ?? "2026-09-28T08:59:00.000Z",
+  };
+}
+
+// Report card test data: the `factory.report` activity the run tracker records
+// on `report.written`, for the report the fixture run wrote
+// (`packages/shared/src/fixtures/invoice-csv-export.report.md`). The body
+// travels only through `factoryReadSnapshot`, under this digest.
+
+export const FACTORY_REPORT_DIGEST = "e".repeat(64);
+
+/** The authored headings of the fixture report, in its order. */
+export const FACTORY_REPORT_TEST_HEADINGS = [
+  "Context",
+  "What was built",
+  "How it was built",
+  "Where this differs from the plan",
+  "How it was verified",
+  "Architecture",
+  "What is unresolved",
+];
+
+export function makeFactoryReportPayload(
+  overrides: Partial<FactoryReportActivityPayload> = {},
+): FactoryReportActivityPayload {
+  return {
+    runId: "invoice-csv-export",
+    digest: FACTORY_REPORT_DIGEST,
+    path: `${FACTORY_RUN_TEST_DIR}/report.md`,
+    title: "Report: Export the invoice list as CSV",
+    headings: FACTORY_REPORT_TEST_HEADINGS,
+    writtenAt: "2026-09-28T13:49:00.000Z",
+    ...overrides,
+  };
+}
+
+/** One activity per run, as the tracker records it: id from thread and run, time from the event. */
+export function makeFactoryReportActivity(input: {
+  readonly threadId: string;
+  readonly payload?: FactoryReportActivityPayload;
+  readonly createdAt?: string;
+  readonly turnId?: TurnId | null;
+}): OrchestrationThreadActivity {
+  const payload = input.payload ?? makeFactoryReportPayload();
+  return {
+    id: EventId.make(factoryReportActivityId(input.threadId, payload.runId)),
+    tone: "info",
+    kind: FACTORY_REPORT_ACTIVITY_KIND,
+    summary: "Report: Export the invoice list as CSV",
+    payload,
+    turnId: input.turnId ?? null,
+    createdAt: input.createdAt ?? payload.writtenAt,
   };
 }

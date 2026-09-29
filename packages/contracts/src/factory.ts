@@ -331,6 +331,8 @@ export const FactoryRunPhase = Schema.Struct({
   acceptance: Schema.Array(Schema.String),
   status: FactoryRunPhaseStatus,
   node: Schema.NullOr(Schema.String),
+  /** Every `node.entered` of the phase, in order: the report's step record reads it. */
+  nodes: Schema.Array(Schema.Struct({ node: Schema.String, at: IsoDateTime })),
   startedAt: Schema.NullOr(IsoDateTime),
   closedAt: Schema.NullOr(IsoDateTime),
   dispatches: Schema.Array(FactoryRunDispatch),
@@ -357,6 +359,8 @@ export const FactoryRunPhase = Schema.Struct({
       title: Schema.String,
       disposition: Schema.NullOr(FactoryRunDisposition),
       reason: Schema.NullOr(Schema.String),
+      /** When the review recorded it. */
+      at: IsoDateTime,
     }),
   ),
   deviations: Schema.Array(
@@ -364,6 +368,7 @@ export const FactoryRunPhase = Schema.Struct({
       path: Schema.String,
       kind: Schema.Literals(["widened", "carried", "skipped"]),
       reason: Schema.String,
+      at: IsoDateTime,
     }),
   ),
   degraded: Schema.Array(Schema.String),
@@ -487,6 +492,13 @@ export const FactoryRunSummary = Schema.Struct({
   phaseStatuses: Schema.optional(Schema.Array(FactoryRunPhaseStatus)),
   /** The open stop question, shortened; null once answered. */
   question: Schema.optional(Schema.NullOr(Schema.String)),
+  /**
+   * Acceptance criteria whose latest verdict passed, over every criterion of
+   * the run: the report card's coverage, without the full state.
+   */
+  coverage: Schema.optional(Schema.Struct({ passed: NonNegativeInt, total: NonNegativeInt })),
+  /** Phases closed degraded: kept when the phase marks are trimmed from a long run. */
+  degradedPhases: Schema.optional(NonNegativeInt),
 });
 export type FactoryRunSummary = typeof FactoryRunSummary.Type;
 

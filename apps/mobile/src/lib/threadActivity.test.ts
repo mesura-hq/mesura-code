@@ -3465,55 +3465,55 @@ describe("quiet timeline: nested agents", () => {
 // Phase 3, criterion 1: a presented plan is a card of its own in the feed —
 // never a work-log row — and a turn fold does not hide it. The card's pixels
 // are the emulator's to show; these pin the entry the feed renders it from.
-describe("factory plan feed entries", () => {
-  const factoryTurnId = TurnId.make("factory-turn");
-  const settledFactoryTurn = {
-    turnId: factoryTurnId,
-    state: "completed" as const,
-    requestedAt: "2026-09-28T10:00:00.000Z",
-    startedAt: "2026-09-28T10:00:01.000Z",
-    completedAt: "2026-09-28T10:00:20.000Z",
-    assistantMessageId: MessageId.make("factory-assistant-final"),
-  };
-  const factoryUserMessage = {
-    id: MessageId.make("factory-user"),
-    role: "user" as const,
-    text: "Plan the factory in chat.",
-    turnId: null,
-    streaming: false,
-    createdAt: "2026-09-28T10:00:00.000Z",
-    updatedAt: "2026-09-28T10:00:00.000Z",
-  };
-  const factoryAssistantMessage = (id: string, text: string, at: string) => ({
-    id: MessageId.make(id),
-    role: "assistant" as const,
-    text,
-    turnId: factoryTurnId,
-    streaming: false,
+const factoryTurnId = TurnId.make("factory-turn");
+const settledFactoryTurn = {
+  turnId: factoryTurnId,
+  state: "completed" as const,
+  requestedAt: "2026-09-28T10:00:00.000Z",
+  startedAt: "2026-09-28T10:00:01.000Z",
+  completedAt: "2026-09-28T10:00:20.000Z",
+  assistantMessageId: MessageId.make("factory-assistant-final"),
+};
+const factoryUserMessage = {
+  id: MessageId.make("factory-user"),
+  role: "user" as const,
+  text: "Plan the factory in chat.",
+  turnId: null,
+  streaming: false,
+  createdAt: "2026-09-28T10:00:00.000Z",
+  updatedAt: "2026-09-28T10:00:00.000Z",
+};
+const factoryAssistantMessage = (id: string, text: string, at: string) => ({
+  id: MessageId.make(id),
+  role: "assistant" as const,
+  text,
+  turnId: factoryTurnId,
+  streaming: false,
+  createdAt: at,
+  updatedAt: at,
+});
+const factoryToolActivity = (id: string, at: string) =>
+  makeActivity({
+    id: EventId.make(id),
+    kind: "tool.completed",
+    tone: "tool",
+    summary: "Read files",
     createdAt: at,
-    updatedAt: at,
+    turnId: factoryTurnId,
+    payload: { title: "Read files", itemType: "file_read", status: "completed" },
   });
-  const factoryToolActivity = (id: string, at: string) =>
-    makeActivity({
-      id: EventId.make(id),
-      kind: "tool.completed",
-      tone: "tool",
-      summary: "Read files",
-      createdAt: at,
-      turnId: factoryTurnId,
-      payload: { title: "Read files", itemType: "file_read", status: "completed" },
-    });
-  const factoryPlanEntries = (feed: ReadonlyArray<ThreadFeedEntry>) =>
-    feed.filter((entry) => entry.type === "factory-plan");
-  const workLogActivityIds = (feed: ReadonlyArray<ThreadFeedEntry>) =>
-    feed.flatMap((entry) =>
-      entry.type === "activity-group"
-        ? entry.activities.map((activity) => activity.id)
-        : entry.type === "agent-spawn"
-          ? [entry.activity.id]
-          : [],
-    );
+const factoryPlanEntries = (feed: ReadonlyArray<ThreadFeedEntry>) =>
+  feed.filter((entry) => entry.type === "factory-plan");
+const workLogActivityIds = (feed: ReadonlyArray<ThreadFeedEntry>) =>
+  feed.flatMap((entry) =>
+    entry.type === "activity-group"
+      ? entry.activities.map((activity) => activity.id)
+      : entry.type === "agent-spawn"
+        ? [entry.activity.id]
+        : [],
+  );
 
+describe("factory plan feed entries", () => {
   it("emits a presented plan as one factory-plan entry at its place in the feed, carrying its payload", () => {
     const payload = makeFactoryPlanPayload({ presentedAt: "2026-09-28T10:00:05.000Z" });
     const thread = makeThread({
@@ -4014,4 +4014,161 @@ it("keeps attachment-only question answers expandable outside mobile work groups
   expect(running[0]?.type).toBe("work-toggle");
   expect(running[1]).toBe(group);
   expect(running[2]?.type).toBe("work-toggle");
+});
+
+// Phase 11, criterion 1 on Android: a written report is a card of its own in
+// the feed, placed by time like the plan card, never a work-log row, and a
+// turn fold does not hide it. The card's content is mounted in
+// `mobileInlineScreen.test.tsx`; these pin the entry the feed renders it from.
+import {
+  makeFactoryReportActivity,
+  makeFactoryReportPayload,
+} from "@t3tools/client-runtime/factory/testing";
+
+describe("phase11 factory report feed entries", () => {
+  const reportThreadId = "factory-report-thread";
+  const reportEntryId = `factory-report:${reportThreadId}:invoice-csv-export`;
+  const factoryReportEntries = (feed: ReadonlyArray<ThreadFeedEntry>) =>
+    feed.filter((entry) => entry.type === "factory-report");
+
+  it("phase11 android AC1 emits a written report as one factory-report entry at its place in the feed, carrying its payload", () => {
+    const payload = makeFactoryReportPayload({ writtenAt: "2026-09-28T10:00:07.000Z" });
+    const thread = makeThread({
+      id: ThreadId.make(reportThreadId),
+      projectId: ProjectId.make("project-1"),
+      title: "Factory report entry",
+      messages: [
+        factoryUserMessage,
+        factoryAssistantMessage(
+          "factory-assistant-final",
+          "The run is done.",
+          "2026-09-28T10:00:09.000Z",
+        ),
+      ],
+      activities: [
+        makeFactoryPlanActivity({
+          id: "factory-plan:entry",
+          createdAt: "2026-09-28T10:00:05.000Z",
+        }),
+        makeFactoryReportActivity({
+          threadId: reportThreadId,
+          payload,
+          createdAt: "2026-09-28T10:00:07.000Z",
+        }),
+      ],
+    });
+
+    const feed = buildThreadFeed(thread);
+
+    expect(feed.map((entry) => entry.id)).toEqual([
+      "factory-user",
+      "factory-plan:entry",
+      reportEntryId,
+      "factory-assistant-final",
+    ]);
+    expect(feed[2]).toMatchObject({
+      type: "factory-report",
+      id: reportEntryId,
+      createdAt: "2026-09-28T10:00:07.000Z",
+      report: payload,
+    });
+    expect(workLogActivityIds(feed)).toEqual([]);
+  });
+
+  it("phase11 android AC1 drops a report whose payload does not decode, without a work-log row", () => {
+    const thread = makeThread({
+      id: ThreadId.make(reportThreadId),
+      projectId: ProjectId.make("project-1"),
+      title: "Factory report that does not decode",
+      activities: [
+        {
+          ...makeFactoryReportActivity({
+            threadId: reportThreadId,
+            createdAt: "2026-09-28T10:00:07.000Z",
+          }),
+          payload: { runId: "invoice-csv-export", digest: "not-a-digest" },
+        },
+      ],
+    });
+
+    const feed = buildThreadFeed(thread);
+
+    expect(factoryReportEntries(feed)).toEqual([]);
+    expect(workLogActivityIds(feed)).toEqual([]);
+  });
+
+  it.each([
+    { placement: "inside the folded turn", turnId: factoryTurnId },
+    { placement: "with no turn", turnId: null },
+  ])(
+    "phase11 android AC1 keeps a report card visible when a turn fold hides the work around it ($placement)",
+    ({ turnId }) => {
+      const thread = makeThread({
+        id: ThreadId.make(reportThreadId),
+        projectId: ProjectId.make("project-1"),
+        title: "Factory report survives a fold",
+        latestTurn: settledFactoryTurn,
+        messages: [
+          factoryUserMessage,
+          factoryAssistantMessage(
+            "factory-assistant-first",
+            "Running the build.",
+            "2026-09-28T10:00:02.000Z",
+          ),
+          factoryAssistantMessage(
+            "factory-assistant-final",
+            "The run is done.",
+            "2026-09-28T10:00:20.000Z",
+          ),
+        ],
+        activities: [
+          factoryToolActivity("factory-report-tool-before", "2026-09-28T10:00:04.000Z"),
+          makeFactoryReportActivity({
+            threadId: reportThreadId,
+            createdAt: "2026-09-28T10:00:10.000Z",
+            turnId,
+          }),
+          factoryToolActivity("factory-report-tool-after", "2026-09-28T10:00:15.000Z"),
+        ],
+      });
+
+      const feed = buildThreadFeed(thread);
+      const collapsed = deriveThreadFeedPresentation(feed, thread.latestTurn, new Set());
+
+      expect(collapsed.some((row) => row.type === "turn-fold" && !row.expanded)).toBe(true);
+      expect(workLogActivityIds(collapsed)).toEqual([]);
+      expect(factoryReportEntries(collapsed).map((row) => row.id)).toEqual([reportEntryId]);
+
+      const expanded = deriveThreadFeedPresentation(
+        feed,
+        thread.latestTurn,
+        new Set([factoryTurnId]),
+      );
+      expect(factoryReportEntries(expanded).map((row) => row.id)).toEqual([reportEntryId]);
+    },
+  );
+
+  it("phase11 android AC1 keeps the report entry's identity across feed rebuilds of the same activities", () => {
+    const activities = [
+      makeFactoryReportActivity({
+        threadId: reportThreadId,
+        createdAt: "2026-09-28T10:00:07.000Z",
+      }),
+    ];
+    const thread = makeThread({
+      id: ThreadId.make(reportThreadId),
+      projectId: ProjectId.make("project-1"),
+      title: "Factory report identity",
+      messages: [factoryUserMessage],
+      activities,
+    });
+
+    const first = factoryReportEntries(buildThreadFeed(thread));
+    const second = factoryReportEntries(
+      buildThreadFeed({ ...thread, activities: [...activities] }),
+    );
+
+    expect(first).toHaveLength(1);
+    expect(second[0]).toBe(first[0]);
+  });
 });

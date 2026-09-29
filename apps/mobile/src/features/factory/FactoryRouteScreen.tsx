@@ -1,9 +1,13 @@
-import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
+import { useIsFocused, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import {
-  deriveFactoryPlanTimelineItems,
+  deriveFactoryTimelineItems,
+  findFactoryReportItem,
   type FactoryPlanTimelineItem,
+  type FactoryReportTimelineItem,
 } from "@t3tools/client-runtime/factory/plan-activities";
+import { deriveFactoryReportView } from "@t3tools/client-runtime/factory/report-view";
+import { splitFactoryDocument } from "@t3tools/shared/factoryDocument";
 import { deriveLatestFactoryRunItem } from "@t3tools/client-runtime/factory/run-activities";
 import { useMemo, useState } from "react";
 import { Platform, ScrollView, View } from "react-native";
@@ -15,7 +19,9 @@ import { SegmentedControl } from "../../components/SegmentedControl";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { useSelectedThreadDetail } from "../../state/use-thread-detail";
 import { FactoryPlanDocument } from "./FactoryPlanDocument";
+import { FactoryReportDocument } from "./FactoryReportDocument";
 import { FactoryRunView } from "./FactoryRunView";
+import { useFactoryRun } from "./useFactoryRun";
 import { useFactorySnapshot } from "./useFactorySnapshot";
 
 type FactoryRouteScreenProps = StaticScreenProps<{
@@ -24,19 +30,19 @@ type FactoryRouteScreenProps = StaticScreenProps<{
   /** The `factory.plan` activity id; the thread's latest plan when absent or unknown. */
   readonly planId?: string;
   /** The tab to open on; the Plan tab when absent. */
-  readonly tab?: "run";
-  /** The run the Run tab shows; the thread's latest run when absent. */
+  readonly tab?: "run" | "report";
+  /** The run the Run and Report tabs show; the thread's latest run when absent. */
   readonly runId?: string;
 }>;
 
 type FactoryTab = "plan" | "run" | "report";
 
-// Run shows only for a thread with a run; Report arrives with the report view.
-function factoryTabs(hasRun: boolean) {
+// Run opens only for a thread with a run, Report only once that run wrote its report.
+function factoryTabs(hasRun: boolean, hasReport: boolean) {
   return [
     { value: "plan", label: "Plan" },
     { value: "run", label: "Run", disabled: !hasRun },
-    { value: "report", label: "Report", disabled: true },
+    { value: "report", label: "Report", disabled: !hasReport },
   ] as const satisfies ReadonlyArray<{
     readonly value: FactoryTab;
     readonly label: string;
@@ -68,9 +74,45 @@ function FactoryPlanBody(props: {
   return <FactoryPlanDocument markdown={snapshot.markdown} />;
 }
 
+/** The report's frame from the run stream, held open only while the screen is focused. */
+function FactoryReportStream(props: {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+  readonly report: FactoryReportTimelineItem;
+  readonly markdown: string;
+}) {
+  const stream = useFactoryRun(props.environmentId, props.threadId, props.report.report.runId);
+  const state = stream.status === "ready" ? stream.item.state : null;
+  const document = useMemo(() => splitFactoryDocument(props.markdown), [props.markdown]);
+  const view = useMemo(
+    () => (state === null ? null : deriveFactoryReportView({ report: document, state })),
+    [document, state],
+  );
+  if (view !== null) return <FactoryReportDocument view={view} />;
+  if (stream.status === "failed") {
+    return <FactoryScreenMessage text="The run's record could not be loaded." />;
+  }
+  return <FactoryScreenMessage text="Loading the report…" />;
+}
+
+function FactoryReportBody(props: {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+  readonly report: FactoryReportTimelineItem;
+}) {
+  const focused = useIsFocused();
+  const snapshot = useFactorySnapshot(props.environmentId, props.report.report.digest);
+  if (snapshot.status === "loading") return <FactoryScreenMessage text="Loading the report…" />;
+  if (snapshot.status === "failed") {
+    return <FactoryScreenMessage text="The report's text could not be loaded." />;
+  }
+  if (!focused) return null;
+  return <FactoryReportStream {...props} markdown={snapshot.markdown} />;
+}
+
 /**
- * The Factory screen of one thread: the presented plan full-screen, and the
- * attached run on the Run tab. The thread comes from the route, like the
+ * The Factory screen of one thread: the presented plan full-screen, the
+ * attached run on the Run tab, and the run's report on the Report tab. The thread comes from the route, like the
  * other thread screens; its plans and runs come from its `factory.plan` and
  * `factory.run` activities.
  */
@@ -79,9 +121,13 @@ export function FactoryRouteScreen(props: FactoryRouteScreenProps) {
   const insets = useSafeAreaInsets();
   const { environmentId, threadId, planId } = props.route.params;
   const threadDetail = useSelectedThreadDetail();
-  const plans = useMemo(
-    () => deriveFactoryPlanTimelineItems(threadDetail?.activities ?? []),
+  const factoryItems = useMemo(
+    () => deriveFactoryTimelineItems(threadDetail?.activities ?? []),
     [threadDetail?.activities],
+  );
+  const plans = useMemo(
+    () => factoryItems.filter((item): item is FactoryPlanTimelineItem => item.kind === "plan"),
+    [factoryItems],
   );
   const plan = selectFactoryPlan(plans, planId);
   const latestRun = useMemo(
@@ -89,9 +135,13 @@ export function FactoryRouteScreen(props: FactoryRouteScreenProps) {
     [threadDetail?.activities],
   );
   const runId = props.route.params.runId ?? latestRun?.run.runId ?? null;
-  const tabs = useMemo(() => factoryTabs(runId !== null), [runId]);
+  const report = findFactoryReportItem(factoryItems, runId);
+  const tabs = useMemo(() => factoryTabs(runId !== null, report !== null), [runId, report]);
   const [pickedTab, setTab] = useState<FactoryTab>(props.route.params.tab ?? "plan");
-  const tab = pickedTab === "run" && runId === null ? "plan" : pickedTab;
+  const tab =
+    (pickedTab === "run" && runId === null) || (pickedTab === "report" && report === null)
+      ? "plan"
+      : pickedTab;
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
@@ -108,7 +158,13 @@ export function FactoryRouteScreen(props: FactoryRouteScreenProps) {
         contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
       >
         <SegmentedControl options={tabs} selected={tab} onSelect={setTab} role="tab" />
-        {tab === "run" && runId !== null ? (
+        {tab === "report" && report !== null ? (
+          <FactoryReportBody
+            environmentId={EnvironmentId.make(environmentId)}
+            threadId={ThreadId.make(threadId)}
+            report={report}
+          />
+        ) : tab === "run" && runId !== null ? (
           <FactoryRunView
             environmentId={EnvironmentId.make(environmentId)}
             threadId={ThreadId.make(threadId)}

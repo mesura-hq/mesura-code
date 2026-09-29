@@ -1032,3 +1032,201 @@ it("phase10 android P1-1 Run tab opens a deviation's file from the run's reposit
     path: ["", "srv", "repos", "billing-web", "src", "components", "Toolbar.tsx"],
   });
 });
+
+// The Report tab (phase 11 of factory-in-chat): criteria 2 to 6 on Android,
+// through the same route screen. The body is the `factoryReadSnapshot` answer
+// for the `factory.report` activity's digest; the frame is the run stream's
+// state. Only the emulator shows the error tone of a degraded phase and a
+// failed result, the drawn diagram, and the layout on a narrow screen.
+import {
+  FACTORY_REPORT_DIGEST,
+  makeFactoryReportActivity,
+} from "@t3tools/client-runtime/factory/testing";
+
+import { readFactoryReportFixture } from "./factoryRun.test-support";
+
+const reportMarkdown = readFactoryReportFixture();
+const REPORT_STEP_LINE = "pnpm lint failed on an unused import in the CSV serializer";
+const REPORT_HEADINGS = [
+  "Context",
+  "What was built",
+  "How it was built",
+  "Where this differs from the plan",
+  "How it was verified",
+  "Architecture",
+  "What is unresolved",
+  "The run, step by step",
+];
+
+/** The thread after `report.written`: its plan, its run and its report, the body stored by digest. */
+function showReportAt(point: FactoryRunFixturePoint, markdown: string = reportMarkdown) {
+  fixture.activities = [
+    makeFactoryPlanActivity({ id: planId, createdAt: "2026-09-28T10:00:05.000Z" }),
+    makeFactoryRunActivityAt({ threadId, point }),
+    makeFactoryReportActivity({ threadId }),
+  ];
+  fixture.factorySnapshots[FACTORY_REPORT_DIGEST] = markdown;
+}
+
+async function openReportTab(point: FactoryRunFixturePoint = "degraded", markdown?: string) {
+  showReportAt(point, markdown);
+  fixture.routeParams = { environmentId, threadId, tab: "report", runId };
+  await streamRunAt(point);
+  await mount();
+}
+
+function reportTab(): HTMLButtonElement {
+  const tab = buttons().find(
+    (node) => node.dataset.nativeRole === "tab" && node.textContent?.trim() === "Report",
+  );
+  expect(tab, "Expected the Report tab").toBeDefined();
+  return tab!;
+}
+
+const follows = (left: Node, right: Node) =>
+  (left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+
+function requireText(text: string): Element {
+  const element = elementWithText(text);
+  expect(element, `Expected "${text}" on the screen; screen: ${visibleText()}`).toBeDefined();
+  return element!;
+}
+
+it("phase11 android AC2 Factory screen enables the Report tab when the thread has a report and shows it when pressed", async () => {
+  showReportAt("degraded");
+  await streamRunAt("degraded");
+  await mount();
+  expect(reportTab().disabled).toBe(false);
+  expect(reportTab().getAttribute("aria-selected")).not.toBe("true");
+
+  await press(reportTab());
+  expect(reportTab().getAttribute("aria-selected")).toBe("true");
+  expect(visibleText()).toContain("The export is one endpoint beside the list endpoint");
+  expect(visibleText()).not.toContain(`${planSections.length} sections`);
+});
+
+it("phase11 android AC2 Report tab shows the clock band, then the authored sections in the contract's order, then the step record", async () => {
+  await openReportTab();
+  expect(reportTab().getAttribute("aria-selected")).toBe("true");
+
+  const text = visibleText();
+  expect(text).toMatch(/elapsed\s*4h 49m/i);
+  expect(text).toMatch(/machine\s*4h 24m/i);
+  expect(text).toMatch(/waiting\s*25m/i);
+  expect(text).toContain("Accountants close each month from the invoice list");
+
+  const headings = REPORT_HEADINGS.map(requireText);
+  for (let index = 1; index < headings.length; index += 1) {
+    expect(
+      follows(headings[index - 1]!, headings[index]!),
+      `"${REPORT_HEADINGS[index - 1]}" before "${REPORT_HEADINGS[index]}"`,
+    ).toBe(true);
+  }
+  expect(text.search(/elapsed\s*4h 49m/i)).toBeLessThan(
+    text.indexOf("Accountants close each month"),
+  );
+});
+
+it("phase11 android AC2 AC3 Report tab draws one verification block per phase inside How it was verified, marking results and authored-tests-only", async () => {
+  await openReportTab();
+  const verified = requireText("How it was verified");
+  const architecture = requireText("Architecture");
+  const criterionLabel = (phase: number, n: number) => {
+    const node = Array.from(container.querySelectorAll("[aria-label]")).find((candidate) =>
+      candidate.getAttribute("aria-label")?.startsWith(`Phase ${phase}, criterion ${n}:`),
+    );
+    expect(
+      node,
+      `Expected phase ${phase} criterion ${n}; labels: ${visibleLabels()}`,
+    ).toBeDefined();
+    expect(follows(verified, node!), "inside How it was verified").toBe(true);
+    expect(follows(node!, architecture), "before Architecture").toBe(true);
+    return node!.getAttribute("aria-label") ?? "";
+  };
+
+  expect(criterionLabel(1, 1)).toMatch(/pass/i);
+  expect(criterionLabel(1, 1)).not.toMatch(/authored tests only/i);
+  expect(criterionLabel(1, 3)).toMatch(/pass/i);
+  expect(criterionLabel(1, 3)).toMatch(/authored tests only/i);
+  expect(criterionLabel(2, 1)).toMatch(/not exercised/i);
+  expect(criterionLabel(2, 2)).toMatch(/pass/i);
+  const text = visibleText();
+  expect(text).toContain("A field that contains a comma or a quote is quoted per RFC 4180");
+  expect(text).toContain("The Export button downloads invoices-<date>.csv");
+  // The derived blocks come first, then the authored comment.
+  expect(text.indexOf("The Export button downloads invoices-<date>.csv")).toBeLessThan(
+    text.indexOf("The quoting of commas and quotes rests on authored tests only"),
+  );
+});
+
+it("phase11 android AC4 Report tab draws the Architecture diagram with its reading and legend and folds the step record per phase", async () => {
+  await openReportTab();
+  expect(latestWebView().source.html).toContain("EX[Export endpoint]");
+  const text = visibleText();
+  expect(text).toContain("The page asks the endpoint for the file with its own filter");
+  expect(text).toContain("the invoices page, which owns the filter.");
+  expect(text).not.toContain("```mermaid");
+
+  const stepRecord = requireText("The run, step by step");
+  const folds = buttons().filter(
+    (node) =>
+      node.getAttribute("aria-expanded") !== null &&
+      follows(stepRecord, node) &&
+      (node.textContent?.includes(RUN_PHASE_1) || node.textContent?.includes(RUN_PHASE_2)),
+  );
+  expect(folds, "Expected one fold per phase under the step record").toHaveLength(2);
+  expect(folds.map((node) => node.getAttribute("aria-expanded"))).toEqual(["false", "false"]);
+  expect(visibleText()).not.toContain(REPORT_STEP_LINE);
+
+  await press(folds[0]!);
+  expect(visibleText()).toContain(REPORT_STEP_LINE);
+});
+
+it("phase11 android AC5 Report tab renders an unknown heading as a plain section and names a missing section", async () => {
+  const withoutDifferences = reportMarkdown.replace(
+    /## Where this differs from the plan\n[\s\S]*?(?=## How it was verified)/,
+    "",
+  );
+  await openReportTab(
+    "degraded",
+    withoutDifferences.replace(
+      "## How it was built",
+      "## Screenshots\n\nTwo screenshots of the Export button, before and after.\n\n## How it was built",
+    ),
+  );
+
+  expect(follows(requireText("What was built"), requireText("Screenshots"))).toBe(true);
+  const text = visibleText();
+  expect(text).toContain("Two screenshots of the Export button, before and after.");
+  expect(text).toContain("Missing from report.md: Where this differs from the plan");
+});
+
+it("phase11 android AC6 Report tab reads the same clock and results as the web from the shared view model", async () => {
+  await openReportTab(
+    "degraded",
+    reportMarkdown.replace(
+      "Accountants close each month from the invoice list",
+      "It took 1h of machine time and every criterion passed. Accountants close each month from the invoice list",
+    ),
+  );
+  const text = visibleText();
+  expect(text).toMatch(/elapsed\s*4h 49m/i);
+  expect(text).toMatch(/machine\s*4h 24m/i);
+  expect(text).toMatch(/waiting\s*25m/i);
+});
+
+it("phase11 android review P2-1 Report tab keeps the verification blocks at their contract place when report.md leaves the section out", async () => {
+  await openReportTab(
+    "degraded",
+    reportMarkdown.replace(/## How it was verified\n[\s\S]*?(?=## Architecture)/, ""),
+  );
+  const heading = requireText("How it was verified");
+  const criterion = Array.from(container.querySelectorAll("[aria-label]")).find((node) =>
+    node.getAttribute("aria-label")?.startsWith("Phase 1, criterion 1:"),
+  );
+  expect(criterion, "Expected phase 1 criterion 1").toBeDefined();
+  expect(follows(requireText("Where this differs from the plan"), heading)).toBe(true);
+  expect(follows(heading, criterion!)).toBe(true);
+  expect(follows(criterion!, requireText("Architecture"))).toBe(true);
+  expect(visibleText()).toContain("Missing from report.md: How it was verified");
+});

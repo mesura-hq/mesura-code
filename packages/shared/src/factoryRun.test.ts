@@ -6,7 +6,9 @@ import * as NodeFS from "node:fs";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  deriveFactoryRunVerification,
   emptyFactoryRunState,
+  factoryRunCoverage,
   foldFactoryRunLine,
   summarizeFactoryRun,
   toFactoryRunShellSummary,
@@ -229,6 +231,9 @@ describe("factory run summary budget", () => {
     const summary = summarizeFactoryRun(state);
     expect(summary.phaseCount).toBe(11);
     expect(summary.verdicts).toHaveLength(22);
+    // Phase 11: the report card's coverage travels in the summary, inside the bound.
+    expect(summary.coverage).toEqual({ passed: 88, total: 88 });
+    expect(summary.degradedPhases).toBe(11);
     expect(new TextEncoder().encode(JSON.stringify(summary)).byteLength).toBeLessThan(4 * 1024);
   });
 
@@ -281,8 +286,24 @@ describe("factory run summary budget", () => {
     expect(encodedPayloadBytes(summary)).toBeLessThan(4 * 1024);
     expect(summary.phaseStatuses).toBeUndefined();
     expect(summary.verdicts).toEqual([]);
+    // Two numbers: the coverage outlives the marks and the verdicts.
+    expect(summary.coverage).toEqual({ passed: 3200, total: 3200 });
+    // Review P1-1: the degraded count outlives the marks it would otherwise be read from.
+    expect(summary.degradedPhases).toBe(400);
     expect(summary.phaseCount).toBe(400);
     expect(summary.phase?.index).toBe(400);
     expect(summary.request?.startsWith("A request long enough to matter.")).toBe(true);
+  });
+});
+
+describe("phase11 factory run summary coverage", () => {
+  it("phase11 summary coverage counts the fixture run's passed criteria over every criterion, as the report view does", () => {
+    const state = foldLines(FIXTURE_LINES);
+
+    expect(summarizeFactoryRun(state).coverage).toEqual({ passed: 4, total: 5 });
+    expect(factoryRunCoverage(deriveFactoryRunVerification(state))).toEqual({
+      passed: 4,
+      total: 5,
+    });
   });
 });

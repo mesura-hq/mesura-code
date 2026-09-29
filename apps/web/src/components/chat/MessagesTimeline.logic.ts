@@ -32,7 +32,10 @@ import {
 } from "../../session-logic";
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
 import type { QueuedComposerMessage } from "../../queuedMessageStore";
-import type { FactoryPlanTimelineItem } from "@t3tools/client-runtime/factory/plan-activities";
+import type {
+  FactoryPlanTimelineItem,
+  FactoryReportTimelineItem,
+} from "@t3tools/client-runtime/factory/plan-activities";
 import type { FactoryRunTimelineItem } from "@t3tools/client-runtime/factory/run-activities";
 import { placeFactoryRunRow } from "../../factory/factoryRunRow";
 import {
@@ -401,6 +404,12 @@ export type MessagesTimelineRow =
       factoryPlan: FactoryPlanTimelineItem;
     }
   | {
+      kind: "factory-report";
+      id: string;
+      createdAt: string;
+      factoryReport: FactoryReportTimelineItem;
+    }
+  | {
       kind: "factory-run";
       id: string;
       createdAt: string;
@@ -567,8 +576,8 @@ function timelineEntryTurnId(entry: TimelineEntry): TurnId | null {
   if (entry.kind === "proposed-plan") {
     return entry.proposedPlan.turnId;
   }
-  // A plan card belongs to no turn, so a turn fold never hides it.
-  if (entry.kind === "factory-plan") {
+  // A plan or report card belongs to no turn, so a turn fold never hides it.
+  if (entry.kind === "factory-plan" || entry.kind === "factory-report") {
     return null;
   }
   return entry.kind === "work" ? (entry.entry.turnId ?? null) : null;
@@ -1289,6 +1298,16 @@ function deriveMessagesTimelineRowsWithoutPending(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "factory-report") {
+      nextRows.push({
+        kind: "factory-report",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        factoryReport: timelineEntry.factoryReport,
+      });
+      continue;
+    }
+
     const assistantResponseStillInProgress =
       timelineEntry.message.role === "assistant" &&
       timelineEntry.message.turnId !== null &&
@@ -1592,6 +1611,8 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       return a.proposedPlan === (b as typeof a).proposedPlan;
     case "factory-plan":
       return a.factoryPlan === (b as typeof a).factoryPlan;
+    case "factory-report":
+      return a.factoryReport === (b as typeof a).factoryReport;
     case "factory-run":
       return a.factoryRun === (b as typeof a).factoryRun;
 

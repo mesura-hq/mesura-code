@@ -196,6 +196,7 @@ import {
   ThreadMarkdownImageView,
 } from "./ThreadMarkdownImage";
 import { FactoryPlanCard } from "../factory/FactoryPlanCard";
+import { FactoryReportCard } from "../factory/FactoryReportCard";
 import { FactoryRunCard } from "../factory/FactoryRunCard";
 import type { FactoryPlanApprovalContext } from "../factory/useFactoryPlanApproval";
 
@@ -281,6 +282,8 @@ export interface ThreadFeedProps extends PendingUserInputFeedProps {
   readonly onOpenFactoryPlan?: (planId: string) => void;
   /** Opens an attached run, by its run id, on the Factory screen's Run tab. */
   readonly onOpenFactoryRun?: (runId: string) => void;
+  /** Opens a written report, by its run id, on the Factory screen's Report tab. */
+  readonly onOpenFactoryReport?: (runId: string) => void;
   /** Routes and Approve for the plan cards. */
   readonly factoryPlanApproval?: FactoryPlanApprovalContext;
   /** Non-null when older turns exist beyond the loaded window. */
@@ -1367,6 +1370,7 @@ function renderFeedEntry(
     | "onUseArtifactTemplate"
     | "onOpenFactoryPlan"
     | "onOpenFactoryRun"
+    | "onOpenFactoryReport"
     | "factoryPlanApproval"
     | "skills"
     | "dispatchingMessageId"
@@ -1438,6 +1442,30 @@ function renderFeedEntry(
         environmentId={props.environmentId}
         onOpen={onOpenFactoryPlan ? () => onOpenFactoryPlan(entry.id) : undefined}
         approval={props.factoryPlanApproval}
+        renderMarkdown={(markdown) => (
+          <MarkdownImageAvailableWidthContext value={props.markdownContentWidth}>
+            <AssistantMarkdownContent
+              markdown={markdown}
+              markdownStyles={markdownStyles.assistant}
+              linkHandlers={props.markdownLinkHandlers}
+              renderImage={props.renderMarkdownImage}
+              skills={props.skills}
+            />
+          </MarkdownImageAvailableWidthContext>
+        )}
+      />
+    );
+  }
+
+  if (entry.type === "factory-report") {
+    const onOpenFactoryReport = props.onOpenFactoryReport;
+    const runId = entry.report.runId;
+    return (
+      <FactoryReportCard
+        report={entry.report}
+        run={entry.run}
+        environmentId={props.environmentId}
+        onOpen={onOpenFactoryReport ? () => onOpenFactoryReport(runId) : undefined}
         renderMarkdown={(markdown) => (
           <MarkdownImageAvailableWidthContext value={props.markdownContentWidth}>
             <AssistantMarkdownContent
@@ -2807,6 +2835,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
                 onUseArtifactTemplate: props.onUseArtifactTemplate,
                 onOpenFactoryPlan: props.onOpenFactoryPlan,
                 onOpenFactoryRun: props.onOpenFactoryRun,
+                onOpenFactoryReport: props.onOpenFactoryReport,
                 factoryPlanApproval: props.factoryPlanApproval,
               },
             )
@@ -2852,6 +2881,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       props.onUseArtifactTemplate,
       props.onOpenFactoryPlan,
       props.onOpenFactoryRun,
+      props.onOpenFactoryReport,
       props.factoryPlanApproval,
       props.skills,
       renderMarkdownImage,

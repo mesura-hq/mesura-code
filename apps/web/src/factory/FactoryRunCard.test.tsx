@@ -60,6 +60,8 @@ const fixture = vi.hoisted(() => ({
   factoryRunInputs: [] as unknown[],
   factoryRunOpened: 0,
   factoryRunEnded: 0,
+  /** Every source the Mermaid stub drew while this file ran. */
+  mermaidRenders: [] as string[],
   environments: [
     {
       environmentId: "factory-run-environment",
@@ -176,6 +178,16 @@ vi.mock("../state/factory", async () => {
     },
   };
 });
+// Mermaid draws in a browser only; the stub records each source it was handed.
+vi.mock("mermaid", () => ({
+  default: {
+    initialize: () => {},
+    render: async (id: string, source: string) => {
+      fixture.mermaidRenders.push(source);
+      return { svg: `<svg id="${id}" data-mermaid-stub="true"></svg>` };
+    },
+  },
+}));
 vi.mock("../hooks/useSettings", async (importOriginal) => {
   const { DEFAULT_SERVER_SETTINGS } = await import("@t3tools/contracts");
   const { DEFAULT_CLIENT_SETTINGS } = await import("@t3tools/contracts/settings");
@@ -694,4 +706,286 @@ it("phase9 web P2-1 opens a turn file whose path holds spaces, parentheses, brac
     await act(async () => useRightPanelStore.getState().activateSurface(threadRef, "factory"));
     await settle();
   }
+});
+
+// ---------------------------------------------------------------------------
+// Phase 11: the report card in the timeline and the Report tab of the pane.
+// The report body is the `factoryReadSnapshot` answer for the activity's
+// digest; the frame comes from the `subscribeFactoryRun` item for the run.
+// What only a browser shows: the error tone of a degraded phase and a failed
+// result, and the drawn diagram.
+// ---------------------------------------------------------------------------
+
+import {
+  FACTORY_REPORT_DIGEST,
+  makeFactoryReportActivity,
+} from "@t3tools/client-runtime/factory/testing";
+import { factoryReportActivityId } from "@t3tools/contracts";
+import reportMarkdown from "../../../../packages/shared/src/fixtures/invoice-csv-export.report.md?raw";
+
+const reportRowId = factoryReportActivityId(threadId, "invoice-csv-export");
+const HOW_IT_WAS_BUILT_PROSE = "The export is one endpoint beside the list endpoint";
+const VERIFIED_COMMENT = "The quoting of commas and quotes rests on authored tests only";
+const STEP_LINE = "pnpm lint failed on an unused import in the CSV serializer";
+
+/**
+ * The thread after `report.written`: its run card and its report card, the
+ * body stored by digest. The stream answers only the Report tab; the card
+ * reads the run's `factory.run` activity.
+ */
+function showReport(point: FactoryRunFixturePoint = "degraded", markdown: string = reportMarkdown) {
+  fixture.factorySnapshots[FACTORY_REPORT_DIGEST] = markdown;
+  streamRunAt(point);
+  fixture.thread = {
+    ...fixture.thread!,
+    activities: [runActivity(point), makeFactoryReportActivity({ threadId })],
+  };
+}
+
+/** The report card's own timeline row, once its body and its run state arrived. */
+async function reportRow(): Promise<HTMLElement> {
+  let row: HTMLElement | null = null;
+  await vi.waitFor(async () => {
+    await settle();
+    row = container.querySelector<HTMLElement>(`[data-timeline-row="${reportRowId}"]`);
+    expect(
+      row,
+      `Expected the report card's row; rendered: ${container.textContent}`,
+    ).not.toBeNull();
+    expect(row!.textContent).toContain("criteria passed");
+  });
+  return row!;
+}
+
+async function openReportFromCard() {
+  const open = [...(await reportRow()).querySelectorAll("button")].find(
+    (button) => button.textContent?.trim() === "Open",
+  );
+  expect(open, "Expected the report card's Open").toBeDefined();
+  await click(open!);
+  await vi.waitFor(async () => {
+    await settle();
+    expect(document.querySelector('nav[aria-label="Factory tabs"]')).not.toBeNull();
+    expect(factoryPane().textContent).toContain("What is unresolved");
+  });
+}
+
+/** Text a reader sees in the pane: folded content that is mounted but hidden does not count. */
+function visiblePaneText(): string {
+  const clone = factoryPane().cloneNode(true) as HTMLElement;
+  for (const hidden of clone.querySelectorAll("[hidden], [aria-hidden='true']")) hidden.remove();
+  return (clone.textContent ?? "").replace(/\s+/g, " ");
+}
+
+/** The first element in the pane whose whole text is `text`. */
+function paneElementWithText(text: string): HTMLElement {
+  const element = [...factoryPane().querySelectorAll<HTMLElement>("*")].find(
+    (node) => node.textContent?.replace(/\s+/g, " ").trim() === text,
+  );
+  expect(
+    element,
+    `Expected "${text}" in the pane; pane: ${factoryPane().textContent}`,
+  ).toBeDefined();
+  return element!;
+}
+
+const precedes = (left: Node, right: Node) =>
+  (left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+
+it("phase11 web AC1 renders a factory.report activity as a report card with its Context, What was built bullets, coverage and degraded count", async () => {
+  showReport();
+  await mountApp();
+  const text = (await reportRow()).textContent ?? "";
+
+  expect(text).toContain("Accountants close each month from the invoice list");
+  expect(text).toContain("Export the invoices the current filter shows as a CSV file.");
+  expect(text).toContain("Keep every amount with two decimals and its invoice currency.");
+  expect(text).toContain(
+    "Download the file from an Export button on the invoices page, named after the export date.",
+  );
+  expect(text).toContain("4/5 criteria passed");
+  expect(text).toContain("1 degraded phase");
+  // The card carries the Context and What was built only.
+  expect(text).not.toContain(HOW_IT_WAS_BUILT_PROSE);
+  // The run card stays; the report card is a second row, never a work-log row.
+  expect(runRow()).not.toBe(await reportRow());
+  // Its numbers come from the run's factory.run activity: no run stream opens.
+  expect(fixture.factoryRunOpened).toBe(0);
+});
+
+it("phase11 web AC6 report card reads coverage and degraded count from the run state, not from report.md", async () => {
+  showReport(
+    "done",
+    reportMarkdown.replace(
+      "Accountants close each month from the invoice list",
+      "Every one of the 5 criteria passed and 2 phases degraded. Accountants close each month from the invoice list",
+    ),
+  );
+  await mountApp();
+  const text = (await reportRow()).textContent ?? "";
+
+  expect(text).toContain("4/5 criteria passed");
+  expect(text).toContain("0 degraded phases");
+  expect(fixture.factoryRunOpened).toBe(0);
+});
+
+it("phase11 web AC1 report card Open opens the Report tab of the Factory pane, maximized", async () => {
+  showReport();
+  await mountApp();
+  await openReportFromCard();
+
+  expect(panelState()).toMatchObject({ isOpen: true, activeSurfaceId: "factory" });
+  expect(document.querySelector('[data-chat-column-maximized-away="true"]')).not.toBeNull();
+  expect(factoryTab("Report").disabled).toBe(false);
+  expect(factoryTab("Report").getAttribute("aria-pressed")).toBe("true");
+  expect(factoryTab("Run").getAttribute("aria-pressed")).not.toBe("true");
+});
+
+it("phase11 web AC2 Report tab shows the clock band, then the authored sections in the contract's order, then the step record", async () => {
+  showReport();
+  await mountApp();
+  await openReportFromCard();
+
+  const text = visiblePaneText();
+  expect(text).toMatch(/elapsed\s*4h 49m/i);
+  expect(text).toMatch(/machine\s*4h 24m/i);
+  expect(text).toMatch(/waiting\s*25m/i);
+  expect(text).toContain(HOW_IT_WAS_BUILT_PROSE);
+
+  const headings = [
+    "Context",
+    "What was built",
+    "How it was built",
+    "Where this differs from the plan",
+    "How it was verified",
+    "Architecture",
+    "What is unresolved",
+    "The run, step by step",
+  ].map(paneElementWithText);
+  for (let index = 1; index < headings.length; index += 1) {
+    expect(
+      precedes(headings[index - 1]!, headings[index]!),
+      `"${headings[index - 1]!.textContent}" before "${headings[index]!.textContent}"`,
+    ).toBe(true);
+  }
+  const showsElapsed = (node: Element) => /elapsed\s*4h 49m/i.test(node.textContent ?? "");
+  // The smallest element that reads the elapsed time: the clock band, not an ancestor.
+  const clock = [...factoryPane().querySelectorAll<HTMLElement>("*")].find(
+    (node) => showsElapsed(node) && ![...node.children].some(showsElapsed),
+  );
+  expect(clock, "Expected the clock band").toBeDefined();
+  expect(clock!.contains(headings[0]!)).toBe(false);
+  expect(precedes(clock!, headings[0]!), "the clock band before Context").toBe(true);
+});
+
+it("phase11 web AC2 AC3 Report tab draws the verification table inside How it was verified, before its comment, marking results and authored-tests-only", async () => {
+  showReport();
+  await mountApp();
+  await openReportFromCard();
+
+  const table = factoryPane().querySelector("table");
+  expect(table, "Expected the verification table").not.toBeNull();
+  expect(precedes(paneElementWithText("How it was verified"), table!)).toBe(true);
+  expect(precedes(table!, paneElementWithText("Architecture"))).toBe(true);
+  const comment = [...factoryPane().querySelectorAll<HTMLElement>("p, li")].find((node) =>
+    node.textContent?.includes(VERIFIED_COMMENT),
+  );
+  expect(comment, "Expected the authored comment").toBeDefined();
+  expect(precedes(table!, comment!), "the derived table before the authored comment").toBe(true);
+
+  const row = (criterion: string) => {
+    const match = [...table!.querySelectorAll("tr")].find((candidate) =>
+      candidate.textContent?.includes(criterion),
+    );
+    expect(match, `Expected a table row for "${criterion}"`).toBeDefined();
+    return match!.textContent?.replace(/\s+/g, " ") ?? "";
+  };
+  expect(table!.textContent).toContain("Serialize the filtered invoice list as CSV");
+  expect(table!.textContent).toContain("Add the Export button to the invoices page");
+  const quoting = row("A field that contains a comma or a quote is quoted per RFC 4180");
+  expect(quoting).toMatch(/pass/i);
+  expect(quoting).toMatch(/authored tests only/i);
+  const rows = row("GET /invoices/export.csv returns the rows the current filter shows");
+  expect(rows).toMatch(/pass/i);
+  expect(rows).not.toMatch(/authored tests only/i);
+  expect(row("The Export button downloads invoices-<date>.csv")).toMatch(/not exercised/i);
+  expect(row("The button is disabled while the list is empty")).toMatch(/pass/i);
+});
+
+it("phase11 web AC4 Report tab draws the Architecture diagram with its reading and legend and folds the step record per phase", async () => {
+  showReport();
+  await mountApp();
+  await openReportFromCard();
+  await vi.waitFor(async () => {
+    await settle();
+    // The loader caches a drawn diagram for the module's life, so the record
+    // spans the file: an earlier spec may have drawn this one already.
+    expect(fixture.mermaidRenders.some((source) => source.includes("EX[Export endpoint]"))).toBe(
+      true,
+    );
+    const svg = factoryPane().querySelector('svg[data-mermaid-stub="true"]');
+    expect(svg, "Expected the drawn diagram in the pane").not.toBeNull();
+    expect(precedes(paneElementWithText("Architecture"), svg!)).toBe(true);
+    expect(precedes(svg!, paneElementWithText("What is unresolved"))).toBe(true);
+  });
+
+  const text = visiblePaneText();
+  expect(text).toContain("The page asks the endpoint for the file with its own filter");
+  expect(text).toContain("the invoices page, which owns the filter.");
+  expect(paneElementWithText("IP")).toBeDefined();
+  expect(text).not.toContain("```mermaid");
+
+  const stepRecord = paneElementWithText("The run, step by step");
+  const phaseFolds = [...factoryPane().querySelectorAll<HTMLButtonElement>("button")].filter(
+    (button) =>
+      precedes(stepRecord, button) &&
+      (button.textContent?.includes("Serialize the filtered invoice list as CSV") ||
+        button.textContent?.includes("Add the Export button to the invoices page")),
+  );
+  expect(phaseFolds, "Expected one fold per phase under the step record").toHaveLength(2);
+  expect(text).not.toContain(STEP_LINE);
+
+  await click(phaseFolds[0]!);
+  expect(visiblePaneText()).toContain(STEP_LINE);
+});
+
+it("phase11 web AC5 Report tab renders an unknown heading as a plain section and names a missing section", async () => {
+  const withoutDifferences = reportMarkdown.replace(
+    /## Where this differs from the plan\n[\s\S]*?(?=## How it was verified)/,
+    "",
+  );
+  showReport(
+    "degraded",
+    withoutDifferences.replace(
+      "## How it was built",
+      "## Screenshots\n\nTwo screenshots of the Export button, before and after.\n\n## How it was built",
+    ),
+  );
+  await mountApp();
+  await openReportFromCard();
+
+  const text = visiblePaneText();
+  expect(precedes(paneElementWithText("What was built"), paneElementWithText("Screenshots"))).toBe(
+    true,
+  );
+  expect(text).toContain("Two screenshots of the Export button, before and after.");
+  expect(text).toContain("Missing from report.md: Where this differs from the plan");
+});
+
+it("phase11 web review P2-1 Report tab keeps the verification table at its contract place when report.md leaves the section out", async () => {
+  showReport(
+    "degraded",
+    reportMarkdown.replace(/## How it was verified\n[\s\S]*?(?=## Architecture)/, ""),
+  );
+  await mountApp();
+  await openReportFromCard();
+
+  const table = factoryPane().querySelector("table");
+  expect(table, "Expected the verification table").not.toBeNull();
+  const heading = paneElementWithText("How it was verified");
+  expect(precedes(paneElementWithText("Where this differs from the plan"), heading)).toBe(true);
+  expect(precedes(heading, table!)).toBe(true);
+  expect(precedes(table!, paneElementWithText("Architecture"))).toBe(true);
+  expect(visiblePaneText()).toContain("Missing from report.md: How it was verified");
+  expect(visiblePaneText()).not.toContain(VERIFIED_COMMENT);
 });

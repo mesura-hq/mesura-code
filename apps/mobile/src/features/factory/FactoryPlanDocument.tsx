@@ -16,10 +16,11 @@ import {
   SelectableMarkdownText,
 } from "../../native/SelectableMarkdownText";
 import { useMarkdownPreviewStyles } from "../files/FileMarkdownPreview";
+import type { FactoryArchitecture } from "@t3tools/shared/factoryDocument";
 import { MermaidWebView } from "./MermaidWebView";
 
 /** A plan section reads like a markdown file preview: links open outside the app. */
-function FactoryMarkdown(props: { readonly text: string }) {
+export function FactoryMarkdown(props: { readonly text: string }) {
   const styles = useMarkdownPreviewStyles();
   const onLinkPress = useCallback((href: string) => {
     void tryOpenExternalUrl(href, "markdown-link");
@@ -44,7 +45,7 @@ function FactoryMarkdown(props: { readonly text: string }) {
 }
 
 /** Closed until the reader opens it; the content mounts only while open. */
-function Fold(props: { readonly summary: ReactNode; readonly children: ReactNode }) {
+export function Fold(props: { readonly summary: ReactNode; readonly children: ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
     <View className="gap-2">
@@ -140,29 +141,35 @@ function SectionBody(props: { readonly section: FactoryPlanSectionModel }) {
       );
     }
     case "architecture":
-      return (
-        <View className="gap-3">
-          {section.diagram !== null ? (
-            <View className="overflow-hidden rounded-2xl border border-border bg-card">
-              <MermaidWebView source={section.diagram} />
-            </View>
-          ) : null}
-          <FactoryMarkdown text={section.body} />
-          {section.legend.length > 0 ? (
-            <View className="gap-1">
-              {section.legend.map((entry) => (
-                <View key={entry.id} className="flex-row gap-2">
-                  <Text className="font-mono text-xs text-foreground">{entry.id}</Text>
-                  <View className="min-w-0 flex-1">
-                    <FactoryMarkdown text={entry.text} />
-                  </View>
-                </View>
-              ))}
-            </View>
-          ) : null}
-        </View>
-      );
+      return <ArchitectureBody architecture={section} />;
   }
+}
+
+/** An Architecture section of a plan or a report: the diagram drawn, its reading, its legend. */
+export function ArchitectureBody(props: { readonly architecture: FactoryArchitecture }) {
+  const { architecture } = props;
+  return (
+    <View className="gap-3">
+      {architecture.diagram !== null ? (
+        <View className="overflow-hidden rounded-2xl border border-border bg-card">
+          <MermaidWebView source={architecture.diagram} />
+        </View>
+      ) : null}
+      <FactoryMarkdown text={architecture.body} />
+      {architecture.legend.length > 0 ? (
+        <View className="gap-1">
+          {architecture.legend.map((entry) => (
+            <View key={entry.id} className="flex-row gap-2">
+              <Text className="font-mono text-xs text-foreground">{entry.id}</Text>
+              <View className="min-w-0 flex-1">
+                <FactoryMarkdown text={entry.text} />
+              </View>
+            </View>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
 }
 
 /**

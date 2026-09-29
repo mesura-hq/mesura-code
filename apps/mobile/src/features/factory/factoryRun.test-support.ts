@@ -1,6 +1,7 @@
 /**
- * Test data for the Android Factory run specs: the shared `factory.run`
- * builders, fed with the recorder's fixture run.
+ * Test data for the Android Factory run and report specs: the shared
+ * `factory.run` builders, fed with the recorder's fixture run, and the report
+ * that run wrote.
  */
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
@@ -22,6 +23,15 @@ export function readFactoryRunEventsFixture(): string {
   const here = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
   return NodeFS.readFileSync(
     NodePath.join(here, "../../../../../packages/shared/src/fixtures/factory-events.v1.jsonl"),
+    "utf8",
+  );
+}
+
+/** The report the fixture run wrote, `packages/shared/src/fixtures/invoice-csv-export.report.md`. */
+export function readFactoryReportFixture(): string {
+  const here = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
+  return NodeFS.readFileSync(
+    NodePath.join(here, "../../../../../packages/shared/src/fixtures/invoice-csv-export.report.md"),
     "utf8",
   );
 }

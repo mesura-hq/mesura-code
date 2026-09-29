@@ -43,3 +43,13 @@ export function openFactoryRunInRightPanel(
 ): void {
   openFactoryInRightPanel(input, { tab: "run", planId: null, runId: input.runId });
 }
+
+/** The report card's Open: that run's report on the Report tab, opened the way the plan card's Open is. */
+export function openFactoryReportInRightPanel(
+  input: FactoryOpenTarget & {
+    /** The run directory's name. */
+    runId: string;
+  },
+): void {
+  openFactoryInRightPanel(input, { tab: "report", planId: null, runId: input.runId });
+}

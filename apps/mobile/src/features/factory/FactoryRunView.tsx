@@ -1,4 +1,3 @@
-import { useAtomValue } from "@effect/atom-react";
 import { useIsFocused, useNavigation } from "@react-navigation/native";
 import {
   isFactoryRunFinished,
@@ -19,13 +18,11 @@ import {
   type FactoryRoleSessionRow,
   type FactorySpineView,
 } from "@t3tools/client-runtime/factory/run-view";
-import { readFactoryRunStreamState } from "@t3tools/client-runtime/state/factory";
 import { memo, useCallback, useEffect, useState, type ReactNode } from "react";
 import { Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
 import { cn } from "../../lib/cn";
-import { factoryEnvironment } from "../../state/factory";
 import { basename, fileRoutePathSegments } from "../files/filePath";
 import {
   deriveFactoryRunSections,
@@ -33,7 +30,9 @@ import {
   type FactoryRunSection,
   type FactoryRunSections,
 } from "./factoryRunSections";
+import { FactoryCostFloor } from "./FactoryCostFloor";
 import { FACTORY_MARK_BY_TONE, FACTORY_TEXT_BY_TONE } from "./factoryTones";
+import { useFactoryRun } from "./useFactoryRun";
 
 type OpenFile = (path: string) => void;
 
@@ -70,14 +69,7 @@ function FactoryRunTotals(props: { readonly state: FactoryRunState }) {
       <Text className="text-xs text-foreground-muted tabular-nums">{`elapsed ${totals.elapsed}`}</Text>
       <Text className="text-xs text-foreground-muted tabular-nums">{`waiting ${totals.waiting}`}</Text>
       <Text className="text-xs text-foreground-muted tabular-nums">{totals.cost}</Text>
-      {totals.costIsFloor ? (
-        <Text
-          accessibilityLabel="floor: Codex turns report tokens, not dollars, so the dollar figure is a lower bound"
-          className={cn("font-t3-medium text-xs", FACTORY_TEXT_BY_TONE.warning)}
-        >
-          floor
-        </Text>
-      ) : null}
+      {totals.costIsFloor ? <FactoryCostFloor /> : null}
     </View>
   );
 }
@@ -386,14 +378,7 @@ function FactoryRunStream(props: {
   readonly onToggle: (index: number, open: boolean) => void;
   readonly onOpenFile: OpenFile;
 }) {
-  const stream = readFactoryRunStreamState(
-    useAtomValue(
-      factoryEnvironment.factoryRun({
-        environmentId: props.environmentId,
-        input: { threadId: props.threadId, runId: props.runId },
-      }),
-    ),
-  );
+  const stream = useFactoryRun(props.environmentId, props.threadId, props.runId);
   const item = stream.status === "ready" ? stream.item : null;
   const sections = useFactoryRunSections(item, props.overrides);
   const repo = item?.state.frame?.repo ?? null;

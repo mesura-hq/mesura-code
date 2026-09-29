@@ -44,6 +44,9 @@ const fixture = vi.hoisted(() => ({
   },
   factorySnapshots: {} as Record<string, string>,
   factorySnapshotAtoms: new Map<string, unknown>(),
+  /** The `subscribeFactoryRun` item every run's stream answers with; null stays loading. A report card must never ask for it. */
+  factoryRunItem: null as unknown,
+  factoryRunAtoms: new Map<string, unknown>(),
   serverConfig: null as unknown,
   enqueue: vi.fn(async (_message: unknown) => undefined),
   queuedMessages: [] as unknown[],
@@ -446,6 +449,19 @@ vi.mock("../../state/factory", async () => {
         }
         return atom;
       },
+      factoryRun: ({ input }: { input: { threadId: string; runId: string } }) => {
+        const key = `${input.threadId}:${input.runId}:${fixture.factoryRunItem === null ? "loading" : "ready"}`;
+        let atom = fixture.factoryRunAtoms.get(key);
+        if (atom === undefined) {
+          atom = Atom.make(
+            fixture.factoryRunItem === null
+              ? AsyncResult.initial(true)
+              : AsyncResult.success(fixture.factoryRunItem),
+          );
+          fixture.factoryRunAtoms.set(key, atom);
+        }
+        return atom;
+      },
     },
   };
 });
@@ -664,6 +680,8 @@ beforeEach(() => {
   for (const method of Object.values(fixture.navigation)) method.mockClear();
   fixture.factorySnapshots = {};
   fixture.factorySnapshotAtoms.clear();
+  fixture.factoryRunItem = null;
+  fixture.factoryRunAtoms.clear();
   fixture.serverConfig = null;
   fixture.enqueue.mockReset();
   fixture.enqueue.mockResolvedValue(undefined);
@@ -1848,4 +1866,114 @@ it("phase10 android AC1 run card Open pushes the Factory screen above the feed w
   }
   expect(fixture.scrollToOffset).not.toHaveBeenCalled();
   expect(factoryRunCard().textContent).toContain("phase 1/2 · Verify ①");
+});
+
+// Report card (phase 11 of factory-in-chat, criteria 1 and 6 on Android):
+// the report a run wrote is a card in the feed with its Context, its What was
+// built bullets, the coverage and the degraded count, and Open lands on the
+// Factory screen's Report tab. The body is the `factoryReadSnapshot` answer
+// for the activity's digest; the numbers come from the run stream's state.
+// The screen it opens is mounted in `FactoryRouteScreen.test.tsx`.
+import {
+  FACTORY_REPORT_DIGEST,
+  makeFactoryReportActivity,
+  makeFactoryRunState,
+} from "@t3tools/client-runtime/factory/testing";
+import { factoryReportActivityId } from "@t3tools/contracts";
+
+import {
+  readFactoryReportFixture,
+  readFactoryRunEventsFixture,
+} from "../factory/factoryRun.test-support";
+
+const factoryReportRowId = factoryReportActivityId(threadId, "invoice-csv-export");
+function showFactoryReport(
+  point: FactoryRunFixturePoint = "degraded",
+  markdown: string = readFactoryReportFixture(),
+) {
+  showFactoryRunAt(point);
+  fixture.activities = [...fixture.activities, makeFactoryReportActivity({ threadId })];
+  fixture.factorySnapshots = { [FACTORY_REPORT_DIGEST]: markdown };
+  // The stream would answer, but a card must not ask: its numbers are the run's activity.
+  fixture.factoryRunItem = {
+    state: makeFactoryRunState(readFactoryRunEventsFixture(), point),
+    roles: [],
+  };
+}
+/** Run streams the feed opened: a card on screen must open none. */
+const openedRunStreams = () => fixture.factoryRunAtoms.size;
+function factoryReportCard() {
+  const row = conversation().querySelector<HTMLElement>(`[data-feed-row="${factoryReportRowId}"]`);
+  expect(
+    row,
+    `Expected the report's own feed row; feed: ${conversation().textContent}`,
+  ).not.toBeNull();
+  return row!;
+}
+
+it("phase11 android AC1 renders the report card in the feed with its Context, What was built bullets, coverage and degraded count", async () => {
+  showFactoryReport();
+  await mount();
+  const text = factoryReportCard().textContent ?? "";
+
+  expect(text).toContain("Accountants close each month from the invoice list");
+  expect(text).toContain("Export the invoices the current filter shows as a CSV file.");
+  expect(text).toContain("Keep every amount with two decimals and its invoice currency.");
+  expect(text).toContain(
+    "Download the file from an Export button on the invoices page, named after the export date.",
+  );
+  expect(text).toContain("4/5 criteria passed");
+  expect(text).toContain("1 degraded phase");
+  expect(text).not.toContain("The export is one endpoint beside the list endpoint");
+  expect(factoryReportCard()).not.toBe(factoryRunCard());
+  expect(openedRunStreams()).toBe(0);
+});
+
+it("phase11 android AC6 report card reads coverage and degraded count from the run state, not from report.md", async () => {
+  showFactoryReport(
+    "done",
+    readFactoryReportFixture().replace(
+      "Accountants close each month from the invoice list",
+      "Every one of the 5 criteria passed and 2 phases degraded. Accountants close each month from the invoice list",
+    ),
+  );
+  await mount();
+  const text = factoryReportCard().textContent ?? "";
+
+  expect(text).toContain("4/5 criteria passed");
+  expect(text).toContain("0 degraded phases");
+  expect(openedRunStreams()).toBe(0);
+});
+
+it("phase11 android AC1 report card Open navigates to the Report tab of the thread's Factory screen for that run", async () => {
+  showFactoryReport();
+  await mount();
+  const open = Array.from(factoryReportCard().querySelectorAll<HTMLButtonElement>("button")).find(
+    (node) => node.textContent?.trim() === "Open" || node.getAttribute("aria-label") === "Open",
+  );
+  expect(
+    open,
+    `Expected the report card's Open; card: ${factoryReportCard().textContent}`,
+  ).toBeDefined();
+  await act(async () => open!.click());
+  expect(fixture.navigation.navigate).toHaveBeenCalledExactlyOnceWith("ThreadFactory", {
+    environmentId: "inline-screen-environment",
+    threadId: "inline-screen-thread",
+    tab: "report",
+    runId: "invoice-csv-export",
+  });
+});
+
+it("phase11 android review P1-1 report card keeps its degraded count when the run's summary lost its phase marks", async () => {
+  showFactoryReport();
+  fixture.activities = [
+    ...fixture.activities.filter((activity) => activity.id !== factoryRunRowId),
+    makeFactoryRunActivityAt({ threadId, point: "degraded", withoutMarks: true }),
+  ];
+  await mount();
+  const text = factoryReportCard().textContent ?? "";
+
+  expect(text).toContain("1 degraded phase");
+  expect(text).toContain("4/5 criteria passed");
+  expect(openedRunStreams()).toBe(0);
 });

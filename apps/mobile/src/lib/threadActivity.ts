@@ -42,8 +42,10 @@ import {
 import { extractToolActivityPresentation } from "@t3tools/client-runtime/work-log/tool-presentation";
 import { commandProgramName } from "@t3tools/client-runtime/work-log/command-label";
 import {
-  deriveFactoryPlanTimelineItems,
+  deriveFactoryTimelineItems,
   type FactoryPlanTimelineItem,
+  type FactoryReportTimelineItem,
+  type FactoryTimelineItem,
 } from "@t3tools/client-runtime/factory/plan-activities";
 import {
   getFactoryRunFeedEntry,
@@ -159,6 +161,15 @@ type RawThreadFeedEntry =
       readonly plan: FactoryPlanTimelineItem["plan"];
     }
   | {
+      /** A report a run wrote: its own card, never folded with a turn. */
+      readonly type: "factory-report";
+      readonly id: string;
+      readonly createdAt: string;
+      readonly report: FactoryReportTimelineItem["report"];
+      /** The run's latest `factory.run` payload: the card's numbers, without the run stream. */
+      readonly run: NonNullable<FactoryReportTimelineItem["run"]>["run"] | null;
+    }
+  | {
       readonly type: "pending-user-input";
       readonly id: string;
       readonly createdAt: string;
@@ -181,7 +192,9 @@ type RawThreadFeedEntry =
 export type ThreadFeedEntry =
   | Extract<
       RawThreadFeedEntry,
-      { type: "message" | "pending-user-input" | "factory-plan" | "factory-run" }
+      {
+        type: "message" | "pending-user-input" | "factory-plan" | "factory-report" | "factory-run";
+      }
     >
   | {
       readonly type: "activity-group";
@@ -275,12 +288,12 @@ const pendingInputEntriesCache = new WeakMap<
 >();
 const factoryPlanEntriesCache = new WeakMap<
   ReadonlyArray<OrchestrationThreadActivity>,
-  ReadonlyArray<Extract<RawThreadFeedEntry, { type: "factory-plan" }>>
+  ReadonlyArray<Extract<RawThreadFeedEntry, { type: "factory-plan" | "factory-report" }>>
 >();
 // Items are cached per activity, so one entry per item keeps unchanged rows referentially equal.
 const factoryPlanEntryByItem = new WeakMap<
-  FactoryPlanTimelineItem,
-  Extract<RawThreadFeedEntry, { type: "factory-plan" }>
+  FactoryTimelineItem,
+  Extract<RawThreadFeedEntry, { type: "factory-plan" | "factory-report" }>
 >();
 const messageEntriesCache = new WeakMap<
   OrchestrationThread["messages"][number],
@@ -2189,10 +2202,19 @@ export function buildThreadFeed(
 function getFactoryPlanEntries(activities: ReadonlyArray<OrchestrationThreadActivity>) {
   const cached = factoryPlanEntriesCache.get(activities);
   if (cached) return cached;
-  const entries = deriveFactoryPlanTimelineItems(activities).map((item) => {
+  const entries = deriveFactoryTimelineItems(activities).map((item) => {
     let entry = factoryPlanEntryByItem.get(item);
     if (!entry) {
-      entry = { type: "factory-plan", id: item.id, createdAt: item.createdAt, plan: item.plan };
+      entry =
+        item.kind === "plan"
+          ? { type: "factory-plan", id: item.id, createdAt: item.createdAt, plan: item.plan }
+          : {
+              type: "factory-report",
+              id: item.id,
+              createdAt: item.createdAt,
+              report: item.report,
+              run: item.run?.run ?? null,
+            };
       factoryPlanEntryByItem.set(item, entry);
     }
     return entry;

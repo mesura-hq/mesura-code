@@ -33,7 +33,11 @@ import {
 } from "@t3tools/contracts";
 import { contextCompactionActivityDetailFromHistory } from "@t3tools/shared/timelineActivity";
 
-import type { FactoryPlanTimelineItem } from "@t3tools/client-runtime/factory/plan-activities";
+import type {
+  FactoryPlanTimelineItem,
+  FactoryReportTimelineItem,
+  FactoryTimelineItem,
+} from "@t3tools/client-runtime/factory/plan-activities";
 
 import {
   isImageAttachment,
@@ -159,13 +163,20 @@ export type TimelineEntry =
       kind: "factory-plan";
       createdAt: string;
       factoryPlan: FactoryPlanTimelineItem;
+    }
+  | {
+      id: string;
+      kind: "factory-report";
+      createdAt: string;
+      factoryReport: FactoryReportTimelineItem;
     };
 
 export interface TimelineEntriesProjection {
   readonly messages: ReadonlyArray<ChatMessage>;
   readonly proposedPlans: ReadonlyArray<ProposedPlan>;
   readonly workEntries: ReadonlyArray<WorkLogEntry>;
-  readonly factoryPlans: ReadonlyArray<FactoryPlanTimelineItem>;
+  /** The Factory's plan and report cards. */
+  readonly factoryPlans: ReadonlyArray<FactoryTimelineItem>;
   readonly entries: TimelineEntry[];
 }
 
@@ -1482,13 +1493,10 @@ function timelineEntryFromProposedPlan(proposedPlan: ProposedPlan): TimelineEntr
   };
 }
 
-function timelineEntryFromFactoryPlan(factoryPlan: FactoryPlanTimelineItem): TimelineEntry {
-  return {
-    id: factoryPlan.id,
-    kind: "factory-plan",
-    createdAt: factoryPlan.createdAt,
-    factoryPlan,
-  };
+function timelineEntryFromFactoryPlan(item: FactoryTimelineItem): TimelineEntry {
+  return item.kind === "plan"
+    ? { id: item.id, kind: "factory-plan", createdAt: item.createdAt, factoryPlan: item }
+    : { id: item.id, kind: "factory-report", createdAt: item.createdAt, factoryReport: item };
 }
 
 function timelineEntryFromWork(workEntry: WorkLogEntry): TimelineEntry {
@@ -1513,6 +1521,7 @@ function timelineEntrySourceOrder(entry: TimelineEntry): number {
     case "work":
       return 2;
     case "factory-plan":
+    case "factory-report":
       return 3;
   }
 }
@@ -1700,7 +1709,7 @@ export function deriveTimelineEntriesWithState(
   proposedPlans: ReadonlyArray<ProposedPlan>,
   workEntries: ReadonlyArray<WorkLogEntry>,
   previous: TimelineEntriesProjection | null = null,
-  factoryPlans: ReadonlyArray<FactoryPlanTimelineItem> = [],
+  factoryPlans: ReadonlyArray<FactoryTimelineItem> = [],
 ): TimelineEntriesProjection {
   if (
     previous !== null &&

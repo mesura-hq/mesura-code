@@ -178,10 +178,11 @@ import {
   type RightPanelSurface,
   useRightPanelStore,
 } from "../rightPanelStore";
-import { deriveFactoryPlanTimelineItems } from "@t3tools/client-runtime/factory/plan-activities";
+import { deriveFactoryTimelineItems } from "@t3tools/client-runtime/factory/plan-activities";
 import { deriveLatestFactoryRunItem } from "@t3tools/client-runtime/factory/run-activities";
 import {
   openFactoryPlanInRightPanel,
+  openFactoryReportInRightPanel,
   openFactoryRunInRightPanel,
 } from "../factory/factoryRightPanel";
 import {
@@ -2942,8 +2943,8 @@ export default function ChatView(props: ChatViewProps) {
     [threadActivities],
   );
   const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities]);
-  const factoryPlans = useMemo(
-    () => deriveFactoryPlanTimelineItems(threadActivities),
+  const factoryItems = useMemo(
+    () => deriveFactoryTimelineItems(threadActivities),
     [threadActivities],
   );
   const factoryRun = useMemo(
@@ -3465,7 +3466,7 @@ export default function ChatView(props: ChatViewProps) {
       activeThread?.proposedPlans ?? [],
       workLogEntries,
       previous?.threadKey === activeThreadKey ? previous.projection : null,
-      factoryPlans,
+      factoryItems,
     );
     timelineProjectionRef.current = { threadKey: activeThreadKey, projection };
     return projection.entries;
@@ -3475,7 +3476,7 @@ export default function ChatView(props: ChatViewProps) {
     activeThread?.proposedPlans,
     timelineMessages,
     workLogEntries,
-    factoryPlans,
+    factoryItems,
   ]);
   const displayedTimeline = resolveThreadSwitchTimeline({
     loading: timelineEntries.length === 0 && threadSyncPhase !== null,
@@ -4534,6 +4535,18 @@ export default function ChatView(props: ChatViewProps) {
     (runId: string) => {
       if (!activeThreadRef) return;
       openFactoryRunInRightPanel({
+        ref: activeThreadRef,
+        runId,
+        maximizeKey: routeThreadKey,
+        setMaximizedRightPanelThreadKey,
+      });
+    },
+    [activeThreadRef, routeThreadKey],
+  );
+  const openFactoryReport = useCallback(
+    (runId: string) => {
+      if (!activeThreadRef) return;
+      openFactoryReportInRightPanel({
         ref: activeThreadRef,
         runId,
         maximizeKey: routeThreadKey,
@@ -9374,7 +9387,7 @@ export default function ChatView(props: ChatViewProps) {
       <Suspense fallback={null}>
         <FactoryPane
           surface={renderedRightPanelSurface}
-          factoryPlans={factoryPlans}
+          factoryItems={factoryItems}
           latestRunId={factoryRun?.run.runId ?? null}
           threadRef={activeThreadRef}
           visible={rightPanelOpen}
@@ -9580,6 +9593,7 @@ export default function ChatView(props: ChatViewProps) {
                       onOpenAgents: addAgentsSurface,
                       onOpenFactoryPlan: openFactoryPlan,
                       onOpenFactoryRun: openFactoryRun,
+                      onOpenFactoryReport: openFactoryReport,
                       onUseArtifactTemplate: useArtifactTemplate,
                     }
                   : {})}
@@ -10040,7 +10054,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddPullRequest={addPullRequestSurface}
           onAddPullRequests={addPullRequestsSurface}
           onAddAgents={addAgentsSurface}
-          onAddFactory={factoryPlans.length > 0 ? addFactorySurface : undefined}
+          onAddFactory={factoryItems.length > 0 ? addFactorySurface : undefined}
           onAddDevice={addDeviceSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
           terminalAvailable={activeProject !== null}
@@ -10099,7 +10113,7 @@ export default function ChatView(props: ChatViewProps) {
             onAddPullRequest={addPullRequestSurface}
             onAddPullRequests={addPullRequestsSurface}
             onAddAgents={addAgentsSurface}
-            onAddFactory={factoryPlans.length > 0 ? addFactorySurface : undefined}
+            onAddFactory={factoryItems.length > 0 ? addFactorySurface : undefined}
             onAddDevice={addDeviceSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
             terminalAvailable={activeProject !== null}

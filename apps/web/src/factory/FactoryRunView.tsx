@@ -2,8 +2,8 @@ import type { FactoryRunState, FactoryRunStreamItem, ScopedThreadRef } from "@t3
 import { memo, useEffect, useState, type ReactNode } from "react";
 
 import { Spinner } from "../components/ui/spinner";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { cn } from "~/lib/utils";
+import { FactoryCostFloor } from "./FactoryCostFloor";
 import { FactoryNodeSpine } from "./FactoryNodeSpine";
 import { FactoryPhaseRail } from "./FactoryPhaseRail";
 import { FactoryRoleSessions } from "./FactoryRoleSessions";
@@ -44,20 +44,7 @@ function FactoryRunTotalsLine({ state, live }: { state: FactoryRunState; live: b
       <span>waiting {totals.waiting}</span>
       <span>
         {totals.cost}
-        {totals.costIsFloor ? (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <span className="ml-1 rounded-sm border border-warning/40 px-1 text-warning-foreground" />
-              }
-            >
-              floor
-            </TooltipTrigger>
-            <TooltipPopup side="top">
-              Codex turns report tokens, not dollars, so the dollar figure is a lower bound.
-            </TooltipPopup>
-          </Tooltip>
-        ) : null}
+        {totals.costIsFloor ? <FactoryCostFloor /> : null}
       </span>
     </p>
   );

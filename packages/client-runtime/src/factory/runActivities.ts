@@ -46,3 +46,19 @@ export function deriveLatestFactoryRunItem(
   }
   return latest;
 }
+
+/** Each run's latest `factory.run` item, by run id: a report card reads its own run's. */
+export function deriveFactoryRunItemsById(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): ReadonlyMap<string, FactoryRunTimelineItem> {
+  const byId = new Map<string, FactoryRunTimelineItem>();
+  for (const activity of activities) {
+    if (activity.kind !== FACTORY_RUN_ACTIVITY_KIND) continue;
+    const item = factoryRunItem(activity);
+    if (item === null) continue;
+    const current = byId.get(item.run.runId);
+    if (current === undefined || item.createdAt >= current.createdAt)
+      byId.set(item.run.runId, item);
+  }
+  return byId;
+}

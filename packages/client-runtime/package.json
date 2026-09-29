@@ -147,6 +147,10 @@
       "types": "./src/factory/runPresentation.ts",
       "default": "./src/factory/runPresentation.ts"
     },
+    "./factory/report-view": {
+      "types": "./src/factory/reportView.ts",
+      "default": "./src/factory/reportView.ts"
+    },
     "./factory/run-view": {
       "types": "./src/factory/runView.ts",
       "default": "./src/factory/runView.ts"

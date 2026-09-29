@@ -110,6 +110,7 @@ function emptyPhase(index: number, title: string, acceptance: ReadonlyArray<stri
     acceptance,
     status: "pending",
     node: null,
+    nodes: [],
     startedAt: null,
     closedAt: null,
     dispatches: [],
@@ -232,7 +233,11 @@ function applyEvent(state: FactoryRunState, event: FactoryRunEvent): FactoryRunS
       };
     case "node.entered":
       return {
-        ...updatePhase(state, event.phase, (phase) => ({ ...phase, node: event.node })),
+        ...updatePhase(state, event.phase, (phase) => ({
+          ...phase,
+          node: event.node,
+          nodes: [...phase.nodes, { node: event.node, at: event.at }],
+        })),
         returns: markReenteredNode(state.returns, event.phase, event.node),
         currentPhase: event.phase,
         currentNode: event.node,
@@ -312,7 +317,12 @@ function applyEvent(state: FactoryRunState, event: FactoryRunEvent): FactoryRunS
         ...phase,
         findings: [
           ...phase.findings,
-          ...event.findings.map((finding) => ({ ...finding, disposition: null, reason: null })),
+          ...event.findings.map((finding) => ({
+            ...finding,
+            disposition: null,
+            reason: null,
+            at: event.at,
+          })),
         ],
       }));
     case "disposition.recorded":
@@ -345,7 +355,7 @@ function applyEvent(state: FactoryRunState, event: FactoryRunEvent): FactoryRunS
         ...phase,
         deviations: [
           ...phase.deviations,
-          { path: event.path, kind: event.kind, reason: event.reason },
+          { path: event.path, kind: event.kind, reason: event.reason, at: event.at },
         ],
       }));
     case "stop.raised":
@@ -507,7 +517,82 @@ function unboundedSummary(state: FactoryRunState): FactoryRunSummary {
     request: state.request,
     phaseStatuses: state.phases.map((candidate) => candidate.status),
     question: state.stops.findLast((stop) => stop.answeredAt === null)?.question ?? null,
+    coverage: factoryRunCoverage(deriveFactoryRunVerification(state)),
+    degradedPhases: state.phases.filter((candidate) => candidate.status === "degraded").length,
   };
+}
+
+export type FactoryCriterionResult = "PASS" | "FAIL" | "NOT_EXERCISED";
+
+/** One acceptance criterion of a phase with the result its latest verdict gave it. */
+export interface FactoryCriterionOutcome {
+  readonly n: number;
+  readonly name: string;
+  /** Null while no verdict named the criterion. */
+  readonly result: FactoryCriterionResult | null;
+  readonly authoredTestsOnly: boolean;
+}
+
+export interface FactoryPhaseVerification {
+  readonly phase: number;
+  readonly title: string;
+  readonly degraded: boolean;
+  readonly criteria: ReadonlyArray<FactoryCriterionOutcome>;
+}
+
+/**
+ * Each phase's criteria with their result: the last verdict of verify ② that
+ * names a criterion wins, else the last verdict of verify ①. A re-run verify
+ * replaces the verdict a repair answered, and a verify ② that recorded no
+ * criteria (NOT_NEEDED) leaves verify ①'s results standing. Every criterion
+ * of the plan is listed, named by a verdict or not.
+ */
+export function deriveFactoryRunVerification(
+  state: FactoryRunState,
+): ReadonlyArray<FactoryPhaseVerification> {
+  return state.phases.map((phase) => {
+    const lastOfPass = (pass: 1 | 2) =>
+      phase.verdicts.findLast((verdict) => verdict.pass === pass)?.criteria ?? [];
+    const second = lastOfPass(2);
+    const first = lastOfPass(1);
+    const numbers = new Set<number>(phase.acceptance.map((_, index) => index + 1));
+    for (const criterion of [...first, ...second]) numbers.add(criterion.n);
+    const criteria = [...numbers]
+      .sort((left, right) => left - right)
+      .map((n) => {
+        const recorded =
+          second.find((criterion) => criterion.n === n) ??
+          first.find((criterion) => criterion.n === n);
+        return {
+          n,
+          name: phase.acceptance[n - 1] ?? recorded?.name ?? `Criterion ${n}`,
+          result: recorded?.result ?? null,
+          authoredTestsOnly: recorded?.authoredTestsOnly === true,
+        };
+      });
+    return {
+      phase: phase.index,
+      title: phase.title,
+      degraded: phase.status === "degraded",
+      criteria,
+    };
+  });
+}
+
+/** Criteria whose result is PASS, over every criterion listed. */
+export function factoryRunCoverage(verification: ReadonlyArray<FactoryPhaseVerification>): {
+  passed: number;
+  total: number;
+} {
+  let passed = 0;
+  let total = 0;
+  for (const phase of verification) {
+    for (const criterion of phase.criteria) {
+      total += 1;
+      if (criterion.result === "PASS") passed += 1;
+    }
+  }
+  return { passed, total };
 }
 
 /** The label a thread row shows: status, `phase i/n`, node. */

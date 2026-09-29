@@ -16,11 +16,12 @@ import {
   type FactoryRunStreamItem,
   type FactoryRunVerdict,
 } from "@t3tools/contracts";
-import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 
 import {
+  factoryClockText,
   factoryCostText,
   factoryNodeDisplayName,
+  factoryReturnText,
   factoryPhaseMarkTone,
   type FactoryPhaseMarkTone,
 } from "./runPresentation.ts";
@@ -99,7 +100,7 @@ export interface FactoryPhaseDetail {
   }>;
   readonly findings: FactoryRunPhase["findings"];
   readonly checks: FactoryRunPhase["checks"];
-  readonly deviations: FactoryRunPhase["deviations"];
+  readonly deviations: ReadonlyArray<Omit<FactoryRunPhase["deviations"][number], "at">>;
   readonly degraded: FactoryRunPhase["degraded"];
   readonly commit: FactoryRunPhase["commit"];
 }
@@ -235,7 +236,7 @@ function returnEdges(state: FactoryRunState, phaseIndex: number): ReadonlyArray<
       to: entry.reentered ?? entry.kind,
       kind: entry.kind,
       signal: entry.change,
-      text: `${entry.kind} ${entry.n}/${entry.budget} — ${factoryNodeDisplayName(entry.node)}: ${entry.change}`,
+      text: factoryReturnText(entry),
       pending: entry.reentered === undefined,
     }));
 }
@@ -387,14 +388,12 @@ function phaseDetail(phase: FactoryRunPhase): FactoryPhaseDetail {
     })),
     findings: phase.findings,
     checks: phase.checks,
-    deviations: phase.deviations,
+    // The record time orders the report's step record; the Run tab lists them as recorded.
+    deviations: phase.deviations.map(({ path, kind, reason }) => ({ path, kind, reason })),
     degraded: phase.degraded,
     commit: phase.commit,
   };
 }
-
-/** Below a second the clock reads `0s`; `formatDuration` would say `1ms`. */
-const clockText = (ms: number) => (ms < 1_000 ? "0s" : formatDuration(ms));
 
 /**
  * The run's totals. A finished run keeps the fold's clock. A live run closes
@@ -423,8 +422,8 @@ export function deriveFactoryRunTotals(state: FactoryRunState, nowMs: number): F
   return {
     elapsedMs,
     waitingMs,
-    elapsed: clockText(elapsedMs),
-    waiting: clockText(waitingMs),
+    elapsed: factoryClockText(elapsedMs),
+    waiting: factoryClockText(waitingMs),
     cost: cost.text,
     costIsFloor: cost.floor,
   };

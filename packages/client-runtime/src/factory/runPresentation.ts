@@ -7,9 +7,11 @@
 import {
   isFactoryRunFinished,
   type FactoryRunPhaseStatus,
+  type FactoryRunReturn,
   type FactoryRunShellSummary,
   type FactoryRunSummary,
 } from "@t3tools/contracts";
+import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 
 export type FactoryRunTone = "info" | "warning" | "success" | "error";
 export type FactoryPhaseMarkTone = FactoryRunTone | "neutral";
@@ -104,6 +106,14 @@ export function factoryEventClock(iso: string): string {
   // The reader's local clock and Intl formatting, which Effect's DateTime does not do.
   // @effect-diagnostics-next-line globalDate:off
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+/** A run's clock reading. Below a second it reads `0s`; `formatDuration` would say `1ms`. */
+export const factoryClockText = (ms: number) => (ms < 1_000 ? "0s" : formatDuration(ms));
+
+/** `repair 2/5 — Verify ①: <change>`: one return, on the Run tab and in the report's steps. */
+export function factoryReturnText(entry: FactoryRunReturn): string {
+  return `${entry.kind} ${entry.n}/${entry.budget} — ${factoryNodeDisplayName(entry.node)}: ${entry.change}`;
 }
 
 const usd = (amount: number) => `$${amount.toFixed(2)}`;
