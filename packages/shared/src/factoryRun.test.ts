@@ -114,15 +114,22 @@ describe("factory run fold over the record-version-1 fixture", () => {
 
 /** An 11-phase run with long titles, every return spent and both verify passes recorded. */
 function elevenPhaseRunLines(
-  shape: { readonly phaseCount?: number; readonly titleRepeat?: number } = {},
+  shape: {
+    readonly phaseCount?: number;
+    readonly titleRepeat?: number;
+    /** Ends the run stopped at this question. */
+    readonly openQuestion?: string;
+  } = {},
 ): ReadonlyArray<string> {
   const phaseCount = shape.phaseCount ?? 11;
   const titleRepeat = shape.titleRepeat ?? 3;
   let nextSecond = 0;
-  // One event a second from 09:00; an 11-phase run stays well inside the hour.
+  // One event a second from 09:00; a run of hundreds of phases runs past the hour.
   const at = () => {
     const second = nextSecond++;
-    return `2026-09-28T09:${String(Math.floor(second / 60)).padStart(2, "0")}:${String(second % 60).padStart(2, "0")}.000Z`;
+    const pad = (value: number) => String(value).padStart(2, "0");
+    const clock = [9 + Math.floor(second / 3600), Math.floor(second / 60) % 60, second % 60];
+    return `2026-09-28T${clock.map(pad).join(":")}.000Z`;
   };
   const line = (type: string, fields: Record<string, unknown>) =>
     JSON.stringify({ v: 1, at: at(), type, ...fields });
@@ -191,6 +198,9 @@ function elevenPhaseRunLines(
       }),
     );
   }
+  if (shape.openQuestion !== undefined) {
+    lines.push(line("stop.raised", { question: shape.openQuestion, options: [] }));
+  }
   return lines;
 }
 
@@ -215,6 +225,19 @@ describe("factory run summary budget", () => {
       "/srv/factory-runs/eleven-phase-run",
     );
     expect(encodedPayloadBytes(summarizeFactoryRun(longTitles))).toBeLessThan(4 * 1024);
+    // A long request and a long open question are shortened, never dropped.
+    const longQuestion = foldLines(
+      elevenPhaseRunLines({
+        titleRepeat: 40,
+        openQuestion: "A stop question long enough to matter? ".repeat(80),
+      }),
+      "/srv/factory-runs/eleven-phase-run",
+    );
+    const questionSummary = summarizeFactoryRun(longQuestion);
+    expect(encodedPayloadBytes(questionSummary)).toBeLessThan(4 * 1024);
+    expect(questionSummary.request?.startsWith("A request long enough to matter.")).toBe(true);
+    expect(questionSummary.question?.length).toBeLessThanOrEqual(280);
+    expect(questionSummary.phaseStatuses).toHaveLength(11);
     // The full state keeps every title whole; only the summary is bounded.
     expect(longTitles.phases[10]!.title.length).toBeGreaterThan(2000);
 
@@ -227,5 +250,23 @@ describe("factory run summary budget", () => {
     expect(summary.phaseCount).toBe(60);
     // The newest verdicts survive the bound.
     expect(summary.verdicts.at(-1)).toEqual({ phase: 60, pass: 2, verdict: "WORKS" });
+  });
+
+  it("drops the phase marks of a run too long to carry them, and stays under 4 KiB", () => {
+    const encodedPayloadBytes = (summary: ReturnType<typeof summarizeFactoryRun>) =>
+      new TextEncoder().encode(JSON.stringify({ threadId: "0".repeat(64), ...summary })).byteLength;
+    const hugeRun = foldLines(
+      elevenPhaseRunLines({ phaseCount: 400, titleRepeat: 0 }),
+      "/srv/factory-runs/eleven-phase-run",
+    );
+    expect(hugeRun.phases).toHaveLength(400);
+
+    const summary = summarizeFactoryRun(hugeRun);
+    expect(encodedPayloadBytes(summary)).toBeLessThan(4 * 1024);
+    expect(summary.phaseStatuses).toBeUndefined();
+    expect(summary.verdicts).toEqual([]);
+    expect(summary.phaseCount).toBe(400);
+    expect(summary.phase?.index).toBe(400);
+    expect(summary.request?.startsWith("A request long enough to matter.")).toBe(true);
   });
 });

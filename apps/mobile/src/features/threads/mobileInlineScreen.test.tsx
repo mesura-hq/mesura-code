@@ -1693,3 +1693,120 @@ it("mobile phase4 verify2 re-validates a mounted card's edited route when only t
   expect(requireCardButton("Reviewer model").textContent).toContain("GPT-6 Astra");
   expect(requireCardButton("Approve").disabled).toBe(false);
 });
+
+// Run card (phase 8 of factory-in-chat): acceptance criteria 3, 5 and 6 on
+// Android, through the same ThreadDetailScreen entry point. A new activity
+// with the run's id replaces the old one, as the server's run tracker does.
+// The emulator alone shows the tones' colours and the phase marks' shapes.
+import { factoryRunActivityId } from "@t3tools/contracts";
+import {
+  makeFactoryRunActivityAt,
+  type FactoryRunFixturePoint,
+} from "../factory/factoryRun.test-support";
+
+const factoryRunRowId = factoryRunActivityId(threadId, "invoice-csv-export");
+function showFactoryRunAt(point: FactoryRunFixturePoint) {
+  fixture.messages = [
+    {
+      id: MessageId.make("factory-run-approve"),
+      role: "user" as const,
+      text: "Build the approved plan",
+      turnId: null,
+      streaming: false,
+      createdAt: "2026-09-28T08:58:00.000Z",
+      updatedAt: "2026-09-28T08:58:00.000Z",
+    },
+  ] as typeof fixture.messages;
+  fixture.activities = [
+    {
+      id: EventId.make("factory-run-coordinator-command"),
+      kind: "tool.completed",
+      tone: "tool",
+      summary: "Ran command",
+      createdAt: "2026-09-28T09:30:00.000Z",
+      turnId: null,
+      payload: { title: "Ran command", itemType: "command_execution", status: "completed" },
+    },
+    makeFactoryRunActivityAt({ threadId, point }),
+  ];
+}
+function factoryRunCard() {
+  const row = conversation().querySelector<HTMLElement>(`[data-feed-row="${factoryRunRowId}"]`);
+  expect(
+    row,
+    `Expected the run's own feed row; feed: ${conversation().textContent}`,
+  ).not.toBeNull();
+  return row!;
+}
+
+it("phase8 android AC5 renders the run card in the feed with its request, status, phase, node, returns and cost", async () => {
+  showFactoryRunAt("verify");
+  await mount();
+  const text = factoryRunCard().textContent ?? "";
+
+  expect(text).toContain("Let accountants export the invoice list as a CSV file");
+  expect(text).toContain("phase 1/2 · Verify ①");
+  expect(text).toContain("Serialize the filtered invoice list as CSV");
+  expect(text).toContain("1/5 returns");
+  expect(text).toContain("$10.03");
+  // Live: the last row of the feed, below the coordinator's newest command.
+  const rows = Array.from(conversation().querySelectorAll<HTMLElement>("[data-feed-row]"));
+  expect(rows.at(-1)).toBe(factoryRunCard());
+  // Never a work-log row: the activity's summary is not shown anywhere.
+  expect(conversation().textContent).not.toContain("Software Factory run");
+});
+
+it("phase8 android AC3 shows the stop question on the run card and reads waiting", async () => {
+  showFactoryRunAt("waiting");
+  await mount();
+  const text = factoryRunCard().textContent ?? "";
+
+  expect(text).toContain("waiting");
+  expect(text).toContain("Name the file after the filter range or after the export date?");
+});
+
+it("phase8 android AC6 updates the run card in place as events arrive without remounting its feed row", async () => {
+  showFactoryRunAt("verify");
+  await mount();
+  const row = factoryRunCard();
+  const card = row.firstElementChild;
+  expect(card).not.toBeNull();
+
+  fixture.activities = [
+    ...fixture.activities.filter((activity) => activity.id !== factoryRunRowId),
+    makeFactoryRunActivityAt({ threadId, point: "review" }),
+  ];
+  await mount();
+  expect(factoryRunCard()).toBe(row);
+  expect(row.firstElementChild).toBe(card);
+  expect(row.textContent).toContain("phase 1/2 · Review");
+
+  fixture.activities = [
+    ...fixture.activities.filter((activity) => activity.id !== factoryRunRowId),
+    makeFactoryRunActivityAt({ threadId, point: "waiting" }),
+  ];
+  await mount();
+  expect(factoryRunCard()).toBe(row);
+  expect(row.firstElementChild).toBe(card);
+  expect(row.textContent).toContain(
+    "Name the file after the filter range or after the export date?",
+  );
+});
+
+it("phase8 android run card of a summary without phase marks renders without marks", async () => {
+  showFactoryRunAt("verify");
+  fixture.activities = [
+    ...fixture.activities.filter((activity) => activity.id !== factoryRunRowId),
+    makeFactoryRunActivityAt({ threadId, point: "verify", withoutMarks: true }),
+  ];
+  await mount();
+  const text = factoryRunCard().textContent ?? "";
+
+  expect(text).toContain("phase 1/2 · Verify ①");
+  expect(text).toContain("Let accountants export the invoice list as a CSV file");
+  expect(text).not.toContain("✓1");
+  // With marks, the same run shows one mark per phase.
+  showFactoryRunAt("answered");
+  await mount();
+  expect(factoryRunCard().textContent).toContain("✓1");
+});

@@ -39,6 +39,7 @@ import {
   type ThreadListV2Status,
 } from "./threadListV2";
 import { QueuedMessageIcon } from "./queued-message-icon";
+import { FactoryRunThreadLabel } from "../factory/FactoryRunThreadLabel";
 import { ThreadSearchMatchExcerpt } from "./thread-search-match";
 
 /**
@@ -885,6 +886,16 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         ) : (
           <View className="flex-1" />
         )}
+        <FactoryRunThreadLabel
+          run={thread.factoryRun}
+          selectedClassName={
+            selected
+              ? materialYouStyleLayoutActive
+                ? "text-thread-selected-foreground-muted"
+                : "text-user-bubble-foreground-muted"
+              : null
+          }
+        />
         {pr ? (
           <View className="flex-row items-center gap-1" accessibilityLabel={pr.accessibilityLabel}>
             {pr.kind === "stack" || pr.others > 0 ? (

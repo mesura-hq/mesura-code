@@ -416,6 +416,7 @@ function currentPhaseOf(state: FactoryRunState) {
 export const FACTORY_RUN_SUMMARY_MAX_BYTES = 4096 - 256;
 const SUMMARY_TITLE_MAX_CHARS = 160;
 const SUMMARY_NODE_MAX_CHARS = 64;
+const SUMMARY_TEXT_MAX_CHARS = 280;
 
 function shorten(text: string, maxChars: number): string {
   return text.length <= maxChars ? text : `${text.slice(0, maxChars - 1)}…`;
@@ -437,6 +438,8 @@ export function summarizeFactoryRun(state: FactoryRunState): FactoryRunSummary {
         ? null
         : { ...summary.phase, title: shorten(summary.phase.title, SUMMARY_TITLE_MAX_CHARS) },
     node: summary.node === null ? null : shorten(summary.node, SUMMARY_NODE_MAX_CHARS),
+    request: summary.request == null ? null : shorten(summary.request, SUMMARY_TEXT_MAX_CHARS),
+    question: summary.question == null ? null : shorten(summary.question, SUMMARY_TEXT_MAX_CHARS),
   };
   let verdicts = bounded.verdicts;
   while (
@@ -445,6 +448,11 @@ export function summarizeFactoryRun(state: FactoryRunState): FactoryRunSummary {
   ) {
     const oldestPhase = verdicts[0]!.phase;
     verdicts = verdicts.filter((verdict) => verdict.phase !== oldestPhase);
+  }
+  // A run of hundreds of phases: its marks go before the bound does.
+  if (encodedBytes({ ...bounded, verdicts }) > FACTORY_RUN_SUMMARY_MAX_BYTES) {
+    const { phaseStatuses: _dropped, ...withoutMarks } = bounded;
+    return { ...withoutMarks, verdicts };
   }
   return { ...bounded, verdicts };
 }
@@ -471,6 +479,9 @@ function unboundedSummary(state: FactoryRunState): FactoryRunSummary {
       }),
     ),
     cost: state.cost,
+    request: state.request,
+    phaseStatuses: state.phases.map((candidate) => candidate.status),
+    question: state.stops.findLast((stop) => stop.answeredAt === null)?.question ?? null,
   };
 }
 

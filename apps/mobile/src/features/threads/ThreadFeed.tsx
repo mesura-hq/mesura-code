@@ -196,6 +196,7 @@ import {
   ThreadMarkdownImageView,
 } from "./ThreadMarkdownImage";
 import { FactoryPlanCard } from "../factory/FactoryPlanCard";
+import { FactoryRunCard } from "../factory/FactoryRunCard";
 import type { FactoryPlanApprovalContext } from "../factory/useFactoryPlanApproval";
 
 const WIDE_MARKDOWN_BLOCK_OPTIONS = {
@@ -1447,6 +1448,10 @@ function renderFeedEntry(
         )}
       />
     );
+  }
+
+  if (entry.type === "factory-run") {
+    return <FactoryRunCard run={entry.run} />;
   }
 
   if (entry.type === "thinking") {

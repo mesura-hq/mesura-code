@@ -45,6 +45,11 @@ import {
   deriveFactoryPlanTimelineItems,
   type FactoryPlanTimelineItem,
 } from "@t3tools/client-runtime/factory/plan-activities";
+import {
+  getFactoryRunFeedEntry,
+  isLiveFactoryRunEntry,
+  type FactoryRunFeedEntry,
+} from "../features/factory/factoryRunFeed";
 
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
@@ -145,6 +150,7 @@ interface DerivedWorkLogEntry extends WorkLogEntry {
 }
 
 type RawThreadFeedEntry =
+  | FactoryRunFeedEntry
   | {
       /** A plan the Software Factory presented: its own card, never folded with a turn. */
       readonly type: "factory-plan";
@@ -173,7 +179,10 @@ type RawThreadFeedEntry =
     };
 
 export type ThreadFeedEntry =
-  | Extract<RawThreadFeedEntry, { type: "message" | "pending-user-input" | "factory-plan" }>
+  | Extract<
+      RawThreadFeedEntry,
+      { type: "message" | "pending-user-input" | "factory-plan" | "factory-run" }
+    >
   | {
       readonly type: "activity-group";
       readonly id: string;
@@ -1742,6 +1751,9 @@ export function deriveThreadFeedPresentation(
       entry.type !== "thinking" &&
       entry.type !== "agent-spawn",
   );
+  // A live run's card is placed last, below; it is never the active tail.
+  const liveRun = sourceFeed.find(isLiveFactoryRunEntry);
+  if (liveRun !== undefined) sourceFeed.splice(sourceFeed.indexOf(liveRun), 1);
   const activeTailGroup = sourceFeed.findLast(
     (entry) => entry.type !== "message" || !isEmptyMessage(entry),
   );
@@ -1819,6 +1831,8 @@ export function deriveThreadFeedPresentation(
   ) {
     result.push(thinkingRow(activeWorkStartedAt, unsettledTurnId));
   }
+  // A live run's card follows everything, the live slot included.
+  if (liveRun !== undefined) result.push(liveRun);
   return result;
 }
 
@@ -2129,6 +2143,16 @@ export function buildThreadFeed(
     (entry) =>
       oldestLoadedMessageCreatedAt === null || entry.createdAt >= oldestLoadedMessageCreatedAt,
   );
+  const factoryRunEntry = getFactoryRunFeedEntry(thread.activities);
+  const liveFactoryRun =
+    factoryRunEntry !== null && isLiveFactoryRunEntry(factoryRunEntry) ? factoryRunEntry : null;
+  const placedFactoryRun =
+    factoryRunEntry !== null &&
+    liveFactoryRun === null &&
+    (oldestLoadedMessageCreatedAt === null ||
+      factoryRunEntry.createdAt >= oldestLoadedMessageCreatedAt)
+      ? [factoryRunEntry]
+      : [];
   const foldedAnswerMessageIds = new Set(
     activityEntries.flatMap((entry) =>
       entry.activity.workEntry.questionAnswer
@@ -2151,12 +2175,15 @@ export function buildThreadFeed(
       ...activityEntries,
       ...pendingEntries,
       ...factoryPlanEntries,
+      ...placedFactoryRun,
     ],
     (s) => new Date(s.createdAt),
     Order.Date,
   );
 
-  return groupAdjacentActivities(entries);
+  const grouped = groupAdjacentActivities(entries);
+  if (liveFactoryRun !== null) grouped.push(liveFactoryRun);
+  return grouped;
 }
 
 function getFactoryPlanEntries(activities: ReadonlyArray<OrchestrationThreadActivity>) {

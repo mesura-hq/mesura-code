@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import {
   ApprovalRequestId,
   EventId,
+  factoryRunActivityId,
   MessageId,
   ProjectId,
   ProviderInstanceId,
@@ -32,6 +33,10 @@ import {
   makeFactoryPlanActivity,
   makeFactoryPlanPayload,
 } from "../features/factory/factoryPlan.test-support";
+import {
+  makeFactoryRunActivityAt,
+  type FactoryRunFixturePoint,
+} from "../features/factory/factoryRun.test-support";
 
 // Match Hermes: these ES2023 array methods are absent on mobile.
 beforeEach(() => {
@@ -3692,6 +3697,203 @@ describe("factory plan feed entries", () => {
       expect(factoryPlanEntries(expanded).map((row) => row.id)).toEqual(["factory-plan:folded"]);
     },
   );
+});
+
+// Phase 8 fence, acceptance criteria 2, 6 and 7 on Android: where the run card
+// sits in the feed, that it keeps one row while its run moves, and that the
+// coordinator's own tool rows stay visible. The feed the screen renders is
+// `deriveThreadFeedPresentation(buildThreadFeed(thread), …)`, keyed by entry id.
+describe("factory run feed entries (phase 8 fence)", () => {
+  const runThreadId = ThreadId.make("factory-run-feed");
+  const coordinatorTurnId = TurnId.make("coordinator-turn");
+  const runRowId = factoryRunActivityId(runThreadId, "invoice-csv-export");
+  const at = (clock: string) => `2026-09-28T${clock}.000Z`;
+  const runningTurn = {
+    turnId: coordinatorTurnId,
+    state: "running" as const,
+    requestedAt: at("08:58:00"),
+    startedAt: at("08:58:01"),
+    completedAt: null,
+    assistantMessageId: null,
+  };
+  const settledTurn = {
+    ...runningTurn,
+    state: "completed" as const,
+    completedAt: at("09:55:00"),
+    assistantMessageId: MessageId.make("factory-run-reply"),
+  };
+  const runMessages = [
+    {
+      id: MessageId.make("factory-run-approve"),
+      role: "user" as const,
+      text: "Build the approved plan",
+      turnId: null,
+      streaming: false,
+      createdAt: at("08:58:00"),
+      updatedAt: at("08:58:00"),
+    },
+    {
+      id: MessageId.make("factory-run-reply"),
+      role: "assistant" as const,
+      text: "Phase 1 is in review.",
+      turnId: coordinatorTurnId,
+      streaming: false,
+      createdAt: at("09:50:00"),
+      updatedAt: at("09:50:00"),
+    },
+  ];
+  // The coordinator's background commands; the run starts at 09:00, between them.
+  const coordinatorTools = [
+    ["tool-before-run", "08:59:00"],
+    ["tool-after-run", "09:30:00"],
+    ["tool-latest", "09:40:00"],
+  ].map(([id, clock]) =>
+    makeActivity({
+      id: EventId.make(id!),
+      kind: "tool.completed",
+      tone: "tool",
+      summary: "Ran command",
+      createdAt: at(clock!),
+      turnId: coordinatorTurnId,
+      payload: { title: "Ran command", itemType: "command_execution", status: "completed" },
+    }),
+  );
+  const runActivity = (point: FactoryRunFixturePoint) =>
+    makeFactoryRunActivityAt({ threadId: runThreadId, point, turnId: coordinatorTurnId });
+  const runThread = (activities: ReadonlyArray<OrchestrationThreadActivity>, live: boolean) =>
+    makeThread({
+      id: runThreadId,
+      projectId: ProjectId.make("project-1"),
+      title: "Factory run feed",
+      latestTurn: live ? runningTurn : settledTurn,
+      messages: runMessages,
+      activities: [...activities],
+    });
+  const present = (
+    activities: ReadonlyArray<OrchestrationThreadActivity>,
+    live: boolean,
+    expanded: ReadonlySet<TurnId> = new Set(),
+  ) =>
+    deriveThreadFeedPresentation(
+      buildThreadFeed(runThread(activities, live)),
+      live ? runningTurn : settledTurn,
+      expanded,
+      new Set(),
+      live ? at("08:58:01") : null,
+    );
+  const runEntries = (feed: ReadonlyArray<ThreadFeedEntry>) =>
+    feed.filter((entry) => entry.type === "factory-run");
+  const indexOfActivity = (feed: ReadonlyArray<ThreadFeedEntry>, id: string) =>
+    feed.findIndex(
+      (entry) =>
+        entry.type === "activity-group" && entry.activities.some((activity) => activity.id === id),
+    );
+  const toolIds = (feed: ReadonlyArray<ThreadFeedEntry>) =>
+    feed.flatMap((entry) =>
+      entry.type === "activity-group" ? entry.activities.map((activity) => activity.id) : [],
+    );
+
+  it("phase8 android AC2 places a live run's card last in the feed, below the newest tool rows", () => {
+    for (const point of ["verify", "waiting"] as const) {
+      const rows = present([...coordinatorTools, runActivity(point)], true);
+
+      expect(rows.at(-1), point).toMatchObject({ type: "factory-run", id: runRowId });
+      expect(runEntries(rows), point).toHaveLength(1);
+    }
+  });
+
+  it("phase8 android AC2 returns a finished run's card to its time position, visible when the turn folds", () => {
+    for (const point of ["done", "degraded", "stopped"] as const) {
+      const activities = [...coordinatorTools, runActivity(point)];
+      const feed = buildThreadFeed(runThread(activities, false));
+      const runIndex = feed.findIndex((entry) => entry.type === "factory-run");
+
+      expect(runEntries(feed), point).toHaveLength(1);
+      expect(runIndex, point).toBeGreaterThan(indexOfActivity(feed, "tool-before-run"));
+      expect(runIndex, point).toBeLessThan(indexOfActivity(feed, "tool-after-run"));
+      // Presented, expanded or folded, the card stays and is not the last row.
+      for (const expanded of [new Set([coordinatorTurnId]), new Set<TurnId>()]) {
+        const rows = present(activities, false, expanded);
+        expect(
+          runEntries(rows).map((entry) => entry.id),
+          point,
+        ).toEqual([runRowId]);
+        expect(rows.at(-1)?.type, point).not.toBe("factory-run");
+      }
+    }
+  });
+
+  it("phase8 android AC7 keeps every coordinator tool row visible beside the run card", () => {
+    // Live: the feed is exactly the feed without a run, plus the card at the end.
+    const liveRows = present([...coordinatorTools, runActivity("review")], true);
+    expect(runEntries(liveRows)).toHaveLength(1);
+    expect(liveRows.filter((entry) => entry.type !== "factory-run")).toEqual(
+      present(coordinatorTools, true),
+    );
+    // Finished: every command is still a tool entry of the feed, none folded under the card.
+    const finishedFeed = buildThreadFeed(
+      runThread([...coordinatorTools, runActivity("done")], false),
+    );
+    expect(runEntries(finishedFeed)).toHaveLength(1);
+    expect(toolIds(finishedFeed)).toEqual(coordinatorTools.map((activity) => activity.id));
+  });
+
+  it("phase8 android paged feed hides a finished run that starts before the loaded window, as it hides tools and plans, and always shows a live run last", () => {
+    const pagedFrom = [runMessages[1]!]; // The loaded window starts at 09:50, after the run's 09:00 start.
+    const planBeforeWindow = makeFactoryPlanActivity({
+      id: "factory-plan:before-window",
+      createdAt: at("08:57:00"),
+    });
+    const paged = (point: FactoryRunFixturePoint) =>
+      buildThreadFeed(
+        runThread([...coordinatorTools, planBeforeWindow, runActivity(point)], false),
+        {
+          loadedMessages: pagedFrom,
+        },
+      );
+
+    const finished = paged("done");
+    expect(runEntries(finished)).toEqual([]);
+    // The same rule every time-positioned row follows in a paged feed.
+    expect(toolIds(finished)).toEqual([]);
+    expect(finished.some((entry) => entry.type === "factory-plan")).toBe(false);
+    // The whole thread loaded: the finished card is back at its time position.
+    expect(
+      runEntries(buildThreadFeed(runThread([...coordinatorTools, runActivity("done")], false))).map(
+        (entry) => entry.id,
+      ),
+    ).toEqual([runRowId]);
+
+    for (const point of ["verify", "waiting"] as const) {
+      const live = paged(point);
+      expect(live.at(-1), point).toMatchObject({ type: "factory-run", id: runRowId });
+      const presented = deriveThreadFeedPresentation(
+        live,
+        runningTurn,
+        new Set(),
+        new Set(),
+        at("08:58:01"),
+      );
+      expect(presented.at(-1), point).toMatchObject({ type: "factory-run", id: runRowId });
+    }
+  });
+
+  it("phase8 android AC6 keeps the run card's entry id while its content changes, and reuses it when nothing changed", () => {
+    const verifyActivities = [...coordinatorTools, runActivity("verify")];
+    const reviewActivities = [...coordinatorTools, runActivity("review")];
+    const first = runEntries(buildThreadFeed(runThread(verifyActivities, true)))[0];
+    const next = runEntries(buildThreadFeed(runThread(reviewActivities, true)))[0];
+    const again = runEntries(buildThreadFeed(runThread(reviewActivities, true)))[0];
+    const finished = runEntries(present([...coordinatorTools, runActivity("done")], false))[0];
+
+    expect(first?.id).toBe(runRowId);
+    expect(next?.id).toBe(runRowId);
+    expect(finished?.id).toBe(runRowId);
+    expect(next).not.toBe(first);
+    expect(next?.type === "factory-run" && next.run.node).toBe("review");
+    // The list memoizes a mounted row on its item: an unchanged run hands it the same item.
+    expect(again).toBe(next);
+  });
 });
 
 it("accepts ready attachment-only answers while preserving selected options", () => {

@@ -179,7 +179,11 @@ import {
   useRightPanelStore,
 } from "../rightPanelStore";
 import { deriveFactoryPlanTimelineItems } from "@t3tools/client-runtime/factory/plan-activities";
-import { openFactoryPlanInRightPanel } from "../factory/factoryRightPanel";
+import { deriveLatestFactoryRunItem } from "@t3tools/client-runtime/factory/run-activities";
+import {
+  openFactoryPlanInRightPanel,
+  openFactoryRunInRightPanel,
+} from "../factory/factoryRightPanel";
 import {
   isPreviewSupportedInRuntime,
   setActivePreviewTab,
@@ -2942,6 +2946,10 @@ export default function ChatView(props: ChatViewProps) {
     () => deriveFactoryPlanTimelineItems(threadActivities),
     [threadActivities],
   );
+  const factoryRun = useMemo(
+    () => deriveLatestFactoryRunItem(threadActivities),
+    [threadActivities],
+  );
   // Native subagent fold: memoized by activity-list identity, shared by the
   // Agents surface, live strip, and workflow cards. v2Projection is null
   // until orchestration-v2 lands (source precedence lives in the derive).
@@ -4516,6 +4524,19 @@ export default function ChatView(props: ChatViewProps) {
       openFactoryPlanInRightPanel({
         ref: activeThreadRef,
         planId,
+        maximizeKey: routeThreadKey,
+        useRightPanelSheet: shouldUseRightPanelSheet,
+        setMaximizedRightPanelThreadKey,
+      });
+    },
+    [activeThreadRef, routeThreadKey, shouldUseRightPanelSheet],
+  );
+  const openFactoryRun = useCallback(
+    (runId: string) => {
+      if (!activeThreadRef) return;
+      openFactoryRunInRightPanel({
+        ref: activeThreadRef,
+        runId,
         maximizeKey: routeThreadKey,
         useRightPanelSheet: shouldUseRightPanelSheet,
         setMaximizedRightPanelThreadKey,
@@ -9558,6 +9579,7 @@ export default function ChatView(props: ChatViewProps) {
                       agentPanelModel,
                       onOpenAgents: addAgentsSurface,
                       onOpenFactoryPlan: openFactoryPlan,
+                      onOpenFactoryRun: openFactoryRun,
                       onUseArtifactTemplate: useArtifactTemplate,
                     }
                   : {})}
@@ -9566,6 +9588,7 @@ export default function ChatView(props: ChatViewProps) {
                 isCompacting={!paintOnlyDisplayedTimeline && isCompacting}
                 activeTurnStartedAt={paintOnlyDisplayedTimeline ? null : activeWorkStartedAt}
                 worktreeSetup={paintOnlyDisplayedTimeline ? null : worktreeSetup}
+                factoryRun={paintOnlyDisplayedTimeline ? null : factoryRun}
                 onCancelWorktreeSetup={onCancelWorktreeSetup}
                 {...(draftId ? { onWorktreeSetupWorkLocally } : {})}
                 {...(onOpenWorktreeSetupTerminal ? { onOpenWorktreeSetupTerminal } : {})}

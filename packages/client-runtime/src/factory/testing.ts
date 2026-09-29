@@ -1,20 +1,29 @@
 /**
- * Test data for the Factory plan specs on every client: `factory.plan`
- * activities as the server's `present_plan` handler writes them. Each test
- * reads the plan fixture itself, since web, mobile and this package load a
- * file differently.
+ * Test data for the Factory specs on every client: `factory.plan` activities
+ * as the server's `present_plan` handler writes them, and `factory.run`
+ * activities as its run tracker writes them. Each test reads the plan and
+ * events fixtures itself, since web, mobile and this package load a file
+ * differently.
  */
 import {
   EventId,
   FACTORY_PLAN_ACTIVITY_KIND,
+  FACTORY_RUN_ACTIVITY_KIND,
+  factoryRunActivityId,
   ProviderDriverKind,
   ProviderInstanceId,
   type FactoryPlanActivityPayload,
+  type FactoryRunSummary,
   type OrchestrationThreadActivity,
   type ServerProvider,
   type ServerProviderModel,
   type TurnId,
 } from "@t3tools/contracts";
+import {
+  emptyFactoryRunState,
+  foldFactoryRunLine,
+  summarizeFactoryRun,
+} from "@t3tools/shared/factoryRun";
 
 import type { FactoryRoutes } from "./routes.ts";
 
@@ -238,5 +247,105 @@ export function readFactoryApprovalMessage(text: string): {
   return {
     firstLine: text.split("\n")[0] ?? "",
     routes: fence?.[1] === undefined ? null : JSON.parse(fence[1]),
+  };
+}
+
+// Run card test data: `factory.run` activities as the server's run tracker
+// writes them, folded from the recorder's fixture
+// (`packages/shared/src/fixtures/factory-events.v1.jsonl`, a two-phase run).
+// Each test reads the fixture itself and passes its text in.
+
+export const FACTORY_RUN_TEST_DIR = "/srv/factory-runs/invoice-csv-export";
+
+/**
+ * A point in the fixture run:
+ * - `attached`: attached before any event, the provisional activity;
+ * - `framed`: started and framed, no phase yet;
+ * - `verify`: phase 1 at `verify-1`, one return used, $10.03 spent;
+ * - `review`: phase 1 at `review`, the next event after `verify`'s verdict;
+ * - `waiting`: phase 2 stopped at a question;
+ * - `answered`: the question answered, phase 2 running again;
+ * - `degraded`: finished with phase 2 closed degraded (the fixture's end);
+ * - `done`: finished with both phases clean;
+ * - `stopped`: finished by the coordinator after the answer.
+ */
+export type FactoryRunFixturePoint =
+  | "attached"
+  | "framed"
+  | "verify"
+  | "review"
+  | "waiting"
+  | "answered"
+  | "degraded"
+  | "done"
+  | "stopped";
+
+function factoryRunFixtureLines(jsonl: string, point: FactoryRunFixturePoint): string[] {
+  const lines = jsonl.split("\n").filter((line) => line.trim().length > 0);
+  switch (point) {
+    case "attached":
+      return [];
+    case "framed":
+      return lines.slice(0, 3);
+    case "verify":
+      return lines.slice(0, 19);
+    case "review":
+      return lines.slice(0, 23);
+    case "waiting":
+      return lines.slice(0, 53);
+    case "answered":
+      return lines.slice(0, 54);
+    case "degraded":
+      return lines;
+    case "done":
+      return [
+        ...lines.slice(0, 71),
+        '{"v":1,"at":"2026-09-28T13:43:00.000Z","type":"phase.closed","phase":2,"close":"clean"}',
+        '{"v":1,"at":"2026-09-28T13:49:00.000Z","type":"run.finished","status":"done"}',
+      ];
+    case "stopped":
+      return [
+        ...lines.slice(0, 54),
+        '{"v":1,"at":"2026-09-28T13:00:00.000Z","type":"run.finished","status":"stopped"}',
+      ];
+  }
+}
+
+/** The compact summary the run tracker publishes at one point of the fixture run. */
+export function makeFactoryRunSummary(
+  jsonl: string,
+  point: FactoryRunFixturePoint,
+): FactoryRunSummary {
+  let state = emptyFactoryRunState(FACTORY_RUN_TEST_DIR);
+  for (const line of factoryRunFixtureLines(jsonl, point)) state = foldFactoryRunLine(state, line);
+  return summarizeFactoryRun(state);
+}
+
+/**
+ * The summary the tracker publishes for a run too long to carry its phase
+ * marks (`summarizeFactoryRun` drops them last), or one stored before the
+ * field existed.
+ */
+export function withoutFactoryRunMarks(summary: FactoryRunSummary): FactoryRunSummary {
+  const { phaseStatuses: _marks, ...rest } = summary;
+  return rest;
+}
+
+/** One activity per run, replaced in place: the tracker derives the id from thread and run. */
+export function makeFactoryRunActivity(input: {
+  readonly threadId: string;
+  readonly summary: FactoryRunSummary;
+  /** Defaults to the tracker's choice: the run's start, else the attach time. */
+  readonly createdAt?: string;
+  readonly turnId?: TurnId | null;
+}): OrchestrationThreadActivity {
+  return {
+    id: EventId.make(factoryRunActivityId(input.threadId, input.summary.runId)),
+    tone: "info",
+    kind: FACTORY_RUN_ACTIVITY_KIND,
+    summary: "Software Factory run",
+    payload: { threadId: input.threadId, ...input.summary },
+    turnId: input.turnId ?? null,
+    createdAt: input.createdAt ?? input.summary.startedAt ?? "2026-09-28T08:59:00.000Z",
   };
 }

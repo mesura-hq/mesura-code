@@ -139,6 +139,14 @@
       "types": "./src/factory/planApproval.ts",
       "default": "./src/factory/planApproval.ts"
     },
+    "./factory/run-activities": {
+      "types": "./src/factory/runActivities.ts",
+      "default": "./src/factory/runActivities.ts"
+    },
+    "./factory/run-presentation": {
+      "types": "./src/factory/runPresentation.ts",
+      "default": "./src/factory/runPresentation.ts"
+    },
     "./factory/testing": {
       "types": "./src/factory/testing.ts",
       "default": "./src/factory/testing.ts"

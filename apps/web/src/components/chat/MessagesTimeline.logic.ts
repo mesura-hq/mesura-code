@@ -33,6 +33,8 @@ import {
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
 import type { QueuedComposerMessage } from "../../queuedMessageStore";
 import type { FactoryPlanTimelineItem } from "@t3tools/client-runtime/factory/plan-activities";
+import type { FactoryRunTimelineItem } from "@t3tools/client-runtime/factory/run-activities";
+import { placeFactoryRunRow } from "../../factory/factoryRunRow";
 import {
   type MessageId,
   type OrchestrationLatestTurn,
@@ -397,6 +399,12 @@ export type MessagesTimelineRow =
       id: string;
       createdAt: string;
       factoryPlan: FactoryPlanTimelineItem;
+    }
+  | {
+      kind: "factory-run";
+      id: string;
+      createdAt: string;
+      factoryRun: FactoryRunTimelineItem;
     }
   | {
       kind: "working";
@@ -911,6 +919,8 @@ function deriveMessagesTimelineRowsWithoutPending(input: {
   worktreeSetup?: WorktreeSetupSnapshot | null;
   /** Messages sent during the running turn, rendered after the live rows. */
   queuedMessages?: ReadonlyArray<QueuedComposerMessage>;
+  /** The thread's attached Software Factory run, placed by `placeFactoryRunRow`. */
+  factoryRun?: FactoryRunTimelineItem | null;
 }): MessagesTimelineRow[] {
   const turnDiffSummaryByAssistantMessageId = new Map<MessageId, TurnDiffSummary>();
   for (const summary of input.turnDiffSummaries) {
@@ -1396,8 +1406,15 @@ function deriveMessagesTimelineRowsWithoutPending(input: {
   return rows;
 }
 
-/** Pending questions remain top-level rows even when their turn or work group is folded. */
+/** Every row of the timeline, with the Software Factory run card placed by `placeFactoryRunRow`. */
 export function deriveMessagesTimelineRows(
+  input: Parameters<typeof deriveMessagesTimelineRowsWithoutPending>[0],
+): MessagesTimelineRow[] {
+  return placeFactoryRunRow(deriveMessagesTimelineRowsWithPending(input), input.factoryRun ?? null);
+}
+
+/** Pending questions remain top-level rows even when their turn or work group is folded. */
+function deriveMessagesTimelineRowsWithPending(
   input: Parameters<typeof deriveMessagesTimelineRowsWithoutPending>[0],
 ): MessagesTimelineRow[] {
   const requests = input.pendingUserInputs ?? [];
@@ -1575,6 +1592,8 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       return a.proposedPlan === (b as typeof a).proposedPlan;
     case "factory-plan":
       return a.factoryPlan === (b as typeof a).factoryPlan;
+    case "factory-run":
+      return a.factoryRun === (b as typeof a).factoryRun;
 
     case "queued-message": {
       const bq = b as typeof a;

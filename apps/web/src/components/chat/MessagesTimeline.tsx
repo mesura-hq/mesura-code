@@ -155,6 +155,8 @@ import {
 } from "./SnapShotAttachmentDetails";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { FactoryPlanCard } from "../../factory/FactoryPlanCard";
+import { FactoryRunCard } from "../../factory/FactoryRunCard";
+import type { FactoryRunTimelineItem } from "@t3tools/client-runtime/factory/run-activities";
 import { ChangedFilesCard } from "./ChangedFilesTree";
 import {
   CHAT_TIMELINE_ANCHOR_OFFSET,
@@ -289,6 +291,7 @@ interface TimelineRowSharedState {
   expandedSpawnEntryIds: ReadonlySet<string>;
   onOpenAgents: () => void;
   onOpenFactoryPlan: ((planId: string) => void) | null;
+  onOpenFactoryRun: ((runId: string) => void) | null;
   onCancelWorktreeSetup: (() => void) | null;
   onWorktreeSetupWorkLocally: (() => void) | null;
   onOpenWorktreeSetupTerminal: ((terminalId: string) => void) | null;
@@ -395,6 +398,9 @@ interface MessagesTimelineProps {
   onOpenAgents?: () => void;
   /** Opens a presented Software Factory plan in the right panel. */
   onOpenFactoryPlan?: (planId: string) => void;
+  /** The thread's attached Software Factory run, and its card's Open. */
+  factoryRun?: FactoryRunTimelineItem | null;
+  onOpenFactoryRun?: (runId: string) => void;
   isWorking: boolean;
   isPreparingWorktree?: boolean;
   isCompacting?: boolean;
@@ -479,6 +485,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   agentPanelModel,
   onOpenAgents = NOOP_OPEN_AGENTS,
   onOpenFactoryPlan,
+  factoryRun = null,
+  onOpenFactoryRun,
   listRef,
   timelineEntries,
   latestTurn,
@@ -757,6 +765,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         liveAgentTaskIds,
         worktreeSetup,
         queuedMessages,
+        factoryRun,
       },
       previous?.threadKey === listIdentityKey && previous.workspaceRoot === workspaceRoot
         ? previous.projection
@@ -783,6 +792,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     liveAgentTaskIds,
     worktreeSetup,
     queuedMessages,
+    factoryRun,
   ]);
   const rows = useStableRows(rawRows, listIdentityKey);
   useEffect(
@@ -988,6 +998,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       expandedSpawnEntryIds: paintedExpandedSpawnEntryIds,
       onOpenAgents,
       onOpenFactoryPlan: onOpenFactoryPlan ?? null,
+      onOpenFactoryRun: onOpenFactoryRun ?? null,
       onCancelWorktreeSetup: onCancelWorktreeSetup ?? null,
       onWorktreeSetupWorkLocally: onWorktreeSetupWorkLocally ?? null,
       onOpenWorktreeSetupTerminal: onOpenWorktreeSetupTerminal ?? null,
@@ -1022,6 +1033,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       paintedExpandedSpawnEntryIds,
       onOpenAgents,
       onOpenFactoryPlan,
+      onOpenFactoryRun,
       onCancelWorktreeSetup,
       onWorktreeSetupWorkLocally,
       onOpenWorktreeSetupTerminal,
@@ -1529,6 +1541,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "assistant-meta" ? <AssistantMetaTimelineRow row={row} /> : null}
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
       {row.kind === "factory-plan" ? <FactoryPlanTimelineRow row={row} /> : null}
+      {row.kind === "factory-run" ? <FactoryRunTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
       {row.kind === "thinking" ? <ThinkingTimelineRow /> : null}
       {row.kind === "worktree-setup" ? <WorktreeSetupTimelineRow row={row} /> : null}
@@ -2283,6 +2296,15 @@ function FactoryPlanTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "fa
         threadRef={ctx.threadRef}
         onOpen={ctx.onOpenFactoryPlan}
       />
+    </div>
+  );
+}
+
+function FactoryRunTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "factory-run" }> }) {
+  const ctx = use(TimelineRowCtx);
+  return (
+    <div className="min-w-0 px-1 py-0.5">
+      <FactoryRunCard factoryRun={row.factoryRun} onOpen={ctx.onOpenFactoryRun} />
     </div>
   );
 }

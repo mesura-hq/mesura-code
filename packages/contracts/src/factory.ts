@@ -474,6 +474,13 @@ export const FactoryRunSummary = Schema.Struct({
     }),
   ),
   cost: FactoryRunCost,
+  // Optional: activities stored before these fields existed still decode.
+  /** The run's request, shortened. */
+  request: Schema.optional(Schema.NullOr(Schema.String)),
+  /** One status per phase, in phase order: the card's phase marks. */
+  phaseStatuses: Schema.optional(Schema.Array(FactoryRunPhaseStatus)),
+  /** The open stop question, shortened; null once answered. */
+  question: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type FactoryRunSummary = typeof FactoryRunSummary.Type;
 
