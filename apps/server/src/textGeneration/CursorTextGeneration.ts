@@ -286,7 +286,7 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
 
   const generateThreadSearchStep: TextGeneration.TextGeneration["Service"]["generateThreadSearchStep"] =
     Effect.fn("CursorTextGeneration.generateThreadSearchStep")(function* (input) {
-      const { prompt, outputSchema } = buildThreadSearchStepPrompt(input);
+      const { prompt, outputSchema } = yield* buildThreadSearchStepPrompt(input);
       const generated = yield* runCursorJson({
         operation: "generateThreadSearchStep",
         cwd: undefined,

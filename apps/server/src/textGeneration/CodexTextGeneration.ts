@@ -511,7 +511,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
 
   const generateThreadSearchStep: TextGeneration.TextGeneration["Service"]["generateThreadSearchStep"] =
     Effect.fn("CodexTextGeneration.generateThreadSearchStep")(function* (input) {
-      const { prompt, outputSchema } = buildThreadSearchStepPrompt(input);
+      const { prompt, outputSchema } = yield* buildThreadSearchStepPrompt(input);
       const generated = yield* runCodexJson({
         operation: "generateThreadSearchStep",
         cwd: undefined,

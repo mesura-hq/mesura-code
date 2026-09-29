@@ -309,7 +309,7 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
 
   const generateThreadSearchStep: TextGeneration.TextGeneration["Service"]["generateThreadSearchStep"] =
     Effect.fn("GrokTextGeneration.generateThreadSearchStep")(function* (input) {
-      const { prompt, outputSchema } = buildThreadSearchStepPrompt(input);
+      const { prompt, outputSchema } = yield* buildThreadSearchStepPrompt(input);
       const nativeSession: GrokNativeSession = { sessionId: undefined, workingDirectories: [] };
       // Runs after runGrokJson closed the Grok process, so nothing rewrites the files.
       const removeNativeSession = Effect.suspend(() =>

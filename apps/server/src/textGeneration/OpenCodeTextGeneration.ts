@@ -599,7 +599,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
 
   const generateThreadSearchStep: TextGeneration.TextGeneration["Service"]["generateThreadSearchStep"] =
     Effect.fn("OpenCodeTextGeneration.generateThreadSearchStep")(function* (input) {
-      const { prompt, outputSchema } = buildThreadSearchStepPrompt(input);
+      const { prompt, outputSchema } = yield* buildThreadSearchStepPrompt(input);
       // An empty directory keeps project config, such as MCP servers, out of the step.
       const cwd = yield* fileSystem
         .makeTempDirectoryScoped({ prefix: "t3code-opencode-search-" })

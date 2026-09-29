@@ -424,7 +424,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
 
   const generateThreadSearchStep: TextGeneration.TextGeneration["Service"]["generateThreadSearchStep"] =
     Effect.fn("ClaudeTextGeneration.generateThreadSearchStep")(function* (input) {
-      const { prompt, outputSchema } = buildThreadSearchStepPrompt(input);
+      const { prompt, outputSchema } = yield* buildThreadSearchStepPrompt(input);
       const generated = yield* runClaudeJson({
         operation: "generateThreadSearchStep",
         cwd: undefined,

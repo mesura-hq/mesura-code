@@ -2343,6 +2343,17 @@ export const THREAD_SEARCH_STEP_MAX_INSPECT = 5;
 export const THREAD_SEARCH_STEP_MAX_RANKED = 10;
 export const THREAD_SEARCH_REASON_MAX_LENGTH = 280;
 export const THREAD_SEARCH_REF_MAX_LENGTH = 64;
+/**
+ * Strict UTF-8 byte cap on the full prompt a reasoning step sends to the model;
+ * a larger prompt fails with TextGenerationError instead of reaching a provider.
+ */
+export const THREAD_SEARCH_REASONING_MAX_PROMPT_BYTES = 96_000;
+/**
+ * Byte budget for the serialized reasoning input a caller sends. The prompt
+ * adds fixed instructions to the same JSON-escaped values, so an input within
+ * this budget stays below THREAD_SEARCH_REASONING_MAX_PROMPT_BYTES.
+ */
+export const THREAD_SEARCH_REASONING_MAX_INPUT_BYTES = 64_000;
 
 const ThreadSearchRef = Schema.String.check(
   Schema.isMinLength(1),

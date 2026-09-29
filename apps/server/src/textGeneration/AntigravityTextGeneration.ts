@@ -433,7 +433,7 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
     Effect.fn("AntigravityTextGeneration.generateThreadSearchStep")(function* (input) {
       const generated = yield* runAntigravityJson({
         operation: "generateThreadSearchStep",
-        ...buildThreadSearchStepPrompt(input),
+        ...(yield* buildThreadSearchStepPrompt(input)),
         modelSelection: input.modelSelection,
         timeoutMs: THREAD_SEARCH_STEP_TIMEOUT_MS,
         reportCleanupFailure: true,
