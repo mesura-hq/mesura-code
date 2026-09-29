@@ -179,6 +179,14 @@
       "types": "./src/state/runtime.ts",
       "default": "./src/state/runtime.ts"
     },
+    "./host-stats": {
+      "types": "./src/hostStats/projectHostStats.ts",
+      "default": "./src/hostStats/projectHostStats.ts"
+    },
+    "./host-stats/levels": {
+      "types": "./src/hostStats/hostStatsLevels.ts",
+      "default": "./src/hostStats/hostStatsLevels.ts"
+    },
     "./state/usage": {
       "types": "./src/state/usage.ts",
       "default": "./src/state/usage.ts"
