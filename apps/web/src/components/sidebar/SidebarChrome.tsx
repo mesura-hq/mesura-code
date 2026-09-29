@@ -2,6 +2,7 @@ import {
   ArrowLeftIcon,
   ChartNoAxesColumnIcon,
   GitPullRequestIcon,
+  ServerIcon,
   SettingsIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -34,6 +35,8 @@ import { readPullRequestListPreferences } from "../pullRequest/pullRequestListPr
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
 import { AccountLimitsDock, useAccountLimitsPanelController } from "./AccountLimitsPanel";
+import { HostsDock } from "./HostsPanel";
+import { useSidebarDockController } from "./sidebarDockController";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
@@ -167,6 +170,12 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   // a keyboard-only panel there would have no way to say it was there.
   const accountLimitsEnabled = !isMobile && currentFooterPage === null;
   const accountLimitsController = useAccountLimitsPanelController(accountLimitsEnabled);
+  // Fork: the Hosts dock shares the usage dock's gate and its controller.
+  const hostsController = useSidebarDockController({
+    dock: "hosts",
+    command: "hosts.peek",
+    enabled: accountLimitsEnabled,
+  });
   // The page reads every connected server, so one of them offering pull requests is enough for
   // the link to lead somewhere.
   const pullRequestsSupported = environments.some(
@@ -224,6 +233,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     // of a gate drift. A recurring whitespace conflict is the smaller cost.
     <div className="flex flex-col">
       {accountLimitsEnabled ? <AccountLimitsDock controller={accountLimitsController} /> : null}
+      {accountLimitsEnabled ? <HostsDock controller={hostsController} /> : null}
       <SidebarMenu className="flex-row items-center">
         {currentFooterPage ? (
           <SidebarMenuItem className="min-w-0 flex-1">
@@ -253,6 +263,14 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
               onPointerEnter={accountLimitsController.onPointerEnter}
               onPointerLeave={accountLimitsController.onPointerLeave}
               suppressTooltip={accountLimitsController.open}
+            />
+            <SidebarUtilityItem
+              icon={<ServerIcon />}
+              label="Hosts"
+              onClick={hostsController.togglePinned}
+              onPointerEnter={hostsController.onPointerEnter}
+              onPointerLeave={hostsController.onPointerLeave}
+              suppressTooltip={hostsController.open}
             />
           </>
         )}

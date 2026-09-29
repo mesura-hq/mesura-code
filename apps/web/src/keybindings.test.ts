@@ -1213,11 +1213,11 @@ describe("shipped defaults on Linux", () => {
     assert.strictEqual(resolve(press("s", { ctrlKey: true })), "composer.stash");
   });
 
-  it("leaves alt+s free now that the settle toggle has moved off it", () => {
-    // The chord has to be genuinely unbound, not merely unreported: a user who
-    // rebinds alt+s to something of their own must not find the settle toggle
-    // still eating it.
-    assert.strictEqual(resolve(press("s", { altKey: true })), null);
+  it("gives alt+s to the hosts peek now that the settle toggle has moved off it", () => {
+    // The settle toggle must not keep eating the chord it left. Until the
+    // Hosts dock this asserted the chord unbound; the dock's held peek took the
+    // free chord, so the chord now resolves to that and to nothing settle-shaped.
+    assert.strictEqual(resolve(press("s", { altKey: true })), "hosts.peek");
   });
 
   it("gives Ctrl+Shift+F to the project scope picker and Ctrl+Alt+G to the search", () => {

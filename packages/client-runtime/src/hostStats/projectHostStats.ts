@@ -88,6 +88,7 @@ export type HostStatsRowAvailability = "available" | "not-available" | "sleeping
  * Series are percent for cpu, memory and gpu, degrees for temperature, bytes
  * per second received plus sent for network, and the running maximum for agents.
  * Swap and disk render as bars, and servers as a count, so they carry no series.
+ * cpu and gpu also carry `peakSeries`, each bucket's maximum on the same axis.
  */
 export interface HostStatsRow {
   readonly value: number | null;
@@ -99,12 +100,18 @@ export interface HostStatsRow {
   readonly availability: HostStatsRowAvailability;
   /** One slot per bucket of the window, null for a gap; null when the row has no series. */
   readonly series: ReadonlyArray<number | null> | null;
+  /** Per slot, the bucket's maximum where it keeps one: cpu and gpu. Null on every other row. */
+  readonly peakSeries: ReadonlyArray<number | null> | null;
+  /** Total bytes the row is measured against: memory, swap and disk. Null on every other row. */
+  readonly total: number | null;
 }
 
 export interface HostStatsHostView {
   readonly environmentId: EnvironmentId;
   readonly label: string;
   readonly isPrimary: boolean;
+  /** The connection, which `state` cannot say: stale and needs-update hosts may be connected or not. */
+  readonly connected: boolean;
   readonly platform: string | null;
   readonly uptimeMs: number | null;
   readonly state: HostStatsHostState;
@@ -402,12 +409,16 @@ const NOT_AVAILABLE: HostStatsRow = {
   secondaryLevel: null,
   availability: "not-available",
   series: null,
+  peakSeries: null,
+  total: null,
 };
 
 function availableRow(
   value: number | null,
   level: HostStatsLevel,
-  extras: Partial<Pick<HostStatsRow, "secondary" | "secondaryLevel" | "series">> = {},
+  extras: Partial<
+    Pick<HostStatsRow, "secondary" | "secondaryLevel" | "series" | "peakSeries" | "total">
+  > = {},
 ): HostStatsRow {
   return {
     value,
@@ -416,6 +427,8 @@ function availableRow(
     secondaryLevel: extras.secondaryLevel ?? null,
     availability: "available",
     series: extras.series ?? null,
+    peakSeries: extras.peakSeries ?? null,
+    total: extras.total ?? null,
   };
 }
 
@@ -499,12 +512,14 @@ function projectRows(
             secondaryLevel:
               loadPerCore === null ? null : hostStatsLevel("loadPerCore", loadPerCore),
             series: seriesOf((bucket) => bucket.cpuAvg),
+            peakSeries: seriesOf((bucket) => bucket.cpuMax),
           }),
     memory:
       memoryPercent === null
         ? NOT_AVAILABLE
         : availableRow(memoryPercent, hostStatsLevel("memoryPercent", memoryPercent), {
             secondary: latest.memUsedBytes,
+            total: latest.memTotalBytes,
             series: seriesOf((bucket) => percentOf(bucket.memUsedAvg, memTotal)),
           }),
     swap:
@@ -512,12 +527,14 @@ function projectRows(
         ? NOT_AVAILABLE
         : availableRow(swapPercent, hostStatsLevel("swapPercent", swapPercent), {
             secondary: latest.swapUsedBytes,
+            total: latest.swapTotalBytes,
           }),
     disk:
       diskPercent === null
         ? NOT_AVAILABLE
         : availableRow(diskPercent, hostStatsLevel("diskPercent", diskPercent), {
             secondary: diskFreeBytes,
+            total: latest.diskTotalBytes,
           }),
     gpu:
       gpu === null && latest.gpus?.some((candidate) => candidate.state === "sleeping")
@@ -525,12 +542,14 @@ function projectRows(
             ...NOT_AVAILABLE,
             availability: "sleeping",
             series: seriesOf((bucket) => bucket.gpuBusyAvg),
+            peakSeries: seriesOf((bucket) => bucket.gpuBusyMax),
           }
         : gpu === null || (gpu.busyPercent === null && gpuMemoryPercent === null)
           ? NOT_AVAILABLE
           : availableRow(gpu.busyPercent, levelOrOk("gpuMemoryPercent", gpuMemoryPercent), {
               secondary: gpuMemoryPercent,
               series: seriesOf((bucket) => bucket.gpuBusyAvg),
+              peakSeries: seriesOf((bucket) => bucket.gpuBusyMax),
             }),
     temperature:
       latest.cpuTemperatureC === null
@@ -583,6 +602,7 @@ function projectHost(
     environmentId,
     label: target.label,
     isPrimary: target._tag === "PrimaryConnectionTarget",
+    connected: presentation.connection.phase === "connected",
     platform: history?.host.platform ?? null,
     uptimeMs:
       history === null || hostNow === null ? null : Math.max(0, hostNow - history.host.bootedAt),

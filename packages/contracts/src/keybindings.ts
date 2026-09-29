@@ -138,6 +138,8 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "fileTree.toggle",
   "fileTree.miller",
   "usage.peek",
+  // Held like usage.peek, and opens the sidebar's Hosts dock instead.
+  "hosts.peek",
   "chat.new",
   "chat.newLocal",
   "editor.openFavorite",

@@ -1,36 +1,22 @@
-import { useAtomValue } from "@effect/atom-react";
 import { accountLimitsWindowKey } from "@t3tools/contracts";
 // A single circular arrow, not one of the two-arrow refresh glyphs: this panel
 // already says "Refresh failed" about the reading itself, and a window resetting
 // is a different event from Mesura Code re-reading it.
 import { RotateCcwIcon } from "lucide-react";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef } from "react";
 
-import { shortcutLabelForCommand } from "../../keybindings";
-import { isTerminalFocused } from "../../lib/terminalFocus";
 import { cn } from "../../lib/utils";
 import {
   useAccountLimits,
   type AccountLimitsRow,
   type AccountLimitsView,
 } from "../../state/accountLimits";
-import { primaryServerKeybindingsAtom } from "../../state/server";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { SUBSCRIPTION_ICON_BY_NAMESPACE } from "../chat/providerIconUtils";
 import { ScrollArea } from "../ui/scroll-area";
-import {
-  closeHeldUsagePeek,
-  createUsagePeekHoverBridge,
-  createUsagePeekKeyboardLifecycle,
-  INITIAL_USAGE_PEEK_STATE,
-  isKeybindingCaptureTarget,
-  type UsagePeekKeyboardEvent,
-  type UsagePeekHoverBridge,
-  type UsagePeekKeyboardLifecycle,
-  type UsagePeekState,
-} from "./AccountLimitsPanel.logic";
+import { formatCompactDuration } from "./AccountLimitsPanel.logic";
+import { useSidebarDockController, type SidebarDockController } from "./sidebarDockController";
 
-const HOVER_BRIDGE_DELAY_MS = 120;
 /**
  * How far apart two rows start their entrance, and how many rows still get a
  * later start than the one above. Past the cap the stagger stops reading as
@@ -44,117 +30,11 @@ export function rowEntranceDelayMs(index: number, open: boolean): number {
   return Math.min(index, ROW_ENTRANCE_MAX_STEPS) * ROW_ENTRANCE_STEP_MS;
 }
 
-export interface AccountLimitsPanelController {
-  readonly open: boolean;
-  readonly shortcutLabel: string | null;
-  readonly onPointerEnter: () => void;
-  readonly onPointerLeave: () => void;
-  readonly close: () => void;
-}
+export type AccountLimitsPanelController = SidebarDockController;
 
-function consumeKeyboardEvent(event: KeyboardEvent): void {
-  event.preventDefault();
-  event.stopPropagation();
-  event.stopImmediatePropagation();
-}
-
+/** The usage dock's controller: the shared sidebar dock controller on Alt+U. */
 export function useAccountLimitsPanelController(enabled: boolean): AccountLimitsPanelController {
-  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const [hovered, setHovered] = useState(false);
-  const [peek, setPeek] = useState<UsagePeekState>(INITIAL_USAGE_PEEK_STATE);
-  const keyboardLifecycleRef = useRef<UsagePeekKeyboardLifecycle | null>(null);
-  const hoverBridgeRef = useRef<UsagePeekHoverBridge | null>(null);
-  if (hoverBridgeRef.current === null) {
-    hoverBridgeRef.current = createUsagePeekHoverBridge({
-      delayMs: HOVER_BRIDGE_DELAY_MS,
-      schedule: (callback, delayMs) => setTimeout(callback, delayMs),
-      cancel: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
-      onHoverChange: setHovered,
-    });
-  }
-
-  const onPointerEnter = useCallback(() => hoverBridgeRef.current?.enter(), []);
-  const onPointerLeave = useCallback(() => hoverBridgeRef.current?.leave(), []);
-  const closePanel = useCallback(() => {
-    hoverBridgeRef.current?.dispose();
-    if (keyboardLifecycleRef.current) {
-      keyboardLifecycleRef.current.close();
-    } else {
-      setPeek(closeHeldUsagePeek());
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!enabled) return;
-    const platform = navigator.platform;
-    const lifecycle = createUsagePeekKeyboardLifecycle({
-      keybindings,
-      platform,
-      getContext: () => ({ terminalFocus: isTerminalFocused() }),
-      onStateChange: setPeek,
-    });
-    keyboardLifecycleRef.current = lifecycle;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || isKeybindingCaptureTarget(event.target)) return;
-      // The popover dismissed itself on Escape and on an outside press. A plain
-      // div does neither, and a hover-opened panel can outlive the pointer that
-      // opened it — Alt+Tab away mid-hover and no `pointerleave` ever arrives.
-      // Escape is the way out. It is never consumed: the panel may not be open,
-      // and whatever else Escape closes has to keep closing.
-      if (event.key === "Escape") {
-        closePanel();
-        return;
-      }
-      const transition = lifecycle.keyDown(event as UsagePeekKeyboardEvent);
-      if (transition.handled) consumeKeyboardEvent(event);
-    };
-    const onKeyUp = (event: KeyboardEvent) => {
-      const transition = lifecycle.keyUp(event as UsagePeekKeyboardEvent);
-      if (transition.handled) consumeKeyboardEvent(event);
-    };
-    const onVisibilityChange = () => {
-      lifecycle.visibilityChange(document.visibilityState === "visible");
-    };
-
-    window.addEventListener("keydown", onKeyDown, true);
-    window.addEventListener("keyup", onKeyUp, true);
-    window.addEventListener("blur", lifecycle.close);
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown, true);
-      window.removeEventListener("keyup", onKeyUp, true);
-      window.removeEventListener("blur", lifecycle.close);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-      lifecycle.dispose();
-      if (keyboardLifecycleRef.current === lifecycle) keyboardLifecycleRef.current = null;
-    };
-  }, [closePanel, enabled, keybindings]);
-
-  useEffect(
-    () => () => {
-      hoverBridgeRef.current?.dispose();
-    },
-    [],
-  );
-
-  return {
-    open: enabled && (hovered || peek.held),
-    shortcutLabel: shortcutLabelForCommand(keybindings, "usage.peek"),
-    onPointerEnter,
-    onPointerLeave,
-    close: closePanel,
-  };
-}
-
-function formatCompactDuration(milliseconds: number): string {
-  const minutes = Math.max(0, Math.floor(milliseconds / 60_000));
-  if (minutes < 1) return "less than 1m";
-  const days = Math.floor(minutes / 1_440);
-  const hours = Math.floor((minutes % 1_440) / 60);
-  const remainingMinutes = minutes % 60;
-  if (days > 0) return `${days}d${hours > 0 ? ` ${hours}h` : ""}`;
-  if (hours > 0) return `${hours}h${remainingMinutes > 0 ? ` ${remainingMinutes}m` : ""}`;
-  return `${minutes}m`;
+  return useSidebarDockController({ dock: "usage", command: "usage.peek", enabled });
 }
 
 /**

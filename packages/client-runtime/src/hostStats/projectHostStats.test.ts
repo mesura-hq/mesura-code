@@ -1196,3 +1196,80 @@ describe("host stats phase 4 regressions", () => {
       }),
   );
 });
+
+// Phase 5: the Hosts dock draws a faint maximum band behind the CPU and GPU
+// averages, and shows RAM and swap as used over total, so the rows carry both.
+describe("host stats peaks and totals for the Hosts dock", () => {
+  const withPeaks = snapshot({
+    serverNow: T0,
+    buckets: [
+      bucket(CURRENT_BUCKET - BUCKET_MS, {
+        cpuAvg: 20,
+        cpuMax: 60,
+        gpuBusyAvg: 10,
+        gpuBusyMax: 70,
+      }),
+      bucket(CURRENT_BUCKET, { cpuAvg: 25, cpuMax: null, gpuBusyAvg: 12, gpuBusyMax: 40 }),
+    ],
+    latest: sample(T0 - 20 * SECOND),
+  });
+
+  it("host stats peak series holds the CPU and GPU bucket maxima on the average's axis", () => {
+    const rows = rowsOf(
+      onlyHost(
+        project([{ presentation: presentation({ id: "a" }), history: applyAll([withPeaks]) }], T0),
+      ),
+    );
+    expect(rows.cpu.peakSeries).toHaveLength(SLOTS);
+    expect(rows.cpu.peakSeries![SLOTS - 2]).toBe(60);
+    expect(rows.cpu.peakSeries![SLOTS - 1]).toBeNull();
+    expect(rows.cpu.peakSeries![SLOTS - 3]).toBeNull();
+    expect(rows.gpu.peakSeries![SLOTS - 2]).toBe(70);
+    expect(rows.gpu.peakSeries![SLOTS - 1]).toBe(40);
+    for (const id of ROW_IDS.filter((row) => row !== "cpu" && row !== "gpu")) {
+      expect(rows[id].peakSeries, id).toBeNull();
+    }
+  });
+
+  it("host stats rows carry the memory, swap and disk totals of the latest sample", () => {
+    const rows = rowsOf(
+      onlyHost(
+        project([{ presentation: presentation({ id: "a" }), history: applyAll([withPeaks]) }], T0),
+      ),
+    );
+    expect(rows.memory.total).toBe(gb(30));
+    expect(rows.swap.total).toBe(gb(7.6));
+    expect(rows.disk.total).toBe(gb(953));
+    expect(rows.cpu.total).toBeNull();
+  });
+});
+
+// Review P1-2: the Hosts dock counts a host as online by its connection, which
+// `state` alone cannot say: a stale host and a host that needs an update can
+// both be connected, and a host from another contract version can be offline.
+describe("host stats connection for the fleet line (review P1-2)", () => {
+  it("host stats view reports whether the environment is connected, whatever its state", () => {
+    const history = applyAll([
+      snapshot({ serverNow: T0, buckets: [], latest: sample(T0 - 5 * MINUTE) }),
+    ]);
+    const views = project(
+      [
+        { presentation: presentation({ id: "stale" }), history },
+        { presentation: presentation({ id: "old", capability: false }) },
+        { presentation: presentation({ id: "gone", phase: "offline" }), history },
+        {
+          presentation: presentation({ id: "old-gone", phase: "offline" }),
+          history: applyAll([
+            snapshot({ serverNow: T0, buckets: [], latest: null, contractVersion: 99 }),
+          ]),
+        },
+      ],
+      T0,
+    );
+    const byId = new Map(views.map((view) => [view.environmentId as string, view]));
+    expect(byId.get("stale")).toMatchObject({ state: "stale", connected: true });
+    expect(byId.get("old")).toMatchObject({ state: "needs-update", connected: true });
+    expect(byId.get("gone")).toMatchObject({ state: "offline", connected: false });
+    expect(byId.get("old-gone")).toMatchObject({ state: "needs-update", connected: false });
+  });
+});

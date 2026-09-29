@@ -1,4 +1,8 @@
-import type { KeybindingShortcut, ResolvedKeybindingsConfig } from "@t3tools/contracts";
+import type {
+  KeybindingCommand,
+  KeybindingShortcut,
+  ResolvedKeybindingsConfig,
+} from "@t3tools/contracts";
 
 import {
   findEffectiveShortcutForCommand,
@@ -31,7 +35,12 @@ export interface UsagePeekKeyboardLifecycle {
   readonly getState: () => UsagePeekState;
 }
 
+/** The held-chord commands of the sidebar's docks: Alt+U for usage, Alt+S for hosts. */
+export type SidebarPeekCommand = Extract<KeybindingCommand, "usage.peek" | "hosts.peek">;
+
 export function createUsagePeekKeyboardLifecycle(input: {
+  /** Defaults to the usage dock's `usage.peek`. */
+  readonly command?: SidebarPeekCommand;
   readonly keybindings: ResolvedKeybindingsConfig;
   readonly platform: string;
   readonly getContext: () => Partial<ShortcutMatchContext>;
@@ -51,6 +60,7 @@ export function createUsagePeekKeyboardLifecycle(input: {
         input.keybindings,
         input.platform,
         input.getContext(),
+        input.command,
       );
       update(transition.state);
       return transition;
@@ -129,8 +139,10 @@ export function transitionUsagePeekKeyDown(
   keybindings: ResolvedKeybindingsConfig,
   platform: string,
   context?: Partial<ShortcutMatchContext>,
+  // Trailing and defaulted so the usage dock's calls read as they always did.
+  command: SidebarPeekCommand = "usage.peek",
 ): UsagePeekTransition {
-  const shortcut = findEffectiveShortcutForCommand(keybindings, "usage.peek", {
+  const shortcut = findEffectiveShortcutForCommand(keybindings, command, {
     platform,
     ...(context ? { context } : {}),
   });
@@ -169,4 +181,16 @@ export function transitionUsagePeekKeyUp(
     matchesShortcutKey(event, state.shortcut) ||
     releasedRequiredModifier(event, state.shortcut, platform);
   return closes ? { state: closeHeldUsagePeek(), handled: true } : { state, handled: false };
+}
+
+/** A duration as its two largest units: "3m", "2h 5m", "1d 3h". Shared by both sidebar docks. */
+export function formatCompactDuration(milliseconds: number): string {
+  const minutes = Math.max(0, Math.floor(milliseconds / 60_000));
+  if (minutes < 1) return "less than 1m";
+  const days = Math.floor(minutes / 1_440);
+  const hours = Math.floor((minutes % 1_440) / 60);
+  const remainingMinutes = minutes % 60;
+  if (days > 0) return `${days}d${hours > 0 ? ` ${hours}h` : ""}`;
+  if (hours > 0) return `${hours}h${remainingMinutes > 0 ? ` ${remainingMinutes}m` : ""}`;
+  return `${minutes}m`;
 }

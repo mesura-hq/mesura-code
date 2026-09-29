@@ -58,3 +58,28 @@ describe("fork keybindings", () => {
     });
   }
 });
+
+// The Hosts dock peeks on alt+s the way the usage dock peeks on alt+u: held,
+// and with no `when` clause, because both docks open over a focused terminal
+// too. That is why it sits outside FORK_BINDINGS, whose rules all require
+// `!terminalFocus`.
+describe("hosts.peek", () => {
+  it("binds alt+s to the hosts peek everywhere, like usage.peek", () => {
+    const bindings = DEFAULT_KEYBINDINGS.filter((binding) => binding.command === "hosts.peek");
+    expect(bindings.map((binding) => binding.key)).toEqual(["alt+s"]);
+    expect(bindings[0]?.when).toBeUndefined();
+    const usage = DEFAULT_KEYBINDINGS.find((binding) => binding.command === "usage.peek");
+    expect(usage?.when).toBeUndefined();
+  });
+
+  it("registers hosts.peek so a user can rebind it", () => {
+    expect(STATIC_KEYBINDING_COMMANDS).toContain("hosts.peek");
+  });
+
+  it("leaves alt+s free of any command but the hosts peek", () => {
+    const collisions = DEFAULT_KEYBINDINGS.filter(
+      (binding) => binding.key === "alt+s" && binding.command !== "hosts.peek",
+    );
+    expect(collisions).toEqual([]);
+  });
+});
