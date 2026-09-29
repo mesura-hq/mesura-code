@@ -180,3 +180,60 @@ export function buildThreadSearchGroups(input: {
     { value: THREAD_SEARCH_CONTENT_GROUP, label: "In messages", items: rankedItems(byContent) },
   ]);
 }
+
+/**
+ * The description one agent search sends: every turn of the popup
+ * conversation, oldest first, so a refinement such as "it was on the laptop"
+ * keeps the subject it refines. The coordinator clamps an overlong description
+ * from its end, which would cut the newest turn, so the oldest turns are
+ * dropped here instead. A single turn longer than the limit keeps its start.
+ */
+export function composeAgentSearchDescription(
+  turns: ReadonlyArray<string>,
+  maxLength: number,
+): string {
+  const kept: string[] = [];
+  let length = 0;
+  for (const turn of turns.toReversed()) {
+    const added = kept.length === 0 ? turn.length : turn.length + 1;
+    if (kept.length > 0 && length + added > maxLength) break;
+    kept.unshift(turn);
+    length += added;
+  }
+  return kept.join("\n").slice(0, maxLength);
+}
+
+interface AgentSearchCoverageInput {
+  readonly unavailableEnvironments: ReadonlyArray<{ readonly label: string }>;
+  readonly budgetExhausted: boolean;
+  readonly unreadEvidence: boolean;
+}
+
+/**
+ * Plain sentences for every way a search fell short of complete coverage, in
+ * the order a reader should weigh them. Empty when the search saw everything.
+ */
+export function describeAgentSearchCoverage(coverage: AgentSearchCoverageInput): string[] {
+  const notes: string[] = [];
+  if (coverage.unavailableEnvironments.length > 0) {
+    const labels = coverage.unavailableEnvironments.map((environment) => environment.label);
+    notes.push(
+      `Could not reach ${labels.join(", ")}, so ${labels.length === 1 ? "its" : "their"} threads were not searched.`,
+    );
+  }
+  if (coverage.budgetExhausted) {
+    notes.push("The search stopped at its work limit, so older matches may be missing.");
+  }
+  if (coverage.unreadEvidence) {
+    notes.push("Some matching messages were found but not reviewed.");
+  }
+  return notes;
+}
+
+/** The row value of one agent result, keyed by environment and thread together. */
+export function agentSearchResultValue(match: {
+  readonly environmentId: string;
+  readonly threadId: string;
+}): string {
+  return `agent-thread:${match.environmentId}:${match.threadId}`;
+}

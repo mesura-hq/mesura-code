@@ -67,6 +67,7 @@ import {
   useState,
   type KeyboardEvent,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { useAtomValue } from "@effect/atom-react";
 
@@ -162,6 +163,7 @@ import {
   openFileManager,
 } from "./files/mesuraFileManager/fileManagerToggle";
 import { ProjectScopePicker } from "./projects/ProjectScopePicker";
+import type { ThreadSearchBackHandler } from "./threads/AgentThreadSearch";
 import { ThreadSearchPicker } from "./threads/ThreadSearchPicker";
 import { openLinkPullRequestDialog } from "./pullRequest/LinkPullRequestDialog";
 import { ProjectContentSearchDialog } from "./search/ProjectContentSearchDialog";
@@ -460,6 +462,9 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { theme, themeHalves, resolvedTheme } = useTheme();
   const composerHandleRef = useRef<ChatComposerHandle | null>(null);
+  // Fork: an overlay mode with inner steps (the thread picker's agent mode)
+  // takes Escape first, before the palette steps back to its command view.
+  const overlayBackHandlerRef = useRef<ThreadSearchBackHandler | null>(null);
   const routeTarget = useParams({
     strict: false,
     select: (params) => resolveThreadRouteTarget(params),
@@ -482,6 +487,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
       if (event.isComposing || event.key !== "Escape") return;
       event.preventDefault();
       event.stopPropagation();
+      if (overlayBackHandlerRef.current?.()) return;
       toggleMode("command");
     };
     window.addEventListener("keydown", onEscapeKeyDown, true);
@@ -566,6 +572,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           setOpen={setOpen}
           openOverlayMode={toggleMode}
           clearOpenIntent={clearOpenIntent}
+          overlayBackHandlerRef={overlayBackHandlerRef}
         />
       </CommandDialog>
     </ComposerHandleContext>
@@ -578,6 +585,7 @@ function CommandPaletteDialog(props: {
   readonly setOpen: (open: boolean) => void;
   readonly openOverlayMode: (mode: SearchOverlayMode) => void;
   readonly clearOpenIntent: () => void;
+  readonly overlayBackHandlerRef: RefObject<ThreadSearchBackHandler | null>;
 }) {
   const composerHandleRef = useComposerHandleContext();
 
@@ -615,7 +623,7 @@ function CommandPaletteDialog(props: {
       ) : props.mode === "projects" ? (
         <ProjectScopePicker setOpen={props.setOpen} />
       ) : props.mode === "threads" ? (
-        <ThreadSearchPicker setOpen={props.setOpen} />
+        <ThreadSearchPicker backHandlerRef={props.overlayBackHandlerRef} setOpen={props.setOpen} />
       ) : (
         <OpenCommandPaletteDialog
           openIntent={props.openIntent}

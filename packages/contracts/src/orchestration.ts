@@ -2386,6 +2386,12 @@ export const OrchestrationThreadSearchReasoningInput = Schema.Struct({
   evidence: Schema.Array(OrchestrationThreadSearchReasoningEvidence).check(
     Schema.isMaxLength(THREAD_SEARCH_REASONING_MAX_EVIDENCE),
   ),
+  /**
+   * The caller will perform no further read: the model must finish now,
+   * ranking what the evidence supports. Optional so an older caller that
+   * never sends it keeps decoding.
+   */
+  finalStep: Schema.optional(Schema.Boolean),
 });
 export type OrchestrationThreadSearchReasoningInput =
   typeof OrchestrationThreadSearchReasoningInput.Type;

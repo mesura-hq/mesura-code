@@ -5,7 +5,8 @@ import {
   tokenizeThreadSearchQuery,
 } from "@t3tools/client-runtime/state/thread-token-search";
 import { useParams } from "@tanstack/react-router";
-import { useDeferredValue, useMemo, useState } from "react";
+import { SparklesIcon, TextSearchIcon } from "lucide-react";
+import { type ReactNode, type RefObject, useDeferredValue, useMemo, useState } from "react";
 
 import { useConnectedEnvironmentIds, useThreadCommandItems } from "~/hooks/useThreadCommandItems";
 import { useProjects, useThreadShells } from "~/state/entities";
@@ -16,7 +17,48 @@ import { resolveThreadRouteTarget } from "~/threadRoutes";
 import { findJumpTargetItem } from "../CommandPalette.logic";
 import { CommandPaletteContent } from "../CommandPaletteContent";
 import { CommandPaletteResults } from "../CommandPaletteResults";
+import { Toggle, ToggleGroup } from "../ui/toggle-group";
+import {
+  AgentThreadSearch,
+  handleThreadSearchModeKey,
+  ThreadSearchModeHint,
+  type ThreadSearchBackHandler,
+} from "./AgentThreadSearch";
 import { buildThreadSearchCandidates, buildThreadSearchGroups } from "./threadSearchPicker.logic";
+
+type ThreadSearchMode = "exact" | "agent";
+
+/**
+ * The picker's two modes as one segmented control beside the field. Each
+ * segment reports its state through `aria-pressed`, and the field keeps focus
+ * after a switch because the mode's own content mounts with it focused.
+ */
+function ThreadSearchModeSwitch(props: {
+  readonly mode: ThreadSearchMode;
+  readonly onModeChange: (mode: ThreadSearchMode) => void;
+}) {
+  return (
+    <ToggleGroup
+      aria-label="Search mode"
+      className="absolute inset-e-2.5 top-1/2 shrink-0 -translate-y-1/2"
+      variant="segmented"
+      value={[props.mode]}
+      onValueChange={(value) => {
+        const next = value[0];
+        if (next === "exact" || next === "agent") props.onModeChange(next);
+      }}
+    >
+      <Toggle className="gap-1" value="exact">
+        <TextSearchIcon className="size-3.5" />
+        Exact
+      </Toggle>
+      <Toggle className="gap-1" value="agent">
+        <SparklesIcon className="size-3.5" />
+        Agent
+      </Toggle>
+    </ToggleGroup>
+  );
+}
 
 /**
  * Finds one thread among every thread, in every project and every environment.
@@ -28,8 +70,44 @@ import { buildThreadSearchCandidates, buildThreadSearchGroups } from "./threadSe
  *
  * The sidebar's project filter does not narrow this: the picker exists to reach
  * a thread you are not currently looking at.
+ *
+ * Tab or the mode switch trades exact words for `AgentThreadSearch`, where the
+ * user describes the thread instead.
  */
-export function ThreadSearchPicker(props: { readonly setOpen: (open: boolean) => void }) {
+export function ThreadSearchPicker(props: {
+  readonly setOpen: (open: boolean) => void;
+  /** Where the active mode offers the palette its own Escape step. */
+  readonly backHandlerRef: RefObject<ThreadSearchBackHandler | null>;
+}) {
+  // Local on purpose: the overlay stays in its `threads` mode, so the global
+  // shortcut and the palette's Escape route need no new mode of their own.
+  const [mode, setMode] = useState<ThreadSearchMode>("exact");
+  const modeSwitch = <ThreadSearchModeSwitch mode={mode} onModeChange={setMode} />;
+
+  if (mode === "agent") {
+    return (
+      <AgentThreadSearch
+        backHandlerRef={props.backHandlerRef}
+        modeSwitch={modeSwitch}
+        setOpen={props.setOpen}
+        onExitAgentMode={() => setMode("exact")}
+      />
+    );
+  }
+  return (
+    <ExactThreadSearch
+      modeSwitch={modeSwitch}
+      setOpen={props.setOpen}
+      onEnterAgentMode={() => setMode("agent")}
+    />
+  );
+}
+
+function ExactThreadSearch(props: {
+  readonly modeSwitch: ReactNode;
+  readonly setOpen: (open: boolean) => void;
+  readonly onEnterAgentMode: () => void;
+}) {
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
@@ -118,12 +196,16 @@ export function ThreadSearchPicker(props: { readonly setOpen: (open: boolean) =>
       autoHighlight="always"
       escapeLabel="Back"
       footerActionLabel="Open thread"
+      footerTrailing={<ThreadSearchModeHint target="Agent search" />}
+      inputAccessory={props.modeSwitch}
       inputProps={{
+        className: "pe-40",
         placeholder: "Search every thread…",
         // The rows are numbered, so a mod+1..9 press has to reach a row before
         // the sidebar's own thread jump sees it. preventDefault is what stops
         // that handler, which bails on an already-handled event.
         onKeyDown: (event) => {
+          if (handleThreadSearchModeKey(event, props.onEnterAgentMode)) return;
           const target = findJumpTargetItem({
             event,
             keybindings,

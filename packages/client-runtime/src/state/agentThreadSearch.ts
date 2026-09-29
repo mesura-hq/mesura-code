@@ -45,7 +45,10 @@ export const AGENT_THREAD_SEARCH_MAX_TOTAL_READS = 256;
  * the total, so the catalog cannot spend the evidence reads.
  */
 const MAX_TOTAL_CATALOG_READS = AGENT_THREAD_SEARCH_MAX_TOTAL_READS / 2;
-/** Model steps before the search stops and reports an exhausted budget. */
+/**
+ * Model steps before the search stops and reports an exhausted budget. The
+ * last one is a final step: the model is told to rank what it holds.
+ */
 const MAX_MODEL_ROUNDS = 8;
 /** Catalog and evidence requests one environment serves in one search. */
 const MAX_READS_PER_ENVIRONMENT = 64;
@@ -521,7 +524,7 @@ export const runAgentThreadSearch = Effect.fn("AgentThreadSearch.run")(function*
    * The serialized request, JSON overhead included, stays within
    * THREAD_SEARCH_REASONING_MAX_INPUT_BYTES.
    */
-  const selectModelEvidence = (): ReadonlyArray<EvidenceItem> => {
+  const selectModelEvidence = (finalStep: boolean): ReadonlyArray<EvidenceItem> => {
     const lowerTerms = searchedTerms.map((term) => term.toLowerCase());
     const titleMatchesTerm = (item: EvidenceItem) => {
       const titles = `${item.threadTitle}\n${item.projectTitle}`.toLowerCase();
@@ -544,7 +547,12 @@ export const runAgentThreadSearch = Effect.fn("AgentThreadSearch.run")(function*
     ]);
     const selected: EvidenceItem[] = [];
     let bytes = utf8Bytes(
-      encodeReasoningInputJson({ description, searchedTerms: [...searchedTerms], evidence: [] }),
+      encodeReasoningInputJson({
+        description,
+        searchedTerms: [...searchedTerms],
+        evidence: [],
+        ...(finalStep ? { finalStep } : {}),
+      }),
     );
     for (const item of candidates) {
       if (selected.length >= THREAD_SEARCH_REASONING_MAX_EVIDENCE) break;
@@ -596,8 +604,16 @@ export const runAgentThreadSearch = Effect.fn("AgentThreadSearch.run")(function*
     return noMatchOrRetrievalFailure();
   }
 
+  // A final step asks the model to rank what it holds instead of reading on.
+  // Without one, a model that keeps asking for reads ends the search with
+  // relevant evidence in hand and nothing ranked.
+  let finalStep = false;
   for (let round = 0; round < MAX_MODEL_ROUNDS; round += 1) {
-    const selected = selectModelEvidence();
+    if (round === MAX_MODEL_ROUNDS - 1 && !finalStep) {
+      finalStep = true;
+      budgetExhausted = true;
+    }
+    const selected = selectModelEvidence(finalStep);
     for (const item of selected) issuedRefs.set(item.ref, item);
     const stepResult = yield* callEnvironment(
       input.modelEnvironmentId,
@@ -606,6 +622,7 @@ export const runAgentThreadSearch = Effect.fn("AgentThreadSearch.run")(function*
         description,
         searchedTerms: [...searchedTerms],
         evidence: selected.map(toReasoningEvidence),
+        ...(finalStep ? { finalStep } : {}),
       },
     );
     if (Result.isFailure(stepResult)) {
@@ -617,19 +634,22 @@ export const runAgentThreadSearch = Effect.fn("AgentThreadSearch.run")(function*
     }
     const step = stepResult.success;
 
-    switch (step.action) {
-      case "finish": {
-        yield* confirmConnections;
-        const matches = verifiedMatches(step).filter((match) => isAvailable(match.environmentId));
-        if (matches.length > 0) {
-          return {
-            status: "matches",
-            matches,
-            coverage: coverage(),
-          } satisfies AgentThreadSearchResult;
-        }
-        return noMatchOrRetrievalFailure();
+    if (step.action === "finish") {
+      yield* confirmConnections;
+      const matches = verifiedMatches(step).filter((match) => isAvailable(match.environmentId));
+      if (matches.length > 0) {
+        return {
+          status: "matches",
+          matches,
+          coverage: coverage(),
+        } satisfies AgentThreadSearchResult;
       }
+      return noMatchOrRetrievalFailure();
+    }
+    // The model declined to finish when told to; no ranking can be trusted.
+    if (finalStep) break;
+    const readsBeforeStep = totalReads;
+    switch (step.action) {
       case "broaden":
       case "readMore": {
         const terms = rememberTerms(step.terms);
@@ -669,9 +689,11 @@ export const runAgentThreadSearch = Effect.fn("AgentThreadSearch.run")(function*
         break;
       }
     }
+    // A step that read nothing asked only for exhausted terms or a spent
+    // budget, so another step would see the same evidence: finish instead.
+    if (totalReads === readsBeforeStep) finalStep = true;
   }
 
-  budgetExhausted = true;
   yield* confirmConnections;
   return noMatchOrRetrievalFailure();
 });

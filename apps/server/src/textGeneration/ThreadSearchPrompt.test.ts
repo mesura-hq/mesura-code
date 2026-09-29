@@ -45,6 +45,17 @@ const baseRequest = {
 } satisfies OrchestrationThreadSearchReasoningInput;
 
 describe("buildThreadSearchStepPrompt", () => {
+  it("tells the model to rank its evidence only on a final thread search step", () => {
+    const finalLine = /final step: no more reads will run\. Choose finish now\./;
+    expect(renderThreadSearchStepPrompt(baseRequest)).not.toMatch(finalLine);
+    const finalPrompt = renderThreadSearchStepPrompt({ ...baseRequest, finalStep: true });
+    expect(finalPrompt).toMatch(finalLine);
+    // Forcing a verdict must not force a match: a weak relation stays unranked.
+    expect(finalPrompt).toMatch(/Rank only refs whose evidence clearly matches/);
+    expect(finalPrompt).toMatch(/empty ranked list when the evidence is only weakly related/);
+    expect(finalPrompt).not.toMatch(/even partly/);
+  });
+
   it("quotes thread search evidence as untrusted JSON data, never as prompt lines", () => {
     const prompt = renderThreadSearchStepPrompt(baseRequest);
 

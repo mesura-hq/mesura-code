@@ -1567,3 +1567,104 @@ describe("agent thread search: review repairs", () => {
       }),
   );
 });
+
+describe("agent thread search: final ranking step", () => {
+  // The catalog title is the only evidence that names the thread: its
+  // messages never repeat the description's words, as in the live miss.
+  const titledThread = makeFakeThread({
+    threadId: "thread-agent-search",
+    projectId: "project-mesura",
+    title: "Agent-Powered Thread Search",
+    projectTitle: "Mesura Code",
+    texts: ["We wired the popup to the configured small model."],
+  });
+  const rankTitledThread = (input: ReasoningInput) => {
+    const ref = input.evidence.find((item) => item.threadTitle === titledThread.title)?.ref;
+    return Effect.succeed(
+      finish(ref === undefined ? [] : [{ ref, reason: "The title names agent thread search." }]),
+    );
+  };
+  const finalStepFlags = (calls: ReadonlyArray<{ readonly input: unknown }>) =>
+    calls.map((call) => (call.input as ReasoningInput).finalStep === true);
+
+  it.effect(
+    "agentThreadSearch spec: a model stuck on exhausted reads is asked for a final ranking and its match is kept",
+    () =>
+      Effect.gen(function* () {
+        const stuckModel: FakeReason = (input) => {
+          if (input.finalStep === true) return rankTitledThread(input);
+          // It re-asks for the term it already read to the end, as the live
+          // model did for five straight rounds.
+          return Effect.succeed(
+            hasSearched(input, "meaning")
+              ? { action: "readMore", terms: ["meaning"] }
+              : { action: "broaden", terms: ["meaning"] },
+          );
+        };
+        const { fakes, search } = yield* runSearch(
+          [
+            {
+              environmentId: "env-laptop",
+              label: "Laptop",
+              threads: [titledThread],
+              reason: stuckModel,
+            },
+          ],
+          {
+            description: "finding old discussions by describing their meaning",
+            modelEnvironmentId: "env-laptop",
+          },
+        );
+
+        const result = yield* search;
+
+        expect(matchKeys(result)).toEqual([["env-laptop", "thread-agent-search"]]);
+        // broaden reads, readMore reads nothing, so the next step is final.
+        expect(finalStepFlags(fakes.callsTo("env-laptop", METHODS.reasonThreadSearch))).toEqual([
+          false,
+          false,
+          true,
+        ]);
+        expect(result.coverage.budgetExhausted).toBe(false);
+      }),
+  );
+
+  it.effect(
+    "agentThreadSearch spec: the last model round is a final step whose ranking is kept with the budget reported",
+    () =>
+      Effect.gen(function* () {
+        let round = 0;
+        const exploringModel: FakeReason = (input) => {
+          if (input.finalStep === true) return rankTitledThread(input);
+          round += 1;
+          return Effect.succeed({ action: "broaden", terms: [`synonym-${round}`] });
+        };
+        const { fakes, search } = yield* runSearch(
+          [
+            {
+              environmentId: "env-laptop",
+              label: "Laptop",
+              threads: [titledThread],
+              reason: exploringModel,
+            },
+          ],
+          {
+            description: "finding old discussions by describing their meaning",
+            modelEnvironmentId: "env-laptop",
+          },
+        );
+
+        const result = yield* search;
+
+        const flags = finalStepFlags(fakes.callsTo("env-laptop", METHODS.reasonThreadSearch));
+        expect(flags).toHaveLength(8);
+        expect(flags.slice(0, -1).every((flag) => !flag)).toBe(true);
+        expect(flags.at(-1)).toBe(true);
+        expect(result).toMatchObject({
+          status: "matches",
+          coverage: { budgetExhausted: true },
+        });
+        expect(matchKeys(result)).toEqual([["env-laptop", "thread-agent-search"]]);
+      }),
+  );
+});
