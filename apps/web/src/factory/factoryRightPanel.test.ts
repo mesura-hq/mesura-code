@@ -24,13 +24,12 @@ const planId = "factory-plan:plan-md";
 const panelState = () =>
   selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, ref);
 
-function openFromCard(useRightPanelSheet: boolean) {
+function openFromCard() {
   const maximized: Array<string | null> = [];
   openFactoryPlanInRightPanel({
     ref,
     planId,
     maximizeKey: scopedThreadKey(ref),
-    useRightPanelSheet,
     setMaximizedRightPanelThreadKey: (key) => maximized.push(key),
   });
   return maximized;
@@ -42,7 +41,7 @@ beforeEach(() => {
 
 describe("factory surface in the right panel (phase 2 fence)", () => {
   it("opens a factory plan in the Factory surface, maximized beside the chat", () => {
-    const maximized = openFromCard(false);
+    const maximized = openFromCard();
 
     expect(panelState()).toMatchObject({
       isOpen: true,
@@ -52,11 +51,12 @@ describe("factory surface in the right panel (phase 2 fence)", () => {
     expect(maximized).toEqual([scopedThreadKey(ref)]);
   });
 
-  it("opens a factory plan without maximizing where the panel is a sheet", () => {
-    const maximized = openFromCard(true);
-
+  it("sets the maximize on every Open, never toggling it off", () => {
+    // Where the panel is a sheet ChatView ignores the key; it takes effect when
+    // the window widens (phase 9 verify ①). A second Open keeps it set.
+    expect(openFromCard()).toEqual([scopedThreadKey(ref)]);
+    expect(openFromCard()).toEqual([scopedThreadKey(ref)]);
     expect(panelState()).toMatchObject({ isOpen: true, activeSurfaceId: "factory" });
-    expect(maximized).toEqual([]);
   });
 
   it("keeps one Factory surface and switches it to the plan opened last", () => {
@@ -86,7 +86,7 @@ describe("factory surface in the right panel (phase 2 fence)", () => {
     expect(panelState().surfaces).toEqual([]);
 
     const revisionBeforeOpen = useRightPanelStore.getState().getUserActionRevision(ref);
-    openFromCard(false);
+    openFromCard();
     // A proactive panel requested before the user's Open is refused.
     expect(
       useRightPanelStore

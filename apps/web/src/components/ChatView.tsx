@@ -4525,11 +4525,10 @@ export default function ChatView(props: ChatViewProps) {
         ref: activeThreadRef,
         planId,
         maximizeKey: routeThreadKey,
-        useRightPanelSheet: shouldUseRightPanelSheet,
         setMaximizedRightPanelThreadKey,
       });
     },
-    [activeThreadRef, routeThreadKey, shouldUseRightPanelSheet],
+    [activeThreadRef, routeThreadKey],
   );
   const openFactoryRun = useCallback(
     (runId: string) => {
@@ -4538,11 +4537,10 @@ export default function ChatView(props: ChatViewProps) {
         ref: activeThreadRef,
         runId,
         maximizeKey: routeThreadKey,
-        useRightPanelSheet: shouldUseRightPanelSheet,
         setMaximizedRightPanelThreadKey,
       });
     },
-    [activeThreadRef, routeThreadKey, shouldUseRightPanelSheet],
+    [activeThreadRef, routeThreadKey],
   );
   const addDeviceSurface = useCallback(() => {
     if (!activeThreadRef) return;
@@ -9377,7 +9375,9 @@ export default function ChatView(props: ChatViewProps) {
         <FactoryPane
           surface={renderedRightPanelSurface}
           factoryPlans={factoryPlans}
-          environmentId={activeThreadRef.environmentId}
+          latestRunId={factoryRun?.run.runId ?? null}
+          threadRef={activeThreadRef}
+          visible={rightPanelOpen}
           cwd={gitCwd ?? undefined}
         />
       </Suspense>

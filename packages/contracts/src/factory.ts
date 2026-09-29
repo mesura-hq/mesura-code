@@ -379,6 +379,12 @@ export const FactoryRunReturn = Schema.Struct({
   node: Schema.String,
   change: Schema.String,
   at: IsoDateTime,
+  /**
+   * The spine node the phase re-entered after the return: the first
+   * `node.entered` of that phase after it, other than the return's own
+   * `repair` or `rework` node. Absent while the implementer still holds it.
+   */
+  reentered: Schema.optional(Schema.String),
 });
 export type FactoryRunReturn = typeof FactoryRunReturn.Type;
 

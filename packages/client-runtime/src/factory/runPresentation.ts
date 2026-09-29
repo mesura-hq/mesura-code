@@ -101,6 +101,32 @@ export function factoryPhaseMarkTone(status: FactoryRunPhaseStatus): FactoryPhas
 
 const usd = (amount: number) => `$${amount.toFixed(2)}`;
 
+/**
+ * Codex's own totals: `cached_input_tokens` is part of `input_tokens` and
+ * `reasoning_output_tokens` part of `output_tokens`, so they are not added.
+ */
+export function factoryTokenTotal(tokens: Readonly<Record<string, number>>): number {
+  return (tokens.input_tokens ?? 0) + (tokens.output_tokens ?? 0);
+}
+
+export interface FactoryCostText {
+  readonly text: string;
+  /** Dollars and tokens both: the dollar figure leaves out the turns that reported tokens. */
+  readonly floor: boolean;
+}
+
+/** `$12.40`, `3,161,680 tokens`, or `$10.03 + 3,161,680 tokens` marked as a floor. */
+export function factoryCostText(cost: {
+  readonly usd: number;
+  readonly tokens: Readonly<Record<string, number>>;
+}): FactoryCostText {
+  const tokenTotal = factoryTokenTotal(cost.tokens);
+  const tokens = `${tokenTotal.toLocaleString("en-US")} tokens`;
+  if (cost.usd > 0 && tokenTotal > 0) return { text: `${usd(cost.usd)} + ${tokens}`, floor: true };
+  if (tokenTotal > 0) return { text: tokens, floor: false };
+  return { text: usd(cost.usd), floor: false };
+}
+
 /** The run card's content, from the compact summary of a `factory.run` activity. */
 export function factoryRunCardModel(summary: FactoryRunSummary): FactoryRunCardModel {
   const status = factoryRunLabel({

@@ -2,8 +2,19 @@ import { WS_METHODS, type FactoryReadSnapshotResult } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 
-import { createEnvironmentRpcQueryAtomFamily } from "./runtime.ts";
+import {
+  createEnvironmentRpcQueryAtomFamily,
+  createEnvironmentRpcSubscriptionAtomFamily,
+} from "./runtime.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
+
+/**
+ * How long a run subscription outlives the last pane that read it. The plan
+ * asks for the stream to end when the Run tab unmounts; a few seconds lets a
+ * quick Plan-and-back switch reuse one server tail instead of restarting it,
+ * and the pane unmounting still interrupts the stream shortly after.
+ */
+export const FACTORY_RUN_IDLE_TTL_MS = 3_000;
 
 /** A day: a digest names fixed bytes, so its answer never goes stale. */
 const FACTORY_SNAPSHOT_CACHE_MS = 86_400_000;
@@ -18,6 +29,12 @@ export function createFactoryEnvironmentAtoms<R, E>(
       tag: WS_METHODS.factoryReadSnapshot,
       staleTimeMs: FACTORY_SNAPSHOT_CACHE_MS,
       idleTtlMs: 300_000,
+    }),
+    /** A run's full state and live role progress, for a visible Run tab only. */
+    factoryRun: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:factory:run",
+      tag: WS_METHODS.subscribeFactoryRun,
+      idleTtlMs: FACTORY_RUN_IDLE_TTL_MS,
     }),
   };
 }

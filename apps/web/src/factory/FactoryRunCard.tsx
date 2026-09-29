@@ -2,7 +2,6 @@ import type { FactoryRunTimelineItem } from "@t3tools/client-runtime/factory/run
 import {
   factoryPhaseMarkTone,
   factoryRunCardModel,
-  type FactoryPhaseMarkTone,
 } from "@t3tools/client-runtime/factory/run-presentation";
 import { Maximize2Icon } from "lucide-react";
 import { memo } from "react";
@@ -10,20 +9,7 @@ import { memo } from "react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { cn } from "~/lib/utils";
-
-// The phase-mark vocabulary of the Agents panel's phase strip.
-const MARK_CLASS_BY_TONE: Record<FactoryPhaseMarkTone, string> = {
-  info: "border-info/40 text-info-foreground",
-  success: "border-success/30 text-success-foreground",
-  error: "border-destructive/40 text-destructive-foreground",
-  warning: "border-warning/40 text-warning-foreground",
-  neutral: "border-border/50 text-muted-foreground/70",
-};
-
-/** The clock time of the last event: absolute, so it never goes stale on screen. */
-function eventClock(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
+import { FACTORY_MARK_CLASS_BY_TONE, factoryEventClock } from "./factoryTones";
 
 /**
  * A Software Factory run attached to this thread. The row is replaced in
@@ -73,7 +59,7 @@ export const FactoryRunCard = memo(function FactoryRunCard({
               aria-label={`Phase ${mark.index}: ${mark.status}`}
               className={cn(
                 "rounded-sm border px-1.5 py-0.5 font-mono text-[.65rem]",
-                MARK_CLASS_BY_TONE[factoryPhaseMarkTone(mark.status)],
+                FACTORY_MARK_CLASS_BY_TONE[factoryPhaseMarkTone(mark.status)],
               )}
             >
               {mark.index}
@@ -86,7 +72,8 @@ export const FactoryRunCard = memo(function FactoryRunCard({
         <span>{card.cost}</span>
         {card.lastEventAt === null ? null : (
           <span>
-            last event <time dateTime={card.lastEventAt}>{eventClock(card.lastEventAt)}</time>
+            last event{" "}
+            <time dateTime={card.lastEventAt}>{factoryEventClock(card.lastEventAt)}</time>
           </span>
         )}
       </p>

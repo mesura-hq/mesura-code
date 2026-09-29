@@ -1,9 +1,12 @@
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { describe, expect, it } from "vite-plus/test";
 
-import { readFactorySnapshotState } from "./factory.ts";
+import type { EnvironmentRegistry } from "../connection/registry.ts";
+import { createFactoryEnvironmentAtoms, readFactorySnapshotState } from "./factory.ts";
 
 describe("readFactorySnapshotState", () => {
   it("returns the same ready state for the same snapshot result, so a card memo does not reparse the plan", () => {
@@ -39,5 +42,24 @@ describe("readFactorySnapshotState after a connection drop", () => {
     );
 
     expect(readFactorySnapshotState(offline)).toBe(ready);
+  });
+});
+
+describe("factoryRun subscription lifetime", () => {
+  it("phase9 P1-1 ends a run stream within five seconds of the last reader unmounting", () => {
+    const runtime = Atom.runtime(Layer.empty) as unknown as Atom.AtomRuntime<
+      EnvironmentRegistry,
+      never
+    >;
+    const atom = createFactoryEnvironmentAtoms(runtime).factoryRun({
+      environmentId: EnvironmentId.make("environment-1"),
+      input: { threadId: ThreadId.make("thread-1"), runId: "invoice-csv-export" },
+    });
+
+    // The real family's atom, not a stand-in: a longer idle would keep the
+    // server tailing the run's files after the Run tab closed.
+    expect(atom.keepAlive).toBe(false);
+    expect(atom.idleTTL).toBeGreaterThan(0);
+    expect(atom.idleTTL).toBeLessThanOrEqual(5_000);
   });
 });

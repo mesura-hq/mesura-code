@@ -13,6 +13,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type FactoryPlanActivityPayload,
+  type FactoryRunState,
   type FactoryRunSummary,
   type OrchestrationThreadActivity,
   type ServerProvider,
@@ -311,14 +312,24 @@ function factoryRunFixtureLines(jsonl: string, point: FactoryRunFixturePoint): s
   }
 }
 
+/** The full state the run tracker folds at one point of the fixture run. */
+export function makeFactoryRunState(jsonl: string, point: FactoryRunFixturePoint): FactoryRunState {
+  return foldFactoryRunTestLines(factoryRunFixtureLines(jsonl, point));
+}
+
+/** Folds event lines as the run tracker does, for states the fixture does not reach. */
+export function foldFactoryRunTestLines(lines: ReadonlyArray<string>): FactoryRunState {
+  let state = emptyFactoryRunState(FACTORY_RUN_TEST_DIR);
+  for (const line of lines) state = foldFactoryRunLine(state, line);
+  return state;
+}
+
 /** The compact summary the run tracker publishes at one point of the fixture run. */
 export function makeFactoryRunSummary(
   jsonl: string,
   point: FactoryRunFixturePoint,
 ): FactoryRunSummary {
-  let state = emptyFactoryRunState(FACTORY_RUN_TEST_DIR);
-  for (const line of factoryRunFixtureLines(jsonl, point)) state = foldFactoryRunLine(state, line);
-  return summarizeFactoryRun(state);
+  return summarizeFactoryRun(makeFactoryRunState(jsonl, point));
 }
 
 /**

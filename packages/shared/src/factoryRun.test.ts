@@ -30,6 +30,22 @@ const foldLines = (lines: ReadonlyArray<string>, runDir = RUN_DIR) =>
   lines.reduce((state, line) => foldFactoryRunLine(state, line), emptyFactoryRunState(runDir));
 
 describe("factory run fold over the record-version-1 fixture", () => {
+  it("phase9 fold records the spine node each return of the fixture re-entered, skipping the return's own node", () => {
+    const state = foldLines(FIXTURE_LINES);
+
+    expect(state.returns.map(({ node, kind, reentered }) => ({ node, kind, reentered }))).toEqual([
+      { node: "checks-build", kind: "repair", reentered: "checks-build" },
+      { node: "review", kind: "rework", reentered: "regression" },
+    ]);
+  });
+
+  it("phase9 fold leaves a return without a re-entered node while the implementer still holds it", () => {
+    // Line 13 is the repair's `return.recorded`, line 14 enters `repair`.
+    expect(foldLines(FIXTURE_LINES.slice(0, 13)).returns[0]?.reentered).toBeUndefined();
+    expect(foldLines(FIXTURE_LINES.slice(0, 14)).returns[0]?.reentered).toBeUndefined();
+    expect(foldLines(FIXTURE_LINES.slice(0, 17)).returns[0]?.reentered).toBe("checks-build");
+  });
+
   it("folds the phase 6 fixture into its phase statuses, returns, verdicts, cost, clock and warnings", () => {
     const state = foldLines(FIXTURE_LINES);
 

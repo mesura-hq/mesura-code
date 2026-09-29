@@ -177,6 +177,30 @@ function addTokens(
   return next;
 }
 
+/**
+ * Records `node` as the re-entry point of the phase's returns still waiting
+ * for one. The return's own `repair` or `rework` node is where the
+ * implementer answers it, not where the spine resumes, so it is skipped.
+ */
+function markReenteredNode(
+  returns: FactoryRunState["returns"],
+  phase: number,
+  node: string,
+): FactoryRunState["returns"] {
+  if (!returns.some((entry) => isAwaitingReentry(entry, phase, node))) return returns;
+  return returns.map((entry) =>
+    isAwaitingReentry(entry, phase, node) ? { ...entry, reentered: node } : entry,
+  );
+}
+
+function isAwaitingReentry(
+  entry: FactoryRunState["returns"][number],
+  phase: number,
+  node: string,
+): boolean {
+  return entry.phase === phase && entry.reentered === undefined && entry.kind !== node;
+}
+
 function applyEvent(state: FactoryRunState, event: FactoryRunEvent): FactoryRunState {
   switch (event.type) {
     case "run.started":
@@ -209,6 +233,7 @@ function applyEvent(state: FactoryRunState, event: FactoryRunEvent): FactoryRunS
     case "node.entered":
       return {
         ...updatePhase(state, event.phase, (phase) => ({ ...phase, node: event.node })),
+        returns: markReenteredNode(state.returns, event.phase, event.node),
         currentPhase: event.phase,
         currentNode: event.node,
       };
