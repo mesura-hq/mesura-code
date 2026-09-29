@@ -144,6 +144,7 @@ import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as FactorySnapshotStore from "./factory/FactorySnapshotStore.ts";
+import * as FactoryRunTracker from "./factory/FactoryRunTracker.ts";
 import * as AgentSessionScanner from "./project/AgentSessionScanner.ts";
 import { importRecentAgentThreads } from "./project/AgentSessionImporter.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
@@ -620,6 +621,7 @@ const makeWsRpcLayer = (
       const projectSetupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
       const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
       const factorySnapshots = yield* FactorySnapshotStore.FactorySnapshotStore;
+      const factoryRunTracker = yield* FactoryRunTracker.FactoryRunTracker;
       const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
       const repositoryIdentityResolver =
         yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
@@ -3239,6 +3241,16 @@ const makeWsRpcLayer = (
             WS_METHODS.subscribeWorktreeSetup,
             worktreeSetupTracker.stream(input.threadId),
             { "rpc.aggregate": "vcs" },
+          ),
+        [WS_METHODS.subscribeFactoryRun]: (input) =>
+          observeRpcStream(
+            WS_METHODS.subscribeFactoryRun,
+            FactoryRunTracker.subscribeFactoryRun(
+              factoryRunTracker,
+              projectionSnapshotQuery,
+              input,
+            ),
+            { "rpc.aggregate": "factory" },
           ),
         [WS_METHODS.worktreeSetupCancel]: (input) =>
           observeRpcEffect(

@@ -65,6 +65,8 @@ import {
   FactoryReadSnapshotError,
   FactoryReadSnapshotInput,
   FactoryReadSnapshotResult,
+  FactoryRunStreamItem,
+  FactorySubscribeRunInput,
 } from "./factory.ts";
 import {
   GitActionProgressEvent,
@@ -305,6 +307,7 @@ export const WS_METHODS = {
   projectsListEntries: "projects.listEntries",
   projectsReadFile: "projects.readFile",
   factoryReadSnapshot: "factory.readSnapshot",
+  subscribeFactoryRun: "factory.subscribeRun",
   projectsSearchContents: "projects.searchContents",
   projectsSearchEntries: "projects.searchEntries",
   projectsWriteFile: "projects.writeFile",
@@ -1064,6 +1067,13 @@ const WsFactoryReadSnapshotRpc = Rpc.make(WS_METHODS.factoryReadSnapshot, {
   error: Schema.Union([FactoryReadSnapshotError, EnvironmentAuthorizationError]),
 });
 
+const WsSubscribeFactoryRunRpc = Rpc.make(WS_METHODS.subscribeFactoryRun, {
+  payload: FactorySubscribeRunInput,
+  success: FactoryRunStreamItem,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
 const WsSubscribeProjectFileRpc = Rpc.make(WS_METHODS.subscribeProjectFile, {
   payload: ProjectReadFileInput,
   success: ProjectFileWatchEvent,
@@ -1581,6 +1591,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsWorktreeSetupCancelRpc,
   WsSubscribeProjectFileRpc,
   WsFactoryReadSnapshotRpc,
+  WsSubscribeFactoryRunRpc,
   WsVcsPullRpc,
   WsVcsRefreshStatusRpc,
   WsGitRunStackedActionRpc,

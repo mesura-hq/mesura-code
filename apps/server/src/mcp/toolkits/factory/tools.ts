@@ -8,6 +8,7 @@ import * as Schema from "effect/Schema";
 import * as Tool from "effect/unstable/ai/Tool";
 import * as Toolkit from "effect/unstable/ai/Toolkit";
 
+import * as FactoryRunTracker from "../../../factory/FactoryRunTracker.ts";
 import * as FactorySnapshotStore from "../../../factory/FactorySnapshotStore.ts";
 import * as OrchestrationEngine from "../../../orchestration/Services/OrchestrationEngine.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -16,10 +17,11 @@ const dependencies = [
   McpInvocationContext.McpInvocationContext,
   OrchestrationEngine.OrchestrationEngineService,
   FactorySnapshotStore.FactorySnapshotStore,
+  FactoryRunTracker.FactoryRunTracker,
 ];
 
 /** The largest plan or intent file `present_plan` reads. */
-export const FACTORY_DOCUMENT_MAX_BYTES = 1024 * 1024;
+export const FACTORY_DOCUMENT_MAX_BYTES = FactorySnapshotStore.FACTORY_SNAPSHOT_MAX_BYTES;
 
 /**
  * The most UTF-8 bytes a plan's title, headings and phase titles may take together.
@@ -98,10 +100,26 @@ export class FactoryPresentPlanFailedError extends Schema.TaggedError<FactoryPre
   }
 }
 
+export const AttachFactoryRunInput = Schema.Struct({
+  runDir: TrimmedNonEmptyString.annotate({
+    description: "Absolute path to the sf-team run directory that holds events.jsonl.",
+  }),
+});
+export type AttachFactoryRunInput = typeof AttachFactoryRunInput.Type;
+
+export const AttachFactoryRunResult = Schema.Struct({
+  runId: Schema.String.annotate({
+    description:
+      "The run id: the run directory's name. sf-team names the run directory after the run.",
+  }),
+});
+export type AttachFactoryRunResult = typeof AttachFactoryRunResult.Type;
+
 export const FactoryToolError = Schema.Union([
   McpCapabilityUnavailableError,
   FactoryPresentPlanError,
   FactoryPresentPlanFailedError,
+  FactoryRunTracker.FactoryAttachRunError,
 ]);
 export type FactoryToolError = typeof FactoryToolError.Type;
 
@@ -119,4 +137,18 @@ const PresentPlanTool = Tool.make("present_plan", {
   .annotate(Tool.Idempotent, true)
   .annotate(Tool.OpenWorld, false);
 
-export const FactoryToolkit = Toolkit.make(PresentPlanTool);
+const AttachFactoryRunTool = Tool.make("attach_factory_run", {
+  description:
+    "Show a Software Factory run in this thread: a run card, a status label on the thread, and live progress in the Factory pane. Pass the absolute path of the run directory. The server follows <runDir>/events.jsonl from its first line, including lines written before this call, keeps following it after a restart until the run finishes, and needs no further calls. If events.jsonl does not exist yet, the server waits for it. The run id is the directory's name. Fails when the path is relative, missing, or not a directory.",
+  parameters: AttachFactoryRunInput,
+  success: AttachFactoryRunResult,
+  failure: FactoryToolError,
+  dependencies,
+})
+  .annotate(Tool.Title, "Attach Software Factory run")
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, true)
+  .annotate(Tool.OpenWorld, false);
+
+export const FactoryToolkit = Toolkit.make(PresentPlanTool, AttachFactoryRunTool);

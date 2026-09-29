@@ -71,6 +71,7 @@ import * as McpHttpServer from "./mcp/McpHttpServer.ts";
 import * as McpSessionRegistry from "./mcp/McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as FactorySnapshotStore from "./factory/FactorySnapshotStore.ts";
+import * as FactoryRunTracker from "./factory/FactoryRunTracker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
 import { deviceHubProxyRouteLayer } from "./device/DeviceHubProxy.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -271,6 +272,8 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(AgentAwarenessRelay.layer.pipe(Layer.provide(ServerSecretStore.layer))),
   Layer.provideMerge(RuntimeReceiptBusLive),
   Layer.provideMerge(AccountLimitsLayerLive),
+  // Mesura: follows Software Factory runs for the MCP tool, the WebSocket and startup alike.
+  Layer.provideMerge(FactoryRunTracker.layer.pipe(Layer.provide(FactorySnapshotStore.layer))),
 );
 
 const ProviderSessionDirectoryLayerLive = ProviderSessionDirectoryLive.pipe(

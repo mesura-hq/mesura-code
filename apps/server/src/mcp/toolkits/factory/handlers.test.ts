@@ -26,6 +26,8 @@ import { McpSchema, McpServer } from "effect/unstable/ai";
 import type { Tool } from "effect/unstable/ai";
 
 import * as ServerConfig from "../../../config.ts";
+import * as FactoryRunShellSummaries from "../../../factory/FactoryRunShellSummaries.ts";
+import * as FactoryRunTracker from "../../../factory/FactoryRunTracker.ts";
 import * as FactorySnapshotStore from "../../../factory/FactorySnapshotStore.ts";
 import {
   OrchestrationEngineService,
@@ -136,18 +138,22 @@ const makeHarness = Effect.fn("makeFactoryToolkitHarness")(function* () {
   const commands = yield* Ref.make<ReadonlyArray<OrchestrationCommand>>([]);
   const dispatch: OrchestrationEngineShape["dispatch"] = (command) =>
     Ref.update(commands, (recorded) => [...recorded, command]).pipe(Effect.as({ sequence: 1 }));
-  const dependencies = Layer.mergeAll(
-    Layer.mock(ProjectionSnapshotQuery)({
-      getThreadShellById: (threadId) =>
-        Effect.succeed(threadId === THREAD_ID ? Option.some(thread) : Option.none()),
-    }),
-    Layer.mock(OrchestrationEngineService)({
-      readEvents: () => Stream.empty,
-      dispatch,
-      streamDomainEvents: Stream.empty,
-      latestSequence: Effect.succeed(0),
-    }),
-  ).pipe(
+  const dependencies = FactoryRunTracker.layer.pipe(
+    Layer.provideMerge(
+      Layer.mergeAll(
+        Layer.mock(ProjectionSnapshotQuery)({
+          getThreadShellById: (threadId) =>
+            Effect.succeed(threadId === THREAD_ID ? Option.some(thread) : Option.none()),
+        }),
+        Layer.mock(OrchestrationEngineService)({
+          readEvents: () => Stream.empty,
+          dispatch,
+          streamDomainEvents: Stream.empty,
+          latestSequence: Effect.succeed(0),
+        }),
+        FactoryRunShellSummaries.layer,
+      ),
+    ),
     Layer.provideMerge(FactorySnapshotStore.layer),
     Layer.provideMerge(
       ServerConfig.layerTest(process.cwd(), { prefix: "t3-factory-toolkit-test-" }),

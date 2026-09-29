@@ -7,6 +7,7 @@ import { OrchestrationProjectionPipelineLive } from "./Layers/ProjectionPipeline
 import { OrchestrationProjectionSnapshotQueryLive } from "./Layers/ProjectionSnapshotQuery.ts";
 import * as ThreadBackgroundLiveness from "./ThreadBackgroundLiveness.ts";
 import * as ThreadPlanProgress from "./ThreadPlanProgress.ts";
+import * as FactoryRunShellSummaries from "../factory/FactoryRunShellSummaries.ts";
 
 const OrchestrationEventInfrastructureLayerLive = Layer.mergeAll(
   OrchestrationEventStoreLive,
@@ -28,6 +29,8 @@ const OrchestrationInfrastructureLayerLive = Layer.mergeAll(
 ).pipe(
   Layer.provideMerge(ThreadBackgroundLiveness.layer),
   Layer.provideMerge(ThreadPlanProgress.layer),
+  // Mesura: the Software Factory run label, written by the run tracker.
+  Layer.provideMerge(FactoryRunShellSummaries.layer),
 );
 
 export const OrchestrationLayerLive = Layer.mergeAll(

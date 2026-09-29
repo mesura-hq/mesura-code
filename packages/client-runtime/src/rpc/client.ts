@@ -60,6 +60,7 @@ export type EnvironmentSubscriptionRpcTag =
   | typeof WS_METHODS.subscribeProjectClones
   | typeof WS_METHODS.terminalAttach
   | typeof WS_METHODS.subscribeProjectFile
+  | typeof WS_METHODS.subscribeFactoryRun
   | typeof WS_METHODS.editorSessionAttach
   | typeof WS_METHODS.fileManagerSubscribeEvents;
 

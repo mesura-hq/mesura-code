@@ -3639,4 +3639,45 @@ projectionSnapshotLayer("ProjectionSnapshotQuery activities by kind", (it) => {
       assert.deepEqual(yield* query.listActivitiesByKind("nope"), []);
     }),
   );
+
+  it.effect("lists one kind across archived threads too when asked, never deleted ones", () =>
+    Effect.gen(function* () {
+      const query = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+      const timestamp = "2026-03-03T00:00:00.000Z";
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id, title, workspace_root, scripts_json, created_at, updated_at
+        ) VALUES ('project-runs', 'Project', '/tmp/project-runs', '[]', ${timestamp}, ${timestamp})
+      `;
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id, project_id, title, model_selection_json, runtime_mode, interaction_mode,
+          created_at, updated_at, deleted_at, archived_at
+        ) VALUES
+          ('run-live', 'project-runs', 'Live', '{"instanceId":"codex","model":"gpt-5"}',
+            'full-access', 'default', ${timestamp}, ${timestamp}, NULL, NULL),
+          ('run-archived', 'project-runs', 'Archived', '{"instanceId":"codex","model":"gpt-5"}',
+            'full-access', 'default', ${timestamp}, ${timestamp}, NULL, ${timestamp}),
+          ('run-deleted', 'project-runs', 'Deleted', '{"instanceId":"codex","model":"gpt-5"}',
+            'full-access', 'default', ${timestamp}, ${timestamp}, ${timestamp}, NULL)
+      `;
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id, thread_id, turn_id, tone, kind, summary, payload_json, created_at
+        ) VALUES
+          ('run-a', 'run-live', NULL, 'info', 'factory.run', 'Run', '{}', ${timestamp}),
+          ('run-b', 'run-archived', NULL, 'info', 'factory.run', 'Run', '{}', ${timestamp}),
+          ('run-c', 'run-deleted', NULL, 'info', 'factory.run', 'Run', '{}', ${timestamp})
+      `;
+
+      const ids = (activities: ReadonlyArray<{ readonly id: string }>) =>
+        activities.map((activity) => activity.id);
+      assert.deepEqual(ids(yield* query.listActivitiesByKind("factory.run")), ["run-a"]);
+      assert.deepEqual(
+        ids(yield* query.listActivitiesByKind("factory.run", { includeArchived: true })),
+        ["run-a", "run-b"],
+      );
+    }),
+  );
 });

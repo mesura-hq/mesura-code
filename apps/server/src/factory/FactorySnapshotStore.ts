@@ -10,6 +10,9 @@ import * as Schema from "effect/Schema";
 
 import * as ServerConfig from "../config.ts";
 
+/** The largest plan, intent or report the Software Factory stores. */
+export const FACTORY_SNAPSHOT_MAX_BYTES = 1024 * 1024;
+
 export class FactorySnapshotWriteError extends Schema.TaggedError<FactorySnapshotWriteError>()(
   "FactorySnapshotWriteError",
   { cause: Schema.Defect() },

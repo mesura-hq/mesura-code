@@ -13,6 +13,7 @@ import * as Encoding from "effect/Encoding";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
+import * as FactoryRunTracker from "../../../factory/FactoryRunTracker.ts";
 import * as FactorySnapshotStore from "../../../factory/FactorySnapshotStore.ts";
 import * as OrchestrationEngine from "../../../orchestration/Services/OrchestrationEngine.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -44,6 +45,7 @@ function planMetadataBytes(
 const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngine.OrchestrationEngineService;
   const snapshots = yield* FactorySnapshotStore.FactorySnapshotStore;
+  const runTracker = yield* FactoryRunTracker.FactoryRunTracker;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const crypto = yield* Crypto.Crypto;
@@ -159,6 +161,12 @@ const make = Effect.gen(function* () {
           .pipe(Effect.mapError((cause) => new FactoryPresentPlanFailedError({ cause })));
 
         return { digest, intentDigest, title: document.title, phaseCount: phases.phases.length };
+      }),
+
+    attach_factory_run: ({ runDir }) =>
+      Effect.gen(function* () {
+        const scope = yield* McpInvocationContext.requireMcpCapability("factory");
+        return yield* runTracker.attach(scope.threadId, runDir);
       }),
   });
 });

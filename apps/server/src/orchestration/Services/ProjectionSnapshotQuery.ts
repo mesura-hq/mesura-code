@@ -90,6 +90,8 @@ export interface ProjectionSnapshotQueryShape {
    */
   readonly listActivitiesByKind: (
     kind: string,
+    // Mesura: a Software Factory run in an archived thread is still followed after a restart.
+    options?: { readonly includeArchived?: boolean },
   ) => Effect.Effect<ReadonlyArray<OrchestrationThreadActivity>, ProjectionRepositoryError>;
 
   /**
