@@ -1810,3 +1810,42 @@ it("phase8 android run card of a summary without phase marks renders without mar
   await mount();
   expect(factoryRunCard().textContent).toContain("✓1");
 });
+
+// Run card Open (phase 10 of factory-in-chat, criterion 1): the card opens the
+// thread's Factory screen on its Run tab, for this run, above the feed. The
+// screen it opens is mounted in `FactoryRouteScreen.test.tsx`.
+function factoryRunOpenButton() {
+  const open = Array.from(factoryRunCard().querySelectorAll<HTMLButtonElement>("button")).find(
+    (node) => node.textContent?.trim() === "Open" || node.getAttribute("aria-label") === "Open",
+  );
+  expect(
+    open,
+    `Expected the run card's Open button; card: ${factoryRunCard().textContent}`,
+  ).toBeDefined();
+  return open!;
+}
+
+it("phase10 android AC1 run card Open navigates to the Run tab of the thread's Factory screen for that run", async () => {
+  showFactoryRunAt("verify");
+  await mount();
+  await act(async () => factoryRunOpenButton().click());
+  expect(fixture.navigation.navigate).toHaveBeenCalledExactlyOnceWith("ThreadFactory", {
+    environmentId: "inline-screen-environment",
+    threadId: "inline-screen-thread",
+    tab: "run",
+    runId: "invoice-csv-export",
+  });
+});
+
+it("phase10 android AC1 run card Open pushes the Factory screen above the feed without moving or replacing it", async () => {
+  fixture.geometry = true;
+  showFactoryRunAt("verify");
+  await mount();
+  await act(async () => factoryRunOpenButton().click());
+  expect(fixture.navigation.navigate).toHaveBeenCalledOnce();
+  for (const method of ["push", "replace", "reset", "dispatch", "goBack"] as const) {
+    expect(fixture.navigation[method], method).not.toHaveBeenCalled();
+  }
+  expect(fixture.scrollToOffset).not.toHaveBeenCalled();
+  expect(factoryRunCard().textContent).toContain("phase 1/2 · Verify ①");
+});

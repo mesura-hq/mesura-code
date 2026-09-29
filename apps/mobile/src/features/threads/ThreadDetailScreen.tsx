@@ -57,7 +57,7 @@ import type { QueuedThreadMessage } from "../../state/thread-outbox-model";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import type { PendingApproval, PendingUserInput, ThreadFeedEntry } from "../../lib/threadActivity";
 import { PendingApprovalCard } from "./PendingApprovalCard";
-import { useOpenFactoryPlan } from "../factory/useOpenFactoryPlan";
+import { useOpenFactoryPlan, useOpenFactoryRun } from "../factory/useOpenFactoryPlan";
 import { useFactoryPlanApprovalContext } from "../factory/useFactoryPlanApproval";
 import { ComposerFeedback } from "./ComposerFeedback";
 import { ComposerUsageLimits } from "./ComposerUsageLimits";
@@ -657,6 +657,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   }, []);
 
   const openFactoryPlan = useOpenFactoryPlan(props.environmentId, props.selectedThread.id);
+  const openFactoryRun = useOpenFactoryRun(props.environmentId, props.selectedThread.id);
   const factoryPlanApproval = useFactoryPlanApprovalContext({
     environmentId: props.environmentId,
     thread: props.selectedThread,
@@ -778,6 +779,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
             skills={selectedProviderSkills}
             onUseArtifactTemplate={handleUseArtifactTemplate}
             onOpenFactoryPlan={openFactoryPlan}
+            onOpenFactoryRun={openFactoryRun}
             factoryPlanApproval={factoryPlanApproval}
             loadEarlier={props.loadEarlier ?? null}
           />

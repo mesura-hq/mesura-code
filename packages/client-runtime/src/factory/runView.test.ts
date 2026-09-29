@@ -1,26 +1,30 @@
 /**
- * Phase 9 fence, the Run tab's view model: acceptance criteria 1 to 4 and 7
- * over `deriveFactoryRunView`, which turns the `subscribeFactoryRun` stream
- * item `{ state, roles }` into what the Factory pane's Run tab draws.
+ * Phase 10 fence, criterion 4: the one run view model both clients draw from.
+ * The phase 9 coverage of the web Run tab's model, moved onto the shared
+ * module, so the web pane and the Android Factory screen read the same phase
+ * states, return edges, role sessions and totals.
  *
- * Entry point: `deriveFactoryRunView` in `factoryRunView.logic.ts`, fed the
- * state the server's run tracker folds from the recorder's fixture
+ * Entry point: `deriveFactoryRunView` and `deriveFactoryRunTotals` in
+ * `runView.ts` (`@t3tools/client-runtime/factory/run-view`), fed the state the
+ * server's run tracker folds from the recorder's fixture
  * (`packages/shared/src/fixtures/factory-events.v1.jsonl`, a two-phase run
  * whose phase 1 has a repair and a rework) and synthetic event lines for a
  * phase with two repairs, a stopped run, a finished run and a Codex-only
- * cost. The mounted criteria (1's Open, 5, 6 and 7's floor on screen) are in
- * `FactoryRunCard.test.tsx`, which mounts AppRoot with ChatView.
+ * cost. The Android screen that renders it is mounted in
+ * `apps/mobile/src/features/factory/FactoryRouteScreen.test.tsx`.
  */
 /// <reference types="vite-plus/client" />
 import type { FactoryRoleProgress, FactoryRunState } from "@t3tools/contracts";
-import {
-  foldFactoryRunTestLines,
-  makeFactoryRunState,
-} from "@t3tools/client-runtime/factory/testing";
 import { describe, expect, it } from "vite-plus/test";
 
-import eventsJsonl from "../../../../packages/shared/src/fixtures/factory-events.v1.jsonl?raw";
-import { deriveFactoryRunView } from "./factoryRunView.logic";
+import eventsJsonl from "../../../shared/src/fixtures/factory-events.v1.jsonl?raw";
+import {
+  deriveFactoryPhaseView,
+  deriveFactoryRunRail,
+  deriveFactoryRunView,
+  factoryRunFilePath,
+} from "./runView.ts";
+import { foldFactoryRunTestLines, makeFactoryRunState } from "./testing.ts";
 
 const PHASE_1_TITLE = "Serialize the filtered invoice list as CSV";
 const PHASE_2_TITLE = "Add the Export button to the invoices page";
@@ -53,8 +57,8 @@ const spineStatuses = (result: ReturnType<typeof view>) =>
     ),
   );
 
-describe("phase9 run view AC1 phase rail", () => {
-  it("phase9 run view AC1 lists one rail entry per phase with its state and selects the current phase", () => {
+describe("phase10 shared run view from phase9 AC1 phase rail", () => {
+  it("phase10 shared run view from phase9 AC1 lists one rail entry per phase with its state and selects the current phase", () => {
     const result = view(makeFactoryRunState(eventsJsonl, "verify"));
 
     expect(result.rail).toEqual([
@@ -64,7 +68,7 @@ describe("phase9 run view AC1 phase rail", () => {
     expect(result.selectedPhase).toBe(1);
   });
 
-  it("phase9 run view AC1 shows a finished run's phases clean and degraded", () => {
+  it("phase10 shared run view from phase9 AC1 shows a finished run's phases clean and degraded", () => {
     const result = view(makeFactoryRunState(eventsJsonl, "degraded"));
 
     expect(result.rail.map((item) => [item.index, item.status])).toEqual([
@@ -73,7 +77,7 @@ describe("phase9 run view AC1 phase rail", () => {
     ]);
   });
 
-  it("phase9 run view AC1 reads the open phase of a stopped run as stopped, never running", () => {
+  it("phase10 shared run view from phase9 AC1 reads the open phase of a stopped run as stopped, never running", () => {
     const result = view(makeFactoryRunState(eventsJsonl, "stopped"));
 
     expect(result.rail.map((item) => [item.index, item.status])).toEqual([
@@ -82,7 +86,7 @@ describe("phase9 run view AC1 phase rail", () => {
     ]);
   });
 
-  it("phase9 run view AC1 moves the rail's selection to the phase the reader picked", () => {
+  it("phase10 shared run view from phase9 AC1 moves the rail's selection to the phase the reader picked", () => {
     const result = view(makeFactoryRunState(eventsJsonl, "degraded"), { selectedPhase: 1 });
 
     expect(result.selectedPhase).toBe(1);
@@ -90,8 +94,8 @@ describe("phase9 run view AC1 phase rail", () => {
   });
 });
 
-describe("phase9 run view AC2 node spine", () => {
-  it("phase9 run view AC2 draws Build, Harden and Close from Fence to Commit with display names", () => {
+describe("phase10 shared run view from phase9 AC2 node spine", () => {
+  it("phase10 shared run view from phase9 AC2 draws Build, Harden and Close from Fence to Commit with display names", () => {
     const result = view(makeFactoryRunState(eventsJsonl, "verify"));
 
     expect(
@@ -103,7 +107,7 @@ describe("phase9 run view AC2 node spine", () => {
     ]);
   });
 
-  it("phase9 run view AC2 marks the node in flight and the nodes before and after it", () => {
+  it("phase10 shared run view from phase9 AC2 marks the node in flight and the nodes before and after it", () => {
     const result = view(makeFactoryRunState(eventsJsonl, "verify"));
 
     expect(spineStatuses(result)).toEqual({
@@ -120,7 +124,7 @@ describe("phase9 run view AC2 node spine", () => {
     });
   });
 
-  it("phase9 run view AC2 draws each return of the fixture's phase 1 as a loop back to the node it re-entered, labelled with its signal", () => {
+  it("phase10 shared run view from phase9 AC2 draws each return of the fixture's phase 1 as a loop back to the node it re-entered, labelled with its signal", () => {
     const result = view(makeFactoryRunState(eventsJsonl, "degraded"), { selectedPhase: 1 });
 
     expect(result.spine?.returns).toEqual([
@@ -144,7 +148,7 @@ describe("phase9 run view AC2 node spine", () => {
     ]);
   });
 
-  it("phase9 run view AC2 draws a return the implementer still holds as pending to the repair node", () => {
+  it("phase10 shared run view from phase9 AC2 draws a return the implementer still holds as pending to the repair node", () => {
     // Line 14 enters `repair` after the phase's first return; the spine has not resumed.
     const result = view(foldFactoryRunTestLines(fixtureLines.slice(0, 14)));
 
@@ -164,7 +168,7 @@ describe("phase9 run view AC2 node spine", () => {
     expect(Object.values(spineStatuses(result))).not.toContain("current");
   });
 
-  it("phase9 run view AC2 shows a phase with two repairs as two return lines and the node it re-entered in flight", () => {
+  it("phase10 shared run view from phase9 AC2 shows a phase with two repairs as two return lines and the node it re-entered in flight", () => {
     const state = foldFactoryRunTestLines([
       fixtureLines[0]!,
       event("2026-09-28T09:08:00.000Z", "phase.started", { phase: 1 }),
@@ -226,13 +230,13 @@ describe("phase9 run view AC2 node spine", () => {
     });
   });
 
-  it("phase9 run view AC2 shows a closed phase with no node in flight", () => {
+  it("phase10 shared run view from phase9 AC2 shows a closed phase with no node in flight", () => {
     const result = view(makeFactoryRunState(eventsJsonl, "done"), { selectedPhase: 1 });
 
     expect(Object.values(spineStatuses(result))).toEqual(Array(10).fill("done"));
   });
 
-  it("phase9 run view AC2 marks the node a stopped run stopped at, with nothing in flight", () => {
+  it("phase10 shared run view from phase9 AC2 marks the node a stopped run stopped at, with nothing in flight", () => {
     const result = view(makeFactoryRunState(eventsJsonl, "stopped"));
 
     expect(result.selectedPhase).toBe(2);
@@ -245,7 +249,7 @@ describe("phase9 run view AC2 node spine", () => {
     expect(Object.values(statuses)).not.toContain("current");
   });
 
-  it("phase9 run view AC2 shows a phase that has not started as all pending with no returns", () => {
+  it("phase10 shared run view from phase9 AC2 shows a phase that has not started as all pending with no returns", () => {
     const result = view(makeFactoryRunState(eventsJsonl, "verify"), { selectedPhase: 2 });
 
     expect(Object.values(spineStatuses(result))).toEqual(Array(10).fill("pending"));
@@ -253,8 +257,8 @@ describe("phase9 run view AC2 node spine", () => {
   });
 });
 
-describe("phase9 run view AC3 role sessions", () => {
-  it("phase9 run view AC3 shows each finished role session with harness, model, session id, turn count and its cost in dollars or tokens", () => {
+describe("phase10 shared run view from phase9 AC3 role sessions", () => {
+  it("phase10 shared run view from phase9 AC3 shows each finished role session with harness, model, session id, turn count and its cost in dollars or tokens", () => {
     const result = view(makeFactoryRunState(eventsJsonl, "degraded"), { selectedPhase: 1 });
 
     expect(
@@ -302,7 +306,7 @@ describe("phase9 run view AC3 role sessions", () => {
     ]);
   });
 
-  it("phase9 run view AC3 shows a running session's live tool-call count, last tool and time of last activity", () => {
+  it("phase10 shared run view from phase9 AC3 shows a running session's live tool-call count, last tool and time of last activity", () => {
     // Phase 1 at Verify ①, with the verifier's first turn dispatched and still running.
     const state = foldFactoryRunTestLines(fixtureLines.slice(0, 20));
     const roles: FactoryRoleProgress[] = [
@@ -368,7 +372,7 @@ describe("phase9 run view AC3 role sessions", () => {
     });
   });
 
-  it("phase9 run view AC3 lists each turn of a session with its prompt and report files", () => {
+  it("phase10 shared run view from phase9 AC3 lists each turn of a session with its prompt and report files", () => {
     const result = view(makeFactoryRunState(eventsJsonl, "degraded"), { selectedPhase: 1 });
 
     const verifier = result.roles.find((row) => row.role === "verifier");
@@ -387,8 +391,8 @@ describe("phase9 run view AC3 role sessions", () => {
   });
 });
 
-describe("phase9 run view AC4 phase record", () => {
-  it("phase9 run view AC4 lists a phase's verdicts with the deciding line, findings with severity and disposition, checks with exit codes and its commit", () => {
+describe("phase10 shared run view from phase9 AC4 phase record", () => {
+  it("phase10 shared run view from phase9 AC4 lists a phase's verdicts with the deciding line, findings with severity and disposition, checks with exit codes and its commit", () => {
     const detail = view(makeFactoryRunState(eventsJsonl, "degraded"), { selectedPhase: 1 }).detail;
 
     expect(detail?.verdicts).toEqual([
@@ -432,7 +436,7 @@ describe("phase9 run view AC4 phase record", () => {
     });
   });
 
-  it("phase9 run view AC4 lists a phase's deviations and a finding without a disposition yet", () => {
+  it("phase10 shared run view from phase9 AC4 lists a phase's deviations and a finding without a disposition yet", () => {
     const detail = view(makeFactoryRunState(eventsJsonl, "degraded"), { selectedPhase: 2 }).detail;
 
     expect(detail?.deviations).toEqual([
@@ -454,15 +458,15 @@ describe("phase9 run view AC4 phase record", () => {
     expect(reworking.detail?.findings.map((finding) => finding.disposition)).toEqual([null, null]);
   });
 
-  it("phase9 run view AC4 shows no commit for a phase still running", () => {
+  it("phase10 shared run view from phase9 AC4 shows no commit for a phase still running", () => {
     const detail = view(makeFactoryRunState(eventsJsonl, "verify")).detail;
 
     expect(detail?.commit).toBeNull();
   });
 });
 
-describe("phase9 run view AC7 totals", () => {
-  it("phase9 run view AC7 closes a live run's open interval with the client clock", () => {
+describe("phase10 shared run view from phase9 AC7 totals", () => {
+  it("phase10 shared run view from phase9 AC7 closes a live run's open interval with the client clock", () => {
     const result = view(makeFactoryRunState(eventsJsonl, "verify"), {
       now: "2026-09-28T10:30:00.000Z",
     });
@@ -474,7 +478,7 @@ describe("phase9 run view AC7 totals", () => {
     });
   });
 
-  it("phase9 run view AC7 adds the open question's wait up to now while the run is waiting", () => {
+  it("phase10 shared run view from phase9 AC7 adds the open question's wait up to now while the run is waiting", () => {
     const result = view(makeFactoryRunState(eventsJsonl, "waiting"), {
       now: "2026-09-28T12:43:00.000Z",
     });
@@ -487,7 +491,7 @@ describe("phase9 run view AC7 totals", () => {
     });
   });
 
-  it("phase9 run view AC7 counts the wait from the question, not from the last event, when events arrive while waiting", () => {
+  it("phase10 shared run view from phase9 AC7 counts the wait from the question, not from the last event, when events arrive while waiting", () => {
     const state = foldFactoryRunTestLines([
       ...fixtureLines.slice(0, 53),
       event("2026-09-28T12:40:00.000Z", "note", { phase: 2, text: "Waiting for the file name." }),
@@ -497,7 +501,7 @@ describe("phase9 run view AC7 totals", () => {
     expect(result.totals).toMatchObject({ elapsedMs: 13_800_000, waitingMs: 1_020_000 });
   });
 
-  it("phase9 run view AC7 keeps a finished run's clock and ignores the client clock", () => {
+  it("phase10 shared run view from phase9 AC7 keeps a finished run's clock and ignores the client clock", () => {
     const degraded = view(makeFactoryRunState(eventsJsonl, "degraded"), {
       now: "2026-09-29T09:00:00.000Z",
     });
@@ -514,19 +518,19 @@ describe("phase9 run view AC7 totals", () => {
     expect(stopped.totals).toMatchObject({ elapsedMs: 14_400_000, waitingMs: 1_500_000 });
   });
 
-  it("phase9 run view AC7 reads dollars and tokens and marks the dollar figure a floor when Codex turns report only tokens", () => {
+  it("phase10 shared run view from phase9 AC7 reads dollars and tokens and marks the dollar figure a floor when Codex turns report only tokens", () => {
     const result = view(makeFactoryRunState(eventsJsonl, "degraded"));
 
     expect(result.totals).toMatchObject({ cost: "$23.94 + 8,429,560 tokens", costIsFloor: true });
   });
 
-  it("phase9 run view AC7 reads dollars alone, not a floor, while only Claude turns have reported", () => {
+  it("phase10 shared run view from phase9 AC7 reads dollars alone, not a floor, while only Claude turns have reported", () => {
     const result = view(makeFactoryRunState(eventsJsonl, "verify"));
 
     expect(result.totals).toMatchObject({ cost: "$10.03", costIsFloor: false });
   });
 
-  it("phase9 run view AC7 reads tokens alone, not a floor, when only Codex turns have reported", () => {
+  it("phase10 shared run view from phase9 AC7 reads tokens alone, not a floor, when only Codex turns have reported", () => {
     const state = foldFactoryRunTestLines([
       fixtureLines[0]!,
       event("2026-09-28T09:08:00.000Z", "phase.started", { phase: 1 }),
@@ -559,7 +563,7 @@ describe("phase9 run view AC7 totals", () => {
   });
 });
 
-describe("phase9 run view review regressions", () => {
+describe("phase10 shared run view from phase9 review regressions", () => {
   const dispatchStarted = (at: string, turn: number, sessionId?: string) =>
     event(at, "dispatch.started", {
       phase: 1,
@@ -586,7 +590,7 @@ describe("phase9 run view review regressions", () => {
     event("2026-09-28T09:08:00.000Z", "phase.started", { phase: 1 }),
   ];
 
-  it("phase9 run view P1-2 keeps a fresh turn without a session id out of the role's finished session", () => {
+  it("phase10 shared run view from phase9 P1-2 keeps a fresh turn without a session id out of the role's finished session", () => {
     const state = foldFactoryRunTestLines([
       ...started,
       dispatchStarted("2026-09-28T09:10:00.000Z", 1),
@@ -600,7 +604,7 @@ describe("phase9 run view review regressions", () => {
     ]);
   });
 
-  it("phase9 run view P1-2 shows two sessions of one role as two rows, each with its own turns", () => {
+  it("phase10 shared run view from phase9 P1-2 shows two sessions of one role as two rows, each with its own turns", () => {
     const state = foldFactoryRunTestLines([
       ...started,
       dispatchStarted("2026-09-28T09:10:00.000Z", 1),
@@ -619,7 +623,7 @@ describe("phase9 run view review regressions", () => {
     ]);
   });
 
-  it("phase9 run view P2-3 keeps an unchanged role row and its turns identical across stream items", () => {
+  it("phase10 shared run view from phase9 P2-3 keeps an unchanged role row and its turns identical across stream items", () => {
     const before = foldFactoryRunTestLines(fixtureLines.slice(0, 20));
     const first = view(before);
     // The verifier's turn finishes; the implementer's session does not change.
@@ -640,7 +644,7 @@ describe("phase9 run view review regressions", () => {
     expect(verifierAfter?.status).toBe("finished");
   });
 
-  it("phase9 run view P2-3 never lends a row of another phase", () => {
+  it("phase10 shared run view from phase9 P2-3 never lends a row of another phase", () => {
     const state = makeFactoryRunState(eventsJsonl, "degraded");
     const phaseOne = view(state, { selectedPhase: 1 });
     const phaseTwo = deriveFactoryRunView({
@@ -652,5 +656,81 @@ describe("phase9 run view review regressions", () => {
 
     expect(phaseTwo.roles.find((row) => row.role === "implementer")?.turnCount).toBe(2);
     for (const row of phaseTwo.roles) expect(phaseOne.roles).not.toContain(row);
+  });
+});
+
+describe("phase10 shared run view review regressions", () => {
+  /** A stream item as the phone receives it: decoded from the wire, sharing nothing. */
+  const decoded = (state: FactoryRunState) => ({
+    state: JSON.parse(JSON.stringify(state)) as FactoryRunState,
+    roles: [],
+  });
+
+  it("phase10 shared run view P1-1 resolves a deviation's repository path against the framed repository", () => {
+    const repo = makeFactoryRunState(eventsJsonl, "degraded").frame?.repo ?? null;
+    expect(repo).toBe("/srv/repos/billing-web");
+
+    expect(factoryRunFilePath(repo, "src/components/Toolbar.tsx")).toBe(
+      "/srv/repos/billing-web/src/components/Toolbar.tsx",
+    );
+    expect(factoryRunFilePath("/srv/repos/billing-web/", "./src/a.ts")).toBe(
+      "/srv/repos/billing-web/src/a.ts",
+    );
+    expect(factoryRunFilePath(repo, `${RUN_DIR}/phase-1/verifier-1.md`)).toBe(
+      `${RUN_DIR}/phase-1/verifier-1.md`,
+    );
+    expect(factoryRunFilePath(null, "src/components/Toolbar.tsx")).toBe(
+      "src/components/Toolbar.tsx",
+    );
+  });
+
+  it("phase10 shared run view P2-1 keeps a phase the item did not change identical across decoded items", () => {
+    const before = decoded(makeFactoryRunState(eventsJsonl, "verify"));
+    const after = decoded(makeFactoryRunState(eventsJsonl, "review"));
+
+    const pendingBefore = deriveFactoryPhaseView({ item: before, phaseIndex: 2 });
+    const pendingAfter = deriveFactoryPhaseView({
+      item: after,
+      phaseIndex: 2,
+      previous: pendingBefore,
+    });
+    expect(pendingAfter).toBe(pendingBefore);
+
+    const runningBefore = deriveFactoryPhaseView({ item: before, phaseIndex: 1 });
+    const runningAfter = deriveFactoryPhaseView({
+      item: after,
+      phaseIndex: 1,
+      previous: runningBefore,
+    });
+    expect(runningAfter).not.toBe(runningBefore);
+    expect(runningAfter?.spine).not.toBe(runningBefore?.spine);
+    // The implementer's finished session did not move between the two items.
+    expect(runningAfter?.roles.find((row) => row.role === "implementer")).toBe(
+      runningBefore?.roles.find((row) => row.role === "implementer"),
+    );
+
+    const railBefore = deriveFactoryRunRail(before.state, null);
+    const railAfter = deriveFactoryRunRail(after.state, null, railBefore);
+    expect(railAfter[0]).toBe(railBefore[0]);
+    expect(railAfter[1]).toBe(railBefore[1]);
+  });
+
+  it("phase10 shared run view P2-1 keeps the web view's unchanged spine and record identical across decoded items", () => {
+    const state = makeFactoryRunState(eventsJsonl, "degraded");
+    const first = deriveFactoryRunView({
+      item: decoded(state),
+      selectedPhase: 1,
+      nowMs: 0,
+    });
+    const second = deriveFactoryRunView({
+      item: decoded(state),
+      selectedPhase: 1,
+      nowMs: 0,
+      previous: first,
+    });
+
+    expect(second.spine).toBe(first.spine);
+    expect(second.detail).toBe(first.detail);
+    expect(second.rail[0]).toBe(first.rail[0]);
   });
 });

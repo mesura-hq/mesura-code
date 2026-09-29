@@ -1,17 +1,14 @@
-import { factoryNodeDisplayName } from "@t3tools/client-runtime/factory/run-presentation";
 import { CheckIcon, CircleDotIcon, CircleSlashIcon, CornerDownLeftIcon } from "lucide-react";
 import { memo } from "react";
 
 import { cn } from "~/lib/utils";
-import type { FactorySpineNodeStatus, FactorySpineView } from "./factoryRunView.logic";
+import {
+  FACTORY_SPINE_NODE_TONE,
+  factoryReturnDestination,
+  type FactorySpineNodeStatus,
+  type FactorySpineView,
+} from "./factoryRunView.logic";
 import { FACTORY_MARK_CLASS_BY_TONE } from "./factoryTones";
-
-const NODE_TONE = {
-  done: "success",
-  current: "info",
-  pending: "neutral",
-  stopped: "warning",
-} as const satisfies Record<FactorySpineNodeStatus, keyof typeof FACTORY_MARK_CLASS_BY_TONE>;
 
 // Static icons only: the node in flight is marked by colour and a dot, never
 // an animation (a repainting spinner pegs the GPU on high-refresh displays).
@@ -47,7 +44,7 @@ export const FactoryNodeSpine = memo(function FactoryNodeSpine({
                 aria-current={node.status === "current" ? "step" : undefined}
                 className={cn(
                   "flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-xs",
-                  FACTORY_MARK_CLASS_BY_TONE[NODE_TONE[node.status]],
+                  FACTORY_MARK_CLASS_BY_TONE[FACTORY_SPINE_NODE_TONE[node.status]],
                 )}
               >
                 <NodeIcon status={node.status} />
@@ -64,11 +61,7 @@ export const FactoryNodeSpine = memo(function FactoryNodeSpine({
               <CornerDownLeftIcon aria-hidden className="mt-0.5 size-3 shrink-0" />
               <span className="min-w-0">
                 <span className="text-foreground">{edge.text}</span>
-                <span className="ml-1.5 whitespace-nowrap">
-                  {edge.pending
-                    ? `→ ${factoryNodeDisplayName(edge.to)}, in progress`
-                    : `→ back in at ${factoryNodeDisplayName(edge.to)}`}
-                </span>
+                <span className="ml-1.5 whitespace-nowrap">{factoryReturnDestination(edge)}</span>
               </span>
             </li>
           ))}

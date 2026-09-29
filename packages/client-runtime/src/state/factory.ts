@@ -1,4 +1,8 @@
-import { WS_METHODS, type FactoryReadSnapshotResult } from "@t3tools/contracts";
+import {
+  WS_METHODS,
+  type FactoryReadSnapshotResult,
+  type FactoryRunStreamItem,
+} from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 
@@ -77,4 +81,24 @@ export function readFactorySnapshotState<E>(
     readySnapshotBySuccess.set(success, state);
   }
   return state;
+}
+
+export type FactoryRunStreamState =
+  | { readonly status: "loading" }
+  | { readonly status: "failed" }
+  | { readonly status: "ready"; readonly item: FactoryRunStreamItem };
+
+const LOADING_FACTORY_RUN: FactoryRunStreamState = { status: "loading" };
+const FAILED_FACTORY_RUN: FactoryRunStreamState = { status: "failed" };
+
+/**
+ * What a Run tab renders from a `factoryRun` subscription: the latest item,
+ * or why there is none. After a failure the last item received still renders.
+ */
+export function readFactoryRunStreamState<E>(
+  result: AsyncResult.AsyncResult<FactoryRunStreamItem, E>,
+): FactoryRunStreamState {
+  const item = Option.getOrNull(AsyncResult.value(result));
+  if (item !== null) return { status: "ready", item };
+  return AsyncResult.isFailure(result) ? FAILED_FACTORY_RUN : LOADING_FACTORY_RUN;
 }

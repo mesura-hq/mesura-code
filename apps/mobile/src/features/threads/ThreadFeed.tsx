@@ -279,6 +279,8 @@ export interface ThreadFeedProps extends PendingUserInputFeedProps {
   readonly onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void;
   /** Opens a presented plan, by its `factory.plan` activity id, on the Factory screen. */
   readonly onOpenFactoryPlan?: (planId: string) => void;
+  /** Opens an attached run, by its run id, on the Factory screen's Run tab. */
+  readonly onOpenFactoryRun?: (runId: string) => void;
   /** Routes and Approve for the plan cards. */
   readonly factoryPlanApproval?: FactoryPlanApprovalContext;
   /** Non-null when older turns exist beyond the loaded window. */
@@ -1364,6 +1366,7 @@ function renderFeedEntry(
     | "environmentId"
     | "onUseArtifactTemplate"
     | "onOpenFactoryPlan"
+    | "onOpenFactoryRun"
     | "factoryPlanApproval"
     | "skills"
     | "dispatchingMessageId"
@@ -1451,7 +1454,14 @@ function renderFeedEntry(
   }
 
   if (entry.type === "factory-run") {
-    return <FactoryRunCard run={entry.run} />;
+    const onOpenFactoryRun = props.onOpenFactoryRun;
+    const runId = entry.run.runId;
+    return (
+      <FactoryRunCard
+        run={entry.run}
+        onOpen={onOpenFactoryRun ? () => onOpenFactoryRun(runId) : undefined}
+      />
+    );
   }
 
   if (entry.type === "thinking") {
@@ -2796,6 +2806,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
                 skills: props.skills,
                 onUseArtifactTemplate: props.onUseArtifactTemplate,
                 onOpenFactoryPlan: props.onOpenFactoryPlan,
+                onOpenFactoryRun: props.onOpenFactoryRun,
                 factoryPlanApproval: props.factoryPlanApproval,
               },
             )
@@ -2840,6 +2851,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       props.environmentId,
       props.onUseArtifactTemplate,
       props.onOpenFactoryPlan,
+      props.onOpenFactoryRun,
       props.factoryPlanApproval,
       props.skills,
       renderMarkdownImage,

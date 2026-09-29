@@ -16,6 +16,7 @@ import { memo, useMemo, useState, type ReactNode } from "react";
 import { Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
+import { FactoryOpenButton } from "./FactoryOpenButton";
 import { FactoryApprovedRoutes, FactoryRoutePicker } from "./FactoryRoutePicker";
 import type { FactoryPlanApprovalContext } from "./useFactoryPlanApproval";
 import { useFactorySnapshot } from "./useFactorySnapshot";
@@ -170,15 +171,7 @@ export const FactoryPlanCard = memo(function FactoryPlanCard(props: {
         ))}
       </View>
       {props.onOpen ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Open"
-          accessibilityHint="Shows the whole plan"
-          className="min-h-9 items-center justify-center self-start rounded-lg border border-border bg-subtle px-3 active:opacity-65"
-          onPress={props.onOpen}
-        >
-          <Text className="font-t3-bold text-xs text-foreground">Open</Text>
-        </Pressable>
+        <FactoryOpenButton hint="Shows the whole plan" onPress={props.onOpen} />
       ) : null}
       {props.approval ? (
         <FactoryPlanApprovalSection plan={props.plan} approval={props.approval} />

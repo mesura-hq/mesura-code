@@ -3,7 +3,9 @@
 // `ThreadFactory` route, mounted with its route params and the real plan
 // document, segmented control and MermaidWebView under it. Stubbed: native
 // hosts (DOM elements), the thread selection, the stored plan body
-// (`factoryEnvironment.factorySnapshot`) and the WebView host.
+// (`factoryEnvironment.factorySnapshot`), the run stream
+// (`factoryEnvironment.factoryRun`), the screen's focus as React Navigation
+// reports it, and the WebView host.
 //
 // Only the Android emulator can show: the WebView actually drawing the diagram
 // with Mermaid from the network, the drawn height matching the measurement,
@@ -22,6 +24,17 @@ const fixture = vi.hoisted(() => ({
   factorySnapshotResults: {} as Record<string, unknown>,
   webViews: [] as Array<Record<string, unknown>>,
   navigation: { navigate: vi.fn(), goBack: vi.fn(), setOptions: vi.fn() },
+  /** Whether React Navigation reports the screen focused; `setFocused` notifies. */
+  focused: true,
+  focusListeners: new Set<() => void>(),
+  /** The `subscribeFactoryRun` stream per run id: the atom a test writes new items to. */
+  runStreams: new Map<string, unknown>(),
+  runStreamViews: new Map<string, unknown>(),
+  runRequests: [] as Array<{ environmentId: string; input: { threadId: string; runId: string } }>,
+  /** Run streams mounted right now: a subscription the server is tailing for. */
+  runSubscriptions: 0,
+  /** The stream atom of a run, created kept alive so a test can write to it before a read. */
+  runStream: null as null | ((runId: string) => unknown),
 }));
 
 type NativeStyle = { height?: number; display?: string } | ReadonlyArray<unknown> | undefined;
@@ -33,10 +46,22 @@ function flattenStyle(style: NativeStyle): { height?: number; display?: string }
 }
 
 vi.mock("react-native", () => {
-  const View = ({ children, style }: { children?: ReactNode; style?: NativeStyle }) => {
+  const View = ({
+    children,
+    style,
+    accessibilityLabel,
+  }: {
+    children?: ReactNode;
+    style?: NativeStyle;
+    accessibilityLabel?: string;
+  }) => {
     const flat = flattenStyle(style);
     return (
-      <div data-height={flat.height} hidden={flat.display === "none"}>
+      <div
+        data-height={flat.height}
+        hidden={flat.display === "none"}
+        aria-label={accessibilityLabel}
+      >
         {children}
       </div>
     );
@@ -67,6 +92,7 @@ vi.mock("react-native", () => {
         onClick={onPress}
         aria-label={accessibilityLabel}
         aria-selected={accessibilityState?.selected}
+        aria-expanded={accessibilityState?.expanded}
         data-native-role={accessibilityRole}
       >
         {typeof children === "function" ? children({ pressed: false }) : children}
@@ -121,12 +147,25 @@ vi.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
   SafeAreaView: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
 }));
-vi.mock("@react-navigation/native", () => ({
-  useNavigation: () => fixture.navigation,
-  useRoute: () => ({ key: "factory", name: "ThreadFactory", params: fixture.routeParams }),
-  useFocusEffect: () => undefined,
-  useIsFocused: () => true,
-}));
+// Focus as React Navigation reports it: `useIsFocused` re-renders on a change,
+// `useFocusEffect` runs its effect on focus and its cleanup on blur.
+vi.mock("@react-navigation/native", async () => {
+  const React = await import("react");
+  const subscribe = (listener: () => void) => {
+    fixture.focusListeners.add(listener);
+    return () => fixture.focusListeners.delete(listener);
+  };
+  const useIsFocused = () => React.useSyncExternalStore(subscribe, () => fixture.focused);
+  return {
+    useNavigation: () => fixture.navigation,
+    useRoute: () => ({ key: "factory", name: "ThreadFactory", params: fixture.routeParams }),
+    useIsFocused,
+    useFocusEffect: (effect: () => undefined | (() => void)) => {
+      const focused = useIsFocused();
+      React.useEffect(() => (focused ? effect() : undefined), [focused, effect]);
+    },
+  };
+});
 vi.mock("@react-navigation/elements", async () => ({
   HeaderHeightContext: (await import("react")).createContext(0),
   useHeaderHeight: () => 0,
@@ -214,6 +253,14 @@ vi.mock("../../state/use-selected-thread-worktree", () => ({
 // factoryReadSnapshot RPC would answer it; an unknown digest stays loading.
 vi.mock("../../state/factory", async () => {
   const { AsyncResult, Atom } = await import("effect/unstable/reactivity");
+  fixture.runStream = (runId) => {
+    let stream = fixture.runStreams.get(runId);
+    if (stream === undefined) {
+      stream = Atom.keepAlive(Atom.make(AsyncResult.initial(true)));
+      fixture.runStreams.set(runId, stream);
+    }
+    return stream;
+  };
   return {
     factoryEnvironment: {
       factorySnapshot: ({ input }: { input: { digest: string } }) => {
@@ -238,6 +285,29 @@ vi.mock("../../state/factory", async () => {
           fixture.factorySnapshotAtoms.set(key, atom);
         }
         return atom;
+      },
+      // One stream per run, as `subscribeFactoryRun` answers it. The atom the
+      // screen reads counts itself mounted until the registry disposes it.
+      factoryRun: (request: {
+        environmentId: string;
+        input: { threadId: string; runId: string };
+      }) => {
+        fixture.runRequests.push(request);
+        const { runId } = request.input;
+        const stream = fixture.runStream!(runId);
+        let view = fixture.runStreamViews.get(runId);
+        if (view === undefined) {
+          const source = stream as Atom.Atom<unknown>;
+          view = Atom.make((get) => {
+            fixture.runSubscriptions += 1;
+            get.addFinalizer(() => {
+              fixture.runSubscriptions -= 1;
+            });
+            return get(source);
+          });
+          fixture.runStreamViews.set(runId, view);
+        }
+        return view;
       },
     },
   };
@@ -276,6 +346,12 @@ beforeEach(() => {
   fixture.factorySnapshotAtoms.clear();
   fixture.factorySnapshotResults = {};
   fixture.webViews = [];
+  fixture.focused = true;
+  fixture.focusListeners.clear();
+  fixture.runStreams.clear();
+  fixture.runStreamViews.clear();
+  fixture.runRequests = [];
+  fixture.runSubscriptions = 0;
   for (const method of Object.values(fixture.navigation)) method.mockClear();
   appAtomRegistry.reset();
   container = document.createElement("div");
@@ -629,4 +705,330 @@ it("Factory screen says the plan's text could not be loaded when it was never re
   );
   await mount();
   expect(visibleText()).toContain("The plan's text could not be loaded.");
+});
+
+// The Run tab (phase 10 of factory-in-chat): criteria 1, 2, 3 and 5 on
+// Android, through the same route screen. The run stream answers with the
+// state the server's run tracker folds from the recorder's fixture
+// (`packages/shared/src/fixtures/factory-events.v1.jsonl`). Only the emulator
+// shows the layout on a narrow screen, the tones' colours, and the server
+// actually ending its tail when the subscription ends.
+import type { FactoryRoleProgress } from "@t3tools/contracts";
+import {
+  foldFactoryRunTestLines,
+  makeFactoryRunState,
+} from "@t3tools/client-runtime/factory/testing";
+import { AsyncResult, type Atom } from "effect/unstable/reactivity";
+
+import {
+  makeFactoryRunActivityAt,
+  readFactoryRunEventsFixture,
+  type FactoryRunFixturePoint,
+} from "./factoryRun.test-support";
+
+const runId = "invoice-csv-export";
+const runEvents = readFactoryRunEventsFixture();
+const runEventLines = runEvents.split("\n").filter((line) => line.trim().length > 0);
+const RUN_PHASE_1 = "Serialize the filtered invoice list as CSV";
+const RUN_PHASE_2 = "Add the Export button to the invoices page";
+
+/** The thread holds its plan and the run's `factory.run` activity at `point`. */
+function showRunAt(point: FactoryRunFixturePoint) {
+  fixture.activities = [
+    makeFactoryPlanActivity({ id: planId, createdAt: "2026-09-28T10:00:05.000Z" }),
+    makeFactoryRunActivityAt({ threadId, point }),
+  ];
+}
+
+/** The next item of the run's stream, as `subscribeFactoryRun` delivers it. */
+async function streamRun(
+  state: import("@t3tools/contracts").FactoryRunState,
+  roles: ReadonlyArray<FactoryRoleProgress> = [],
+) {
+  const stream = fixture.runStream!(runId) as Atom.Writable<unknown>;
+  await act(async () => appAtomRegistry.set(stream, AsyncResult.success({ state, roles })));
+}
+const streamRunAt = (point: FactoryRunFixturePoint) =>
+  streamRun(makeFactoryRunState(runEvents, point));
+
+async function openRunTab(point: FactoryRunFixturePoint) {
+  showRunAt(point);
+  fixture.routeParams = { environmentId, threadId, tab: "run", runId };
+  await streamRunAt(point);
+  await mount();
+}
+
+/** React Navigation focusing or blurring the screen; disposal settles after it. */
+async function setFocused(focused: boolean) {
+  await act(async () => {
+    fixture.focused = focused;
+    for (const listener of fixture.focusListeners) listener();
+  });
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+}
+
+/** Accessibility labels a reader can reach: folded content does not count. */
+function visibleLabels(): string[] {
+  const clone = container.cloneNode(true) as HTMLElement;
+  for (const hidden of Array.from(clone.querySelectorAll("[hidden]"))) hidden.remove();
+  return Array.from(clone.querySelectorAll("[aria-label]")).map(
+    (node) => node.getAttribute("aria-label") ?? "",
+  );
+}
+
+function phaseHeaders(): HTMLButtonElement[] {
+  return buttons().filter((node) => /^Phase \d+: /.test(node.getAttribute("aria-label") ?? ""));
+}
+function phaseHeader(index: number): HTMLButtonElement {
+  const header = phaseHeaders().find((node) =>
+    node.getAttribute("aria-label")?.startsWith(`Phase ${index}: `),
+  );
+  expect(header, `Expected phase ${index}'s header; screen: ${visibleText()}`).toBeDefined();
+  return header!;
+}
+
+it("phase10 android AC1 Factory screen enables the Run tab when the thread has a run and keeps Report disabled", async () => {
+  showRunAt("verify");
+  await mount();
+  const tabs = buttons().filter((node) => node.dataset.nativeRole === "tab");
+  expect(tabs.map((node) => [node.textContent?.trim(), node.disabled])).toEqual([
+    ["Plan", false],
+    ["Run", false],
+    ["Report", true],
+  ]);
+  expect(tabs[0]!.getAttribute("aria-selected")).toBe("true");
+  expect(fixture.runSubscriptions).toBe(0);
+
+  await streamRunAt("verify");
+  await press(tabs[1]!);
+  expect(
+    buttons()
+      .find((node) => node.dataset.nativeRole === "tab" && node.textContent?.trim() === "Run")!
+      .getAttribute("aria-selected"),
+  ).toBe("true");
+  expect(phaseHeaders()).toHaveLength(2);
+});
+
+it("phase10 android AC1 Factory screen opened on the Run tab lists the run's phases in order with their state", async () => {
+  await openRunTab("verify");
+  const runTab = buttons().find(
+    (node) => node.dataset.nativeRole === "tab" && node.textContent?.trim() === "Run",
+  );
+  expect(runTab?.getAttribute("aria-selected")).toBe("true");
+  expect(visibleText()).not.toContain(`${planSections.length} sections`);
+
+  expect(phaseHeaders().map((node) => node.getAttribute("aria-label"))).toEqual([
+    `Phase 1: running — ${RUN_PHASE_1}`,
+    `Phase 2: pending — ${RUN_PHASE_2}`,
+  ]);
+  expect(fixture.runRequests.length).toBeGreaterThan(0);
+  for (const request of fixture.runRequests) {
+    expect(request).toEqual({ environmentId, input: { threadId, runId } });
+  }
+});
+
+it("phase10 android AC1 Factory screen Run tab follows the thread's latest run when the route names none", async () => {
+  showRunAt("degraded");
+  fixture.routeParams = { environmentId, threadId, tab: "run" };
+  await streamRunAt("degraded");
+  await mount();
+
+  expect(fixture.runRequests.map((request) => request.input.runId)).toContain(runId);
+  expect(phaseHeaders().map((node) => node.getAttribute("aria-label"))).toEqual([
+    `Phase 1: clean — ${RUN_PHASE_1}`,
+    `Phase 2: degraded — ${RUN_PHASE_2}`,
+  ]);
+});
+
+it("phase10 android AC2 Run tab opens the running phase with its node in flight and keeps the other phases folded", async () => {
+  await openRunTab("verify");
+  expect(phaseHeader(1).getAttribute("aria-expanded")).toBe("true");
+  expect(phaseHeader(2).getAttribute("aria-expanded")).toBe("false");
+
+  const labels = visibleLabels();
+  expect(labels).toEqual(
+    expect.arrayContaining([
+      "Fence: done",
+      "Implement: done",
+      "Build checks: done",
+      "Verify ①: current",
+      "Review: pending",
+      "Commit: pending",
+    ]),
+  );
+  // Only the open phase shows a spine: one node in flight, none of phase 2's.
+  expect(labels.filter((label) => label === "Verify ①: current")).toHaveLength(1);
+  expect(labels.filter((label) => label === "Fence: pending")).toHaveLength(0);
+});
+
+it("phase10 android AC2 tapping a phase expands its returns, role sessions, verdicts, findings, checks and commit, and folds it again", async () => {
+  await openRunTab("degraded");
+  expect(phaseHeader(1).getAttribute("aria-expanded")).toBe("false");
+  expect(visibleText()).not.toContain("4a7d1e9");
+
+  await press(phaseHeader(1));
+  expect(phaseHeader(1).getAttribute("aria-expanded")).toBe("true");
+  const text = visibleText();
+  // Returns, each with its signal.
+  expect(text).toContain(
+    "repair 1/5 — Build checks: pnpm lint failed on an unused import in the CSV serializer; the import was removed",
+  );
+  expect(text).toContain(
+    "rework 2/5 — Review: P1-1 repaired: rows stream through a cursor; P3-1 rejected",
+  );
+  // Role sessions.
+  expect(text).toContain("claude-opus-5-5");
+  expect(text).toContain("$16.58");
+  expect(text).toContain("gpt-6-luna");
+  expect(text).toContain("4,381,030 tokens");
+  expect(text).toContain("gpt-6-sol");
+  // Verdicts with their deciding line.
+  expect(text).toContain("WORKS");
+  expect(text).toContain(
+    'curl "/invoices/export.csv?status=overdue" returned 14 rows, the same 14 the page lists',
+  );
+  // Findings with severity and disposition.
+  expect(text).toContain("P1-1");
+  expect(text).toContain(
+    "The export loads every invoice into memory before it writes the first row",
+  );
+  expect(text).toContain("repaired");
+  expect(text).toContain("P3-1");
+  expect(text).toContain("rejected");
+  // Checks with exit codes, and the commit.
+  expect(text).toContain("pnpm lint");
+  expect(text).toMatch(/exit\s*1/);
+  expect(text).toContain("4a7d1e9");
+  expect(text).toContain("feat(invoices): export the filtered invoice list as CSV");
+
+  await press(phaseHeader(1));
+  expect(phaseHeader(1).getAttribute("aria-expanded")).toBe("false");
+  expect(visibleText()).not.toContain("4a7d1e9");
+});
+
+it("phase10 android AC2 Run tab shows a running role session's live tool calls and last tool", async () => {
+  showRunAt("verify");
+  fixture.routeParams = { environmentId, threadId, tab: "run", runId };
+  // Phase 1 at Verify ①, with the verifier's first turn dispatched and running.
+  await streamRun(foldFactoryRunTestLines(runEventLines.slice(0, 20)), [
+    {
+      phase: 1,
+      role: "verifier",
+      turn: 1,
+      status: "running",
+      toolCalls: 14,
+      lastTool: "exec_command",
+      lastActivityAt: "2026-09-28T10:24:00.000Z",
+    },
+  ]);
+  await mount();
+
+  const text = visibleText();
+  expect(text).toContain("14 tool calls");
+  expect(text).toContain("exec_command");
+});
+
+it("phase10 android AC2 Run tab opens a role turn's prompt file in the file screen", async () => {
+  await openRunTab("degraded");
+  await press(phaseHeader(1));
+
+  const chip = buttons().find(
+    (node) =>
+      node.textContent?.includes("verifier-prompt-1.md") ||
+      node.getAttribute("aria-label")?.includes("verifier-prompt-1.md"),
+  );
+  expect(chip, "Expected the verifier's first prompt as a file chip").toBeDefined();
+  await press(chip!);
+  expect(fixture.navigation.navigate).toHaveBeenCalledExactlyOnceWith("ThreadFile", {
+    environmentId,
+    threadId,
+    path: ["", "srv", "factory-runs", "invoice-csv-export", "phase-1", "verifier-prompt-1.md"],
+  });
+});
+
+it("phase10 android AC3 Run tab redraws as the run's stream delivers new state while the screen is focused", async () => {
+  await openRunTab("verify");
+  const header = phaseHeader(1);
+  expect(visibleLabels()).toContain("Verify ①: current");
+
+  await streamRunAt("review");
+  expect(phaseHeader(1)).toBe(header);
+  expect(visibleLabels()).toEqual(expect.arrayContaining(["Verify ①: done", "Review: current"]));
+});
+
+it("phase10 android AC3 Run tab ends the run stream when the screen loses focus and resumes it on focus", async () => {
+  await openRunTab("verify");
+  expect(fixture.runSubscriptions).toBe(1);
+
+  await setFocused(false);
+  expect(fixture.runSubscriptions).toBe(0);
+
+  await streamRunAt("review");
+  await setFocused(true);
+  expect(fixture.runSubscriptions).toBe(1);
+  expect(visibleLabels()).toContain("Review: current");
+});
+
+it("phase10 android AC3 Factory screen holds no run stream while the Plan tab shows", async () => {
+  await openRunTab("verify");
+  expect(fixture.runSubscriptions).toBe(1);
+
+  const planTab = buttons().find(
+    (node) => node.dataset.nativeRole === "tab" && node.textContent?.trim() === "Plan",
+  );
+  await press(planTab!);
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+  expect(fixture.runSubscriptions).toBe(0);
+});
+
+it("phase10 android AC5 Run tab totals read a finished run's elapsed, waiting and cost with the floor mark", async () => {
+  await openRunTab("degraded");
+  const text = visibleText();
+  expect(text).toMatch(/elapsed\s*4h 49m/i);
+  expect(text).toMatch(/waiting\s*25m/i);
+  expect(text).toContain("$23.94 + 8,429,560 tokens");
+  expect(text).toMatch(/floor/i);
+});
+
+it("phase10 android AC5 Run tab totals close a live run's wait with the phone's clock and read dollars alone without the floor mark", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(new Date("2026-09-28T12:43:00.000Z"));
+    await openRunTab("waiting");
+    const waiting = visibleText();
+    expect(waiting).toMatch(/elapsed\s*3h 43m/i);
+    expect(waiting).toMatch(/waiting\s*10m/i);
+
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await openRunTab("verify");
+    const verify = visibleText();
+    expect(verify).toContain("$10.03");
+    expect(verify).not.toMatch(/floor/i);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+// Review P1-1: a deviation names a path in the run's repository; its chip
+// opens it there, not in the thread's workspace.
+it("phase10 android P1-1 Run tab opens a deviation's file from the run's repository", async () => {
+  await openRunTab("degraded");
+  await press(phaseHeader(2));
+
+  const chip = buttons().find(
+    (node) =>
+      node.textContent?.trim() === "Toolbar.tsx" ||
+      node.getAttribute("aria-label")?.includes("src/components/Toolbar.tsx"),
+  );
+  expect(chip, "Expected the deviation's path as a file chip").toBeDefined();
+  expect(visibleText()).toContain(
+    "widened — The Export button sits in the shared toolbar, which needed a slot for page actions",
+  );
+  await press(chip!);
+  expect(fixture.navigation.navigate).toHaveBeenCalledExactlyOnceWith("ThreadFile", {
+    environmentId,
+    threadId,
+    path: ["", "srv", "repos", "billing-web", "src", "components", "Toolbar.tsx"],
+  });
 });

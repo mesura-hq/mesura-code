@@ -1,13 +1,9 @@
-import { factoryPhaseMarkTone } from "@t3tools/client-runtime/factory/run-presentation";
 import { CheckIcon, ChevronRight } from "lucide-react";
 import { memo } from "react";
 
 import { cn } from "~/lib/utils";
-import type { FactoryRailItem, FactoryRailStatus } from "./factoryRunView.logic";
+import { factoryRailTone, type FactoryRailItem } from "./factoryRunView.logic";
 import { FACTORY_MARK_CLASS_BY_TONE } from "./factoryTones";
-
-const railTone = (status: FactoryRailStatus) =>
-  status === "stopped" ? "warning" : factoryPhaseMarkTone(status);
 
 /**
  * The run's phases in order, one entry per phase with its state, in the class
@@ -35,7 +31,7 @@ export const FactoryPhaseRail = memo(function FactoryPhaseRail({
             onClick={() => onSelect(item.index)}
             className={cn(
               "flex min-w-0 items-center gap-1 rounded-sm text-left border px-1.5 py-0.5 font-mono text-[.65rem]",
-              FACTORY_MARK_CLASS_BY_TONE[railTone(item.status)],
+              FACTORY_MARK_CLASS_BY_TONE[factoryRailTone(item.status)],
               item.selected && "bg-accent",
             )}
           >

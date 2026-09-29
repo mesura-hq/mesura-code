@@ -1,31 +1,16 @@
 import type { FactoryRunActivityPayload } from "@t3tools/contracts";
 import {
+  factoryEventClock,
   factoryPhaseMarkTone,
   factoryRunCardModel,
-  type FactoryPhaseMarkTone,
-  type FactoryRunTone,
 } from "@t3tools/client-runtime/factory/run-presentation";
 import { memo, useMemo } from "react";
 import { View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
 import { cn } from "../../lib/cn";
-
-// The same hue family as the thread list row's run label.
-const TEXT_BY_TONE: Record<FactoryRunTone, string> = {
-  info: "text-adaptive-sky-600-400",
-  warning: "text-adaptive-amber-700-300",
-  success: "text-adaptive-emerald-700-300",
-  error: "text-adaptive-rose-700-300",
-};
-const MARK_BY_TONE: Record<FactoryPhaseMarkTone, string> = {
-  ...TEXT_BY_TONE,
-  neutral: "text-foreground-tertiary",
-};
-
-function eventClock(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
+import { FactoryOpenButton } from "./FactoryOpenButton";
+import { FACTORY_MARK_BY_TONE, FACTORY_TEXT_BY_TONE } from "./factoryTones";
 
 /**
  * A Software Factory run attached to this thread, styled like the plan card.
@@ -33,6 +18,8 @@ function eventClock(iso: string): string {
  */
 export const FactoryRunCard = memo(function FactoryRunCard(props: {
   readonly run: FactoryRunActivityPayload;
+  /** Opens the thread's Factory screen on this run's Run tab. */
+  readonly onOpen: (() => void) | undefined;
 }) {
   const card = useMemo(() => factoryRunCardModel(props.run), [props.run]);
   return (
@@ -40,7 +27,7 @@ export const FactoryRunCard = memo(function FactoryRunCard(props: {
       <View className="gap-0.5">
         <View className="flex-row items-center gap-2">
           <Text className="text-xs text-foreground-muted">Factory run</Text>
-          <Text className={cn("font-t3-medium text-xs", TEXT_BY_TONE[card.status.tone])}>
+          <Text className={cn("font-t3-medium text-xs", FACTORY_TEXT_BY_TONE[card.status.tone])}>
             {card.status.text}
           </Text>
         </View>
@@ -67,7 +54,7 @@ export const FactoryRunCard = memo(function FactoryRunCard(props: {
               accessibilityLabel={`Phase ${mark.index}: ${mark.status}`}
               className={cn(
                 "font-t3-medium text-xs tabular-nums",
-                MARK_BY_TONE[factoryPhaseMarkTone(mark.status)],
+                FACTORY_MARK_BY_TONE[factoryPhaseMarkTone(mark.status)],
               )}
             >
               {mark.status === "clean" ? `✓${mark.index}` : String(mark.index)}
@@ -79,11 +66,14 @@ export const FactoryRunCard = memo(function FactoryRunCard(props: {
         {[
           card.returns,
           card.cost,
-          card.lastEventAt === null ? null : `last event ${eventClock(card.lastEventAt)}`,
+          card.lastEventAt === null ? null : `last event ${factoryEventClock(card.lastEventAt)}`,
         ]
           .filter((part) => part !== null)
           .join("  ·  ")}
       </Text>
+      {props.onOpen ? (
+        <FactoryOpenButton hint="Shows the whole run" onPress={props.onOpen} />
+      ) : null}
     </View>
   );
 });

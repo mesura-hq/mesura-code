@@ -99,6 +99,13 @@ export function factoryPhaseMarkTone(status: FactoryRunPhaseStatus): FactoryPhas
   }
 }
 
+/** The clock time of an event: absolute, so it never goes stale on screen. */
+export function factoryEventClock(iso: string): string {
+  // The reader's local clock and Intl formatting, which Effect's DateTime does not do.
+  // @effect-diagnostics-next-line globalDate:off
+  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 const usd = (amount: number) => `$${amount.toFixed(2)}`;
 
 /**
