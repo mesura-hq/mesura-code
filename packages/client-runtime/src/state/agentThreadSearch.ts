@@ -81,6 +81,13 @@ export interface AgentThreadSearchInput {
   readonly environments: ReadonlyArray<AgentThreadSearchEnvironment>;
   /** The environment whose configured text model reasons about the evidence. */
   readonly modelEnvironmentId: EnvironmentId;
+  /** Local UI feedback. These are observed search steps, not model thoughts. */
+  readonly onProgress?: (progress: AgentThreadSearchProgress) => void;
+}
+
+export interface AgentThreadSearchProgress {
+  readonly kind: "catalog" | "messages" | "inspect" | "ranking";
+  readonly text: string;
 }
 
 export interface AgentThreadSearchMatch {
@@ -253,6 +260,8 @@ function toReasoningEvidence(
 export const runAgentThreadSearch = Effect.fn("AgentThreadSearch.run")(function* (
   input: AgentThreadSearchInput,
 ) {
+  const report = (kind: AgentThreadSearchProgress["kind"], text: string) =>
+    input.onProgress?.({ kind, text });
   const description = clampText(input.description.trim(), THREAD_SEARCH_DESCRIPTION_MAX_LENGTH);
   const environments: EnvironmentState[] = uniqueEnvironments(input.environments).map(
     (environment) => ({
@@ -599,7 +608,12 @@ export const runAgentThreadSearch = Effect.fn("AgentThreadSearch.run")(function*
     return { status: "noConfidentMatch", coverage: coverage() } satisfies AgentThreadSearchResult;
   }
 
+  report(
+    "catalog",
+    `Checking thread titles across ${environments.length} connected ${environments.length === 1 ? "environment" : "environments"}`,
+  );
   yield* readCatalogs;
+  report("catalog", `Checked ${evidence.length} thread titles`);
   if (!anyAvailable()) {
     return noMatchOrRetrievalFailure();
   }
@@ -614,6 +628,7 @@ export const runAgentThreadSearch = Effect.fn("AgentThreadSearch.run")(function*
       budgetExhausted = true;
     }
     const selected = selectModelEvidence(finalStep);
+    if (finalStep) report("ranking", "Comparing the strongest matches");
     for (const item of selected) issuedRefs.set(item.ref, item);
     const stepResult = yield* callEnvironment(
       input.modelEnvironmentId,
@@ -653,6 +668,12 @@ export const runAgentThreadSearch = Effect.fn("AgentThreadSearch.run")(function*
       case "broaden":
       case "readMore": {
         const terms = rememberTerms(step.terms);
+        if (terms.length > 0) {
+          report(
+            "messages",
+            `Searching messages for ${terms.map((term) => `“${term}”`).join(", ")}`,
+          );
+        }
         yield* forEachEnvironment((state) =>
           Effect.forEach(terms, (term) => readEvidence(state, term), { discard: true }),
         );
@@ -672,6 +693,9 @@ export const runAgentThreadSearch = Effect.fn("AgentThreadSearch.run")(function*
           const item = issuedRefs.get(ref);
           return item === undefined ? [] : [item];
         });
+        for (const item of candidates) {
+          report("inspect", `Checking “${item.threadTitle}” in ${item.projectTitle}`);
+        }
         yield* Effect.forEach(
           candidates,
           (item) => {

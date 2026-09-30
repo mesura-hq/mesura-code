@@ -164,6 +164,7 @@ import {
 } from "./files/mesuraFileManager/fileManagerToggle";
 import { ProjectScopePicker } from "./projects/ProjectScopePicker";
 import type { ThreadSearchBackHandler } from "./threads/AgentThreadSearch";
+import { AgentThreadSearchSessionProvider } from "./threads/AgentThreadSearchSession";
 import { ThreadSearchPicker } from "./threads/ThreadSearchPicker";
 import { openLinkPullRequestDialog } from "./pullRequest/LinkPullRequestDialog";
 import { ProjectContentSearchDialog } from "./search/ProjectContentSearchDialog";
@@ -456,6 +457,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     (mode: SearchOverlayMode) => dispatch({ _tag: "ToggleMode", mode }),
     [],
   );
+  const reopenThreadSearch = useCallback(() => dispatch({ _tag: "OpenMode", mode: "threads" }), []);
   const openAddProject = useCallback(() => dispatch({ _tag: "OpenAddProject" }), []);
   const openNewThreadIn = useCallback(() => dispatch({ _tag: "OpenNewThreadIn" }), []);
   const clearOpenIntent = useCallback(() => dispatch({ _tag: "ClearOpenIntent" }), []);
@@ -549,7 +551,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     [openAddProject, openNewThreadIn, setOpen],
   );
 
-  return (
+  const palette = (
     <ComposerHandleContext value={composerHandleRef}>
       <CommandDialog
         open={state.open}
@@ -577,6 +579,11 @@ export function CommandPalette({ children }: { children: ReactNode }) {
       </CommandDialog>
     </ComposerHandleContext>
   );
+  return (
+    <AgentThreadSearchSessionProvider reopen={reopenThreadSearch}>
+      {palette}
+    </AgentThreadSearchSessionProvider>
+  );
 }
 
 function CommandPaletteDialog(props: {
@@ -602,7 +609,11 @@ function CommandPaletteDialog(props: {
                 ? "Search threads"
                 : "Command palette"
       }
-      className={cn("overflow-hidden p-0", props.mode === "content" && "h-105")}
+      className={cn(
+        "overflow-hidden p-0",
+        props.mode === "content" && "h-105",
+        props.mode === "threads" && "max-h-[min(40rem,80vh)]",
+      )}
       data-command-palette="true"
       data-palette-mode={props.mode}
       data-testid="command-palette"

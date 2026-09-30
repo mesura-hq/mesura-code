@@ -13,6 +13,7 @@
  */
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { toastManager } from "../ui/toast";
 
 vi.mock("~/state/entities", async (original) =>
   (await import("./threadSearchPicker.testFixtures")).mockEntities(await original()),
@@ -72,6 +73,7 @@ import {
   settle,
   submitDescription,
   threadSearchPicker,
+  typeInto,
   type MountedApp,
 } from "./threadSearchPicker.testMount";
 
@@ -117,6 +119,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await app.unmount();
+  vi.restoreAllMocks();
 });
 
 async function enterAgentMode(): Promise<void> {
@@ -444,6 +447,12 @@ describe("agent search criterion 4: archived results unarchive before opening", 
     await settle();
     expect(currentPath(app)).toBe(threadPath(ARCHIVED_LAG_MATCH));
     expect(alertDialog()).toBeNull();
+
+    await openThreadSearch();
+    expect(optionRows()[0]?.textContent).not.toMatch(/archived/i);
+    await click(optionRows()[0]!);
+    expect(alertDialog()).toBeNull();
+    expect(unarchiveCalls()).toHaveLength(1);
   });
 
   it("agent search: an unarchived thread whose environment drops before its shell arrives shows a recoverable wait and opens after reconnecting", async () => {
@@ -506,10 +515,67 @@ describe("agent search criterion 4: archived results unarchive before opening", 
     expect(paletteMode()).toBe("threads");
     expect(threadSearchPicker()!.contains(document.activeElement)).toBe(true);
   });
+
+  it("does not restart while the unarchive confirmation is open", async () => {
+    await searchAndShow([ARCHIVED_LAG_MATCH]);
+    await click(optionRows()[0]!);
+    const dialog = alertDialog()!;
+    await pressKey(buttonIn(dialog, /cancel/i), "r", { altKey: true });
+    expect(alertDialog()).not.toBeNull();
+    expect(optionRows()[0]?.textContent).toContain(ARCHIVED_LAG_MATCH.threadTitle);
+    expect(unarchiveCalls()).toHaveLength(0);
+  });
 });
 
-describe("agent search criterion 5: closing cancels and leaves no coding-agent thread", () => {
-  it("agent search: closing the picker with its shortcut cancels a running search and dispatches no command", async () => {
+describe("agent search: persistent popup session", () => {
+  it("reopens an unsent description in agent mode", async () => {
+    await enterAgentMode();
+    await typeInto(pickerTextField(), "an unfinished description");
+    await openThreadSearch();
+    await openThreadSearch();
+    expect(activeSearchMode()).toBe("agent");
+    expect(pickerTextField().value).toBe("an unfinished description");
+  });
+
+  it("collapses a long activity log when ranked threads arrive", async () => {
+    await enterAgentMode();
+    await submitDescription(DESCRIPTION);
+    await act(async () => {
+      for (let index = 0; index < 20; index += 1) {
+        agentCall(0).input.onProgress?.({
+          kind: "inspect",
+          text: `Checking candidate thread ${index}`,
+        });
+      }
+    });
+    await resolveAgentSearch(agentCall(0), {
+      status: "matches",
+      matches: [ARROW_LAG_MATCH],
+      coverage: FULL_COVERAGE,
+    });
+
+    const activity = threadSearchPicker()?.querySelector("details");
+    expect(activity?.open).toBe(false);
+    expect(activity?.textContent).toContain("Checking candidate thread 19");
+    expect(optionRows()[0]?.textContent).toContain(ARROW_LAG_MATCH.threadTitle);
+  });
+
+  it("shows observed search activity in the conversation", async () => {
+    await enterAgentMode();
+    await submitDescription(DESCRIPTION);
+    await act(async () => {
+      agentCall(0).input.onProgress?.({
+        kind: "inspect",
+        text: "Checking “File tree arrow-key lag” in Mesura Code",
+      });
+    });
+    expect(threadSearchPicker()?.textContent).toContain(
+      "Checking “File tree arrow-key lag” in Mesura Code",
+    );
+  });
+
+  it("keeps searching while closed and resumes with results", async () => {
+    const addToast = vi.spyOn(toastManager, "add");
     await enterAgentMode();
     await submitDescription(DESCRIPTION);
     const call = agentCall(0);
@@ -519,11 +585,28 @@ describe("agent search criterion 5: closing cancels and leaves no coding-agent t
     await settle();
 
     expect(paletteElement()).toBeNull();
-    expect(call.interrupted).toBe(true);
+    expect(call.interrupted).toBe(false);
+    await resolveAgentSearch(call, {
+      status: "matches",
+      matches: [ARROW_LAG_MATCH],
+      coverage: FULL_COVERAGE,
+    });
+    expect(addToast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "1 likely thread found" }),
+    );
+    const toast = addToast.mock.calls.at(-1)?.[0];
+    if (!toast) throw new Error("Expected a completed search notification");
+    const viewSearch = (toast.actionProps as { onClick: () => void }).onClick;
+    await act(async () => viewSearch());
+    expect(activeSearchMode()).toBe("agent");
+    expect(optionRows()).toHaveLength(1);
+    expect(optionRows()[0]?.textContent).toContain(ARROW_LAG_MATCH.threadTitle);
+    await act(async () => viewSearch());
+    expect(activeSearchMode()).toBe("agent");
     expect(threadSearchFixture.commandCalls).toEqual([]);
   });
 
-  it("agent search: leaving thread search for the command palette cancels a running search", async () => {
+  it("keeps searching through the command palette and Alt+R cancels the session", async () => {
     await enterAgentMode();
     await submitDescription(DESCRIPTION);
     const call = agentCall(0);
@@ -533,7 +616,13 @@ describe("agent search criterion 5: closing cancels and leaves no coding-agent t
     await settle();
 
     expect(paletteMode()).toBe("command");
+    expect(call.interrupted).toBe(false);
+    await openThreadSearch();
+    expect(activeSearchMode()).toBe("agent");
+    await pressKey(pickerTextField(), "r", { altKey: true });
     expect(call.interrupted).toBe(true);
+    expect(pickerTextField().getAttribute("placeholder")).toContain("Describe the thread");
+    expect(focusIsInPickerTextField()).toBe(true);
     expect(threadSearchFixture.commandCalls).toEqual([]);
   });
 });
@@ -580,8 +669,12 @@ describe("agent search regressions from phase 4 verification and review", () => 
     });
 
     expect(optionRows()).toHaveLength(1);
-    const text = threadSearchPicker()!.textContent ?? "";
-    expect(text).toMatch(/stopped at its work limit/i);
-    expect(text).toMatch(/found but not reviewed/i);
+    const details = threadSearchPicker()!.querySelector("details");
+    expect(details?.open).toBe(false);
+    expect(details?.querySelector("summary")?.textContent).toMatch(/partial/i);
+    await click(details!.querySelector<HTMLElement>("summary")!);
+    expect(details?.open).toBe(true);
+    expect(details?.textContent).toMatch(/stopped at its work limit/i);
+    expect(details?.textContent).toMatch(/found but not reviewed/i);
   });
 });

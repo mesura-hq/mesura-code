@@ -25,6 +25,7 @@ import {
   type ThreadSearchBackHandler,
 } from "./AgentThreadSearch";
 import { buildThreadSearchCandidates, buildThreadSearchGroups } from "./threadSearchPicker.logic";
+import { useAgentThreadSearchSession } from "./AgentThreadSearchSession";
 
 type ThreadSearchMode = "exact" | "agent";
 
@@ -79,9 +80,11 @@ export function ThreadSearchPicker(props: {
   /** Where the active mode offers the palette its own Escape step. */
   readonly backHandlerRef: RefObject<ThreadSearchBackHandler | null>;
 }) {
-  // Local on purpose: the overlay stays in its `threads` mode, so the global
-  // shortcut and the palette's Escape route need no new mode of their own.
-  const [mode, setMode] = useState<ThreadSearchMode>("exact");
+  const session = useAgentThreadSearchSession();
+  // Reopening the picker resumes the conversation when one exists.
+  const [mode, setMode] = useState<ThreadSearchMode>(() =>
+    session.turns.length > 0 || session.draft.length > 0 ? "agent" : "exact",
+  );
   const modeSwitch = <ThreadSearchModeSwitch mode={mode} onModeChange={setMode} />;
 
   if (mode === "agent") {
