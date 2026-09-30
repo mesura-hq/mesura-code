@@ -123,6 +123,11 @@ so `mesura rename` finds **Rename the sidebar** in the **Mesura Code** project. 
 matched against what was said inside a thread. The project filter does not narrow this search — it
 always reaches every project. With the field empty it lists recent threads, so it doubles as a way
 back to what you were reading.
+Press Tab in its field, or choose **Agent** beside it, to describe a thread in your own words
+instead. The configured text model searches every connected environment, archived threads
+included, and returns likely threads with a short reason. Type again to refine the description.
+Tab or **Exact** returns to word search, and Escape steps back one mode at a time. Opening an
+archived result asks before it unarchives the thread.
 `themeEditor.toggle` opens or closes the floating theme editor and defaults to
 `mod+alt+shift+t`. Select a color label to spotlight the elements that use it; select the label
 again to clear the spotlight. The swatch and hex field keep that color selected while you edit it.

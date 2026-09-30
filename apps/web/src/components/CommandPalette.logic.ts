@@ -84,6 +84,7 @@ export interface CommandPaletteUiState {
 export type CommandPaletteUiAction =
   | { readonly _tag: "SetOpen"; readonly open: boolean }
   | { readonly _tag: "ToggleMode"; readonly mode: SearchOverlayMode }
+  | { readonly _tag: "OpenMode"; readonly mode: SearchOverlayMode }
   | {
       readonly _tag: "OpenSearch";
       readonly query: string;
@@ -106,6 +107,8 @@ export function reduceCommandPaletteUiState(
       return state.open && state.mode === action.mode
         ? { ...state, open: false, openIntent: null }
         : { open: true, mode: action.mode, openIntent: null };
+    case "OpenMode":
+      return { open: true, mode: action.mode, openIntent: null };
     case "OpenSearch":
       return {
         open: true,
@@ -137,6 +140,8 @@ export interface CommandPaletteItem {
   readonly searchTerms: ReadonlyArray<string>;
   readonly title: ReactNode;
   readonly description?: ReactNode;
+  /** Replaces the standard icon, title, and description layout for a rich result row. */
+  readonly rowContent?: ReactNode;
   readonly threadContentMatch?: CommandPaletteThreadContentMatch;
   readonly timestamp?: string;
   readonly icon: ReactNode;

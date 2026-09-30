@@ -18,6 +18,10 @@ import type {
   OrchestrationReadModel,
   OrchestrationSearchThreadsInput,
   OrchestrationSearchThreadsResult,
+  OrchestrationThreadSearchCatalogInput,
+  OrchestrationThreadSearchCatalogPage,
+  OrchestrationThreadSearchEvidenceInput,
+  OrchestrationThreadSearchEvidencePage,
   OrchestrationShellSnapshot,
   OrchestrationThread,
   OrchestrationThreadActivity,
@@ -140,6 +144,22 @@ export interface ProjectionSnapshotQueryShape {
   readonly searchThreads: (
     input: OrchestrationSearchThreadsInput,
   ) => Effect.Effect<OrchestrationSearchThreadsResult, ProjectionRepositoryError>;
+
+  /**
+   * Page compact metadata for every undeleted thread, active and archived, in
+   * a stable keyset order. Agent thread search reads this instead of the shell.
+   */
+  readonly listThreadSearchCatalog: (
+    input: OrchestrationThreadSearchCatalogInput,
+  ) => Effect.Effect<OrchestrationThreadSearchCatalogPage, ProjectionRepositoryError>;
+
+  /**
+   * Page per-message evidence from the same message set `searchThreads` reads,
+   * extended to archived threads, with a bounded excerpt around each match.
+   */
+  readonly searchThreadEvidence: (
+    input: OrchestrationThreadSearchEvidenceInput,
+  ) => Effect.Effect<OrchestrationThreadSearchEvidencePage, ProjectionRepositoryError>;
 
   /**
    * Read the latest projection snapshot sequence without hydrating read-model

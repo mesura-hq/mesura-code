@@ -28,6 +28,13 @@ import {
   isAntigravityTextGenerationAvailable,
   makeAntigravityTextGeneration,
 } from "./AntigravityTextGeneration.ts";
+import {
+  THREAD_SEARCH_FINISH_MODEL_OUTPUT,
+  THREAD_SEARCH_FINISH_STEP,
+  THREAD_SEARCH_FORBIDDEN_MODEL_OUTPUT,
+  THREAD_SEARCH_STEP_REQUEST,
+  THREAD_SEARCH_QUOTED_EXCERPT,
+} from "./ThreadSearchStep.testFixtures.ts";
 
 type TextRuntime = Effect.Success<ReturnType<AntigravityTextGenerationOptions["makeRuntime"]>>;
 
@@ -60,6 +67,8 @@ const makeFixture = Effect.fn("makeAntigravityTextGenerationFixture")(function* 
     readonly startError?: AcpError;
     readonly rejectAdmission?: boolean;
     readonly sessionId?: string;
+    /** Make the native session files undeletable once the helper wrote them. */
+    readonly lockConversations?: boolean;
   } = {},
 ) {
   const fs = yield* FileSystem.FileSystem;
@@ -143,6 +152,9 @@ const makeFixture = Effect.fn("makeAntigravityTextGenerationFixture")(function* 
             yield* fs
               .writeFileString(path.join(brainDirectory, "output.txt"), "helper artifact")
               .pipe(Effect.orDie);
+            if (options.lockConversations) {
+              yield* fs.chmod(conversations, 0o555).pipe(Effect.orDie);
+            }
             return {
               sessionId: nativeSessionId,
               initializeResult: { protocolVersion: 1 },
@@ -264,6 +276,7 @@ const makeFixture = Effect.fn("makeAntigravityTextGenerationFixture")(function* 
   return {
     fs,
     path,
+    conversations,
     profileDirectory,
     projectDirectory,
     sessionBase,
@@ -628,6 +641,128 @@ it.layer(NodeServices.layer)("AntigravityTextGeneration", (it) => {
         "keep this session",
       );
       expect(yield* fixture.fs.readFileString(`${fixture.sessionBase}.meta`)).toBe(metadata);
+    }).pipe(Effect.scoped),
+  );
+
+  // Agent thread search, phase 2: the step runs in an empty temporary
+  // workspace and removes the native helper session afterwards, so no durable
+  // conversation survives it.
+  const threadSearchStepInput = { ...THREAD_SEARCH_STEP_REQUEST, modelSelection };
+
+  it.effect("Antigravity answers a schema-checked thread search step and keeps no session", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeFixture({ outputs: [THREAD_SEARCH_FINISH_MODEL_OUTPUT] });
+
+      const step = yield* fixture.textGeneration.generateThreadSearchStep(threadSearchStepInput);
+
+      expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
+      const promptText = (fixture.state.prompts[0]?.prompt ?? [])
+        .map((part) => (part.type === "text" ? part.text : ""))
+        .join("");
+      expect(promptText).toContain(THREAD_SEARCH_QUOTED_EXCERPT);
+      yield* fixture.assertCleaned;
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("Antigravity rejects a write action as a thread search step", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeFixture({ outputs: [THREAD_SEARCH_FORBIDDEN_MODEL_OUTPUT] });
+
+      const error = yield* fixture.textGeneration
+        .generateThreadSearchStep(threadSearchStepInput)
+        .pipe(Effect.flip);
+
+      expect(error._tag).toBe("TextGenerationError");
+      expect(error.operation).toBe("generateThreadSearchStep");
+      expect(error.detail).toMatch(/invalid structured output/i);
+      yield* fixture.assertCleaned;
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("Antigravity times out a stalled thread search step with a typed error", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeFixture({ prompt: () => Effect.never });
+      const child = yield* fixture.textGeneration
+        .generateThreadSearchStep(threadSearchStepInput)
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(fixture.enteredPrompt);
+      // A search runs several steps, so one step gets 60 s, not the 180 s
+      // other text-generation tasks allow.
+      yield* TestClock.adjust(60_000);
+
+      const error = yield* Fiber.join(child).pipe(Effect.flip);
+
+      expect(error._tag).toBe("TextGenerationError");
+      expect(error.operation).toBe("generateThreadSearchStep");
+      expect(error.detail).toContain("timed out");
+      yield* fixture.assertCleaned;
+    }).pipe(Effect.scoped),
+  );
+
+  // Review P1-4: a search step reports a native transcript it could not
+  // remove, instead of answering as if nothing were left behind.
+  it.effect("Antigravity reports thread search session files it could not remove", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeFixture({
+        outputs: [THREAD_SEARCH_FINISH_MODEL_OUTPUT],
+        lockConversations: true,
+      });
+
+      const error = yield* fixture.textGeneration
+        .generateThreadSearchStep(threadSearchStepInput)
+        .pipe(Effect.flip);
+      yield* fixture.fs.chmod(fixture.conversations, 0o755);
+
+      expect(error._tag).toBe("TextGenerationError");
+      expect(error.operation).toBe("generateThreadSearchStep");
+      expect(error.detail).toMatch(/could not remove/i);
+      expect(yield* fixture.fs.exists(`${fixture.sessionBase}.db`)).toBe(true);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("keeps Antigravity title cleanup best-effort when session files stay locked", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeFixture({ lockConversations: true });
+
+      const generated = yield* fixture.textGeneration.generateThreadTitle(fixture.titleInput);
+      yield* fixture.fs.chmod(fixture.conversations, 0o755);
+
+      expect(generated.title).toBe("Repair login");
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("Antigravity reports locked session files even when the search output is invalid", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeFixture({
+        outputs: [THREAD_SEARCH_FORBIDDEN_MODEL_OUTPUT],
+        lockConversations: true,
+      });
+
+      const error = yield* fixture.textGeneration
+        .generateThreadSearchStep(threadSearchStepInput)
+        .pipe(Effect.flip);
+      yield* fixture.fs.chmod(fixture.conversations, 0o755);
+
+      expect(error.detail).toMatch(/could not remove/i);
+    }).pipe(Effect.scoped),
+  );
+
+  // The 60 s limit belongs to the search step only; titles keep 180 s.
+  it.effect("keeps the 180 second Antigravity title timeout apart from search", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeFixture({ prompt: () => Effect.never });
+      const child = yield* fixture.textGeneration
+        .generateThreadTitle(fixture.titleInput)
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(fixture.enteredPrompt);
+      yield* TestClock.adjust(60_000);
+      for (let turn = 0; turn < 20; turn += 1) yield* Effect.yieldNow;
+      expect(child.pollUnsafe()).toBeUndefined();
+
+      yield* TestClock.adjust(120_000);
+      const error = yield* Fiber.join(child).pipe(Effect.flip);
+      expect(error.detail).toContain("timed out");
+      yield* fixture.assertCleaned;
     }).pipe(Effect.scoped),
   );
 });

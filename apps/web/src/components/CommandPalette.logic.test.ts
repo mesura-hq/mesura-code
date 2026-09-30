@@ -798,6 +798,11 @@ describe("the thread search mode", () => {
     });
   });
 
+  it("opens a thread search notification without toggling an open picker closed", () => {
+    const open = reduceCommandPaletteUiState(closed, { _tag: "OpenMode", mode: "threads" });
+    expect(reduceCommandPaletteUiState(open, { _tag: "OpenMode", mode: "threads" })).toEqual(open);
+  });
+
   it("goes back to the command palette rather than closing, which is what Escape does", () => {
     const open = reduceCommandPaletteUiState(closed, { _tag: "ToggleMode", mode: "threads" });
     expect(reduceCommandPaletteUiState(open, { _tag: "ToggleMode", mode: "command" })).toEqual({

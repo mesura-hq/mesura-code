@@ -3,6 +3,7 @@ import {
   AuthOrchestrationReadScope,
   AuthRelayReadScope,
   AuthRelayWriteScope,
+  ORCHESTRATION_WS_METHODS,
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
@@ -70,6 +71,29 @@ describe("RPC authorization scopes", () => {
     );
     expect(requiredScopeForRpcMethod(WS_METHODS.subscribeFactoryRun)).toBe(
       requiredScopeForRpcMethod(WS_METHODS.factoryReadSnapshot),
+    );
+  });
+
+  it("reads agent thread search evidence under the lexical thread search scope", () => {
+    expect(requiredScopeForRpcMethod(ORCHESTRATION_WS_METHODS.searchThreads)).toBe(
+      AuthOrchestrationReadScope,
+    );
+    expect(requiredScopeForRpcMethod(ORCHESTRATION_WS_METHODS.listThreadSearchCatalog)).toBe(
+      AuthOrchestrationReadScope,
+    );
+    expect(requiredScopeForRpcMethod(ORCHESTRATION_WS_METHODS.searchThreadEvidence)).toBe(
+      AuthOrchestrationReadScope,
+    );
+  });
+
+  // Agent thread search, phase 2: a reasoning step runs the environment's
+  // model like every other text-generation task, which all require operate.
+  it("requires the orchestration operate scope to reason a thread search step", () => {
+    expect(requiredScopeForRpcMethod(ORCHESTRATION_WS_METHODS.reasonThreadSearch)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.gitRunStackedAction)).toBe(
+      AuthOrchestrationOperateScope,
     );
   });
 

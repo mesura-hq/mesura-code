@@ -309,6 +309,7 @@ function createTextGeneration(
       Effect.succeed({
         title: "Update workflow",
       }),
+    generateThreadSearchStep: () => Effect.die("Git workflows never run a thread search step"),
     ...overrides,
   };
 
@@ -357,6 +358,7 @@ function createTextGeneration(
             }),
         ),
       ),
+    generateThreadSearchStep: (input) => implementation.generateThreadSearchStep(input),
   };
 }
 

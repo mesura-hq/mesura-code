@@ -1,6 +1,8 @@
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -13,12 +15,18 @@ import { extractJsonObject } from "@t3tools/shared/schemaJson";
 
 import { TextGenerationError } from "@t3tools/contracts";
 import * as TextGeneration from "./TextGeneration.ts";
+import { removeGrokSessionFiles, resolveGrokHome } from "../provider/acp/GrokSessionFiles.ts";
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
+import {
+  buildThreadSearchStepPrompt,
+  THREAD_SEARCH_STEP_TIMEOUT_MS,
+  toThreadSearchStep,
+} from "./ThreadSearchPrompt.ts";
 import {
   sanitizeCommitSubject,
   sanitizePrTitle,
@@ -42,6 +50,14 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
 ) {
   const crypto = yield* Crypto.Crypto;
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+
+  /** What a search step records so it can remove the native session it created. */
+  interface GrokNativeSession {
+    sessionId: string | undefined;
+    readonly workingDirectories: Array<string>;
+  }
 
   const runGrokJson = <S extends Schema.Top>({
     operation,
@@ -49,25 +65,52 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
     prompt,
     outputSchemaJson,
     modelSelection,
+    timeoutMs = GROK_TIMEOUT_MS,
+    nativeSession,
   }: {
     operation:
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
-    cwd: string;
+      | "generateThreadTitle"
+      | "generateThreadSearchStep";
+    /** Undefined runs the agent in an empty temporary directory instead of a project. */
+    cwd: string | undefined;
     prompt: string;
     outputSchemaJson: S;
     modelSelection: ModelSelection;
+    timeoutMs?: number;
+    /** Filled in as the step learns what Grok stores for it. */
+    nativeSession?: GrokNativeSession;
   }): Effect.Effect<S["Type"], TextGenerationError, S["DecodingServices"]> =>
     Effect.gen(function* () {
       const resolvedModel = resolveGrokAcpBaseModelId(modelSelection.model);
+      const workingDirectory =
+        cwd ??
+        (yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3code-grok-search-" }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new TextGenerationError({
+                operation,
+                detail: "Failed to create Grok working directory.",
+                cause,
+              }),
+          ),
+        ));
+      if (nativeSession !== undefined) {
+        nativeSession.workingDirectories.push(workingDirectory);
+        // Grok may name the project after the resolved path.
+        const resolved = yield* fileSystem
+          .realPath(workingDirectory)
+          .pipe(Effect.orElseSucceed(() => workingDirectory));
+        if (resolved !== workingDirectory) nativeSession.workingDirectories.push(resolved);
+      }
       const outputRef = yield* Ref.make("");
       const runtime = yield* makeGrokAcpRuntime({
         grokSettings,
         environment,
         childProcessSpawner: commandSpawner,
-        cwd,
+        cwd: workingDirectory,
         clientInfo: { name: "t3-code-git-text", version: "0.0.0" },
       }).pipe(Effect.provideService(Crypto.Crypto, crypto));
 
@@ -85,6 +128,7 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
 
       const promptResult = yield* Effect.gen(function* () {
         const started = yield* runtime.start();
+        if (nativeSession !== undefined) nativeSession.sessionId = started.sessionId;
         const requestedReasoningEffort = getModelSelectionStringOptionValue(
           modelSelection,
           "reasoningEffort",
@@ -109,7 +153,7 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
           prompt: [{ type: "text", text: prompt }],
         });
       }).pipe(
-        Effect.timeoutOption(GROK_TIMEOUT_MS),
+        Effect.timeoutOption(timeoutMs),
         Effect.flatMap(
           Option.match({
             onNone: () =>
@@ -263,10 +307,52 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
       } satisfies TextGeneration.ThreadTitleGenerationResult;
     });
 
+  const generateThreadSearchStep: TextGeneration.TextGeneration["Service"]["generateThreadSearchStep"] =
+    Effect.fn("GrokTextGeneration.generateThreadSearchStep")(function* (input) {
+      const { prompt, outputSchema } = yield* buildThreadSearchStepPrompt(input);
+      const nativeSession: GrokNativeSession = { sessionId: undefined, workingDirectories: [] };
+      // Runs after runGrokJson closed the Grok process, so nothing rewrites the files.
+      const removeNativeSession = Effect.suspend(() =>
+        removeGrokSessionFiles({
+          grokHome: resolveGrokHome(environment),
+          sessionId: nativeSession.sessionId,
+          workingDirectories: nativeSession.workingDirectories,
+        }),
+      ).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+        Effect.mapError(
+          (cause) =>
+            new TextGenerationError({
+              operation: "generateThreadSearchStep",
+              detail: "Grok could not remove its session files, so its transcript may remain.",
+              cause,
+            }),
+        ),
+      );
+      const exit = yield* runGrokJson({
+        operation: "generateThreadSearchStep",
+        cwd: undefined,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+        timeoutMs: THREAD_SEARCH_STEP_TIMEOUT_MS,
+        nativeSession,
+      }).pipe(
+        // A cancelled step cannot report a failure, but still removes its files.
+        Effect.onInterrupt(() => removeNativeSession.pipe(Effect.ignore)),
+        Effect.exit,
+      );
+      yield* removeNativeSession;
+      const generated = yield* exit;
+      return yield* toThreadSearchStep("Grok Agent", generated);
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateThreadSearchStep,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

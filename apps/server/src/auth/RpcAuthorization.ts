@@ -26,6 +26,10 @@ export const RPC_REQUIRED_SCOPES = {
   [ORCHESTRATION_WS_METHODS.getTurnDiff]: AuthOrchestrationReadScope,
   [ORCHESTRATION_WS_METHODS.getFullThreadDiff]: AuthOrchestrationReadScope,
   [ORCHESTRATION_WS_METHODS.searchThreads]: AuthOrchestrationReadScope,
+  [ORCHESTRATION_WS_METHODS.listThreadSearchCatalog]: AuthOrchestrationReadScope,
+  [ORCHESTRATION_WS_METHODS.searchThreadEvidence]: AuthOrchestrationReadScope,
+  // Runs the environment's text model, like the other model-driven operations.
+  [ORCHESTRATION_WS_METHODS.reasonThreadSearch]: AuthOrchestrationOperateScope,
   [ORCHESTRATION_WS_METHODS.subscribeShell]: AuthOrchestrationReadScope,
   [ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot]: AuthOrchestrationReadScope,
   [ORCHESTRATION_WS_METHODS.subscribeThread]: AuthOrchestrationReadScope,

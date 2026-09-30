@@ -118,6 +118,7 @@ import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import { makeReasonThreadSearch } from "./textGeneration/ThreadSearchReasoning.ts";
 import * as EditorSessionManager from "./editor/Manager.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import { withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
@@ -578,6 +579,7 @@ const makeWsRpcLayer = (
       const config = yield* ServerConfig.ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
+      const reasonThreadSearch = yield* makeReasonThreadSearch;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
@@ -1982,6 +1984,38 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "orchestration" },
           ),
+        [ORCHESTRATION_WS_METHODS.listThreadSearchCatalog]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.listThreadSearchCatalog,
+            projectionSnapshotQuery.listThreadSearchCatalog(input).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationSearchThreadsError({
+                    message: "Failed to list thread search catalog",
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.searchThreadEvidence]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.searchThreadEvidence,
+            projectionSnapshotQuery.searchThreadEvidence(input).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationSearchThreadsError({
+                    message: "Failed to search thread evidence",
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.reasonThreadSearch]: (input) =>
+          observeRpcEffect(ORCHESTRATION_WS_METHODS.reasonThreadSearch, reasonThreadSearch(input), {
+            "rpc.aggregate": "orchestration",
+          }),
         [ORCHESTRATION_WS_METHODS.subscribeShell]: (input) =>
           observeRpcStreamEffect(
             ORCHESTRATION_WS_METHODS.subscribeShell,

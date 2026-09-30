@@ -21,6 +21,13 @@ import * as ServerConfig from "../config.ts";
 import * as TextGeneration from "./TextGeneration.ts";
 import { makeCursorTextGeneration } from "./CursorTextGeneration.ts";
 import { execScriptSource, writeFakeCli } from "../testUtils/fakeCli.ts";
+import {
+  THREAD_SEARCH_FINISH_MODEL_OUTPUT,
+  THREAD_SEARCH_FINISH_STEP,
+  THREAD_SEARCH_FORBIDDEN_MODEL_OUTPUT,
+  THREAD_SEARCH_STEP_REQUEST,
+  THREAD_SEARCH_QUOTED_EXCERPT,
+} from "./ThreadSearchStep.testFixtures.ts";
 const decodeCursorSettings = Schema.decodeSync(CursorSettings);
 
 const __dirname = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
@@ -265,5 +272,80 @@ it.layer(CursorTextGenerationTestLayer)("CursorTextGeneration", (it) => {
           }),
       );
     },
+  );
+
+  // Agent thread search, phase 2: the step runs with no file or terminal
+  // capability and outside the project directory, so Cursor's own tools
+  // have nothing to read.
+  it.effect(
+    "Cursor answers a schema-checked thread search step without file or terminal access",
+    () => {
+      const requestLogDir = NodeFS.mkdtempSync(
+        NodePath.join(NodeOS.tmpdir(), "t3code-cursor-search-log-"),
+      );
+      const requestLogPath = NodePath.join(requestLogDir, "requests.ndjson");
+
+      return withFakeAcpAgent(
+        {
+          T3_ACP_REQUEST_LOG_PATH: requestLogPath,
+          T3_ACP_PROMPT_RESPONSE_TEXT: THREAD_SEARCH_FINISH_MODEL_OUTPUT,
+        },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const step = yield* textGeneration.generateThreadSearchStep({
+              ...THREAD_SEARCH_STEP_REQUEST,
+              modelSelection: createModelSelection(ProviderInstanceId.make("cursor"), "gpt-5.4"),
+            });
+            expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
+
+            const requests = NodeFS.readFileSync(requestLogPath, "utf8")
+              .trim()
+              .split("\n")
+              .filter((line) => line.length > 0)
+              .map(
+                (line) => JSON.parse(line) as { method?: string; params?: Record<string, unknown> },
+              );
+            expect(
+              requests.find((request) => request.method === "initialize")?.params
+                ?.clientCapabilities,
+            ).toMatchObject({
+              fs: { readTextFile: false, writeTextFile: false },
+              terminal: false,
+            });
+            const sessionCwd = requests.find((request) => request.method === "session/new")?.params
+              ?.cwd;
+            expect(typeof sessionCwd).toBe("string");
+            expect((sessionCwd as string).startsWith(process.cwd())).toBe(false);
+            // The isolated working directory is removed when the step ends.
+            expect(NodeFS.existsSync(sessionCwd as string)).toBe(false);
+            const promptParts = (requests.find((request) => request.method === "session/prompt")
+              ?.params?.prompt ?? []) as ReadonlyArray<{ readonly text?: string }>;
+            const promptText = promptParts.map((part) => part.text ?? "").join("");
+            expect(promptText).toContain(THREAD_SEARCH_QUOTED_EXCERPT);
+          }),
+      ).pipe(
+        Effect.ensuring(
+          Effect.sync(() => NodeFS.rmSync(requestLogDir, { recursive: true, force: true })),
+        ),
+      );
+    },
+  );
+
+  it.effect("Cursor rejects a write action as a thread search step", () =>
+    withFakeAcpAgent(
+      { T3_ACP_PROMPT_RESPONSE_TEXT: THREAD_SEARCH_FORBIDDEN_MODEL_OUTPUT },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const error = yield* textGeneration
+            .generateThreadSearchStep({
+              ...THREAD_SEARCH_STEP_REQUEST,
+              modelSelection: createModelSelection(ProviderInstanceId.make("cursor"), "gpt-5.4"),
+            })
+            .pipe(Effect.flip);
+          expect(error._tag).toBe("TextGenerationError");
+          expect(error.operation).toBe("generateThreadSearchStep");
+          expect(error.detail).toMatch(/invalid structured output/i);
+        }),
+    ),
   );
 });

@@ -131,27 +131,31 @@ function DisabledCommandPaletteResultRow(props: {
 }) {
   return (
     <div className="flex min-h-8 select-none items-center gap-2 rounded-sm px-2 py-1.5 text-base opacity-64 sm:min-h-7 sm:text-sm">
-      {props.item.icon}
-      {props.item.description || props.item.threadContentMatch ? (
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
-            {props.item.titleLeadingContent}
-            <span className="truncate">{props.item.title}</span>
-          </span>
-          {props.item.threadContentMatch ? (
-            <ThreadContentMatch match={props.item.threadContentMatch} />
-          ) : null}
-          {props.item.description ? (
-            <span className="min-w-0 text-muted-foreground/70 text-xs">
-              {props.item.description}
+      {props.item.rowContent ?? (
+        <>
+          {props.item.icon}
+          {props.item.description || props.item.threadContentMatch ? (
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
+                {props.item.titleLeadingContent}
+                <span className="truncate">{props.item.title}</span>
+              </span>
+              {props.item.threadContentMatch ? (
+                <ThreadContentMatch match={props.item.threadContentMatch} />
+              ) : null}
+              {props.item.description ? (
+                <span className="min-w-0 text-muted-foreground/70 text-xs">
+                  {props.item.description}
+                </span>
+              ) : null}
             </span>
-          ) : null}
-        </span>
-      ) : (
-        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-foreground">
-          {props.item.titleLeadingContent}
-          <span className="truncate">{props.item.title}</span>
-        </span>
+          ) : (
+            <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-foreground">
+              {props.item.titleLeadingContent}
+              <span className="truncate">{props.item.title}</span>
+            </span>
+          )}
+        </>
       )}
       {props.item.titleTrailingContent}
     </div>
@@ -182,27 +186,31 @@ function CommandPaletteResultRow(props: {
         props.onExecuteItem(props.item);
       }}
     >
-      {props.item.icon}
-      {props.item.description || props.item.threadContentMatch ? (
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
-            {props.item.titleLeadingContent}
-            <span className="truncate">{props.item.title}</span>
-          </span>
-          {props.item.threadContentMatch ? (
-            <ThreadContentMatch match={props.item.threadContentMatch} />
-          ) : null}
-          {props.item.description ? (
-            <span className="min-w-0 text-muted-foreground/70 text-xs">
-              {props.item.description}
+      {props.item.rowContent ?? (
+        <>
+          {props.item.icon}
+          {props.item.description || props.item.threadContentMatch ? (
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
+                {props.item.titleLeadingContent}
+                <span className="truncate">{props.item.title}</span>
+              </span>
+              {props.item.threadContentMatch ? (
+                <ThreadContentMatch match={props.item.threadContentMatch} />
+              ) : null}
+              {props.item.description ? (
+                <span className="min-w-0 text-muted-foreground/70 text-xs">
+                  {props.item.description}
+                </span>
+              ) : null}
             </span>
-          ) : null}
-        </span>
-      ) : (
-        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-foreground">
-          {props.item.titleLeadingContent}
-          <span className="truncate">{props.item.title}</span>
-        </span>
+          ) : (
+            <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-foreground">
+              {props.item.titleLeadingContent}
+              <span className="truncate">{props.item.title}</span>
+            </span>
+          )}
+        </>
       )}
       {props.item.titleTrailingContent}
       {props.item.timestamp ? (

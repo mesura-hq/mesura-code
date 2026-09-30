@@ -141,12 +141,21 @@ import {
   resolveActiveThreadRouteRef,
   resolveThreadRouteTarget,
 } from "../threadRoutes";
-import { formatRelativeTimeLabel, parseTimestampDate } from "../timestampFormat";
+import { parseTimestampDate } from "../timestampFormat";
 import type { SidebarThreadSummary } from "../types";
 import { FactoryRunThreadLabel } from "../factory/FactoryRunThreadLabel";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
+import {
+  SidebarThreadCardContent,
+  SidebarThreadCardFooter,
+  SidebarThreadCardHeader,
+  SidebarThreadCardProject,
+  SidebarThreadCardTitle,
+  compactSettledSidebarTimeLabel,
+  sidebarThreadTimeLabel,
+} from "./SidebarThreadCardContent";
 import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
 import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
 import {
@@ -255,22 +264,12 @@ const SETTLED_TAIL_PAGE_COUNT = 25;
 const SETTLED_SHELF_EXPANDED_KEY = "t3code:sidebar:settled-expanded";
 const SNOOZED_SHELF_EXPANDED_KEY = "t3code:sidebar:snoozed-expanded";
 
-function compactSidebarTimeLabel(label: string): string {
-  if (label === "just now") return "now";
-  return label.endsWith(" ago") ? label.slice(0, -4) : label;
-}
-
-function threadTimeLabel(thread: SidebarThreadSummary): string {
-  const timestamp = thread.latestUserMessageAt ?? thread.updatedAt;
-  return compactSidebarTimeLabel(formatRelativeTimeLabel(timestamp));
-}
-
 // Settled rows read "how long ago did this wrap up", matching their sort
 // key: both go through resolveSettledThreadTimestamp so label and order can't
 // disagree.
 function settledTimeLabel(thread: SidebarThreadSummary): string {
   const timestamp = resolveSettledThreadTimestamp(thread);
-  return timestamp === null ? "" : compactSidebarTimeLabel(formatRelativeTimeLabel(timestamp));
+  return compactSettledSidebarTimeLabel(timestamp);
 }
 
 function elementLayoutTop(element: HTMLElement): number {
@@ -1677,7 +1676,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     <span className="text-xs">
                       {variantAction === "unsettle"
                         ? settledTimeLabel(thread)
-                        : threadTimeLabel(thread)}
+                        : sidebarThreadTimeLabel(thread)}
                     </span>
                   )}
                 </span>
@@ -1767,24 +1766,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             />
           }
         >
-          <div className="relative z-10 h-[4.875rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
-            <div className="flex h-5 min-w-0 items-center gap-1.5">
+          <SidebarThreadCardContent>
+            <SidebarThreadCardHeader>
               {draftIndicator}
-              {props.project ? (
-                <ProjectFavicon project={props.project} className="size-4 shrink-0" />
-              ) : null}
-              {props.projectDisplayName ? (
-                <span
-                  className={cn(
-                    "min-w-0 flex-1 truncate text-secondary-label text-xs",
-                    shouldRecede ? "font-normal" : "font-medium",
-                  )}
-                >
-                  {props.projectDisplayName}
-                </span>
-              ) : (
-                <span className="flex-1" />
-              )}
+              <SidebarThreadCardProject
+                project={props.project}
+                label={props.projectDisplayName}
+                labelClassName={shouldRecede ? "font-normal" : "font-medium"}
+              />
               {pinIndicator}
               {/* The visible state owns this slot's width: status at rest,
                   actions on hover/keyboard focus or while the popover is open. Keeping
@@ -1859,7 +1848,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                         </span>
                       )
                     ) : (
-                      threadTimeLabel(thread)
+                      sidebarThreadTimeLabel(thread)
                     )}
                   </span>
                   {props.settlementSupported || showSnoozeButton || hasUnsentDraft ? (
@@ -1921,16 +1910,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   ) : null}
                 </span>
               )}
-            </div>
-            <div className="mt-1 flex min-w-0">
+            </SidebarThreadCardHeader>
+            <SidebarThreadCardTitle>
               {title}
               {isRegeneratingTitle ? (
                 <span role="status" className="sr-only">
                   Regenerating title
                 </span>
               ) : null}
-            </div>
-            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
+            </SidebarThreadCardTitle>
+            <SidebarThreadCardFooter>
               {/* Always the branch. The plan step used to take this slot while
                   working, but it truncated to a half-sentence and dropped the
                   branch, so the row lost its most stable identifier. */}
@@ -1984,8 +1973,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   </span>
                 ) : null}
               </span>
-            </div>
-          </div>
+            </SidebarThreadCardFooter>
+          </SidebarThreadCardContent>
           {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
         </TooltipTrigger>
         {detailsTooltip}
@@ -2117,7 +2106,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
           ) : null}
           <span className="min-w-0 flex-1 truncate">{thread.title}</span>
           <span className="shrink-0 text-xs text-muted-foreground/55 tabular-nums">
-            {threadTimeLabel(thread)}
+            {sidebarThreadTimeLabel(thread)}
           </span>
         </TooltipTrigger>
         <SidebarThreadTooltip

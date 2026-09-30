@@ -68,6 +68,7 @@ import {
   useState,
   type KeyboardEvent,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { useAtomValue } from "@effect/atom-react";
 
@@ -165,6 +166,8 @@ import {
 import { ProjectScopePicker } from "./projects/ProjectScopePicker";
 import { requestSidebarDockPin } from "./sidebar/sidebarDockController";
 import { useIsMobile } from "../hooks/useMediaQuery";
+import type { ThreadSearchBackHandler } from "./threads/AgentThreadSearch";
+import { AgentThreadSearchSessionProvider } from "./threads/AgentThreadSearchSession";
 import { ThreadSearchPicker } from "./threads/ThreadSearchPicker";
 import { openLinkPullRequestDialog } from "./pullRequest/LinkPullRequestDialog";
 import { ProjectContentSearchDialog } from "./search/ProjectContentSearchDialog";
@@ -457,12 +460,16 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     (mode: SearchOverlayMode) => dispatch({ _tag: "ToggleMode", mode }),
     [],
   );
+  const reopenThreadSearch = useCallback(() => dispatch({ _tag: "OpenMode", mode: "threads" }), []);
   const openAddProject = useCallback(() => dispatch({ _tag: "OpenAddProject" }), []);
   const openNewThreadIn = useCallback(() => dispatch({ _tag: "OpenNewThreadIn" }), []);
   const clearOpenIntent = useCallback(() => dispatch({ _tag: "ClearOpenIntent" }), []);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { theme, themeHalves, resolvedTheme } = useTheme();
   const composerHandleRef = useRef<ChatComposerHandle | null>(null);
+  // Fork: an overlay mode with inner steps (the thread picker's agent mode)
+  // takes Escape first, before the palette steps back to its command view.
+  const overlayBackHandlerRef = useRef<ThreadSearchBackHandler | null>(null);
   const routeTarget = useParams({
     strict: false,
     select: (params) => resolveThreadRouteTarget(params),
@@ -485,6 +492,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
       if (event.isComposing || event.key !== "Escape") return;
       event.preventDefault();
       event.stopPropagation();
+      if (overlayBackHandlerRef.current?.()) return;
       toggleMode("command");
     };
     window.addEventListener("keydown", onEscapeKeyDown, true);
@@ -546,7 +554,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     [openAddProject, openNewThreadIn, setOpen],
   );
 
-  return (
+  const palette = (
     <ComposerHandleContext value={composerHandleRef}>
       <CommandDialog
         open={state.open}
@@ -569,9 +577,15 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           setOpen={setOpen}
           openOverlayMode={toggleMode}
           clearOpenIntent={clearOpenIntent}
+          overlayBackHandlerRef={overlayBackHandlerRef}
         />
       </CommandDialog>
     </ComposerHandleContext>
+  );
+  return (
+    <AgentThreadSearchSessionProvider reopen={reopenThreadSearch}>
+      {palette}
+    </AgentThreadSearchSessionProvider>
   );
 }
 
@@ -581,6 +595,7 @@ function CommandPaletteDialog(props: {
   readonly setOpen: (open: boolean) => void;
   readonly openOverlayMode: (mode: SearchOverlayMode) => void;
   readonly clearOpenIntent: () => void;
+  readonly overlayBackHandlerRef: RefObject<ThreadSearchBackHandler | null>;
 }) {
   const composerHandleRef = useComposerHandleContext();
 
@@ -597,7 +612,11 @@ function CommandPaletteDialog(props: {
                 ? "Search threads"
                 : "Command palette"
       }
-      className={cn("overflow-hidden p-0", props.mode === "content" && "h-105")}
+      className={cn(
+        "overflow-hidden p-0",
+        props.mode === "content" && "h-105",
+        props.mode === "threads" && "max-h-[min(40rem,80vh)]",
+      )}
       data-command-palette="true"
       data-palette-mode={props.mode}
       data-testid="command-palette"
@@ -618,7 +637,7 @@ function CommandPaletteDialog(props: {
       ) : props.mode === "projects" ? (
         <ProjectScopePicker setOpen={props.setOpen} />
       ) : props.mode === "threads" ? (
-        <ThreadSearchPicker setOpen={props.setOpen} />
+        <ThreadSearchPicker backHandlerRef={props.overlayBackHandlerRef} setOpen={props.setOpen} />
       ) : (
         <OpenCommandPaletteDialog
           openIntent={props.openIntent}

@@ -1,4 +1,7 @@
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import {
@@ -20,6 +23,11 @@ import {
   buildPrContentPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
+import {
+  buildThreadSearchStepPrompt,
+  THREAD_SEARCH_STEP_TIMEOUT_MS,
+  toThreadSearchStep,
+} from "./ThreadSearchPrompt.ts";
 import * as TextGeneration from "./TextGeneration.ts";
 import {
   sanitizeCommitSubject,
@@ -34,9 +42,15 @@ const OpenCodeTextGenerationOperation = Schema.Literals([
   "generatePrContent",
   "generateBranchName",
   "generateThreadTitle",
+  "generateThreadSearchStep",
 ]);
 
 type OpenCodeTextGenerationOperation = typeof OpenCodeTextGenerationOperation.Type;
+
+/** How long cleaning up a search step's session may take before the step fails. */
+const OPENCODE_SESSION_CLEANUP_TIMEOUT_MS = 5_000;
+/** The share of that bound an abort may use, so the delete is always attempted. */
+const OPENCODE_SESSION_ABORT_TIMEOUT_MS = 2_000;
 
 const openCodeTextGenerationErrorContext = {
   operation: OpenCodeTextGenerationOperation,
@@ -176,6 +190,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
   const serverConfig = yield* ServerConfig.ServerConfig;
   const openCodeRuntime = yield* OpenCodeRuntime.OpenCodeRuntime;
   const serverOwner = yield* OpenCodeServerOwner.OpenCodeServerOwner;
+  const fileSystem = yield* FileSystem.FileSystem;
 
   const runOpenCodeJson = Effect.fn("runOpenCodeJson")(function* <S extends Schema.Top>(input: {
     readonly operation: OpenCodeTextGenerationOperation;
@@ -184,6 +199,12 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
     readonly outputSchemaJson: S;
     readonly modelSelection: ModelSelection;
     readonly attachments?: ReadonlyArray<ChatAttachment> | undefined;
+    /**
+     * Bound the step and delete OpenCode's session afterwards, so no transcript
+     * outlives it. Only the search step asks for this; other tasks keep their
+     * sessions and OpenCode's own limits.
+     */
+    readonly ephemeralSession?: { readonly timeoutMs: number } | undefined;
   }) {
     const parsedModel = OpenCodeRuntime.parseOpenCodeModelSlug(input.modelSelection.model);
     if (!parsedModel) {
@@ -199,6 +220,20 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
         resolveAttachmentPath({ attachmentsDir: serverConfig.attachmentsDir, attachment }),
     });
 
+    /**
+     * The session an ephemeral step owns, from the moment `session.create` is
+     * sent. The ID stays a promise: a step cancelled or timed out while
+     * creation is in flight still owns the session that arrives later.
+     */
+    let ownedSession:
+      | {
+          readonly client: ReturnType<
+            OpenCodeRuntime.OpenCodeRuntimeShape["createOpenCodeSdkClient"]
+          >;
+          readonly sessionID: Promise<string | undefined>;
+        }
+      | undefined;
+
     const runAgainstServer = Effect.fn("runOpenCodeJson.runAgainstServer")(
       function* (
         server: Pick<
@@ -212,11 +247,24 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
           ...(server.serverPassword !== undefined ? { serverPassword: server.serverPassword } : {}),
         });
         const session = yield* Effect.tryPromise({
-          try: () =>
-            client.session.create({
+          // Deliberately not cancelled: an aborted request can still create a
+          // session whose ID never arrives, which nothing could then delete.
+          try: () => {
+            const request = client.session.create({
               title: `Mesura Code ${input.operation}`,
               permission: [{ permission: "*", pattern: "*", action: "deny" }],
-            }),
+            });
+            if (input.ephemeralSession !== undefined) {
+              ownedSession = {
+                client,
+                sessionID: request.then(
+                  (created) => created.data?.id,
+                  () => undefined,
+                ),
+              };
+            }
+            return request;
+          },
           catch: (cause) =>
             new OpenCodeTextGenerationSessionRequestError({
               operation: input.operation,
@@ -318,6 +366,102 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       }),
     );
 
+    /**
+     * Delete the session this step created, aborting it first when it may
+     * still be running. Bounded, and a failure is reported rather than
+     * swallowed: the caller must not be told no transcript remains.
+     */
+    const deleteCreatedSession = (options: {
+      readonly abortFirst: boolean;
+      readonly context: string;
+    }) =>
+      Effect.suspend(() => {
+        const owned = ownedSession;
+        if (owned === undefined) return Effect.void;
+        const cleanupFailed = (cause?: unknown) =>
+          new TextGenerationError({
+            operation: input.operation,
+            detail: `${options.context}OpenCode could not delete the session, so its transcript may remain.`,
+            ...(cause !== undefined ? { cause } : {}),
+          });
+        return Effect.gen(function* () {
+          const sessionID = yield* Effect.promise(() => owned.sessionID);
+          // Creation failed, so no session exists.
+          if (sessionID === undefined) return;
+          if (options.abortFirst) {
+            // Bounded apart from the delete, so a stalled abort cannot skip it.
+            yield* Effect.tryPromise(() => owned.client.session.abort({ sessionID })).pipe(
+              Effect.timeoutOption(OPENCODE_SESSION_ABORT_TIMEOUT_MS),
+              Effect.ignore,
+            );
+          }
+          yield* Effect.tryPromise(() => owned.client.session.delete({ sessionID })).pipe(
+            Effect.mapError(cleanupFailed),
+          );
+        }).pipe(
+          Effect.timeoutOption(OPENCODE_SESSION_CLEANUP_TIMEOUT_MS),
+          Effect.flatMap(
+            Option.match({
+              onNone: () =>
+                Effect.sync(() => {
+                  // Past the bound the step reports failure, but a session
+                  // that arrives later is still deleted when it does.
+                  void owned.sessionID.then((sessionID) =>
+                    sessionID === undefined
+                      ? undefined
+                      : owned.client.session.delete({ sessionID }).catch(() => undefined),
+                  );
+                }).pipe(Effect.andThen(Effect.fail(cleanupFailed()))),
+              onSome: () => Effect.void,
+            }),
+          ),
+        );
+      });
+
+    const runEphemeralAgainstServer = (
+      server: Parameters<typeof runAgainstServer>[0],
+      timeoutMs: number,
+    ) =>
+      runAgainstServer(server).pipe(
+        Effect.timeoutOption(timeoutMs),
+        // A cancelled search leaves nothing behind either, but cannot report it.
+        Effect.onInterrupt(() =>
+          deleteCreatedSession({ abortFirst: true, context: "" }).pipe(Effect.ignore),
+        ),
+        Effect.exit,
+        Effect.flatMap((exit) => {
+          if (Exit.isFailure(exit)) {
+            return deleteCreatedSession({ abortFirst: false, context: "" }).pipe(
+              Effect.andThen(Effect.failCause(exit.cause)),
+            );
+          }
+          if (Option.isNone(exit.value)) {
+            return deleteCreatedSession({
+              abortFirst: true,
+              context: "OpenCode request timed out. ",
+            }).pipe(
+              Effect.andThen(
+                Effect.fail(
+                  new TextGenerationError({
+                    operation: input.operation,
+                    detail: "OpenCode request timed out.",
+                  }),
+                ),
+              ),
+            );
+          }
+          return deleteCreatedSession({ abortFirst: false, context: "" }).pipe(
+            Effect.as(exit.value.value),
+          );
+        }),
+      );
+
+    const ephemeralSession = input.ephemeralSession;
+    const useServer = (server: Parameters<typeof runAgainstServer>[0]) =>
+      ephemeralSession === undefined
+        ? runAgainstServer(server)
+        : runEphemeralAgainstServer(server, ephemeralSession.timeoutMs);
+
     const serverOutput =
       openCodeSettings.serverUrl.length > 0
         ? openCodeRuntime
@@ -329,8 +473,8 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
                 ? { serverPassword: openCodeSettings.serverPassword }
                 : {}),
             })
-            .pipe(Effect.flatMap(runAgainstServer), Effect.scoped)
-        : serverOwner.withServer(runAgainstServer);
+            .pipe(Effect.flatMap(useServer), Effect.scoped)
+        : serverOwner.withServer(useServer);
     const rawOutput = yield* serverOutput.pipe(
       Effect.catchTags({
         OpenCodeRuntimeError: (cause) =>
@@ -453,10 +597,38 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       };
     });
 
+  const generateThreadSearchStep: TextGeneration.TextGeneration["Service"]["generateThreadSearchStep"] =
+    Effect.fn("OpenCodeTextGeneration.generateThreadSearchStep")(function* (input) {
+      const { prompt, outputSchema } = yield* buildThreadSearchStepPrompt(input);
+      // An empty directory keeps project config, such as MCP servers, out of the step.
+      const cwd = yield* fileSystem
+        .makeTempDirectoryScoped({ prefix: "t3code-opencode-search-" })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new TextGenerationError({
+                operation: "generateThreadSearchStep",
+                detail: "Failed to create OpenCode working directory.",
+                cause,
+              }),
+          ),
+        );
+      const generated = yield* runOpenCodeJson({
+        operation: "generateThreadSearchStep",
+        cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+        ephemeralSession: { timeoutMs: THREAD_SEARCH_STEP_TIMEOUT_MS },
+      });
+      return yield* toThreadSearchStep("OpenCode", generated);
+    }, Effect.scoped);
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateThreadSearchStep,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

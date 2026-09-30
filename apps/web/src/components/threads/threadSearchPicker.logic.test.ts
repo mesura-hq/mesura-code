@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { CommandPaletteActionItem } from "../CommandPalette.logic";
 import {
+  agentSearchResultValue,
   buildThreadSearchCandidates,
   buildThreadSearchGroups,
   THREAD_SEARCH_CONTENT_GROUP,
@@ -225,5 +226,13 @@ describe("guards", () => {
       contentMatchKeys: new Set([sameIdElsewhere]),
     });
     expect(built[0]?.hasContentMatch).toBe(false);
+  });
+});
+
+describe("agentSearchResultValue", () => {
+  it("agent result rows stay distinct for the same thread id in two environments", () => {
+    expect(agentSearchResultValue({ environmentId: "a", threadId: "t" })).not.toBe(
+      agentSearchResultValue({ environmentId: "b", threadId: "t" }),
+    );
   });
 });

@@ -180,3 +180,11 @@ export function buildThreadSearchGroups(input: {
     { value: THREAD_SEARCH_CONTENT_GROUP, label: "In messages", items: rankedItems(byContent) },
   ]);
 }
+
+/** The row value of one agent result, keyed by environment and thread together. */
+export function agentSearchResultValue(match: {
+  readonly environmentId: string;
+  readonly threadId: string;
+}): string {
+  return `agent-thread:${match.environmentId}:${match.threadId}`;
+}

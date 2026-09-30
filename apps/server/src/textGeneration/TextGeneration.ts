@@ -1,7 +1,13 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import type { ChatAttachment, ModelSelection, ProviderInstanceId } from "@t3tools/contracts";
+import type {
+  ChatAttachment,
+  ModelSelection,
+  OrchestrationThreadSearchReasoningInput,
+  OrchestrationThreadSearchStep,
+  ProviderInstanceId,
+} from "@t3tools/contracts";
 import { TextGenerationError } from "@t3tools/contracts";
 
 import * as ProviderInstanceRegistry from "../provider/Services/ProviderInstanceRegistry.ts";
@@ -78,6 +84,17 @@ export interface ThreadTitleGenerationResult {
 }
 
 /**
+ * One agent thread search reasoning step. No `cwd`: the step needs no project,
+ * so each provider runs it in an isolated, empty working directory.
+ */
+export interface ThreadSearchStepGenerationInput extends OrchestrationThreadSearchReasoningInput {
+  /** What model and provider to use for generation. */
+  modelSelection: ModelSelection;
+}
+
+export type ThreadSearchStepGenerationResult = OrchestrationThreadSearchStep;
+
+/**
  * TextGeneration - Service tag for commit and change request text generation.
  */
 export class TextGeneration extends Context.Service<
@@ -108,6 +125,11 @@ export class TextGeneration extends Context.Service<
     readonly generateThreadTitle: (
       input: ThreadTitleGenerationInput,
     ) => Effect.Effect<ThreadTitleGenerationResult, TextGenerationError>;
+
+    /** Choose the next read-only agent thread search step, or rank the evidence. */
+    readonly generateThreadSearchStep: (
+      input: ThreadSearchStepGenerationInput,
+    ) => Effect.Effect<ThreadSearchStepGenerationResult, TextGenerationError>;
   }
 >()("t3/textGeneration/TextGeneration") {}
 
@@ -115,7 +137,8 @@ type TextGenerationOp =
   | "generateCommitMessage"
   | "generatePrContent"
   | "generateBranchName"
-  | "generateThreadTitle";
+  | "generateThreadTitle"
+  | "generateThreadSearchStep";
 
 const resolveInstance = (
   registry: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
@@ -151,6 +174,10 @@ export const make = Effect.gen(function* () {
     generateBranchName: (input) =>
       resolveInstance(registry, "generateBranchName", input.modelSelection.instanceId).pipe(
         Effect.flatMap((textGeneration) => textGeneration.generateBranchName(input)),
+      ),
+    generateThreadSearchStep: (input) =>
+      resolveInstance(registry, "generateThreadSearchStep", input.modelSelection.instanceId).pipe(
+        Effect.flatMap((textGeneration) => textGeneration.generateThreadSearchStep(input)),
       ),
     generateThreadTitle: (input) =>
       resolveInstance(registry, "generateThreadTitle", input.modelSelection.instanceId).pipe(

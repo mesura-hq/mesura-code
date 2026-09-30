@@ -14,6 +14,14 @@ import {
   ProviderInstanceId,
   OrchestrationMessageContext,
   type OrchestrationThreadActivity,
+  THREAD_SEARCH_CATALOG_MAX_PAGE_SIZE,
+  THREAD_SEARCH_EVIDENCE_EXCERPT_MAX_LENGTH,
+  THREAD_SEARCH_EVIDENCE_MAX_PAGE_SIZE,
+  THREAD_SEARCH_TITLE_MAX_LENGTH,
+  THREAD_SEARCH_CURSOR_MAX_LENGTH,
+  OrchestrationThreadSearchCatalogPage,
+  OrchestrationThreadSearchEvidencePage,
+  type OrchestrationThreadSearchEvidence,
 } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -22,6 +30,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as Tracer from "effect/Tracer";
 
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
@@ -29,6 +38,7 @@ import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import {
   enrichContextCompactionActivityDetails,
   OrchestrationProjectionSnapshotQueryLive,
+  THREAD_SEARCH_EVIDENCE_SCAN_BUDGET,
 } from "./ProjectionSnapshotQuery.ts";
 import * as ThreadBackgroundLiveness from "../ThreadBackgroundLiveness.ts";
 import * as ThreadPlanProgress from "../ThreadPlanProgress.ts";
@@ -3678,6 +3688,1234 @@ projectionSnapshotLayer("ProjectionSnapshotQuery activities by kind", (it) => {
         ids(yield* query.listActivitiesByKind("factory.run", { includeArchived: true })),
         ["run-a", "run-b"],
       );
+    }),
+  );
+});
+
+// Agent thread search, phase 1. These specs drive the read-only evidence API
+// through the live ProjectionSnapshotQuery layer against in-memory SQLite. The
+// lexical `searchThreads` guard beside them pins the behavior the existing
+// picker depends on, which the evidence API must leave unchanged.
+const THREAD_SEARCH_MODEL_SELECTION = '{"instanceId":"codex","model":"gpt-5"}';
+
+const resetThreadSearchTables = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`DELETE FROM projection_thread_activities`;
+  yield* sql`DELETE FROM projection_thread_messages`;
+  yield* sql`DELETE FROM projection_turns`;
+  yield* sql`DELETE FROM projection_threads`;
+  yield* sql`DELETE FROM projection_projects`;
+});
+
+const insertThreadSearchProject = (input: {
+  readonly projectId: string;
+  readonly title: string;
+  readonly deletedAt?: string;
+}) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`
+      INSERT INTO projection_projects (
+        project_id, title, workspace_root, scripts_json, created_at, updated_at, deleted_at
+      ) VALUES (
+        ${input.projectId}, ${input.title}, ${`/tmp/${input.projectId}`}, '[]',
+        '2026-06-01T00:00:00.000Z', '2026-06-01T00:00:00.000Z', ${input.deletedAt ?? null}
+      )
+    `;
+  });
+
+const insertThreadSearchThread = (input: {
+  readonly threadId: string;
+  readonly projectId: string;
+  readonly title: string;
+  readonly updatedAt: string;
+  readonly archivedAt?: string;
+  readonly deletedAt?: string;
+}) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`
+      INSERT INTO projection_threads (
+        thread_id, project_id, title, model_selection_json, runtime_mode, interaction_mode,
+        created_at, updated_at, archived_at, deleted_at
+      ) VALUES (
+        ${input.threadId}, ${input.projectId}, ${input.title}, ${THREAD_SEARCH_MODEL_SELECTION},
+        'full-access', 'default', '2026-06-01T00:00:00.000Z', ${input.updatedAt},
+        ${input.archivedAt ?? null}, ${input.deletedAt ?? null}
+      )
+    `;
+  });
+
+const insertThreadSearchMessage = (input: {
+  readonly messageId: string;
+  readonly threadId: string;
+  readonly role: string;
+  readonly text: string;
+  readonly createdAt: string;
+  readonly turnId?: string;
+  readonly isStreaming?: boolean;
+}) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`
+      INSERT INTO projection_thread_messages (
+        message_id, thread_id, turn_id, role, text, is_streaming, created_at, updated_at
+      ) VALUES (
+        ${input.messageId}, ${input.threadId}, ${input.turnId ?? null}, ${input.role},
+        ${input.text}, ${input.isStreaming === true ? 1 : 0}, ${input.createdAt}, ${input.createdAt}
+      )
+    `;
+  });
+
+// A turn whose `assistant_message_id` marks its assistant answer; completed unless stated.
+const insertThreadSearchTurn = (input: {
+  readonly threadId: string;
+  readonly turnId: string;
+  readonly assistantMessageId: string;
+  readonly requestedAt: string;
+  readonly state?: string;
+}) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`
+      INSERT INTO projection_turns (
+        thread_id, turn_id, pending_message_id, assistant_message_id, state,
+        requested_at, started_at, completed_at, checkpoint_files_json
+      ) VALUES (
+        ${input.threadId}, ${input.turnId}, NULL, ${input.assistantMessageId},
+        ${input.state ?? "completed"},
+        ${input.requestedAt}, ${input.requestedAt}, ${input.requestedAt}, '[]'
+      )
+    `;
+  });
+
+interface ThreadSearchPage<A> {
+  readonly entries: ReadonlyArray<A>;
+  readonly nextCursor: string | null;
+}
+
+// Follows `nextCursor` until the API reports the last page. The page ceiling
+// turns a cursor that never advances into a failure instead of a hang.
+const collectThreadSearchPages = <A, E, R>(
+  readPage: (cursor: string | undefined) => Effect.Effect<ThreadSearchPage<A>, E, R>,
+) =>
+  Effect.gen(function* () {
+    const pages: Array<ReadonlyArray<A>> = [];
+    let cursor: string | undefined;
+    for (let pageIndex = 0; pageIndex < 50; pageIndex += 1) {
+      const page = yield* readPage(cursor);
+      pages.push(page.entries);
+      if (page.nextCursor === null) return pages;
+      cursor = page.nextCursor;
+    }
+    return assert.fail("thread search pagination did not reach a final page");
+  });
+
+const withThreadSearchCursor = (cursor: string | undefined) =>
+  cursor === undefined ? {} : { cursor };
+
+const readThreadSearchCatalogPage = (cursor: string | undefined, limit: number) =>
+  Effect.gen(function* () {
+    const query = yield* ProjectionSnapshotQuery;
+    const page = yield* query.listThreadSearchCatalog({ ...withThreadSearchCursor(cursor), limit });
+    return { entries: page.threads, nextCursor: page.nextCursor };
+  });
+
+const readThreadSearchEvidencePage = (
+  cursor: string | undefined,
+  queryText: string,
+  limit?: number,
+) =>
+  Effect.gen(function* () {
+    const query = yield* ProjectionSnapshotQuery;
+    const page = yield* query.searchThreadEvidence({
+      query: queryText,
+      ...withThreadSearchCursor(cursor),
+      ...(limit === undefined ? {} : { limit }),
+    });
+    return { entries: page.matches, nextCursor: page.nextCursor };
+  });
+
+const isThreadSearchCatalogPage = Schema.is(OrchestrationThreadSearchCatalogPage);
+const isThreadSearchEvidencePage = Schema.is(OrchestrationThreadSearchEvidencePage);
+
+/**
+ * Runs `effect` and returns SQLite's plan for every statement it executed. The
+ * SQL comes from the `db.query.text` attribute of each `sql.execute` span, so
+ * the plan is the one of the statement the query layer really sent. SQLite
+ * plans at prepare time, so leaving the parameters unbound does not change it.
+ */
+const planStatementsOf = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const spans: Array<Tracer.NativeSpan> = [];
+    const tracer = Tracer.make({
+      span: (options) => {
+        const span = new Tracer.NativeSpan(options);
+        if (options.name === "sql.execute") spans.push(span);
+        return span;
+      },
+    });
+    yield* effect.pipe(Effect.withTracer(tracer));
+    const plans: Array<ReadonlyArray<string>> = [];
+    for (const span of spans) {
+      const statement = span.attributes.get("db.query.text");
+      assert.isString(statement);
+      const rows = yield* sql.unsafe<{ readonly detail: string }>(
+        `EXPLAIN QUERY PLAN ${String(statement)}`,
+      );
+      plans.push(rows.map((row) => row.detail));
+    }
+    return plans;
+  });
+
+// An evidence statement reads a bounded window only if SQLite can walk the
+// messages in scan order and stop at LIMIT: no full scan of a base table and
+// no sort of every candidate row first. `SCAN page` walks the bounded CTE. A
+// resumed thread page adds a third statement, the boundary rowid lookup.
+const assertBoundedEvidencePlans = (
+  plans: ReadonlyArray<ReadonlyArray<string>>,
+  expectedStatements = 2,
+) => {
+  assert.strictEqual(plans.length, expectedStatements);
+  for (const plan of plans) {
+    const text = plan.join("\n");
+    assert.notInclude(text, "USE TEMP B-TREE", text);
+    assert.isFalse(
+      plan.some((detail) => /^SCAN (messages|threads|projects|turns)\b/.test(detail)),
+      text,
+    );
+    assert.match(
+      plan.find((detail) => / (messages|projection_thread_messages) /.test(detail)) ?? "",
+      /^SEARCH /,
+      text,
+    );
+  }
+};
+
+// Walks one thread's evidence, checking every page against the contract the
+// RPC encodes it with, so a page the wire would reject fails here too.
+const collectThreadFilteredEvidencePages = (queryText: string, threadId: string, limit: number) =>
+  collectThreadSearchPages((cursor) =>
+    Effect.gen(function* () {
+      const query = yield* ProjectionSnapshotQuery;
+      const page = yield* query.searchThreadEvidence({
+        query: queryText,
+        threadId: ThreadId.make(threadId),
+        limit,
+        ...withThreadSearchCursor(cursor),
+      });
+      assert.isTrue(
+        isThreadSearchEvidencePage(page),
+        `evidence page violates its contract; nextCursor length ${page.nextCursor?.length}`,
+      );
+      return { entries: page.matches, nextCursor: page.nextCursor };
+    }),
+  );
+
+/**
+ * Walks one thread's evidence one match per page and deletes the message the
+ * first cursor names before resuming, as a revert would. Returns the ids
+ * delivered after the deletion; the walk must still reach every match below
+ * the boundary, repeating at most matches that share the boundary timestamp.
+ */
+const walkThreadEvidencePastDeletedBoundary = (queryText: string, threadId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const query = yield* ProjectionSnapshotQuery;
+    const first = yield* query.searchThreadEvidence({
+      query: queryText,
+      threadId: ThreadId.make(threadId),
+      limit: 1,
+    });
+    const boundary = first.matches[0];
+    assert.isDefined(boundary);
+    assert.isNotNull(first.nextCursor);
+    yield* sql`DELETE FROM projection_thread_messages WHERE message_id = ${boundary?.messageId ?? ""}`;
+    const later = yield* collectThreadSearchPages((cursor) =>
+      Effect.gen(function* () {
+        const page = yield* query.searchThreadEvidence({
+          query: queryText,
+          threadId: ThreadId.make(threadId),
+          limit: 1,
+          cursor: cursor ?? first.nextCursor ?? "",
+        });
+        return { entries: page.matches, nextCursor: page.nextCursor };
+      }),
+    );
+    return { boundary, later: later.flat() };
+  });
+
+const insertDeletedBoundaryFixture = (
+  threadId: string,
+  messages: ReadonlyArray<{ readonly messageId: string; readonly createdAt: string }>,
+) =>
+  Effect.gen(function* () {
+    yield* insertThreadSearchProject({ projectId: `project-${threadId}`, title: "Boundary" });
+    yield* insertThreadSearchThread({
+      threadId,
+      projectId: `project-${threadId}`,
+      title: threadId,
+      updatedAt: "2026-06-01T00:00:00.000Z",
+    });
+    for (const message of messages) {
+      yield* insertThreadSearchMessage({
+        ...message,
+        threadId,
+        role: "user",
+        text: `A boundary jasper note ${message.messageId}.`,
+      });
+    }
+  });
+
+// Every match below the deleted boundary arrives, and every repeat shares the
+// boundary's timestamp.
+const assertDeletedBoundaryWalk = (
+  walk: {
+    readonly boundary: OrchestrationThreadSearchEvidence | undefined;
+    readonly later: ReadonlyArray<OrchestrationThreadSearchEvidence>;
+  },
+  expectedBelowBoundary: ReadonlyArray<string>,
+) => {
+  const delivered = walk.later.map((match) => match.messageId ?? "");
+  for (const messageId of expectedBelowBoundary) {
+    assert.include(delivered, messageId, `skipped ${messageId}; delivered ${delivered.join(", ")}`);
+  }
+  assert.notInclude(delivered, walk.boundary?.messageId);
+  const counts = new Map<string, number>();
+  for (const messageId of delivered) counts.set(messageId, (counts.get(messageId) ?? 0) + 1);
+  for (const match of walk.later) {
+    const repeated =
+      (counts.get(match.messageId ?? "") ?? 0) > 1 ||
+      !expectedBelowBoundary.includes(match.messageId ?? "");
+    if (repeated) {
+      assert.strictEqual(match.messageCreatedAt, walk.boundary?.messageCreatedAt);
+    }
+  }
+};
+
+const collectThreadSearchEvidence = (queryText: string, limit?: number) =>
+  collectThreadSearchPages((cursor) => readThreadSearchEvidencePage(cursor, queryText, limit)).pipe(
+    Effect.map((pages) => pages.flat()),
+  );
+
+projectionSnapshotLayer("ProjectionSnapshotQuery agent thread search evidence", (it) => {
+  it.effect(
+    "lists compact thread search catalog entries from active and archived threads across stable pages",
+    () =>
+      Effect.gen(function* () {
+        yield* resetThreadSearchTables;
+        const sameUpdatedAt = "2026-06-02T00:00:00.000Z";
+        yield* insertThreadSearchProject({ projectId: "project-alpha", title: "Alpha" });
+        for (const index of [1, 2, 3, 4, 5]) {
+          yield* insertThreadSearchThread({
+            threadId: `thread-catalog-${index}`,
+            projectId: "project-alpha",
+            title: `Catalog ${index}`,
+            updatedAt: sameUpdatedAt,
+          });
+        }
+        yield* insertThreadSearchThread({
+          threadId: "thread-catalog-archived",
+          projectId: "project-alpha",
+          title: "Catalog archived",
+          updatedAt: sameUpdatedAt,
+          archivedAt: "2026-06-03T00:00:00.000Z",
+        });
+
+        const firstPage = yield* readThreadSearchCatalogPage(undefined, 2);
+        assert.isAtMost(firstPage.entries.length, 2);
+        assert.isNotNull(firstPage.nextCursor);
+        // A thread that changes after the first page must not shift the
+        // remaining pages: no entry is repeated and none is skipped.
+        yield* insertThreadSearchThread({
+          threadId: "thread-catalog-late",
+          projectId: "project-alpha",
+          title: "Catalog late",
+          updatedAt: "2026-06-04T00:00:00.000Z",
+        });
+        const laterPages = yield* collectThreadSearchPages((cursor) =>
+          readThreadSearchCatalogPage(cursor ?? firstPage.nextCursor ?? undefined, 2),
+        );
+        const entries = [...firstPage.entries, ...laterPages.flat()];
+        for (const page of laterPages) assert.isAtMost(page.length, 2);
+
+        const originalIds = entries
+          .map((entry) => entry.threadId as string)
+          .filter((threadId) => threadId !== "thread-catalog-late");
+        assert.strictEqual(new Set(originalIds).size, originalIds.length);
+        assert.deepStrictEqual(originalIds.toSorted(), [
+          "thread-catalog-1",
+          "thread-catalog-2",
+          "thread-catalog-3",
+          "thread-catalog-4",
+          "thread-catalog-5",
+          "thread-catalog-archived",
+        ]);
+        const archivedEntry = entries.find((entry) => entry.threadId === "thread-catalog-archived");
+        assert.deepStrictEqual(
+          {
+            threadId: archivedEntry?.threadId,
+            projectId: archivedEntry?.projectId,
+            title: archivedEntry?.title,
+            projectTitle: archivedEntry?.projectTitle,
+            archivedAt: archivedEntry?.archivedAt,
+            updatedAt: archivedEntry?.updatedAt,
+          },
+          {
+            threadId: ThreadId.make("thread-catalog-archived"),
+            projectId: asProjectId("project-alpha"),
+            title: "Catalog archived",
+            projectTitle: "Alpha",
+            archivedAt: "2026-06-03T00:00:00.000Z",
+            updatedAt: sameUpdatedAt,
+          },
+        );
+      }),
+  );
+
+  it.effect("finds thread search evidence deep in long and archived threads", () =>
+    Effect.gen(function* () {
+      yield* resetThreadSearchTables;
+      const sql = yield* SqlClient.SqlClient;
+      yield* insertThreadSearchProject({ projectId: "project-deep", title: "Deep project" });
+      yield* insertThreadSearchThread({
+        threadId: "thread-long",
+        projectId: "project-deep",
+        title: "Long conversation",
+        updatedAt: "2026-06-05T00:00:00.000Z",
+      });
+      yield* insertThreadSearchThread({
+        threadId: "thread-shelved",
+        projectId: "project-deep",
+        title: "Shelved conversation",
+        updatedAt: "2026-06-01T00:00:00.000Z",
+        archivedAt: "2026-06-02T00:00:00.000Z",
+      });
+
+      // The oldest message of a 400-message thread carries the only match.
+      yield* insertThreadSearchMessage({
+        messageId: "message-long-first",
+        threadId: "thread-long",
+        role: "user",
+        text: "We decided on the quartzite migration plan before anything else.",
+        createdAt: "2026-06-01T00:00:00.000Z",
+      });
+      yield* sql`
+        WITH RECURSIVE filler(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM filler WHERE n < 400)
+        INSERT INTO projection_thread_messages (
+          message_id, thread_id, turn_id, role, text, is_streaming, created_at, updated_at
+        )
+        SELECT
+          'message-long-filler-' || n,
+          'thread-long',
+          NULL,
+          'user',
+          'Unrelated filler message number ' || n,
+          0,
+          strftime('%Y-%m-%dT%H:%M:%fZ', '2026-06-01T00:00:00.000Z', '+' || n || ' seconds'),
+          strftime('%Y-%m-%dT%H:%M:%fZ', '2026-06-01T00:00:00.000Z', '+' || n || ' seconds')
+        FROM filler
+      `;
+      yield* insertThreadSearchMessage({
+        messageId: "message-long-final",
+        threadId: "thread-long",
+        turnId: "turn-long-middle",
+        role: "assistant",
+        text: "Final answer: the basalt rollout finished cleanly.",
+        createdAt: "2026-06-01T00:03:20.500Z",
+      });
+      yield* insertThreadSearchTurn({
+        threadId: "thread-long",
+        turnId: "turn-long-middle",
+        assistantMessageId: "message-long-final",
+        requestedAt: "2026-06-01T00:03:20.000Z",
+      });
+
+      yield* insertThreadSearchMessage({
+        messageId: "message-shelved-user",
+        threadId: "thread-shelved",
+        role: "user",
+        text: "Why does the obsidian cache evict too early?",
+        createdAt: "2026-06-01T00:00:00.000Z",
+      });
+      yield* insertThreadSearchMessage({
+        messageId: "message-shelved-final",
+        threadId: "thread-shelved",
+        turnId: "turn-shelved",
+        role: "assistant",
+        text: "The obsidian cache used the wrong clock.",
+        createdAt: "2026-06-01T00:00:01.000Z",
+      });
+      yield* insertThreadSearchTurn({
+        threadId: "thread-shelved",
+        turnId: "turn-shelved",
+        assistantMessageId: "message-shelved-final",
+        requestedAt: "2026-06-01T00:00:00.500Z",
+      });
+
+      const oldest = yield* collectThreadSearchEvidence("QUARTZITE migration");
+      assert.strictEqual(oldest.length, 1);
+      assert.deepStrictEqual(
+        {
+          threadId: oldest[0]?.threadId,
+          projectId: oldest[0]?.projectId,
+          title: oldest[0]?.title,
+          projectTitle: oldest[0]?.projectTitle,
+          archivedAt: oldest[0]?.archivedAt,
+          source: oldest[0]?.source,
+          messageCreatedAt: oldest[0]?.messageCreatedAt,
+        },
+        {
+          threadId: ThreadId.make("thread-long"),
+          projectId: asProjectId("project-deep"),
+          title: "Long conversation",
+          projectTitle: "Deep project",
+          archivedAt: null,
+          source: "user",
+          messageCreatedAt: "2026-06-01T00:00:00.000Z",
+        },
+      );
+      assert.match(oldest[0]?.excerpt ?? "", /quartzite migration/i);
+
+      const finalAnswer = yield* collectThreadSearchEvidence("basalt rollout");
+      assert.deepStrictEqual(
+        finalAnswer.map((match) => [match.threadId, match.source]),
+        [[ThreadId.make("thread-long"), "assistant"]],
+      );
+
+      const archived = yield* collectThreadSearchEvidence("obsidian cache");
+      assert.deepStrictEqual(
+        archived
+          .map((match) => [match.threadId, match.source, match.archivedAt] as const)
+          .toSorted(([, left], [, right]) => left.localeCompare(right)),
+        [
+          [ThreadId.make("thread-shelved"), "assistant", "2026-06-02T00:00:00.000Z"],
+          [ThreadId.make("thread-shelved"), "user", "2026-06-02T00:00:00.000Z"],
+        ],
+      );
+    }),
+  );
+
+  it.effect(
+    "keeps deleted, streaming, interim, tool, and system text out of thread search evidence",
+    () =>
+      Effect.gen(function* () {
+        yield* resetThreadSearchTables;
+        const sql = yield* SqlClient.SqlClient;
+        yield* insertThreadSearchProject({ projectId: "project-live", title: "Live project" });
+        yield* insertThreadSearchProject({
+          projectId: "project-gone",
+          title: "Gone project",
+          deletedAt: "2026-06-03T00:00:00.000Z",
+        });
+        yield* insertThreadSearchThread({
+          threadId: "thread-safe",
+          projectId: "project-live",
+          title: "Safe thread",
+          updatedAt: "2026-06-02T00:00:00.000Z",
+        });
+        yield* insertThreadSearchThread({
+          threadId: "thread-deleted",
+          projectId: "project-live",
+          title: "Deleted thread",
+          updatedAt: "2026-06-02T00:00:00.000Z",
+          deletedAt: "2026-06-03T00:00:00.000Z",
+        });
+        yield* insertThreadSearchThread({
+          threadId: "thread-in-deleted-project",
+          projectId: "project-gone",
+          title: "Thread in a deleted project",
+          updatedAt: "2026-06-02T00:00:00.000Z",
+        });
+
+        const at = (second: number) => `2026-06-01T00:00:${String(second).padStart(2, "0")}.000Z`;
+        yield* insertThreadSearchMessage({
+          messageId: "message-visible",
+          threadId: "thread-safe",
+          role: "user",
+          text: "The visible zircon note.",
+          createdAt: at(1),
+        });
+        yield* insertThreadSearchMessage({
+          messageId: "message-streaming-user",
+          threadId: "thread-safe",
+          role: "user",
+          text: "Streaming zircon draft.",
+          createdAt: at(2),
+          isStreaming: true,
+        });
+        yield* insertThreadSearchMessage({
+          messageId: "message-streaming-final",
+          threadId: "thread-safe",
+          turnId: "turn-streaming",
+          role: "assistant",
+          text: "Streaming zircon final answer.",
+          createdAt: at(3),
+          isStreaming: true,
+        });
+        yield* insertThreadSearchTurn({
+          threadId: "thread-safe",
+          turnId: "turn-streaming",
+          assistantMessageId: "message-streaming-final",
+          requestedAt: at(3),
+        });
+        yield* insertThreadSearchMessage({
+          messageId: "message-interim",
+          threadId: "thread-safe",
+          turnId: "turn-streaming",
+          role: "assistant",
+          text: "Interim zircon reasoning.",
+          createdAt: at(4),
+        });
+        yield* insertThreadSearchMessage({
+          messageId: "message-system",
+          threadId: "thread-safe",
+          role: "system",
+          text: "System zircon instruction.",
+          createdAt: at(5),
+        });
+        yield* insertThreadSearchMessage({
+          messageId: "message-tool",
+          threadId: "thread-safe",
+          role: "tool",
+          text: "Tool zircon output.",
+          createdAt: at(6),
+        });
+        yield* sql`
+          INSERT INTO projection_thread_activities (
+            activity_id, thread_id, turn_id, tone, kind, summary, payload_json, created_at
+          ) VALUES (
+            'activity-tool-output', 'thread-safe', 'turn-streaming', 'tool', 'tool.completed',
+            'Ran grep for zircon', '{"output":"zircon appears in tool output"}', ${at(7)}
+          )
+        `;
+        yield* insertThreadSearchMessage({
+          messageId: "message-deleted-thread",
+          threadId: "thread-deleted",
+          role: "user",
+          text: "Deleted zircon thread.",
+          createdAt: at(8),
+        });
+        yield* insertThreadSearchMessage({
+          messageId: "message-deleted-project",
+          threadId: "thread-in-deleted-project",
+          role: "user",
+          text: "Deleted project zircon thread.",
+          createdAt: at(9),
+        });
+
+        const evidence = yield* collectThreadSearchEvidence("zircon");
+        assert.deepStrictEqual(
+          evidence.map((match) => [match.threadId, match.source]),
+          [[ThreadId.make("thread-safe"), "user"]],
+        );
+        assert.match(evidence[0]?.excerpt ?? "", /visible zircon note/);
+
+        const catalog = yield* collectThreadSearchPages((cursor) =>
+          readThreadSearchCatalogPage(cursor, 50),
+        );
+        assert.deepStrictEqual(
+          catalog.flat().map((entry) => entry.threadId),
+          [ThreadId.make("thread-safe")],
+        );
+      }),
+  );
+
+  it.effect(
+    "pages thread search evidence beyond the first result limit with a fixed statement count per page",
+    () =>
+      Effect.gen(function* () {
+        yield* resetThreadSearchTables;
+        yield* insertThreadSearchProject({ projectId: "project-paged", title: "Paged project" });
+        // Every thread and message shares one timestamp, so only a cursor that
+        // breaks ties by identity can page through them without gaps.
+        const sharedTimestamp = "2026-06-01T00:00:00.000Z";
+        const matchCount = THREAD_SEARCH_EVIDENCE_MAX_PAGE_SIZE + 7;
+        const expectedLabels: Array<string> = [];
+        for (let index = 0; index < matchCount; index += 1) {
+          const label = `paged pyrite ${String(index).padStart(3, "0")}`;
+          expectedLabels.push(label);
+          yield* insertThreadSearchThread({
+            threadId: `thread-paged-${index}`,
+            projectId: "project-paged",
+            title: `Paged ${index}`,
+            updatedAt: sharedTimestamp,
+          });
+          yield* insertThreadSearchMessage({
+            messageId: `message-paged-${index}`,
+            threadId: `thread-paged-${index}`,
+            role: "user",
+            text: `Remember the ${label} decision.`,
+            createdAt: sharedTimestamp,
+          });
+        }
+
+        // Database work per page is a fixed number of statements: it does not
+        // grow with the page size or with the number of matching threads.
+        const smallPageCounter = makeSqlStatementCounter();
+        yield* readThreadSearchEvidencePage(undefined, "paged pyrite", 1).pipe(
+          Effect.withTracer(smallPageCounter.tracer),
+        );
+        const counter = makeSqlStatementCounter();
+        const firstPage = yield* readThreadSearchEvidencePage(
+          undefined,
+          "paged pyrite",
+          THREAD_SEARCH_EVIDENCE_MAX_PAGE_SIZE,
+        ).pipe(Effect.withTracer(counter.tracer));
+        assert.strictEqual(counter.count(), smallPageCounter.count());
+        assert.isAtMost(counter.count(), 2);
+        assert.strictEqual(firstPage.entries.length, THREAD_SEARCH_EVIDENCE_MAX_PAGE_SIZE);
+        assert.isNotNull(firstPage.nextCursor);
+
+        const defaultPage = yield* readThreadSearchEvidencePage(undefined, "paged pyrite");
+        assert.isAtMost(defaultPage.entries.length, THREAD_SEARCH_EVIDENCE_MAX_PAGE_SIZE);
+
+        const everyMatch = yield* collectThreadSearchEvidence(
+          "paged pyrite",
+          THREAD_SEARCH_EVIDENCE_MAX_PAGE_SIZE,
+        );
+        const labels = everyMatch.map(
+          (match) => /paged pyrite \d{3}/.exec(match.excerpt)?.[0] ?? match.excerpt,
+        );
+        assert.strictEqual(new Set(labels).size, labels.length);
+        assert.deepStrictEqual(labels.toSorted(), expectedLabels);
+
+        const catalogCounter = makeSqlStatementCounter();
+        const catalogPage = yield* readThreadSearchCatalogPage(
+          undefined,
+          THREAD_SEARCH_CATALOG_MAX_PAGE_SIZE,
+        ).pipe(Effect.withTracer(catalogCounter.tracer));
+        assert.isAtMost(catalogCounter.count(), 2);
+        assert.isAtMost(catalogPage.entries.length, THREAD_SEARCH_CATALOG_MAX_PAGE_SIZE);
+
+        yield* insertThreadSearchMessage({
+          messageId: "message-paged-huge",
+          threadId: "thread-paged-0",
+          role: "user",
+          text: `${"a".repeat(20_000)} buried beryl detail ${"b".repeat(20_000)}`,
+          createdAt: sharedTimestamp,
+        });
+        const huge = yield* collectThreadSearchEvidence("buried beryl");
+        assert.strictEqual(huge.length, 1);
+        assert.isAtMost(
+          huge[0]?.excerpt.length ?? Infinity,
+          THREAD_SEARCH_EVIDENCE_EXCERPT_MAX_LENGTH,
+        );
+        assert.include(huge[0]?.excerpt ?? "", "buried beryl detail");
+      }),
+  );
+
+  it.effect("narrows thread search evidence to one thread and restarts on a foreign cursor", () =>
+    Effect.gen(function* () {
+      yield* resetThreadSearchTables;
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      yield* insertThreadSearchProject({ projectId: "project-inspect", title: "Inspect" });
+      for (const threadId of ["thread-inspect-a", "thread-inspect-b"]) {
+        yield* insertThreadSearchThread({
+          threadId,
+          projectId: "project-inspect",
+          title: threadId,
+          updatedAt: "2026-06-01T00:00:00.000Z",
+        });
+        yield* insertThreadSearchMessage({
+          messageId: `message-${threadId}`,
+          threadId,
+          role: "user",
+          text: "An olivine clue.",
+          createdAt: "2026-06-01T00:00:00.000Z",
+        });
+      }
+
+      const narrowed = yield* snapshotQuery.searchThreadEvidence({
+        query: "olivine",
+        threadId: ThreadId.make("thread-inspect-b"),
+      });
+      assert.deepStrictEqual(
+        narrowed.matches.map((match) => [match.threadId, match.messageId]),
+        [[ThreadId.make("thread-inspect-b"), asMessageId("message-thread-inspect-b")]],
+      );
+
+      // A catalog cursor is not an evidence boundary: evidence restarts at page one.
+      const catalogPage = yield* snapshotQuery.listThreadSearchCatalog({ limit: 1 });
+      assert.isNotNull(catalogPage.nextCursor);
+      const restarted = yield* snapshotQuery.searchThreadEvidence({
+        query: "olivine",
+        cursor: catalogPage.nextCursor ?? "",
+      });
+      assert.strictEqual(restarted.matches.length, 2);
+    }),
+  );
+
+  it.effect(
+    "keeps a running turn's linked assistant text out of evidence but not out of lexical search",
+    () =>
+      Effect.gen(function* () {
+        yield* resetThreadSearchTables;
+        const sql = yield* SqlClient.SqlClient;
+        const snapshotQuery = yield* ProjectionSnapshotQuery;
+        yield* insertThreadSearchProject({ projectId: "project-running", title: "Running" });
+        yield* insertThreadSearchThread({
+          threadId: "thread-running",
+          projectId: "project-running",
+          title: "Running thread",
+          updatedAt: "2026-06-01T00:00:00.000Z",
+        });
+        const turns = [
+          ["running", "running"],
+          ["interrupted", "interrupted"],
+          ["error", "error"],
+        ] as const;
+        for (const [index, [turnId, state]] of turns.entries()) {
+          const createdAt = `2026-06-01T00:00:0${index}.000Z`;
+          yield* insertThreadSearchMessage({
+            messageId: `message-${turnId}`,
+            threadId: "thread-running",
+            turnId,
+            role: "assistant",
+            text: `The ${state} spinel answer.`,
+            createdAt,
+          });
+          yield* insertThreadSearchTurn({
+            threadId: "thread-running",
+            turnId,
+            assistantMessageId: `message-${turnId}`,
+            requestedAt: createdAt,
+            state,
+          });
+        }
+
+        const settled = yield* collectThreadSearchEvidence("spinel answer");
+        assert.deepStrictEqual(settled.map((match) => match.messageId).toSorted(), [
+          asMessageId("message-error"),
+          asMessageId("message-interrupted"),
+        ]);
+        // The lexical picker keeps its original predicate, which ignores turn state.
+        const lexical = yield* snapshotQuery.searchThreads({ query: "running spinel" });
+        assert.deepStrictEqual(
+          lexical.matches.map((match) => match.threadId),
+          [ThreadId.make("thread-running")],
+        );
+
+        yield* sql`UPDATE projection_turns SET state = 'completed' WHERE turn_id = 'running'`;
+        const afterCompletion = yield* collectThreadSearchEvidence("running spinel");
+        assert.deepStrictEqual(
+          afterCompletion.map((match) => match.messageId),
+          [asMessageId("message-running")],
+        );
+      }),
+  );
+
+  it.effect("caps thread and project titles in thread search catalog and evidence pages", () =>
+    Effect.gen(function* () {
+      yield* resetThreadSearchTables;
+      // Astral characters are two UTF-16 units each, the unit the schema counts.
+      const longThreadTitle = "🪨".repeat(THREAD_SEARCH_TITLE_MAX_LENGTH + 5);
+      const longProjectTitle = "p".repeat(THREAD_SEARCH_TITLE_MAX_LENGTH * 20);
+      yield* insertThreadSearchProject({ projectId: "project-long", title: longProjectTitle });
+      yield* insertThreadSearchThread({
+        threadId: "thread-long-title",
+        projectId: "project-long",
+        title: longThreadTitle,
+        updatedAt: "2026-06-01T00:00:00.000Z",
+      });
+      yield* insertThreadSearchMessage({
+        messageId: "message-long-title",
+        threadId: "thread-long-title",
+        role: "user",
+        text: "A tourmaline note.",
+        createdAt: "2026-06-01T00:00:00.000Z",
+      });
+
+      const catalog = (yield* readThreadSearchCatalogPage(undefined, 10)).entries;
+      const evidence = yield* collectThreadSearchEvidence("tourmaline");
+      // The RPC encodes each page with the contract schema, so a page the
+      // schema rejects fails the whole request instead of arriving truncated.
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      assert.isTrue(
+        isThreadSearchCatalogPage(yield* snapshotQuery.listThreadSearchCatalog({ limit: 10 })),
+      );
+      assert.isTrue(
+        isThreadSearchEvidencePage(
+          yield* snapshotQuery.searchThreadEvidence({ query: "tourmaline" }),
+        ),
+      );
+      for (const entry of [...catalog, ...evidence]) {
+        assert.isAtMost(entry.title.length, THREAD_SEARCH_TITLE_MAX_LENGTH);
+        assert.isAtMost(entry.projectTitle.length, THREAD_SEARCH_TITLE_MAX_LENGTH);
+        assert.isTrue(entry.title.startsWith("🪨"));
+        assert.isTrue(entry.title.endsWith("…"));
+        assert.notMatch(entry.title, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+        assert.isTrue(entry.projectTitle.endsWith("…"));
+      }
+      assert.strictEqual(catalog.length, 1);
+      assert.strictEqual(evidence.length, 1);
+    }),
+  );
+
+  it.effect("scans at most one budget of messages per evidence request and resumes below it", () =>
+    Effect.gen(function* () {
+      yield* resetThreadSearchTables;
+      const sql = yield* SqlClient.SqlClient;
+      yield* insertThreadSearchProject({ projectId: "project-scan", title: "Scan" });
+      yield* insertThreadSearchThread({
+        threadId: "thread-scan",
+        projectId: "project-scan",
+        title: "Scan thread",
+        updatedAt: "2026-06-01T00:00:00.000Z",
+      });
+      // The only match is inserted first, so it sits below more than two scan
+      // windows of newer non-matching messages.
+      yield* insertThreadSearchMessage({
+        messageId: "message-scan-match",
+        threadId: "thread-scan",
+        role: "user",
+        text: "The lone chrysoberyl remark.",
+        createdAt: "2026-06-01T00:00:00.000Z",
+      });
+      const fillerCount = THREAD_SEARCH_EVIDENCE_SCAN_BUDGET * 2 + 10;
+      yield* sql`
+          WITH RECURSIVE filler(n) AS (
+            SELECT 1 UNION ALL SELECT n + 1 FROM filler WHERE n < ${fillerCount}
+          )
+          INSERT INTO projection_thread_messages (
+            message_id, thread_id, turn_id, role, text, is_streaming, created_at, updated_at
+          )
+          SELECT
+            'message-scan-filler-' || n, 'thread-scan', NULL, 'user', 'Filler ' || n, 0,
+            '2026-06-01T00:00:01.000Z', '2026-06-01T00:00:01.000Z'
+          FROM filler
+        `;
+
+      const firstPage = yield* readThreadSearchEvidencePage(undefined, "chrysoberyl");
+      assert.deepStrictEqual(firstPage.entries, []);
+      assert.isNotNull(firstPage.nextCursor);
+
+      const pages = yield* collectThreadSearchPages((cursor) =>
+        readThreadSearchEvidencePage(cursor, "chrysoberyl"),
+      );
+      assert.strictEqual(pages.length, 3);
+      assert.deepStrictEqual(
+        pages.flat().map((match) => match.messageId),
+        [asMessageId("message-scan-match")],
+      );
+
+      // The thread filter scans the same bounded windows within one thread.
+      const narrowed = yield* collectThreadSearchPages((cursor) =>
+        Effect.gen(function* () {
+          const query = yield* ProjectionSnapshotQuery;
+          const page = yield* query.searchThreadEvidence({
+            query: "chrysoberyl",
+            threadId: ThreadId.make("thread-scan"),
+            ...withThreadSearchCursor(cursor),
+          });
+          return { entries: page.matches, nextCursor: page.nextCursor };
+        }),
+      );
+      assert.strictEqual(narrowed.length, 3);
+      assert.strictEqual(narrowed.flat().length, 1);
+    }),
+  );
+
+  it.effect("binds an evidence cursor to its query and thread filter", () =>
+    Effect.gen(function* () {
+      yield* resetThreadSearchTables;
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      yield* insertThreadSearchProject({ projectId: "project-bound", title: "Bound" });
+      yield* insertThreadSearchThread({
+        threadId: "thread-bound",
+        projectId: "project-bound",
+        title: "Bound thread",
+        updatedAt: "2026-06-01T00:00:00.000Z",
+      });
+      // Oldest to newest: two garnet matches, then a beryl match that a garnet
+      // cursor would skip if another search accepted it.
+      for (const [index, text] of ["garnet one", "garnet two", "beryl newest"].entries()) {
+        yield* insertThreadSearchMessage({
+          messageId: `message-bound-${index}`,
+          threadId: "thread-bound",
+          role: "user",
+          text,
+          createdAt: `2026-06-01T00:00:0${index}.000Z`,
+        });
+      }
+
+      const garnetFirst = yield* snapshotQuery.searchThreadEvidence({ query: "garnet", limit: 1 });
+      assert.deepStrictEqual(
+        garnetFirst.matches.map((match) => match.messageId),
+        [asMessageId("message-bound-1")],
+      );
+      const garnetCursor = garnetFirst.nextCursor ?? "";
+
+      // The same search, differing only in ASCII case, continues the walk.
+      const garnetSecond = yield* snapshotQuery.searchThreadEvidence({
+        query: "GARNET",
+        cursor: garnetCursor,
+      });
+      assert.deepStrictEqual(
+        garnetSecond.matches.map((match) => match.messageId),
+        [asMessageId("message-bound-0")],
+      );
+
+      // Another query, or the same query narrowed to a thread, restarts at page one.
+      const beryl = yield* snapshotQuery.searchThreadEvidence({
+        query: "beryl",
+        cursor: garnetCursor,
+      });
+      assert.deepStrictEqual(
+        beryl.matches.map((match) => match.messageId),
+        [asMessageId("message-bound-2")],
+      );
+      const narrowed = yield* snapshotQuery.searchThreadEvidence({
+        query: "garnet",
+        threadId: ThreadId.make("thread-bound"),
+        cursor: garnetCursor,
+      });
+      assert.deepStrictEqual(
+        narrowed.matches.map((match) => match.messageId),
+        [asMessageId("message-bound-1"), asMessageId("message-bound-0")],
+      );
+    }),
+  );
+
+  it.effect("plans a global evidence request as a rowid window read without sorting history", () =>
+    Effect.gen(function* () {
+      yield* resetThreadSearchTables;
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const plans = yield* planStatementsOf(
+        snapshotQuery.searchThreadEvidence({ query: "plan probe" }),
+      );
+      assertBoundedEvidencePlans(plans);
+    }),
+  );
+
+  it.effect("plans a thread-filtered evidence request without sorting the thread's history", () =>
+    Effect.gen(function* () {
+      yield* resetThreadSearchTables;
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const plans = yield* planStatementsOf(
+        snapshotQuery.searchThreadEvidence({
+          query: "plan probe",
+          threadId: ThreadId.make("thread-plan-probe"),
+        }),
+      );
+      assertBoundedEvidencePlans(plans);
+    }),
+  );
+
+  it.effect("pages thread-filtered evidence through matches that share one timestamp", () =>
+    Effect.gen(function* () {
+      yield* resetThreadSearchTables;
+      yield* insertThreadSearchProject({ projectId: "project-ties", title: "Ties" });
+      for (const threadId of ["thread-ties", "thread-ties-other"]) {
+        yield* insertThreadSearchThread({
+          threadId,
+          projectId: "project-ties",
+          title: threadId,
+          updatedAt: "2026-06-01T00:00:00.000Z",
+        });
+      }
+      const expected: Array<MessageId> = [];
+      for (let index = 0; index < 7; index += 1) {
+        const messageId = `message-ties-${index}`;
+        expected.push(asMessageId(messageId));
+        yield* insertThreadSearchMessage({
+          messageId,
+          threadId: "thread-ties",
+          role: "user",
+          text: `A tied lapis note ${index}.`,
+          createdAt: "2026-06-01T00:00:00.000Z",
+        });
+      }
+      // A match in another thread with the same timestamp must stay out.
+      yield* insertThreadSearchMessage({
+        messageId: "message-ties-elsewhere",
+        threadId: "thread-ties-other",
+        role: "user",
+        text: "A tied lapis note elsewhere.",
+        createdAt: "2026-06-01T00:00:00.000Z",
+      });
+
+      const pages = yield* collectThreadFilteredEvidencePages("lapis note", "thread-ties", 3);
+      for (const page of pages) assert.isAtMost(page.length, 3);
+      const delivered = pages.flat().map((match) => match.messageId ?? "");
+      assert.strictEqual(new Set(delivered).size, delivered.length);
+      assert.deepStrictEqual(delivered.toSorted(), expected.toSorted());
+    }),
+  );
+
+  it.effect("keeps a thread-filtered evidence cursor within its limit for a long message id", () =>
+    Effect.gen(function* () {
+      yield* resetThreadSearchTables;
+      yield* insertThreadSearchProject({ projectId: "project-long-id", title: "Long id" });
+      yield* insertThreadSearchThread({
+        threadId: "thread-long-id",
+        projectId: "project-long-id",
+        title: "Long id thread",
+        updatedAt: "2026-06-01T00:00:00.000Z",
+      });
+      // MessageId has no length limit, and a thread cursor carries the
+      // boundary message id. This one alone outgrows the cursor limit.
+      const expected: Array<MessageId> = [];
+      for (let index = 0; index < 3; index += 1) {
+        const messageId = `message-long-id-${index}-${"x".repeat(THREAD_SEARCH_CURSOR_MAX_LENGTH)}`;
+        expected.push(asMessageId(messageId));
+        yield* insertThreadSearchMessage({
+          messageId,
+          threadId: "thread-long-id",
+          role: "user",
+          text: `A sodalite remark ${index}.`,
+          createdAt: `2026-06-01T00:00:0${index}.000Z`,
+        });
+      }
+
+      const pages = yield* collectThreadFilteredEvidencePages(
+        "sodalite remark",
+        "thread-long-id",
+        1,
+      );
+      assert.deepStrictEqual(
+        pages
+          .flat()
+          .map((match) => match.messageId ?? "")
+          .toSorted(),
+        expected.toSorted(),
+      );
+    }),
+  );
+
+  it.effect("resumes a thread evidence walk after its boundary message is deleted", () =>
+    Effect.gen(function* () {
+      yield* resetThreadSearchTables;
+      // Walk order is (created_at, message_id) descending: m-d, m-c, m-b, then
+      // the older m-a. m-d is delivered first and becomes the boundary.
+      yield* insertDeletedBoundaryFixture("thread-deleted-boundary", [
+        { messageId: "m-a", createdAt: "2026-06-01T00:00:00.000Z" },
+        { messageId: "m-b", createdAt: "2026-06-01T00:00:01.000Z" },
+        { messageId: "m-c", createdAt: "2026-06-01T00:00:01.000Z" },
+        { messageId: "m-d", createdAt: "2026-06-01T00:00:01.000Z" },
+      ]);
+      const walk = yield* walkThreadEvidencePastDeletedBoundary(
+        "boundary jasper",
+        "thread-deleted-boundary",
+      );
+      assert.strictEqual(walk.boundary?.messageId, "m-d");
+      assertDeletedBoundaryWalk(walk, ["m-c", "m-b", "m-a"]);
+    }),
+  );
+
+  it.effect(
+    "resumes a thread evidence walk after a deleted boundary with high-Unicode message ids",
+    () =>
+      Effect.gen(function* () {
+        yield* resetThreadSearchTables;
+        // SQLite compares TEXT as UTF-8 bytes. Code points above U+FFFF encode
+        // from 0xF0, above the fallback U+FFFF (0xEF 0xBF 0xBF), so these ids
+        // sort above it: walk order is 😀-b, 😀-a, then m-c, then the older m-a.
+        yield* insertDeletedBoundaryFixture("thread-unicode-boundary", [
+          { messageId: "m-a", createdAt: "2026-06-01T00:00:00.000Z" },
+          { messageId: "m-c", createdAt: "2026-06-01T00:00:01.000Z" },
+          { messageId: "😀-a", createdAt: "2026-06-01T00:00:01.000Z" },
+          { messageId: "😀-b", createdAt: "2026-06-01T00:00:01.000Z" },
+        ]);
+        const walk = yield* walkThreadEvidencePastDeletedBoundary(
+          "boundary jasper",
+          "thread-unicode-boundary",
+        );
+        assert.strictEqual(walk.boundary?.messageId, "😀-b");
+        assertDeletedBoundaryWalk(walk, ["😀-a", "m-c", "m-a"]);
+      }),
+  );
+
+  it.effect(
+    "plans resumed thread evidence pages as bounded index reads with and without their boundary",
+    () =>
+      Effect.gen(function* () {
+        yield* resetThreadSearchTables;
+        const sql = yield* SqlClient.SqlClient;
+        const snapshotQuery = yield* ProjectionSnapshotQuery;
+        yield* insertDeletedBoundaryFixture("thread-resume-plan", [
+          { messageId: "m-a", createdAt: "2026-06-01T00:00:00.000Z" },
+          { messageId: "m-b", createdAt: "2026-06-01T00:00:01.000Z" },
+          { messageId: "m-c", createdAt: "2026-06-01T00:00:01.000Z" },
+        ]);
+        const threadId = ThreadId.make("thread-resume-plan");
+        const first = yield* snapshotQuery.searchThreadEvidence({
+          query: "boundary jasper",
+          threadId,
+          limit: 1,
+        });
+        const cursor = first.nextCursor ?? "";
+        assert.notStrictEqual(cursor, "");
+        const resume = snapshotQuery.searchThreadEvidence({
+          query: "boundary jasper",
+          threadId,
+          limit: 1,
+          cursor,
+        });
+
+        // Boundary present: rowid lookup, then the keyset range on the index.
+        const present = yield* planStatementsOf(resume);
+        assertBoundedEvidencePlans(present, 3);
+
+        // Boundary gone: the lookup finds nothing and the walk resumes on
+        // created_at alone, still a range on the same index.
+        yield* sql`DELETE FROM projection_thread_messages WHERE message_id = ${first.matches[0]?.messageId ?? ""}`;
+        const missing = yield* planStatementsOf(resume);
+        assertBoundedEvidencePlans(missing, 3);
+        assert.notDeepEqual(missing, present);
+      }),
+  );
+
+  it.effect("keeps lexical searchThreads active-only and capped at fifty threads", () =>
+    Effect.gen(function* () {
+      yield* resetThreadSearchTables;
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      yield* insertThreadSearchProject({ projectId: "project-lexical", title: "Lexical" });
+      for (let index = 0; index < 55; index += 1) {
+        yield* insertThreadSearchThread({
+          threadId: `thread-lexical-${index}`,
+          projectId: "project-lexical",
+          title: `Lexical ${index}`,
+          updatedAt: "2026-06-01T00:00:00.000Z",
+        });
+        yield* insertThreadSearchMessage({
+          messageId: `message-lexical-${index}`,
+          threadId: `thread-lexical-${index}`,
+          role: "user",
+          text: "A lexical garnet mention.",
+          createdAt: "2026-06-01T00:00:00.000Z",
+        });
+      }
+      yield* insertThreadSearchThread({
+        threadId: "thread-lexical-archived",
+        projectId: "project-lexical",
+        title: "Lexical archived",
+        updatedAt: "2026-06-09T00:00:00.000Z",
+        archivedAt: "2026-06-09T00:00:00.000Z",
+      });
+      yield* insertThreadSearchMessage({
+        messageId: "message-lexical-archived",
+        threadId: "thread-lexical-archived",
+        role: "user",
+        text: "An archived lexical garnet mention.",
+        createdAt: "2026-06-09T00:00:00.000Z",
+      });
+
+      const defaultResult = yield* snapshotQuery.searchThreads({ query: "lexical garnet" });
+      assert.strictEqual(defaultResult.matches.length, 50);
+      assert.isFalse(
+        defaultResult.matches.some((match) => match.threadId === "thread-lexical-archived"),
+      );
+      assert.deepStrictEqual(Object.keys(defaultResult.matches[0] ?? {}).toSorted(), [
+        "messageCreatedAt",
+        "projectId",
+        "snippet",
+        "source",
+        "threadId",
+      ]);
+      const limited = yield* snapshotQuery.searchThreads({ query: "lexical garnet", limit: 3 });
+      assert.strictEqual(limited.matches.length, 3);
     }),
   );
 });

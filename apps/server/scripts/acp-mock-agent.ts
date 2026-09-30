@@ -54,6 +54,17 @@ const failPrompt = process.env.T3_ACP_FAIL_PROMPT === "1";
 const failSetConfigOption = process.env.T3_ACP_FAIL_SET_CONFIG_OPTION === "1";
 const exitOnSetConfigOption = process.env.T3_ACP_EXIT_ON_SET_CONFIG_OPTION === "1";
 const promptResponseText = process.env.T3_ACP_PROMPT_RESPONSE_TEXT;
+// Mimic Grok Build, which keeps each session under
+// `$GROK_HOME/sessions/<encoded cwd>/<session id>/updates.jsonl`.
+const writeGrokSession = process.env.T3_ACP_WRITE_GROK_SESSION === "1";
+const grokSessionProject = process.env.T3_ACP_GROK_SESSION_PROJECT;
+function writeGrokSessionTranscript(cwd: string) {
+  const grokHome = process.env.GROK_HOME;
+  if (!grokHome) return;
+  const directory = `${grokHome}/sessions/${grokSessionProject ?? encodeURIComponent(cwd)}/${sessionId}`;
+  NodeFS.mkdirSync(directory, { recursive: true });
+  NodeFS.writeFileSync(`${directory}/updates.jsonl`, '{"type":"turn_completed"}\n');
+}
 const initialGrokReasoningEffort =
   process.env.T3_ACP_INITIAL_GROK_REASONING_EFFORT?.trim() || undefined;
 const promptDelayMs = Number(process.env.T3_ACP_PROMPT_DELAY_MS ?? "0");
@@ -433,10 +444,13 @@ const program = Effect.gen(function* () {
     yield* agent.handleLogout(() => Effect.succeed({}));
   }
 
-  yield* agent.handleCreateSession(() =>
+  yield* agent.handleCreateSession((request) =>
     Effect.gen(function* () {
       if (antigravityProfile) {
         yield* publishAntigravityCommands(sessionId);
+      }
+      if (writeGrokSession) {
+        writeGrokSessionTranscript(request.cwd);
       }
       return {
         sessionId,

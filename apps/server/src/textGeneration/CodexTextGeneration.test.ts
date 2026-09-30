@@ -15,6 +15,17 @@ import * as ServerConfig from "../config.ts";
 import * as TextGeneration from "./TextGeneration.ts";
 import { makeCodexTextGeneration } from "./CodexTextGeneration.ts";
 import { writeFakeCli } from "../testUtils/fakeCli.ts";
+import {
+  THREAD_SEARCH_BROADEN_MODEL_OUTPUT,
+  THREAD_SEARCH_BROADEN_STEP,
+  THREAD_SEARCH_EMPTY_INSPECT_MODEL_OUTPUT,
+  THREAD_SEARCH_FINISH_MODEL_OUTPUT,
+  THREAD_SEARCH_FINISH_STEP,
+  THREAD_SEARCH_FORBIDDEN_MODEL_OUTPUT,
+  THREAD_SEARCH_STEP_REQUEST,
+  THREAD_SEARCH_QUOTED_EXCERPT,
+  THREAD_SEARCH_STEP_EXCERPT,
+} from "./ThreadSearchStep.testFixtures.ts";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
 const DEFAULT_TEST_MODEL_SELECTION = createModelSelection(
@@ -38,6 +49,13 @@ interface FakeCodexInput {
   forbidArg?: string;
   stdinMustContain?: string;
   stdinMustNotContain?: string;
+  /**
+   * Config values the run must end up with, resolved the way codex-cli does:
+   * the last `-c`/`--config` for a key wins.
+   */
+  requireEffectiveConfig?: Record<string, string>;
+  /** Features that must end up off; codex-cli applies `--disable` over any `--enable`. */
+  requireDisabledFeatures?: ReadonlyArray<string>;
 }
 
 // The stub walks argv the way the shell script it replaced did: `--image`,
@@ -52,6 +70,8 @@ function makeFakeCodexBinary(dir: string, input: FakeCodexInput) {
     forbidReasoningEffort: input.forbidReasoningEffort ?? false,
     requireArg: input.requireArg ?? null,
     forbidArg: input.forbidArg ?? null,
+    requireEffectiveConfig: input.requireEffectiveConfig ?? {},
+    requireDisabledFeatures: input.requireDisabledFeatures ?? [],
     stdinMustContain: input.stdinMustContain ?? null,
     stdinMustNotContain: input.stdinMustNotContain ?? null,
     stderr: input.stderr ?? null,
@@ -98,6 +118,27 @@ function makeFakeCodexBinary(dir: string, input: FakeCodexInput) {
         "}",
         "if (check.forbidArg !== null && originalArgs.includes(` ${check.forbidArg} `)) {",
         '  fail("forbidden arg: " + check.forbidArg, 9);',
+        "}",
+        "const effectiveConfig = {};",
+        "const disabledFeatures = new Set();",
+        "for (let index = 0; index < args.length; index += 1) {",
+        "  const arg = args[index];",
+        "  const inline = /^(?:--config|-c)=(.*)$/.exec(arg);",
+        '  const setting = inline ? inline[1] : arg === "--config" || arg === "-c" ? args[++index] : null;',
+        "  if (setting) {",
+        '    const separator = setting.indexOf("=");',
+        '    effectiveConfig[setting.slice(0, separator)] = setting.slice(separator + 1).replace(/^"|"$/g, "");',
+        '  } else if (arg === "--disable") {',
+        "    disabledFeatures.add(args[++index]);",
+        "  }",
+        "}",
+        "for (const [key, value] of Object.entries(check.requireEffectiveConfig)) {",
+        "  if (effectiveConfig[key] !== value) {",
+        '    fail("effective " + key + " was " + effectiveConfig[key], 10);',
+        "  }",
+        "}",
+        "for (const feature of check.requireDisabledFeatures) {",
+        '  if (!disabledFeatures.has(feature)) fail("feature left enabled: " + feature, 11);',
         "}",
         'if (check.requireImage && !seenImage) fail("missing --image input", 2);',
         "if (",
@@ -661,6 +702,275 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
               "Codex CLI command failed: codex execution failed",
             );
           }
+        }),
+    ),
+  );
+
+  // Guard: every Codex text-generation task already runs as an ephemeral,
+  // read-only exec. The thread search step must inherit that isolation.
+  for (const isolationArg of ["--ephemeral", "-s read-only"]) {
+    it.effect(`keeps existing Codex thread titles isolated with ${isolationArg}`, () =>
+      withFakeCodexEnv(
+        { output: JSON.stringify({ title: "Isolated title" }), requireArg: isolationArg },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const generated = yield* textGeneration.generateThreadTitle({
+              cwd: process.cwd(),
+              message: "Name this thread",
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            });
+            expect(generated.title).toBe("Isolated title");
+          }),
+      ),
+    );
+  }
+
+  // Agent thread search, phase 2.
+  for (const requiredArg of ["--ephemeral", "-s read-only", "--model gpt-5.4-mini"]) {
+    it.effect(`Codex answers a schema-checked thread search step with ${requiredArg}`, () =>
+      withFakeCodexEnv(
+        {
+          output: THREAD_SEARCH_FINISH_MODEL_OUTPUT,
+          requireArg: requiredArg,
+          // Evidence reaches the model JSON-quoted, never as raw prompt lines.
+          stdinMustContain: THREAD_SEARCH_QUOTED_EXCERPT,
+          stdinMustNotContain: THREAD_SEARCH_STEP_EXCERPT,
+        },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const step = yield* textGeneration.generateThreadSearchStep({
+              ...THREAD_SEARCH_STEP_REQUEST,
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            });
+            expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
+          }),
+      ),
+    );
+  }
+
+  it.effect("Codex answers a broaden thread search step with its new terms", () =>
+    withFakeCodexEnv({ output: THREAD_SEARCH_BROADEN_MODEL_OUTPUT }, (textGeneration) =>
+      Effect.gen(function* () {
+        const step = yield* textGeneration.generateThreadSearchStep({
+          ...THREAD_SEARCH_STEP_REQUEST,
+          modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+        });
+        expect(step).toEqual(THREAD_SEARCH_BROADEN_STEP);
+      }),
+    ),
+  );
+
+  for (const [label, output] of [
+    ["a write action", THREAD_SEARCH_FORBIDDEN_MODEL_OUTPUT],
+    ["an inspect step without candidates", THREAD_SEARCH_EMPTY_INSPECT_MODEL_OUTPUT],
+    ["non-JSON text", "I could not find it."],
+  ] as const) {
+    it.effect(`Codex rejects ${label} as a thread search step`, () =>
+      withFakeCodexEnv({ output }, (textGeneration) =>
+        Effect.gen(function* () {
+          const error = yield* textGeneration
+            .generateThreadSearchStep({
+              ...THREAD_SEARCH_STEP_REQUEST,
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            })
+            .pipe(Effect.flip);
+          expect(error).toBeInstanceOf(TextGenerationError);
+          expect(error.operation).toBe("generateThreadSearchStep");
+          expect(error.message).toMatch(/invalid structured output/i);
+        }),
+      ),
+    );
+  }
+
+  // Review P1-1: search reasoning must not reach Codex tools. The user's
+  // config.toml (MCP servers, plugins, profiles) and exec rules are skipped,
+  // every tool feature is disabled (disable wins over any --enable), and an
+  // MCP server injected through launch args is dropped for this operation.
+  for (const isolationArg of [
+    "--ignore-user-config",
+    "--ignore-rules",
+    "--disable shell_tool",
+    "--disable unified_exec",
+    "--disable apps",
+    "--disable plugins",
+    "--disable hooks",
+    "--disable multi_agent",
+    "--disable browser_use",
+    "--disable computer_use",
+    "--disable image_generation",
+    '--config web_search="disabled"',
+    // Checked against real codex-cli 0.156.0 through a local Responses
+    // endpoint: `--disable view_image` removes the image tool the model sees.
+    "--disable view_image",
+    // apply_patch stays model-visible (Codex chooses it per model), so writes
+    // rest on these two; they follow launch args so those cannot relax them.
+    '--config sandbox_mode="read-only"',
+    '--config approval_policy="never"',
+  ]) {
+    it.effect(`Codex runs a thread search step without tools: ${isolationArg}`, () =>
+      withFakeCodexEnv(
+        { output: THREAD_SEARCH_FINISH_MODEL_OUTPUT, requireArg: isolationArg },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const step = yield* textGeneration.generateThreadSearchStep({
+              ...THREAD_SEARCH_STEP_REQUEST,
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            });
+            expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
+          }),
+      ),
+    );
+  }
+
+  it.effect("Codex drops launch-arg MCP servers from a thread search step", () =>
+    withFakeCodexEnv(
+      {
+        output: THREAD_SEARCH_FINISH_MODEL_OUTPUT,
+        launchArgs: "-c mcp_servers.writer.command=writer-tool -c model_verbosity=low",
+        forbidArg: "-c mcp_servers.writer.command=writer-tool",
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const step = yield* textGeneration.generateThreadSearchStep({
+            ...THREAD_SEARCH_STEP_REQUEST,
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          });
+          expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
+        }),
+    ),
+  );
+
+  it.effect("Codex keeps other launch-arg overrides on a thread search step", () =>
+    withFakeCodexEnv(
+      {
+        output: THREAD_SEARCH_FINISH_MODEL_OUTPUT,
+        launchArgs: "-c mcp_servers.writer.command=writer-tool -c model_verbosity=low",
+        requireArg: "-c model_verbosity=low",
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const step = yield* textGeneration.generateThreadSearchStep({
+            ...THREAD_SEARCH_STEP_REQUEST,
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          });
+          expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
+        }),
+    ),
+  );
+
+  // Guard: other tasks keep the user's full Codex configuration.
+  it.effect("keeps launch-arg MCP servers for existing Codex text generation tasks", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({ title: "Configured title" }),
+        launchArgs: "-c mcp_servers.writer.command=writer-tool",
+        requireArg: "-c mcp_servers.writer.command=writer-tool",
+        forbidArg: "--ignore-user-config",
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const generated = yield* textGeneration.generateThreadTitle({
+            cwd: process.cwd(),
+            message: "Name this thread",
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          });
+          expect(generated.title).toBe("Configured title");
+        }),
+    ),
+  );
+
+  for (const inlineOverride of [
+    "--config=mcp_servers.writer.command=writer-tool",
+    "-c=mcp_servers.writer.command=writer-tool",
+    "--config mcp_servers.writer.enabled=true",
+  ]) {
+    it.effect(
+      `Codex drops the launch-arg MCP override ${inlineOverride} from a thread search step`,
+      () =>
+        withFakeCodexEnv(
+          {
+            output: THREAD_SEARCH_FINISH_MODEL_OUTPUT,
+            launchArgs: inlineOverride,
+            forbidArg: inlineOverride,
+          },
+          (textGeneration) =>
+            Effect.gen(function* () {
+              const step = yield* textGeneration.generateThreadSearchStep({
+                ...THREAD_SEARCH_STEP_REQUEST,
+                modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+              });
+              expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
+            }),
+        ),
+    );
+  }
+
+  // Real Codex reports `tools.view_image` as ignored and keeps the tool; the
+  // search step must not rely on that override.
+  it.effect("Codex does not rely on the ignored tools.view_image override for search", () =>
+    withFakeCodexEnv(
+      { output: THREAD_SEARCH_FINISH_MODEL_OUTPUT, forbidArg: "--config tools.view_image=false" },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const step = yield* textGeneration.generateThreadSearchStep({
+            ...THREAD_SEARCH_STEP_REQUEST,
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          });
+          expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
+        }),
+    ),
+  );
+
+  // Hostile launch args try to relax each protection a search step pins. The
+  // step must still resolve to a read-only sandbox, never-approve policy, and
+  // no image tool: real codex-cli 0.156.0 then rejected every patch and
+  // refused view_image through a local Responses endpoint.
+  for (const [label, hostileLaunchArgs] of [
+    ["sandbox", "-c sandbox_mode=danger-full-access"],
+    ["approval", "-c approval_policy=on-request"],
+    ["image tool", "--enable view_image -c features.view_image=true"],
+    [
+      "all at once",
+      '--config=sandbox_mode="workspace-write" -c approval_policy=untrusted --enable view_image',
+    ],
+  ] as const) {
+    it.effect(`Codex keeps thread search isolation against hostile launch args: ${label}`, () =>
+      withFakeCodexEnv(
+        {
+          output: THREAD_SEARCH_FINISH_MODEL_OUTPUT,
+          launchArgs: hostileLaunchArgs,
+          requireEffectiveConfig: { sandbox_mode: "read-only", approval_policy: "never" },
+          requireDisabledFeatures: ["view_image", "shell_tool"],
+        },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const step = yield* textGeneration.generateThreadSearchStep({
+              ...THREAD_SEARCH_STEP_REQUEST,
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            });
+            expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
+          }),
+      ),
+    );
+  }
+
+  // Guard: the fixture itself sees hostile values when nothing overrides them,
+  // so the isolation assertions above cannot pass vacuously.
+  it.effect("keeps hostile Codex launch args on existing text generation tasks", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({ title: "Hostile config title" }),
+        launchArgs: "-c sandbox_mode=danger-full-access",
+        requireEffectiveConfig: { sandbox_mode: "danger-full-access" },
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const generated = yield* textGeneration.generateThreadTitle({
+            cwd: process.cwd(),
+            message: "Name this thread",
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          });
+          expect(generated.title).toBe("Hostile config title");
         }),
     ),
   );
