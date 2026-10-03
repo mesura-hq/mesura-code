@@ -9,6 +9,7 @@
 // @effect-diagnostics-next-line nodeBuiltinImport:off - FileSystem stat exposes only millisecond Date timestamps; rapid same-length saves need nanosecond metadata.
 import * as NodeFSP from "node:fs/promises";
 import * as Cache from "effect/Cache";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -330,11 +331,13 @@ export const make = Effect.gen(function* () {
       if (info === null || info === "missing") return info;
       const metadata = `${info.mode}:${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`;
       // A save in the same timestamp tick as the last lookup can leave all of
-      // that unchanged. Like git's racily clean index entries, a file modified
-      // that recently is compared by content too.
-      const modifiedMs = Number(info.mtimeNs / 1_000_000n);
-      // @effect-diagnostics-next-line globalDateInEffect:off - compared with a kernel timestamp, so it must be the wall clock even under a TestClock.
-      if (Date.now() - modifiedMs > MESURA_CONFIG_RACY_WINDOW_MS) return metadata;
+      // that unchanged. Like git's racily clean index entries, a file changed
+      // that recently is compared by content too. Changed means the later of
+      // mtime and ctime: a writer can restore an old mtime, never an old ctime.
+      const changedNs = info.mtimeNs > info.ctimeNs ? info.mtimeNs : info.ctimeNs;
+      const changedMs = Number(changedNs / 1_000_000n);
+      const nowMs = yield* Clock.currentTimeMillis;
+      if (nowMs - changedMs > MESURA_CONFIG_RACY_WINDOW_MS) return metadata;
       return yield* fileSystem.readFileString(configPath).pipe(
         Effect.match({
           onSuccess: (content) => `${metadata}:${content}`,

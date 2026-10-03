@@ -22,10 +22,13 @@ export const nvimAvailable = (() => {
   }
 })();
 
-const inContinuousIntegration = (() => {
-  const value = process.env["CI"]?.trim().toLowerCase() ?? "";
-  return value !== "" && value !== "false" && value !== "0";
-})();
+/** Whether a `CI` variable's value means continuous integration: set, and not "false" or "0". */
+export const isContinuousIntegration = (value: string | undefined): boolean => {
+  const normalized = value?.trim().toLowerCase() ?? "";
+  return normalized !== "" && normalized !== "false" && normalized !== "0";
+};
+
+const inContinuousIntegration = isContinuousIntegration(process.env["CI"]);
 
 /**
  * Registers the one test a file shows in place of `harness` when Neovim is
