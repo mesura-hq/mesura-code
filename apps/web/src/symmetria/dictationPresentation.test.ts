@@ -7,6 +7,7 @@ import { assert, it } from "vite-plus/test";
 
 import {
   claimDictationReservation,
+  completedDictationSessionId,
   dictationMicrophonePresentation,
   dictationPhaseLabel,
   formatDictationTime,
@@ -97,6 +98,22 @@ it("keeps ownership independent of phase and releases it after dismissal", () =>
       dismissedSessionId: "session-a",
     }),
   );
+});
+
+// Regression: the strip's auto-hide timer depended on the session object, and
+// every lease renewal republishes it with a new leaseExpiresAt, so "Delivered"
+// never went away. The dismissal key must ignore everything but identity.
+it("keeps one auto-hide key for a completed session across lease renewals", () => {
+  const completed = { ...session, phase: "completed" as const };
+  const renewed = {
+    ...completed,
+    presentation: { mesuraOwnsPresentation: true, leaseExpiresAt: "2026-08-29T12:01:00.000Z" },
+  };
+
+  assert.equal(completedDictationSessionId(completed), "session-a");
+  assert.equal(completedDictationSessionId(renewed), completedDictationSessionId(completed));
+  assert.isNull(completedDictationSessionId(session));
+  assert.isNull(completedDictationSessionId(null));
 });
 
 it("cycles one delivery mode and formats elapsed or grace time", () => {

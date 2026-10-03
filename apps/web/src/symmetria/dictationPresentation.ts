@@ -65,6 +65,16 @@ export function shouldPresentDictationInMesura(input: {
   );
 }
 
+/**
+ * The session to auto-hide after delivery, or null. A primitive so that an
+ * effect keyed on it survives the lease renewal's republished snapshots.
+ */
+export function completedDictationSessionId(
+  session: SymmetriaDictationSession | null,
+): string | null {
+  return session?.phase === "completed" ? session.sessionId : null;
+}
+
 export function shouldOwnDictationPresentation(input: {
   readonly shouldPresent: boolean;
   readonly sessionId: string | null;

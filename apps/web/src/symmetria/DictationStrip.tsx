@@ -26,6 +26,7 @@ import { CenterOutWaveform } from "./CenterOutWaveform";
 import { MaterialDictationModeIcon } from "./MaterialDictationModeIcon";
 import {
   claimDictationReservation,
+  completedDictationSessionId,
   dictationMicrophonePresentation,
   dictationPhaseLabel,
   formatDictationTime,
@@ -40,6 +41,7 @@ import { dictationCoordinator, type DictationReservationRequest } from "./dictat
 
 const LEASE_DURATION_MS = 3_500;
 const LEASE_RENEWAL_MS = 1_500;
+const COMPLETED_DISMISS_DELAY_MS = 1_800;
 const microphoneReservationPending = { current: false };
 
 const newIdentity = (kind: string): string => `mesura-${kind}-${randomUUID()}`;
@@ -288,11 +290,18 @@ export const DictationStrip = memo(function DictationStrip(props: {
     };
   }, [session?.sessionId, visible]);
 
+  // Keyed on a string, not on `session`: the lease above republishes the
+  // session every LEASE_RENEWAL_MS, and depending on the object restarted this
+  // timer before it fired, which left "Delivered" on screen for good.
+  const completedSessionId = completedDictationSessionId(session);
   useEffect(() => {
-    if (!session || session.phase !== "completed") return;
-    const timer = window.setTimeout(() => setDismissedSessionId(session.sessionId), 1_800);
+    if (completedSessionId === null) return;
+    const timer = window.setTimeout(
+      () => setDismissedSessionId(completedSessionId),
+      COMPLETED_DISMISS_DELAY_MS,
+    );
     return () => window.clearTimeout(timer);
-  }, [session]);
+  }, [completedSessionId]);
 
   const dismissPresentedSession = useCallback(() => {
     const current = useDictationSessionStore.getState().session;
