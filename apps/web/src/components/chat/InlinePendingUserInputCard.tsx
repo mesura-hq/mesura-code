@@ -21,11 +21,14 @@ import {
   type PendingUserInputDraftAnswer,
 } from "../../pendingUserInput";
 import {
+  editPendingUserInputAnswerText,
   EMPTY_QUESTION_ANSWERS,
   pendingUserInputRequestKey,
   usePendingUserInputDraftStore,
 } from "../../pendingUserInputDraftStore";
-import { useComposerDraftStore } from "../../composerDraftStore";
+
+const EMPTY_VOICED_QUESTION_IDS: ReadonlyArray<string> = [];
+import { DraftId, useComposerDraftStore } from "../../composerDraftStore";
 import {
   questionAttachmentDraftId,
   stageQuestionAttachments,
@@ -39,6 +42,18 @@ import {
 } from "../../lib/attachmentUploadQueue";
 import { dictationCoordinator } from "../../symmetria/dictationCoordinator";
 import { DictationMicrophoneButton } from "../../symmetria/DictationStrip";
+import { useDictationSessionStore as useShellDictationSessionStore } from "../../symmetria/dictationSessionStore";
+import { DictationStartButton } from "../../dictation/DictationControls";
+import { registerDictationComposer } from "../../dictation/dictationController";
+import {
+  armQuestionSendWhenReady,
+  disarmQuestionSendWhenReady,
+  useQuestionSendWhenReadyArmed,
+} from "../../dictation/sendWhenReady";
+import { countPendingDictationSlots } from "@t3tools/shared/dictationSlots";
+import { insertDictationSlotAt } from "../../dictation/dictationSlotEdits";
+import { SendWhenReadyNotice } from "../../dictation/SendWhenReadyBanner";
+import { completeQuestionDraftAnswers } from "../../pendingUserInputResponse";
 import { cn } from "../../lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
@@ -98,28 +113,19 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
       ),
     ),
   );
-  const completeDrafts: Record<string, PendingUserInputDraftAnswer> = Object.fromEntries(
-    request.questions.map((question, index) => {
-      const draft = drafts[index];
-      const attachments = draft ? [...draft.images, ...draft.files] : [];
-      return [
-        question.id,
-        {
-          ...answers[question.id],
-          attachmentCount: attachments.length,
-          attachmentsBlocked:
-            preparations[index]! > 0 ||
-            attachments.some(
-              (attachment) =>
-                !context.supportsAttachments ||
-                question.allowCustomAnswer === false ||
-                uploads[attachment.id]?.status !== "ready" ||
-                uploads[attachment.id]?.environmentId !== environmentId,
-            ),
-        },
-      ];
-    }),
+  const voicedQuestionIds = usePendingUserInputDraftStore(
+    (state) => state.requests[key]?.voicedQuestionIds ?? EMPTY_VOICED_QUESTION_IDS,
   );
+  const completeDrafts = completeQuestionDraftAnswers({
+    questions: request.questions,
+    answers,
+    attachments: drafts.map((draft) => (draft ? [...draft.images, ...draft.files] : [])),
+    preparations,
+    uploads,
+    supportsAttachments: context.supportsAttachments,
+    environmentId,
+    voicedQuestionIds,
+  });
   const answerCount = request.questions.filter(
     (question) => resolvePendingUserInputAnswer(question, completeDrafts[question.id]) !== null,
   ).length;
@@ -156,6 +162,22 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
           ) ?? null
       );
     };
+    // Mesura's own recording drops its marker into this answer while the question has focus.
+    const unregisterRecording = registerDictationComposer({
+      environmentId,
+      target: { kind: "draft", draftId: target.draftId },
+      draftTarget: DraftId.make(target.draftId),
+      // At the field's caret, read when the recording stops; at the end once it is gone.
+      insertSlot: (slot) => {
+        const field = fields.current.get(question.id);
+        if (!field?.isConnected) return false;
+        const caret = field.selectionStart ?? field.value.length;
+        return editPendingUserInputAnswerText(key, question.id, (text) =>
+          insertDictationSlotAt(text, caret, slot),
+        );
+      },
+      question: { requestKey: key, questionId: question.id },
+    });
     const unregister = dictationCoordinator.registerComposer({
       target,
       projectName: null,
@@ -169,6 +191,7 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
       },
     });
     unregisterDictation.current = () => {
+      unregisterRecording();
       unregister();
       context.onDictationTargetChange(null, target);
     };
@@ -195,8 +218,19 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
     focusAnswerField(question?.id);
     context.onQuestionFocused?.();
   }, [context, request, completeDrafts, focusAnswerField]);
+  const sendWhenReadyArmed = useQuestionSendWhenReadyArmed(key);
+  const pendingTranscriptions = request.questions.reduce(
+    (count, question) =>
+      count + countPendingDictationSlots(answers[question.id]?.customAnswer ?? ""),
+    0,
+  );
   const submit = async () => {
     if (responding || context.unavailable) return;
+    // A transcription still pending in an answer: submit once it lands.
+    if (pendingTranscriptions > 0) {
+      armQuestionSendWhenReady(key);
+      return;
+    }
     const built = buildPendingUserInputAnswers(request.questions, completeDrafts);
     if (!built) {
       const missing = request.questions.find(
@@ -292,6 +326,14 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
           />
         ))}
       </div>
+      {sendWhenReadyArmed && pendingTranscriptions > 0 ? (
+        <div className="border-t border-border px-4 py-2 sm:px-5">
+          <SendWhenReadyNotice
+            pendingCount={pendingTranscriptions}
+            onCancel={() => disarmQuestionSendWhenReady(key)}
+          />
+        </div>
+      ) : null}
       <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-muted/20 px-4 py-3 sm:px-5">
         <div className="text-xs text-muted-foreground" aria-live="polite">
           {context.unavailable
@@ -345,6 +387,10 @@ function QuestionField({
   const textarea = useRef<HTMLTextAreaElement | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  // WORKAROUND: while Symmetria Shell's bridge answers, the card keeps Shell's microphone so its
+  // reservation flow keeps working; otherwise the card records in this window. Remove with the
+  // Shell link in phase 8 of the STT redesign, leaving only DictationStartButton.
+  const shellDictationAvailable = useShellDictationSessionStore((state) => state.bridgeAvailable);
   const target = questionAttachmentDraftId(
     context.environmentId,
     context.threadId,
@@ -524,15 +570,24 @@ function QuestionField({
                 </Tooltip>
               </>
             ) : null}
-            <DictationMicrophoneButton
-              compact
-              disabled={disabled || context.unavailable}
-              targetLabel={question.header || question.question}
-              onBeforeStart={(reservation) => {
-                onFocus();
-                return dictationCoordinator.reserve(reservation);
-              }}
-            />
+            {shellDictationAvailable ? (
+              <DictationMicrophoneButton
+                compact
+                disabled={disabled || context.unavailable}
+                targetLabel={question.header || question.question}
+                onBeforeStart={(reservation) => {
+                  onFocus();
+                  return dictationCoordinator.reserve(reservation);
+                }}
+              />
+            ) : (
+              <DictationStartButton
+                compact
+                disabled={disabled || context.unavailable}
+                targetLabel={question.header || question.question}
+                onBeforeStart={onFocus}
+              />
+            )}
           </div>
         ) : null}
       </div>

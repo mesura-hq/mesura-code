@@ -331,7 +331,14 @@ export function createDictationCoordinator(options: CoordinatorOptions = {}) {
               : reserved.submissionContext;
           submission = await submit({
             command,
-            reservedTarget: reserved.target,
+            target:
+              reserved.target.kind === "draft"
+                ? { kind: "draft", draftId: reserved.target.draftId }
+                : {
+                    kind: "thread",
+                    environmentId: reserved.target.environmentId,
+                    threadId: reserved.target.threadId,
+                  },
             composerTarget: resolved.target,
             prompt: result.prompt,
             messageId,
@@ -358,6 +365,14 @@ export function createDictationCoordinator(options: CoordinatorOptions = {}) {
             code: submission.code,
             detail: "the current composer action does not accept free-form text",
           };
+        }
+        if (submission.kind === "draft-changed") {
+          return failedReceipt(
+            command,
+            reserved.target,
+            "renderer_lost",
+            "the draft changed while it was being sent",
+          );
         }
         if (submission.kind === "provider-start-failed") {
           return failedReceipt(

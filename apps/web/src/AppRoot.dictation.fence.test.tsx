@@ -6,18 +6,22 @@
  * thread that is not on screen is still filled.
  *
  * Phase 4 of the STT redesign, criteria 1–8: record in the desktop and web
- * window and place the marker.
+ * window and place the marker. Phase 5, criteria 1–7: send a draft when its
+ * last marker fills, on screen, off screen and from an open question card.
  *
  * Boundaries the fixture replaces, and nothing else:
  * - The browser media APIs, through the `setDictationMediaBackend` seam in
  *   `dictation/recorder.ts` (happy-dom has no getUserMedia, MediaRecorder or
  *   AudioContext).
- * - The upload, at `runAttachmentUploadCycle`, the cycle the plan names.
+ * - The upload, at `runAttachmentUploadCycle`, the cycle the plan names, and the check of an
+ *   earlier upload, at `verifyPersistedAttachmentUpload`.
  * - Every RPC command, at `runAtomCommand` and `useAtomCommand`, so the
  *   dictation start and setMode commands are observed as they leave.
  * - The job stream, at phase 2's `useDictationJobs` hook: the fixture pushes
  *   job lists through it as the server would.
- * - The sidebars and the thread entity reads, as `AppRoot.pendingUserInput.test.tsx` does.
+ * - The sidebars and the thread entity reads, as `AppRoot.pendingUserInput.test.tsx` does,
+ *   including the registry reads (`environmentThreadDetails.detailAtom`,
+ *   `environmentProjects.projectAtom`) that a send off screen resolves the thread with.
  */
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -30,6 +34,7 @@ import {
 } from "@tanstack/react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import {
+  ApprovalRequestId,
   DictationJobId,
   EnvironmentId,
   ProjectId,
@@ -54,6 +59,15 @@ import type { AppRouter } from "./router";
 
 const fixture = vi.hoisted(() => ({
   thread: null as Thread | null,
+  project: {
+    id: "dictation-phase-four-project",
+    environmentId: "dictation-phase-four-environment",
+    title: "Dictation fence",
+    workspaceRoot: "/tmp/dictation-fence",
+    scripts: [],
+    createdAt: "2026-10-03T12:00:00.000Z",
+    defaultModelSelection: { instanceId: "codex", model: "gpt-5.4" },
+  },
   empty: [],
   threadListeners: new Set<() => void>(),
   /** Set after import: the dictation commands and the turn start, by name. */
@@ -62,6 +76,14 @@ const fixture = vi.hoisted(() => ({
   uploads: [] as Array<{ upload: unknown; promptAtUpload: string | null }>,
   readPromptAtUpload: (() => null) as () => string | null,
   jobs: [] as unknown[],
+  /** Uploads still to fail before one succeeds. */
+  failingUploads: 0,
+  /** While set, a turn start waits for it. */
+  startTurnGate: null as Promise<void> | null,
+  /** When set, a turn start is refused by the server. */
+  startTurnFails: false,
+  /** While set, checking an earlier upload waits for it. */
+  verifyGate: null as Promise<void> | null,
   /** False until the subscription's snapshot arrives, as for a fresh subscription. */
   jobsLoaded: true,
   jobListeners: new Set<() => void>(),
@@ -96,6 +118,14 @@ const fixture = vi.hoisted(() => ({
 function dispatchCommand(command: unknown, value: unknown) {
   const name = fixture.dictationCommands.get(command);
   if (name) fixture.dictationCalls.push({ name, value });
+  if (name === "startTurn" && (fixture.startTurnGate || fixture.startTurnFails)) {
+    const gate = fixture.startTurnGate ?? Promise.resolve();
+    return gate.then(() =>
+      fixture.startTurnFails
+        ? { _tag: "Failure" as const, cause: new Error("The provider refused the turn.") }
+        : { _tag: "Success" as const, value: { providers: [] } },
+    );
+  }
   // Shaped for the composer's provider refresh, the one caller that reads a value here.
   return Promise.resolve({ _tag: "Success" as const, value: { providers: [] } });
 }
@@ -120,15 +150,7 @@ vi.mock("./state/entities", async (importOriginal) => {
     useThreadRefs: () => fixture.empty,
     useThreadShells: () => fixture.empty,
     useProjects: () => fixture.empty,
-    useProject: () => ({
-      id: "dictation-phase-four-project",
-      environmentId: "dictation-phase-four-environment",
-      title: "Dictation fence",
-      workspaceRoot: "/tmp/dictation-fence",
-      scripts: [],
-      createdAt: "2026-10-03T12:00:00.000Z",
-      defaultModelSelection: { instanceId: "codex", model: "gpt-5.4" },
-    }),
+    useProject: () => fixture.project,
   };
 });
 vi.mock("./state/environments", async (importOriginal) => ({
@@ -148,7 +170,28 @@ vi.mock("./state/query", () => ({
 vi.mock("./state/threads", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./state/threads")>();
   const { EMPTY_ENVIRONMENT_THREAD_STATE } = await import("@t3tools/client-runtime/state/threads");
-  return { ...actual, useEnvironmentThread: () => EMPTY_ENVIRONMENT_THREAD_STATE };
+  const { Atom } = await import("effect/unstable/reactivity");
+  return {
+    ...actual,
+    useEnvironmentThread: () => EMPTY_ENVIRONMENT_THREAD_STATE,
+    environmentThreadDetails: {
+      ...actual.environmentThreadDetails,
+      detailAtom: (ref: { threadId: string }) =>
+        Atom.make(() => (fixture.thread?.id === ref.threadId ? fixture.thread : null)),
+    },
+  };
+});
+vi.mock("./state/projects", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./state/projects")>();
+  const { Atom } = await import("effect/unstable/reactivity");
+  return {
+    ...actual,
+    environmentProjects: {
+      ...actual.environmentProjects,
+      projectAtom: (ref: { projectId: string }) =>
+        Atom.make(() => (ref.projectId === fixture.project.id ? fixture.project : null)),
+    },
+  };
 });
 vi.mock("./state/dictation", async (importOriginal) => {
   const { useSyncExternalStore } = await import("react");
@@ -185,7 +228,16 @@ vi.mock("@t3tools/client-runtime/state/attachments", async (importOriginal) => (
   ...(await importOriginal<typeof import("@t3tools/client-runtime/state/attachments")>()),
   runAttachmentUploadCycle: async (input: { upload: unknown }) => {
     fixture.uploads.push({ upload: input.upload, promptAtUpload: fixture.readPromptAtUpload() });
+    if (fixture.failingUploads > 0) {
+      fixture.failingUploads -= 1;
+      return { status: "failed", error: new Error("The upload failed.") };
+    }
     return { status: "uploaded", attachmentId: `dictation-audio-${fixture.uploads.length}` };
+  },
+  // A draft file uploaded before is checked against the server before it is sent.
+  verifyPersistedAttachmentUpload: async () => {
+    await fixture.verifyGate;
+    return { status: "verified" };
   },
 }));
 // The toggle ships unbound; this fixture binds it the way a user's keybindings file would.
@@ -259,14 +311,24 @@ vi.mock("@legendapp/list/react", () => ({
   ),
 }));
 
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { AppRoot } from "./AppRoot";
 import { AppSidebarLayout } from "./components/AppSidebarLayout";
 import ChatView from "./components/ChatView";
 import { toastManager } from "./components/ui/toast";
-import { persistComposerDrafts, useComposerDraftStore } from "./composerDraftStore";
+import {
+  type ComposerFileAttachment,
+  persistComposerDrafts,
+  useComposerDraftStore,
+} from "./composerDraftStore";
+import {
+  editPendingUserInputAnswerText,
+  pendingUserInputRequestKey,
+  usePendingUserInputDraftStore,
+} from "./pendingUserInputDraftStore";
 import { createFakeMedia } from "./dictation/dictationMedia.testFixtures";
 import { setDictationMediaBackend } from "./dictation/recorder";
+import { useQueuedMessageStore } from "./queuedMessageStore";
 import { dictationEnvironment } from "./state/dictation";
 import { threadEnvironment } from "./state/threads";
 
@@ -317,12 +379,17 @@ beforeEach(() => {
   fixture.uploads.length = 0;
   fixture.jobs = [];
   fixture.jobsLoaded = true;
+  fixture.failingUploads = 0;
+  fixture.startTurnGate = null;
+  fixture.startTurnFails = false;
+  fixture.verifyGate = null;
   fixture.dictationCommands = new Map<unknown, string>([
     [dictationEnvironment.start, "start"],
     [dictationEnvironment.retry, "retry"],
     [dictationEnvironment.cancel, "cancel"],
     [dictationEnvironment.setMode, "setMode"],
     [threadEnvironment.startTurn, "startTurn"],
+    [threadEnvironment.respondToUserInput, "respond"],
   ]);
   fixture.readPromptAtUpload = () => promptOf(onScreenTarget);
   media = createFakeMedia();
@@ -344,6 +411,8 @@ afterEach(async () => {
   setDictationMediaBackend(null);
   useComposerDraftStore.getState().clearComposerContent(onScreenTarget);
   useComposerDraftStore.getState().clearComposerContent(offScreenTarget);
+  usePendingUserInputDraftStore.setState({ requests: {} });
+  useQueuedMessageStore.getState().drain(scopedThreadKey(onScreenTarget));
   Reflect.deleteProperty(navigator, "clipboard");
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -428,6 +497,8 @@ async function reloadApp() {
   const freshCommands = (await import("./state/dictation")).dictationEnvironment;
   fixture.dictationCommands.set(freshCommands.start, "start");
   fixture.dictationCommands.set(freshCommands.setMode, "setMode");
+  const freshThreads = (await import("./state/threads")).threadEnvironment;
+  fixture.dictationCommands.set(freshThreads.startTurn, "startTurn");
   await act(async () => {
     fixture.jobs = [];
     fixture.jobsLoaded = false;
@@ -814,14 +885,13 @@ describe("dictation phase 4 fence", () => {
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Hello big world");
     await mountApp();
     await placeCaretAfter("Hello");
-    await startRecordingFromMicrophone();
-    await stopRecordingFromStrip();
+    // Insert mode: since phase 5, a send-mode draft sends itself once its markers fill.
+    await recordInMode("insert");
     const first = startedJob(0).input.jobId;
 
     // The user moved on and dictated again after "big", past the first marker.
     await placeCaretAfter("big");
-    await startRecordingFromMicrophone();
-    await stopRecordingFromStrip();
+    await recordInMode("insert");
     const second = startedJob(1).input.jobId;
     expect(slotsIn(promptOf(onScreenTarget)).map((slot) => slot.jobId)).toEqual([first, second]);
 
@@ -862,8 +932,8 @@ describe("dictation phase 4 fence", () => {
   it("dictation phase 4 AC6: a completed job whose marker was deleted keeps its text in the Transcriptions list with one notice", async () => {
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Draft");
     await mountApp();
-    await startRecordingFromMicrophone();
-    await stopRecordingFromStrip();
+    // Insert mode: since phase 5, a send-mode draft sends itself once its markers fill.
+    await recordInMode("insert");
     const { jobId } = startedJob(0).input;
     await pushJobs([job(jobId, { status: "transcribing" })]);
 
@@ -953,11 +1023,10 @@ describe("dictation phase 4 regressions", () => {
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Hello big world");
     await mountApp();
     await placeCaretAfter("Hello");
-    await startRecordingFromMicrophone();
-    await stopRecordingFromStrip();
+    // Insert mode: since phase 5, a send-mode draft sends itself once its markers fill.
+    await recordInMode("insert");
     await placeCaretAfter("world");
-    await startRecordingFromMicrophone();
-    await stopRecordingFromStrip();
+    await recordInMode("insert");
     const [first, second] = [startedJob(0).input.jobId, startedJob(1).input.jobId];
     // The user goes back between the two markers.
     await placeCaretAfter("big");
@@ -993,5 +1062,561 @@ describe("dictation phase 4 guards", () => {
     expect(JSON.stringify(turns[0]!.value)).toContain("Ship the dictation fence");
     expect(fixture.uploads).toHaveLength(0);
     expect(startCalls()).toHaveLength(0);
+  });
+});
+
+// ── Phase 5: send a draft when its last marker fills ────────────────────────
+
+interface StartedTurn {
+  readonly environmentId: string;
+  readonly input: {
+    readonly threadId: string;
+    readonly commandId?: string;
+    readonly message: {
+      readonly text: string;
+      readonly attachments: ReadonlyArray<Record<string, unknown>>;
+    };
+  };
+}
+
+function turnStarts(): StartedTurn[] {
+  return fixture.dictationCalls
+    .filter((call) => call.name === "startTurn")
+    .map((call) => call.value as StartedTurn);
+}
+
+function onlyTurnText(): string {
+  const turns = turnStarts();
+  expect(turns, "Expected exactly one turn start").toHaveLength(1);
+  return turns[0]!.input.message.text;
+}
+
+function respondCalls() {
+  return fixture.dictationCalls.filter((call) => call.name === "respond");
+}
+
+const VOICED = "[voiced] ";
+
+function voicedCount(text: string): number {
+  return text.split("[voiced]").length - 1;
+}
+
+/** The send-when-ready banner, worded as in the prototype's `SendWhenReadyBanner`. */
+function sendWhenReadyBannerShown(): boolean {
+  return /sends when (the transcription|\d+ transcriptions) lands?/i.test(
+    document.body.textContent ?? "",
+  );
+}
+
+async function recordInMode(mode: "send" | "insert") {
+  await startRecordingFromMicrophone();
+  // The session starts in send mode; Alt+I selects insert.
+  if (mode === "insert") await pressKey(ALT_I);
+  await stopRecordingFromStrip();
+}
+
+const questionRequestId = ApprovalRequestId.make("dictation-phase-five-question");
+
+function withOpenQuestion(thread: Thread): Thread {
+  return {
+    ...thread,
+    activities: [
+      {
+        id: "dictation-phase-five-question-requested",
+        kind: "user-input.requested",
+        summary: "User input requested",
+        tone: "info",
+        turnId: null,
+        createdAt: now,
+        payload: {
+          requestId: questionRequestId,
+          questions: [
+            {
+              id: "scope",
+              header: "Scope",
+              question: "Which scope first?",
+              multiSelect: false,
+              options: [{ label: "Workspace", description: "Current workspace" }],
+            },
+          ],
+        },
+      },
+    ],
+  } as unknown as Thread;
+}
+
+function withPendingApproval(thread: Thread): Thread {
+  return {
+    ...thread,
+    activities: [
+      {
+        id: "dictation-phase-five-approval-requested",
+        kind: "approval.requested",
+        summary: "Command approval requested",
+        tone: "info",
+        turnId: null,
+        createdAt: now,
+        payload: {
+          requestId: "dictation-phase-five-approval",
+          requestType: "command_execution_approval",
+          detail: "rm -rf build",
+        },
+      },
+    ],
+  } as unknown as Thread;
+}
+
+function questionAnswerText(): string {
+  const key = pendingUserInputRequestKey(environmentId, threadId, questionRequestId);
+  return usePendingUserInputDraftStore.getState().requests[key]?.answers.scope?.customAnswer ?? "";
+}
+
+const attachedFile: ComposerFileAttachment = {
+  type: "file",
+  id: "dictation-phase-five-file",
+  name: "notes.txt",
+  mimeType: "text/plain",
+  sizeBytes: 12,
+  file: null,
+  uploadedAttachmentId: "uploaded-notes",
+  uploadEnvironmentId: environmentId,
+};
+
+describe("dictation phase 5 fence", () => {
+  it("dictation phase 5 AC1: a recording finished in send mode sends its draft once no marker remains", async () => {
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Hello big world");
+    await mountApp();
+    await placeCaretAfter("Hello");
+    await recordInMode("send");
+    await placeCaretAfter("world");
+    await recordInMode("send");
+    const [first, second] = [startedJob(0).input.jobId, startedJob(1).input.jobId];
+    expect(turnStarts()).toHaveLength(0);
+
+    // One marker is still pending: nothing leaves.
+    await pushJobs([job(first, { status: "completed", mode: "submit", text: "hola mundo" })]);
+    expect(turnStarts()).toHaveLength(0);
+    expect(slotsIn(promptOf(onScreenTarget))).toHaveLength(1);
+
+    await pushJobs([
+      job(first, { status: "completed", mode: "submit", text: "hola mundo" }),
+      job(second, { status: "completed", mode: "submit", text: "y adios" }),
+    ]);
+    expect(squash(onlyTurnText())).toBe("[voiced] Hello hola mundo big world y adios");
+    expect(squash(promptOf(onScreenTarget))).toBe("");
+
+    // The same completed jobs arriving again send nothing more.
+    await pushJobs([
+      job(first, { status: "completed", mode: "submit", text: "hola mundo" }),
+      job(second, { status: "completed", mode: "submit", text: "y adios" }),
+    ]);
+    expect(turnStarts()).toHaveLength(1);
+  });
+
+  it("dictation phase 5 AC1: an armed draft stays armed across a page reload", async () => {
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Before the reload");
+    await mountApp();
+    await recordInMode("send");
+    const { jobId } = startedJob(0).input;
+    expect(persistComposerDrafts()).toBe(true);
+
+    await reloadApp();
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "después" })]);
+    expect(squash(onlyTurnText())).toBe("[voiced] Before the reload después");
+  });
+
+  it("dictation phase 5 AC2: pressing Send while a marker is pending arms the draft and shows the banner", async () => {
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Draft");
+    await mountApp();
+    await recordInMode("insert");
+    const { jobId } = startedJob(0).input;
+    await pushJobs([job(jobId, { status: "transcribing", mode: "inject" })]);
+    expect(sendWhenReadyBannerShown()).toBe(false);
+
+    const send = requireButton("Send message");
+    expect(send.disabled, "Send stays enabled so that pressing it can arm the draft").toBe(false);
+    await click(send);
+    expect(turnStarts()).toHaveLength(0);
+    expect(slotsIn(promptOf(onScreenTarget))).toHaveLength(1);
+    expect(sendWhenReadyBannerShown()).toBe(true);
+
+    await pushJobs([job(jobId, { status: "completed", mode: "inject", text: "hola mundo" })]);
+    expect(squash(onlyTurnText())).toBe("[voiced] Draft hola mundo");
+    expect(sendWhenReadyBannerShown()).toBe(false);
+  });
+
+  it("dictation phase 5 AC3: Don't send disarms the draft and keeps its text", async () => {
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Draft");
+    await mountApp();
+    await recordInMode("send");
+    const { jobId } = startedJob(0).input;
+    await pushJobs([job(jobId, { status: "transcribing", mode: "submit" })]);
+    expect(sendWhenReadyBannerShown()).toBe(true);
+
+    await click(requireButton("Don't send"));
+    expect(sendWhenReadyBannerShown()).toBe(false);
+
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "hola mundo" })]);
+    expect(turnStarts()).toHaveLength(0);
+    expect(squash(promptOf(onScreenTarget))).toBe("Draft hola mundo");
+  });
+
+  it("dictation phase 5 AC4: an armed draft whose thread is not on screen sends through the directed path with its files and is cleared", async () => {
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Read the notes");
+    // Attached as the composer attaches it: the file's chip goes into the prompt.
+    useComposerDraftStore
+      .getState()
+      .addFiles(onScreenTarget, [attachedFile], { appendReference: true });
+    await mountApp();
+    await recordInMode("send");
+    const { jobId } = startedJob(0).input;
+    await navigateAwayFromThread();
+
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "y resume" })]);
+    const turns = turnStarts();
+    expect(turns).toHaveLength(1);
+    const [turn] = turns;
+    expect(turn!.environmentId).toBe(environmentId);
+    expect(turn!.input.threadId).toBe(threadId);
+    // The job id of the last filled marker is the command id, so a repeat is deduplicated.
+    expect(turn!.input.commandId).toBe(jobId);
+    const text = squash(turn!.input.message.text);
+    expect(text.startsWith("[voiced] Read the notes"), text).toBe(true);
+    expect(text.endsWith("y resume"), text).toBe(true);
+    expect(voicedCount(text)).toBe(1);
+    expect(turn!.input.message.attachments).toEqual([
+      expect.objectContaining({ type: "file", name: "notes.txt" }),
+    ]);
+    const draft = useComposerDraftStore.getState().getComposerDraft(onScreenTarget);
+    expect(squash(draft?.prompt)).toBe("");
+    expect(draft?.files ?? []).toHaveLength(0);
+
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "y resume" })]);
+    expect(turnStarts()).toHaveLength(1);
+  });
+
+  it("dictation phase 5 AC5: a message with dictated parts carries one [voiced] prefix, and a typed one carries none", async () => {
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Hello big world");
+    await mountApp();
+    await placeCaretAfter("Hello");
+    await recordInMode("insert");
+    await placeCaretAfter("world");
+    await recordInMode("insert");
+    const [first, second] = [startedJob(0).input.jobId, startedJob(1).input.jobId];
+    await pushJobs([
+      job(first, { status: "completed", mode: "inject", text: "hola mundo" }),
+      job(second, { status: "completed", mode: "inject", text: "y adios" }),
+    ]);
+    expect(turnStarts()).toHaveLength(0);
+    expect(slotsIn(promptOf(onScreenTarget))).toHaveLength(0);
+
+    await click(requireButton("Send message"));
+    const text = onlyTurnText();
+    expect(text.startsWith(VOICED), JSON.stringify(text)).toBe(true);
+    expect(voicedCount(text)).toBe(1);
+    expect(squash(text)).toBe("[voiced] Hello hola mundo big world y adios");
+
+    // The next message is typed only; the dictated flag went with the last send. A reload
+    // stands in for the server's echo, which this fixture never sends to end the first send.
+    await reloadApp();
+    const freshDrafts = (await import("./composerDraftStore")).useComposerDraftStore;
+    await act(async () => {
+      freshDrafts.getState().setPrompt(onScreenTarget, "Typed by hand");
+    });
+    await settle();
+    await click(requireButton("Send message"));
+    const typed = turnStarts()[1]?.input.message.text;
+    expect(typed).toBe("Typed by hand");
+  });
+
+  it("dictation phase 5 AC6: a failed marker keeps the draft armed and unsent until a retry fills it", async () => {
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Hello world");
+    await mountApp();
+    await placeCaretAfter("Hello");
+    await recordInMode("send");
+    const { jobId } = startedJob(0).input;
+
+    await pushJobs([job(jobId, { status: "failed", mode: "submit", failure: "Network error" })]);
+    expect(turnStarts()).toHaveLength(0);
+    expect(slotsIn(promptOf(onScreenTarget))).toHaveLength(1);
+    expect(sendWhenReadyBannerShown()).toBe(true);
+
+    await click(requireButton("Retry transcription"));
+    expect(fixture.dictationCalls.filter((call) => call.name === "retry")).toHaveLength(1);
+    await pushJobs([job(jobId, { status: "transcribing", mode: "submit" })]);
+    expect(turnStarts()).toHaveLength(0);
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "hola mundo" })]);
+    expect(squash(onlyTurnText())).toBe("[voiced] Hello hola mundo world");
+  });
+
+  it("dictation phase 5 AC6: discarding the failed marker sends what the draft holds", async () => {
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Hello world");
+    await mountApp();
+    await placeCaretAfter("Hello");
+    await recordInMode("send");
+    const { jobId } = startedJob(0).input;
+    await pushJobs([job(jobId, { status: "failed", mode: "submit", failure: "Network error" })]);
+    expect(turnStarts()).toHaveLength(0);
+    expect(sendWhenReadyBannerShown()).toBe(true);
+
+    await click(requireButton("Discard transcription marker"));
+    // Nothing was dictated into the message that leaves.
+    expect(squash(onlyTurnText())).toBe("Hello world");
+  });
+
+  it("dictation phase 5 AC7: a recording stopped while a question card has focus fills the card's answer, and send mode submits it", async () => {
+    fixture.thread = withOpenQuestion(makeThread());
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Composer draft");
+    await mountApp();
+    const field = container.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Which scope first?"]',
+    );
+    expect(field, "Expected the question card's answer field").not.toBeNull();
+    await act(async () => field!.focus());
+    await settle();
+
+    const microphone = requireButton("Dictate into Scope");
+    expect(microphone.getAttribute("aria-disabled")).not.toBe("true");
+    await click(microphone);
+    expect(media.recorders).toHaveLength(1);
+    await stopRecordingFromStrip();
+
+    const { jobId } = startedJob(0).input;
+    expect(slotsIn(questionAnswerText()).map((slot) => slot.jobId)).toEqual([jobId]);
+    expect(promptOf(onScreenTarget)).toBe("Composer draft");
+    expect(respondCalls()).toHaveLength(0);
+
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "solo la web" })]);
+    expect(respondCalls()).toHaveLength(1);
+    const response = JSON.stringify(respondCalls()[0]!.value);
+    expect(response).toContain(questionRequestId);
+    expect(response).toContain("[voiced] solo la web");
+    expect(response).not.toContain("t3-context://");
+    expect(turnStarts()).toHaveLength(0);
+    expect(promptOf(onScreenTarget)).toBe("Composer draft");
+  });
+});
+
+describe("dictation phase 5 guards", () => {
+  it("dictation phase 5 guard: a filled send-mode draft is not sent while a button approval is pending", async () => {
+    fixture.thread = withPendingApproval(makeThread());
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Draft");
+    await mountApp();
+    await pressKey(TOGGLE);
+    await pressKey(TOGGLE);
+    const { jobId, mode } = startedJob(0).input;
+    expect(mode).toBe("submit");
+
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "hola mundo" })]);
+    expect(turnStarts()).toHaveLength(0);
+    expect(squash(promptOf(onScreenTarget))).toBe("Draft hola mundo");
+  });
+});
+
+describe("dictation phase 5 rework regressions", () => {
+  async function focusQuestionAnswer(): Promise<HTMLTextAreaElement> {
+    const field = container.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Which scope first?"]',
+    );
+    expect(field, "Expected the question card's answer field").not.toBeNull();
+    await act(async () => field!.focus());
+    await settle();
+    return field!;
+  }
+
+  async function recordIntoQuestion(mode: "send" | "insert") {
+    await click(requireButton("Dictate into Scope"));
+    if (mode === "insert") await pressKey(ALT_I);
+    await stopRecordingFromStrip();
+  }
+
+  it("dictation phase 5 regression: what the user writes while an armed send is acknowledged stays in the draft", async () => {
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Draft");
+    await mountApp();
+    await recordInMode("send");
+    const { jobId } = startedJob(0).input;
+    await navigateAwayFromThread();
+    let release: () => void = () => undefined;
+    fixture.startTurnGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "hola mundo" })]);
+    expect(turnStarts()).toHaveLength(1);
+    await act(async () => {
+      useComposerDraftStore.getState().setPrompt(onScreenTarget, "Next message");
+    });
+    await act(async () => release());
+    await settle();
+
+    expect(squash(onlyTurnText())).toBe("[voiced] Draft hola mundo");
+    expect(promptOf(onScreenTarget)).toBe("Next message");
+  });
+
+  it("dictation phase 5 regression: an edit made while an armed draft's files upload goes out with it", async () => {
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Read the notes");
+    useComposerDraftStore
+      .getState()
+      // Its own file: the upload state of `attachedFile` outlives the earlier specs.
+      .addFiles(onScreenTarget, [{ ...attachedFile, id: "dictation-phase-five-edited-file" }], {
+        appendReference: true,
+      });
+    // The check of the file's earlier upload is still out when the transcript lands.
+    let release: () => void = () => undefined;
+    fixture.verifyGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await mountApp();
+    await recordInMode("send");
+    const { jobId } = startedJob(0).input;
+    await navigateAwayFromThread();
+
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "y resume" })]);
+    expect(turnStarts()).toHaveLength(0);
+    await act(async () => {
+      const draft = useComposerDraftStore.getState().getComposerDraft(onScreenTarget)!;
+      useComposerDraftStore.getState().setPrompt(onScreenTarget, `${draft.prompt} con cuidado`);
+    });
+    await act(async () => release());
+    await settle();
+
+    const text = squash(onlyTurnText());
+    expect(text.startsWith("[voiced] Read the notes"), text).toBe(true);
+    expect(text).toContain("y resume con cuidado");
+    expect(squash(promptOf(onScreenTarget))).toBe("");
+  });
+
+  it("dictation phase 5 regression: an armed send the server refuses puts the draft back and stays unsent", async () => {
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Draft");
+    await mountApp();
+    await recordInMode("send");
+    const { jobId } = startedJob(0).input;
+    await navigateAwayFromThread();
+    fixture.startTurnFails = true;
+
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "hola mundo" })]);
+    expect(turnStarts()).toHaveLength(1);
+    expect(squash(promptOf(onScreenTarget))).toBe("Draft hola mundo");
+    expect(vi.mocked(toastManager.add).mock.calls.map(([toast]) => toast.title)).toContain(
+      "The dictated message was not sent",
+    );
+  });
+
+  it("dictation phase 5 regression: a failed upload keeps the marker and the armed draft until Retry starts the job", async () => {
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Must wait");
+    fixture.failingUploads = 1;
+    await mountApp();
+    await recordInMode("send");
+
+    expect(startCalls()).toHaveLength(0);
+    expect(slotsIn(promptOf(onScreenTarget))).toHaveLength(1);
+    expect(turnStarts()).toHaveLength(0);
+    expect(sendWhenReadyBannerShown()).toBe(true);
+
+    await click(requireButton("Retry transcription"));
+    expect(fixture.uploads).toHaveLength(2);
+    const { jobId } = startedJob(0).input;
+    expect(slotsIn(promptOf(onScreenTarget)).map((slot) => slot.jobId)).toEqual([jobId]);
+    expect(turnStarts()).toHaveLength(0);
+
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "el texto" })]);
+    expect(squash(onlyTurnText())).toBe("[voiced] Must wait el texto");
+  });
+
+  it("dictation phase 5 regression: a send-mode answer is submitted with its voiced tag while its thread is not on screen", async () => {
+    fixture.thread = withOpenQuestion(makeThread());
+    await mountApp();
+    await focusQuestionAnswer();
+    await recordIntoQuestion("send");
+    const { jobId } = startedJob(0).input;
+    await navigateAwayFromThread();
+
+    await pushJobs([
+      job(jobId, { status: "completed", mode: "submit", text: "fuera de pantalla" }),
+    ]);
+    expect(respondCalls()).toHaveLength(1);
+    expect(respondCalls()[0]!.value).toMatchObject({
+      environmentId,
+      input: {
+        threadId,
+        requestId: questionRequestId,
+        answers: { scope: "[voiced] fuera de pantalla" },
+      },
+    });
+  });
+
+  it("dictation phase 5 regression: Submit with a pending answer marker shows the banner, and Don't send keeps the answer unsent", async () => {
+    fixture.thread = withOpenQuestion(makeThread());
+    await mountApp();
+    await focusQuestionAnswer();
+    await recordIntoQuestion("insert");
+    const { jobId } = startedJob(0).input;
+    expect(sendWhenReadyBannerShown()).toBe(false);
+
+    await click(requireButton("Submit"));
+    expect(respondCalls()).toHaveLength(0);
+    expect(sendWhenReadyBannerShown()).toBe(true);
+
+    await click(requireButton("Don't send"));
+    expect(sendWhenReadyBannerShown()).toBe(false);
+    await pushJobs([job(jobId, { status: "completed", mode: "inject", text: "respuesta" })]);
+    expect(respondCalls()).toHaveLength(0);
+    expect(questionAnswerText()).toBe("respuesta");
+  });
+
+  it("dictation phase 5 regression: the answer's marker goes at the field's caret", async () => {
+    fixture.thread = withOpenQuestion(makeThread());
+    await mountApp();
+    const field = await focusQuestionAnswer();
+    await act(async () => {
+      editPendingUserInputAnswerText(
+        pendingUserInputRequestKey(environmentId, threadId, questionRequestId),
+        "scope",
+        () => "Hello world",
+      );
+    });
+    await settle();
+    expect(questionAnswerText()).toBe("Hello world");
+    field.setSelectionRange(5, 5);
+
+    await recordIntoQuestion("insert");
+    const answer = questionAnswerText();
+    const [slot] = slotsIn(answer);
+    expect(slot, `Expected a marker in ${JSON.stringify(answer)}`).toBeDefined();
+    expect(answer.slice(0, slot!.start).trimEnd()).toBe("Hello");
+    expect(answer.slice(slot!.end).trimStart()).toBe("world");
+  });
+
+  it("dictation phase 5 regression: a dictated draft that goes to the queue keeps its voiced tag", async () => {
+    // An open question makes Send queue the message.
+    fixture.thread = withOpenQuestion(makeThread());
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Queued");
+    await mountApp();
+    await recordInMode("insert");
+    const { jobId } = startedJob(0).input;
+    await pushJobs([job(jobId, { status: "completed", mode: "inject", text: "dictado" })]);
+
+    await click(requireButton(/^(Send message|Queue message)$/));
+    expect(turnStarts()).toHaveLength(0);
+    const queued =
+      useQueuedMessageStore.getState().queuesByThreadKey[scopedThreadKey(onScreenTarget)];
+    expect(JSON.stringify(queued)).toContain("[voiced] Queued dictado");
+  });
+
+  it("dictation phase 5 regression: a file sent off screen carries its context record, so its reference resolves", async () => {
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Read the notes");
+    useComposerDraftStore
+      .getState()
+      .addFiles(onScreenTarget, [attachedFile], { appendReference: true });
+    await mountApp();
+    await recordInMode("send");
+    const { jobId } = startedJob(0).input;
+    await navigateAwayFromThread();
+
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "y resume" })]);
+    const text = onlyTurnText();
+    // A server without inline context gets the record serialized: the raw link is replaced.
+    expect(text).not.toContain("t3-context://");
+    expect(text).toContain("notes.txt");
   });
 });

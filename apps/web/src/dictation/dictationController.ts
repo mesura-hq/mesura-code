@@ -14,7 +14,12 @@ import {
   type EnvironmentId,
   type KeybindingCommand,
 } from "@t3tools/contracts";
-import { findDictationSlots, formatDictationSlot } from "@t3tools/shared/dictationSlots";
+import {
+  fillDictationSlot,
+  findDictationSlots,
+  formatDictationSlot,
+  removeDictationSlot,
+} from "@t3tools/shared/dictationSlots";
 
 import { toastManager } from "~/components/ui/toast";
 import { openTranscriptionsList } from "~/components/dictation/TranscriptionsList";
@@ -30,6 +35,11 @@ import {
   useComposerDraftStore,
 } from "~/composerDraftStore";
 import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
+import {
+  editPendingUserInputAnswerText,
+  markPendingUserInputAnswerVoiced,
+  readPendingUserInputAnswerText,
+} from "~/pendingUserInputDraftStore";
 import { randomUUID } from "~/lib/utils";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { attachmentEnvironment } from "~/state/attachments";
@@ -42,7 +52,16 @@ import {
   type DictationAudio,
   type DictationRecording,
 } from "./recorder";
+import { appendDictationSlot } from "./dictationSlotEdits";
 import {
+  armQuestionSendWhenReady,
+  armSendWhenReady,
+  disarmQuestionSendWhenReady,
+  disarmSendWhenReady,
+  markDictationFilled,
+} from "./sendWhenReady";
+import {
+  type DictationQuestionAnswer,
   forgetOwnDictationJob,
   type OwnDictationJob,
   recordedDictationMs,
@@ -69,9 +88,13 @@ export interface DictationComposer {
   readonly draftTarget: ComposerThreadTarget;
   /** Inserts at the editor's caret; `null` once the composer is no longer mounted. */
   readonly insertSlot: ((slot: string) => boolean) | null;
+  /** Set for a focused question card: the marker goes into that answer, not into the draft. */
+  readonly question?: DictationQuestionAnswer;
 }
 
 let lastComposer: DictationComposer | null = null;
+/** The thread's composer, which takes over again when a focused question card lets go. */
+let lastThreadComposer: DictationComposer | null = null;
 let activeRecording: DictationRecording | null = null;
 let opening = false;
 let levelTimer: ReturnType<typeof setInterval> | null = null;
@@ -121,9 +144,80 @@ const SURVIVAL_CHECK_DELAY_MS = 1_000;
 
 export function registerDictationComposer(composer: DictationComposer): () => void {
   lastComposer = composer;
+  if (!composer.question) lastThreadComposer = composer;
   return () => {
-    if (lastComposer === composer) lastComposer = { ...composer, insertSlot: null };
+    if (composer.question) {
+      if (lastComposer === composer) lastComposer = lastThreadComposer;
+      return;
+    }
+    const unmounted = { ...composer, insertSlot: null };
+    if (lastThreadComposer === composer) lastThreadComposer = unmounted;
+    if (lastComposer === composer) lastComposer = unmounted;
   };
+}
+
+/** The thread's composer took focus back from a question card: it takes the next marker. */
+export function reclaimDictationComposer(): void {
+  if (lastThreadComposer) lastComposer = lastThreadComposer;
+}
+
+/** Where a job's marker lives, and what fills, removes and sends it there. */
+interface DictationSlotHost {
+  readonly append: (slot: string) => void;
+  readonly fill: (jobId: string, transcript: string) => "filled" | "unsaved" | "missing";
+  readonly remove: (jobId: string) => void;
+  readonly read: () => string;
+  /** What storage holds; `null` when it cannot be judged. */
+  readonly readStored: () => Promise<string | null>;
+  readonly armSend: () => void;
+  readonly disarmSend: () => void;
+  readonly markFilled: (jobId: string) => void;
+}
+
+function questionSlotHost(question: DictationQuestionAnswer): DictationSlotHost {
+  const edit = (change: (text: string) => string | null) =>
+    editPendingUserInputAnswerText(question.requestKey, question.questionId, change);
+  const read = () => readPendingUserInputAnswerText(question.requestKey, question.questionId);
+  return {
+    append: (slot) => void edit((text) => appendDictationSlot(text, slot)),
+    fill: (jobId, transcript) =>
+      edit((text) => {
+        const result = fillDictationSlot(text, jobId, transcript);
+        return "missing" in result ? null : result.text;
+      })
+        ? "filled"
+        : "missing",
+    remove: (jobId) =>
+      void edit((text) => {
+        const result = removeDictationSlot(text, jobId);
+        return "missing" in result ? null : result.text;
+      }),
+    read,
+    // The answers store writes through on every change; the copy in memory is what storage holds.
+    readStored: async () => read(),
+    armSend: () => armQuestionSendWhenReady(question.requestKey),
+    disarmSend: () => disarmQuestionSendWhenReady(question.requestKey),
+    markFilled: () => markPendingUserInputAnswerVoiced(question.requestKey, question.questionId),
+  };
+}
+
+function draftSlotHost(draftTarget: ComposerThreadTarget): DictationSlotHost {
+  return {
+    append: (slot) => void appendDictationSlotToDraft(draftTarget, slot),
+    fill: (jobId, transcript) => fillDictationSlotInDraft(draftTarget, jobId, transcript),
+    remove: (jobId) => void removeDictationSlotFromDraft(draftTarget, jobId),
+    read: () => useComposerDraftStore.getState().getComposerDraft(draftTarget)?.prompt ?? "",
+    readStored: () => readStoredDraftPrompt(draftTarget),
+    armSend: () => armSendWhenReady(draftTarget),
+    disarmSend: () => disarmSendWhenReady(draftTarget),
+    markFilled: (jobId) => markDictationFilled(draftTarget, jobId),
+  };
+}
+
+function slotHostFor(owner: Pick<OwnDictationJob, "target" | "question">): DictationSlotHost {
+  return owner.question
+    ? questionSlotHost(owner.question)
+    : draftSlotHost(toComposerThreadTarget(owner.target));
 }
 
 export function toComposerThreadTarget(
@@ -315,13 +409,54 @@ async function uploadDictationAudio(
   throw result.status === "failed" ? result.error : new Error("The upload was cancelled.");
 }
 
-/** A job that never reached the server takes its marker with it; nothing would ever fill it. */
-function abandonJob(jobId: DictationJobId, draftTarget: ComposerThreadTarget, cause: unknown) {
-  forgetOwnDictationJob(jobId);
-  removeDictationSlotFromDraft(draftTarget, jobId);
+/**
+ * The audio of jobs that have not reached the server yet, so a failed upload or start can be
+ * retried. Only this tab holds it; after a reload such a job can only be discarded.
+ */
+const unstartedAudio = new Map<string, { audio: DictationAudio; durationMs: number }>();
+
+/**
+ * A job that never reached the server. A save-only job has no marker and is dropped. A marker
+ * stays, shown as failed, so an armed draft does not send without its transcript.
+ */
+function failToStart(jobId: DictationJobId, host: DictationSlotHost, cause: unknown) {
   const { lastJob } = useDictationSessionStore.getState();
   if (lastJob?.jobId === jobId) useDictationSessionStore.setState({ lastJob: null });
   reportError("Dictation could not be sent for transcription", cause);
+  if (useOwnDictationJobsStore.getState().jobs[jobId]?.mode === "clipboard") {
+    forgetOwnDictationJob(jobId);
+    unstartedAudio.delete(jobId);
+    host.remove(jobId);
+    return;
+  }
+  updateOwnDictationJob(jobId, { notStarted: errorMessage(cause) });
+}
+
+/** Uploads the audio and starts the server job, in whatever mode the job has by then. */
+async function startDictationJob(
+  jobId: DictationJobId,
+  own: Pick<OwnDictationJob, "environmentId" | "target">,
+  audio: DictationAudio,
+  durationMs: number,
+): Promise<void> {
+  const { environmentId } = own;
+  unstartedAudio.set(jobId, { audio, durationMs });
+  const attachmentId = await uploadDictationAudio(environmentId, audio, jobId);
+  // A mode key pressed during the upload changed the record, not a server job.
+  const mode = useOwnDictationJobsStore.getState().jobs[jobId]?.mode ?? DEFAULT_MODE;
+  const target = mode === "clipboard" ? null : own.target;
+  const result = await runAtomCommand(
+    appAtomRegistry,
+    dictationEnvironment.start,
+    { environmentId, input: { jobId, attachmentId, durationMs, mode, target } },
+    { reportFailure: false },
+  );
+  if (result._tag !== "Success") throw squashAtomCommandFailure(result);
+  unstartedAudio.delete(jobId);
+  startedJobIds.add(jobId);
+  // A mode key pressed while the start was on the wire changed only the record.
+  const latest = useOwnDictationJobsStore.getState().jobs[jobId]?.mode;
+  if (latest !== undefined && latest !== mode) sendModeChange(environmentId, jobId, latest);
 }
 
 /** Stops the recording, drops the marker at the caret, then uploads and starts the job. */
@@ -341,36 +476,24 @@ export async function stopDictation(): Promise<void> {
   const now = Date.now();
   const durationMs = Math.round(recordedDictationMs(session, now));
   const jobId = DictationJobId.make(randomUUID());
-  const { environmentId, draftTarget } = composer;
+  const { environmentId } = composer;
+  const host = slotHostFor(composer);
   if (session.mode !== "clipboard") placeDictationSlot(composer, jobId);
+  if (session.mode === "submit") host.armSend();
   recordOwnDictationJob(jobId, {
     environmentId,
     target: composer.target,
     mode: session.mode,
     createdAt: now,
+    ...(composer.question ? { question: composer.question } : {}),
   });
   lastJobRestored = true;
   useDictationSessionStore.setState({ lastJob: { environmentId, jobId } });
 
   try {
-    const audio = await recording.stop();
-    const attachmentId = await uploadDictationAudio(environmentId, audio, jobId);
-    // A mode key pressed during the upload changed the record, not a server job.
-    const mode = useOwnDictationJobsStore.getState().jobs[jobId]?.mode ?? session.mode;
-    const target = mode === "clipboard" ? null : composer.target;
-    const result = await runAtomCommand(
-      appAtomRegistry,
-      dictationEnvironment.start,
-      { environmentId, input: { jobId, attachmentId, durationMs, mode, target } },
-      { reportFailure: false },
-    );
-    if (result._tag !== "Success") throw squashAtomCommandFailure(result);
-    startedJobIds.add(jobId);
-    // A mode key pressed while the start was on the wire changed only the record.
-    const latest = useOwnDictationJobsStore.getState().jobs[jobId]?.mode;
-    if (latest !== undefined && latest !== mode) sendModeChange(environmentId, jobId, latest);
+    await startDictationJob(jobId, composer, await recording.stop(), durationMs);
   } catch (cause) {
-    abandonJob(jobId, draftTarget, cause);
+    failToStart(jobId, host, cause);
   }
 }
 
@@ -383,8 +506,7 @@ export async function toggleDictation(): Promise<void> {
 function placeDictationSlot(composer: DictationComposer, jobId: DictationJobId) {
   markersHeldInTab.add(jobId);
   const slot = formatDictationSlot(jobId);
-  if (!(composer.insertSlot?.(slot) ?? false))
-    appendDictationSlotToDraft(composer.draftTarget, slot);
+  if (!(composer.insertSlot?.(slot) ?? false)) slotHostFor(composer).append(slot);
 }
 
 function sameTarget(
@@ -418,21 +540,29 @@ export function selectDictationMode(mode: DictationMode): void {
   const own = useOwnDictationJobsStore.getState().jobs[lastJob.jobId];
   if (!own || own.mode === mode) return;
   updateOwnDictationJob(lastJob.jobId, { mode });
+  const host = slotHostFor(own);
   if (own.mode === "clipboard") {
     const composer =
-      lastComposer && sameTarget(lastComposer.target, own.target) ? lastComposer : null;
+      lastComposer &&
+      sameTarget(lastComposer.target, own.target) &&
+      lastComposer.question?.questionId === own.question?.questionId
+        ? lastComposer
+        : null;
     placeDictationSlot(
       composer ?? {
         environmentId: own.environmentId,
         target: own.target,
         draftTarget: toComposerThreadTarget(own.target),
         insertSlot: null,
+        ...(own.question ? { question: own.question } : {}),
       },
       lastJob.jobId,
     );
   } else if (mode === "clipboard") {
-    removeDictationSlotFromDraft(toComposerThreadTarget(own.target), lastJob.jobId);
+    host.remove(lastJob.jobId);
   }
+  if (mode === "submit") host.armSend();
+  else if (own.mode === "submit") host.disarmSend();
   if (startedJobIds.has(lastJob.jobId)) sendModeChange(lastJob.environmentId, lastJob.jobId, mode);
 }
 
@@ -448,6 +578,19 @@ export function cycleDictationMode(): void {
 export function retryDictationJob(jobId: string): void {
   const own = useOwnDictationJobsStore.getState().jobs[jobId];
   if (!own) return;
+  if (own.notStarted !== undefined) {
+    const kept = unstartedAudio.get(jobId);
+    if (!kept) {
+      reportError("The recording is no longer available", "Discard the marker and dictate again.");
+      return;
+    }
+    const id = DictationJobId.make(jobId);
+    updateOwnDictationJob(jobId, { notStarted: undefined });
+    void startDictationJob(id, own, kept.audio, kept.durationMs).catch((cause: unknown) =>
+      failToStart(id, slotHostFor(own), cause),
+    );
+    return;
+  }
   void runAtomCommand(appAtomRegistry, dictationEnvironment.retry, {
     environmentId: own.environmentId,
     input: { jobId: DictationJobId.make(jobId) },
@@ -458,7 +601,8 @@ export function retryDictationJob(jobId: string): void {
 export function discardDictationJob(jobId: string): void {
   const own = useOwnDictationJobsStore.getState().jobs[jobId];
   if (!own) return;
-  removeDictationSlotFromDraft(toComposerThreadTarget(own.target), jobId);
+  unstartedAudio.delete(jobId);
+  slotHostFor(own).remove(jobId);
   updateOwnDictationJob(jobId, { handled: true });
 }
 
@@ -546,22 +690,20 @@ function restoreLastJob(environmentId: EnvironmentId, jobs: ReadonlyArray<Dictat
 }
 
 function draftHoldsMarker(own: OwnDictationJob, jobId: string): boolean {
-  const prompt =
-    useComposerDraftStore.getState().getComposerDraft(toComposerThreadTarget(own.target))?.prompt ??
-    "";
-  return findDictationSlots(prompt).some((slot) => slot.jobId === jobId);
+  return findDictationSlots(slotHostFor(own).read()).some((slot) => slot.jobId === jobId);
 }
 
 /** One completed job, in this tab. See `OwnDictationJob` for the cross-tab rule. */
 async function deliverCompletedJob(job: DictationJob, own: OwnDictationJob): Promise<void> {
   const draftTarget = toComposerThreadTarget(own.target);
+  const host = slotHostFor(own);
   const settle = () => {
     settledInTab.add(job.id);
     filledAwaitingWrite.delete(job.id);
     updateOwnDictationJob(job.id, { handled: true });
   };
   if (own.mode === "clipboard") {
-    removeDictationSlotFromDraft(draftTarget, job.id);
+    host.remove(job.id);
     if (!own.handled) await copyTranscript(own.environmentId, job.text ?? "");
     settle();
     return;
@@ -570,7 +712,9 @@ async function deliverCompletedJob(job: DictationJob, own: OwnDictationJob): Pro
     if (persistComposerDrafts()) settle();
     return;
   }
-  const outcome = fillDictationSlotInDraft(draftTarget, job.id, job.text ?? "");
+  const outcome = host.fill(job.id, job.text ?? "");
+  // The text is in the draft from here on, written through or not.
+  if (outcome !== "missing") host.markFilled(job.id);
   if (outcome === "unsaved") {
     filledAwaitingWrite.add(job.id);
     return;
@@ -580,16 +724,17 @@ async function deliverCompletedJob(job: DictationJob, own: OwnDictationJob): Pro
       // The user deleted it here. Write that edit through before judging storage.
       if (!own.handled) {
         persistComposerDrafts();
-        await announceIfLost(job, own, draftTarget, MARKER_DELETED);
+        await announceIfLost(job, own, host, MARKER_DELETED);
       }
       settle();
     } else {
       settledInTab.add(job.id);
-      setTimeout(() => void announceIfUnclaimed(job, draftTarget), UNCLAIMED_GRACE_MS);
+      setTimeout(() => void announceIfUnclaimed(job, host), UNCLAIMED_GRACE_MS);
     }
     return;
   }
-  if (outcome === "filled" && job.text) {
+  // Only a composer draft is written whole by every tab; an answer is not watched.
+  if (outcome === "filled" && job.text && !own.question) {
     placedTranscripts.set(job.id, {
       environmentId: own.environmentId,
       target: draftTarget,
@@ -610,10 +755,10 @@ function announceKeptOnce(jobId: string, environmentId: EnvironmentId, descripti
 async function announceIfLost(
   job: DictationJob,
   own: OwnDictationJob,
-  target: ComposerThreadTarget,
+  host: DictationSlotHost,
   description: string,
 ) {
-  const stored = await readStoredDraftPrompt(target);
+  const stored = await host.readStored();
   if (stored !== null && job.text && stored.includes(job.text)) return;
   if (stored !== null && findDictationSlots(stored).some((slot) => slot.jobId === job.id)) return;
   announceKeptOnce(job.id, own.environmentId, description);
@@ -624,10 +769,10 @@ async function announceIfLost(
  * it within the grace period and storage holds neither its text nor its marker, another tab's
  * save took the marker away, and this tab says so.
  */
-async function announceIfUnclaimed(job: DictationJob, target: ComposerThreadTarget) {
+async function announceIfUnclaimed(job: DictationJob, host: DictationSlotHost) {
   const own = useOwnDictationJobsStore.getState().jobs[job.id];
   if (!own || own.handled || own.noticed) return;
-  await announceIfLost(job, own, target, OVERWRITTEN_BY_OTHER_TAB);
+  await announceIfLost(job, own, host, OVERWRITTEN_BY_OTHER_TAB);
   if (useOwnDictationJobsStore.getState().jobs[job.id]?.noticed) {
     updateOwnDictationJob(job.id, { handled: true });
   }

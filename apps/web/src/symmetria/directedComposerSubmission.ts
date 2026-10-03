@@ -2,6 +2,7 @@ import type { StartThreadTurnInput } from "@t3tools/client-runtime/state/threads
 import {
   OrchestrationProposedPlanId,
   type CommandId,
+  type DictationTarget,
   type EnvironmentId,
   type MessageId,
   type OrchestrationMessageContext,
@@ -30,11 +31,12 @@ import {
   formatOutgoingComposerPrompt,
   getComposerPromptLengthValidationMessage,
 } from "../components/chat/composerSubmission";
+import {
+  awaitAttachmentUploads,
+  getUploadedAttachments,
+  startAttachmentUpload,
+} from "../lib/attachmentUploadQueue";
 import type { ComposerDictationTarget } from "./dictationTarget";
-import type {
-  SymmetriaDictationCommand,
-  SymmetriaDictationTarget,
-} from "@symmetria/broker-contract";
 
 export type DirectedComposerPendingAction =
   | { readonly kind: "composer" }
@@ -123,8 +125,42 @@ export function consumeDirectedComposerDraft(
 
 export type DirectedComposerSubmissionResult =
   | { readonly kind: "turn-dispatched"; readonly messageId: MessageId }
+  /** The user changed the draft while its uploads finished; nothing was sent or consumed. */
+  | { readonly kind: "draft-changed" }
   | { readonly kind: "provider-start-failed"; readonly messageId: MessageId }
   | { readonly kind: "refused"; readonly code: "unsupported_composer_action" };
+
+type DirectedComposerDraft = NonNullable<
+  ReturnType<ReturnType<typeof useComposerDraftStore.getState>["getComposerDraft"]>
+>;
+
+const draftAttachmentIds = (draft: DirectedComposerDraft) =>
+  [...draft.images, ...draft.files].map((attachment) => attachment.id).join("\n");
+
+/**
+ * Puts a draft that failed to send back, ahead of anything the user wrote into the emptied
+ * composer while the send was in flight, so neither is lost.
+ */
+function restoreDirectedComposerDraft(
+  target: ComposerDictationTarget,
+  sent: DirectedComposerDraft,
+): void {
+  const store = useComposerDraftStore.getState();
+  const typed = store.getComposerDraft(target);
+  const typedPrompt = typed?.prompt ?? "";
+  store.setPrompt(
+    target,
+    typedPrompt.trim() === "" ? sent.prompt : `${sent.prompt.trimEnd()}\n${typedPrompt}`,
+  );
+  if (sent.images.length > 0) store.addImages(target, [...sent.images]);
+  if (sent.files.length > 0) store.addFiles(target, [...sent.files]);
+  store.setTerminalContexts(target, [...sent.terminalContexts, ...(typed?.terminalContexts ?? [])]);
+  store.setPreviewAnnotations(target, [
+    ...sent.previewAnnotations,
+    ...(typed?.previewAnnotations ?? []),
+  ]);
+  store.setReviewComments(target, [...sent.reviewComments, ...(typed?.reviewComments ?? [])]);
+}
 
 export type DirectedComposerSubmissionDependencies = {
   readonly startTurn: (input: {
@@ -246,8 +282,9 @@ const productionExecutor = createDirectedComposerExecutor({
 const titleFromPrompt = (prompt: string): string => prompt.trim().slice(0, 80) || "New thread";
 
 export async function submitDirectedDictation(input: {
-  readonly command: Extract<SymmetriaDictationCommand, { type: "dictation.deliver" }>;
-  readonly reservedTarget: SymmetriaDictationTarget;
+  /** Identifies the send: a repeat with the same `commandId` starts no second turn. */
+  readonly command: { readonly commandId: CommandId; readonly createdAt: string };
+  readonly target: Exclude<DictationTarget, null>;
   readonly composerTarget: ComposerDictationTarget;
   readonly prompt: string;
   readonly messageId: MessageId;
@@ -269,8 +306,8 @@ export async function submitDirectedDictation(input: {
   const thread = appAtomRegistry.get(environmentThreadDetails.detailAtom(threadRef));
   const draft = useComposerDraftStore.getState().getComposerDraft(input.composerTarget);
   const draftSession =
-    input.reservedTarget.kind === "draft"
-      ? useComposerDraftStore.getState().getDraftSession(DraftId.make(input.reservedTarget.draftId))
+    input.target.kind === "draft"
+      ? useComposerDraftStore.getState().getDraftSession(DraftId.make(input.target.draftId))
       : null;
   const projectRef =
     draftSession !== null
@@ -303,36 +340,60 @@ export async function submitDirectedDictation(input: {
 
   const sendState = deriveComposerSendState({
     prompt: input.prompt,
-    imageCount: draft.images.length,
+    imageCount: draft.images.length + draft.files.length,
     terminalContexts: draft.terminalContexts,
     elementContextCount: draft.previewAnnotations.length + draft.reviewComments.length,
   });
   if (!sendState.hasSendableContent) {
     return { kind: "refused", code: "unsupported_composer_action" };
   }
-  // v0.0.42 stopped appending this material to the prompt as text. It travels
-  // as records beside the message now, and only a server too old to read them
-  // gets the serialized form — which `buildDirectedTurnStartInput` decides.
-  const messageContext = buildMessageContext({
-    terminalContexts: sendState.sendableTerminalContexts,
-    reviewComments: draft.reviewComments,
-    previewAnnotations: draft.previewAnnotations,
-    attachments: draft.images.map((image) => ({ attachment: image, attachmentId: image.id })),
-  });
   const preparedPrompt = prepareDirectedProviderPrompt(input.prompt, input.submissionContext);
   if (!preparedPrompt.ok) {
     return { kind: "refused", code: "unsupported_composer_action" };
   }
   const prompt = preparedPrompt.prompt;
-  const attachments = await Promise.all(
+  // A file travels only as an upload, as in the composer's own send: finish (or verify) each
+  // upload first, and refuse rather than drop a file that cannot be uploaded.
+  for (const file of draft.files) {
+    startAttachmentUpload({
+      environmentId: threadRef.environmentId,
+      image: file,
+      draftTarget: input.composerTarget,
+    });
+  }
+  await awaitAttachmentUploads(draft.files.map((file) => file.id));
+  const files = getUploadedAttachments({
+    environmentId: threadRef.environmentId,
+    images: draft.files,
+  });
+  if (files === null) {
+    return { kind: "refused", code: "unsupported_composer_action" };
+  }
+  const images = await Promise.all(
     draft.images.map(async (image) => ({
       type: "image" as const,
+      // The local id is the wire id on the data-URL path, so its context record binds to it.
+      id: image.id,
       name: image.name,
       mimeType: image.mimeType,
       sizeBytes: image.sizeBytes,
       dataUrl: await readFileAsDataUrl(image.file),
     })),
   );
+  const attachments = [...images, ...files];
+  // v0.0.42 stopped appending this material to the prompt as text. It travels
+  // as records beside the message now, and only a server too old to read them
+  // gets the serialized form — which `buildDirectedTurnStartInput` decides.
+  // Built after the uploads: a file's record binds to the id its upload got on the wire.
+  const messageContext = buildMessageContext({
+    terminalContexts: sendState.sendableTerminalContexts,
+    reviewComments: draft.reviewComments,
+    previewAnnotations: draft.previewAnnotations,
+    attachments: [
+      ...draft.images.map((image) => ({ attachment: image, attachmentId: image.id })),
+      ...draft.files.map((file, index) => ({ attachment: file, attachmentId: files[index]!.id })),
+    ],
+  });
   const selectedModel = draft.activeProvider
     ? draft.modelSelectionByProvider[draft.activeProvider]
     : undefined;
@@ -387,6 +448,17 @@ export async function submitDirectedDictation(input: {
         }
       : undefined;
 
+  // The draft is consumed before the turn is acknowledged, as the composer's own send does, so
+  // what the user writes meanwhile is a new draft and survives. A failed send puts it back.
+  const latest = useComposerDraftStore.getState().getComposerDraft(input.composerTarget);
+  if (
+    latest === null ||
+    latest.prompt !== draft.prompt ||
+    draftAttachmentIds(latest) !== draftAttachmentIds(draft)
+  ) {
+    return { kind: "draft-changed" };
+  }
+  consumeDirectedComposerDraft(input.composerTarget, input.sourceComposerTarget);
   const result = await productionExecutor.submit({
     environmentId: threadRef.environmentId,
     threadId: threadRef.threadId,
@@ -408,8 +480,6 @@ export async function submitDirectedDictation(input: {
       context: messageContext,
     },
   });
-  if (result.kind === "turn-dispatched") {
-    consumeDirectedComposerDraft(input.composerTarget, input.sourceComposerTarget);
-  }
+  if (result.kind !== "turn-dispatched") restoreDirectedComposerDraft(input.composerTarget, draft);
   return result;
 }

@@ -109,6 +109,9 @@ import {
   useEffectiveComposerModelState,
 } from "../../composerDraftStore";
 import { fillDictationSlotKeepingCaret } from "../../dictation/dictationSlotEdits";
+import { countPendingDictationSlots } from "@t3tools/shared/dictationSlots";
+import { armSendWhenReady } from "../../dictation/sendWhenReady";
+import { SendWhenReadyBanner } from "../../dictation/SendWhenReadyBanner";
 import {
   MAX_STASH_ENTRIES,
   partitionStashAttachments,
@@ -2564,15 +2567,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     hiddenBlockCount: restingControlsHiddenBlockCount,
     controlsVisible: restingControlsVisible,
   } = useRestingComposerControlsLayout(restingControlsHost);
+  const canArmSendWhenReady = composerSendState.pendingDictationSlotCount > 0;
   const collapsedComposerPrimaryActionDisabled =
     phase === "running" ||
     isSendBusy ||
-    isSendDisabled ||
+    (isSendDisabled && !canArmSendWhenReady) ||
     isConnecting ||
     noProviderAvailable ||
     projectSelectionRequired ||
     environmentUnavailable !== null ||
-    !composerSendState.hasSendableContent;
+    !(composerSendState.hasSendableContent || canArmSendWhenReady);
   const collapsedComposerPrimaryActionLabel = "Send message";
   // ------------------------------------------------------------------
   // Prompt helpers
@@ -3577,6 +3581,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const submitComposer = useCallback(
     (event?: { preventDefault: () => void }, intent: ComposerSubmissionIntent = "foreground") => {
+      // A transcription still pending: Send arms the draft to go once it lands.
+      if (countPendingDictationSlots(promptRef.current) > 0) {
+        event?.preventDefault();
+        armSendWhenReady(composerDraftTarget);
+        return;
+      }
       if (noProviderAvailable || isSendDisabled) {
         event?.preventDefault();
         return;
@@ -3631,6 +3641,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       activeThread?.session,
       attachmentTargetKey,
       blurMobileComposerAfterSend,
+      composerDraftTarget,
       isSendDisabled,
       noProviderAvailable,
       onSend,
@@ -5884,6 +5895,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               />
             </ComposerBanner.Attachment>
           ) : null}
+          <SendWhenReadyBanner
+            target={composerDraftTarget}
+            pendingCount={composerSendState.pendingDictationSlotCount}
+          />
           {dictationStrip}
         </ComposerBanner.Column>
         {!isComposerApprovalState ? (
@@ -6508,7 +6523,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     showPlanFollowUpPrompt={showPlanFollowUpPrompt}
                     promptHasText={prompt.trim().length > 0}
                     isSendBusy={isSendBusy}
-                    sendDisabledReason={sendDisabledReason}
+                    // Pressing Send is how a draft with a pending transcription is armed.
+                    sendDisabledReason={canArmSendWhenReady ? null : sendDisabledReason}
                     isConnecting={isConnecting}
                     isEnvironmentUnavailable={
                       environmentUnavailable !== null ||
@@ -6516,7 +6532,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       projectSelectionRequired
                     }
                     isPreparingWorktree={isPreparingWorktree}
-                    hasSendableContent={composerSendState.hasSendableContent}
+                    hasSendableContent={composerSendState.hasSendableContent || canArmSendWhenReady}
                     preserveComposerFocusOnPointerDown={isMobileViewport || isComposerResting}
                     onInterrupt={handleInterruptPrimaryAction}
                     onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}

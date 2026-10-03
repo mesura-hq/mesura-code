@@ -58,6 +58,7 @@ import {
   useOwnDictationJobsStore,
 } from "./dictationSessionStore";
 import { setDictationMediaBackend } from "./recorder";
+import { withDictatedPrefix } from "./sendWhenReady";
 
 const environmentId = EnvironmentId.make("dictation-controller-environment");
 const threadId = ThreadId.make("dictation-controller-thread");
@@ -234,17 +235,18 @@ describe("dictation across reloads and tabs", () => {
   });
 
   it("dictation phase 4 regression: a job another tab already handled fills this tab's marker without a second notice", async () => {
-    const jobId = await recordAndStop();
+    // Insert mode: since phase 5 of the STT redesign, a send-mode draft sends itself once filled.
+    const jobId = await recordAndStop("inject");
     updateOwnDictationJob(jobId, { handled: true });
-    deliverDictationJobs(environmentId, [completed(jobId, "submit", "desde la otra pestaña")]);
+    deliverDictationJobs(environmentId, [completed(jobId, "inject", "desde la otra pestaña")]);
     await settle();
     expect(prompt()).toBe("Draft desde la otra pestaña");
 
     // The marker is gone now; the other tab's acknowledgement keeps this one quiet.
-    const another = await recordAndStop();
+    const another = await recordAndStop("inject");
     useComposerDraftStore.getState().setPrompt(draftTarget, "Draft edited");
     updateOwnDictationJob(another, { handled: true });
-    deliverDictationJobs(environmentId, [completed(another, "submit", "perdido")]);
+    deliverDictationJobs(environmentId, [completed(another, "inject", "perdido")]);
     await settle();
     expect(toastManager.add).not.toHaveBeenCalled();
   });
@@ -252,7 +254,8 @@ describe("dictation across reloads and tabs", () => {
 
 describe("dictation delivery is acknowledged once it is durable", () => {
   it("dictation phase 4 regression: a fill whose draft write fails stays unhandled and is written on the next delivery", async () => {
-    const jobId = await recordAndStop();
+    // Insert mode: since phase 5 of the STT redesign, a send-mode draft sends itself once filled.
+    const jobId = await recordAndStop("inject");
     const originalSetItem = localStorage.setItem.bind(localStorage);
     const refuseDrafts = vi
       .spyOn(localStorage, "setItem")
@@ -261,11 +264,13 @@ describe("dictation delivery is acknowledged once it is durable", () => {
         originalSetItem(key, value);
       });
 
-    const jobs = [completed(jobId, "submit", "texto")];
+    const jobs = [completed(jobId, "inject", "texto")];
     deliverDictationJobs(environmentId, jobs);
     await settle();
     expect(prompt()).toBe("Draft texto");
     expect(useOwnDictationJobsStore.getState().jobs[jobId]?.handled).toBe(false);
+    // The text is in the draft, written through or not: its next send carries the tag.
+    expect(withDictatedPrefix(draftTarget, prompt())).toBe("[voiced] Draft texto");
 
     refuseDrafts.mockRestore();
     deliverDictationJobs(environmentId, [...jobs]);
@@ -376,12 +381,13 @@ describe("a transcript another tab overwrites", () => {
   const notices = () => vi.mocked(toastManager.add).mock.calls.map(([toast]) => toast);
 
   it("dictation phase 4 regression: concurrent stops in two tabs announce only the transcript a save really lost, with the other-tab wording", async () => {
-    const mine = await recordAndStop();
+    // Insert mode: since phase 5 of the STT redesign, a send-mode draft sends itself once filled.
+    const mine = await recordAndStop("inject");
     const theirs = jobFromSecondTab("7c2d9e41-5b3a-4f60-9d18-0e6f4a2b8c75");
     // Both jobs complete. Tab 2's marker lives only in tab 2's copy, which has not filled yet.
     deliverDictationJobs(environmentId, [
-      completed(mine, "submit", "texto de esta pestaña"),
-      completed(theirs, "submit", "texto de la otra pestaña"),
+      completed(mine, "inject", "texto de esta pestaña"),
+      completed(theirs, "inject", "texto de la otra pestaña"),
     ]);
     await vi.advanceTimersByTimeAsync(0);
     expect(prompt()).toBe("Draft texto de esta pestaña");

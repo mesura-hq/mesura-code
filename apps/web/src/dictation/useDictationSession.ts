@@ -10,6 +10,7 @@ import { resolveShortcutCommand } from "~/keybindings";
 import { isTerminalFocused } from "~/lib/terminalFocus";
 import { useDictationJobs } from "~/state/dictation";
 import { primaryServerKeybindingsAtom } from "~/state/server";
+import type { DirectedSubmissionContext } from "~/symmetria/directedComposerSubmission";
 import {
   deliverDictationJobs,
   isDictationKeybindingCommand,
@@ -17,14 +18,23 @@ import {
   runDictationKeybindingCommand,
 } from "./dictationController";
 import { useOwnDictationJobsStore } from "./dictationSessionStore";
+import { registerSendContextReader } from "./sendWhenReady";
 
-/** Makes this composer the one a stopped recording drops its marker into. */
+/**
+ * Makes this composer the one a stopped recording drops its marker into, and lends a
+ * send-when-ready send from it what the composer knows about the provider.
+ */
 export function useDictationComposer(input: {
   readonly environmentId: EnvironmentId;
   readonly composerDraftTarget: ComposerThreadTarget;
   readonly composerRef: RefObject<ChatComposerHandle | null>;
+  readonly readSubmissionContext: () => DirectedSubmissionContext | null;
 }): void {
-  const { environmentId, composerDraftTarget, composerRef } = input;
+  const { environmentId, composerDraftTarget, composerRef, readSubmissionContext } = input;
+  useEffect(
+    () => registerSendContextReader(composerDraftTarget, readSubmissionContext),
+    [composerDraftTarget, readSubmissionContext],
+  );
   useEffect(
     () =>
       registerDictationComposer({

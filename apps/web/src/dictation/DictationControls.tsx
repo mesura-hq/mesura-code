@@ -23,16 +23,32 @@ import {
   type DictationRecordingSession,
   useDictationSessionStore,
 } from "./dictationSessionStore";
+import { useQuestionSendWhenReady } from "./questionSendWhenReady";
 import {
   useDictationDelivery,
   useDictationKeybindings,
   useDictationEnvironments,
 } from "./useDictationSession";
 
-/** The composer's microphone: starts a recording in this window. */
-export const DictationStartButton = memo(function DictationStartButton() {
+/**
+ * A microphone that starts a recording in this window: the composer's, or a question card's when
+ * `targetLabel` names the answer and `onBeforeStart` makes that answer the marker's target.
+ */
+export const DictationStartButton = memo(function DictationStartButton(props: {
+  readonly targetLabel?: string;
+  readonly compact?: boolean;
+  readonly disabled?: boolean;
+  readonly onBeforeStart?: () => void;
+}) {
   const recording = useDictationSessionStore((state) => state.session !== null);
-  const label = recording ? "A dictation session is already active" : "Start voice dictation";
+  const unavailable = recording || props.disabled === true;
+  const label = recording
+    ? "A dictation session is already active"
+    : props.disabled
+      ? "Voice input is unavailable while this answer is sending"
+      : props.targetLabel
+        ? `Dictate into ${props.targetLabel}`
+        : "Start voice dictation";
   return (
     <Tooltip>
       <TooltipTrigger
@@ -41,14 +57,17 @@ export const DictationStartButton = memo(function DictationStartButton() {
             type="button"
             size="icon-sm"
             variant="ghost"
-            aria-disabled={recording}
+            aria-disabled={unavailable}
             aria-label={label}
             className={cn(
               "rounded-full text-secondary-label transition-colors",
-              recording && "cursor-default opacity-45",
+              props.compact && "size-7 rounded-md text-muted-foreground",
+              unavailable && "cursor-default opacity-45",
             )}
             onClick={() => {
-              if (!recording) void startDictation();
+              if (unavailable) return;
+              props.onBeforeStart?.();
+              void startDictation();
             }}
           >
             <MicIcon className="size-4" />
@@ -126,10 +145,12 @@ function DictationEnvironmentDelivery({
 
 /**
  * Mounted once for the whole app: places this client's transcripts into whichever draft holds
- * their marker, on screen or not, and listens for the dictation keys.
+ * their marker, on screen or not, answers armed question cards, and listens for the dictation
+ * keys.
  */
 export function DictationJobDelivery() {
   useDictationKeybindings();
+  useQuestionSendWhenReady();
   return useDictationEnvironments().map((environmentId) => (
     <DictationEnvironmentDelivery key={environmentId} environmentId={environmentId} />
   ));

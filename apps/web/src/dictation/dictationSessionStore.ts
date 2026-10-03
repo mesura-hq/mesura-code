@@ -72,6 +72,20 @@ export interface OwnDictationJob {
   readonly handled: boolean;
   /** A "kept in Transcriptions" notice was shown for this job; never show a second one. */
   readonly noticed?: boolean;
+  /**
+   * Why the job never reached the server (finalizing, uploading or starting failed). Its marker
+   * stays, shown as failed, until Retry starts it from the audio this tab kept, or Discard.
+   */
+  readonly notStarted?: string | undefined;
+  /** Set when the recording stopped in a question card: the marker is in that answer. */
+  readonly question?: DictationQuestionAnswer;
+}
+
+/** An open question card's typed answer, which takes the marker of a recording stopped in it. */
+export interface DictationQuestionAnswer {
+  /** `pendingUserInputRequestKey` of the request the question belongs to. */
+  readonly requestKey: string;
+  readonly questionId: string;
 }
 
 /** Jobs live 24 hours on the server; keep the record a little longer, then forget it. */
@@ -147,7 +161,7 @@ export function createOwnDictationJobs(storage: Storage | null, now: () => numbe
       write(jobId, { ...job, handled: false }),
     update: (
       jobId: string,
-      change: Partial<Pick<OwnDictationJob, "mode" | "handled" | "noticed">>,
+      change: Partial<Pick<OwnDictationJob, "mode" | "handled" | "noticed" | "notStarted">>,
     ) => {
       const current = store.getState().jobs[jobId];
       return current ? write(jobId, { ...current, ...change }) : false;

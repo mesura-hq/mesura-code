@@ -16,6 +16,8 @@ interface RequestDraft {
   answers: Record<string, PendingUserInputDraftAnswer>;
   error?: PendingUserInputError | null;
   dictationCommands: string[];
+  /** Questions whose typed answer holds dictated text; their answer carries `[voiced] `. */
+  voicedQuestionIds?: string[];
   version: number;
 }
 
@@ -126,3 +128,57 @@ export const usePendingUserInputDraftStore = create(
     },
   ),
 );
+
+/**
+ * Rewrites one question's typed answer; `edit` returns `null` to leave it alone. Used for
+ * dictation markers, which reach an answer whether or not its card is mounted. Returns whether
+ * the answer changed.
+ */
+export function editPendingUserInputAnswerText(
+  key: string,
+  questionId: string,
+  edit: (text: string) => string | null,
+): boolean {
+  const current = usePendingUserInputDraftStore.getState().requests[key] ?? {
+    answers: {},
+    dictationCommands: [],
+    version: 0,
+  };
+  const answer = current.answers[questionId];
+  const text = edit(answer?.customAnswer ?? "");
+  if (text === null || text === (answer?.customAnswer ?? "")) return false;
+  usePendingUserInputDraftStore.setState((state) => ({
+    requests: {
+      ...state.requests,
+      [key]: {
+        ...current,
+        answers: { ...current.answers, [questionId]: { ...answer, customAnswer: text } },
+        version: current.version + 1,
+      },
+    },
+  }));
+  return true;
+}
+
+export function readPendingUserInputAnswerText(key: string, questionId: string): string {
+  return (
+    usePendingUserInputDraftStore.getState().requests[key]?.answers[questionId]?.customAnswer ?? ""
+  );
+}
+
+/** Records that a transcript was filled into one question's answer. */
+export function markPendingUserInputAnswerVoiced(key: string, questionId: string): void {
+  usePendingUserInputDraftStore.setState((state) => {
+    const current = state.requests[key];
+    if (!current || current.voicedQuestionIds?.includes(questionId)) return state;
+    return {
+      requests: {
+        ...state.requests,
+        [key]: {
+          ...current,
+          voicedQuestionIds: [...(current.voicedQuestionIds ?? []), questionId],
+        },
+      },
+    };
+  });
+}

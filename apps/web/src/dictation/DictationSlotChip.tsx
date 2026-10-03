@@ -17,7 +17,8 @@ export function DictationSlotChip(props: { readonly jobId: string }) {
   const { jobs } = useDictationJobs(own?.environmentId ?? null);
   const job = jobs.find((candidate) => candidate.id === props.jobId);
 
-  if (job?.status === "failed") {
+  // A job that never reached the server fails here too, so its marker can be retried.
+  if (job?.status === "failed" || own?.notStarted !== undefined) {
     return (
       <span
         contentEditable={false}
