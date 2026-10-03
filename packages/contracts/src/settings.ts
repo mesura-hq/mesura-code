@@ -907,6 +907,14 @@ export const UsageLimitSourceConfig = Schema.Struct({
 export type UsageLimitSourceConfig = typeof UsageLimitSourceConfig.Type;
 
 /**
+ * Stands in for a secret setting (the usage-limit `managementKey`, the
+ * dictation `openAiApiKey`) everywhere outside the server's secret store. The
+ * server sends it to clients when a value is stored; a client that sends it
+ * back means "keep what you have".
+ */
+export const SECRET_SETTING_REDACTION_MARKER = "\u2022\u2022\u2022\u2022\u2022\u2022";
+
+/**
  * Server-side dictation. The key is a bearer secret: on disk it is replaced by
  * the redaction marker and the value lives in the server secret store, as the
  * usage-limit `managementKey` does. A client only ever sees the marker.

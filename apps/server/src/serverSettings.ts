@@ -24,6 +24,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   resolveProviderInstanceEnabled,
+  SECRET_SETTING_REDACTION_MARKER,
   ServerSettings,
   ServerSettingsError,
   type ServerSettingsPatch,
@@ -139,13 +140,6 @@ function providerEnvironmentSecretName(input: {
   return `provider-env-${Buffer.from(input.instanceId, "utf8").toString("base64url")}-${Buffer.from(input.name, "utf8").toString("base64url")}`;
 }
 
-/**
- * On disk the hub key is replaced by this marker and the real value lives in
- * the secret store, mirroring provider environment secrets. A client that
- * sends the marker back means "keep what you have".
- */
-const USAGE_LIMIT_SOURCE_KEY_REDACTED = "\u2022\u2022\u2022\u2022\u2022\u2022";
-
 function usageLimitSourceSecretName(sourceId: string): string {
   return `usage-limit-source-${Buffer.from(sourceId, "utf8").toString("base64url")}`;
 }
@@ -185,13 +179,13 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
       id,
       {
         ...source,
-        managementKey: source.managementKey.length > 0 ? USAGE_LIMIT_SOURCE_KEY_REDACTED : "",
+        managementKey: source.managementKey.length > 0 ? SECRET_SETTING_REDACTION_MARKER : "",
       },
     ]),
   );
   const dictation = {
     ...settings.dictation,
-    openAiApiKey: settings.dictation.openAiApiKey.length > 0 ? USAGE_LIMIT_SOURCE_KEY_REDACTED : "",
+    openAiApiKey: settings.dictation.openAiApiKey.length > 0 ? SECRET_SETTING_REDACTION_MARKER : "",
   };
   return { ...settings, providerInstances, usageLimitSources, dictation };
 }
@@ -713,7 +707,7 @@ const make = Effect.gen(function* () {
       }
       const usageLimitSources: Record<string, UsageLimitSourceConfig> = {};
       for (const [sourceId, source] of Object.entries(settings.usageLimitSources)) {
-        if (source.managementKey !== USAGE_LIMIT_SOURCE_KEY_REDACTED) {
+        if (source.managementKey !== SECRET_SETTING_REDACTION_MARKER) {
           usageLimitSources[sourceId] = source;
           continue;
         }
@@ -730,7 +724,7 @@ const make = Effect.gen(function* () {
         };
       }
       let dictation = settings.dictation;
-      if (dictation.openAiApiKey === USAGE_LIMIT_SOURCE_KEY_REDACTED) {
+      if (dictation.openAiApiKey === SECRET_SETTING_REDACTION_MARKER) {
         const secret = yield* secretStore
           .get(DICTATION_OPENAI_KEY_SECRET_NAME)
           .pipe(
@@ -877,7 +871,7 @@ const make = Effect.gen(function* () {
       const usageLimitSources: Record<string, UsageLimitSourceConfig> = {};
       for (const [sourceId, source] of Object.entries(next.usageLimitSources)) {
         const secretName = usageLimitSourceSecretName(sourceId);
-        if (source.managementKey === USAGE_LIMIT_SOURCE_KEY_REDACTED) {
+        if (source.managementKey === SECRET_SETTING_REDACTION_MARKER) {
           // Unchanged from the client's point of view; the store already has it.
           usageLimitSources[sourceId] = source;
           continue;
@@ -902,7 +896,7 @@ const make = Effect.gen(function* () {
                 new ServerSettingsError({ settingsPath, operation: "write-secret", cause }),
             ),
           );
-        usageLimitSources[sourceId] = { ...source, managementKey: USAGE_LIMIT_SOURCE_KEY_REDACTED };
+        usageLimitSources[sourceId] = { ...source, managementKey: SECRET_SETTING_REDACTION_MARKER };
       }
       for (const sourceId of Object.keys(current.usageLimitSources)) {
         if (sourceId in next.usageLimitSources) continue;
@@ -927,7 +921,7 @@ const make = Effect.gen(function* () {
                 new ServerSettingsError({ settingsPath, operation: "remove-secret", cause }),
             ),
           );
-      } else if (dictationKey !== USAGE_LIMIT_SOURCE_KEY_REDACTED) {
+      } else if (dictationKey !== SECRET_SETTING_REDACTION_MARKER) {
         yield* secretStore
           .set(DICTATION_OPENAI_KEY_SECRET_NAME, textEncoder.encode(dictationKey))
           .pipe(
@@ -945,7 +939,7 @@ const make = Effect.gen(function* () {
         dictation:
           dictationKey.length === 0
             ? next.dictation
-            : { ...next.dictation, openAiApiKey: USAGE_LIMIT_SOURCE_KEY_REDACTED },
+            : { ...next.dictation, openAiApiKey: SECRET_SETTING_REDACTION_MARKER },
       };
     });
 

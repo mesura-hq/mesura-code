@@ -31,6 +31,10 @@
       "types": "./src/environment/index.ts",
       "default": "./src/environment/index.ts"
     },
+    "./dictation": {
+      "types": "./src/dictation/index.ts",
+      "default": "./src/dictation/index.ts"
+    },
     "./markdown-images": {
       "types": "./src/markdownImages.ts",
       "default": "./src/markdownImages.ts"
