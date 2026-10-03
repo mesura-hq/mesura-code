@@ -7,13 +7,84 @@
   animation: dictation-blink 1.1s steps(1, end) infinite;
 }
 
-.dictation-slot[data-slot-status="transcribing"] .dictation-slot-label::after,
 .dictation-widget-transcribing::after {
   display: inline-block;
   width: 1.2em;
   text-align: left;
   content: "";
   animation: dictation-dots 1.2s steps(1, end) infinite;
+}
+
+/*
+ * The shadow caret's transcribing wave: CenterOutWaveform's processing wave
+ * (one sine period about every 0.96 s), shrunk to six bars. Each bar runs the
+ * same stepped scaleY cycle; increasing delays make the crest travel left to
+ * right. Twelve steps a cycle is ~12 repaints a second, not 60.
+ */
+.dictation-slot-wave > span {
+  transform-origin: center;
+  animation: dictation-slot-wave 0.96s steps(1, end) infinite;
+}
+
+.dictation-slot-wave > span:nth-child(1) {
+  animation-delay: -0.96s;
+}
+.dictation-slot-wave > span:nth-child(2) {
+  animation-delay: -0.8s;
+}
+.dictation-slot-wave > span:nth-child(3) {
+  animation-delay: -0.64s;
+}
+.dictation-slot-wave > span:nth-child(4) {
+  animation-delay: -0.48s;
+}
+.dictation-slot-wave > span:nth-child(5) {
+  animation-delay: -0.32s;
+}
+.dictation-slot-wave > span:nth-child(6) {
+  animation-delay: -0.16s;
+}
+
+@keyframes dictation-slot-wave {
+  0% {
+    transform: scaleY(1);
+  }
+  8.33% {
+    transform: scaleY(1);
+  }
+  16.67% {
+    transform: scaleY(0.866);
+  }
+  25% {
+    transform: scaleY(0.59);
+  }
+  33.33% {
+    transform: scaleY(0.314);
+  }
+  41.67% {
+    transform: scaleY(0.18);
+  }
+  50% {
+    transform: scaleY(0.18);
+  }
+  58.33% {
+    transform: scaleY(0.306);
+  }
+  66.67% {
+    transform: scaleY(0.456);
+  }
+  75% {
+    transform: scaleY(0.59);
+  }
+  83.33% {
+    transform: scaleY(0.724);
+  }
+  91.67% {
+    transform: scaleY(0.874);
+  }
+  100% {
+    transform: scaleY(1);
+  }
 }
 
 @keyframes dictation-blink {
@@ -42,7 +113,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .dictation-slot .dictation-slot-caret,
-  .dictation-slot .dictation-slot-label::after,
+  .dictation-slot-wave > span,
   .dictation-rec-dot,
   .dictation-widget-transcribing::after {
     animation: none;

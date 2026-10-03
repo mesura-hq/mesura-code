@@ -73,6 +73,8 @@ export class DictationSlotNode extends DecoratorNode<ReactElement> {
   }
 }
 
+const WAVE_BARS = [0, 1, 2, 3, 4, 5] as const;
+
 function DictationSlotChip(props: { jobId: string }) {
   const job = usePrototypeStore((state) => state.jobs[props.jobId]);
   // A slot whose job is gone renders nothing; delivery removes it right after.
@@ -112,8 +114,15 @@ function DictationSlotChip(props: { jobId: string }) {
       className="dictation-slot mx-0.5 inline-flex h-[1.4em] items-center gap-1 rounded-sm px-0.5 align-middle text-[11px] leading-none text-primary select-none"
     >
       <span className="dictation-slot-caret inline-block h-[1.5em] w-[2px] rounded-full bg-primary" />
+      <span
+        aria-label="Transcribing"
+        className="dictation-slot-wave inline-flex h-[1em] items-center gap-[2px]"
+      >
+        {WAVE_BARS.map((bar) => (
+          <span key={bar} className="block h-full w-[2px] rounded-full bg-primary/80" />
+        ))}
+      </span>
       <MaterialDictationModeIcon mode={job.mode} className="size-3 opacity-70" />
-      <span className="dictation-slot-label opacity-70">transcribing</span>
     </span>
   );
 }
