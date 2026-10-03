@@ -29,6 +29,7 @@ import {
   sanitizeComposerContextLabel,
   replaceComposerContextReferences,
 } from "@t3tools/shared/composerContextReferences";
+import { isDictationContextKind } from "@t3tools/shared/dictationSlots";
 import { imageMimeType } from "@t3tools/shared/image";
 import { videoMimeType } from "@t3tools/shared/video";
 import { DraftComposerAttachmentSchema } from "../lib/composer-image-schema";
@@ -1362,6 +1363,16 @@ export function appendComposerDraftAttachments(
   return rejected.length;
 }
 
+/** Drops the chips of removed attachment records; a dictation slot sharing an id stays. */
+function removeAttachmentContextReferences(
+  text: string,
+  removedContextIds: ReadonlySet<string>,
+): string {
+  return replaceComposerContextReferences(text, (ref) =>
+    removedContextIds.has(ref.contextId) && !isDictationContextKind(ref.kind) ? "" : ref.source,
+  );
+}
+
 export function replaceComposerDraftAttachments(
   draftKey: string,
   attachments: ReadonlyArray<DraftComposerAttachment>,
@@ -1377,9 +1388,7 @@ export function replaceComposerDraftAttachments(
         .filter((record) => "attachmentId" in record && !retainedIds.has(record.attachmentId))
         .map((record) => record.contextId),
     );
-    const text = replaceComposerContextReferences(existing.text, (ref) =>
-      droppedContextIds.has(ref.contextId) ? "" : ref.source,
-    );
+    const text = removeAttachmentContextReferences(existing.text, droppedContextIds);
     const draft = {
       ...existing,
       text,
@@ -1402,9 +1411,7 @@ export function removeComposerDraftAttachment(draftKey: string, imageId: string)
         .filter((record) => "attachmentId" in record && record.attachmentId === imageId)
         .map((record) => record.contextId),
     );
-    const text = replaceComposerContextReferences(existing.text, (ref) =>
-      removedIds.has(ref.contextId) ? "" : ref.source,
-    );
+    const text = removeAttachmentContextReferences(existing.text, removedIds);
     const draft = {
       ...existing,
       text,

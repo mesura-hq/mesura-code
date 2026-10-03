@@ -4,6 +4,7 @@ import {
   formatComposerContextReference,
   replaceComposerContextReferences,
 } from "@t3tools/shared/composerContextReferences";
+import { isDictationContextKind } from "@t3tools/shared/dictationSlots";
 
 /**
  * Prompt-string operations on inline context references, independent of kind. Each context
@@ -77,10 +78,17 @@ export function formatInlineContextReference(reference: ComposerContextReference
   });
 }
 
+/** Links backed by a context record: every link except a pending dictation slot. */
+function collectRecordReferences(prompt: string) {
+  return collectComposerContextReferences(prompt).filter(
+    (occurrence) => !isDictationContextKind(occurrence.kind),
+  );
+}
+
 /** Payload ids referenced by the prompt, once each in first-occurrence order. */
 export function collectInlineContextIds(prompt: string): string[] {
   return Array.from(
-    new Set(collectComposerContextReferences(prompt).map((occurrence) => occurrence.contextId)),
+    new Set(collectRecordReferences(prompt).map((occurrence) => occurrence.contextId)),
   );
 }
 
@@ -137,7 +145,7 @@ export function removeInlineContextReference(
   prompt: string,
   contextId: string,
 ): { prompt: string; cursor: number } {
-  const occurrences = collectComposerContextReferences(prompt).filter(
+  const occurrences = collectRecordReferences(prompt).filter(
     (candidate) => candidate.contextId === contextId,
   );
   if (occurrences.length === 0) return { prompt, cursor: prompt.length };

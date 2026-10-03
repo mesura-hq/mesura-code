@@ -15,6 +15,7 @@ import {
   formatComposerContextReference,
   replaceComposerContextReferences,
 } from "@t3tools/shared/composerContextReferences";
+import { isDictationContextKind } from "@t3tools/shared/dictationSlots";
 import {
   collectComposerInlineTokens,
   type ComposerInlineToken,
@@ -144,7 +145,11 @@ export function composerContextEditorTokens(text: string, tokens: readonly Compo
 /** Prunes removed references, retaining the screenshot bound to a preview annotation. */
 export function referencedComposerContext(text: string, context?: OrchestrationMessageContext) {
   if (!context) return undefined;
-  const ids = new Set(collectComposerContextReferences(text).map((ref) => ref.contextId));
+  const ids = new Set(
+    collectComposerContextReferences(text)
+      .filter((ref) => !isDictationContextKind(ref.kind))
+      .map((ref) => ref.contextId),
+  );
   for (const record of context.records) {
     if (
       ids.has(record.contextId) &&
@@ -188,11 +193,14 @@ export function reidentifyComposerContext(
     records.map((record) => [record.contextId, ComposerContextId.make(createId())]),
   );
   return {
+    // A dictation slot keeps its job id, or its transcript could not find it again.
     text: replaceComposerContextReferences(text, (ref) =>
-      formatComposerContextReference({
-        ...ref,
-        contextId: ids.get(ref.contextId) ?? ref.contextId,
-      }),
+      isDictationContextKind(ref.kind)
+        ? ref.source
+        : formatComposerContextReference({
+            ...ref,
+            contextId: ids.get(ref.contextId) ?? ref.contextId,
+          }),
     ),
     context: {
       version: 1 as const,

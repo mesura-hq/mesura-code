@@ -1,5 +1,6 @@
 import {
   COMPOSER_CONTEXT_LABEL_MAX_CHARS,
+  DICTATION_CONTEXT_KIND,
   type ComposerContextId,
   type ComposerContextKind,
   type ComposerContextRecord,
@@ -259,7 +260,10 @@ export function projectComposerContextForProvider(input: {
   text: string;
   records: ReadonlyArray<ComposerContextRecord>;
 }): string {
-  const occurrences = collectComposerContextReferences(input.text);
+  // A dictation slot has no record; it stays as written instead of reading as unavailable.
+  const occurrences = collectComposerContextReferences(input.text).filter(
+    (occurrence) => occurrence.kind !== DICTATION_CONTEXT_KIND,
+  );
   if (occurrences.length === 0) return input.text;
   const recordsById = new Map<ComposerContextId, ComposerContextRecord | undefined>();
   for (const record of input.records) {
@@ -267,11 +271,13 @@ export function projectComposerContextForProvider(input: {
     recordsById.set(record.contextId, recordsById.has(record.contextId) ? undefined : record);
   }
   const body = replaceComposerContextReferences(input.text, (occurrence) =>
-    formatComposerContextProviderMarker(
-      recordsById.get(occurrence.contextId)?.kind ?? occurrence.kind,
-      occurrence.label,
-      occurrence.contextId,
-    ),
+    occurrence.kind === DICTATION_CONTEXT_KIND
+      ? occurrence.source
+      : formatComposerContextProviderMarker(
+          recordsById.get(occurrence.contextId)?.kind ?? occurrence.kind,
+          occurrence.label,
+          occurrence.contextId,
+        ),
   );
   const seen = new Set<ComposerContextId>();
   const entries: string[] = [];

@@ -44,6 +44,10 @@ const DEFINITIONS = [
     kind: "skill",
     capabilities: { details: "tooltip", expanded: "none", defaultDraftView: "compact" },
   },
+  {
+    kind: "dictation",
+    capabilities: { details: "none", expanded: "none", defaultDraftView: "compact" },
+  },
 ] as const satisfies ReadonlyArray<ContextPresentationDefinition>;
 
 function buildDefinitionRegistry(

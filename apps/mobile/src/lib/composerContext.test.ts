@@ -175,6 +175,22 @@ describe("mobile composer context", () => {
     expect(referencedComposerContext("plain text", context)).toBeUndefined();
   });
 
+  it("does not keep a record alive through a dictation marker that shares its id", () => {
+    const context: OrchestrationMessageContext = { version: 1, records: [terminal] };
+    const dictation = `[Transcribing](t3-context://v1/dictation/${terminal.contextId})`;
+    expect(referencedComposerContext(`fix ${dictation}`, context)).toBeUndefined();
+  });
+
+  it("keeps a pasted dictation marker's job id when a pasted record shares it", () => {
+    const dictation = `[Transcribing](t3-context://v1/dictation/${terminal.contextId})`;
+    const text = `${formatComposerContextReference(terminal)} ${dictation}`;
+    const imported = reidentifyComposerContext(text, [terminal], () => "copy-1");
+    expect(imported.text).toBe(
+      `${formatComposerContextReference({ ...terminal, contextId: ComposerContextId.make("copy-1") })} ${dictation}`,
+    );
+    expect(imported.context.records.map((record) => record.contextId)).toEqual(["copy-1"]);
+  });
+
   it("reidentifies pasted records and their screenshot binding without changing repeated-reference identity", () => {
     let next = 0;
     const text = `${formatComposerContextReference(annotation)} ${formatComposerContextReference(annotation)}`;

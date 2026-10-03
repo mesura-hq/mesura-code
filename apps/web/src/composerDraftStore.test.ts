@@ -915,6 +915,31 @@ describe("composerDraftStore terminal contexts", () => {
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.terminalContexts).toEqual([]);
   });
 
+  it("keeps a dictation marker in the prompt when terminal links are reconciled", () => {
+    const store = useComposerDraftStore.getState();
+    const dictation = "[Transcribing](t3-context://v1/dictation/job-1)";
+    store.setPrompt(threadRef, `Explain ${dictation}`);
+    store.addTerminalContext(threadRef, makeTerminalContext({ id: "ctx-1" }));
+    store.setTerminalContexts(threadRef, []);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.prompt).toBe(`Explain ${dictation}`);
+  });
+
+  it("keeps a dictation marker through draft persistence and hydration", () => {
+    const store = useComposerDraftStore.getState();
+    const dictation = "[Transcribing](t3-context://v1/dictation/job-1)";
+    store.setPrompt(threadRef, `Explain ${dictation} later`);
+    const merge = useComposerDraftStore.persist.getOptions().merge!;
+    const state = merge(
+      JSON.parse(
+        JSON.stringify(partializeComposerDraftStoreState(useComposerDraftStore.getState())),
+      ),
+      useComposerDraftStore.getInitialState(),
+    );
+    expect(state.draftsByThreadKey[scopedThreadKey(threadRef)]?.prompt).toBe(
+      `Explain ${dictation} later`,
+    );
+  });
+
   it("clears terminal contexts when clearing composer content", () => {
     useComposerDraftStore
       .getState()

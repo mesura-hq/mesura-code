@@ -176,6 +176,7 @@ import {
   mergeComposerDraftContentState,
   migrateLegacyNewTaskDraft,
   releaseUnusedComposerAttachmentFiles,
+  removeComposerDraftAttachment,
   removeComposerDraftsForEnvironment,
   replaceComposerDraftAttachments,
   resetComposerDraftsLoadState,
@@ -440,6 +441,35 @@ describe("mobile composer drafts", () => {
       before.context?.records[0]?.contextId,
     ]);
   });
+
+  it.each(["remove", "replace"])(
+    "keeps a dictation marker that shares an id when an attachment %s drops its chip",
+    (operation) => {
+      const key = "new-task:draft-1";
+      const file = {
+        type: "file" as const,
+        id: "marker-collision-file",
+        name: "collision.txt",
+        mimeType: "text/plain",
+        sizeBytes: 1,
+        fileUri: "file:///collision.txt",
+      };
+      appendComposerDraftAttachments(key, [file], { appendReference: true });
+      const before = getComposerDraftSnapshot(key);
+      const contextId = before.context?.records[0]?.contextId;
+      const dictation = `[Transcribing](t3-context://v1/dictation/${contextId})`;
+      setComposerDraftText(key, `${before.text} ${dictation}`);
+
+      if (operation === "remove") removeComposerDraftAttachment(key, file.id);
+      else replaceComposerDraftAttachments(key, []);
+
+      const after = getComposerDraftSnapshot(key);
+      expect(after.text).not.toContain("collision.txt");
+      expect(after.text).toContain(dictation);
+      expect(after.context?.records ?? []).toEqual([]);
+      expect(after.attachments).toEqual([]);
+    },
+  );
 
   it.each(["new-task:draft-1", "pending-task:queued-1"])(
     "finds draft-only local clipboard files in %s",
