@@ -11,6 +11,7 @@
  */
 import { assert, describe, it } from "@effect/vitest";
 import * as Clock from "effect/Clock";
+import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -320,5 +321,36 @@ describe("openAiTranscription phase 1 fence", () => {
         assert.lengthOf(requests, 1);
       }
     }),
+  );
+});
+
+describe("openAiTranscription phase 4 fence", () => {
+  it.effect(
+    "dictation phase 4: T3CODE_DICTATION_OPENAI_URL redirects the transcription request, and the real OpenAI URL is the default",
+    () =>
+      Effect.gen(function* () {
+        const stubUrl = "http://127.0.0.1:4010/v1/audio/transcriptions";
+        const overridden = yield* transcribeWith([{ status: 200, body: "ok" }]).pipe(
+          Effect.provide(
+            ConfigProvider.layer(
+              ConfigProvider.fromEnv({ env: { T3CODE_DICTATION_OPENAI_URL: stubUrl } }),
+            ),
+          ),
+        );
+        assert.lengthOf(overridden.requests, 1);
+        assert.strictEqual(overridden.requests[0]!.url, stubUrl);
+
+        const defaulted = yield* transcribeWith([{ status: 200, body: "ok" }]).pipe(
+          Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} }))),
+        );
+        assert.strictEqual(
+          defaulted.requests[0]!.url,
+          "https://api.openai.com/v1/audio/transcriptions",
+        );
+        assert.strictEqual(
+          OPENAI_TRANSCRIPTION_URL,
+          "https://api.openai.com/v1/audio/transcriptions",
+        );
+      }),
   );
 });

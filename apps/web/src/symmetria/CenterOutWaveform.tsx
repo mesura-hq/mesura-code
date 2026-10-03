@@ -10,7 +10,11 @@ const INPUT_GAIN = 15;
 const ATTACK_TIME_MS = 42;
 const RELEASE_TIME_MS = 150;
 const HISTORY_SAMPLE_INTERVAL_MS = 54;
-const FRAME_INTERVAL_MS = 1000 / 60;
+// Stepped, not per-frame: AGENTS.md forbids continuously repainting animations, and the
+// microphone level only changes ten times a second. Twelve redraws a second matches the
+// dictation marker's wave.
+const FRAME_INTERVAL_MS = 1000 / 12;
+const SETTLED_EPSILON = 0.002;
 const FRAME_EPSILON_MS = 0.01;
 const BAR_WIDTH = 2;
 const BAR_GAP = 2;
@@ -71,6 +75,23 @@ export function advanceWaveformHistory(input: {
 
 export function shouldDrawWaveformFrame(timestamp: number, lastDrawAt: number): boolean {
   return timestamp - lastDrawAt + FRAME_EPSILON_MS >= FRAME_INTERVAL_MS;
+}
+
+/**
+ * A recording waveform whose level has settled and whose history is flat at that level looks
+ * the same on the next frame, so drawing it again only repaints the GPU for nothing.
+ */
+export function isRecordingWaveformSettled(input: {
+  readonly history: ReadonlyArray<number>;
+  readonly currentAmplitude: number;
+  readonly targetAmplitude: number;
+}): boolean {
+  const near = (value: number) => Math.abs(value - input.targetAmplitude) < SETTLED_EPSILON;
+  return (
+    near(input.currentAmplitude) &&
+    input.history.length >= HALF_BAR_COUNT &&
+    input.history.every(near)
+  );
 }
 
 export function shouldDrawStaticAudioUpdate(input: {
@@ -145,7 +166,8 @@ export const CenterOutWaveform = memo(function CenterOutWaveform(props: {
     const draw = (timestamp: number) => {
       if (width <= 0 || height <= 0) return;
 
-      const deltaMs = Math.min(50, Math.max(0, timestamp - lastFrameAt));
+      // Capped at two steps, so a frame after a stall does not jump the smoothing.
+      const deltaMs = Math.min(FRAME_INTERVAL_MS * 2, Math.max(0, timestamp - lastFrameAt));
       lastFrameAt = timestamp;
       const target = props.phase === "recording" ? targetAmplitudeRef.current : 0;
       const timeConstant = target > currentAmplitudeRef.current ? ATTACK_TIME_MS : RELEASE_TIME_MS;
@@ -205,7 +227,18 @@ export const CenterOutWaveform = memo(function CenterOutWaveform(props: {
     };
 
     const animate = (timestamp: number) => {
-      if (shouldDrawWaveformFrame(timestamp, lastDrawAt)) {
+      const settled =
+        props.phase === "recording" &&
+        isRecordingWaveformSettled({
+          history: historyRef.current,
+          currentAmplitude: currentAmplitudeRef.current,
+          targetAmplitude: targetAmplitudeRef.current,
+        });
+      if (settled) {
+        // Keep the clocks moving so the first frame after a level change starts from now.
+        lastFrameAt = timestamp;
+        lastSampleAt = timestamp - HISTORY_SAMPLE_INTERVAL_MS;
+      } else if (shouldDrawWaveformFrame(timestamp, lastDrawAt)) {
         lastDrawAt = timestamp;
         draw(timestamp);
       }

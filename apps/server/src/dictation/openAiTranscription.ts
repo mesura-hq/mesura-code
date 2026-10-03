@@ -1,9 +1,13 @@
+import * as Config from "effect/Config";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Schedule from "effect/Schedule";
 import { HttpClient, HttpClientError, HttpClientRequest } from "effect/unstable/http";
 
 export const OPENAI_TRANSCRIPTION_URL = "https://api.openai.com/v1/audio/transcriptions";
+
+/** Points transcription at a local stub or a proxy; there is no UI for it. */
+const OPENAI_TRANSCRIPTION_URL_ENV = "T3CODE_DICTATION_OPENAI_URL";
 
 /** Past this length `gpt-4o-transcribe` silently truncates, so `whisper-1` takes over. */
 export const LONG_RECORDING_THRESHOLD_MS = 420_000;
@@ -86,6 +90,10 @@ export const makeOpenAiTranscription: Effect.Effect<
   HttpClient.HttpClient
 > = Effect.gen(function* () {
   const client = yield* HttpClient.HttpClient;
+  const transcriptionUrl = yield* Config.string(OPENAI_TRANSCRIPTION_URL_ENV).pipe(
+    Config.withDefault(OPENAI_TRANSCRIPTION_URL),
+    Effect.orElseSucceed(() => OPENAI_TRANSCRIPTION_URL),
+  );
 
   const transcribe = (request: OpenAiTranscriptionRequest) => {
     const useWhisper = request.durationMs > LONG_RECORDING_THRESHOLD_MS;
@@ -95,7 +103,7 @@ export const makeOpenAiTranscription: Effect.Effect<
     form.append("response_format", "text");
     form.append("prompt", transcriptionPrompt(useWhisper, request.vocabularyHints));
     form.append("temperature", "0");
-    const httpRequest = HttpClientRequest.post(OPENAI_TRANSCRIPTION_URL).pipe(
+    const httpRequest = HttpClientRequest.post(transcriptionUrl).pipe(
       HttpClientRequest.bearerToken(request.apiKey),
       HttpClientRequest.bodyFormData(form),
     );

@@ -305,7 +305,9 @@ import { formatOutgoingComposerPrompt } from "./chat/composerSubmission";
 import { dictationCoordinator } from "../symmetria/dictationCoordinator";
 import { captureDictationTarget, dictationTargetsEqual } from "../symmetria/dictationTarget";
 import { buildDirectedTurnStartInput } from "../symmetria/directedComposerSubmission";
-import { DictationMicrophoneButton, DictationStrip } from "../symmetria/DictationStrip";
+import { DictationStrip } from "../symmetria/DictationStrip";
+import { DictationRecordingStrip, DictationStartButton } from "../dictation/DictationControls";
+import { useDictationComposer } from "../dictation/useDictationSession";
 import {
   formatTerminalContextLabel,
   type TerminalContextDraft,
@@ -541,7 +543,7 @@ const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 // Built once. The composer forwards this into a memoized footer group, and an
 // element created inline here would take a new identity on every ChatView
 // render, re-rendering that group on every keystroke and every streaming delta.
-const DICTATION_START_CONTROL = <DictationMicrophoneButton />;
+const DICTATION_START_CONTROL = <DictationStartButton />;
 function useDraftHeroLayoutTransition(isDraftHeroState: boolean) {
   const transitionGroupRef = useRef<HTMLDivElement | null>(null);
   const composerAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -1660,6 +1662,11 @@ export default function ChatView(props: ChatViewProps) {
   const composerTerminalContextsRef = useRef<TerminalContextDraft[]>([]);
   const localComposerRef = useRef<ChatComposerHandle | null>(null);
   const composerRef = useComposerHandleContext() ?? localComposerRef;
+  useDictationComposer({
+    environmentId: routeThreadRef.environmentId,
+    composerDraftTarget,
+    composerRef,
+  });
   const branchToolbarRef = useRef<BranchToolbarHandle>(null);
   const pasteAsTextShortcutUntilRef = useRef(0);
   const [restingComposerControlsHost, setRestingComposerControlsHost] =
@@ -8611,12 +8618,17 @@ export default function ChatView(props: ChatViewProps) {
       : null;
   // Keep the strip stable for ChatComposer while routing active question dictation to its field.
   const dictationStrip = useMemo(
-    () =>
-      registeredDictationTarget ? (
-        <DictationStrip
-          displayedTarget={activeQuestionDictationTarget ?? registeredDictationTarget}
-        />
-      ) : null,
+    () => (
+      <>
+        {registeredDictationTarget ? (
+          <DictationStrip
+            displayedTarget={activeQuestionDictationTarget ?? registeredDictationTarget}
+          />
+        ) : null}
+        {/* Mesura's own recording; the Shell strip above goes in phase 8. */}
+        <DictationRecordingStrip />
+      </>
+    ),
     [activeQuestionDictationTarget, registeredDictationTarget],
   );
 

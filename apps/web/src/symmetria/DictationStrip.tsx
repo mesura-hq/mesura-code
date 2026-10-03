@@ -209,6 +209,8 @@ const StripButton = memo(function StripButton(props: {
             disabled={props.disabled}
             data-dictation-mode-control={props.modeControl ? "true" : undefined}
             data-dictation-control="true"
+            // Keeps the composer's focus and caret: Stop drops the marker where the caret is.
+            onMouseDown={(event) => event.preventDefault()}
             className={cn(
               "flex size-7 cursor-pointer items-center justify-center rounded-full border border-border/55 bg-background/35 text-secondary-label shadow-xs backdrop-blur-md transition-[color,background-color,border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:scale-[1.06] hover:border-foreground/20 hover:bg-foreground/10 hover:text-foreground hover:shadow-sm focus-visible:border-foreground/25 focus-visible:ring-2 focus-visible:ring-foreground/20 focus-visible:outline-none active:translate-y-0 active:scale-95",
               props.destructive &&

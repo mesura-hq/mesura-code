@@ -52,38 +52,96 @@ function isWordBoundary(previous: string | undefined, next: string | undefined):
   );
 }
 
-/** Deletes a copied slot and one neighbouring space, keeping the words around it apart. */
-function removeDictationSlotAt(text: string, slot: DictationSlotOccurrence): string {
-  let { start, end } = slot;
-  if (text[end] === " ") end += 1;
-  else if (text[start - 1] === " ") start -= 1;
-  const separator = isWordBoundary(text[start - 1], text[end]) ? "" : " ";
-  return `${text.slice(0, start)}${separator}${text.slice(end)}`;
+/**
+ * One replacement in the coordinates of the text it was computed from. A fill or a removal is
+ * a list of these that never overlap, so a caret can be carried through each one.
+ */
+export interface DictationSlotEdit {
+  start: number;
+  end: number;
+  replacement: string;
+}
+
+/** Applies non-overlapping edits given in the original text's coordinates. */
+export function applyDictationSlotEdits(
+  text: string,
+  edits: ReadonlyArray<DictationSlotEdit>,
+): string {
+  return [...edits]
+    .sort((left, right) => right.start - left.start)
+    .reduce(
+      (current, edit) =>
+        `${current.slice(0, edit.start)}${edit.replacement}${current.slice(edit.end)}`,
+      text,
+    );
 }
 
 /**
- * Replaces the slot for `jobId` with its transcript, adding a space only where a neighbouring
- * word would otherwise join it. A copied slot for the same job is removed, so the filled job
- * no longer counts as pending. `missing` means the user deleted the slot.
+ * Removes slots right to left, deleting one neighbouring space with each and keeping the words
+ * around it apart. Each removal sits left of the ones already made, so its range is also a range
+ * in the original text.
  */
+function slotRemovalEdits(
+  text: string,
+  slots: ReadonlyArray<DictationSlotOccurrence>,
+): { text: string; edits: DictationSlotEdit[] } {
+  const edits: DictationSlotEdit[] = [];
+  let current = text;
+  for (let index = slots.length - 1; index >= 0; index -= 1) {
+    let { start, end } = slots[index]!;
+    if (current[end] === " ") end += 1;
+    else if (current[start - 1] === " ") start -= 1;
+    const replacement = isWordBoundary(current[start - 1], current[end]) ? "" : " ";
+    edits.push({ start, end, replacement });
+    current = `${current.slice(0, start)}${replacement}${current.slice(end)}`;
+  }
+  return { text: current, edits };
+}
+
+/**
+ * The edits that replace the slot for `jobId` with its transcript, adding a space only where a
+ * neighbouring word would otherwise join it. A copied slot for the same job is removed, so the
+ * filled job no longer counts as pending. `null` means the user deleted the slot.
+ */
+export function fillDictationSlotEdits(
+  text: string,
+  jobId: string,
+  transcript: string,
+): DictationSlotEdit[] | null {
+  const [slot, ...copies] = findDictationSlots(text).filter(
+    (candidate) => candidate.jobId === jobId,
+  );
+  if (!slot) return null;
+  // Copies sit after the first slot, so removing them leaves its offsets valid.
+  const withoutCopies = slotRemovalEdits(text, copies);
+  const previous = withoutCopies.text[slot.start - 1];
+  const next = withoutCopies.text[slot.end];
+  const leading = previous !== undefined && !WHITESPACE.test(previous) ? " " : "";
+  const trailing = next !== undefined && !NO_SPACE_BEFORE.test(next) ? " " : "";
+  return [
+    { start: slot.start, end: slot.end, replacement: `${leading}${transcript}${trailing}` },
+    ...withoutCopies.edits,
+  ];
+}
+
+/** Replaces the slot for `jobId` with its transcript. `missing` means the user deleted it. */
 export function fillDictationSlot(
   text: string,
   jobId: string,
   transcript: string,
 ): { text: string } | { missing: true } {
-  const [slot, ...copies] = findDictationSlots(text).filter(
-    (candidate) => candidate.jobId === jobId,
-  );
-  if (!slot) return { missing: true };
-  // Copies sit after the first slot; removing them from the end keeps every offset valid.
-  const withoutCopies = copies.reduceRight(removeDictationSlotAt, text);
-  const previous = withoutCopies[slot.start - 1];
-  const next = withoutCopies[slot.end];
-  const leading = previous !== undefined && !WHITESPACE.test(previous) ? " " : "";
-  const trailing = next !== undefined && !NO_SPACE_BEFORE.test(next) ? " " : "";
-  return {
-    text: `${withoutCopies.slice(0, slot.start)}${leading}${transcript}${trailing}${withoutCopies.slice(slot.end)}`,
-  };
+  const edits = fillDictationSlotEdits(text, jobId, transcript);
+  return edits === null ? { missing: true } : { text: applyDictationSlotEdits(text, edits) };
+}
+
+/** Deletes every slot for `jobId`, with one neighbouring space. `missing` when none is left. */
+export function removeDictationSlot(
+  text: string,
+  jobId: string,
+): { text: string } | { missing: true } {
+  const slots = findDictationSlots(text).filter((candidate) => candidate.jobId === jobId);
+  if (slots.length === 0) return { missing: true };
+  return { text: slotRemovalEdits(text, slots).text };
 }
 
 export function countPendingDictationSlots(text: string): number {

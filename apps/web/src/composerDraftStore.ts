@@ -77,6 +77,8 @@ import { replaceComposerContextReferences } from "@t3tools/shared/composerContex
 import { UnifiedSettings } from "@t3tools/contracts/settings";
 import { ReviewCommentContextSchema, type ReviewCommentContext } from "./reviewCommentContext";
 import { appendComposerTextAtEnd } from "./symmetria/dictationTarget";
+import { fillDictationSlot, removeDictationSlot } from "@t3tools/shared/dictationSlots";
+import { appendDictationSlot } from "./dictation/dictationSlotEdits";
 const isRuntimeMode = Schema.is(RuntimeMode);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
 const isReviewCommentContext = Schema.is(ReviewCommentContextSchema);
@@ -4483,6 +4485,120 @@ export async function appendPersistedDictation(
   }
   const { ok: _readbackSucceeded, ...verification } = readback;
   return { ok: true, targetKey, ...applied, ...verification };
+}
+
+/**
+ * A mounted composer fills its own dictation markers, so the caret stays where the user is
+ * typing; a draft with no composer open is filled in the store. Runtime-only: never persisted.
+ */
+export type DictationSlotFillHandler = (jobId: string, transcript: string) => "filled" | "missing";
+const dictationSlotFillHandlers = new Map<string, DictationSlotFillHandler>();
+
+export function registerDictationSlotFillHandler(
+  target: ComposerThreadTarget,
+  handler: DictationSlotFillHandler,
+): () => void {
+  const threadKey = resolveComposerDraftKey(useComposerDraftStore.getState(), target);
+  if (!threadKey) return () => undefined;
+  dictationSlotFillHandlers.set(threadKey, handler);
+  return () => {
+    if (dictationSlotFillHandlers.get(threadKey) === handler) {
+      dictationSlotFillHandlers.delete(threadKey);
+    }
+  };
+}
+
+/** Writes the drafts through now; `false` when the storage refused them. */
+export function persistComposerDrafts(): boolean {
+  try {
+    composerDebouncedStorage.flush();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Rewrites one draft's prompt in a single store update. `edit` returns `null` to leave the
+ * draft alone. Returns whether the draft changed; callers write it through themselves.
+ *
+ * The store is touched only when the prompt changes: every `set` makes the persist middleware
+ * save this tab's whole draft store, which would overwrite a draft another tab just saved.
+ */
+function editComposerDraftPrompt(
+  target: ComposerThreadTarget,
+  edit: (prompt: string) => string | null,
+): boolean {
+  const threadKey = resolveComposerDraftKey(useComposerDraftStore.getState(), target);
+  if (!threadKey) return false;
+  const current =
+    useComposerDraftStore.getState().draftsByThreadKey[threadKey] ?? createEmptyThreadDraft();
+  const prompt = edit(current.prompt);
+  if (prompt === null || prompt === current.prompt) return false;
+  useComposerDraftStore.setState((state) => ({
+    draftsByThreadKey: {
+      ...state.draftsByThreadKey,
+      [threadKey]: { ...(state.draftsByThreadKey[threadKey] ?? current), prompt },
+    },
+  }));
+  return true;
+}
+
+/**
+ * Replaces the dictation marker for `jobId` with its transcript. `missing` when the marker was
+ * deleted; `unsaved` when the draft holds the transcript but the write to storage failed, so the
+ * caller must not treat the delivery as done.
+ */
+export function fillDictationSlotInDraft(
+  target: ComposerThreadTarget,
+  jobId: string,
+  transcript: string,
+): "filled" | "unsaved" | "missing" {
+  const threadKey = resolveComposerDraftKey(useComposerDraftStore.getState(), target);
+  const handler = threadKey ? dictationSlotFillHandlers.get(threadKey) : undefined;
+  const filled = handler
+    ? handler(jobId, transcript) === "filled"
+    : editComposerDraftPrompt(target, (prompt) => {
+        const result = fillDictationSlot(prompt, jobId, transcript);
+        return "missing" in result ? null : result.text;
+      });
+  if (!filled) return "missing";
+  return persistComposerDrafts() ? "filled" : "unsaved";
+}
+
+/**
+ * The prompt storage holds for a draft, as the last tab to write it left it; `""` when storage
+ * holds no such draft. `null` when storage cannot be read or decoded, so nothing can be judged.
+ */
+export async function readStoredDraftPrompt(target: ComposerThreadTarget): Promise<string | null> {
+  const threadKey = resolveComposerDraftKey(useComposerDraftStore.getState(), target);
+  if (!threadKey) return null;
+  try {
+    const raw = await composerDebouncedStorage.getItem(COMPOSER_DRAFT_STORAGE_KEY);
+    if (!raw) return "";
+    const persisted = decodePersistedComposerDraftStoreStorage(raw);
+    const normalized = normalizeCurrentPersistedComposerDraftStoreState(persisted.state);
+    return normalized.draftsByThreadKey[threadKey]?.prompt ?? "";
+  } catch {
+    return null;
+  }
+}
+
+/** Puts a dictation marker at the end of a draft that has no composer to take it at the caret. */
+export function appendDictationSlotToDraft(target: ComposerThreadTarget, slot: string): boolean {
+  const changed = editComposerDraftPrompt(target, (prompt) => appendDictationSlot(prompt, slot));
+  if (changed) persistComposerDrafts();
+  return changed;
+}
+
+/** Deletes the dictation marker for `jobId`, as Discard does. */
+export function removeDictationSlotFromDraft(target: ComposerThreadTarget, jobId: string): boolean {
+  const changed = editComposerDraftPrompt(target, (prompt) => {
+    const result = removeDictationSlot(prompt, jobId);
+    return "missing" in result ? null : result.text;
+  });
+  if (changed) persistComposerDrafts();
+  return changed;
 }
 
 export function clearComposerDraftsEnvironment(environmentId: EnvironmentId): void {

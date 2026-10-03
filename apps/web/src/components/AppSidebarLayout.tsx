@@ -31,6 +31,7 @@ import {
 import { useProjects, useThreadShells } from "../state/entities";
 import { useThreadFeed } from "../symmetria/useThreadFeed";
 import { useDictationBridge } from "../symmetria/useDictationBridge";
+import { DictationJobDelivery } from "../dictation/DictationControls";
 import {
   resolveInitialThreadSidebarWidth,
   resolveThreadSidebarMaximumWidth,
@@ -246,6 +247,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         <ProjectProjectionRetention />
         <SymmetriaThreadFeedRetention />
         <SymmetriaDictationRetention />
+        <DictationJobDelivery />
         <Sidebar
           side="left"
           collapsible="offcanvas"

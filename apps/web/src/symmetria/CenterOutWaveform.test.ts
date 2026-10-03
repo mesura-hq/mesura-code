@@ -8,6 +8,7 @@ import {
   mirroredBarXPositions,
   recordingAmplitudeAtDistance,
   shouldDrawStaticAudioUpdate,
+  isRecordingWaveformSettled,
   shouldDrawWaveformFrame,
   waveformSmoothingAlpha,
 } from "./CenterOutWaveform";
@@ -48,7 +49,7 @@ it("keeps history sampling independent of display refresh rate", () => {
   assert.deepEqual(run(1000 / 60), run(1000 / 120));
 });
 
-it("caps canvas drawing at sixty frames per second", () => {
+it("caps canvas drawing at twelve stepped frames per second", () => {
   let lastDrawAt = 0;
   const drawTimes = [lastDrawAt];
   for (let timestamp = 1000 / 240; timestamp <= 1000; timestamp += 1000 / 240) {
@@ -57,11 +58,31 @@ it("caps canvas drawing at sixty frames per second", () => {
     drawTimes.push(timestamp);
   }
 
-  assert.isAtMost(drawTimes.length, 61);
-  assert.isAbove(drawTimes.length, 55);
+  assert.isAtMost(drawTimes.length, 13);
+  assert.isAbove(drawTimes.length, 10);
   for (let index = 1; index < drawTimes.length; index += 1) {
-    assert.isAtLeast(drawTimes[index]! - drawTimes[index - 1]!, 1000 / 60 - 0.01);
+    assert.isAtLeast(drawTimes[index]! - drawTimes[index - 1]!, 1000 / 12 - 0.01);
   }
+});
+
+it("stops redrawing a recording waveform whose level has settled", () => {
+  const flat = Array.from({ length: 18 }, () => 0.4);
+  assert.isTrue(
+    isRecordingWaveformSettled({ history: flat, currentAmplitude: 0.4, targetAmplitude: 0.4 }),
+  );
+  assert.isFalse(
+    isRecordingWaveformSettled({ history: flat, currentAmplitude: 0.3, targetAmplitude: 0.4 }),
+  );
+  assert.isFalse(
+    isRecordingWaveformSettled({
+      history: [0.6, ...flat.slice(1)],
+      currentAmplitude: 0.4,
+      targetAmplitude: 0.4,
+    }),
+  );
+  assert.isFalse(
+    isRecordingWaveformSettled({ history: [0.4], currentAmplitude: 0.4, targetAmplitude: 0.4 }),
+  );
 });
 
 it("redraws audio updates without recurring motion when reduced motion is enabled", () => {
