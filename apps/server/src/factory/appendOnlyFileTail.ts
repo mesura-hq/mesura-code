@@ -5,7 +5,8 @@
  * megabytes is read once and then only by its new bytes.
  *
  * The file may not exist yet. A partial last line waits for its newline, and a
- * file that shrank is read again from the start and reported as truncated.
+ * file that shrank, or another file now at its path, is read again from the
+ * start and reported as truncated.
  *
  * @module appendOnlyFileTail
  */
@@ -23,6 +24,8 @@ import type * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
+import { isHostWindows } from "@t3tools/shared/hostProcess";
+
 /** The most bytes one read takes; a caller loops while `more` is set. */
 export const TAIL_READ_MAX_BYTES = 1024 * 1024;
 
@@ -37,6 +40,15 @@ const WATCH_DEBOUNCE = Duration.millis(100);
 const RECHECK_INTERVAL = Duration.seconds(3);
 
 const NEWLINE = 0x0a;
+
+/**
+ * The most of a file's first line kept to tell it from a file that replaced it.
+ * An inode number alone does not: ext4 gives a new file the number its deleted
+ * predecessor freed, often at once. The first line, because an append-only
+ * file never changes it once complete, while later lines may be rewritten in
+ * place without making it another file.
+ */
+const IDENTITY_PREFIX_BYTES = 1024;
 
 export class AppendOnlyFileTailError extends Schema.TaggedError<AppendOnlyFileTailError>()(
   "AppendOnlyFileTailError",
@@ -68,6 +80,14 @@ export interface AppendOnlyFileTail {
   readonly isMissing: () => boolean;
 }
 
+function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.byteLength !== right.byteLength) return false;
+  for (let index = 0; index < left.byteLength; index += 1) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
+}
+
 function concatBytes(left: Uint8Array, right: Uint8Array): Uint8Array {
   if (left.byteLength === 0) return right;
   const joined = new Uint8Array(left.byteLength + right.byteLength);
@@ -88,10 +108,21 @@ export function makeAppendOnlyFileTail(filePath: string): AppendOnlyFileTail {
   // two reads decodes whole.
   let pending: Uint8Array = new Uint8Array(0);
   let missing = true;
-  // The file's identity: a file replaced at the same path is read from its start.
+  // The file's identity, its inode number and first line: a file replaced at
+  // the same path is read from its start.
   let inode: number | null = null;
+  let prefix: Uint8Array = new Uint8Array(0);
   const decoder = new TextDecoder();
   const permit = Semaphore.makeUnsafe(1);
+
+  /** Whether the open file begins with the bytes the followed file began with. */
+  const startsWithPrefix = async (handle: NodeFSP.FileHandle, size: number) => {
+    // A file shorter than the prefix is shorter than the offset, and read again anyway.
+    if (prefix.byteLength === 0 || size < prefix.byteLength) return true;
+    const start = new Uint8Array(prefix.byteLength);
+    const { bytesRead } = await handle.read(start, 0, start.byteLength, 0);
+    return bytesEqual(start.subarray(0, bytesRead), prefix);
+  };
 
   const readOnce = async (): Promise<TailRead> => {
     let handle: NodeFSP.FileHandle;
@@ -106,19 +137,28 @@ export function makeAppendOnlyFileTail(filePath: string): AppendOnlyFileTail {
     try {
       const { size, ino } = await handle.stat();
       let truncated = false;
-      const replaced = inode !== null && ino !== inode;
+      const replaced = inode !== null && (ino !== inode || !(await startsWithPrefix(handle, size)));
       inode = ino;
       if (replaced || size < offset) {
         offset = 0;
         pending = new Uint8Array(0);
+        prefix = new Uint8Array(0);
         truncated = true;
       }
       const length = Math.min(size - offset, TAIL_READ_MAX_BYTES);
       if (length <= 0) return { lines: [], truncated, missing: false, more: false };
       const buffer = new Uint8Array(length);
       const { bytesRead } = await handle.read(buffer, 0, length, offset);
+      const read = buffer.subarray(0, bytesRead);
+      const prefixComplete =
+        prefix.byteLength >= IDENTITY_PREFIX_BYTES || prefix.at(-1) === NEWLINE;
+      if (!prefixComplete) {
+        const newline = read.indexOf(NEWLINE);
+        const firstLine = newline === -1 ? read : read.subarray(0, newline + 1);
+        prefix = concatBytes(prefix, firstLine.slice(0, IDENTITY_PREFIX_BYTES - prefix.byteLength));
+      }
       offset += bytesRead;
-      const bytes = concatBytes(pending, buffer.subarray(0, bytesRead));
+      const bytes = concatBytes(pending, read);
       const lines: Array<string> = [];
       let start = 0;
       for (let index = 0; index < bytes.byteLength; index += 1) {
@@ -157,7 +197,9 @@ export function makeAppendOnlyFileTail(filePath: string): AppendOnlyFileTail {
  *
  * A watch on a deleted directory goes inert without an error, so every recheck
  * also compares the directory's identity with the one watched, and watches it
- * again, and signals, when the directory is gone, new, or its watch died.
+ * again, and signals, when the directory is gone, new, or its watch died. The
+ * watch holds the directory open, because ext4 gives a directory created
+ * again the inode number of the one deleted unless something still holds it.
  */
 export const watchAppendOnlyFile = Effect.fn("watchAppendOnlyFile")(function* (
   tail: AppendOnlyFileTail,
@@ -168,6 +210,11 @@ export const watchAppendOnlyFile = Effect.fn("watchAppendOnlyFile")(function* (
   const triggers = yield* Queue.unbounded<void, Cause.Done>();
   let watcher: NodeFS.FSWatcher | null = null;
   let watchedInode: number | null = null;
+  // Keeps the watched directory's inode number from passing to its successor.
+  // Not on Windows, where an open directory can hold up its deletion and NTFS
+  // does not reuse file IDs promptly.
+  const holdsDirectory = !(yield* isHostWindows);
+  let heldDirectory: number | null = null;
 
   const directoryInode = () => {
     try {
@@ -177,11 +224,28 @@ export const watchAppendOnlyFile = Effect.fn("watchAppendOnlyFile")(function* (
     }
   };
 
-  /** Replaces the watch with one on the directory now at the path; null when there is none. */
-  const watchDirectory = () => {
+  const closeWatch = () => {
     watcher?.close();
     watcher = null;
-    watchedInode = directoryInode();
+    if (heldDirectory !== null) NodeFS.closeSync(heldDirectory);
+    heldDirectory = null;
+  };
+
+  /** Opens the directory now at the path and returns its inode number; null when there is none. */
+  const holdDirectory = () => {
+    if (!holdsDirectory) return directoryInode();
+    try {
+      heldDirectory = NodeFS.openSync(directory, "r");
+    } catch {
+      return null;
+    }
+    return NodeFS.fstatSync(heldDirectory).ino;
+  };
+
+  /** Replaces the watch with one on the directory now at the path; null when there is none. */
+  const watchDirectory = () => {
+    closeWatch();
+    watchedInode = holdDirectory();
     if (watchedInode === null) return;
     try {
       const next = NodeFS.watch(directory, { recursive: false }, (_event, name) => {
@@ -206,9 +270,7 @@ export const watchAppendOnlyFile = Effect.fn("watchAppendOnlyFile")(function* (
     return tail.isMissing();
   });
 
-  yield* Effect.acquireRelease(Effect.sync(watchDirectory), () =>
-    Effect.sync(() => watcher?.close()),
-  );
+  yield* Effect.acquireRelease(Effect.sync(watchDirectory), () => Effect.sync(closeWatch));
 
   const rechecks = Stream.fromSchedule(
     Schedule.spaced(options.recheckInterval ?? RECHECK_INTERVAL),

@@ -34,6 +34,9 @@ import * as T3ProjectFileLoader from "./T3ProjectFileLoader.ts";
 const FAVICON_CACHE_CAPACITY = 512;
 const FAVICON_POSITIVE_CACHE_TTL = Duration.minutes(10);
 const FAVICON_NEGATIVE_CACHE_TTL = Duration.minutes(1);
+// Wider than any timestamp granularity a .mesura.json can sit under: a timer
+// tick on kernels before 6.13, one second on small-inode ext4, two on FAT.
+const MESURA_CONFIG_RACY_WINDOW_MS = 3_000;
 
 function faviconCacheKey(cwd: string, faviconPath?: string): string {
   return `${faviconPath ?? ""}\0${cwd}`;
@@ -317,12 +320,25 @@ export const make = Effect.gen(function* () {
       // Date.getTime() collapsed rapid equal-length saves into one revision.
       // Preserve the filesystem's precision and detect timestamp-preserving
       // writes through ctime, plus atomic editor replacements through inode.
-      return yield* Effect.tryPromise(() => NodeFSP.stat(configPath, { bigint: true })).pipe(
+      const info = yield* Effect.tryPromise(() => NodeFSP.stat(configPath, { bigint: true })).pipe(
         Effect.match({
-          onSuccess: (info) =>
-            `${info.mode}:${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`,
+          onSuccess: (stats) => stats,
           onFailure: (error) =>
             Predicate.isObject(error.cause) && error.cause.code === "ENOENT" ? "missing" : null,
+        }),
+      );
+      if (info === null || info === "missing") return info;
+      const metadata = `${info.mode}:${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`;
+      // A save in the same timestamp tick as the last lookup can leave all of
+      // that unchanged. Like git's racily clean index entries, a file modified
+      // that recently is compared by content too.
+      const modifiedMs = Number(info.mtimeNs / 1_000_000n);
+      // @effect-diagnostics-next-line globalDateInEffect:off - compared with a kernel timestamp, so it must be the wall clock even under a TestClock.
+      if (Date.now() - modifiedMs > MESURA_CONFIG_RACY_WINDOW_MS) return metadata;
+      return yield* fileSystem.readFileString(configPath).pipe(
+        Effect.match({
+          onSuccess: (content) => `${metadata}:${content}`,
+          onFailure: () => null,
         }),
       );
     },

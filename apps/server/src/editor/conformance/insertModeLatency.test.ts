@@ -10,6 +10,7 @@ import * as Layer from "effect/Layer";
 
 import { NodeNvimAdapter } from "../NodeNvimAdapter.ts";
 import { NvimBridge } from "../NvimBridge.ts";
+import { nvimAvailable, reportMissingNvim } from "./nvimOnPath.ts";
 
 /**
  * The insert-mode bench, and the number the design decision rests on.
@@ -40,15 +41,6 @@ const configDirectory = (() => {
     return NodeFS.statSync(expanded).isDirectory() ? expanded : null;
   } catch {
     return null;
-  }
-})();
-
-const nvimAvailable = (() => {
-  try {
-    NodeChildProcess.execFileSync("nvim", ["--version"], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
   }
 })();
 
@@ -206,7 +198,9 @@ const summarise = (name: string, samples: ReadonlyArray<Sample>) => {
   };
 };
 
-if (!enabled) {
+if (configDirectory !== null && !nvimAvailable) reportMissingNvim("insert-mode bench");
+
+if (configDirectory === null) {
   it("skips the insert-mode bench", () => {
     // Said out loud rather than silently absent: a bench that vanishes looks
     // exactly like a bench that ran.

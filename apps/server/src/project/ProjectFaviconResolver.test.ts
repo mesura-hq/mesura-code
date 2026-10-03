@@ -232,6 +232,9 @@ it.layer(TestLayer)("ProjectFaviconResolverLive", (it) => {
         const configPath = path.join(cwd, ".mesura.json");
         yield* writeTextFile(cwd, "brand/icon.svg", "<svg/>");
         yield* writeTextFile(cwd, ".mesura.json", '{ "version": 1, "iconPath": "brand/icon.svg" }');
+        // A configuration saved moments ago is compared by content, because a
+        // second save in the same timestamp tick would leave its metadata alone.
+        yield* fileSystem.utimes(configPath, 1000, 1000);
         let configReads = 0;
         const resolver = yield* makeResolverWithFileSystem(
           FileSystem.FileSystem.of({
