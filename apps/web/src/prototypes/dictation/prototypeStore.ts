@@ -4,7 +4,10 @@
  * The drafts themselves live in one Lexical editor per thread
  * (`draftEditors.ts`); this store owns everything around them.
  */
+import type { SymmetriaDictationMode } from "@symmetria/broker-contract";
 import { create } from "zustand";
+
+import { nextDictationMode } from "~/symmetria/dictationPresentation";
 
 import {
   countDictationSlots,
@@ -15,22 +18,28 @@ import {
   removeDictationSlot,
 } from "./draftEditors";
 
-/** How a finished recording is delivered. Alt+I, Alt+Enter and Alt+S pick one. */
-export type DeliveryMode = "inject" | "submit" | "save";
+/**
+ * How a transcript is delivered, with the Shell protocol's names. As in Shell,
+ * Alt+S, Alt+I and Alt+Enter only select the mode; stopping is separate, and
+ * the mode stays changeable while the transcript is on its way.
+ */
+export type DeliveryMode = SymmetriaDictationMode;
 
-export type JobStatus = "recording" | "transcribing" | "failed";
+export type JobStatus = "transcribing" | "failed";
 
 export interface DictationJob {
   readonly id: string;
   readonly threadId: string;
   readonly status: JobStatus;
-  readonly mode: DeliveryMode | null;
+  readonly mode: DeliveryMode;
   readonly recordedMs: number;
 }
 
+/** A recording has no target: the marker drops at the caret when it stops. */
 export interface RecordingState {
-  readonly jobId: string;
-  readonly threadId: string;
+  readonly sessionId: string;
+  readonly startedAt: string;
+  readonly mode: DeliveryMode;
   /** Recorded time banked before the current run of the clock. */
   readonly bankedMs: number;
   /** Start of the current run, or null while paused. */
@@ -87,8 +96,10 @@ interface PrototypeState {
   readonly flash: DeliveryFlash | null;
   readonly scene: Scene;
   readonly speed: TranscriptionSpeed;
-  readonly stopMode: Exclude<DeliveryMode, "save">;
+  readonly defaultMode: DeliveryMode;
   readonly failNext: boolean;
+  /** The job the mode keys reach once the recording has stopped. */
+  readonly lastJobId: string | null;
 }
 
 const SEED_THREADS: ReadonlyArray<PrototypeThread> = [
@@ -173,8 +184,9 @@ export const usePrototypeStore = create<PrototypeState>(() => ({
   flash: null,
   scene: "mesura",
   speed: "realistic",
-  stopMode: "submit",
+  defaultMode: "submit",
   failNext: false,
+  lastJobId: null,
 }));
 
 const get = usePrototypeStore.getState;
@@ -268,13 +280,19 @@ function stopLevelSimulation() {
   levelTimer = null;
 }
 
-/** Starts recording into a thread's draft, at its caret, or at the end when it has none. */
-export function startRecording(threadId: string = get().activeThreadId) {
+export function startRecording() {
   if (get().recording) return;
-  const jobId = nextId("job");
-  insertDictationSlotAtCaret(threadId, jobId);
-  setJob({ id: jobId, threadId, status: "recording", mode: null, recordedMs: 0 });
-  set({ recording: { jobId, threadId, bankedMs: 0, runningSince: Date.now(), level: 0 } });
+  set({
+    recording: {
+      sessionId: nextId("rec"),
+      startedAt: new Date().toISOString(),
+      mode: get().defaultMode,
+      bankedMs: 0,
+      runningSince: Date.now(),
+      level: 0,
+    },
+    lastJobId: null,
+  });
   startLevelSimulation();
 }
 
@@ -299,33 +317,60 @@ export function restartRecording() {
 export function cancelRecording() {
   const recording = get().recording;
   if (!recording) return;
-  removeDictationSlot(recording.threadId, recording.jobId);
-  dropJob(recording.jobId);
   set({ recording: null });
   stopLevelSimulation();
-  maybeSendWhenReady(recording.threadId);
 }
 
-/** Ends the recording and hands the audio to the (simulated) server. */
-export function finishRecording(mode: DeliveryMode = get().stopMode) {
+/**
+ * Stops recording and hands the audio to the (simulated) server. The marker
+ * drops here, at the caret of the thread on screen (or the last one shown,
+ * when another app has focus), not where the recording started.
+ */
+export function finishRecording() {
   const recording = get().recording;
   if (!recording) return;
-  const recordedMs = recordedMsAt(recording, Date.now());
-  set({ recording: null });
-  stopLevelSimulation();
-  if (mode === "save") removeDictationSlot(recording.threadId, recording.jobId);
-  if (mode === "submit") {
-    updateThread(recording.threadId, (thread) => ({ ...thread, sendWhenReady: true }));
-  }
+  const threadId = get().activeThreadId;
   const job: DictationJob = {
-    id: recording.jobId,
-    threadId: recording.threadId,
+    id: nextId("job"),
+    threadId,
     status: "transcribing",
-    mode,
-    recordedMs,
+    mode: recording.mode,
+    recordedMs: recordedMsAt(recording, Date.now()),
   };
+  set({ recording: null, lastJobId: job.id });
+  stopLevelSimulation();
+  if (job.mode !== "clipboard") insertDictationSlotAtCaret(threadId, job.id);
+  if (job.mode === "submit")
+    updateThread(threadId, (thread) => ({ ...thread, sendWhenReady: true }));
   setJob(job);
   scheduleTranscription(job);
+}
+
+/** Alt+S, Alt+I, Alt+Enter: the recording's mode, or the last job's while it transcribes. */
+export function setDeliveryMode(mode: DeliveryMode): boolean {
+  const { recording, lastJobId, jobs } = get();
+  if (recording) {
+    set({ recording: { ...recording, mode } });
+    return true;
+  }
+  const job = lastJobId ? jobs[lastJobId] : undefined;
+  if (!job || job.status !== "transcribing") return false;
+  if (job.mode === mode) return true;
+  if (mode === "clipboard") removeDictationSlot(job.threadId, job.id);
+  if (job.mode === "clipboard") insertDictationSlotAtCaret(job.threadId, job.id);
+  if (mode === "submit")
+    updateThread(job.threadId, (thread) => ({ ...thread, sendWhenReady: true }));
+  if (job.mode === "submit")
+    updateThread(job.threadId, (thread) => ({ ...thread, sendWhenReady: false }));
+  setJob({ ...job, mode });
+  return true;
+}
+
+/** The strip's mode button: clipboard → inject → submit, like Shell. */
+export function cycleDeliveryMode() {
+  const { recording, lastJobId, jobs } = get();
+  const current = recording?.mode ?? (lastJobId ? jobs[lastJobId]?.mode : undefined);
+  if (current) setDeliveryMode(nextDictationMode(current));
 }
 
 function scheduleTranscription(job: DictationJob) {
@@ -346,7 +391,7 @@ function scheduleTranscription(job: DictationJob) {
 
 function deliver(job: DictationJob, text: string) {
   dropJob(job.id);
-  if (job.mode === "save") {
+  if (job.mode === "clipboard") {
     saveTranscription(text, job.threadId, "Saved to Transcriptions and copied");
     return;
   }
@@ -447,7 +492,7 @@ export function setScene(scene: Scene) {
 }
 
 export function setSimulation(
-  patch: Partial<Pick<PrototypeState, "speed" | "stopMode" | "failNext">>,
+  patch: Partial<Pick<PrototypeState, "speed" | "defaultMode" | "failNext">>,
 ) {
   set(patch);
 }

@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 
 import { cn } from "~/lib/utils";
 import { CenterOutWaveform } from "~/symmetria/CenterOutWaveform";
+import { MaterialDictationModeIcon } from "~/symmetria/MaterialDictationModeIcon";
 import { recordedMsAt, setScene, usePrototypeStore } from "./prototypeStore";
 import { formatClock } from "./RecordingStrip";
 
@@ -31,6 +32,7 @@ function DesktopWidget() {
   const recording = usePrototypeStore((state) => state.recording);
   const threads = usePrototypeStore((state) => state.threads);
   const jobs = usePrototypeStore((state) => state.jobs);
+  const activeThreadId = usePrototypeStore((state) => state.activeThreadId);
   const flash = useFreshFlash();
   const transcribing = Object.values(jobs).filter((job) => job.status === "transcribing");
   const failed = Object.values(jobs).filter((job) => job.status === "failed");
@@ -52,16 +54,15 @@ function DesktopWidget() {
         </span>
         <div className="w-28">
           <CenterOutWaveform
-            sessionId={recording.jobId}
+            sessionId={recording.sessionId}
             phase={paused ? "paused" : "recording"}
             audioLevel={recording.level}
             active
             reducedMotion={false}
           />
         </div>
-        <span className="max-w-32 truncate text-xs text-zinc-400">
-          → {titleOf(recording.threadId)}
-        </span>
+        <MaterialDictationModeIcon mode={recording.mode} className="size-4 text-zinc-300" />
+        <span className="max-w-32 truncate text-xs text-zinc-400">→ {titleOf(activeThreadId)}</span>
         {transcribing.length > 0 ? (
           <span className="text-[11px] text-sky-300">+{transcribing.length} transcribing</span>
         ) : null}

@@ -15,6 +15,7 @@ import {
   jobsForThread,
   restartRecording,
   setActiveThread,
+  setDeliveryMode,
   setScene,
   setSimulation,
   startRecording,
@@ -25,11 +26,12 @@ import {
 } from "./prototypeStore";
 import { PrototypeComposer } from "./PrototypeComposer";
 
-const FINISH_KEYS: Record<string, DeliveryMode> = {
+/** Shell's session binds: they select the mode, they do not stop the recording. */
+const MODE_KEYS: Record<string, DeliveryMode> = {
   KeyI: "inject",
   Enter: "submit",
   NumpadEnter: "submit",
-  KeyS: "save",
+  KeyS: "clipboard",
 };
 
 /**
@@ -45,18 +47,24 @@ function useDictationKeys() {
         event.preventDefault();
         event.stopPropagation();
         if (state.recording) finishRecording();
-        else startRecording(state.activeThreadId);
+        else startRecording();
         return;
       }
       if (event.code === "Escape" && state.scene === "elsewhere") {
         setScene("mesura");
         return;
       }
-      if (!state.recording || !event.altKey || event.ctrlKey || event.metaKey) return;
-      const mode = FINISH_KEYS[event.code];
-      const action = mode
-        ? () => finishRecording(mode)
-        : event.code === "Space"
+      if (!event.altKey || event.ctrlKey || event.metaKey) return;
+      const mode = MODE_KEYS[event.code];
+      if (mode) {
+        if (!setDeliveryMode(mode)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      if (!state.recording) return;
+      const action =
+        event.code === "Space"
           ? togglePause
           : event.code === "KeyR"
             ? restartRecording
@@ -74,16 +82,12 @@ function useDictationKeys() {
 }
 
 function ThreadBadges(props: { thread: PrototypeThread }) {
-  const recordingHere = usePrototypeStore((state) => state.recording?.threadId === props.thread.id);
   const jobs = usePrototypeStore((state) => state.jobs);
   const threadJobs = jobsForThread(jobs, props.thread.id);
   const transcribing = threadJobs.filter((job) => job.status === "transcribing").length;
   const failed = threadJobs.some((job) => job.status === "failed");
   return (
     <span className="flex shrink-0 items-center gap-1 text-[10px]">
-      {recordingHere ? (
-        <span className="dictation-rec-dot size-1.5 rounded-full bg-red-500" />
-      ) : null}
       {transcribing > 0 ? (
         <span className="rounded bg-primary/15 px-1 text-primary">{transcribing}</span>
       ) : null}
@@ -190,9 +194,15 @@ function Timeline() {
   );
 }
 
+const DEFAULT_MODE_OPTIONS: ReadonlyArray<{ mode: DeliveryMode; label: string }> = [
+  { mode: "submit", label: "Send" },
+  { mode: "inject", label: "Insert" },
+  { mode: "clipboard", label: "Save" },
+];
+
 function SimulationMenu() {
   const speed = usePrototypeStore((state) => state.speed);
-  const stopMode = usePrototypeStore((state) => state.stopMode);
+  const defaultMode = usePrototypeStore((state) => state.defaultMode);
   const failNext = usePrototypeStore((state) => state.failNext);
   const option = (active: boolean) =>
     cn(
@@ -221,24 +231,18 @@ function SimulationMenu() {
           </div>
         </div>
         <div>
-          <div className="mb-1 text-[11px] text-muted-foreground">
-            Stop button and toggle key finish with
-          </div>
+          <div className="mb-1 text-[11px] text-muted-foreground">A new recording starts in</div>
           <div className="flex gap-1">
-            <button
-              type="button"
-              className={option(stopMode === "submit")}
-              onClick={() => setSimulation({ stopMode: "submit" })}
-            >
-              Send
-            </button>
-            <button
-              type="button"
-              className={option(stopMode === "inject")}
-              onClick={() => setSimulation({ stopMode: "inject" })}
-            >
-              Insert
-            </button>
+            {DEFAULT_MODE_OPTIONS.map((entry) => (
+              <button
+                key={entry.mode}
+                type="button"
+                className={option(defaultMode === entry.mode)}
+                onClick={() => setSimulation({ defaultMode: entry.mode })}
+              >
+                {entry.label}
+              </button>
+            ))}
           </div>
         </div>
         <button
@@ -257,11 +261,12 @@ function SimulationMenu() {
 }
 
 const SCENARIOS = [
-  "Chain in one prompt: type a sentence, put the caret in the middle, press Ctrl+Shift+Space (or the mic), talk, press Alt+I. While it transcribes, move the caret and record again.",
-  "Send from afar: record, press Alt+Enter, and switch thread at once. The sidebar shows the job, and a toast says when it sent.",
-  "Edit while it transcribes: type around the marker. Delete a marker: its text goes to Transcriptions, never lost.",
-  "Press Enter while a marker is pending: the draft waits for it, and you can still edit or press Don't send.",
-  "Another app focused (desktop): press Focus another app, then Ctrl+Shift+Space and Alt+Enter. The floating widget shows progress and disappears after delivery.",
+  "Record first, place later: press Ctrl+Shift+Space (or the mic) and talk. Move the caret where the text belongs, then stop with the square or Ctrl+Shift+Space. The marker drops at the caret on stop.",
+  "Modes, as in Shell: Alt+S save, Alt+I insert, Alt+Enter send. They only pick the mode (the mode button shows it); they keep working while the text transcribes.",
+  "Chain: while a marker transcribes, move the caret, or change thread, and record again.",
+  "Send from afar: record in send mode, stop, and switch thread at once. The sidebar shows the job, and a toast says when it sent.",
+  "Edit while it transcribes: type around the marker. Delete a marker: its text goes to Transcriptions, never lost. Press Enter with a marker pending: the draft waits for it.",
+  "Another app focused (desktop): Focus another app, then Ctrl+Shift+Space to record and to stop. The text lands in the last thread you had open.",
   "Failure: Simulation → Make the next transcription fail, then use Retry on the marker.",
 ];
 
@@ -269,13 +274,15 @@ function ScenarioGuide() {
   const [open, setOpen] = useState(true);
   if (!open) {
     return (
-      <button
-        type="button"
-        className="text-xs text-muted-foreground hover:text-foreground"
-        onClick={() => setOpen(true)}
-      >
-        What to try
-      </button>
+      <div className="mx-auto mt-3 w-full max-w-3xl px-4">
+        <button
+          type="button"
+          className="text-xs text-muted-foreground hover:text-foreground"
+          onClick={() => setOpen(true)}
+        >
+          What to try
+        </button>
+      </div>
     );
   }
   return (

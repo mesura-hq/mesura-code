@@ -8,10 +8,10 @@
  * so a draft that is not mounted can still be filled by replacing the token.
  */
 import { DecoratorNode, type NodeKey, type SerializedLexicalNode, type Spread } from "lexical";
-import { RotateCcwIcon, SendIcon, XIcon } from "lucide-react";
+import { RotateCcwIcon, XIcon } from "lucide-react";
 import type { ReactElement } from "react";
 
-import { cn } from "~/lib/utils";
+import { MaterialDictationModeIcon } from "~/symmetria/MaterialDictationModeIcon";
 import { discardJob, retryJob, usePrototypeStore } from "./prototypeStore";
 
 type SerializedDictationSlotNode = Spread<{ jobId: string }, SerializedLexicalNode>;
@@ -75,9 +75,6 @@ export class DictationSlotNode extends DecoratorNode<ReactElement> {
 
 function DictationSlotChip(props: { jobId: string }) {
   const job = usePrototypeStore((state) => state.jobs[props.jobId]);
-  const paused = usePrototypeStore(
-    (state) => state.recording?.jobId === props.jobId && state.recording.runningSince === null,
-  );
   // A slot whose job is gone renders nothing; delivery removes it right after.
   if (!job) return <span />;
 
@@ -108,26 +105,15 @@ function DictationSlotChip(props: { jobId: string }) {
     );
   }
 
-  const recording = job.status === "recording";
   return (
     <span
       contentEditable={false}
-      data-slot-status={paused ? "paused" : job.status}
-      className={cn(
-        "dictation-slot mx-0.5 inline-flex h-[1.4em] items-center gap-1 rounded-sm px-0.5 align-middle text-[11px] leading-none select-none",
-        recording ? "text-red-400" : "text-primary",
-      )}
+      data-slot-status={job.status}
+      className="dictation-slot mx-0.5 inline-flex h-[1.4em] items-center gap-1 rounded-sm px-0.5 align-middle text-[11px] leading-none text-primary select-none"
     >
-      <span
-        className={cn(
-          "dictation-slot-caret inline-block h-[1.5em] w-[2px] rounded-full",
-          recording ? "bg-red-400" : "bg-primary",
-        )}
-      />
-      <span className="dictation-slot-label opacity-70">
-        {recording ? (paused ? "paused" : "listening") : "transcribing"}
-      </span>
-      {job.mode === "submit" ? <SendIcon className="size-2.5 opacity-70" /> : null}
+      <span className="dictation-slot-caret inline-block h-[1.5em] w-[2px] rounded-full bg-primary" />
+      <MaterialDictationModeIcon mode={job.mode} className="size-3 opacity-70" />
+      <span className="dictation-slot-label opacity-70">transcribing</span>
     </span>
   );
 }

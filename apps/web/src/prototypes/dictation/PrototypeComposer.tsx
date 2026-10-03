@@ -111,8 +111,7 @@ export function PrototypeComposer() {
   const recording = usePrototypeStore((state) => state.recording);
   const jobs = usePrototypeStore((state) => state.jobs);
   const activeThread = threads.find((thread) => thread.id === activeThreadId)!;
-  const pendingHere = jobsForThread(jobs, activeThreadId).filter((job) => job.mode !== "save");
-  const recordingHere = recording?.threadId === activeThreadId;
+  const pendingHere = jobsForThread(jobs, activeThreadId).filter((job) => job.mode !== "clipboard");
 
   return (
     <ComposerSurface.Shell>
@@ -123,7 +122,7 @@ export function PrototypeComposer() {
               {activeThread.sendWhenReady && pendingHere.length > 0 ? (
                 <SendWhenReadyBanner threadId={activeThreadId} pending={pendingHere.length} />
               ) : null}
-              <RecordingStrip displayedThreadId={activeThreadId} />
+              <RecordingStrip />
             </ComposerBanner.Column>
           </ComposerBanner.Dock>
           <div className="relative">
@@ -143,19 +142,13 @@ export function PrototypeComposer() {
                       : "Prototype · simulated transcription"}
                   </span>
                   <Hint
-                    label={
-                      recording
-                        ? "Stop (Ctrl+Shift+Space)"
-                        : "Dictate at the caret (Ctrl+Shift+Space)"
-                    }
+                    label={recording ? "Stop (Ctrl+Shift+Space)" : "Dictate (Ctrl+Shift+Space)"}
                   >
                     <button
                       type="button"
-                      aria-label={recordingHere ? "Stop recording" : "Start dictation"}
+                      aria-label={recording ? "Stop recording" : "Start dictation"}
                       onPointerDown={(event) => event.preventDefault()}
-                      onClick={() =>
-                        recording ? finishRecording() : startRecording(activeThreadId)
-                      }
+                      onClick={() => (recording ? finishRecording() : startRecording())}
                       className={cn(
                         "flex size-8 items-center justify-center rounded-full",
                         recording
