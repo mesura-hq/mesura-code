@@ -1,0 +1,51 @@
+/*
+ * Every animation here is stepped, so it repaints a few times a second
+ * instead of every frame. AGENTS.md forbids continuously repainting
+ * animations; the real shadow caret must keep this property.
+ */
+.dictation-slot[data-slot-status="recording"] .dictation-slot-caret,
+.dictation-rec-dot {
+  animation: dictation-blink 1.1s steps(1, end) infinite;
+}
+
+.dictation-slot[data-slot-status="transcribing"] .dictation-slot-label::after,
+.dictation-widget-transcribing::after {
+  display: inline-block;
+  width: 1.2em;
+  text-align: left;
+  content: "";
+  animation: dictation-dots 1.2s steps(1, end) infinite;
+}
+
+@keyframes dictation-blink {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@keyframes dictation-dots {
+  0% {
+    content: "";
+  }
+  25% {
+    content: ".";
+  }
+  50% {
+    content: "..";
+  }
+  75% {
+    content: "...";
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dictation-slot .dictation-slot-caret,
+  .dictation-slot .dictation-slot-label::after,
+  .dictation-rec-dot,
+  .dictation-widget-transcribing::after {
+    animation: none;
+  }
+}

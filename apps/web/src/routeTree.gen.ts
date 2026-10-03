@@ -28,6 +28,7 @@ import { Route as SettingsDiagnosticsRouteImport } from './routes/settings.diagn
 import { Route as SettingsConnectionsRouteImport } from './routes/settings.connections'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
 import { Route as SettingsAppearanceRouteImport } from './routes/settings.appearance'
+import { Route as PrototypeDictationRouteImport } from './routes/prototype.dictation'
 import { Route as ProjectsProjectKeyRouteImport } from './routes/projects.$projectKey'
 import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-requests'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
@@ -128,6 +129,11 @@ const SettingsAppearanceRoute = SettingsAppearanceRouteImport.update({
   path: '/appearance',
   getParentRoute: () => SettingsRoute,
 } as any)
+const PrototypeDictationRoute = PrototypeDictationRouteImport.update({
+  id: '/prototype/dictation',
+  path: '/prototype/dictation',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProjectsProjectKeyRoute = ProjectsProjectKeyRouteImport.update({
   id: '/projects/$projectKey',
   path: '/projects/$projectKey',
@@ -159,6 +165,7 @@ export interface FileRoutesByFullPath {
   '/welcome': typeof WelcomeRoute
   '/pull-requests': typeof ChatPullRequestsRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
+  '/prototype/dictation': typeof PrototypeDictationRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/connections': typeof SettingsConnectionsRoute
@@ -182,6 +189,7 @@ export interface FileRoutesByTo {
   '/welcome': typeof WelcomeRoute
   '/pull-requests': typeof ChatPullRequestsRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
+  '/prototype/dictation': typeof PrototypeDictationRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/connections': typeof SettingsConnectionsRoute
@@ -208,6 +216,7 @@ export interface FileRoutesById {
   '/welcome': typeof WelcomeRoute
   '/_chat/pull-requests': typeof ChatPullRequestsRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
+  '/prototype/dictation': typeof PrototypeDictationRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/connections': typeof SettingsConnectionsRoute
@@ -235,6 +244,7 @@ export interface FileRouteTypes {
     | '/welcome'
     | '/pull-requests'
     | '/projects/$projectKey'
+    | '/prototype/dictation'
     | '/settings/appearance'
     | '/settings/archived'
     | '/settings/connections'
@@ -258,6 +268,7 @@ export interface FileRouteTypes {
     | '/welcome'
     | '/pull-requests'
     | '/projects/$projectKey'
+    | '/prototype/dictation'
     | '/settings/appearance'
     | '/settings/archived'
     | '/settings/connections'
@@ -283,6 +294,7 @@ export interface FileRouteTypes {
     | '/welcome'
     | '/_chat/pull-requests'
     | '/projects/$projectKey'
+    | '/prototype/dictation'
     | '/settings/appearance'
     | '/settings/archived'
     | '/settings/connections'
@@ -308,6 +320,7 @@ export interface RootRouteChildren {
   UsageRoute: typeof UsageRoute
   WelcomeRoute: typeof WelcomeRoute
   ProjectsProjectKeyRoute: typeof ProjectsProjectKeyRoute
+  PrototypeDictationRoute: typeof PrototypeDictationRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -445,6 +458,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsAppearanceRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/prototype/dictation': {
+      id: '/prototype/dictation'
+      path: '/prototype/dictation'
+      fullPath: '/prototype/dictation'
+      preLoaderRoute: typeof PrototypeDictationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/projects/$projectKey': {
       id: '/projects/$projectKey'
       path: '/projects/$projectKey'
@@ -534,6 +554,7 @@ const rootRouteChildren: RootRouteChildren = {
   UsageRoute: UsageRoute,
   WelcomeRoute: WelcomeRoute,
   ProjectsProjectKeyRoute: ProjectsProjectKeyRoute,
+  PrototypeDictationRoute: PrototypeDictationRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
