@@ -13,6 +13,7 @@ import { ComposerSurface } from "~/components/chat/ComposerSurface";
 import { cn } from "~/lib/utils";
 import { DictationSlotNode } from "./DictationSlotNode";
 import { Hint } from "./Hint";
+import { PhoneToolbar, usePhoneLayout } from "./PhoneToolbar";
 import { registerDraftEditor } from "./draftEditors";
 import {
   cancelSendWhenReady,
@@ -112,6 +113,7 @@ export function PrototypeComposer() {
   const jobs = usePrototypeStore((state) => state.jobs);
   const activeThread = threads.find((thread) => thread.id === activeThreadId)!;
   const pendingHere = jobsForThread(jobs, activeThreadId).filter((job) => job.mode !== "clipboard");
+  const phone = usePhoneLayout();
 
   return (
     <ComposerSurface.Shell>
@@ -122,7 +124,7 @@ export function PrototypeComposer() {
               {activeThread.sendWhenReady && pendingHere.length > 0 ? (
                 <SendWhenReadyBanner threadId={activeThreadId} pending={pendingHere.length} />
               ) : null}
-              <RecordingStrip />
+              {phone ? null : <RecordingStrip />}
             </ComposerBanner.Column>
           </ComposerBanner.Dock>
           <div className="relative">
@@ -135,44 +137,48 @@ export function PrototypeComposer() {
                     hidden={thread.id !== activeThreadId}
                   />
                 ))}
-                <div className="flex items-center gap-2 px-2.5 pb-2.5">
-                  <span className="min-w-0 flex-1 truncate pl-1.5 text-[11px] text-muted-foreground">
-                    {pendingHere.length > 0
-                      ? `${pendingHere.length} dictation${pendingHere.length === 1 ? "" : "s"} pending in this draft`
-                      : "Prototype · simulated transcription"}
-                  </span>
-                  <Hint
-                    label={recording ? "Stop (Ctrl+Shift+Space)" : "Dictate (Ctrl+Shift+Space)"}
-                  >
+                {phone ? (
+                  <PhoneToolbar threadId={activeThreadId} />
+                ) : (
+                  <div className="flex items-center gap-2 px-2.5 pb-2.5">
+                    <span className="min-w-0 flex-1 truncate pl-1.5 text-[11px] text-muted-foreground">
+                      {pendingHere.length > 0
+                        ? `${pendingHere.length} dictation${pendingHere.length === 1 ? "" : "s"} pending in this draft`
+                        : "Prototype · simulated transcription"}
+                    </span>
+                    <Hint
+                      label={recording ? "Stop (Ctrl+Shift+Space)" : "Dictate (Ctrl+Shift+Space)"}
+                    >
+                      <button
+                        type="button"
+                        aria-label={recording ? "Stop recording" : "Start dictation"}
+                        onPointerDown={(event) => event.preventDefault()}
+                        onClick={() => (recording ? finishRecording() : startRecording())}
+                        className={cn(
+                          "flex size-8 items-center justify-center rounded-full",
+                          recording
+                            ? "bg-red-500/15 text-red-400 hover:bg-red-500/25"
+                            : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                        )}
+                      >
+                        {recording ? (
+                          <SquareIcon className="size-3.5" />
+                        ) : (
+                          <MicIcon className="size-4" />
+                        )}
+                      </button>
+                    </Hint>
                     <button
                       type="button"
-                      aria-label={recording ? "Stop recording" : "Start dictation"}
+                      aria-label="Send"
                       onPointerDown={(event) => event.preventDefault()}
-                      onClick={() => (recording ? finishRecording() : startRecording())}
-                      className={cn(
-                        "flex size-8 items-center justify-center rounded-full",
-                        recording
-                          ? "bg-red-500/15 text-red-400 hover:bg-red-500/25"
-                          : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                      )}
+                      onClick={() => requestSend(activeThreadId)}
+                      className="flex size-8 items-center justify-center rounded-full bg-message-action text-message-action-foreground hover:bg-message-action-hover"
                     >
-                      {recording ? (
-                        <SquareIcon className="size-3.5" />
-                      ) : (
-                        <MicIcon className="size-4" />
-                      )}
+                      <ArrowUpIcon className="size-4" />
                     </button>
-                  </Hint>
-                  <button
-                    type="button"
-                    aria-label="Send"
-                    onPointerDown={(event) => event.preventDefault()}
-                    onClick={() => requestSend(activeThreadId)}
-                    className="flex size-8 items-center justify-center rounded-full bg-message-action text-message-action-foreground hover:bg-message-action-hover"
-                  >
-                    <ArrowUpIcon className="size-4" />
-                  </button>
-                </div>
+                  </div>
+                )}
               </div>
             </ComposerSurface.Main>
           </div>
