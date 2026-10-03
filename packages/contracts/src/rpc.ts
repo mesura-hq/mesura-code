@@ -290,6 +290,15 @@ import {
   ProjectCloneSubscribeInput,
 } from "./projectClone.ts";
 import {
+  DictationError,
+  DictationJob,
+  DictationJobActionInput,
+  DictationJobEvent,
+  DictationSetModeInput,
+  DictationStartInput,
+  DictationSubscribeInput,
+} from "./dictation.ts";
+import {
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
   SourceControlDiscoveryResult,
@@ -471,6 +480,11 @@ export const WS_METHODS = {
   projectCloneCancel: "projectClone.cancel",
   projectCloneRetry: "projectClone.retry",
   subscribeProjectClones: "subscribeProjectClones",
+  dictationStart: "dictation.start",
+  dictationRetry: "dictation.retry",
+  dictationCancel: "dictation.cancel",
+  dictationSetMode: "dictation.setMode",
+  subscribeDictationJobs: "subscribeDictationJobs",
 
   // Streaming subscriptions
   subscribeVcsStatus: "subscribeVcsStatus",
@@ -942,6 +956,39 @@ const WsProjectCloneRetryRpc = Rpc.make(WS_METHODS.projectCloneRetry, {
 const WsSubscribeProjectClonesRpc = Rpc.make(WS_METHODS.subscribeProjectClones, {
   payload: ProjectCloneSubscribeInput,
   success: ProjectCloneListEvent,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
+// Mesura: server-side dictation. `start` returns once the job is tracked; the
+// transcription and its outcome arrive on the subscription.
+const WsDictationStartRpc = Rpc.make(WS_METHODS.dictationStart, {
+  payload: DictationStartInput,
+  success: DictationJob,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsDictationRetryRpc = Rpc.make(WS_METHODS.dictationRetry, {
+  payload: DictationJobActionInput,
+  success: DictationJob,
+  error: Schema.Union([DictationError, EnvironmentAuthorizationError]),
+});
+
+const WsDictationCancelRpc = Rpc.make(WS_METHODS.dictationCancel, {
+  payload: DictationJobActionInput,
+  success: Schema.Struct({ applied: Schema.Boolean }),
+  error: EnvironmentAuthorizationError,
+});
+
+const WsDictationSetModeRpc = Rpc.make(WS_METHODS.dictationSetMode, {
+  payload: DictationSetModeInput,
+  success: DictationJob,
+  error: Schema.Union([DictationError, EnvironmentAuthorizationError]),
+});
+
+const WsSubscribeDictationJobsRpc = Rpc.make(WS_METHODS.subscribeDictationJobs, {
+  payload: DictationSubscribeInput,
+  success: DictationJobEvent,
   error: EnvironmentAuthorizationError,
   stream: true,
 });
@@ -1605,6 +1652,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectCloneCancelRpc,
   WsProjectCloneRetryRpc,
   WsSubscribeProjectClonesRpc,
+  WsDictationStartRpc,
+  WsDictationRetryRpc,
+  WsDictationCancelRpc,
+  WsDictationSetModeRpc,
+  WsSubscribeDictationJobsRpc,
   WsProjectsListEntriesRpc,
   WsProjectsReadFileRpc,
   WsProjectsSearchContentsRpc,

@@ -906,6 +906,19 @@ export const UsageLimitSourceConfig = Schema.Struct({
 });
 export type UsageLimitSourceConfig = typeof UsageLimitSourceConfig.Type;
 
+/**
+ * Server-side dictation. The key is a bearer secret: on disk it is replaced by
+ * the redaction marker and the value lives in the server secret store, as the
+ * usage-limit `managementKey` does. A client only ever sees the marker.
+ */
+export const DictationSettings = Schema.Struct({
+  openAiApiKey: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  vocabularyHints: Schema.Array(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+});
+export type DictationSettings = typeof DictationSettings.Type;
+
 export const ObservabilitySettings = Schema.Struct({
   otlpTracesUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   otlpMetricsUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
@@ -1225,6 +1238,7 @@ export const ServerSettings = Schema.Struct({
   usageLimitSources: Schema.Record(UsageLimitSourceId, UsageLimitSourceConfig).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
+  dictation: DictationSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   /** Exact model IDs, applied to past and future usage on this environment. */
   usagePriceOverrides: Schema.Record(TrimmedNonEmptyString, UsageModelPriceOverride).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
@@ -1471,6 +1485,12 @@ export const ServerSettingsPatch = Schema.Struct({
   // echoed back yet. `null` removes; the server merges into its current map.
   usageLimitSources: Schema.optionalKey(
     Schema.Record(UsageLimitSourceId, Schema.NullOr(UsageLimitSourceConfig)),
+  ),
+  dictation: Schema.optionalKey(
+    Schema.Struct({
+      openAiApiKey: Schema.optionalKey(TrimmedString),
+      vocabularyHints: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
+    }),
   ),
   /** Each entry replaces one model's rates; `null` restores automatic pricing. */
   usagePriceOverrides: Schema.optionalKey(

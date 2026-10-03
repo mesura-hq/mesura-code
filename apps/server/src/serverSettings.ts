@@ -150,6 +150,9 @@ function usageLimitSourceSecretName(sourceId: string): string {
   return `usage-limit-source-${Buffer.from(sourceId, "utf8").toString("base64url")}`;
 }
 
+/** The dictation OpenAI key follows the hub key: the marker on disk, the value in the store. */
+const DICTATION_OPENAI_KEY_SECRET_NAME = "dictation-openai-api-key";
+
 function redactProviderEnvironmentVariable(
   variable: ProviderInstanceEnvironmentVariable,
 ): ProviderInstanceEnvironmentVariable {
@@ -186,7 +189,11 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
       },
     ]),
   );
-  return { ...settings, providerInstances, usageLimitSources };
+  const dictation = {
+    ...settings.dictation,
+    openAiApiKey: settings.dictation.openAiApiKey.length > 0 ? USAGE_LIMIT_SOURCE_KEY_REDACTED : "",
+  };
+  return { ...settings, providerInstances, usageLimitSources, dictation };
 }
 
 export class ServerSettingsService extends Context.Service<
@@ -722,10 +729,25 @@ const make = Effect.gen(function* () {
           managementKey: Option.isSome(secret) ? textDecoder.decode(secret.value) : "",
         };
       }
+      let dictation = settings.dictation;
+      if (dictation.openAiApiKey === USAGE_LIMIT_SOURCE_KEY_REDACTED) {
+        const secret = yield* secretStore
+          .get(DICTATION_OPENAI_KEY_SECRET_NAME)
+          .pipe(
+            Effect.mapError(
+              (cause) => new ServerSettingsError({ settingsPath, operation: "read-secret", cause }),
+            ),
+          );
+        dictation = {
+          ...dictation,
+          openAiApiKey: Option.isSome(secret) ? textDecoder.decode(secret.value) : "",
+        };
+      }
       return {
         ...settings,
         providerInstances: providerInstances as ServerSettings["providerInstances"],
         usageLimitSources: usageLimitSources as ServerSettings["usageLimitSources"],
+        dictation,
       };
     });
 
@@ -894,10 +916,36 @@ const make = Effect.gen(function* () {
           );
       }
 
+      // The marker means "keep what the store has"; an empty key clears it.
+      const dictationKey = next.dictation.openAiApiKey;
+      if (dictationKey.length === 0) {
+        yield* secretStore
+          .remove(DICTATION_OPENAI_KEY_SECRET_NAME)
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new ServerSettingsError({ settingsPath, operation: "remove-secret", cause }),
+            ),
+          );
+      } else if (dictationKey !== USAGE_LIMIT_SOURCE_KEY_REDACTED) {
+        yield* secretStore
+          .set(DICTATION_OPENAI_KEY_SECRET_NAME, textEncoder.encode(dictationKey))
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new ServerSettingsError({ settingsPath, operation: "write-secret", cause }),
+            ),
+          );
+      }
+
       return {
         ...next,
         providerInstances: providerInstances as ServerSettings["providerInstances"],
         usageLimitSources: usageLimitSources as ServerSettings["usageLimitSources"],
+        dictation:
+          dictationKey.length === 0
+            ? next.dictation
+            : { ...next.dictation, openAiApiKey: USAGE_LIMIT_SOURCE_KEY_REDACTED },
       };
     });
 
