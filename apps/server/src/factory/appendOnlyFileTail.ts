@@ -6,7 +6,8 @@
  *
  * The file may not exist yet. A partial last line waits for its newline, and a
  * file that shrank, or another file now at its path, is read again from the
- * start and reported as truncated.
+ * start and reported as truncated. Content never decides which file it is:
+ * equal bytes in another file are still another file.
  *
  * @module appendOnlyFileTail
  */
@@ -41,15 +42,6 @@ const RECHECK_INTERVAL = Duration.seconds(3);
 
 const NEWLINE = 0x0a;
 
-/**
- * The most of a file's first line kept to tell it from a file that replaced it.
- * An inode number alone does not: ext4 gives a new file the number its deleted
- * predecessor freed, often at once. The first line, because an append-only
- * file never changes it once complete, while later lines may be rewritten in
- * place without making it another file.
- */
-const IDENTITY_PREFIX_BYTES = 1024;
-
 export class AppendOnlyFileTailError extends Schema.TaggedError<AppendOnlyFileTailError>()(
   "AppendOnlyFileTailError",
   { path: Schema.String, cause: Schema.Defect() },
@@ -80,14 +72,6 @@ export interface AppendOnlyFileTail {
   readonly isMissing: () => boolean;
 }
 
-function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
-  if (left.byteLength !== right.byteLength) return false;
-  for (let index = 0; index < left.byteLength; index += 1) {
-    if (left[index] !== right[index]) return false;
-  }
-  return true;
-}
-
 function concatBytes(left: Uint8Array, right: Uint8Array): Uint8Array {
   if (left.byteLength === 0) return right;
   const joined = new Uint8Array(left.byteLength + right.byteLength);
@@ -101,64 +85,93 @@ const isMissingError = (cause: unknown) => {
   return code === "ENOENT" || code === "ENOTDIR";
 };
 
-/** A tail of an absolute path, positioned at the file's start. */
-export function makeAppendOnlyFileTail(filePath: string): AppendOnlyFileTail {
+/** An open file and its identity on its filesystem. */
+interface OpenFile {
+  readonly handle: NodeFSP.FileHandle;
+  readonly dev: number;
+  readonly ino: number;
+}
+
+/**
+ * A tail of an absolute path, positioned at the file's start, for the life of
+ * the scope.
+ *
+ * The tail holds the file it follows open until the scope closes. A file then
+ * created at the path cannot get its inode number, which ext4 otherwise hands
+ * to a new file as soon as the old one is deleted, so a different number at
+ * the path is exactly a replaced file. A deleted file stays held, its disk
+ * space included, until another file appears at the path or the scope closes.
+ */
+export const makeAppendOnlyFileTail = Effect.fn("makeAppendOnlyFileTail")(function* (
+  filePath: string,
+): Effect.fn.Return<AppendOnlyFileTail, never, Scope.Scope> {
+  // Not on Windows, where an open file can hold up its replacement and NTFS
+  // does not reuse file IDs promptly. Off too once the scope has closed.
+  let holdsFile = !(yield* isHostWindows);
+  let held: OpenFile | null = null;
   let offset = 0;
   // Bytes after the last newline, kept as bytes so a character split across
   // two reads decodes whole.
   let pending: Uint8Array = new Uint8Array(0);
   let missing = true;
-  // The file's identity, its inode number and first line: a file replaced at
-  // the same path is read from its start.
-  let inode: number | null = null;
-  let prefix: Uint8Array = new Uint8Array(0);
+  // The identity of the file last read: another file at the path is read from its start.
+  let identity: { readonly dev: number; readonly ino: number } | null = null;
   const decoder = new TextDecoder();
   const permit = Semaphore.makeUnsafe(1);
 
-  /** Whether the open file begins with the bytes the followed file began with. */
-  const startsWithPrefix = async (handle: NodeFSP.FileHandle, size: number) => {
-    // A file shorter than the prefix is shorter than the offset, and read again anyway.
-    if (prefix.byteLength === 0 || size < prefix.byteLength) return true;
-    const start = new Uint8Array(prefix.byteLength);
-    const { bytesRead } = await handle.read(start, 0, start.byteLength, 0);
-    return bytesEqual(start.subarray(0, bytesRead), prefix);
+  /** The file now at the path: the held one while it is still there, else a new handle. */
+  const openAtPath = async (): Promise<OpenFile> => {
+    if (held !== null) {
+      const atPath = await NodeFSP.stat(filePath);
+      if (atPath.dev === held.dev && atPath.ino === held.ino) return held;
+    }
+    const handle = await NodeFSP.open(filePath, "r");
+    try {
+      const { dev, ino } = await handle.stat();
+      return { handle, dev, ino };
+    } catch (cause) {
+      await handle.close();
+      throw cause;
+    }
+  };
+
+  const release = async () => {
+    const file = held;
+    held = null;
+    await file?.handle.close();
   };
 
   const readOnce = async (): Promise<TailRead> => {
-    let handle: NodeFSP.FileHandle;
+    let file: OpenFile;
     try {
-      handle = await NodeFSP.open(filePath, "r");
+      file = await openAtPath();
     } catch (cause) {
       if (!isMissingError(cause)) throw cause;
       missing = true;
       return { lines: [], truncated: false, missing: true, more: false };
     }
     missing = false;
+    if (file !== held) {
+      await release();
+      if (holdsFile) held = file;
+    }
     try {
-      const { size, ino } = await handle.stat();
+      const { size } = await file.handle.stat();
       let truncated = false;
-      const replaced = inode !== null && (ino !== inode || !(await startsWithPrefix(handle, size)));
-      inode = ino;
+      const replaced =
+        identity !== null && (file.dev !== identity.dev || file.ino !== identity.ino);
+      identity = { dev: file.dev, ino: file.ino };
       if (replaced || size < offset) {
         offset = 0;
         pending = new Uint8Array(0);
-        prefix = new Uint8Array(0);
         truncated = true;
       }
       const length = Math.min(size - offset, TAIL_READ_MAX_BYTES);
       if (length <= 0) return { lines: [], truncated, missing: false, more: false };
       const buffer = new Uint8Array(length);
-      const { bytesRead } = await handle.read(buffer, 0, length, offset);
-      const read = buffer.subarray(0, bytesRead);
-      const prefixComplete =
-        prefix.byteLength >= IDENTITY_PREFIX_BYTES || prefix.at(-1) === NEWLINE;
-      if (!prefixComplete) {
-        const newline = read.indexOf(NEWLINE);
-        const firstLine = newline === -1 ? read : read.subarray(0, newline + 1);
-        prefix = concatBytes(prefix, firstLine.slice(0, IDENTITY_PREFIX_BYTES - prefix.byteLength));
-      }
+      const { bytesRead } = await file.handle.read(buffer, 0, length, offset);
       offset += bytesRead;
-      const bytes = concatBytes(pending, read);
+      const bytes = concatBytes(pending, buffer.subarray(0, bytesRead));
       const lines: Array<string> = [];
       let start = 0;
       for (let index = 0; index < bytes.byteLength; index += 1) {
@@ -170,9 +183,18 @@ export function makeAppendOnlyFileTail(filePath: string): AppendOnlyFileTail {
       pending = bytes.slice(start);
       return { lines, truncated, missing: false, more: offset < size };
     } finally {
-      await handle.close();
+      if (file !== held) await file.handle.close();
     }
   };
+
+  yield* Effect.addFinalizer(() =>
+    permit.withPermits(1)(
+      Effect.promise(() => {
+        holdsFile = false;
+        return release().catch(() => undefined);
+      }),
+    ),
+  );
 
   return {
     path: filePath,
@@ -184,7 +206,7 @@ export function makeAppendOnlyFileTail(filePath: string): AppendOnlyFileTail {
     ),
     isMissing: () => missing,
   };
-}
+});
 
 /**
  * Signals when the file may have grown. The parent directory is watched,

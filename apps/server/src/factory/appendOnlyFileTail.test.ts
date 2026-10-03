@@ -58,7 +58,7 @@ it.layer(NodeServices.layer)("append-only file tail", (it) => {
     it.effect("an append-only tail holds a partial last line until its newline arrives", () =>
       Effect.gen(function* () {
         const file = yield* makeFile;
-        const tail = makeAppendOnlyFileTail(file.filePath);
+        const tail = yield* makeAppendOnlyFileTail(file.filePath);
         const accent = new TextEncoder().encode("é");
 
         yield* file.append("first\nsec");
@@ -78,7 +78,7 @@ it.layer(NodeServices.layer)("append-only file tail", (it) => {
     it.effect("an append-only tail reads a shrunk file again from its start and reports it", () =>
       Effect.gen(function* () {
         const file = yield* makeFile;
-        const tail = makeAppendOnlyFileTail(file.filePath);
+        const tail = yield* makeAppendOnlyFileTail(file.filePath);
         yield* file.append("one\ntwo\nthree\n");
         expect((yield* tail.read).lines).toEqual(["one", "two", "three"]);
 
@@ -94,7 +94,7 @@ it.layer(NodeServices.layer)("append-only file tail", (it) => {
       () =>
         Effect.gen(function* () {
           const file = yield* makeFile;
-          const tail = makeAppendOnlyFileTail(file.filePath);
+          const tail = yield* makeAppendOnlyFileTail(file.filePath);
           const line = `${"x".repeat(99)}\n`;
           const count = Math.ceil((TAIL_READ_MAX_BYTES * 1.5) / line.length);
           yield* file.append(line.repeat(count));
@@ -108,7 +108,7 @@ it.layer(NodeServices.layer)("append-only file tail", (it) => {
     it.effect("an append-only tail reads a replaced file from its start and reports it", () =>
       Effect.gen(function* () {
         const file = yield* makeFile;
-        const tail = makeAppendOnlyFileTail(file.filePath);
+        const tail = yield* makeAppendOnlyFileTail(file.filePath);
         yield* file.append("old\n");
         expect((yield* tail.read).lines).toEqual(["old"]);
 
@@ -124,7 +124,7 @@ it.layer(NodeServices.layer)("append-only file tail", (it) => {
     it.effect("an append-only tail of a missing file reads nothing and says so", () =>
       Effect.gen(function* () {
         const file = yield* makeFile;
-        const tail = makeAppendOnlyFileTail(file.filePath);
+        const tail = yield* makeAppendOnlyFileTail(file.filePath);
         expect(yield* tail.read).toEqual({
           lines: [],
           truncated: false,
@@ -141,7 +141,7 @@ it.layer(NodeServices.layer)("append-only file tail", (it) => {
     () =>
       Effect.gen(function* () {
         const file = yield* makeFile;
-        const tail = makeAppendOnlyFileTail(file.filePath);
+        const tail = yield* makeAppendOnlyFileTail(file.filePath);
         yield* file.append("first\n");
         const changes = yield* watchAppendOnlyFile(tail, {
           recheckInterval: Duration.millis(50),
@@ -169,7 +169,7 @@ it.layer(NodeServices.layer)("append-only file tail", (it) => {
   it.effect("an append-only file watch signals a file that appears after the watch started", () =>
     Effect.gen(function* () {
       const file = yield* makeFile;
-      const tail = makeAppendOnlyFileTail(file.filePath);
+      const tail = yield* makeAppendOnlyFileTail(file.filePath);
       const changes = yield* watchAppendOnlyFile(tail);
       expect((yield* tail.read).missing).toBe(true);
 
