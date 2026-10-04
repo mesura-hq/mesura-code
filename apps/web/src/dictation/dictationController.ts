@@ -1,10 +1,12 @@
 import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
-import {
-  deletePendingAttachmentUpload,
-  runAttachmentUploadCycle,
-} from "@t3tools/client-runtime/state/attachments";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { runAtomCommand, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import {
+  DEFAULT_DICTATION_MODE,
+  nextDictationMode,
+  runDictationStop,
+  uploadDictationRecording,
+} from "@t3tools/client-runtime/dictation";
 import {
   DictationJobId,
   type DictationJob,
@@ -45,7 +47,6 @@ import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { attachmentEnvironment } from "~/state/attachments";
 import { dictationEnvironment } from "~/state/dictation";
 import { readPreparedConnection } from "~/state/session";
-import { nextDictationMode } from "~/symmetria/dictationPresentation";
 import {
   DICTATION_MAX_RECORDING_MS,
   openDictationRecording,
@@ -86,7 +87,6 @@ import {
  */
 
 const LEVEL_POLL_INTERVAL_MS = 100;
-const DEFAULT_MODE: DictationMode = "submit";
 
 /** The composer a stopped recording drops its marker into: the one on screen, else the last shown. */
 export interface DictationComposer {
@@ -304,7 +304,7 @@ export async function startDictation(): Promise<void> {
   useDictationSessionStore.setState({
     session: {
       sessionId: randomUUID(),
-      mode: DEFAULT_MODE,
+      mode: DEFAULT_DICTATION_MODE,
       startedAt: now,
       bankedMs: 0,
       runningSince: now,
@@ -381,23 +381,19 @@ export async function restartDictation(): Promise<void> {
   startLevelPolling();
 }
 
-async function uploadDictationAudio(
+function uploadDictationAudio(
   environmentId: EnvironmentId,
   audio: DictationAudio,
   jobId: DictationJobId,
 ): Promise<string> {
-  const extension = audio.mimeType.startsWith("audio/mp4") ? "m4a" : "webm";
-  const result = await runAttachmentUploadCycle({
+  return uploadDictationRecording({
     registry: appAtomRegistry,
     createUploadUrl: attachmentEnvironment.createUploadUrl,
     remove: attachmentEnvironment.remove,
     environmentId,
-    upload: {
-      type: "file",
-      name: `dictation-${jobId}.${extension}`,
-      mimeType: audio.mimeType,
-      sizeBytes: audio.blob.size,
-    },
+    jobId,
+    mimeType: audio.mimeType,
+    sizeBytes: audio.blob.size,
     resolveUploadUrl: (relativeUrl) => {
       const connection = readPreparedConnection(environmentId);
       return connection ? resolveAssetUrl(connection.httpBaseUrl, relativeUrl) : null;
@@ -418,16 +414,6 @@ async function uploadDictationAudio(
       };
     },
   });
-  if (result.status === "uploaded") return result.attachmentId;
-  if (result.attachmentId) {
-    deletePendingAttachmentUpload({
-      registry: appAtomRegistry,
-      remove: attachmentEnvironment.remove,
-      environmentId,
-      attachmentId: result.attachmentId,
-    });
-  }
-  throw result.status === "failed" ? result.error : new Error("The upload was cancelled.");
 }
 
 /**
@@ -476,11 +462,30 @@ async function startDictationJob(
   audio: DictationAudio,
   durationMs: number,
 ): Promise<void> {
-  const { environmentId } = own;
+  const attachmentId = await uploadDictationJobAudio(jobId, own, audio, durationMs);
+  await startUploadedDictationJob(jobId, own, attachmentId, durationMs);
+}
+
+/** Keeps the audio for a retry, then uploads it. */
+function uploadDictationJobAudio(
+  jobId: DictationJobId,
+  own: Pick<OwnDictationJob, "environmentId">,
+  audio: DictationAudio,
+  durationMs: number,
+): Promise<string> {
   unstartedAudio.set(jobId, { audio, durationMs });
-  const attachmentId = await uploadDictationAudio(environmentId, audio, jobId);
+  return uploadDictationAudio(own.environmentId, audio, jobId);
+}
+
+async function startUploadedDictationJob(
+  jobId: DictationJobId,
+  own: Pick<OwnDictationJob, "environmentId" | "target">,
+  attachmentId: string,
+  durationMs: number,
+): Promise<void> {
+  const { environmentId } = own;
   // A mode key pressed during the upload changed the record, not a server job.
-  const mode = useOwnDictationJobsStore.getState().jobs[jobId]?.mode ?? DEFAULT_MODE;
+  const mode = useOwnDictationJobsStore.getState().jobs[jobId]?.mode ?? DEFAULT_DICTATION_MODE;
   const target = mode === "clipboard" ? null : own.target;
   const result = await runAtomCommand(
     appAtomRegistry,
@@ -515,8 +520,8 @@ export async function stopDictation(): Promise<void> {
   const jobId = DictationJobId.make(randomUUID());
   const { environmentId } = composer;
   const host = slotHostFor(composer);
-  if (session.mode !== "clipboard") placeDictationSlot(composer, jobId);
-  if (session.mode === "submit") host.armSend();
+  // Recorded before the marker drops: nothing below reads it, and the shared stop order owns
+  // what follows (marker, arm, upload, start).
   recordOwnDictationJob(jobId, {
     environmentId,
     target: composer.target,
@@ -527,11 +532,16 @@ export async function stopDictation(): Promise<void> {
   lastJobRestored = true;
   useDictationSessionStore.setState({ lastJob: { environmentId, jobId } });
 
-  try {
-    await startDictationJob(jobId, composer, await recording.stop(), durationMs);
-  } catch (cause) {
-    failToStart(jobId, host, cause);
-  }
+  await runDictationStop({
+    jobId,
+    mode: session.mode,
+    placeMarker: (id) => placeDictationSlot(composer, id),
+    armSend: () => host.armSend(),
+    finishRecording: () => recording.stop(),
+    upload: (id, audio) => uploadDictationJobAudio(id, composer, audio, durationMs),
+    start: (id, attachmentId) => startUploadedDictationJob(id, composer, attachmentId, durationMs),
+    onFailed: (id, cause) => failToStart(id, host, cause),
+  });
 }
 
 export async function toggleDictation(): Promise<void> {
@@ -608,7 +618,7 @@ export function cycleDictationMode(): void {
   const current =
     session?.mode ??
     (lastJob ? useOwnDictationJobsStore.getState().jobs[lastJob.jobId]?.mode : undefined) ??
-    DEFAULT_MODE;
+    DEFAULT_DICTATION_MODE;
   selectDictationMode(nextDictationMode(current));
 }
 

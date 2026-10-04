@@ -182,6 +182,9 @@ vi.mock("./state/composer-attachment-uploads", () =>
   stubs.stubModule("useComposerAttachmentUploadWorker"),
 );
 vi.mock("./state/use-thread-outbox-drain", () => stubs.stubModule("useThreadOutboxDrain"));
+vi.mock("./features/voice-input/DictationJobsWorker", () =>
+  stubs.stubModule("DictationJobsWorker"),
+);
 
 import { createPathConfigForStaticNavigation, getStateFromPath } from "@react-navigation/native";
 import { RootStack } from "./Stack";

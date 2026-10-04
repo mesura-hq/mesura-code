@@ -88,6 +88,29 @@ function setUserInputDraftCustomAnswer(
   });
 }
 
+/** Mesura: dictation reads and fills a question's note by key, wherever its card is. */
+export function readUserInputDraftCustomAnswer(requestKey: string, questionId: string): string {
+  return (
+    appAtomRegistry.get(userInputDraftsByRequestKeyAtom)[requestKey]?.[questionId]?.customAnswer ??
+    ""
+  );
+}
+
+export function setUserInputDraftCustomAnswerText(
+  requestKey: string,
+  questionId: string,
+  customAnswer: string,
+): void {
+  const current = appAtomRegistry.get(userInputDraftsByRequestKeyAtom);
+  appAtomRegistry.set(userInputDraftsByRequestKeyAtom, {
+    ...current,
+    [requestKey]: {
+      ...current[requestKey],
+      [questionId]: { ...current[requestKey]?.[questionId], customAnswer },
+    },
+  });
+}
+
 // Share the readiness calculation between the card subscription and the submit
 // snapshot. Regular composer text and upload progress must not invalidate the feed.
 function readPendingUserInputDrafts(

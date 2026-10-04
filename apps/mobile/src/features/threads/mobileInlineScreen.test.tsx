@@ -50,6 +50,7 @@ const fixture = vi.hoisted(() => ({
   serverConfig: null as unknown,
   enqueue: vi.fn(async (_message: unknown) => undefined),
   queuedMessages: [] as unknown[],
+  finishDictation: vi.fn(async (_input: unknown) => ({ jobId: "job-1", status: "started" })),
 }));
 vi.mock("react-native", () => {
   const View = ({
@@ -685,6 +686,7 @@ beforeEach(() => {
   fixture.serverConfig = null;
   fixture.enqueue.mockReset();
   fixture.enqueue.mockResolvedValue(undefined);
+  fixture.finishDictation.mockClear();
   fixture.queuedMessages = [];
   fixture.configs = new Map([
     [
@@ -696,6 +698,11 @@ beforeEach(() => {
             attachmentUploads: true,
             fileAttachments: { maxUploadBytes: 1048576 },
           },
+        },
+        // The host has a dictation key, so the question card offers server dictation.
+        settings: {
+          providerInstances: {},
+          dictation: { openAiApiKey: "\u2022\u2022\u2022\u2022\u2022\u2022" },
         },
       },
     ],
@@ -948,6 +955,20 @@ vi.mock("../../native/voiceTranscription", () => ({
   }),
 }));
 vi.mock("../showcase/nativeShowcaseScene", () => ({ getNativeShowcaseScene: () => null }));
+vi.mock("../../state/dictation", () => ({
+  finishDictation: fixture.finishDictation,
+  deliverDictationJobs: vi.fn(),
+  readDictationJobFailure: () => null,
+  retryDictationJob: vi.fn(),
+}));
+const questionDictationOwner = (questionId: string) =>
+  expect.objectContaining({
+    owner: expect.objectContaining({
+      environmentId,
+      target: { kind: "thread", environmentId, threadId },
+      question: { requestKey: JSON.stringify([environmentId, threadId, requestId]), questionId },
+    }),
+  });
 async function focusQuestion(index: number) {
   await act(async () => answerInputs()[index]!.focus());
 }
@@ -965,9 +986,13 @@ it("mobile phase3 AC2 appends dictation to the selected question note without su
   await focusQuestion(0);
   expect(container.querySelectorAll('[aria-label="Start dictation"]')).toHaveLength(1);
   await press("Start dictation");
-  await press("Finish dictation");
+  await press("Stop dictation");
+  // Phase 7: the recording goes to the server path, owned by the focused answer;
+  // its marker and transcript land through `state/dictation`, pinned there.
+  expect(fixture.finishDictation).toHaveBeenCalledOnce();
+  expect(fixture.finishDictation).toHaveBeenCalledWith(questionDictationOwner("runtime"));
+  expect(fixture.transcribe).not.toHaveBeenCalled();
   expect(answerInputs()[0]!.value).toContain("Typed detail");
-  expect(answerInputs()[0]!.value).toContain("Dictated detail");
   expect(fixture.respond).not.toHaveBeenCalled();
   const note = answerInputs()[0]!.value;
   await type(answerInputs()[1]!, "API only");
@@ -977,20 +1002,15 @@ it("mobile phase3 AC2 appends dictation to the selected question note without su
 it.each(["question", "thread", "request", "environment"])(
   "mobile phase3 AC5 never delivers late transcription to another %s target",
   async (switchTarget) => {
-    const transcript = deferred<string>();
-    const entered = deferred<void>();
-    fixture.transcribe.mockImplementation(async () => {
-      entered.resolve();
-      return transcript.promise;
-    });
+    // Phase 7: a stopped recording is owned by the answer focused at stop time; switching
+    // afterwards changes neither that owner nor the answers now on screen.
     await mount();
     await type(answerInputs()[0]!, "Original draft");
     await focusQuestion(0);
     expect(container.querySelectorAll('[aria-label="Start dictation"]')).toHaveLength(1);
     await press("Start dictation");
     expect(fixture.record).toHaveBeenCalledOnce();
-    await press("Finish dictation");
-    await entered.promise;
+    await press("Stop dictation");
     if (switchTarget === "question") {
       await focusQuestion(1);
     } else {
@@ -1016,14 +1036,36 @@ it.each(["question", "thread", "request", "environment"])(
         (input) => input.value,
       );
     const destinationBefore = destinationValues();
-    await act(async () => {
-      transcript.resolve("Late transcript");
-      await transcript.promise;
-    });
+    await act(async () => undefined);
+    expect(fixture.finishDictation).toHaveBeenCalledOnce();
+    expect(fixture.finishDictation).toHaveBeenCalledWith(questionDictationOwner("runtime"));
     expect(destinationValues()).toEqual(destinationBefore);
     expect(fixture.respond).not.toHaveBeenCalled();
   },
 );
+it("mobile phase7 refuses to submit question answers while a transcription is pending", async () => {
+  await mount();
+  await chooseGo();
+  await type(answerInputs()[0]!, "Typed [Transcribing](t3-context://v1/dictation/job-pending)");
+  await type(answerInputs()[1]!, "API only");
+  await press("Submit answers");
+  expect(fixture.respond).not.toHaveBeenCalled();
+  expect(container.textContent).toContain("Waiting for the transcription");
+
+  await type(answerInputs()[0]!, "Typed and transcribed");
+  expect(container.textContent).not.toContain("Waiting for the transcription");
+  await press("Submit answers");
+  expect(fixture.respond).toHaveBeenCalledOnce();
+});
+it("mobile phase7 hides question dictation when the host has no dictation key", async () => {
+  fixture.configs.set(environmentId, {
+    ...(fixture.configs.get(environmentId) as object),
+    settings: { providerInstances: {}, dictation: { openAiApiKey: "" } },
+  });
+  await mount();
+  await focusQuestion(0);
+  expect(container.querySelectorAll('[aria-label="Start dictation"]')).toHaveLength(0);
+});
 
 import { useVoiceInputController } from "../voice-input/useVoiceInputController";
 import { ComposerDictationPrimaryAction } from "../voice-input/ComposerDictationControl";
@@ -1179,15 +1221,16 @@ it.each(["idle", "recording", "transcribing"])(
     await mount();
     await act(async () => answerInputs()[0]!.focus());
     if (phase !== "idle") await press("Start dictation");
-    if (phase === "transcribing") await press("Finish dictation");
+    // Phase 7: the server path's round stop is labelled "Stop dictation".
+    if (phase === "transcribing") await press("Stop dictation");
     await act(async () => answerInputs()[2]!.focus());
     expect(container.textContent?.match(/Voice answer:/g)).toHaveLength(1);
     expect(container.querySelectorAll('[aria-label="Start dictation"]')).toHaveLength(1);
-    expect(container.querySelector('[aria-label="Finish dictation"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Stop dictation"]')).toBeNull();
     if (phase === "transcribing") await act(async () => transcript.resolve("Late first answer"));
     expect(answerInputs().map((input) => input.value)).toEqual(["", "", "", ""]);
     await press("Start dictation");
-    expect(button("Finish dictation")).toBeDefined();
+    expect(button("Stop dictation")).toBeDefined();
     await press("Cancel dictation");
   },
 );

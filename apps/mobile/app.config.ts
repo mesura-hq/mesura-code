@@ -369,7 +369,7 @@ const config: ExpoConfig = {
       "expo-audio",
       {
         microphonePermission: "Allow T3 Code to use your microphone for voice input.",
-        recordAudioAndroid: false,
+        recordAudioAndroid: true,
         enableBackgroundPlayback: false,
         enableBackgroundRecording: false,
       },
@@ -384,7 +384,9 @@ const config: ExpoConfig = {
         recordAudioAndroid: false,
       },
     ],
-    ["expo-image-picker", { photosPermission: false, microphonePermission: false }],
+    // Mesura: no `microphonePermission: false` here. The picker turns `false` into a blocked
+    // RECORD_AUDIO (`tools:node="remove"`), which overrides expo-audio and stops dictation.
+    ["expo-image-picker", { photosPermission: false }],
     [
       "expo-splash-screen",
       {

@@ -4,7 +4,7 @@ import type {
   ThreadId,
   UserInputQuestion,
 } from "@t3tools/contracts";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import { Atom } from "effect/unstable/reactivity";
 import { appAtomRegistry } from "../../state/atom-registry";
@@ -18,11 +18,15 @@ import {
   type PendingUserInput,
 } from "../../lib/threadActivity";
 import { QuestionAttachments } from "./QuestionAttachments";
-import { useVoiceInputController } from "../voice-input/useVoiceInputController";
+import { hostHasDictationKey } from "@t3tools/client-runtime/dictation";
+import { countPendingDictationSlots } from "@t3tools/shared/dictationSlots";
+import { scopedThreadKey } from "../../lib/scopedEntities";
+import { useServerConfigs } from "../../state/entities";
+import { useDictationController } from "../voice-input/useDictationController";
+import { ServerDictationPrimaryAction } from "../voice-input/ServerDictationControls";
 import { resolveVoiceComposerPresentation } from "../voice-input/voiceInputPresentation";
 import {
   ComposerDictationCancelAction,
-  ComposerDictationPrimaryAction,
   ComposerDictationStatus,
 } from "../voice-input/ComposerDictationControl";
 
@@ -63,21 +67,26 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
   const focusedQuestion = request.questions.find(
     (question) => question.id === focusedQuestionId && question.allowCustomAnswer !== false,
   );
-  const note = focusedQuestion ? (drafts[focusedQuestion.id]?.customAnswer ?? "") : "";
-  const voice = useVoiceInputController({
-    ownerKey: focusedQuestion
-      ? JSON.stringify([props.environmentId, props.threadId, request.requestId, focusedQuestion.id])
+  // Mesura: dictation goes through the host. It adds to this answer's note and never replaces
+  // its selected options.
+  const serverConfig = useServerConfigs().get(props.environmentId) ?? null;
+  const voice = useDictationController({
+    owner: focusedQuestion
+      ? {
+          environmentId: props.environmentId,
+          draftKey: scopedThreadKey(props.environmentId, props.threadId),
+          target: { kind: "thread", environmentId: props.environmentId, threadId: props.threadId },
+          question: { requestKey: ownerKey, questionId: focusedQuestion.id },
+        }
       : null,
-    draftMessage: note,
-    // Dictation adds a note to this answer; it never replaces its selected options.
-    selection: { start: note.length, end: note.length },
-    disabled: props.responding || !focusedQuestion,
-    onChangeDraftMessage: (value) => {
-      if (focusedQuestion) props.onChangeCustomAnswer(request.requestId, focusedQuestion.id, value);
-    },
-    onChangeSelection: () => undefined,
+    available: hostHasDictationKey(serverConfig),
+    disabled: props.responding,
   });
   const presentation = resolveVoiceComposerPresentation(voice.state, voice.elapsedSeconds);
+  const transcriptionPending = request.questions.some(
+    (question) => countPendingDictationSlots(drafts[question.id]?.customAnswer ?? "") > 0,
+  );
+  const [refusedForTranscription, setRefusedForTranscription] = useState(false);
   return (
     <View className="gap-3 rounded-[20px] border border-border bg-card-alt p-4">
       <Text className="font-t3-bold text-lg text-foreground">Fill in the pending answers</Text>
@@ -138,9 +147,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
               requestId={props.pendingUserInput.requestId}
               question={question}
               questions={props.pendingUserInput.questions}
-              disabled={
-                props.responding || (voice.freezesEditor && focusedQuestionId === question.id)
-              }
+              disabled={props.responding}
               value={draft?.customAnswer ?? ""}
               onChangeText={(value) =>
                 props.onChangeCustomAnswer(props.pendingUserInput.requestId, question.id, value)
@@ -173,15 +180,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
               presentation={presentation}
               onDismissError={voice.cancel}
             />
-            <ComposerDictationPrimaryAction
-              state={voice.state}
-              presentation={presentation}
-              isAvailable={voice.isAvailable}
-              disabled={props.responding}
-              onStart={voice.start}
-              onConfirm={voice.stop}
-              onCancel={voice.cancel}
-            />
+            <ServerDictationPrimaryAction dictation={voice} disabled={props.responding} />
           </View>
         </View>
       ) : null}
@@ -192,7 +191,15 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
           answers ? "bg-primary" : "bg-subtle-strong",
         )}
         disabled={answers === null || props.responding || voice.blocksSubmission}
-        onPress={() => void props.onSubmit(request.requestId)}
+        onPress={() => {
+          // Mesura: an answer still waiting for its transcript is not submitted; send mode does
+          // not arm a question card, so the user submits again once the text is in.
+          if (transcriptionPending) {
+            setRefusedForTranscription(true);
+            return;
+          }
+          void props.onSubmit(request.requestId);
+        }}
       >
         <Text
           className={cn(
@@ -203,6 +210,11 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
           Submit answers
         </Text>
       </Pressable>
+      {refusedForTranscription && transcriptionPending ? (
+        <Text className="text-center text-xs text-foreground-muted">
+          Waiting for the transcription
+        </Text>
+      ) : null}
       {request.dismissible ? (
         <Pressable
           accessibilityRole="button"

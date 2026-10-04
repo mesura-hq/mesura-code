@@ -218,7 +218,7 @@ const VoiceWaveform = memo(function VoiceWaveform(props: {
   );
 });
 
-function VoiceActionButton(props: {
+export function VoiceActionButton(props: {
   readonly accessibilityLabel: string;
   readonly disabled?: boolean;
   readonly icon: AppSymbolName;

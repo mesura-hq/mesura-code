@@ -71,11 +71,23 @@ import { ComposerCommandPopover } from "./ComposerCommandPopover";
 import { useComposerCommandMenu } from "./use-composer-command-menu";
 import {
   ComposerDictationCancelAction,
-  ComposerDictationPrimaryAction,
   ComposerDictationStatus,
   ComposerDictationToolbar,
 } from "../voice-input/ComposerDictationControl";
-import { useVoiceInputController } from "../voice-input/useVoiceInputController";
+import { hostHasDictationKey } from "@t3tools/client-runtime/dictation";
+import { reportDictatedDraftUnsent } from "../../state/dictation";
+import {
+  armDictationDraft,
+  forgetDictationDraft,
+  withDictatedMessageText,
+} from "../../state/dictationDrafts";
+import { countPendingDictationSlots } from "@t3tools/shared/dictationSlots";
+import {
+  DictationDraftBanner,
+  ServerDictationPrimaryAction,
+} from "../voice-input/ServerDictationControls";
+import { useDictationController } from "../voice-input/useDictationController";
+import { useDictationDraftSender } from "../voice-input/useDictationDraftSender";
 import { resolveVoiceComposerPresentation } from "../voice-input/voiceInputPresentation";
 import {
   useThreadSettingsSheetPresentation,
@@ -463,14 +475,21 @@ export function NewTaskDraftScreen(props: {
     onChangeDraftMessage: flow.setPrompt,
     onUpdateInteractionMode: flow.planModeEnabled ? flow.setInteractionMode : undefined,
   });
-  const voiceInput = useVoiceInputController({
-    ownerKey: flow.draftKey,
-    draftMessage: flow.prompt,
-    selection: composerMenu.selection,
+  // Mesura: dictation goes through the host's transcription, on Android and iPhone alike.
+  const voiceInput = useDictationController({
+    owner:
+      flow.draftKey && selectedProject
+        ? {
+            environmentId: selectedProject.environmentId,
+            draftKey: flow.draftKey,
+            target: { kind: "draft", draftId: flow.draftKey },
+          }
+        : null,
+    available: hostHasDictationKey(selectedEnvironmentServerConfig ?? null),
     disabled: isIncomingShareTransferPending || isImportingShare || flow.submitting,
-    onChangeDraftMessage: flow.setPrompt,
-    onChangeSelection: composerMenu.onSelectionChange,
   });
+  // An armed draft starts its task once its last marker fills, only while this screen is open.
+  useDictationDraftSender(flow.draftKey, flow.prompt, () => void handleStart({ automatic: true }));
   const voicePresentation = resolveVoiceComposerPresentation(
     voiceInput.state,
     voiceInput.elapsedSeconds,
@@ -1172,7 +1191,20 @@ export function NewTaskDraftScreen(props: {
     [composerMenu, flow, selectedEnvironmentServerConfig],
   );
 
-  async function handleStart(): Promise<void> {
+  async function handleStart(options?: { readonly automatic?: boolean }): Promise<void> {
+    // Mesura: the visible Start and a dictated draft's automatic start pass the same check; an
+    // automatic one that is blocked says so instead of starting a task the button would refuse.
+    if (!canStart) {
+      if (options?.automatic && flow.draftKey) {
+        reportDictatedDraftUnsent(
+          flow.draftKey,
+          cloneBlocksStart
+            ? "The repository is still being cloned. The text is in the draft."
+            : "This task cannot start right now. The text is in the draft.",
+        );
+      }
+      return;
+    }
     if (voiceInput.blocksSubmission || pendingPastedTextAttachmentCountRef.current > 0) return;
     const selectedProject = flow.selectedProject;
     const draftKey = flow.draftKey;
@@ -1180,6 +1212,12 @@ export function NewTaskDraftScreen(props: {
       return;
     }
     const draft = getComposerDraftSnapshot(draftKey);
+    // A transcription is still pending: Start arms the draft, which starts itself once its last
+    // marker fills, while this screen is open.
+    if (countPendingDictationSlots(draft.text) > 0) {
+      armDictationDraft(draftKey);
+      return;
+    }
     if (appAtomRegistry.get(composerContextImportsAtom)[draftKey]) return;
     // Read the latest explicit pick. Antigravity selections stay unchanged
     // when setup or a catalog change makes them unavailable.
@@ -1259,14 +1297,15 @@ export function NewTaskDraftScreen(props: {
           createdAt: editingPendingTask.createdAt,
         }
       : makeTurnCommandMetadata();
-    const message = flow.buildPendingTaskMessage(metadata, {
+    const builtMessage = flow.buildPendingTaskMessage(metadata, {
       // A task that waits in the outbox cannot know the checkout it will
       // drain against; one that sends now runs against the live one.
       currentCheckoutBranch: queuesInsteadOfStarting ? null : flow.currentCheckoutBranchName,
     });
-    if (!message) {
+    if (!builtMessage) {
       return;
     }
+    const message = withDictatedMessageText(draftKey, builtMessage);
     if (!queuesInsteadOfStarting) {
       // Arm the lock-screen card before the async thread creation: backgrounding
       // the app right after tapping submit would otherwise reject the foreground
@@ -1283,6 +1322,7 @@ export function NewTaskDraftScreen(props: {
     flow.setSubmitting(true);
     try {
       await enqueueThreadOutboxMessage(message);
+      forgetDictationDraft(draftKey);
     } catch (error) {
       Alert.alert(
         "Could not queue task",
@@ -1390,7 +1430,6 @@ export function NewTaskDraftScreen(props: {
         autoFocus={false}
         // Clipboard imports use the editor's read-only mode to retain keyboard focus.
         editable={!isIncomingShareTransferPending && !flow.submitting}
-        readOnly={voiceInput.freezesEditor}
         multiline
         scrollEnabled
         value={flow.prompt}
@@ -1542,6 +1581,7 @@ export function NewTaskDraftScreen(props: {
 
   const composerDock = (
     <View className="bg-sheet px-[12px] pt-1" style={{ paddingBottom: controlsBottomPadding }}>
+      <DictationDraftBanner draftKey={flow.draftKey} />
       {!voiceInput.isBusy &&
       composerMenu.trigger &&
       (composerMenu.items.length > 0 || composerMenu.trigger.kind === "pull-request") ? (
@@ -1709,14 +1749,9 @@ export function NewTaskDraftScreen(props: {
                   </View>
                 </>
               )}
-              <ComposerDictationPrimaryAction
-                state={voiceInput.state}
-                presentation={voicePresentation}
-                isAvailable={voiceInput.isAvailable}
+              <ServerDictationPrimaryAction
+                dictation={voiceInput}
                 disabled={isIncomingShareTransferPending || isImportingShare || flow.submitting}
-                onStart={voiceInput.start}
-                onConfirm={voiceInput.stop}
-                onCancel={voiceInput.cancel}
               />
               {voicePresentation.showsSend ? (
                 <ComposerActionButton

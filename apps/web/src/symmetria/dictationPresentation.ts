@@ -1,5 +1,4 @@
 import type {
-  SymmetriaDictationMode,
   SymmetriaDictationPhase,
   SymmetriaDictationSession,
   SymmetriaDictationTarget,
@@ -83,11 +82,8 @@ export function shouldOwnDictationPresentation(input: {
   return input.shouldPresent && input.sessionId !== input.dismissedSessionId;
 }
 
-export function nextDictationMode(mode: SymmetriaDictationMode): SymmetriaDictationMode {
-  if (mode === "clipboard") return "inject";
-  if (mode === "inject") return "submit";
-  return "clipboard";
-}
+// The mode cycle is shared with mobile; Shell's mode names are the same three literals.
+export { nextDictationMode } from "@t3tools/client-runtime/dictation";
 
 export function formatDictationTime(session: SymmetriaDictationSession): string {
   if (session.phase === "grace" && session.graceRemainingMs !== null) {

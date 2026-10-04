@@ -1,6 +1,7 @@
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { CommandId, MessageId, type DictationTarget } from "@t3tools/contracts";
-import { countPendingDictationSlots, withVoicedPrefix } from "@t3tools/shared/dictationSlots";
+import { armedDraftSendDecision, dictatedMessageText } from "@t3tools/client-runtime/dictation";
+import { withVoicedPrefix } from "@t3tools/shared/dictationSlots";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
@@ -156,7 +157,7 @@ async function sendArmedDraft(
     },
     target: toDictationTarget(entry.target),
     composerTarget: entry.target,
-    prompt: withDictatedPrefix(entry.target, prompt.trim()),
+    prompt: dictatedMessageText(prompt, isDictationVoiced(entry.target)),
     messageId: MessageId.make(randomUUID()),
     submissionContext: submissionContextReaders.get(key)?.() ?? null,
   });
@@ -192,11 +193,12 @@ function checkDraftsAfterChange() {
     const draft = useComposerDraftStore.getState().getComposerDraft(entry.target);
     const prompt = draft?.prompt ?? "";
     const hasAttachments = (draft?.images.length ?? 0) + (draft?.files.length ?? 0) > 0;
-    if (prompt.trim() === "" && !hasAttachments) {
+    const decision = armedDraftSendDecision({ armed: entry.armed, prompt, hasAttachments });
+    if (decision === "forget") {
       forgetDraftSendState(key);
       continue;
     }
-    if (!entry.armed || countPendingDictationSlots(prompt) > 0) continue;
+    if (decision === "wait") continue;
     sending.add(key);
     void sendArmedDraft(key, entry, prompt)
       .catch((cause: unknown) => {

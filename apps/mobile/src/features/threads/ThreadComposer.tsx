@@ -111,12 +111,16 @@ import { useComposerCommandMenu } from "./use-composer-command-menu";
 import {
   ComposerDictationCancelAction,
   ComposerDictationDraftContent,
-  ComposerDictationPrimaryAction,
   ComposerDictationStartAction,
   ComposerDictationStatus,
   ComposerDictationToolbar,
 } from "../voice-input/ComposerDictationControl";
-import { useVoiceInputController } from "../voice-input/useVoiceInputController";
+import { hostHasDictationKey } from "@t3tools/client-runtime/dictation";
+import {
+  DictationDraftBanner,
+  ServerDictationPrimaryAction,
+} from "../voice-input/ServerDictationControls";
+import { useDictationController } from "../voice-input/useDictationController";
 import { resolveVoiceComposerPresentation } from "../voice-input/voiceInputPresentation";
 import {
   type ExistingThreadSettingsRouteSession,
@@ -419,12 +423,18 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     onUsageLimits:
       usageLimitsOffered && props.draftAttachments.length === 0 ? openUsageLimits : undefined,
   });
-  const voiceInput = useVoiceInputController({
-    ownerKey: composerOwnerKey,
-    draftMessage: props.draftMessage,
-    selection: composerMenu.selection,
-    onChangeDraftMessage: props.onChangeDraftMessage,
-    onChangeSelection: composerMenu.onSelectionChange,
+  // Mesura: dictation goes through the host's transcription, on Android and iPhone alike.
+  const voiceInput = useDictationController({
+    owner: {
+      environmentId: props.environmentId,
+      draftKey: composerOwnerKey,
+      target: {
+        kind: "thread",
+        environmentId: props.environmentId,
+        threadId: props.selectedThread.id,
+      },
+    },
+    available: hostHasDictationKey(props.serverConfig),
   });
   const voicePresentation = resolveVoiceComposerPresentation(
     voiceInput.state,
@@ -432,7 +442,9 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   );
   const isVoiceInputPresented = voicePresentation.statusLabel !== null;
   // An open draft stays visible; only a collapsed composer becomes a voice strip.
-  const isExpanded = isFocused || settingsSheetPresentation.keepsComposerExpanded;
+  // Mesura: a recording keeps the draft open, so it stays visible and editable while recording.
+  const isExpanded =
+    isFocused || settingsSheetPresentation.keepsComposerExpanded || voiceInput.isBusy;
   const showsCompactDictation = isVoiceInputPresented && !isExpanded;
   const isToolbarVisible = isExpanded || isVoiceInputPresented;
   const attachmentBlockReason = composerAttachmentUploadBlockReason({
@@ -709,6 +721,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           </View>
         ) : null}
 
+        <DictationDraftBanner draftKey={composerOwnerKey} />
         {modelUnavailable ? (
           <Pressable accessibilityRole="button" className="px-3 py-2" onPress={openSettings}>
             <Text className="text-xs text-foreground">Model unavailable. Open model settings.</Text>
@@ -797,7 +810,6 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                 ref={inputRef}
                 multiline
                 value={props.draftMessage}
-                readOnly={voiceInput.freezesEditor}
                 skills={composerMenu.skills}
                 selection={composerMenu.selection}
                 onChangeText={props.onChangeDraftMessage}
@@ -1013,14 +1025,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                   </View>
                 )}
                 <View className="shrink-0 flex-row items-center">
-                  <ComposerDictationPrimaryAction
-                    state={voiceInput.state}
-                    presentation={voicePresentation}
-                    isAvailable={voiceInput.isAvailable}
-                    onStart={voiceInput.start}
-                    onConfirm={voiceInput.stop}
-                    onCancel={voiceInput.cancel}
-                  />
+                  <ServerDictationPrimaryAction dictation={voiceInput} />
                   {showStopAction ? (
                     <ComposerActionButton
                       accessibilityLabel="Stop agent"

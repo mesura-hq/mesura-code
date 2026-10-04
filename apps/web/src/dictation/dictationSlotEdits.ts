@@ -1,19 +1,7 @@
 import { applyDictationSlotEdits, fillDictationSlotEdits } from "@t3tools/shared/dictationSlots";
 
-/** Puts a marker at `offset`, with a space on each side where a word would otherwise touch it. */
-export function insertDictationSlotAt(text: string, offset: number, slot: string): string {
-  const at = Math.max(0, Math.min(text.length, offset));
-  const before = text.slice(0, at);
-  const after = text.slice(at);
-  const leading = before.length > 0 && !/\s$/.test(before) ? " " : "";
-  const trailing = after.length > 0 && !/^\s/.test(after) ? " " : "";
-  return `${before}${leading}${slot}${trailing}${after}`;
-}
-
-/** Appends a marker at the end of a draft, one space after any text already there. */
-export function appendDictationSlot(prompt: string, slot: string): string {
-  return insertDictationSlotAt(prompt, prompt.length, slot);
-}
+// Shared with mobile; re-exported so web callers keep their import path.
+export { appendDictationSlot, insertDictationSlotAt } from "@t3tools/shared/dictationSlots";
 
 /**
  * Fills the marker for `jobId` and carries an expanded caret offset through every edit the fill
