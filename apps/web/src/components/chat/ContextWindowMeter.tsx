@@ -2,8 +2,10 @@ import { Button } from "../ui/button";
 import {
   type ContextWindowSnapshot,
   deriveContextWindowSegments,
+  formatContextWindowAccessibilityLabel,
   formatContextWindowIndicatorLabels,
   formatContextWindowTokens,
+  formatContextWindowUsedPercentage,
 } from "~/lib/contextWindow";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { formatContextWindowCompactionMessage } from "./ContextWindowMeter.logic";
@@ -11,16 +13,6 @@ import { Minimize2Icon } from "lucide-react";
 import { composerFloatingLayerProps } from "./composerEventScope";
 import { ContextWindowRequestBreakdown } from "./ContextWindowRequestBreakdown";
 import { ContextWindowSegmentedBar, ContextWindowSegmentedRing } from "./ContextWindowSegments";
-
-function formatPercentage(value: number | null): string | null {
-  if (value === null || !Number.isFinite(value)) {
-    return null;
-  }
-  if (value < 10) {
-    return `${value.toFixed(1).replace(/\.0$/, "")}%`;
-  }
-  return `${Math.round(value)}%`;
-}
 
 export function ContextWindowMeter(props: {
   usage: ContextWindowSnapshot;
@@ -30,7 +22,7 @@ export function ContextWindowMeter(props: {
   compactDisabledReason?: string | null | undefined;
 }) {
   const { usage, modelDisplayName, onCompact, compactDisabled, compactDisabledReason } = props;
-  const usedPercentage = formatPercentage(usage.usedPercentage);
+  const usedPercentage = formatContextWindowUsedPercentage(usage.usedPercentage);
   const normalizedPercentage = Math.max(0, Math.min(100, usage.usedPercentage ?? 0));
   const radius = 9.75;
   const circumference = 2 * Math.PI * radius;
@@ -55,11 +47,7 @@ export function ContextWindowMeter(props: {
             size="xs"
             variant="ghost-muted"
             className="h-7 gap-1 rounded-full px-1.5 text-[11px] tabular-nums hover:text-muted-foreground data-pressed:text-muted-foreground sm:h-7 sm:text-[11px]"
-            aria-label={
-              usage.maxTokens !== null && usedPercentage
-                ? `Context window ${usedPercentage} used`
-                : `Context window ${formatContextWindowTokens(usage.usedTokens)} tokens used`
-            }
+            aria-label={formatContextWindowAccessibilityLabel(usage)}
           >
             <span
               className="font-medium"

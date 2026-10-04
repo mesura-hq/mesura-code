@@ -126,6 +126,13 @@ import {
   useThreadSettingsSheetPresentation,
   type NavigationWithFinishTransitioning,
 } from "./use-thread-settings-sheet-presentation";
+import { ContextWindowDetailsSheet } from "./ContextWindowDetailsSheet";
+import { ContextWindowIndicator } from "./ContextWindowIndicator";
+import {
+  isContextWindowCompactDisabled,
+  shouldShowContextWindowIndicator,
+} from "./contextWindowIndicatorState";
+import { useSelectedThreadContextWindow } from "./useSelectedThreadContextWindow";
 
 /**
  * Height of the collapsed composer (pill + vertical padding, excluding safe-area inset).
@@ -431,6 +438,20 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     voiceInput.elapsedSeconds,
   );
   const isVoiceInputPresented = voicePresentation.statusLabel !== null;
+  const contextWindowSnapshot = useSelectedThreadContextWindow(props.selectedThread.id);
+  const [isContextWindowSheetOpen, setIsContextWindowSheetOpen] = useState(false);
+  const showsContextWindow = shouldShowContextWindowIndicator({
+    snapshot: contextWindowSnapshot,
+    threadId: props.selectedThread.id,
+    providerReportsContextWindow: selectedProviderStatus
+      ? selectedProviderStatus.reportsContextWindow === true
+      : null,
+    isVoiceInputPresented,
+  });
+  const contextWindowCompactDisabled = isContextWindowCompactDisabled({
+    hasCompactableConversation: props.hasCompactableConversation,
+    sessionStatus: props.selectedThread.session?.status ?? null,
+  });
   // An open draft stays visible; only a collapsed composer becomes a voice strip.
   const isExpanded = isFocused || settingsSheetPresentation.keepsComposerExpanded;
   const showsCompactDictation = isVoiceInputPresented && !isExpanded;
@@ -924,6 +945,13 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
             ) : null}
             {!isExpanded ? (
               <View className="flex-row items-center">
+                {showsContextWindow && contextWindowSnapshot ? (
+                  <ContextWindowIndicator
+                    snapshot={contextWindowSnapshot}
+                    variant="ring"
+                    onPress={() => setIsContextWindowSheetOpen(true)}
+                  />
+                ) : null}
                 <ComposerDictationStartAction
                   state={voiceInput.state}
                   isAvailable={voiceInput.isAvailable}
@@ -1013,6 +1041,13 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                   </View>
                 )}
                 <View className="shrink-0 flex-row items-center">
+                  {showsContextWindow && contextWindowSnapshot ? (
+                    <ContextWindowIndicator
+                      snapshot={contextWindowSnapshot}
+                      variant="pill"
+                      onPress={() => setIsContextWindowSheetOpen(true)}
+                    />
+                  ) : null}
                   <ComposerDictationPrimaryAction
                     state={voiceInput.state}
                     presentation={voicePresentation}
@@ -1046,6 +1081,22 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
 
       <VideoPreviewModal source={previewVideo} onRequestClose={closePreview} />
       <FilePreviewModal source={previewFile} onRequestClose={closePreview} />
+      {isContextWindowSheetOpen && contextWindowSnapshot ? (
+        <ContextWindowDetailsSheet
+          snapshot={contextWindowSnapshot}
+          onClose={() => setIsContextWindowSheetOpen(false)}
+          onCompact={
+            selectedProviderStatus?.nativeContextCompaction === true
+              ? () => {
+                  if (contextWindowCompactDisabled) return;
+                  setIsContextWindowSheetOpen(false);
+                  void props.onCompactContext();
+                }
+              : undefined
+          }
+          compactDisabled={contextWindowCompactDisabled}
+        />
+      ) : null}
     </Animated.View>
   );
 });

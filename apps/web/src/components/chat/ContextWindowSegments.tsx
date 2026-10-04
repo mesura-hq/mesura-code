@@ -1,4 +1,10 @@
-import type { ContextWindowSegment, ContextWindowSegmentKind } from "~/lib/contextWindow";
+import {
+  CONTEXT_WINDOW_RING_CIRCUMFERENCE,
+  CONTEXT_WINDOW_RING_RADIUS,
+  type ContextWindowSegment,
+  type ContextWindowSegmentKind,
+  deriveContextWindowRingArcs,
+} from "~/lib/contextWindow";
 
 /** Ring, bar and legend colours, one per segment kind. */
 const CONTEXT_WINDOW_SEGMENT_COLORS: Readonly<Record<ContextWindowSegmentKind, string>> = {
@@ -9,11 +15,6 @@ const CONTEXT_WINDOW_SEGMENT_COLORS: Readonly<Record<ContextWindowSegmentKind, s
   output: "var(--color-violet-500)",
 };
 
-const RING_RADIUS = 9.75;
-const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
-/** Gap between neighbouring arcs, in SVG units, so adjacent colours stay distinct. */
-const RING_SEGMENT_GAP = 0.9;
-
 /**
  * The composer ring, filled clockwise from the top with one arc per segment.
  * Arcs are drawn to true scale: a segment smaller than the gap is not drawn.
@@ -21,14 +22,7 @@ const RING_SEGMENT_GAP = 0.9;
 export function ContextWindowSegmentedRing(props: {
   segments: ReadonlyArray<ContextWindowSegment>;
 }) {
-  let offset = 0;
-  const arcs = props.segments.map((segment) => {
-    const length = segment.fraction * RING_CIRCUMFERENCE;
-    const start = offset;
-    offset += length;
-    const gap = props.segments.length > 1 ? RING_SEGMENT_GAP : 0;
-    return { segment, start, visibleLength: Math.max(0, length - gap) };
-  });
+  const arcs = deriveContextWindowRingArcs(props.segments);
 
   return (
     <svg
@@ -39,26 +33,24 @@ export function ContextWindowSegmentedRing(props: {
       <circle
         cx="12"
         cy="12"
-        r={RING_RADIUS}
+        r={CONTEXT_WINDOW_RING_RADIUS}
         fill="none"
         stroke="color-mix(in oklab, var(--color-muted-foreground) 24%, transparent)"
         strokeWidth="3"
       />
-      {arcs
-        .filter((arc) => arc.visibleLength > 0)
-        .map((arc) => (
-          <circle
-            key={arc.segment.kind}
-            cx="12"
-            cy="12"
-            r={RING_RADIUS}
-            fill="none"
-            stroke={CONTEXT_WINDOW_SEGMENT_COLORS[arc.segment.kind]}
-            strokeWidth="3"
-            strokeDasharray={`${arc.visibleLength} ${RING_CIRCUMFERENCE}`}
-            strokeDashoffset={-arc.start}
-          />
-        ))}
+      {arcs.map((arc) => (
+        <circle
+          key={arc.kind}
+          cx="12"
+          cy="12"
+          r={CONTEXT_WINDOW_RING_RADIUS}
+          fill="none"
+          stroke={CONTEXT_WINDOW_SEGMENT_COLORS[arc.kind]}
+          strokeWidth="3"
+          strokeDasharray={`${arc.visibleLength} ${CONTEXT_WINDOW_RING_CIRCUMFERENCE}`}
+          strokeDashoffset={-arc.start}
+        />
+      ))}
     </svg>
   );
 }

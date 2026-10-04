@@ -1,11 +1,13 @@
 import {
-  COLD_CACHE_PERCENTAGE,
+  CONTEXT_WINDOW_COLD_CACHE_MESSAGE,
   type ContextWindowSegmentKind,
   type ContextWindowSnapshot,
+  deriveContextWindowCacheSplit,
   deriveContextWindowRequestBreakdown,
   deriveContextWindowRequestSegments,
   formatContextWindowCachedPercentage,
   formatContextWindowTokens,
+  isContextWindowCacheCold,
 } from "~/lib/contextWindow";
 import { ContextWindowSegmentDot, ContextWindowSegmentedBar } from "./ContextWindowSegments";
 
@@ -37,26 +39,8 @@ export function ContextWindowRequestBreakdown(props: { usage: ContextWindowSnaps
     return null;
   }
   const requestSegments = deriveContextWindowRequestSegments(props.usage);
-  const isCacheCold =
-    breakdown.cachedPercentage !== null && breakdown.cachedPercentage < COLD_CACHE_PERCENTAGE;
-  const cacheParts: ReadonlyArray<{ kind: ContextWindowSegmentKind; text: string }> =
-    breakdown.cacheReadTokens === null
-      ? []
-      : [
-          {
-            kind: "cacheRead",
-            text: `${breakdown.cacheWriteTokens === null ? "cached" : "cache read"} ${formatContextWindowTokens(breakdown.cacheReadTokens)}`,
-          },
-          ...(breakdown.cacheWriteTokens === null
-            ? []
-            : [
-                {
-                  kind: "cacheWrite" as const,
-                  text: `write ${formatContextWindowTokens(breakdown.cacheWriteTokens)}`,
-                },
-              ]),
-          { kind: "uncached", text: `new ${formatContextWindowTokens(breakdown.uncachedTokens)}` },
-        ];
+  const isCacheCold = isContextWindowCacheCold(breakdown);
+  const cacheParts = deriveContextWindowCacheSplit(breakdown);
 
   return (
     <div className="mt-1 flex flex-col gap-1 border-t border-border/60 pt-2">
@@ -101,7 +85,7 @@ export function ContextWindowRequestBreakdown(props: { usage: ContextWindowSnaps
           className="text-pretty text-[11px] leading-4"
           style={{ color: "var(--color-warning)" }}
         >
-          Cache was cold: this request paid full price for most of its input.
+          {CONTEXT_WINDOW_COLD_CACHE_MESSAGE}
         </div>
       ) : null}
     </div>
