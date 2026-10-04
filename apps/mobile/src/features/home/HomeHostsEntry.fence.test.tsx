@@ -43,6 +43,10 @@ vi.mock("../../native/StackHeader", () => ({
   NativeHeaderToolbar: { Button: () => null },
 }));
 vi.mock("../../state/entities", () => ({ useProjects: () => [], useThreadShells: () => [] }));
+vi.mock(
+  "../../state/orchestration",
+  async () => (await import("./homeRouteTestDoubles")).orchestrationBoundary,
+);
 vi.mock("../../state/use-pending-new-tasks", () => ({ usePendingNewTasks: () => [] }));
 vi.mock("../../state/workspace", () => ({
   useWorkspaceState: () => ({ environments: [], state: { hasReadyEnvironment: true } }),
