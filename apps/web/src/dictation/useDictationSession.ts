@@ -10,7 +10,7 @@ import { resolveShortcutCommand } from "~/keybindings";
 import { isTerminalFocused } from "~/lib/terminalFocus";
 import { useDictationJobs } from "~/state/dictation";
 import { primaryServerKeybindingsAtom } from "~/state/server";
-import type { DirectedSubmissionContext } from "~/symmetria/directedComposerSubmission";
+import type { DirectedSubmissionContext } from "./directedComposerSubmission";
 import {
   deliverDictationJobs,
   isDictationKeybindingCommand,

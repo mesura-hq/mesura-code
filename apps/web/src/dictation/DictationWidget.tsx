@@ -2,10 +2,13 @@ import { CheckIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { cn } from "~/lib/utils";
-import { CenterOutWaveform } from "~/symmetria/CenterOutWaveform";
-import { formatDictationElapsed } from "~/symmetria/dictationPresentation";
-import { MaterialDictationModeIcon } from "~/symmetria/MaterialDictationModeIcon";
-import { recordedDictationMs } from "./dictationSessionStore";
+import { CenterOutWaveform } from "./CenterOutWaveform";
+import {
+  dictationRecordedElapsedMs,
+  dictationRecordingPhase,
+  formatDictationElapsed,
+} from "./dictationPresentation";
+import { MaterialDictationModeIcon } from "./MaterialDictationModeIcon";
 import type { DictationWidgetSnapshot } from "./dictationWidgetState";
 import { prefersReducedMotion } from "./reducedMotion";
 
@@ -18,7 +21,8 @@ export function DictationWidget({ snapshot }: { readonly snapshot: DictationWidg
   const { session, mode, target } = snapshot;
   let body: React.ReactNode = null;
   if (session) {
-    const paused = session.runningSince === null;
+    const phase = dictationRecordingPhase(session);
+    const paused = phase === "paused";
     body = (
       <>
         <span
@@ -28,12 +32,12 @@ export function DictationWidget({ snapshot }: { readonly snapshot: DictationWidg
           )}
         />
         <span className="font-mono text-xs tabular-nums text-zinc-300">
-          {formatDictationElapsed(recordedDictationMs(session, session.sampledAt))}
+          {formatDictationElapsed(dictationRecordedElapsedMs(session))}
         </span>
         <div className="flex w-28">
           <CenterOutWaveform
             sessionId={session.sessionId}
-            phase={paused ? "paused" : "recording"}
+            phase={phase}
             audioLevel={session.level}
             active
             reducedMotion={prefersReducedMotion()}

@@ -1,15 +1,10 @@
-import {
-  SymmetriaDictationSessionId,
-  type SymmetriaDictationSession,
-} from "@symmetria/broker-contract";
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { MicIcon } from "lucide-react";
 import { memo } from "react";
 
 import { Button } from "~/components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { cn } from "~/lib/utils";
-import { DictationStripBanner } from "~/symmetria/DictationStrip";
 import {
   cancelDictation,
   cycleDictationMode,
@@ -18,11 +13,8 @@ import {
   stopDictation,
   toggleDictationPause,
 } from "./dictationController";
-import {
-  recordedDictationMs,
-  type DictationRecordingSession,
-  useDictationSessionStore,
-} from "./dictationSessionStore";
+import { useDictationSessionStore } from "./dictationSessionStore";
+import { DictationStripBanner, type DictationStripAction } from "./DictationStripBanner";
 import { useQuestionSendWhenReady } from "./questionSendWhenReady";
 import { prefersReducedMotion } from "./reducedMotion";
 import { useDesktopDictationBridge } from "./useDesktopDictationBridge";
@@ -83,33 +75,7 @@ export const DictationStartButton = memo(function DictationStartButton(props: {
   );
 });
 
-// HACK: the shipped strip still reads a Symmetria Shell session, so this recording is dressed
-// up as one, as the prototype did. Remove once phase 8 moves DictationStripBanner out of
-// `symmetria/` and gives it a Mesura session type.
-const BANNER_TARGET = {
-  kind: "thread",
-  environmentId: EnvironmentId.make("mesura-dictation"),
-  threadId: ThreadId.make("mesura-dictation"),
-} as const;
-
-function toBannerSession(session: DictationRecordingSession): SymmetriaDictationSession {
-  return {
-    protocolVersion: { major: 1, minor: 5 },
-    sessionId: SymmetriaDictationSessionId.make(session.sessionId),
-    target: BANNER_TARGET,
-    source: "mesura",
-    phase: session.runningSince === null ? "paused" : "recording",
-    mode: session.mode,
-    projectName: null,
-    startedAt: new Date(session.startedAt).toISOString(),
-    elapsedMs: Math.floor(recordedDictationMs(session, session.sampledAt)),
-    audioLevel: session.level,
-    graceRemainingMs: null,
-    presentation: { mesuraOwnsPresentation: true, leaseExpiresAt: null },
-  };
-}
-
-const STRIP_CONTROLS: Partial<Record<string, () => void>> = {
+const STRIP_CONTROLS: Record<DictationStripAction, () => void> = {
   pause: toggleDictationPause,
   resume: toggleDictationPause,
   restart: () => void restartDictation(),
@@ -123,11 +89,10 @@ export const DictationRecordingStrip = memo(function DictationRecordingStrip() {
   if (!session) return null;
   return (
     <DictationStripBanner
-      session={toBannerSession(session)}
+      session={session}
       reducedMotion={prefersReducedMotion()}
-      onControl={(action) => STRIP_CONTROLS[action]?.()}
+      onControl={(action) => STRIP_CONTROLS[action]()}
       onChangeMode={cycleDictationMode}
-      onDismiss={() => undefined}
     />
   );
 });

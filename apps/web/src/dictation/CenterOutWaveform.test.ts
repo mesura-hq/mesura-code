@@ -93,7 +93,7 @@ it("redraws audio updates without recurring motion when reduced motion is enable
     shouldDrawStaticAudioUpdate({ active: false, phase: "recording", reducedMotion: true }),
   );
   assert.isFalse(
-    shouldDrawStaticAudioUpdate({ active: true, phase: "processing", reducedMotion: true }),
+    shouldDrawStaticAudioUpdate({ active: true, phase: "paused", reducedMotion: true }),
   );
 });
 

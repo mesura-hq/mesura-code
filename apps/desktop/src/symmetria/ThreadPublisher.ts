@@ -76,8 +76,7 @@ export const make = Effect.gen(function* () {
     // lives for the whole session — so an accept-time failure long after
     // startup would take the entire main process down over the bar.
     // `listenOnPath` installs a listener for the bind only and removes it
-    // again, which leaves exactly that gap. Same reasoning, same shape, as the
-    // dictation socket's.
+    // again, which leaves exactly that gap.
     server.on("error", (error) => {
       runSync(logWarning("thread socket server error", { message: error.message }));
     });
@@ -98,7 +97,7 @@ export const make = Effect.gen(function* () {
 
   const started = yield* start.pipe(
     Effect.map((running) => Option.some(running)),
-    // Best-effort, for the same reason dictation is: a bind failure must never
+    // Best-effort: a bind failure must never
     // block startup. The bar is simply absent until the next launch, and every
     // other surface of the application is unaffected.
     Effect.catch((error) =>
@@ -109,13 +108,13 @@ export const make = Effect.gen(function* () {
     ),
   );
 
-  // ⚠ UNTESTED, and named here rather than left as a gap of unknown shape.
-  // This module has no test of its own: the two things it decides — that the
-  // handler is registered even when the bind failed, and that frames are
-  // dropped rather than queued in that state — would need the whole Effect
-  // layer stood up with a fake IPC and a fake socket. Everything the handler
-  // CALLS is covered (`parseFeedPush`, `createFeed`, `projectReadModel`), so
-  // what is uncovered is this wiring and nothing else.
+  // ⚠ PARTLY UNTESTED, and named here rather than left as a gap of unknown
+  // shape. `ThreadPublisher.test.ts` covers the happy path: the socket binds,
+  // this handler is registered, and a peer receives the snapshot. Not covered
+  // are the two bind-failure decisions — that the handler is still registered,
+  // and that frames are dropped rather than queued — which would need a socket
+  // path that cannot bind. Everything the handler CALLS is covered
+  // (`parseFeedPush`, `createFeed`, `projectReadModel`).
   //
   // Registered even when the bind failed. The renderer must not have to know
   // whether a socket came up, and an unhandled `invoke` channel rejects in the
@@ -127,8 +126,8 @@ export const make = Effect.gen(function* () {
       Effect.sync(() => {
         const push = parseFeedPush(raw);
         // A malformed push publishes nothing rather than half a world. It is
-        // dropped rather than thrown for the reason the dictation handler
-        // gives: a throw inside an IPC handler costs more than this feature.
+        // dropped rather than thrown: a throw inside an IPC handler costs more
+        // than this feature.
         if (push === null) return;
         const frames = feed.accept(push.generation, push.readModel);
         if (Option.isNone(started)) return;

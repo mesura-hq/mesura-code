@@ -154,9 +154,8 @@ export function createFeed(): Feed {
  * Reads what the renderer sent, refusing anything it cannot use.
  *
  * The renderer is our own code, but this is a process boundary and an IPC
- * payload is `unknown` on arrival. Refusing beats trusting for the same reason
- * the dictation socket parses its line: a malformed push should publish
- * nothing, not publish a half-built world.
+ * payload is `unknown` on arrival. Refusing beats trusting: a malformed push
+ * should publish nothing, not publish a half-built world.
  *
  * Deliberately shallow. It checks the shape the feed indexes on — a generation
  * string, and arrays whose entries carry the identifiers used as keys — and

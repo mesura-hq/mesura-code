@@ -9,7 +9,6 @@ import { exposeClerkBridge } from "@clerk/electron/preload";
 import { contextBridge, ipcRenderer, webFrame } from "electron";
 
 import * as IpcChannels from "./ipc/channels.ts";
-import { subscribeToOrderedRendererFrames } from "./symmetria/rendererFrameSubscription.ts";
 
 const SNAP_SHOT_EVENT_TYPES = new Set([
   "requested",
@@ -392,51 +391,6 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     },
   },
 } satisfies DesktopBridge);
-
-// Fork-owned bridge kept separate from upstream's DesktopBridge. Phase three
-// gives the renderer its typed facade when the coordinator starts consuming it.
-contextBridge.exposeInMainWorld("symmetriaDictationBridge", {
-  sendCommand: (command: unknown) =>
-    ipcRenderer.invoke(IpcChannels.DICTATION_COMMAND_CHANNEL, command),
-  resolveRequest: (requestId: string, result: unknown) =>
-    ipcRenderer.invoke(IpcChannels.RESOLVE_DICTATION_RENDERER_REQUEST_CHANNEL, {
-      requestId,
-      result,
-    }),
-  onRequest: (listener: (request: unknown) => void) => {
-    const wrappedListener = (_event: Electron.IpcRendererEvent, request: unknown) =>
-      listener(request);
-    ipcRenderer.on(IpcChannels.DICTATION_RENDERER_REQUEST_CHANNEL, wrappedListener);
-    return () =>
-      ipcRenderer.removeListener(IpcChannels.DICTATION_RENDERER_REQUEST_CHANNEL, wrappedListener);
-  },
-  subscribe: (listener: (snapshot: unknown) => void) =>
-    subscribeToOrderedRendererFrames({
-      load: () => ipcRenderer.invoke(IpcChannels.GET_DICTATION_SNAPSHOT_CHANNEL),
-      attach: (onFrame) => {
-        const wrappedListener = (_event: Electron.IpcRendererEvent, frame: unknown) => {
-          if (typeof frame !== "object" || frame === null) return;
-          const candidate = frame as Record<string, unknown>;
-          if (typeof candidate["revision"] !== "number") return;
-          onFrame(frame as Parameters<typeof onFrame>[0]);
-        };
-        ipcRenderer.on(IpcChannels.DICTATION_SNAPSHOT_CHANNEL, wrappedListener);
-        return () =>
-          ipcRenderer.removeListener(IpcChannels.DICTATION_SNAPSHOT_CHANNEL, wrappedListener);
-      },
-      listener,
-    }),
-  getShellAvailability: () =>
-    ipcRenderer.invoke(IpcChannels.GET_DICTATION_SHELL_AVAILABILITY_CHANNEL),
-  subscribeShellAvailability: (listener: (available: boolean) => void) => {
-    const wrappedListener = (_event: Electron.IpcRendererEvent, available: unknown) => {
-      if (typeof available === "boolean") listener(available);
-    };
-    ipcRenderer.on(IpcChannels.DICTATION_SHELL_AVAILABILITY_CHANNEL, wrappedListener);
-    return () =>
-      ipcRenderer.removeListener(IpcChannels.DICTATION_SHELL_AVAILABILITY_CHANNEL, wrappedListener);
-  },
-});
 
 // Mesura's own dictation, independent of Symmetria Shell: the `--dictation …` command line a
 // second launch forwards, and the state the floating widget window draws.

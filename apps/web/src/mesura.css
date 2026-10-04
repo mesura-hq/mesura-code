@@ -52,11 +52,9 @@
  */
 
 /**
- * The voice dictation strip.
- *
- * Only the confirmation pulse lives here. The strip's surface — glass, seam,
+ * The voice dictation strip has no rule here. Its surface — glass, seam,
  * outline, overlap — comes from upstream's `ComposerBanner.Attachment` and
- * `ComposerBanner.Root`, which `DictationStrip.tsx` renders directly.
+ * `ComposerBanner.Root`, which `DictationStripBanner.tsx` renders directly.
  *
  * Do not reintroduce a hand-styled surface for the strip. This file used to
  * carry a full copy of the attached-banner glass plus rules coupling into
@@ -66,36 +64,11 @@
  * present (`has-data-[composer-banner-surface=attached]:before:hidden`), which
  * left a see-through band in the strip's masked overlap. Rendering on the
  * upstream primitives removes the entire class of drift.
+ *
+ * The confirmation pulse that lived here keyed on Symmetria Shell's
+ * `delivering` and `confirming` phases. A recording in Mesura has only
+ * `recording` and `paused`, so the pulse went with the Shell link.
  */
-
-/* Confirms a dictated message reached the composer. Deliberately finite — two
-   alternating passes — because a looping animation would repaint forever. */
-.mesura-dictation-strip:is([data-phase="delivering"], [data-phase="confirming"])
-  [data-dictation-mode-control="true"] {
-  color: var(--primary);
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--primary) 22%, transparent),
-    0 0 18px color-mix(in srgb, var(--primary) 16%, transparent);
-  animation: mesura-dictation-confirmation 800ms ease-in-out 2 alternate;
-}
-
-@keyframes mesura-dictation-confirmation {
-  to {
-    transform: scale(1.08);
-    box-shadow:
-      0 0 0 1px color-mix(in srgb, var(--primary) 38%, transparent),
-      0 0 22px color-mix(in srgb, var(--primary) 24%, transparent);
-  }
-}
-
-/* Must repeat the pulse rule's exact selector: a media query adds no
-   specificity, so a shorter selector here loses to the pulse above. */
-@media (prefers-reduced-motion: reduce) {
-  .mesura-dictation-strip:is([data-phase="delivering"], [data-phase="confirming"])
-    [data-dictation-mode-control="true"] {
-    animation: none;
-  }
-}
 
 /* ── Which pane has the keyboard ────────────────────────────────────────
    One mark, two shapes, chosen by whether the pane has a row to light.

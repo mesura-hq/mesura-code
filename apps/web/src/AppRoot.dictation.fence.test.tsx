@@ -2030,3 +2030,36 @@ describe("dictation phase 6 repair: Retry from the marker", () => {
     ).toEqual([]);
   });
 });
+
+// Phase 8 removes Symmetria Shell's dictation link. The strip stops reading a
+// Shell session shape (the `HACK` in `dictation/DictationControls.tsx`), and the
+// question card stops keeping Shell's microphone (the `WORKAROUND` in
+// `InlinePendingUserInputCard.tsx`). "dictation phase 5 AC7" pins the card's
+// microphone on the server path; this pins the strip.
+describe("dictation phase 8 guards", () => {
+  it("dictation phase 8 guard: the composer strip shows a Mesura recording's phase, timer and mode", async () => {
+    await mountApp();
+    await startRecordingFromMicrophone();
+
+    const strips = document.querySelectorAll<HTMLElement>(".mesura-dictation-strip");
+    expect(strips).toHaveLength(1);
+    const strip = strips[0]!;
+    expect(strip.getAttribute("data-phase")).toBe("recording");
+    expect(strip.querySelector('[aria-label="Voice dictation: Recording"]')).not.toBeNull();
+    expect(strip.textContent).toMatch(/\d+:\d{2}/);
+    expect(strip.querySelector('[aria-label="Delivery mode: submit"]')).not.toBeNull();
+
+    await click(requireButton("Pause recording"));
+    expect(strip.getAttribute("data-phase")).toBe("paused");
+    expect(strip.querySelector('[aria-label="Voice dictation: Paused"]')).not.toBeNull();
+    await click(requireButton("Resume recording"));
+    expect(strip.getAttribute("data-phase")).toBe("recording");
+
+    await click(requireButton("Delivery mode: submit"));
+    expect(strip.querySelector('[aria-label="Delivery mode: submit"]')).toBeNull();
+    expect(strip.querySelector('[aria-label^="Delivery mode: "]')).not.toBeNull();
+
+    await stopRecordingFromStrip();
+    expect(document.querySelector(".mesura-dictation-strip")).toBeNull();
+  });
+});

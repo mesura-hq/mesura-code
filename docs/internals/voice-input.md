@@ -1,9 +1,12 @@
 # Voice input
 
+This page covers upstream's on-device voice input for iPhone. Mesura Code turns it
+off and uses environment-backed transcription instead, described in
+[dictation.md](./dictation.md); the code below stays in the tree.
+
 Transcription edits a composer draft. It does not submit an agent turn. Audio is
 temporary client input, and only normal message submission sends the resulting
-text. The current implementation transcribes locally on supported iOS devices;
-environment-backed transcription is not implemented.
+text. This implementation transcribes locally on supported iOS devices.
 
 The [shared controller](../../packages/client-runtime/src/voice-input/controller.ts)
 owns the operation while the client supplies capture and transcription. Preparation

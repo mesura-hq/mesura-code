@@ -8,7 +8,7 @@ import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { dictationEnvironment, useDictationJobs } from "~/state/dictation";
 import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
 import { useAtomCommand } from "~/state/use-atom-command";
-import { MaterialDictationModeIcon } from "~/symmetria/MaterialDictationModeIcon";
+import { MaterialDictationModeIcon } from "~/dictation/MaterialDictationModeIcon";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 import { Button } from "../ui/button";
 import {

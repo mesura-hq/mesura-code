@@ -30,7 +30,6 @@ import {
 } from "./SidebarStageBackdrop";
 import { useProjects, useThreadShells } from "../state/entities";
 import { useThreadFeed } from "../symmetria/useThreadFeed";
-import { useDictationBridge } from "../symmetria/useDictationBridge";
 import { DictationJobDelivery } from "../dictation/DictationControls";
 import {
   resolveInitialThreadSidebarWidth,
@@ -154,11 +153,6 @@ function SymmetriaThreadFeedRetention() {
   return null;
 }
 
-function SymmetriaDictationRetention() {
-  useDictationBridge();
-  return null;
-}
-
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const legacySidebarEnabled = useLegacySidebarEnabled();
@@ -246,7 +240,6 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       >
         <ProjectProjectionRetention />
         <SymmetriaThreadFeedRetention />
-        <SymmetriaDictationRetention />
         <DictationJobDelivery />
         <Sidebar
           side="left"

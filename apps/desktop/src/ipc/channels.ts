@@ -8,14 +8,6 @@ export const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
 export const OPEN_SYSTEM_SETTINGS_CHANNEL = "desktop:open-system-settings";
 export const PROBE_REMOTE_EDITORS_CHANNEL = "desktop:probe-remote-editors";
 export const MENU_ACTION_CHANNEL = "desktop:menu-action";
-export const DICTATION_RENDERER_REQUEST_CHANNEL = "desktop:dictation-renderer-request";
-export const RESOLVE_DICTATION_RENDERER_REQUEST_CHANNEL =
-  "desktop:resolve-dictation-renderer-request";
-export const GET_DICTATION_SNAPSHOT_CHANNEL = "desktop:get-dictation-snapshot";
-export const GET_DICTATION_SHELL_AVAILABILITY_CHANNEL = "desktop:get-dictation-shell-availability";
-export const DICTATION_COMMAND_CHANNEL = "desktop:dictation-command";
-export const DICTATION_SNAPSHOT_CHANNEL = "desktop:dictation-snapshot";
-export const DICTATION_SHELL_AVAILABILITY_CHANNEL = "desktop:dictation-shell-availability";
 // Mesura's own dictation, decoupled from Symmetria Shell. Main→renderer: a
 // `--dictation …` command line a second launch of the binary forwarded.
 export const DICTATION_COMMAND_LINE_CHANNEL = "desktop:dictation-command-line";

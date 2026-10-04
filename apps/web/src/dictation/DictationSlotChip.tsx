@@ -1,7 +1,7 @@
 import { RotateCcwIcon, XIcon } from "lucide-react";
 
 import { useDictationJobs } from "~/state/dictation";
-import { MaterialDictationModeIcon } from "~/symmetria/MaterialDictationModeIcon";
+import { MaterialDictationModeIcon } from "./MaterialDictationModeIcon";
 import { discardDictationJob, retryDictationJob } from "./dictationController";
 import { useOwnDictationJobsStore } from "./dictationSessionStore";
 import "./dictationSlot.css";

@@ -1,8 +1,8 @@
-import type { SymmetriaDictationMode } from "@symmetria/broker-contract";
+import type { DictationMode } from "@t3tools/contracts";
 
 import { cn } from "~/lib/utils";
 
-const MATERIAL_SYMBOL_PATHS: Record<SymmetriaDictationMode, string> = {
+const MATERIAL_SYMBOL_PATHS: Record<DictationMode, string> = {
   clipboard:
     "M360 240Q327 240 303.5 263.5Q280 287 280 320V800Q280 833 303.5 856.5Q327 880 360 880H720Q753 880 776.5 856.5Q800 833 800 800V320Q800 287 776.5 263.5Q753 240 720 240ZM360 320H720V800H360ZM200 80Q167 80 143.5 103.5Q120 127 120 160V720H200V160H640V80Z",
   inject:
@@ -10,16 +10,13 @@ const MATERIAL_SYMBOL_PATHS: Record<SymmetriaDictationMode, string> = {
   submit: "M120 160V800L880 480ZM200 280 674 480 200 680V540L440 480L200 420Z",
 };
 
-const MATERIAL_SYMBOL_NAMES: Record<SymmetriaDictationMode, string> = {
+const MATERIAL_SYMBOL_NAMES: Record<DictationMode, string> = {
   clipboard: "content_copy",
   inject: "input",
   submit: "send",
 };
 
-export function MaterialDictationModeIcon(props: {
-  mode: SymmetriaDictationMode;
-  className?: string;
-}) {
+export function MaterialDictationModeIcon(props: { mode: DictationMode; className?: string }) {
   return (
     <svg
       aria-hidden="true"

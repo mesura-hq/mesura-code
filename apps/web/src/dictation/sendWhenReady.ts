@@ -11,7 +11,7 @@ import { randomUUID } from "~/lib/utils";
 import {
   submitDirectedDictation,
   type DirectedSubmissionContext,
-} from "~/symmetria/directedComposerSubmission";
+} from "./directedComposerSubmission";
 
 /**
  * Send-when-ready: a draft armed by a recording finished in send mode, or by Send pressed while

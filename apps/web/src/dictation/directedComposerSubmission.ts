@@ -17,7 +17,12 @@ import { runAtomCommand } from "@t3tools/client-runtime/state/runtime";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { serializeLegacyContextMessage } from "@t3tools/shared/composerContextLegacySend";
 
-import { useComposerDraftStore, DraftId, type DraftSessionState } from "../composerDraftStore";
+import {
+  useComposerDraftStore,
+  DraftId,
+  type ComposerThreadTarget,
+  type DraftSessionState,
+} from "../composerDraftStore";
 import { deriveComposerSendState, readFileAsDataUrl } from "../components/ChatView.logic";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentProjects } from "../state/projects";
@@ -36,7 +41,6 @@ import {
   getUploadedAttachments,
   startAttachmentUpload,
 } from "../lib/attachmentUploadQueue";
-import type { ComposerDictationTarget } from "./dictationTarget";
 
 export type DirectedComposerPendingAction =
   | { readonly kind: "composer" }
@@ -114,8 +118,8 @@ export function hasValidDirectedWorktreeSelection(
 }
 
 export function consumeDirectedComposerDraft(
-  target: ComposerDictationTarget,
-  sourceTarget: ComposerDictationTarget | null | undefined,
+  target: ComposerThreadTarget,
+  sourceTarget: ComposerThreadTarget | null | undefined,
 ): void {
   useComposerDraftStore.getState().clearComposerContent(target);
   if (sourceTarget !== undefined && sourceTarget !== null && sourceTarget !== target) {
@@ -142,7 +146,7 @@ const draftAttachmentIds = (draft: DirectedComposerDraft) =>
  * composer while the send was in flight, so neither is lost.
  */
 function restoreDirectedComposerDraft(
-  target: ComposerDictationTarget,
+  target: ComposerThreadTarget,
   sent: DirectedComposerDraft,
 ): void {
   const store = useComposerDraftStore.getState();
@@ -285,11 +289,11 @@ export async function submitDirectedDictation(input: {
   /** Identifies the send: a repeat with the same `commandId` starts no second turn. */
   readonly command: { readonly commandId: CommandId; readonly createdAt: string };
   readonly target: Exclude<DictationTarget, null>;
-  readonly composerTarget: ComposerDictationTarget;
+  readonly composerTarget: ComposerThreadTarget;
   readonly prompt: string;
   readonly messageId: MessageId;
   readonly submissionContext?: DirectedSubmissionContext | null;
-  readonly sourceComposerTarget?: ComposerDictationTarget | null;
+  readonly sourceComposerTarget?: ComposerThreadTarget | null;
 }): Promise<DirectedComposerSubmissionResult> {
   const threadRef =
     typeof input.composerTarget === "string"

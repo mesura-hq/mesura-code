@@ -1,8 +1,10 @@
-import type { SymmetriaDictationPhase } from "@symmetria/broker-contract";
 import { memo, useEffect, useRef } from "react";
 
 import { cn } from "~/lib/utils";
-import { shouldAnimateDictationWaveform } from "./dictationPresentation";
+import {
+  shouldAnimateDictationWaveform,
+  type DictationRecordingPhase,
+} from "./dictationPresentation";
 
 const HALF_BAR_COUNT = 18;
 const NOISE_FLOOR = 0.025;
@@ -30,13 +32,6 @@ function normalizedAmplitude(audioLevel: number): number {
 
 export function waveformSmoothingAlpha(deltaMs: number, timeConstantMs: number): number {
   return 1 - Math.exp(-Math.max(0, deltaMs) / timeConstantMs);
-}
-
-function processingAmplitude(distance: number, timestamp: number): number {
-  const spatialPhase = (distance / Math.max(1, HALF_BAR_COUNT - 1)) * Math.PI;
-  const wavePosition = spatialPhase - timestamp * 0.0065;
-  const primaryWave = 0.5 + 0.5 * Math.sin(wavePosition);
-  return Math.max(0, Math.min(1, primaryWave + Math.sin(wavePosition * 2) * 0.1));
 }
 
 export function recordingAmplitudeAtDistance(input: {
@@ -96,7 +91,7 @@ export function isRecordingWaveformSettled(input: {
 
 export function shouldDrawStaticAudioUpdate(input: {
   readonly active: boolean;
-  readonly phase: SymmetriaDictationPhase;
+  readonly phase: DictationRecordingPhase;
   readonly reducedMotion: boolean;
 }): boolean {
   return input.active && input.phase === "recording" && input.reducedMotion;
@@ -112,7 +107,7 @@ export function mirroredBarXPositions(centerX: number, distance: number) {
 
 export const CenterOutWaveform = memo(function CenterOutWaveform(props: {
   sessionId: string;
-  phase: SymmetriaDictationPhase;
+  phase: DictationRecordingPhase;
   audioLevel: number | null;
   active: boolean;
   reducedMotion: boolean;
@@ -196,15 +191,12 @@ export const CenterOutWaveform = memo(function CenterOutWaveform(props: {
       for (let distance = 0; distance < HALF_BAR_COUNT; distance += 1) {
         const edgeProgress = distance / edgeDenominator;
         const positionFactor = 1 - edgeProgress * 0.42;
-        const amplitude =
-          props.phase === "processing" || props.phase === "grace"
-            ? processingAmplitude(distance, timestamp)
-            : recordingAmplitudeAtDistance({
-                history: historyRef.current,
-                currentAmplitude: currentAmplitudeRef.current,
-                distance,
-                sampleProgress,
-              });
+        const amplitude = recordingAmplitudeAtDistance({
+          history: historyRef.current,
+          currentAmplitude: currentAmplitudeRef.current,
+          distance,
+          sampleProgress,
+        });
         const barHeight = Math.max(
           MIN_BAR_HEIGHT,
           Math.min(

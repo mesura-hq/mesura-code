@@ -1,10 +1,4 @@
-import { readThread } from "../../state/entities";
-import { derivePendingRequests } from "@t3tools/client-runtime/pending-requests";
 import type { PendingUserInputError } from "../../pendingUserInputDraftStore";
-import {
-  SymmetriaComposerDraftId,
-  type SymmetriaDictationTarget,
-} from "@symmetria/broker-contract";
 import { memo, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { CheckIcon, PaperclipIcon, XIcon } from "lucide-react";
 import type {
@@ -40,9 +34,6 @@ import {
   startAttachmentUpload,
   useAttachmentUploadStore,
 } from "../../lib/attachmentUploadQueue";
-import { dictationCoordinator } from "../../symmetria/dictationCoordinator";
-import { DictationMicrophoneButton } from "../../symmetria/DictationStrip";
-import { useDictationSessionStore as useShellDictationSessionStore } from "../../symmetria/dictationSessionStore";
 import { DictationStartButton } from "../../dictation/DictationControls";
 import { registerDictationComposer } from "../../dictation/dictationController";
 import {
@@ -67,11 +58,6 @@ export interface InlinePendingUserInputContext {
   onQuestionFocused?: () => void;
   unavailable: boolean;
   respondingRequestIds: ReadonlyArray<ApprovalRequestId>;
-  onDictationTargetChange: (
-    target: SymmetriaDictationTarget | null,
-    previous?: SymmetriaDictationTarget,
-  ) => void;
-  isResponding: (requestId: ApprovalRequestId) => boolean;
   onRespond: (requestId: ApprovalRequestId, answers: Record<string, unknown>) => Promise<boolean>;
   onDismiss: (requestId: ApprovalRequestId) => Promise<boolean>;
 }
@@ -136,37 +122,18 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
   const focusQuestion = (question: UserInputQuestion) => {
     unregisterDictation.current?.();
     unregisterDictation.current = null;
-    if (question.allowCustomAnswer === false) {
-      dictationCoordinator.clearQuestionTarget();
-      context.onDictationTargetChange(null);
-      return;
-    }
-    const target: SymmetriaDictationTarget = {
-      kind: "draft",
-      draftId: SymmetriaComposerDraftId.make(
-        questionAttachmentDraftId(environmentId, threadId, request.requestId, question.id),
-      ),
-      futureThreadRef: { environmentId, threadId },
-    };
-    context.onDictationTargetChange(target);
-    // Row mount state rejected delayed transcripts after scrolling or navigation.
-    // The scoped thread data, not the virtual row, owns the reservation lifetime.
-    const readQuestion = () => {
-      const thread = readThread({ environmentId, threadId });
-      if (!thread || context.isResponding(request.requestId)) return null;
-      return (
-        derivePendingRequests(thread.activities)
-          .userInputs.find((entry) => entry.requestId === request.requestId)
-          ?.questions.find(
-            (entry) => entry.id === question.id && entry.allowCustomAnswer !== false,
-          ) ?? null
-      );
-    };
-    // Mesura's own recording drops its marker into this answer while the question has focus.
-    const unregisterRecording = registerDictationComposer({
+    if (question.allowCustomAnswer === false) return;
+    const draftId = questionAttachmentDraftId(
       environmentId,
-      target: { kind: "draft", draftId: target.draftId },
-      draftTarget: DraftId.make(target.draftId),
+      threadId,
+      request.requestId,
+      question.id,
+    );
+    // A recording drops its marker into this answer while the question has focus.
+    unregisterDictation.current = registerDictationComposer({
+      environmentId,
+      target: { kind: "draft", draftId },
+      draftTarget: DraftId.make(draftId),
       // At the field's caret, read when the recording stops; at the end once it is gone.
       insertSlot: (slot) => {
         const field = fields.current.get(question.id);
@@ -178,23 +145,6 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
       },
       question: { requestKey: key, questionId: question.id },
     });
-    const unregister = dictationCoordinator.registerComposer({
-      target,
-      projectName: null,
-      handle: null,
-      questionTarget: {
-        isAvailable: () => readQuestion() !== null,
-        append: (commandId, text) =>
-          usePendingUserInputDraftStore
-            .getState()
-            .appendTranscript(key, readQuestion()!, commandId, text),
-      },
-    });
-    unregisterDictation.current = () => {
-      unregisterRecording();
-      unregister();
-      context.onDictationTargetChange(null, target);
-    };
   };
 
   const focusAnswerField = (questionId: string | undefined) => {
@@ -387,10 +337,6 @@ function QuestionField({
   const textarea = useRef<HTMLTextAreaElement | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
-  // WORKAROUND: while Symmetria Shell's bridge answers, the card keeps Shell's microphone so its
-  // reservation flow keeps working; otherwise the card records in this window. Remove with the
-  // Shell link in phase 8 of the STT redesign, leaving only DictationStartButton.
-  const shellDictationAvailable = useShellDictationSessionStore((state) => state.bridgeAvailable);
   const target = questionAttachmentDraftId(
     context.environmentId,
     context.threadId,
@@ -570,24 +516,12 @@ function QuestionField({
                 </Tooltip>
               </>
             ) : null}
-            {shellDictationAvailable ? (
-              <DictationMicrophoneButton
-                compact
-                disabled={disabled || context.unavailable}
-                targetLabel={question.header || question.question}
-                onBeforeStart={(reservation) => {
-                  onFocus();
-                  return dictationCoordinator.reserve(reservation);
-                }}
-              />
-            ) : (
-              <DictationStartButton
-                compact
-                disabled={disabled || context.unavailable}
-                targetLabel={question.header || question.question}
-                onBeforeStart={onFocus}
-              />
-            )}
+            <DictationStartButton
+              compact
+              disabled={disabled || context.unavailable}
+              targetLabel={question.header || question.question}
+              onBeforeStart={onFocus}
+            />
           </div>
         ) : null}
       </div>

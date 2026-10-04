@@ -1,5 +1,4 @@
 import { createPendingUserInputProjection } from "../pendingUserInput";
-import type { SymmetriaDictationTarget } from "@symmetria/broker-contract";
 import { usePendingUserInputDraftStore } from "../pendingUserInputDraftStore";
 import { useRepositoryDefaults } from "~/lib/t3ProjectFileDefaults";
 import { applyImplicitDraftModelDefaults } from "~/lib/chatThreadActions";
@@ -302,13 +301,10 @@ import {
   DraftId,
 } from "../composerDraftStore";
 import { formatOutgoingComposerPrompt } from "./chat/composerSubmission";
-import { dictationCoordinator } from "../symmetria/dictationCoordinator";
-import { captureDictationTarget, dictationTargetsEqual } from "../symmetria/dictationTarget";
 import {
   buildDirectedTurnStartInput,
   type DirectedSubmissionContext,
-} from "../symmetria/directedComposerSubmission";
-import { DictationStrip } from "../symmetria/DictationStrip";
+} from "../dictation/directedComposerSubmission";
 import { DictationRecordingStrip, DictationStartButton } from "../dictation/DictationControls";
 import { useDictationComposer } from "../dictation/useDictationSession";
 import { reclaimDictationComposer } from "../dictation/dictationController";
@@ -551,6 +547,7 @@ const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 // element created inline here would take a new identity on every ChatView
 // render, re-rendering that group on every keystroke and every streaming delta.
 const DICTATION_START_CONTROL = <DictationStartButton />;
+const DICTATION_RECORDING_STRIP = <DictationRecordingStrip />;
 function useDraftHeroLayoutTransition(isDraftHeroState: boolean) {
   const transitionGroupRef = useRef<HTMLDivElement | null>(null);
   const composerAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -1756,9 +1753,6 @@ export default function ChatView(props: ChatViewProps) {
     window.addEventListener("dragend", clearWorkspaceFileDrag);
     return () => window.removeEventListener("dragend", clearWorkspaceFileDrag);
   }, [isWorkspaceFileDragActive]);
-  const [normalComposerFocusRevision, setNormalComposerFocusRevision] = useState(0);
-  const [questionDictationTarget, setQuestionDictationTarget] =
-    useState<SymmetriaDictationTarget | null>(null);
   const shouldUseRightPanelSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const isMobileViewport = useMediaQuery("max-sm");
   const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0);
@@ -8282,14 +8276,6 @@ export default function ChatView(props: ChatViewProps) {
     }
   };
 
-  const registeredDictationTarget = useMemo(
-    () =>
-      captureDictationTarget(
-        composerDraftTarget,
-        typeof composerDraftTarget === "string" ? draftThread : null,
-      ),
-    [composerDraftTarget, draftThread],
-  );
   // What a send that leaves without the composer (dictation) needs to know from it.
   const readDirectedSubmissionContext = useCallback((): DirectedSubmissionContext | null => {
     const sendContext = composerRef.current?.getSendContext();
@@ -8318,23 +8304,6 @@ export default function ChatView(props: ChatViewProps) {
     composerRef,
     readSubmissionContext: readDirectedSubmissionContext,
   });
-  useEffect(() => {
-    if (registeredDictationTarget === null) return;
-    return dictationCoordinator.registerComposer({
-      target: registeredDictationTarget,
-      projectName: activeProject?.title ?? null,
-      handle: {
-        replacePrompt: (prompt) => composerRef.current?.replacePrompt(prompt) ?? false,
-      },
-      readSubmissionContext: readDirectedSubmissionContext,
-    });
-  }, [
-    activeProject?.title,
-    composerRef,
-    readDirectedSubmissionContext,
-    registeredDictationTarget,
-    normalComposerFocusRevision,
-  ]);
 
   // Sends the oldest queued message once it is due: a tool call finished
   // after it was queued, or the turn ended. Only one leaves per boundary; the
@@ -8557,23 +8526,6 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
 
-  const onQuestionDictationTargetChange = useCallback(
-    (target: SymmetriaDictationTarget | null, previous?: SymmetriaDictationTarget) => {
-      setQuestionDictationTarget(
-        (current) =>
-          target ??
-          (previous && current && !dictationTargetsEqual(current, previous) ? current : null),
-      );
-    },
-    [],
-  );
-  const isQuestionResponding = useCallback(
-    (requestId: ApprovalRequestId) =>
-      userInputResponsesInFlight.current.has(
-        JSON.stringify([environmentId, activeThreadId, requestId]),
-      ),
-    [environmentId, activeThreadId],
-  );
   const inlinePendingUserInput = useMemo(
     () =>
       activeThreadId && pendingUserInputs.length > 0
@@ -8593,8 +8545,6 @@ export default function ChatView(props: ChatViewProps) {
               .map((request) => request.requestId),
             onRespond: onRespondToUserInput,
             onDismiss: onDismissUserInput,
-            onDictationTargetChange: onQuestionDictationTargetChange,
-            isResponding: isQuestionResponding,
           }
         : null,
     [
@@ -8607,38 +8557,8 @@ export default function ChatView(props: ChatViewProps) {
       respondingUserInputRequestKeys,
       onRespondToUserInput,
       onDismissUserInput,
-      onQuestionDictationTargetChange,
-      isQuestionResponding,
     ],
   );
-  const activeQuestionDictationTarget =
-    questionDictationTarget?.kind === "draft" &&
-    activeThreadId &&
-    pendingUserInputs.some((request) =>
-      request.questions.some(
-        (question) =>
-          String(questionDictationTarget.draftId) ===
-          questionAttachmentDraftId(environmentId, activeThreadId, request.requestId, question.id),
-      ),
-    )
-      ? questionDictationTarget
-      : null;
-  // Keep the strip stable for ChatComposer while routing active question dictation to its field.
-  const dictationStrip = useMemo(
-    () => (
-      <>
-        {registeredDictationTarget ? (
-          <DictationStrip
-            displayedTarget={activeQuestionDictationTarget ?? registeredDictationTarget}
-          />
-        ) : null}
-        {/* Mesura's own recording; the Shell strip above goes in phase 8. */}
-        <DictationRecordingStrip />
-      </>
-    ),
-    [activeQuestionDictationTarget, registeredDictationTarget],
-  );
-
   const onSubmitPlanFollowUp = useCallback(
     async ({
       text,
@@ -9772,10 +9692,7 @@ export default function ChatView(props: ChatViewProps) {
                               event.target instanceof HTMLElement &&
                               event.target.closest('[contenteditable="true"]')
                             ) {
-                              dictationCoordinator.clearQuestionTarget();
                               reclaimDictationComposer();
-                              setQuestionDictationTarget(null);
-                              setNormalComposerFocusRevision((value) => value + 1);
                             }
                           }}
                         >
@@ -9859,7 +9776,7 @@ export default function ChatView(props: ChatViewProps) {
                             terminalOpen={Boolean(terminalUiState.terminalOpen)}
                             gitCwd={gitCwd}
                             dictationStartControl={DICTATION_START_CONTROL}
-                            dictationStrip={dictationStrip}
+                            dictationStrip={DICTATION_RECORDING_STRIP}
                             pullRequestProjectId={
                               supportsPullRequests ? (activeProject?.id ?? null) : null
                             }
