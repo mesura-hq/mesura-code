@@ -70,12 +70,19 @@ import {
   useDictationSessionStore,
   useOwnDictationJobsStore,
 } from "./dictationSessionStore";
+import { dictationTargetLabel } from "./dictationTargetLabel";
+import {
+  recordDictationDelivery,
+  recordDictationFailure,
+  setTranscribingDictationJobs,
+  useDictationWidgetActivityStore,
+} from "./dictationWidgetState";
 
 /**
  * Mesura's own dictation, end to end in the window: record, drop a marker where the caret was
  * when the recording stopped, upload, start the server job, and fill the marker when the job
- * completes. Plain functions over module state, so the strip, the keybindings and (later) the
- * desktop command line all drive the same session.
+ * completes. Plain functions over module state, so the strip, the keybindings and the desktop
+ * command line all drive the same session.
  */
 
 const LEVEL_POLL_INTERVAL_MS = 100;
@@ -105,8 +112,14 @@ let levelTimer: ReturnType<typeof setInterval> | null = null;
 let sessionGeneration = 0;
 /** Jobs the server knows, so a mode change goes to the server instead of into the start. */
 const startedJobIds = new Set<string>();
-/** Failures of save-only jobs already reported; a failed marker shows its own Retry. */
-const reportedFailures = new Set<string>();
+/**
+ * The failed attempt of each job this tab has already handled, by the attempt's `completedAt`.
+ * A retry keeps the job id but its failure carries a new `completedAt`, and that failure may be
+ * all this tab receives: the server publishes a retry only when its attempt ends, and the job
+ * stream coalesces per job, so no `transcribing` need come between the two failures.
+ */
+const seenFailedAttempts = new Map<string, string>();
+let lastFailureAt = 0;
 /** Jobs this tab has finished delivering, so a repeated job list does no work. */
 const settledInTab = new Set<string>();
 /** Jobs whose fill reached the draft but not storage; the next delivery retries the write. */
@@ -154,6 +167,11 @@ export function registerDictationComposer(composer: DictationComposer): () => vo
     if (lastThreadComposer === composer) lastThreadComposer = unmounted;
     if (lastComposer === composer) lastComposer = unmounted;
   };
+}
+
+/** Where a recording stopped now would drop its marker, for the desktop widget. */
+export function currentDictationTarget(): Exclude<DictationTarget, null> | null {
+  return lastComposer?.target ?? null;
 }
 
 /** The thread's composer took focus back from a question card: it takes the next marker. */
@@ -279,6 +297,9 @@ export async function startDictation(): Promise<void> {
     return;
   }
   activeRecording = recording;
+  // A new recording replaces the last delivery result or failure in the widget.
+  recordDictationDelivery(null);
+  recordDictationFailure(null);
   const now = Date.now();
   useDictationSessionStore.setState({
     session: {
@@ -419,9 +440,25 @@ const unstartedAudio = new Map<string, { audio: DictationAudio; durationMs: numb
  * A job that never reached the server. A save-only job has no marker and is dropped. A marker
  * stays, shown as failed, so an armed draft does not send without its transcript.
  */
+/** Tells the desktop widget that an attempt of this device's job failed. */
+function announceFailed(jobId: string, own: Pick<OwnDictationJob, "target">) {
+  // Strictly increasing: the desktop tells a new failure from a dismissed one by this time.
+  lastFailureAt = Math.max(Date.now(), lastFailureAt + 1);
+  recordDictationFailure({ jobId, at: lastFailureAt, target: dictationTargetLabel(own.target) });
+}
+
+/** A new attempt of `jobId` began: the widget's notice of its last failure is no longer true. */
+function clearFailureNotice(jobId: string) {
+  if (useDictationWidgetActivityStore.getState().failed?.jobId === jobId) {
+    recordDictationFailure(null);
+  }
+}
+
 function failToStart(jobId: DictationJobId, host: DictationSlotHost, cause: unknown) {
   const { lastJob } = useDictationSessionStore.getState();
   if (lastJob?.jobId === jobId) useDictationSessionStore.setState({ lastJob: null });
+  const own = useOwnDictationJobsStore.getState().jobs[jobId];
+  if (own) announceFailed(jobId, own);
   reportError("Dictation could not be sent for transcription", cause);
   if (useOwnDictationJobsStore.getState().jobs[jobId]?.mode === "clipboard") {
     forgetOwnDictationJob(jobId);
@@ -578,6 +615,7 @@ export function cycleDictationMode(): void {
 export function retryDictationJob(jobId: string): void {
   const own = useOwnDictationJobsStore.getState().jobs[jobId];
   if (!own) return;
+  clearFailureNotice(jobId);
   if (own.notStarted !== undefined) {
     const kept = unstartedAudio.get(jobId);
     if (!kept) {
@@ -702,9 +740,19 @@ async function deliverCompletedJob(job: DictationJob, own: OwnDictationJob): Pro
     filledAwaitingWrite.delete(job.id);
     updateOwnDictationJob(job.id, { handled: true });
   };
+  const announceDelivered = () => {
+    if (own.handled) return;
+    recordDictationDelivery({
+      at: Date.now(),
+      mode: own.mode,
+      target: dictationTargetLabel(own.target),
+    });
+  };
   if (own.mode === "clipboard") {
     host.remove(job.id);
-    if (!own.handled) await copyTranscript(own.environmentId, job.text ?? "");
+    if (!own.handled && (await copyTranscript(own.environmentId, job.text ?? ""))) {
+      announceDelivered();
+    }
     settle();
     return;
   }
@@ -714,7 +762,10 @@ async function deliverCompletedJob(job: DictationJob, own: OwnDictationJob): Pro
   }
   const outcome = host.fill(job.id, job.text ?? "");
   // The text is in the draft from here on, written through or not.
-  if (outcome !== "missing") host.markFilled(job.id);
+  if (outcome !== "missing") {
+    host.markFilled(job.id);
+    announceDelivered();
+  }
   if (outcome === "unsaved") {
     filledAwaitingWrite.add(job.id);
     return;
@@ -819,6 +870,15 @@ export function deliverDictationJobs(
   jobs: ReadonlyArray<DictationJob>,
 ): void {
   restoreLastJob(environmentId, jobs);
+  const ownJobs = useOwnDictationJobsStore.getState().jobs;
+  // The jobs this tab watched transcribe; only their failures happen now.
+  const watched = new Set(useDictationWidgetActivityStore.getState().transcribing[environmentId]);
+  const lastJobId = useDictationSessionStore.getState().lastJob?.jobId;
+  if (lastJobId) watched.add(lastJobId);
+  setTranscribingDictationJobs(
+    environmentId,
+    jobs.filter((job) => job.status === "transcribing" && job.id in ownJobs).map((job) => job.id),
+  );
   for (const job of jobs) {
     startedJobIds.add(job.id);
     const { lastJob } = useDictationSessionStore.getState();
@@ -830,9 +890,19 @@ export function deliverDictationJobs(
     if (!markersHeldInTab.has(job.id) && draftHoldsMarker(own, job.id)) {
       markersHeldInTab.add(job.id);
     }
+    // Transcribing again after a failure: a retry from here, another tab or the list.
+    if (job.status === "transcribing") clearFailureNotice(job.id);
     if (job.status === "failed") {
-      if (own.mode === "clipboard" && !own.handled && !reportedFailures.has(job.id)) {
-        reportedFailures.add(job.id);
+      const attempt = job.completedAt ?? job.createdAt;
+      const previous = seenFailedAttempts.get(job.id);
+      const newAttempt = previous !== attempt;
+      seenFailedAttempts.set(job.id, attempt);
+      // News for the widget when it happened now: this tab saw the job transcribe, or saw an
+      // earlier attempt fail (a retry). A failure first met after a reload is old news.
+      if (newAttempt && !own.handled && (previous !== undefined || watched.has(job.id))) {
+        announceFailed(job.id, own);
+      }
+      if (own.mode === "clipboard" && !own.handled && newAttempt) {
         reportError("Transcription failed", job.failure);
       }
       continue;

@@ -35,6 +35,7 @@ import * as DesktopApp from "./app/DesktopApp.ts";
 import * as LegacySttEndpoint from "./symmetria/LegacySttEndpoint.ts";
 import * as DictationBroker from "./symmetria/DictationBroker.ts";
 import * as ThreadPublisher from "./symmetria/ThreadPublisher.ts";
+import * as DesktopDictationWidget from "./dictation/DesktopDictationWidget.ts";
 import * as DesktopAppActivation from "./app/DesktopAppActivation.ts";
 import * as DesktopAppIdentity from "./app/DesktopAppIdentity.ts";
 import * as DesktopConnectionCatalogStore from "./app/DesktopConnectionCatalogStore.ts";
@@ -208,6 +209,7 @@ const desktopApplicationLayer = Layer.mergeAll(
   DictationBroker.layer,
   LegacySttEndpoint.layer,
   ThreadPublisher.layer,
+  DesktopDictationWidget.layer,
   desktopSshLayer,
 ).pipe(
   Layer.provideMerge(desktopSnapShotLayer),

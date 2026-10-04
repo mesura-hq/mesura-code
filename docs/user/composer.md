@@ -163,6 +163,32 @@ dictated user message started the matching provider turn. If the destination no 
 Symmetria Shell keeps the transcript available for clipboard recovery and does not send it to the
 chat that happens to be open.
 
+### Dictate from another app on Hyprland
+
+With Mesura Code running, `mesura-code --dictation toggle` starts a recording, and running it again
+stops it. The transcript goes to the last chat you had open. To use it from any app, add a bind to
+your Hyprland config, for example:
+
+```
+bind = SUPER ALT, M, exec, mesura-code --dictation toggle
+```
+
+Any free key works. Symmetria Shell's own dictation key stays as it is for other apps.
+
+While a recording or its transcription is in progress, Mesura Code binds Alt+S (copy), Alt+I
+(insert), Alt+Enter (send), Alt+Space (pause), Alt+R (restart) and Alt+X (cancel), and releases them
+when it ends.
+
+A small widget at the bottom of the screen shows the recording while another app has focus. Add these
+window rules so it floats on every workspace and never takes focus:
+
+```
+windowrule = float on, match:title ^(mesura-dictation-overlay)$
+windowrule = pin on, match:title ^(mesura-dictation-overlay)$
+windowrule = no_initial_focus on, match:title ^(mesura-dictation-overlay)$
+windowrule = no_focus on, match:title ^(mesura-dictation-overlay)$
+```
+
 ## Voice input on iPhone
 
 On supported iPhones with iOS 26 or later, use the composer's microphone to record,

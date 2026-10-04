@@ -8,6 +8,10 @@
  * Phase 4 of the STT redesign, criteria 1–8: record in the desktop and web
  * window and place the marker. Phase 5, criteria 1–7: send a draft when its
  * last marker fills, on screen, off screen and from an open question card.
+ * Phase 6, criteria 1–4 on the renderer side: a `--dictation …` command line
+ * the desktop forwards runs the in-window command, and the widget window's
+ * page (`DictationWidgetPage`, mounted beside the app) draws what the app
+ * publishes. The desktop bridge is a loopback stand-in for the preload one.
  *
  * Boundaries the fixture replaces, and nothing else:
  * - The browser media APIs, through the `setDictationMediaBackend` seam in
@@ -326,6 +330,9 @@ import {
   pendingUserInputRequestKey,
   usePendingUserInputDraftStore,
 } from "./pendingUserInputDraftStore";
+import { DictationWidgetPage } from "./dictation/DictationWidget";
+import { useDictationSessionStore } from "./dictation/dictationSessionStore";
+import { useDictationWidgetActivityStore } from "./dictation/dictationWidgetState";
 import { createFakeMedia } from "./dictation/dictationMedia.testFixtures";
 import { setDictationMediaBackend } from "./dictation/recorder";
 import { useQueuedMessageStore } from "./queuedMessageStore";
@@ -1618,5 +1625,408 @@ describe("dictation phase 5 rework regressions", () => {
     // A server without inline context gets the record serialized: the raw link is replaced.
     expect(text).not.toContain("t3-context://");
     expect(text).toContain("notes.txt");
+  });
+});
+
+// ── Phase 6: the desktop command line and the widget ───────────────────────
+
+/**
+ * The preload's `mesuraDictationBridge`, looped back: what the app publishes for the widget
+ * reaches the widget page's listener, as the main process relays it to the widget window.
+ */
+function installLoopbackDesktopBridge() {
+  const commandListeners = new Set<(command: unknown) => void>();
+  const widgetListeners = new Set<(state: unknown) => void>();
+  const published: unknown[] = [];
+  const bridge = {
+    onCommandLine: (listener: (command: unknown) => void) => {
+      commandListeners.add(listener);
+      return () => void commandListeners.delete(listener);
+    },
+    acknowledgeWidgetState: (_sequence: number) => undefined,
+    publishWidgetState: (state: unknown) => {
+      published.push(state);
+      for (const listener of widgetListeners) listener(state);
+    },
+    onWidgetState: (listener: (state: unknown) => void) => {
+      widgetListeners.add(listener);
+      if (published.length > 0) listener(published.at(-1));
+      return () => void widgetListeners.delete(listener);
+    },
+  };
+  Object.assign(window, { mesuraDictationBridge: bridge });
+  return {
+    published,
+    /** What a second launch with `--dictation …` hands the renderer. */
+    async forward(command: string) {
+      expect(commandListeners.size, "Expected the app to listen for forwarded commands").toBe(1);
+      await act(async () => {
+        for (const listener of commandListeners) listener(command);
+      });
+      await settle();
+    },
+  };
+}
+
+let widgetRoot: Root | undefined;
+let widgetContainer: HTMLDivElement | undefined;
+
+async function mountWidgetPage() {
+  widgetContainer = document.createElement("div");
+  document.body.append(widgetContainer);
+  await act(async () => {
+    widgetRoot = createRoot(widgetContainer!);
+    widgetRoot.render(<DictationWidgetPage />);
+  });
+  return widgetContainer;
+}
+
+describe("dictation phase 6 fence", () => {
+  // The widget draws module state an earlier test's stopped recording may have left behind.
+  beforeEach(() => {
+    useDictationSessionStore.setState({ session: null, lastJob: null });
+    useDictationWidgetActivityStore.setState({ transcribing: {}, delivered: null, failed: null });
+  });
+
+  afterEach(async () => {
+    await act(async () => widgetRoot?.unmount());
+    widgetRoot = undefined;
+    widgetContainer?.remove();
+    widgetContainer = undefined;
+    Reflect.deleteProperty(window, "mesuraDictationBridge");
+  });
+
+  it("dictation phase 6 AC1: a forwarded toggle records in the running app, and a second one stops into the composer", async () => {
+    const desktop = installLoopbackDesktopBridge();
+    await mountApp();
+
+    await desktop.forward("dictation.toggle");
+    expect(media.recorders).toHaveLength(1);
+    expect(media.recorders[0]!.calls).toContain("start");
+    requireButton("Stop and transcribe");
+
+    await desktop.forward("dictation.toggle");
+    expect(media.recorders[0]!.calls).toContain("stop");
+    expect(startCalls()).toHaveLength(1);
+    expect(slotsIn(promptOf(onScreenTarget))).toHaveLength(1);
+  });
+
+  it("dictation phase 6 AC2: forwarded mode, pause, restart and cancel steer the recording like the in-window keys", async () => {
+    const desktop = installLoopbackDesktopBridge();
+    await mountApp();
+    await desktop.forward("dictation.toggle");
+
+    await desktop.forward("dictation.mode.inject");
+    requireButton("Delivery mode: inject");
+    await desktop.forward("dictation.mode.clipboard");
+    requireButton("Delivery mode: clipboard");
+    await desktop.forward("dictation.mode.submit");
+    requireButton("Delivery mode: submit");
+
+    await desktop.forward("dictation.pause");
+    expect(media.recorders[0]!.state).toBe("paused");
+    await desktop.forward("dictation.pause");
+    expect(media.recorders[0]!.state).toBe("recording");
+
+    await desktop.forward("dictation.restart");
+    expect(media.recorders).toHaveLength(2);
+    expect(media.recorders[1]!.calls).toContain("start");
+
+    await desktop.forward("dictation.cancel");
+    expect(buttonLabelled("Stop and transcribe")).toBeUndefined();
+    expect(fixture.uploads).toHaveLength(0);
+    expect(startCalls()).toHaveLength(0);
+  });
+
+  it("dictation phase 6 AC1: with the thread off screen, a forwarded stop drops the marker into the last composer shown", async () => {
+    const desktop = installLoopbackDesktopBridge();
+    await mountApp();
+    await navigateAwayFromThread();
+
+    await desktop.forward("dictation.toggle");
+    await desktop.forward("dictation.toggle");
+    expect(startedJob(0).input.target).toEqual({ kind: "thread", environmentId, threadId });
+    expect(slotsIn(promptOf(onScreenTarget))).toHaveLength(1);
+  });
+
+  it("dictation phase 6 AC3: the widget page draws the timer, the waveform, the mode and the target of the recording", async () => {
+    const desktop = installLoopbackDesktopBridge();
+    await mountApp();
+    const widget = await mountWidgetPage();
+    expect(widget.textContent ?? "").toBe("");
+
+    await desktop.forward("dictation.toggle");
+    const text = widget.textContent ?? "";
+    expect(text, `widget: ${widget.innerHTML}`).toMatch(/\b\d{2}:\d{2}\b/);
+    expect(text).toContain("Dictation fence");
+    expect(widget.querySelector("[data-dictation-waveform]")).not.toBeNull();
+    expect(widget.querySelector('svg[data-material-symbol="send"]')).not.toBeNull();
+
+    await desktop.forward("dictation.mode.clipboard");
+    expect(widget.querySelector('svg[data-material-symbol="content_copy"]')).not.toBeNull();
+    expect(desktop.published.at(-1)).toMatchObject({ recording: true });
+
+    await desktop.forward("dictation.cancel");
+    expect(widget.textContent ?? "").toBe("");
+    expect(desktop.published.at(-1)).toMatchObject({
+      recording: false,
+      transcribing: false,
+      deliveredAt: null,
+    });
+  });
+
+  it("dictation phase 6 AC3: a stopped recording publishes its transcription, and the widget says it is transcribing", async () => {
+    const desktop = installLoopbackDesktopBridge();
+    await mountApp();
+    const widget = await mountWidgetPage();
+    await desktop.forward("dictation.toggle");
+    await desktop.forward("dictation.mode.inject");
+    await desktop.forward("dictation.toggle");
+    const { jobId } = startedJob(0).input;
+    await pushJobs([job(jobId, { status: "transcribing", mode: "inject" })]);
+
+    expect(desktop.published.at(-1)).toMatchObject({ recording: false, transcribing: true });
+    expect(widget.textContent ?? "").toMatch(/transcribing/i);
+  });
+
+  it("dictation phase 6 AC4: a delivered transcript publishes its delivery time, and the widget shows the result", async () => {
+    const desktop = installLoopbackDesktopBridge();
+    await mountApp();
+    const widget = await mountWidgetPage();
+    await desktop.forward("dictation.toggle");
+    await desktop.forward("dictation.mode.inject");
+    await desktop.forward("dictation.toggle");
+    const { jobId } = startedJob(0).input;
+    await pushJobs([job(jobId, { status: "completed", mode: "inject", text: "hola mundo" })]);
+
+    const last = desktop.published.at(-1) as { deliveredAt?: unknown };
+    expect(last).toMatchObject({ recording: false, transcribing: false });
+    expect(typeof last.deliveredAt).toBe("number");
+    expect(widget.textContent ?? "").not.toBe("");
+  });
+});
+
+describe("dictation phase 6 regressions", () => {
+  beforeEach(() => {
+    useDictationSessionStore.setState({ session: null, lastJob: null });
+    useDictationWidgetActivityStore.setState({ transcribing: {}, delivered: null, failed: null });
+  });
+
+  afterEach(() => {
+    Reflect.deleteProperty(window, "mesuraDictationBridge");
+  });
+
+  it("dictation phase 6 regression: a stop goes straight from recording to transcribing, with no idle frame that would hide the widget", async () => {
+    const desktop = installLoopbackDesktopBridge();
+    await mountApp();
+    await desktop.forward("dictation.toggle");
+    const fromStop = desktop.published.length;
+    await desktop.forward("dictation.toggle");
+
+    const afterStop = desktop.published.slice(fromStop) as Array<{
+      recording: boolean;
+      transcribing: boolean;
+      deliveredAt: number | null;
+    }>;
+    expect(afterStop.length).toBeGreaterThan(0);
+    for (const frame of afterStop) {
+      expect(
+        frame.recording || frame.transcribing || frame.deliveredAt !== null,
+        JSON.stringify(frame),
+      ).toBe(true);
+    }
+    expect(afterStop.at(-1)).toMatchObject({ recording: false, transcribing: true });
+  });
+});
+
+describe("dictation phase 6 fence: a failed transcription", () => {
+  beforeEach(() => {
+    useDictationSessionStore.setState({ session: null, lastJob: null });
+    useDictationWidgetActivityStore.setState({ transcribing: {}, delivered: null, failed: null });
+  });
+
+  afterEach(async () => {
+    await act(async () => widgetRoot?.unmount());
+    widgetRoot = undefined;
+    widgetContainer?.remove();
+    widgetContainer = undefined;
+    Reflect.deleteProperty(window, "mesuraDictationBridge");
+  });
+
+  async function recordAndFail(desktop: ReturnType<typeof installLoopbackDesktopBridge>) {
+    await desktop.forward("dictation.toggle");
+    await desktop.forward("dictation.mode.inject");
+    await desktop.forward("dictation.toggle");
+    const { jobId } = startedJob(0).input;
+    await pushJobs([job(jobId, { status: "transcribing", mode: "inject" })]);
+    await pushJobs([
+      job(jobId, { status: "failed", mode: "inject", failure: "The provider timed out." }),
+    ]);
+  }
+
+  it("dictation phase 6 failure: this device's failed job reaches the widget with the target", async () => {
+    const desktop = installLoopbackDesktopBridge();
+    await mountApp();
+    const widget = await mountWidgetPage();
+    await recordAndFail(desktop);
+
+    const last = desktop.published.at(-1) as { failedAt?: unknown };
+    expect(last).toMatchObject({ recording: false, transcribing: false });
+    expect(typeof last.failedAt).toBe("number");
+    expect(widget.textContent).toBe(
+      "Transcription failed in Dictation fence. Open Mesura to retry.",
+    );
+  });
+
+  it("dictation phase 6 failure: a new recording replaces the failure in the widget", async () => {
+    const desktop = installLoopbackDesktopBridge();
+    await mountApp();
+    const widget = await mountWidgetPage();
+    await recordAndFail(desktop);
+
+    await desktop.forward("dictation.toggle");
+    expect(desktop.published.at(-1)).toMatchObject({ recording: true, failedAt: null });
+    expect(widget.textContent ?? "").not.toMatch(/failed/i);
+    expect(widget.querySelector("[data-dictation-waveform]")).not.toBeNull();
+    await desktop.forward("dictation.cancel");
+  });
+
+  it("dictation phase 6 failure: a failed job this device did not start is not a widget failure", async () => {
+    const desktop = installLoopbackDesktopBridge();
+    await mountApp();
+    const widget = await mountWidgetPage();
+    await pushJobs([
+      job("6c1f0b5e-6a4b-4b8e-9d3a-1f2e3d4c5b6a", { status: "transcribing", mode: "inject" }),
+    ]);
+    await pushJobs([
+      job("6c1f0b5e-6a4b-4b8e-9d3a-1f2e3d4c5b6a", { status: "failed", mode: "inject" }),
+    ]);
+    expect(desktop.published.at(-1)).toMatchObject({ failedAt: null });
+    expect(widget.textContent).toBe("");
+  });
+});
+
+describe("dictation phase 6 rework", () => {
+  beforeEach(() => {
+    useDictationSessionStore.setState({ session: null, lastJob: null });
+    useDictationWidgetActivityStore.setState({ transcribing: {}, delivered: null, failed: null });
+  });
+
+  afterEach(async () => {
+    await act(async () => widgetRoot?.unmount());
+    widgetRoot = undefined;
+    widgetContainer?.remove();
+    widgetContainer = undefined;
+    Reflect.deleteProperty(window, "mesuraDictationBridge");
+  });
+
+  it("dictation phase 6 rework: a retried job that fails again reports the new failure", async () => {
+    const desktop = installLoopbackDesktopBridge();
+    await mountApp();
+    const widget = await mountWidgetPage();
+    await desktop.forward("dictation.toggle");
+    await desktop.forward("dictation.mode.inject");
+    await desktop.forward("dictation.toggle");
+    const { jobId } = startedJob(0).input;
+    await pushJobs([job(jobId, { status: "transcribing", mode: "inject" })]);
+    await pushJobs([
+      job(jobId, { status: "failed", mode: "inject", completedAt: "2026-10-03T12:00:05.000Z" }),
+    ]);
+    const first = (desktop.published.at(-1) as { failedAt: number | null }).failedAt;
+    expect(typeof first).toBe("number");
+
+    // Retried with the same id: transcribing again clears the old notice ...
+    await pushJobs([job(jobId, { status: "transcribing", mode: "inject" })]);
+    expect(desktop.published.at(-1)).toMatchObject({ transcribing: true, failedAt: null });
+    // ... and its next failure is a new one.
+    await pushJobs([
+      job(jobId, { status: "failed", mode: "inject", completedAt: "2026-10-03T12:00:09.000Z" }),
+    ]);
+    const second = (desktop.published.at(-1) as { failedAt: number | null }).failedAt;
+    expect(second).toBeGreaterThan(first!);
+    expect(widget.textContent).toBe(
+      "Transcription failed in Dictation fence. Open Mesura to retry.",
+    );
+  });
+
+  it("dictation phase 6 rework: level samples are published only while the window does not have focus", async () => {
+    const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const desktop = installLoopbackDesktopBridge();
+    await mountApp();
+    await desktop.forward("dictation.toggle");
+    const whileFocused = desktop.published.length;
+    // The recorder samples the level every 100 ms.
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 450)));
+    expect(desktop.published.length).toBe(whileFocused);
+
+    // A lifecycle change still goes out with focus.
+    await desktop.forward("dictation.mode.inject");
+    expect(desktop.published.length).toBe(whileFocused + 1);
+
+    focus.mockReturnValue(false);
+    const unfocused = desktop.published.length;
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 450)));
+    expect(desktop.published.length).toBeGreaterThanOrEqual(unfocused + 3);
+    await desktop.forward("dictation.cancel");
+  });
+});
+
+describe("dictation phase 6 repair: Retry from the marker", () => {
+  beforeEach(() => {
+    useDictationSessionStore.setState({ session: null, lastJob: null });
+    useDictationWidgetActivityStore.setState({ transcribing: {}, delivered: null, failed: null });
+  });
+
+  afterEach(async () => {
+    await act(async () => widgetRoot?.unmount());
+    widgetRoot = undefined;
+    widgetContainer?.remove();
+    widgetContainer = undefined;
+    Reflect.deleteProperty(window, "mesuraDictationBridge");
+  });
+
+  it("dictation phase 6 repair: the marker's Retry that fails again shows a new failure, with no transcribing in between", async () => {
+    const desktop = installLoopbackDesktopBridge();
+    await mountApp();
+    const widget = await mountWidgetPage();
+    await desktop.forward("dictation.toggle");
+    await desktop.forward("dictation.mode.inject");
+    await desktop.forward("dictation.toggle");
+    const { jobId } = startedJob(0).input;
+    const failedAt = (completedAt: string) =>
+      job(jobId, {
+        status: "failed",
+        mode: "inject",
+        failure: "Add an OpenAI API key in Settings → Dictation.",
+        completedAt,
+      });
+    await pushJobs([failedAt("2026-10-03T12:00:05.000Z")]);
+    const first = (desktop.published.at(-1) as { failedAt: number | null }).failedAt;
+    expect(typeof first).toBe("number");
+
+    // The same path the chip takes: its Retry button, then the server's retry command.
+    await click(requireButton("Retry transcription"));
+    expect(fixture.dictationCalls.filter((call) => call.name === "retry")).toHaveLength(1);
+    expect(desktop.published.at(-1)).toMatchObject({ failedAt: null });
+
+    // The server publishes the retry only when its attempt ends: one coalesced `failed`.
+    await pushJobs([failedAt("2026-10-03T12:00:09.000Z")]);
+    const second = (desktop.published.at(-1) as { failedAt: number | null }).failedAt;
+    expect(second).toBeGreaterThan(first!);
+    expect(widget.textContent).toBe(
+      "Transcription failed in Dictation fence. Open Mesura to retry.",
+    );
+
+    // The same failed attempt arriving again is not a new failure.
+    const published = desktop.published.length;
+    await pushJobs([
+      failedAt("2026-10-03T12:00:09.000Z"),
+      job("unrelated", { status: "transcribing" }),
+    ]);
+    expect(
+      desktop.published
+        .slice(published)
+        .filter((frame) => (frame as { failedAt: unknown }).failedAt !== second),
+    ).toEqual([]);
   });
 });

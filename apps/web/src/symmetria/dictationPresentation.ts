@@ -95,7 +95,12 @@ export function formatDictationTime(session: SymmetriaDictationSession): string 
       .toString()
       .padStart(2, "0")}`;
   }
-  const totalSeconds = Math.floor(session.elapsedMs / 1000);
+  return formatDictationElapsed(session.elapsedMs);
+}
+
+/** Recorded time as `mm:ss`. */
+export function formatDictationElapsed(elapsedMs: number): string {
+  const totalSeconds = Math.floor(elapsedMs / 1000);
   return `${Math.floor(totalSeconds / 60)
     .toString()
     .padStart(2, "0")}:${(totalSeconds % 60).toString().padStart(2, "0")}`;

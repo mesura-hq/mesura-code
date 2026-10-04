@@ -437,3 +437,38 @@ contextBridge.exposeInMainWorld("symmetriaDictationBridge", {
       ipcRenderer.removeListener(IpcChannels.DICTATION_SHELL_AVAILABILITY_CHANNEL, wrappedListener);
   },
 });
+
+// Mesura's own dictation, independent of Symmetria Shell: the `--dictation …` command line a
+// second launch forwards, and the state the floating widget window draws.
+contextBridge.exposeInMainWorld("mesuraDictationBridge", {
+  onCommandLine: (listener: (command: unknown) => void) => {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, command: unknown) =>
+      listener(command);
+    ipcRenderer.on(IpcChannels.DICTATION_COMMAND_LINE_CHANNEL, wrappedListener);
+    return () =>
+      ipcRenderer.removeListener(IpcChannels.DICTATION_COMMAND_LINE_CHANNEL, wrappedListener);
+  },
+  publishWidgetState: (state: unknown) => {
+    void ipcRenderer.invoke(IpcChannels.PUBLISH_DICTATION_WIDGET_STATE_CHANNEL, state);
+  },
+  acknowledgeWidgetState: (sequence: number) => {
+    void ipcRenderer.invoke(IpcChannels.DICTATION_WIDGET_RENDERED_CHANNEL, sequence);
+  },
+  onWidgetState: (listener: (state: unknown) => void) => {
+    // The page may start listening after the last push; it pulls that state once, unless a
+    // newer push arrives first.
+    let pushed = false;
+    const wrappedListener = (_event: Electron.IpcRendererEvent, state: unknown) => {
+      pushed = true;
+      listener(state);
+    };
+    ipcRenderer.on(IpcChannels.DICTATION_WIDGET_STATE_CHANNEL, wrappedListener);
+    void ipcRenderer
+      .invoke(IpcChannels.GET_DICTATION_WIDGET_STATE_CHANNEL)
+      .then((state: unknown) => {
+        if (!pushed && state !== null) listener(state);
+      });
+    return () =>
+      ipcRenderer.removeListener(IpcChannels.DICTATION_WIDGET_STATE_CHANNEL, wrappedListener);
+  },
+});

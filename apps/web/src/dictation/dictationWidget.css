@@ -1,0 +1,53 @@
+/*
+ * The desktop dictation widget. Every animation is stepped, so it repaints a few times a second
+ * instead of every frame: AGENTS.md forbids continuously repainting animations.
+ */
+html.dictation-widget-window,
+html.dictation-widget-window body,
+html.dictation-widget-window #root {
+  background: transparent !important;
+  overflow: hidden;
+}
+
+.dictation-widget-rec-dot {
+  animation: dictation-widget-blink 1.1s steps(1, end) infinite;
+}
+
+.dictation-widget-transcribing::after {
+  display: inline-block;
+  width: 1.2em;
+  text-align: left;
+  content: "";
+  animation: dictation-widget-dots 1.2s steps(1, end) infinite;
+}
+
+@keyframes dictation-widget-blink {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@keyframes dictation-widget-dots {
+  0% {
+    content: "";
+  }
+  25% {
+    content: ".";
+  }
+  50% {
+    content: "..";
+  }
+  75% {
+    content: "...";
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dictation-widget-rec-dot,
+  .dictation-widget-transcribing::after {
+    animation: none;
+  }
+}

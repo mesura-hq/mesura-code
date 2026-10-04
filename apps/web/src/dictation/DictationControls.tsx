@@ -24,6 +24,8 @@ import {
   useDictationSessionStore,
 } from "./dictationSessionStore";
 import { useQuestionSendWhenReady } from "./questionSendWhenReady";
+import { prefersReducedMotion } from "./reducedMotion";
+import { useDesktopDictationBridge } from "./useDesktopDictationBridge";
 import {
   useDictationDelivery,
   useDictationKeybindings,
@@ -115,10 +117,6 @@ const STRIP_CONTROLS: Partial<Record<string, () => void>> = {
   stop: () => void stopDictation(),
 };
 
-const prefersReducedMotion = () =>
-  typeof window !== "undefined" &&
-  (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
-
 /** The shipped strip, shown while this window records. It goes away when recording stops. */
 export const DictationRecordingStrip = memo(function DictationRecordingStrip() {
   const session = useDictationSessionStore((state) => state.session);
@@ -145,11 +143,12 @@ function DictationEnvironmentDelivery({
 
 /**
  * Mounted once for the whole app: places this client's transcripts into whichever draft holds
- * their marker, on screen or not, answers armed question cards, and listens for the dictation
- * keys.
+ * their marker, on screen or not, answers armed question cards, listens for the dictation
+ * keys, and on the desktop takes the `--dictation …` command line and feeds the widget.
  */
 export function DictationJobDelivery() {
   useDictationKeybindings();
+  useDesktopDictationBridge();
   useQuestionSendWhenReady();
   return useDictationEnvironments().map((environmentId) => (
     <DictationEnvironmentDelivery key={environmentId} environmentId={environmentId} />
