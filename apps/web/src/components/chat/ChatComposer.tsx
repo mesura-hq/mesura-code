@@ -266,6 +266,7 @@ import {
   renderProviderTraitsPicker,
 } from "./composerProviderState";
 import { ContextWindowMeter, ContextWindowMeterPlaceholder } from "./ContextWindowMeter";
+import { useRestingComposerActionsInset } from "./useRestingComposerActionsInset";
 import {
   providerSupportsManualCompaction,
   resolveContextWindowModelDisplayName,
@@ -4488,6 +4489,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     hasMultilinePrompt,
     timelineOverflows,
   });
+  const restingActionsInset = useRestingComposerActionsInset(isComposerResting);
   const expandedComposerImages = isComposerResting
     ? standaloneComposerImages.filter((image) => pendingSnapShotIdSet.has(image.id))
     : standaloneComposerImages;
@@ -6295,17 +6297,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 )}
 
               <div
-                className={cn(
-                  "relative",
-                  isComposerResting && "flex min-w-0 items-center gap-1",
-                  isComposerResting &&
-                    ((settings.contextWindowMeterEnabled && activeContextWindow) ||
-                    reserveContextWindowMeter
-                      ? "pr-28"
-                      : showComposerAttachAction
-                        ? "pr-20"
-                        : "pr-12"),
-                )}
+                ref={restingActionsInset.rowRef}
+                className={cn("relative", isComposerResting && "flex min-w-0 items-center gap-1")}
               >
                 {previewFile ? (
                   <Dialog
@@ -6398,6 +6391,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             {/* Bottom toolbar */}
             {isComposerCollapsedMobile || isComposerApprovalState ? null : (
               <div
+                ref={restingActionsInset.footerRef}
                 data-chat-composer-footer="true"
                 data-chat-composer-footer-compact={isComposerFooterCompact ? "true" : "false"}
                 className={cn(

@@ -330,6 +330,10 @@
     "./file-preview": {
       "types": "./src/filePreview.ts",
       "default": "./src/filePreview.ts"
+    },
+    "./context-window": {
+      "types": "./src/contextWindow/index.ts",
+      "default": "./src/contextWindow/index.ts"
     }
   },
   "scripts": {
