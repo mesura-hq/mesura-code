@@ -190,6 +190,17 @@
                     }
                   ]
                 },
+                "cacheCreationTokens": {
+                  "anyOf": [
+                    {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "cachedInputTokens": {
                   "anyOf": [
                     {
@@ -223,6 +234,17 @@
                   ]
                 },
                 "inputTokens": {
+                  "anyOf": [
+                    {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "lastCacheCreationTokens": {
                   "anyOf": [
                     {
                       "minimum": 0,

@@ -84,14 +84,16 @@ export type SymmetriaThreadLatestTurn = typeof SymmetriaThreadLatestTurn.Type;
  * supplies `null` for an absent upstream value.
  *
  * `tokenUsage` is the one exception, and it is deliberate. It composes
- * `ThreadTokenUsageSnapshot` whole rather than restating its sixteen fields, so
+ * `ThreadTokenUsageSnapshot` whole rather than restating its fields, so
  * it keeps upstream's own convention: `usedTokens` is required and every other
  * field is an optional key that is absent rather than null when the provider
  * did not report it. A consumer therefore reads absence inside `tokenUsage` and
  * null everywhere else, and phase six emits both conventions into the JSON
  * Schema. Restating the snapshot to make it uniform would put a second copy of
- * a sixteen-field vocabulary in this repository, which is the drift the whole
- * package is built to avoid.
+ * a growing vocabulary in this repository, which is the drift the whole
+ * package is built to avoid. An optional field added to the snapshot reaches
+ * `tokenUsage` as one more absent-or-present key: regenerate `schema/`, and
+ * leave the contract version alone, as the `autoCompactThreshold` merge did.
  */
 export const SymmetriaThreadSummary = Schema.Struct({
   threadId: ThreadId,
