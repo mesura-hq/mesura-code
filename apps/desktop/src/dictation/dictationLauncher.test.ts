@@ -62,7 +62,7 @@ describe("dictation phase 6 regressions: bind launcher", () => {
     ]);
   });
 
-  it("dictation phase 6 guard: packaged builds bind the AppImage or the executable alone", () => {
+  it("dictation phase 6 guard: a packaged build with the default environment binds the AppImage or the executable alone", () => {
     expect(
       resolveDictationLauncher({
         appImagePath: "/home/dev/Applications/Mesura-Code.AppImage",
@@ -70,7 +70,7 @@ describe("dictation phase 6 regressions: bind launcher", () => {
         execPath: "/tmp/.mount_Mesura/mesura-code",
         argv: ["/tmp/.mount_Mesura/mesura-code", "--no-sandbox"],
         cwd: "/",
-        env: { XDG_CONFIG_HOME: "/x" },
+        env: {},
       }),
     ).toEqual(["/home/dev/Applications/Mesura-Code.AppImage"]);
     expect(
@@ -80,9 +80,35 @@ describe("dictation phase 6 regressions: bind launcher", () => {
         execPath: "/usr/bin/mesura-code",
         argv: ["/usr/bin/mesura-code", "--enable-features=X"],
         cwd: "/",
-        env: { XDG_CONFIG_HOME: "/x" },
+        env: {},
       }),
     ).toEqual(["/usr/bin/mesura-code"]);
+  });
+
+  // This guard used to pin "the AppImage alone" even with XDG_CONFIG_HOME set. Hyprland runs
+  // binds with its own environment, so a side-by-side test install isolated through
+  // XDG_CONFIG_HOME and T3CODE_HOME was never reached: its session keys hit the stable
+  // install's lock instead. The bind line has to carry both variables whenever they are set.
+  it("a packaged build isolated through XDG_CONFIG_HOME and T3CODE_HOME carries both on its bind line", () => {
+    expect(
+      resolveDictationLauncher({
+        appImagePath: "/home/jc/Applications/Mesura-Code-stt-test.AppImage",
+        isDevelopment: false,
+        execPath: "/tmp/.mount_Mesura/mesura-code",
+        argv: ["/tmp/.mount_Mesura/mesura-code"],
+        cwd: "/",
+        env: {
+          XDG_CONFIG_HOME: "/home/jc/.local/state/mesura-stt-test/config",
+          T3CODE_HOME: "/home/jc/.local/state/mesura-stt-test/home",
+          VITE_DEV_SERVER_URL: "http://ignored-when-packaged",
+        },
+      }),
+    ).toEqual([
+      "env",
+      "XDG_CONFIG_HOME=/home/jc/.local/state/mesura-stt-test/config",
+      "T3CODE_HOME=/home/jc/.local/state/mesura-stt-test/home",
+      "/home/jc/Applications/Mesura-Code-stt-test.AppImage",
+    ]);
   });
 
   it("dictation phase 6 regression: the development bind line Hyprland runs", async () => {
