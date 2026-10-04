@@ -65,6 +65,11 @@ type MessageEntry = {
   parts: Array<unknown>;
 };
 
+type OpenCodeTestProviderListEntry = {
+  id: string;
+  models: Record<string, { id: string; limit: { context: number; output: number } }>;
+};
+
 const runtimeMock = {
   state: {
     startCalls: [] as string[],
@@ -131,6 +136,10 @@ const runtimeMock = {
     questionListImplementation: null as (() => Promise<Array<QuestionRequest>>) | null,
     sessionUpdateCalls: [] as Array<{ sessionID: string; permission: unknown }>,
     forkCalls: [] as Array<{ sessionID: string; directory?: string; messageID?: string }>,
+    providerListCalls: 0,
+    providerListError: null as Error | null,
+    providerListImplementation: null as (() => Promise<void>) | null,
+    providerListProviders: [] as Array<OpenCodeTestProviderListEntry>,
   },
   reset() {
     this.state.startCalls.length = 0;
@@ -188,6 +197,10 @@ const runtimeMock = {
     this.state.questionListImplementation = null;
     this.state.sessionUpdateCalls.length = 0;
     this.state.forkCalls.length = 0;
+    this.state.providerListCalls = 0;
+    this.state.providerListError = null;
+    this.state.providerListImplementation = null;
+    this.state.providerListProviders = [];
   },
 };
 
@@ -488,6 +501,22 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
           };
         },
       },
+      provider: {
+        list: async () => {
+          runtimeMock.state.providerListCalls += 1;
+          await runtimeMock.state.providerListImplementation?.();
+          if (runtimeMock.state.providerListError) {
+            throw runtimeMock.state.providerListError;
+          }
+          return {
+            data: {
+              all: runtimeMock.state.providerListProviders,
+              default: {},
+              connected: runtimeMock.state.providerListProviders.map((provider) => provider.id),
+            },
+          };
+        },
+      },
       permission: {
         list: async () => {
           runtimeMock.state.permissionListCalls += 1;
@@ -629,6 +658,171 @@ function makeOpenCodeEventQueue() {
     current.resolve(event);
   };
 }
+
+// Context-window fixtures: one main OpenCode session, steps driven through `message.part.updated`.
+const OPENCODE_CONTEXT_MAIN_SESSION_ID = "http://127.0.0.1:9999/session";
+
+type OpenCodeTestStepTokens = {
+  input: number;
+  output: number;
+  reasoning: number;
+  cache: { read: number; write: number };
+};
+
+const openCodeContextProvider = (
+  providerId: string,
+  modelId: string,
+  contextLimit: number,
+): OpenCodeTestProviderListEntry => ({
+  id: providerId,
+  models: { [modelId]: { id: modelId, limit: { context: contextLimit, output: 32_000 } } },
+});
+
+const openCodeAssistantMessageEvent = (input: {
+  messageId: string;
+  parentId: string;
+  sessionId?: string;
+}) => ({
+  id: `evt-context-assistant-${input.messageId}`,
+  type: "message.updated",
+  properties: {
+    sessionID: input.sessionId ?? OPENCODE_CONTEXT_MAIN_SESSION_ID,
+    info: { id: input.messageId, role: "assistant", parentID: input.parentId },
+  },
+});
+
+const openCodeStepFinishEvent = (input: {
+  stepId: string;
+  messageId: string;
+  tokens: OpenCodeTestStepTokens;
+  sessionId?: string;
+}) => {
+  const sessionID = input.sessionId ?? OPENCODE_CONTEXT_MAIN_SESSION_ID;
+  return {
+    id: `evt-context-step-${input.stepId}`,
+    type: "message.part.updated",
+    properties: {
+      sessionID,
+      part: {
+        id: input.stepId,
+        sessionID,
+        messageID: input.messageId,
+        type: "step-finish",
+        reason: "stop",
+        cost: 0,
+        tokens: input.tokens,
+      },
+    },
+  };
+};
+
+/**
+ * Runs one admitted OpenCode turn on an already started session, pushes the events
+ * `buildEvents` returns for that turn's prompt message, then idles the session.
+ * Returns the context snapshots the adapter emitted for the turn and its `turn.completed`.
+ */
+const runOpenCodeContextWindowTurn = Effect.fn("runOpenCodeContextWindowTurn")(function* (input: {
+  adapter: OpenCodeAdapterShape;
+  threadId: ThreadId;
+  model: string;
+  pushEvent: (event: unknown) => void;
+  buildEvents: (promptMessageId: string) => ReadonlyArray<unknown>;
+  /** Runs after the turn's events are pushed, before its idle; e.g. to advance the TestClock. */
+  afterEvents?: Effect.Effect<void>;
+}) {
+  const collectorFiber = yield* input.adapter.streamEvents.pipe(
+    Stream.filter(
+      (event) =>
+        event.threadId === input.threadId &&
+        (event.type === "thread.token-usage.updated" || event.type === "turn.completed"),
+    ),
+    Stream.takeUntil((event) => event.type === "turn.completed"),
+    Stream.runCollect,
+    Effect.forkChild,
+  );
+  const promptCallIndex = runtimeMock.state.promptCalls.length;
+  runtimeMock.state.sessionStatus = "busy";
+  yield* input.adapter.sendTurn({
+    threadId: input.threadId,
+    input: `Run a context window turn on ${input.model}`,
+    modelSelection: createModelSelection(ProviderInstanceId.make("opencode"), input.model),
+  });
+  const promptMessageId = (runtimeMock.state.promptCalls[promptCallIndex] as { messageID: string })
+    .messageID;
+  input.pushEvent({
+    id: `evt-context-busy-${promptMessageId}`,
+    type: "session.status",
+    properties: { sessionID: OPENCODE_CONTEXT_MAIN_SESSION_ID, status: { type: "busy" } },
+  });
+  for (const event of input.buildEvents(promptMessageId)) {
+    input.pushEvent(event);
+  }
+  if (input.afterEvents) yield* input.afterEvents;
+  runtimeMock.state.sessionStatus = "idle";
+  input.pushEvent({
+    id: `evt-context-idle-${promptMessageId}`,
+    type: "session.status",
+    properties: { sessionID: OPENCODE_CONTEXT_MAIN_SESSION_ID, status: { type: "idle" } },
+  });
+  const events = Array.from(yield* Fiber.join(collectorFiber).pipe(Effect.timeout("1 second")));
+  const snapshots = events.flatMap((event) =>
+    event.type === "thread.token-usage.updated" ? [event.payload.usage] : [],
+  );
+  const completed = events.find((event) => event.type === "turn.completed");
+  return { snapshots, completed };
+});
+
+/**
+ * Pushes `events` outside any turn and returns the context snapshots they produced.
+ * `streamEvents` is one queue, so only one collector may read it at a time; a trailing
+ * compaction is a sentinel that ends the wait whether or not a snapshot was emitted.
+ */
+const collectOpenCodeContextSnapshotsOutsideTurns = Effect.fn(
+  "collectOpenCodeContextSnapshotsOutsideTurns",
+)(function* (input: {
+  adapter: OpenCodeAdapterShape;
+  threadId: ThreadId;
+  pushEvent: (event: unknown) => void;
+  events: ReadonlyArray<unknown>;
+  sessionId?: string;
+}) {
+  const collectorFiber = yield* input.adapter.streamEvents.pipe(
+    Stream.filter(
+      (event) =>
+        event.threadId === input.threadId &&
+        (event.type === "thread.token-usage.updated" || event.type === "thread.state.changed"),
+    ),
+    Stream.takeUntil((event) => event.type === "thread.state.changed"),
+    Stream.runCollect,
+    Effect.forkChild,
+  );
+  for (const event of input.events) {
+    input.pushEvent(event);
+  }
+  input.pushEvent({
+    id: `evt-context-sentinel-${input.threadId}`,
+    type: "session.compacted",
+    properties: { sessionID: input.sessionId ?? OPENCODE_CONTEXT_MAIN_SESSION_ID },
+  });
+  const events = Array.from(yield* Fiber.join(collectorFiber).pipe(Effect.timeout("1 second")));
+  return events.flatMap((event) =>
+    event.type === "thread.token-usage.updated" ? [event.payload.usage] : [],
+  );
+});
+
+/** Starts a full-access OpenCode session on `threadId` fed by a push-driven event queue. */
+const startOpenCodeContextWindowSession = Effect.fn("startOpenCodeContextWindowSession")(function* (
+  adapter: OpenCodeAdapterShape,
+  threadId: ThreadId,
+) {
+  const pushEvent = makeOpenCodeEventQueue();
+  yield* adapter.startSession({
+    provider: ProviderDriverKind.make("opencode"),
+    threadId,
+    runtimeMode: "full-access",
+  });
+  return pushEvent;
+});
 
 const permissionRequest = (id: string, sessionID: string): PermissionRequest => ({
   id,
@@ -2491,11 +2685,18 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       const terminalUuidRelease = yield* Deferred.make<void>();
       let blockFirstStepWrite = true;
       let blockNextUuid = false;
+      // The owned step emits its context snapshot before the terminal event; let that
+      // snapshot's event id through so the gate still holds the first turn's completion.
+      let uuidsBeforeBlock = 0;
       const nodeCrypto = yield* Crypto.Crypto;
       const gatedCrypto = {
         ...nodeCrypto,
         randomUUIDv4: Effect.suspend(() => {
           if (!blockNextUuid) return nodeCrypto.randomUUIDv4;
+          if (uuidsBeforeBlock > 0) {
+            uuidsBeforeBlock -= 1;
+            return nodeCrypto.randomUUIDv4;
+          }
           blockNextUuid = false;
           return Deferred.succeed(terminalUuidStarted, undefined).pipe(
             Effect.andThen(Deferred.await(terminalUuidRelease)),
@@ -2588,6 +2789,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       });
       yield* Deferred.await(firstStepWriteStarted);
       blockNextUuid = true;
+      uuidsBeforeBlock = 1;
       firstIdle.resolve({
         id: "evt-token-handoff-first-idle",
         type: "session.status",
@@ -2993,6 +3195,788 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         });
       }
 
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  // Context-window snapshots (phase 2 acceptance criteria 1–6), asserted on `thread.token-usage.updated`.
+  it.effect("reports an OpenCode step's whole token total as the context usedTokens", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-context-used-tokens");
+      const pushEvent = yield* startOpenCodeContextWindowSession(adapter, threadId);
+
+      const { snapshots, completed } = yield* runOpenCodeContextWindowTurn({
+        adapter,
+        threadId,
+        model: "opencode/kimi-k3",
+        pushEvent,
+        buildEvents: (promptMessageId) => [
+          openCodeAssistantMessageEvent({
+            messageId: "assistant-context-used",
+            parentId: promptMessageId,
+          }),
+          openCodeStepFinishEvent({
+            stepId: "step-context-used",
+            messageId: "assistant-context-used",
+            tokens: { input: 100, output: 20, reasoning: 5, cache: { read: 40, write: 10 } },
+          }),
+        ],
+      });
+
+      // Guard: the per-turn usage is the accumulator's, unchanged by the context snapshot.
+      NodeAssert.equal(completed?.type, "turn.completed");
+      if (completed?.type === "turn.completed") {
+        NodeAssert.deepStrictEqual(completed.payload.tokenUsage, {
+          usageStatus: "complete",
+          usageScope: "main_agent",
+          inputTokens: 150,
+          cachedInputTokens: 40,
+          cacheCreationTokens: 10,
+          outputTokens: 25,
+          reasoningTokens: 5,
+          hasSubagents: false,
+        });
+      }
+      NodeAssert.equal(snapshots.length, 1);
+      NodeAssert.equal(snapshots[0]?.usedTokens, 175);
+      NodeAssert.equal(snapshots[0]?.lastUsedTokens, 175);
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("splits an OpenCode step's input into cache reads and cache writes", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-context-cache-split");
+      const pushEvent = yield* startOpenCodeContextWindowSession(adapter, threadId);
+
+      const { snapshots } = yield* runOpenCodeContextWindowTurn({
+        adapter,
+        threadId,
+        model: "opencode/kimi-k3",
+        pushEvent,
+        buildEvents: (promptMessageId) => [
+          openCodeAssistantMessageEvent({
+            messageId: "assistant-context-split",
+            parentId: promptMessageId,
+          }),
+          openCodeStepFinishEvent({
+            stepId: "step-context-split-cold",
+            messageId: "assistant-context-split",
+            tokens: { input: 300, output: 12, reasoning: 0, cache: { read: 0, write: 200 } },
+          }),
+          openCodeStepFinishEvent({
+            stepId: "step-context-split-warm",
+            messageId: "assistant-context-split",
+            tokens: { input: 100, output: 20, reasoning: 5, cache: { read: 40, write: 10 } },
+          }),
+        ],
+      });
+
+      const split = (snapshot: (typeof snapshots)[number] | undefined) => ({
+        inputTokens: snapshot?.inputTokens,
+        cachedInputTokens: snapshot?.cachedInputTokens,
+        cacheCreationTokens: snapshot?.cacheCreationTokens,
+        outputTokens: snapshot?.outputTokens,
+        reasoningOutputTokens: snapshot?.reasoningOutputTokens,
+      });
+      NodeAssert.equal(snapshots.length, 2);
+      // A cold cache reports an explicit zero read, not an absent field.
+      NodeAssert.deepStrictEqual(split(snapshots[0]), {
+        inputTokens: 500,
+        cachedInputTokens: 0,
+        cacheCreationTokens: 200,
+        outputTokens: 12,
+        reasoningOutputTokens: 0,
+      });
+      NodeAssert.deepStrictEqual(split(snapshots[1]), {
+        inputTokens: 150,
+        cachedInputTokens: 40,
+        cacheCreationTokens: 10,
+        outputTokens: 25,
+        reasoningOutputTokens: 5,
+      });
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("reports the session model's provider.list context limit as maxTokens", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-context-max-tokens");
+      runtimeMock.state.providerListProviders = [
+        openCodeContextProvider("opencode", "kimi-k3", 262_144),
+        openCodeContextProvider("openai", "kimi-k3", 1_000),
+      ];
+      const pushEvent = yield* startOpenCodeContextWindowSession(adapter, threadId);
+
+      const { snapshots } = yield* runOpenCodeContextWindowTurn({
+        adapter,
+        threadId,
+        model: "opencode/kimi-k3",
+        pushEvent,
+        buildEvents: (promptMessageId) => [
+          openCodeAssistantMessageEvent({
+            messageId: "assistant-context-max",
+            parentId: promptMessageId,
+          }),
+          openCodeStepFinishEvent({
+            stepId: "step-context-max",
+            messageId: "assistant-context-max",
+            tokens: { input: 100, output: 20, reasoning: 5, cache: { read: 40, write: 10 } },
+          }),
+        ],
+      });
+
+      NodeAssert.equal(snapshots.length, 1);
+      NodeAssert.equal(snapshots[0]?.maxTokens, 262_144);
+      NodeAssert.equal(snapshots[0]?.usedTokens, 175);
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("clamps OpenCode context usedTokens to the model's context limit", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-context-clamp");
+      runtimeMock.state.providerListProviders = [
+        openCodeContextProvider("opencode", "kimi-k3", 150),
+      ];
+      const pushEvent = yield* startOpenCodeContextWindowSession(adapter, threadId);
+
+      const { snapshots } = yield* runOpenCodeContextWindowTurn({
+        adapter,
+        threadId,
+        model: "opencode/kimi-k3",
+        pushEvent,
+        buildEvents: (promptMessageId) => [
+          openCodeAssistantMessageEvent({
+            messageId: "assistant-context-clamp",
+            parentId: promptMessageId,
+          }),
+          openCodeStepFinishEvent({
+            stepId: "step-context-clamp",
+            messageId: "assistant-context-clamp",
+            tokens: { input: 100, output: 20, reasoning: 5, cache: { read: 40, write: 10 } },
+          }),
+        ],
+      });
+
+      NodeAssert.equal(snapshots.length, 1);
+      NodeAssert.equal(snapshots[0]?.maxTokens, 150);
+      NodeAssert.equal(snapshots[0]?.usedTokens, 150);
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect.each([
+    { case: "provider.list fails", fails: true },
+    { case: "provider.list lacks the session model", fails: false },
+  ])("emits the OpenCode context snapshot without maxTokens when $case", ({ fails }) =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId(`thread-context-no-limit-${fails ? "failure" : "missing"}`);
+      if (fails) {
+        runtimeMock.state.providerListError = new Error("provider list failed", {
+          cause: { status: 500 },
+        });
+      } else {
+        runtimeMock.state.providerListProviders = [
+          openCodeContextProvider("opencode", "some-other-model", 262_144),
+        ];
+      }
+      const pushEvent = yield* startOpenCodeContextWindowSession(adapter, threadId);
+
+      const { snapshots, completed } = yield* runOpenCodeContextWindowTurn({
+        adapter,
+        threadId,
+        model: "opencode/kimi-k3",
+        pushEvent,
+        buildEvents: (promptMessageId) => [
+          openCodeAssistantMessageEvent({
+            messageId: "assistant-context-no-limit",
+            parentId: promptMessageId,
+          }),
+          openCodeStepFinishEvent({
+            stepId: "step-context-no-limit",
+            messageId: "assistant-context-no-limit",
+            tokens: { input: 100, output: 20, reasoning: 5, cache: { read: 40, write: 10 } },
+          }),
+        ],
+      });
+
+      NodeAssert.equal(runtimeMock.state.providerListCalls, 1);
+      NodeAssert.equal(snapshots.length, 1);
+      NodeAssert.equal(snapshots[0]?.usedTokens, 175);
+      NodeAssert.equal("maxTokens" in (snapshots[0] ?? {}), false);
+      NodeAssert.equal(completed?.type, "turn.completed");
+      if (completed?.type === "turn.completed") {
+        NodeAssert.equal(completed.payload.state, "completed");
+      }
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("looks up each OpenCode model's context limit once per session, misses included", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-context-lookup-cache");
+      // `openai/gpt-5.4` is absent, so its lookup is a miss that must be cached too.
+      runtimeMock.state.providerListProviders = [
+        openCodeContextProvider("opencode", "kimi-k3", 262_144),
+      ];
+      const pushEvent = yield* startOpenCodeContextWindowSession(adapter, threadId);
+      const twoStepTurn = (model: string, label: string) =>
+        runOpenCodeContextWindowTurn({
+          adapter,
+          threadId,
+          model,
+          pushEvent,
+          buildEvents: (promptMessageId) => [
+            openCodeAssistantMessageEvent({
+              messageId: `assistant-context-cache-${label}`,
+              parentId: promptMessageId,
+            }),
+            openCodeStepFinishEvent({
+              stepId: `step-context-cache-${label}-1`,
+              messageId: `assistant-context-cache-${label}`,
+              tokens: { input: 10, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+            }),
+            openCodeStepFinishEvent({
+              stepId: `step-context-cache-${label}-2`,
+              messageId: `assistant-context-cache-${label}`,
+              tokens: { input: 20, output: 1, reasoning: 0, cache: { read: 10, write: 0 } },
+            }),
+          ],
+        });
+
+      const first = yield* twoStepTurn("opencode/kimi-k3", "first");
+      NodeAssert.equal(runtimeMock.state.providerListCalls, 1);
+      const second = yield* twoStepTurn("opencode/kimi-k3", "second");
+      NodeAssert.equal(runtimeMock.state.providerListCalls, 1);
+      const switched = yield* twoStepTurn("openai/gpt-5.4", "switched");
+      NodeAssert.equal(runtimeMock.state.providerListCalls, 2);
+      const switchedAgain = yield* twoStepTurn("openai/gpt-5.4", "switched-again");
+      const back = yield* twoStepTurn("opencode/kimi-k3", "back");
+      NodeAssert.equal(runtimeMock.state.providerListCalls, 2);
+
+      NodeAssert.deepStrictEqual(
+        [first, second, switched, switchedAgain, back].map(({ snapshots }) =>
+          snapshots.map((snapshot) => snapshot.maxTokens),
+        ),
+        [
+          [262_144, 262_144],
+          [262_144, 262_144],
+          [undefined, undefined],
+          [undefined, undefined],
+          [262_144, 262_144],
+        ],
+      );
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect(
+    "emits the OpenCode context snapshot without maxTokens when provider.list times out",
+    () =>
+      Effect.gen(function* () {
+        const adapter = yield* OpenCodeAdapter;
+        const threadId = asThreadId("thread-context-lookup-timeout");
+        runtimeMock.state.providerListProviders = [
+          openCodeContextProvider("opencode", "kimi-k3", 262_144),
+        ];
+        const lookupStarted = promiseWithResolvers<void>();
+        runtimeMock.state.providerListImplementation = () => {
+          lookupStarted.resolve(undefined);
+          return new Promise<void>(() => {});
+        };
+        const pushEvent = yield* startOpenCodeContextWindowSession(adapter, threadId);
+        const step = (label: string, promptMessageId: string) => [
+          openCodeAssistantMessageEvent({
+            messageId: `assistant-context-timeout-${label}`,
+            parentId: promptMessageId,
+          }),
+          openCodeStepFinishEvent({
+            stepId: `step-context-timeout-${label}`,
+            messageId: `assistant-context-timeout-${label}`,
+            tokens: { input: 100, output: 20, reasoning: 5, cache: { read: 40, write: 10 } },
+          }),
+        ];
+
+        const timedOut = yield* runOpenCodeContextWindowTurn({
+          adapter,
+          threadId,
+          model: "opencode/kimi-k3",
+          pushEvent,
+          buildEvents: (promptMessageId) => step("first", promptMessageId),
+          afterEvents: Effect.promise(() => lookupStarted.promise).pipe(
+            Effect.andThen(advanceTestClock(2_999)),
+            Effect.andThen(
+              Effect.sync(() => NodeAssert.equal(runtimeMock.state.providerListCalls, 1)),
+            ),
+            Effect.andThen(advanceTestClock(1)),
+          ),
+        });
+        // The timeout is cached like a miss: the next turn on the model does not ask again.
+        const cached = yield* runOpenCodeContextWindowTurn({
+          adapter,
+          threadId,
+          model: "opencode/kimi-k3",
+          pushEvent,
+          buildEvents: (promptMessageId) => step("second", promptMessageId),
+        });
+
+        NodeAssert.equal(runtimeMock.state.providerListCalls, 1);
+        NodeAssert.deepStrictEqual(
+          [...timedOut.snapshots, ...cached.snapshots].map((snapshot) => [
+            snapshot.usedTokens,
+            snapshot.maxTokens,
+          ]),
+          [
+            [175, undefined],
+            [175, undefined],
+          ],
+        );
+        NodeAssert.equal(timedOut.completed?.type, "turn.completed");
+        if (timedOut.completed?.type === "turn.completed") {
+          NodeAssert.equal(timedOut.completed.payload.state, "completed");
+        }
+        yield* adapter.stopSession(threadId);
+      }),
+    // Without the bound, the lookup holds the event handler forever; fail fast, not at 120 s.
+    5_000,
+  );
+
+  it.effect("emits no OpenCode context snapshot for a step with no tokens", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-context-zero-step");
+      const pushEvent = yield* startOpenCodeContextWindowSession(adapter, threadId);
+
+      const { snapshots, completed } = yield* runOpenCodeContextWindowTurn({
+        adapter,
+        threadId,
+        model: "opencode/kimi-k3",
+        pushEvent,
+        buildEvents: (promptMessageId) => [
+          openCodeAssistantMessageEvent({
+            messageId: "assistant-context-zero",
+            parentId: promptMessageId,
+          }),
+          openCodeStepFinishEvent({
+            stepId: "step-context-zero-empty",
+            messageId: "assistant-context-zero",
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          }),
+          openCodeStepFinishEvent({
+            stepId: "step-context-zero-real",
+            messageId: "assistant-context-zero",
+            tokens: { input: 100, output: 20, reasoning: 5, cache: { read: 40, write: 10 } },
+          }),
+        ],
+      });
+
+      NodeAssert.deepStrictEqual(
+        snapshots.map((snapshot) => snapshot.usedTokens),
+        [175],
+      );
+      NodeAssert.equal(completed?.type, "turn.completed");
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("reports an owned OpenCode step that lands after its turn completed", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-context-late-step");
+      const pushEvent = yield* startOpenCodeContextWindowSession(adapter, threadId);
+      const lateStep = (stepId: string, tokens: OpenCodeTestStepTokens) =>
+        openCodeStepFinishEvent({ stepId, messageId: "assistant-context-late-first", tokens });
+      // The live order: the first turn completes before OpenCode answers its prompt, and the
+      // answer's steps arrive later, between turns and during the next turn.
+      yield* runOpenCodeContextWindowTurn({
+        adapter,
+        threadId,
+        model: "opencode/kimi-k3",
+        pushEvent,
+        buildEvents: (promptMessageId) => [
+          openCodeAssistantMessageEvent({
+            messageId: "assistant-context-late-first",
+            parentId: promptMessageId,
+          }),
+        ],
+      });
+      const betweenTurns = yield* collectOpenCodeContextSnapshotsOutsideTurns({
+        adapter,
+        threadId,
+        pushEvent,
+        events: [
+          lateStep("step-context-late-between", {
+            input: 30_000,
+            output: 2,
+            reasoning: 0,
+            cache: { read: 1_900, write: 0 },
+          }),
+        ],
+      });
+      const second = yield* runOpenCodeContextWindowTurn({
+        adapter,
+        threadId,
+        model: "opencode/kimi-k3",
+        pushEvent,
+        buildEvents: (promptMessageId) => [
+          lateStep("step-context-late-during", {
+            input: 30_755,
+            output: 2,
+            reasoning: 0,
+            cache: { read: 1_902, write: 0 },
+          }),
+          openCodeAssistantMessageEvent({
+            messageId: "assistant-context-late-second",
+            parentId: promptMessageId,
+          }),
+          openCodeStepFinishEvent({
+            stepId: "step-context-late-second",
+            messageId: "assistant-context-late-second",
+            tokens: { input: 25, output: 2, reasoning: 0, cache: { read: 32_657, write: 0 } },
+          }),
+        ],
+      });
+      // Guard: the second turn's own usage still excludes the first prompt's late steps.
+      NodeAssert.equal(second.completed?.type, "turn.completed");
+      if (second.completed?.type === "turn.completed") {
+        NodeAssert.deepStrictEqual(second.completed.payload.tokenUsage, {
+          usageStatus: "complete",
+          usageScope: "main_agent",
+          inputTokens: 32_682,
+          cachedInputTokens: 32_657,
+          cacheCreationTokens: 0,
+          outputTokens: 2,
+          reasoningTokens: 0,
+          hasSubagents: false,
+        });
+      }
+      NodeAssert.deepStrictEqual(
+        betweenTurns.map((snapshot) => snapshot.usedTokens),
+        [31_902],
+      );
+      NodeAssert.deepStrictEqual(
+        second.snapshots.map((snapshot) => snapshot.usedTokens),
+        [32_659, 32_684],
+      );
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("reports a resumed OpenCode session's step for a prompt sent before the restart", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-context-resumed-step");
+      const pushEvent = makeOpenCodeEventQueue();
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+        resumeCursor: { schemaVersion: 1, sessionId: "ses_context_resumed" },
+      });
+
+      // The prompt was sent by the adapter before the server restarted, so this process
+      // never saw it; the answer still belongs to the main session.
+      const snapshots = yield* collectOpenCodeContextSnapshotsOutsideTurns({
+        adapter,
+        threadId,
+        pushEvent,
+        sessionId: "ses_context_resumed",
+        events: [
+          openCodeAssistantMessageEvent({
+            messageId: "assistant-context-resumed",
+            parentId: "user-context-before-restart",
+            sessionId: "ses_context_resumed",
+          }),
+          openCodeStepFinishEvent({
+            stepId: "step-context-resumed",
+            messageId: "assistant-context-resumed",
+            sessionId: "ses_context_resumed",
+            tokens: { input: 100, output: 20, reasoning: 5, cache: { read: 40, write: 10 } },
+          }),
+        ],
+      });
+
+      NodeAssert.deepStrictEqual(
+        snapshots.map((snapshot) => snapshot.usedTokens),
+        [175],
+      );
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect(
+    "keeps an OpenCode step in the turn usage when idle reconciliation completes during its lookup",
+    () =>
+      Effect.gen(function* () {
+        const adapter = yield* OpenCodeAdapter;
+        const threadId = asThreadId("thread-context-lookup-race");
+        runtimeMock.state.autoPromptEcho = false;
+        runtimeMock.state.providerListProviders = [
+          openCodeContextProvider("opencode", "kimi-k3", 262_144),
+        ];
+        const lookupStarted = promiseWithResolvers<void>();
+        const lookupRelease = promiseWithResolvers<void>();
+        runtimeMock.state.providerListImplementation = () => {
+          lookupStarted.resolve(undefined);
+          return lookupRelease.promise;
+        };
+        const pushEvent = yield* startOpenCodeContextWindowSession(adapter, threadId);
+        const completedFiber = yield* adapter.streamEvents.pipe(
+          Stream.filter((event) => event.threadId === threadId && event.type === "turn.completed"),
+          Stream.runHead,
+          Effect.forkChild,
+        );
+
+        runtimeMock.state.sessionStatus = "busy";
+        yield* adapter.sendTurn({
+          threadId,
+          input: "Complete while the context lookup is pending",
+          modelSelection: createModelSelection(
+            ProviderInstanceId.make("opencode"),
+            "opencode/kimi-k3",
+          ),
+        });
+        const promptMessageId = (runtimeMock.state.promptCalls[0] as { messageID: string })
+          .messageID;
+        // Invalid status data keeps the idle reconciliation fiber retrying until it reads idle.
+        runtimeMock.state.sessionStatusImplementation = async () => ({ data: null });
+        // An idle before the prompt echo defers completion to idle reconciliation, which runs
+        // beside the event handler; the handler then blocks on the step's held lookup.
+        pushEvent({
+          id: "evt-context-race-idle",
+          type: "session.status",
+          properties: { sessionID: OPENCODE_CONTEXT_MAIN_SESSION_ID, status: { type: "idle" } },
+        });
+        pushEvent({
+          id: "evt-context-race-echo",
+          type: "message.updated",
+          properties: {
+            sessionID: OPENCODE_CONTEXT_MAIN_SESSION_ID,
+            info: { id: promptMessageId, role: "user" },
+          },
+        });
+        pushEvent(
+          openCodeAssistantMessageEvent({
+            messageId: "assistant-context-race",
+            parentId: promptMessageId,
+          }),
+        );
+        pushEvent(
+          openCodeStepFinishEvent({
+            stepId: "step-context-race",
+            messageId: "assistant-context-race",
+            tokens: { input: 100, output: 20, reasoning: 5, cache: { read: 40, write: 10 } },
+          }),
+        );
+        yield* Effect.promise(() => lookupStarted.promise);
+        runtimeMock.state.sessionStatusImplementation = async () => ({ data: {} });
+        yield* advanceTestClock(5_000);
+
+        const completed = yield* Fiber.join(completedFiber).pipe(Effect.timeout("1 second"));
+        lookupRelease.resolve(undefined);
+        NodeAssert.equal(runtimeMock.state.providerListCalls, 1);
+        NodeAssert.equal(completed._tag, "Some");
+        if (completed._tag === "Some" && completed.value.type === "turn.completed") {
+          NodeAssert.deepStrictEqual(completed.value.payload.tokenUsage, {
+            usageStatus: "complete",
+            usageScope: "main_agent",
+            inputTokens: 150,
+            cachedInputTokens: 40,
+            cacheCreationTokens: 10,
+            outputTokens: 25,
+            reasoningTokens: 5,
+            hasSubagents: false,
+          });
+        }
+        yield* adapter.stopSession(threadId);
+      }),
+    // A turn that never completes would otherwise hang until the 120 s suite timeout.
+    5_000,
+  );
+
+  it.effect("reports a main-session OpenCode step on arrival, before its message header", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-context-step-before-header");
+      const pushEvent = yield* startOpenCodeContextWindowSession(adapter, threadId);
+
+      // No `message.updated` names this step's message: the session alone decides ownership.
+      const snapshots = yield* collectOpenCodeContextSnapshotsOutsideTurns({
+        adapter,
+        threadId,
+        pushEvent,
+        events: [
+          openCodeStepFinishEvent({
+            stepId: "step-context-before-header",
+            messageId: "assistant-context-header-never-seen",
+            tokens: { input: 30, output: 10, reasoning: 2, cache: { read: 5, write: 1 } },
+          }),
+        ],
+      });
+
+      NodeAssert.deepStrictEqual(
+        snapshots.map((snapshot) => snapshot.usedTokens),
+        [48],
+      );
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("reports a re-sent OpenCode step-finish part only once", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-context-resent-step");
+      const pushEvent = yield* startOpenCodeContextWindowSession(adapter, threadId);
+      const step = openCodeStepFinishEvent({
+        stepId: "step-context-resent",
+        messageId: "assistant-context-resent",
+        tokens: { input: 100, output: 20, reasoning: 5, cache: { read: 40, write: 10 } },
+      });
+
+      const snapshots = yield* collectOpenCodeContextSnapshotsOutsideTurns({
+        adapter,
+        threadId,
+        pushEvent,
+        events: [step, { ...step, id: "evt-context-step-resent-again" }],
+      });
+
+      NodeAssert.deepStrictEqual(
+        snapshots.map((snapshot) => snapshot.usedTokens),
+        [175],
+      );
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("skips the context lookup for an OpenCode turn whose only step has no tokens", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-context-zero-only");
+      runtimeMock.state.providerListProviders = [
+        openCodeContextProvider("opencode", "kimi-k3", 262_144),
+      ];
+      const pushEvent = yield* startOpenCodeContextWindowSession(adapter, threadId);
+
+      const { snapshots, completed } = yield* runOpenCodeContextWindowTurn({
+        adapter,
+        threadId,
+        model: "opencode/kimi-k3",
+        pushEvent,
+        buildEvents: (promptMessageId) => [
+          openCodeAssistantMessageEvent({
+            messageId: "assistant-context-zero-only",
+            parentId: promptMessageId,
+          }),
+          openCodeStepFinishEvent({
+            stepId: "step-context-zero-only",
+            messageId: "assistant-context-zero-only",
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          }),
+        ],
+      });
+
+      NodeAssert.deepStrictEqual(snapshots, []);
+      NodeAssert.equal(runtimeMock.state.providerListCalls, 0);
+      // Guard: the turn usage still counts the empty step, as before this phase.
+      NodeAssert.equal(completed?.type, "turn.completed");
+      if (completed?.type === "turn.completed") {
+        NodeAssert.deepStrictEqual(completed.payload.tokenUsage, {
+          usageStatus: "complete",
+          usageScope: "main_agent",
+          inputTokens: 0,
+          cachedInputTokens: 0,
+          cacheCreationTokens: 0,
+          outputTokens: 0,
+          reasoningTokens: 0,
+          hasSubagents: false,
+        });
+      }
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("emits OpenCode context snapshots only for steps the main agent owns", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-context-ownership");
+      const pushEvent = yield* startOpenCodeContextWindowSession(adapter, threadId);
+
+      const { snapshots, completed } = yield* runOpenCodeContextWindowTurn({
+        adapter,
+        threadId,
+        model: "opencode/kimi-k3",
+        pushEvent,
+        buildEvents: (promptMessageId) => [
+          // A subagent: a child session whose assistant message answers the child's own prompt.
+          {
+            id: "evt-context-ownership-child-created",
+            type: "session.created",
+            properties: {
+              info: { id: "ses_context_child", parentID: OPENCODE_CONTEXT_MAIN_SESSION_ID },
+            },
+          },
+          openCodeAssistantMessageEvent({
+            messageId: "assistant-context-child",
+            parentId: "user-context-child",
+            sessionId: "ses_context_child",
+          }),
+          openCodeStepFinishEvent({
+            stepId: "step-context-child",
+            messageId: "assistant-context-child",
+            sessionId: "ses_context_child",
+            tokens: { input: 7_000, output: 7, reasoning: 0, cache: { read: 0, write: 0 } },
+          }),
+          // Another OpenCode session that this thread never related to itself.
+          openCodeAssistantMessageEvent({
+            messageId: "assistant-context-other",
+            parentId: "user-context-other-prompt",
+            sessionId: "ses_context_unrelated",
+          }),
+          openCodeStepFinishEvent({
+            stepId: "step-context-other",
+            messageId: "assistant-context-other",
+            sessionId: "ses_context_unrelated",
+            tokens: { input: 8_000, output: 8, reasoning: 0, cache: { read: 0, write: 0 } },
+          }),
+          // A main-session step that arrives before its header: the turn usage parks it until
+          // the header resolves it as owned, and the context window reports it on arrival.
+          openCodeStepFinishEvent({
+            stepId: "step-context-parked",
+            messageId: "assistant-context-parked",
+            tokens: { input: 30, output: 10, reasoning: 2, cache: { read: 5, write: 1 } },
+          }),
+          openCodeAssistantMessageEvent({
+            messageId: "assistant-context-parked",
+            parentId: promptMessageId,
+          }),
+        ],
+      });
+
+      // Guard: the per-turn usage counts only the parked step, as before this phase.
+      NodeAssert.equal(completed?.type, "turn.completed");
+      if (completed?.type === "turn.completed") {
+        NodeAssert.deepStrictEqual(completed.payload.tokenUsage, {
+          usageStatus: "complete",
+          usageScope: "main_agent",
+          inputTokens: 36,
+          cachedInputTokens: 5,
+          cacheCreationTokens: 1,
+          outputTokens: 12,
+          reasoningTokens: 2,
+          hasSubagents: true,
+        });
+      }
+      NodeAssert.deepStrictEqual(
+        snapshots.map((snapshot) => snapshot.usedTokens),
+        [48],
+      );
       yield* adapter.stopSession(threadId);
     }),
   );

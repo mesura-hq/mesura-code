@@ -9,6 +9,7 @@ import {
   RuntimeItemId,
   RuntimeRequestId,
   ThreadId,
+  type ThreadTokenUsageSnapshot,
   type ToolLifecycleItemType,
   type TurnTokenUsage,
   TurnId,
@@ -68,6 +69,9 @@ const PROVIDER = ProviderDriverKind.make("opencode");
  * rather than misread (mirrors GROK_RESUME_VERSION / CURSOR_RESUME_VERSION).
  */
 const OPENCODE_RESUME_VERSION = 1 as const;
+// mesura: the lookup runs inside the session's sequential event handler, so a slow server
+// must not hold that session's later events for longer than this.
+const OPENCODE_CONTEXT_WINDOW_LOOKUP_TIMEOUT = "3 seconds";
 
 /**
  * Decode a persisted resume cursor into the upstream `ses_…` id. Anything
@@ -351,6 +355,17 @@ interface OpenCodeSessionContext {
   // until native removal or session teardown, but do not retain other part payloads.
   readonly textPartsByMessageId: Map<string, Map<string, OpenCodeTextPartState>>;
   turnTokenUsage: OpenCodeTurnTokenUsageAccumulator | undefined;
+  /**
+   * mesura: each model slug's `limit.context` from `provider.list`, looked up once per
+   * session. `undefined` caches a miss or a failed lookup, so neither is retried.
+   */
+  readonly contextWindowByModelSlug: Map<string, number | undefined>;
+  /**
+   * mesura: steps already reported as the context window. The window belongs to the main
+   * session, not to a turn: a step that lands after its turn completed (OpenCode retried the
+   * request), or that answers a prompt sent before a restart, still updates it.
+   */
+  readonly reportedContextWindowStepIds: Set<string>;
   activeTurnId: TurnId | undefined;
   activeAgent: string | undefined;
   activeVariant: string | undefined;
@@ -450,6 +465,35 @@ function takeOpenCodeTurnTokenUsage(
     outputTokens: usage.outputTokens,
     reasoningTokens: Math.min(usage.outputTokens, usage.reasoningTokens),
     hasSubagents: usage.hasSubagents,
+  };
+}
+
+/** mesura: every token one step sent and produced, which is the context the next step carries. */
+function openCodeStepTotalTokens(step: OpenCodeStepUsage): number {
+  const { input, output, reasoning, cache } = step.tokens;
+  return input + output + reasoning + cache.read + cache.write;
+}
+
+/**
+ * mesura: the context snapshot for one main-agent step. `usedTokens` is the step's whole
+ * total; the split follows the turn accumulator.
+ */
+function makeOpenCodeContextWindowSnapshot(
+  step: OpenCodeStepUsage,
+  contextWindow: number | undefined,
+): ThreadTokenUsageSnapshot {
+  const { input, output, reasoning, cache } = step.tokens;
+  const stepTokens = openCodeStepTotalTokens(step);
+  const usedTokens = contextWindow !== undefined ? Math.min(stepTokens, contextWindow) : stepTokens;
+  return {
+    usedTokens,
+    lastUsedTokens: usedTokens,
+    inputTokens: input + cache.read + cache.write,
+    cachedInputTokens: cache.read,
+    cacheCreationTokens: cache.write,
+    outputTokens: output + reasoning,
+    reasoningOutputTokens: reasoning,
+    ...(contextWindow !== undefined ? { maxTokens: contextWindow } : {}),
   };
 }
 
@@ -1591,6 +1635,56 @@ export function makeOpenCodeAdapter(
       yield* Scope.close(context.sessionScope, Exit.void);
     });
 
+    /** mesura: the session model's context window, from a per-session cache of `provider.list`. */
+    const resolveOpenCodeContextWindow = Effect.fn("resolveOpenCodeContextWindow")(function* (
+      context: OpenCodeSessionContext,
+    ) {
+      const modelSlug = context.session.model;
+      const parsedModel = parseOpenCodeModelSlug(modelSlug);
+      if (modelSlug === undefined || parsedModel === null) return undefined;
+      if (context.contextWindowByModelSlug.has(modelSlug)) {
+        return context.contextWindowByModelSlug.get(modelSlug);
+      }
+      const contextWindow = yield* runOpenCodeSdk("provider.list", (signal) =>
+        context.client.provider.list(undefined, { signal }),
+      ).pipe(
+        Effect.timeout(OPENCODE_CONTEXT_WINDOW_LOOKUP_TIMEOUT),
+        Effect.map((response) => {
+          const limit = response.data?.all.find(
+            (provider) => provider.id === parsedModel.providerID,
+          )?.models[parsedModel.modelID]?.limit.context;
+          return Number.isInteger(limit) && limit !== undefined && limit > 0 ? limit : undefined;
+        }),
+        Effect.catch((error) =>
+          Effect.logWarning(
+            `OpenCode could not read the context window of '${modelSlug}'; reporting usage without it.`,
+            error,
+          ).pipe(Effect.as(undefined)),
+        ),
+      );
+      context.contextWindowByModelSlug.set(modelSlug, contextWindow);
+      return contextWindow;
+    });
+
+    /** mesura: report an owned main-agent step, the first time it is seen, as the context window. */
+    const reportOpenCodeContextWindowStep = Effect.fn("reportOpenCodeContextWindowStep")(function* (
+      context: OpenCodeSessionContext,
+      step: OpenCodeStepUsage,
+      turnId: TurnId | undefined,
+      raw: unknown,
+    ) {
+      if (context.reportedContextWindowStepIds.has(step.id)) return;
+      context.reportedContextWindowStepIds.add(step.id);
+      // A step with no tokens (an aborted one) says nothing about the context; Claude drops it too.
+      if (openCodeStepTotalTokens(step) <= 0) return;
+      const contextWindow = yield* resolveOpenCodeContextWindow(context);
+      yield* emit({
+        ...(yield* buildEventBase({ threadId: context.session.threadId, turnId, raw })),
+        type: "thread.token-usage.updated",
+        payload: { usage: makeOpenCodeContextWindowSnapshot(step, contextWindow) },
+      });
+    });
+
     /** Emit content.delta and item.completed events for an assistant text part. */
     const emitAssistantTextDelta = Effect.fn("emitAssistantTextDelta")(function* (
       context: OpenCodeSessionContext,
@@ -2445,6 +2539,18 @@ export function makeOpenCodeAdapter(
             }
           }
 
+          // mesura: a step of the main session is its context window; a subagent's step runs
+          // in a child session. Report it only after the turn usage above has counted it: the
+          // report awaits a lookup, and idle reconciliation may complete the turn meanwhile.
+          if (part.type === "step-finish" && part.sessionID === context.openCodeSessionId) {
+            yield* reportOpenCodeContextWindowStep(
+              context,
+              { id: part.id, tokens: part.tokens },
+              turnId,
+              event,
+            );
+          }
+
           if ((part.type === "text" || part.type === "reasoning") && messageRole !== "user") {
             const state = retainOpenCodeTextPart(context, part);
             if (messageRole === "assistant") {
@@ -2995,6 +3101,8 @@ export function makeOpenCodeAdapter(
           textPartsByMessageId: new Map(),
           messageRoleById: new Map(),
           turnTokenUsage: undefined,
+          contextWindowByModelSlug: new Map(),
+          reportedContextWindowStepIds: new Set(),
           activeTurnId: undefined,
           activeAgent: undefined,
           activeVariant: undefined,
