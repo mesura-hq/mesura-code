@@ -42,6 +42,8 @@ export interface CombinedPickerSavedSelection {
   prompt: string;
   /** The effective access value: draft, then thread, then the configured default. */
   runtimeMode: RuntimeMode;
+  /** Aggregate Settings scopes whose targets disagree show access as Mixed until edited. */
+  runtimeModeMixed?: boolean;
 }
 
 /** One model row, resolved against its exact instance's catalog. */
@@ -56,6 +58,14 @@ export interface CombinedPickerContext {
   planModeEnabled: boolean;
   /** False where no prompt can change, such as Settings. */
   allowPromptInjectedEffort: boolean;
+  /**
+   * Why a descriptor cannot be saved in this context, or null. The option stays
+   * visible; only edits are refused. Settings for background writing use it for
+   * options their task does not read.
+   */
+  optionReadOnlyReason?: (driverKind: ProviderDriverKind, descriptorId: string) => string | null;
+  /** Shown in place of the access control where the context has no access setting. */
+  accessReadOnlyLabel?: string;
 }
 
 /** A pending Ultrathink prefix change, applied to the prompt current at apply time. */
@@ -95,6 +105,8 @@ export interface CombinedPickerRow {
   key: string;
   effort: CombinedPickerEffort | null;
   optionState: ProviderOptionState;
+  /** Descriptors the context refuses to save, keyed by descriptor id. */
+  optionReadOnlyReasons: Readonly<Record<string, string>>;
 }
 
 export interface CombinedPickerCandidate {
@@ -107,6 +119,13 @@ export interface CombinedPickerCandidate {
    * pins the effort, so the choice must not be applied.
    */
   blockedReason?: string;
+  /** Whether the applied row differs from the saved one or has edited options. */
+  selectionEdited: boolean;
+  /**
+   * How the row was applied: a row click or Enter chooses the model, while the
+   * Use button in More options may only carry an access edit.
+   */
+  appliedFrom?: "row" | "use";
 }
 
 const ULTRATHINK_PREFIX_PATTERN = /^\s*Ultrathink:\s*/i;
@@ -178,10 +197,42 @@ function resolveRowOptionState(
   return { optionState, prompt, selections };
 }
 
-function resolveEffort(optionState: ProviderOptionState): CombinedPickerEffort | null {
+/** Why a row's descriptor cannot change: the option's own rule, then the context's. */
+function resolveOptionReadOnlyReason(
+  optionState: ProviderOptionState,
+  row: CombinedPickerRowInput,
+  context: CombinedPickerContext,
+  descriptorId: string,
+): string | null {
+  return (
+    getProviderOptionReadOnlyReason(optionState, descriptorId) ??
+    context.optionReadOnlyReason?.(row.driverKind, descriptorId) ??
+    null
+  );
+}
+
+function resolveContextReadOnlyReasons(
+  optionState: ProviderOptionState,
+  row: CombinedPickerRowInput,
+  context: CombinedPickerContext,
+): Readonly<Record<string, string>> {
+  const reasons: Record<string, string> = {};
+  if (!context.optionReadOnlyReason) return reasons;
+  for (const descriptor of optionState.descriptors) {
+    const reason = context.optionReadOnlyReason(row.driverKind, descriptor.id);
+    if (reason !== null) reasons[descriptor.id] = reason;
+  }
+  return reasons;
+}
+
+function resolveEffort(
+  optionState: ProviderOptionState,
+  row: CombinedPickerRowInput,
+  context: CombinedPickerContext,
+): CombinedPickerEffort | null {
   const descriptor = optionState.effortDescriptor;
   if (!descriptor) return null;
-  const readOnlyReason = getProviderOptionReadOnlyReason(optionState, descriptor.id);
+  const readOnlyReason = resolveOptionReadOnlyReason(optionState, row, context, descriptor.id);
   const options = descriptor.options.map((option) => ({
     id: option.id,
     label: option.label,
@@ -209,7 +260,12 @@ export function resolveCombinedPickerRow(
   context: CombinedPickerContext,
 ): CombinedPickerRow {
   const { optionState } = resolveRowOptionState(state, row, context);
-  return { key: rowKey(row), effort: resolveEffort(optionState), optionState };
+  return {
+    key: rowKey(row),
+    effort: resolveEffort(optionState, row, context),
+    optionState,
+    optionReadOnlyReasons: resolveContextReadOnlyReasons(optionState, row, context),
+  };
 }
 
 function applyRowChange(
@@ -220,6 +276,7 @@ function applyRowChange(
   value: string | boolean,
 ): CombinedPickerState {
   const { optionState, prompt } = resolveRowOptionState(state, row, context);
+  if (context.optionReadOnlyReason?.(row.driverKind, descriptorId)) return state;
   const change = applyProviderOptionChange(optionState, { descriptorId, value, prompt });
   if (!change) return state;
   const key = rowKey(row);
@@ -306,9 +363,13 @@ export function buildCombinedPickerCandidate(
       allowPromptInjectedEffort: context.allowPromptInjectedEffort,
       planModeEnabled: context.planModeEnabled,
     }).ultrathinkInBodyText;
+  const savedRowKey = modelPickerModelKey(state.saved.instanceId, state.saved.model);
   return {
     modelSelection: createModelSelection(row.instanceId, row.model, options),
     prompt: applyPromptEffort(currentPrompt, edit?.promptEffort),
+    selectionEdited:
+      rowKey(row) !== savedRowKey ||
+      (edit !== undefined && ("modelOptions" in edit || edit.promptEffort !== undefined)),
     ...(state.runtimeModeTouched ? { runtimeMode: state.runtimeMode } : {}),
     ...(blocked ? { blockedReason: ULTRATHINK_IN_BODY_REASON } : {}),
   };
@@ -349,6 +410,12 @@ export interface CombinedPickerConfig {
   readCurrentPrompt: () => string;
   context: CombinedPickerContext;
   onApply: (candidate: CombinedPickerCandidate) => void;
+  /**
+   * Applies only an access edit. Offered where an opening may have no model
+   * row to apply, such as a Settings default whose saved model is hidden by
+   * Favorites, gone from the catalog, or has no provider at all.
+   */
+  onApplyAccess?: (runtimeMode: RuntimeMode) => void;
   /** Open with More options expanded and its first control focused. */
   initialExtrasExpanded?: boolean;
   /** Lets `traitsPicker.toggle` toggle More options while this picker is open. */

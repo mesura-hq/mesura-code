@@ -1100,6 +1100,21 @@ describe("combined picker shortcuts in every composer layout", () => {
     },
   );
 
+  it("combined picker composer.effort alias toggles More options once while the picker is open", async () => {
+    await mountApp();
+    await openPicker();
+    expect(moreOptionsToggle()?.getAttribute("aria-expanded")).toBe("false");
+
+    await press(focusTarget(), "Y", { altKey: true, shiftKey: true, code: "KeyY" });
+    expect(moreOptionsToggle()?.getAttribute("aria-expanded")).toBe("true");
+    expect(extrasRegion()?.contains(document.activeElement)).toBe(true);
+
+    await press(focusTarget(), "Y", { altKey: true, shiftKey: true, code: "KeyY" });
+    expect(pickerContent()).toBeTruthy();
+    expect(moreOptionsToggle()?.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(searchInput());
+  });
+
   it.each(["expanded", "compact", "resting"] as const)(
     "combined picker composer.mode alias opens the picker without opening access in the %s layout",
     async (layout) => {

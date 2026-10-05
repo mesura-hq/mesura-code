@@ -707,8 +707,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   }, []);
 
   const handleModelSelect = useCallback(
-    (modelSlug: string, instanceId: ProviderInstanceId) => {
-      if (getModelDisabledReason?.(instanceId, modelSlug)) {
+    (modelSlug: string, instanceId: ProviderInstanceId, appliedFrom: "row" | "use" = "row") => {
+      const disabled = getModelDisabledReason?.(instanceId, modelSlug) != null;
+      // Use on the saved, unedited row carries only an access edit, so the
+      // caller validates it; every other disabled model stays unselectable.
+      if (disabled && !(combined && appliedFrom === "use")) {
         return;
       }
       const options = modelOptionsByInstance.get(instanceId);
@@ -727,6 +730,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         return;
       }
       const row = combined && pickerState ? combinedRowInput(instanceId, modelSlug) : null;
+      if (disabled && !row) return;
       if (combined && pickerState && row) {
         // Apply the row's whole pending choice; the caller validates it
         // before writing anything.
@@ -736,9 +740,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           combined.context,
           combined.readCurrentPrompt(),
         );
+        if (disabled && candidate.selectionEdited) return;
         combined.onApply({
           ...candidate,
           modelSelection: { ...candidate.modelSelection, model: resolvedModel },
+          appliedFrom,
         });
         return;
       }
@@ -918,7 +924,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       row,
       modelName: getDisplayModelName(model, isLocked ? undefined : { preferShortName: true }),
       providerName: model.instanceDisplayName,
-      optionState: resolveCombinedPickerRow(pickerState, row, combined.context).optionState,
+      ...resolveCombinedPickerRow(pickerState, row, combined.context),
     };
   })();
   const extrasShortcutLabel = combined
@@ -976,6 +982,17 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         platform: navigator.platform,
         context: modelJumpShortcutContext,
       });
+      // The traits shortcut (and its composer.effort alias) toggles More
+      // options while the combined picker is open, including where no ChatView
+      // dispatches it, such as Settings. In the composer ChatView may see the
+      // event first; each handler skips an event the other already handled,
+      // so the section toggles once.
+      if (isCombined && (command === "traitsPicker.toggle" || command === "composer.effort")) {
+        event.preventDefault();
+        event.stopPropagation();
+        setExtras(!extrasExpanded);
+        return;
+      }
       if (command === "modelPicker.previousProvider" || command === "modelPicker.nextProvider") {
         event.preventDefault();
         event.stopPropagation();
@@ -1006,11 +1023,14 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       window.removeEventListener("keydown", onWindowKeyDown, true);
     };
   }, [
+    extrasExpanded,
     handleModelSelect,
+    isCombined,
     keybindings,
     modelJumpModelKeys,
     modelJumpShortcutContext,
     selectAdjacentProvider,
+    setExtras,
   ]);
 
   useLayoutEffect(() => {
@@ -1345,6 +1365,17 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               toggleRef={extrasToggleRef}
               shortcutLabel={extrasShortcutLabel}
               runtimeMode={pickerState.runtimeMode}
+              runtimeModeMixed={
+                pickerState.saved.runtimeModeMixed === true && !pickerState.runtimeModeTouched
+              }
+              accessReadOnlyLabel={combined.context.accessReadOnlyLabel ?? null}
+              {...(combined.onApplyAccess && !combined.context.accessReadOnlyLabel
+                ? {
+                    onApplyAccess: pickerState.runtimeModeTouched
+                      ? () => combined.onApplyAccess?.(pickerState.runtimeMode)
+                      : null,
+                  }
+                : {})}
               target={extrasTarget}
               onToggle={() => setExtras(!extrasExpanded)}
               onRuntimeModeChange={(mode) =>
@@ -1368,7 +1399,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               }}
               onUse={() => {
                 if (extrasTarget) {
-                  handleModelSelect(extrasTarget.model.slug, extrasTarget.model.instanceId);
+                  handleModelSelect(extrasTarget.model.slug, extrasTarget.model.instanceId, "use");
                 }
               }}
             />

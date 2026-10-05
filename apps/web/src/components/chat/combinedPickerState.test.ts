@@ -470,3 +470,49 @@ describe("combinedPickerState candidates", () => {
     );
   });
 });
+
+describe("combinedPickerState Settings support", () => {
+  it("combined picker state reports whether a candidate edits the saved selection", () => {
+    const state = createCombinedPickerState(
+      saved({ modelOptionsByInstance: { [CODEX]: selections(["reasoningEffort", "high"]) } }),
+    );
+
+    expect(buildCombinedPickerCandidate(state, CODEX_54, CONTEXT, "Draft").selectionEdited).toBe(
+      false,
+    );
+    expect(buildCombinedPickerCandidate(state, CODEX_55, CONTEXT, "Draft").selectionEdited).toBe(
+      true,
+    );
+    expect(
+      buildCombinedPickerCandidate(step(state, CODEX_54, -1), CODEX_54, CONTEXT, "Draft")
+        .selectionEdited,
+    ).toBe(true);
+    expect(
+      buildCombinedPickerCandidate(
+        setCombinedPickerRuntimeMode(state, "full-access"),
+        CODEX_54,
+        CONTEXT,
+        "Draft",
+      ).selectionEdited,
+    ).toBe(false);
+  });
+
+  it("combined picker state applies a context's read-only option rule without hiding the option", () => {
+    const context = {
+      ...CONTEXT,
+      optionReadOnlyReason: (_driverKind: ProviderDriverKind, descriptorId: string) =>
+        descriptorId === "serviceTier" ? "Not used by this task." : null,
+    };
+    const state = createCombinedPickerState(saved());
+    const resolved = resolveCombinedPickerRow(state, CODEX_54, context);
+
+    expect(resolved.optionState.extraDescriptors.map((descriptor) => descriptor.id)).toContain(
+      "serviceTier",
+    );
+    expect(resolved.optionReadOnlyReasons).toEqual({ serviceTier: "Not used by this task." });
+    expect(setCombinedPickerOption(state, CODEX_54, context, "serviceTier", "priority")).toBe(
+      state,
+    );
+    expect(effortOf(step(state, CODEX_54, 1), CODEX_54)).toBe("high");
+  });
+});

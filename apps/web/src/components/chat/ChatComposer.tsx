@@ -252,8 +252,7 @@ import {
   slashCommandItemsForPromptPosition,
 } from "./composerSlashCommandSearch";
 import { getComposerPromptInjectionState, getComposerProviderState } from "./composerProviderState";
-import { resolveComposerOptionSelections, resolveProviderOptionState } from "./providerOptionState";
-import { buildTraitsTriggerDisplay } from "./TraitsPicker";
+import { resolveTraitsTriggerDisplay } from "./TraitsPicker";
 import type {
   CombinedPickerCandidate,
   CombinedPickerConfig,
@@ -2473,39 +2472,26 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // ------------------------------------------------------------------
   // Combined model, effort, options, and access picker
   // ------------------------------------------------------------------
-  const modelPickerTriggerTraits = useMemo(() => {
-    const { selections } = resolveComposerOptionSelections(
-      selectedProviderModels,
+  const modelPickerTriggerTraits = useMemo(
+    () =>
+      resolveTraitsTriggerDisplay({
+        provider: selectedProvider,
+        models: selectedProviderModels,
+        model: selectedModel,
+        prompt,
+        modelOptions: composerModelOptions?.[selectedInstanceId],
+        planModeEnabled: settings.planModeEnabled,
+      }),
+    [
+      composerModelOptions,
+      prompt,
+      selectedInstanceId,
       selectedModel,
       selectedProvider,
-      composerModelOptions?.[selectedInstanceId],
+      selectedProviderModels,
       settings.planModeEnabled,
-    );
-    const optionState = resolveProviderOptionState({
-      provider: selectedProvider,
-      models: selectedProviderModels,
-      model: selectedModel,
-      prompt,
-      modelOptions: selections,
-      planModeEnabled: settings.planModeEnabled,
-    });
-    return optionState.hasAnyControls
-      ? buildTraitsTriggerDisplay({
-          provider: selectedProvider,
-          descriptors: optionState.descriptors,
-          primarySelectDescriptorId: optionState.promptEffortDescriptor?.id ?? null,
-          ultrathinkPromptControlled: optionState.ultrathinkPromptControlled,
-        })
-      : undefined;
-  }, [
-    composerModelOptions,
-    prompt,
-    selectedInstanceId,
-    selectedModel,
-    selectedProvider,
-    selectedProviderModels,
-    settings.planModeEnabled,
-  ]);
+    ],
+  );
   // Set when the effort shortcut opens the picker, so it opens on More options.
   const [modelPickerOpensOnExtras, setModelPickerOpensOnExtras] = useState(false);
   const readCombinedPickerSavedSelection = useCallback(

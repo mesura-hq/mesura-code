@@ -27,6 +27,7 @@ import { useComposerDraftStore, DraftId } from "../../composerDraftStore";
 import {
   applyProviderOptionChange,
   buildUnavailableModelOptionDescriptors,
+  resolveComposerOptionSelections,
   resolveProviderOptionState,
 } from "./providerOptionState";
 import { cn } from "~/lib/utils";
@@ -334,6 +335,43 @@ export function buildTraitsTriggerDisplay(input: {
     return { label: fastModeFallbackLabel, showFastModeIcon: false };
   }
   return { label: labels.join(" · "), showFastModeIcon: fastModeEnabled };
+}
+
+/**
+ * The trigger traits for a saved selection, with the composer's Normal/Fast
+ * default applied, or undefined when the model has no controls.
+ */
+export function resolveTraitsTriggerDisplay(input: {
+  provider: ProviderDriverKind;
+  models: ReadonlyArray<ServerProviderModel>;
+  model: string;
+  prompt: string;
+  modelOptions: ReadonlyArray<ProviderOptionSelection> | null | undefined;
+  planModeEnabled: boolean;
+}): { label: string; showFastModeIcon: boolean } | undefined {
+  const { selections } = resolveComposerOptionSelections(
+    input.models,
+    input.model,
+    input.provider,
+    input.modelOptions,
+    input.planModeEnabled,
+  );
+  const optionState = resolveProviderOptionState({
+    provider: input.provider,
+    models: input.models,
+    model: input.model,
+    prompt: input.prompt,
+    modelOptions: selections,
+    planModeEnabled: input.planModeEnabled,
+  });
+  return optionState.hasAnyControls
+    ? buildTraitsTriggerDisplay({
+        provider: input.provider,
+        descriptors: optionState.descriptors,
+        primarySelectDescriptorId: optionState.promptEffortDescriptor?.id ?? null,
+        ultrathinkPromptControlled: optionState.ultrathinkPromptControlled,
+      })
+    : undefined;
 }
 
 export interface TraitsPickerProps extends TraitsMenuContentProps {

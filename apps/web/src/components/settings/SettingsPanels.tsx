@@ -7,7 +7,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type BackgroundActivityProfile,
   type DesktopUpdateChannel,
-  ProviderDriverKind,
   type ProviderInstanceId,
   type ScopedThreadRef,
   type SidebarProjectGroupingMode,
@@ -43,7 +42,6 @@ import {
   type QuitConfirmationMode,
 } from "@t3tools/contracts/settings";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
-import { createModelSelection } from "@t3tools/shared/model";
 import * as Duration from "effect/Duration";
 import * as Equal from "effect/Equal";
 import * as Schema from "effect/Schema";
@@ -55,8 +53,6 @@ import {
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
 } from "../../components/desktopUpdate.logic";
-import { ProviderModelPicker } from "../chat/ProviderModelPicker";
-import { TraitsPicker } from "../chat/TraitsPicker";
 import {
   resolveEnvironmentIdentificationPillLabel,
   useEnvironmentStageLabel,
@@ -77,6 +73,8 @@ import {
   useUpdateScopedSettings,
 } from "./useScopedSettings";
 import { useScopedModelDisabledReason } from "./useScopedModelAvailability";
+import { CombinedPickerSettings } from "./CombinedPickerSettings";
+import { withStoredOptions } from "./combinedPickerSettings";
 import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
@@ -162,7 +160,6 @@ import {
 } from "./SettingsPanels.logic";
 import {
   PolicyTooltip,
-  SETTINGS_PICKER_TRIGGER_CLASSNAME,
   SettingResetButton,
   SettingsPageContainer,
   SettingsRow,
@@ -231,7 +228,6 @@ const BACKGROUND_ACTIVITY_PROFILE_DESCRIPTIONS: Record<BackgroundActivityProfile
 
 const ADVANCED_BACKGROUND_ACTIVITY_DESCRIPTION = "Uses custom intervals.";
 
-const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
 const BACKGROUND_ACTIVITY_BOOLEAN_OVERRIDES: ReadonlyArray<{
   readonly key:
     | "pauseWhenHostLocked"
@@ -2200,18 +2196,12 @@ export function GeneralSettingsPanel() {
   );
   const textGenInstanceId = textGenerationModelSelection.instanceId;
   const textGenModel = textGenerationModelSelection.model;
-  const textGenModelOptions = textGenerationModelSelection.options;
   const textGenerationModelInstanceEntries = sortProviderInstanceEntries(
     applyProviderInstanceSettings(deriveProviderInstanceEntries(textGenerationProviders), settings),
   );
   const hasTextGenerationProvider = textGenerationModelInstanceEntries.some(
     (entry) => entry.enabled && entry.isAvailable,
   );
-  const textGenInstanceEntry = textGenerationModelInstanceEntries.find(
-    (entry) => entry.instanceId === textGenInstanceId,
-  );
-  const textGenProvider: ProviderDriverKind =
-    textGenInstanceEntry?.driverKind ?? DEFAULT_DRIVER_KIND;
   const textGenerationModelOptionsByInstance = getCustomModelOptionsByInstance(
     settings,
     textGenerationProviders,
@@ -2225,6 +2215,7 @@ export function GeneralSettingsPanel() {
   const textGenerationModelDisabledReason = useScopedModelDisabledReason(
     settings,
     textGenerationModelInstanceEntries,
+    { requireTextGeneration: true },
   );
   const resolvedBackgroundActivity = resolveServerBackgroundActivitySettings(settings);
   const activeBackgroundActivityProfile = resolvedBackgroundActivity.profile;
@@ -3124,84 +3115,36 @@ export function GeneralSettingsPanel() {
                 No text generation providers available.
               </span>
             ) : (
-              <div className="flex flex-wrap items-center justify-end gap-1.5">
-                <ProviderModelPicker
-                  activeInstanceId={textGenInstanceId}
-                  model={textGenModel}
-                  lockedProvider={null}
-                  instanceEntries={textGenerationModelInstanceEntries}
-                  modelOptionsByInstance={textGenerationModelOptionsByInstance}
-                  triggerVariant="outline"
-                  triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                  {...(mixedTextGenerationModel ? { triggerLabel: "Mixed" } : {})}
-                  getModelDisabledReason={textGenerationModelDisabledReason}
-                  {...(environmentId
-                    ? {
-                        onOpenProviderSetup: (instanceId: ProviderInstanceId) => {
-                          void navigate({
-                            to: "/settings/providers",
-                            search: { environmentId, instanceId },
-                          });
-                        },
-                      }
-                    : {})}
-                  onInstanceModelChange={(instanceId, model) => {
-                    const reason = textGenerationModelDisabledReason(instanceId, model);
-                    if (reason) {
-                      toastManager.add({
-                        type: "error",
-                        title: "Text generation model not saved",
-                        description: reason,
-                      });
-                      return;
+              <CombinedPickerSettings
+                kind="text-generation"
+                selection={withStoredOptions(
+                  textGenerationModelSelection,
+                  settings.textGenerationModelSelection,
+                )}
+                instanceEntries={textGenerationModelInstanceEntries}
+                modelOptionsByInstance={textGenerationModelOptionsByInstance}
+                planModeEnabled={settings.planModeEnabled}
+                mixedModel={mixedTextGenerationModel}
+                triggerAriaLabel="Text generation model"
+                rejectedTitle="Text generation model not saved"
+                getModelDisabledReason={textGenerationModelDisabledReason}
+                {...(environmentId
+                  ? {
+                      onOpenProviderSetup: (instanceId: ProviderInstanceId) => {
+                        void navigate({
+                          to: "/settings/providers",
+                          search: { environmentId, instanceId },
+                        });
+                      },
                     }
-                    updateSettings({
-                      textGenerationModelSelection: resolveAppModelSelectionState(
-                        {
-                          ...settings,
-                          textGenerationModelSelection: createModelSelection(instanceId, model),
-                        },
-                        textGenerationProviders,
-                      ),
-                    });
-                  }}
-                />
-                {textGenInstanceEntry ? (
-                  <TraitsPicker
-                    provider={textGenProvider}
-                    models={
-                      // Use the exact instance's models (rather than the
-                      // first-kind-match) so a custom text-gen instance like
-                      // `codex_personal` gets its own model list, not the
-                      // default Codex one.
-                      textGenInstanceEntry?.models ?? []
-                    }
-                    model={textGenModel}
-                    prompt=""
-                    onPromptChange={() => {}}
-                    modelOptions={textGenModelOptions}
-                    allowPromptInjectedEffort={false}
-                    planModeEnabled={settings.planModeEnabled}
-                    triggerVariant="outline"
-                    triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                    onModelOptionsChange={(nextOptions) => {
-                      updateSettings({
-                        textGenerationModelSelection: resolveAppModelSelectionState(
-                          {
-                            ...settings,
-                            textGenerationModelSelection: createModelSelection(
-                              textGenInstanceId,
-                              textGenModel,
-                              nextOptions,
-                            ),
-                          },
-                          textGenerationProviders,
-                        ),
-                      });
-                    }}
-                  />
-                ) : null}
-              </div>
+                  : {})}
+                onChange={({ modelSelection }) => {
+                  // The picker's exact, validated selection. Normalizing it
+                  // again would drop a stored option its service still reads.
+                  if (modelSelection)
+                    updateSettings({ textGenerationModelSelection: modelSelection });
+                }}
+              />
             )
           }
         />

@@ -26,18 +26,13 @@ import {
   resolveAppModelSelectionState,
 } from "../../modelSelection";
 import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
-import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
-import { toastManager } from "../ui/toast";
 import { Button } from "../ui/button";
-import {
-  SETTINGS_PICKER_TRIGGER_CLASSNAME,
-  SettingResetButton,
-  SettingsRow,
-  SettingsSection,
-} from "./settingsLayout";
+import { CombinedPickerSettings } from "./CombinedPickerSettings";
+import { withStoredOptions } from "./combinedPickerSettings";
+import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 
 const MODE_OPTIONS: Record<SourceControlWritingStyleMode, { label: string; description: string }> =
@@ -122,7 +117,9 @@ export function SourceControlWritingSettingsSection() {
     activeSelection.instanceId,
     activeSelection.model,
   );
-  const writerModelDisabledReason = useScopedModelDisabledReason(settings, instanceEntries);
+  const writerModelDisabledReason = useScopedModelDisabledReason(settings, instanceEntries, {
+    requireTextGeneration: true,
+  });
 
   return (
     <SettingsSection id="source-control-text-generation" title="Text generation">
@@ -298,16 +295,19 @@ export function SourceControlWritingSettingsSection() {
                 </span>
               ) : null}
               {usesDedicatedModel && canEnableDedicatedModel ? (
-                <ProviderModelPicker
-                  activeInstanceId={activeSelection.instanceId}
-                  model={activeSelection.model}
-                  lockedProvider={null}
+                <CombinedPickerSettings
+                  kind="source-control-writing"
+                  selection={withStoredOptions(
+                    activeSelection,
+                    resolveSourceControlWriterModelSelection(settings, textGenerationProviders),
+                  )}
                   instanceEntries={instanceEntries}
                   modelOptionsByInstance={modelOptionsByInstance}
-                  triggerVariant="outline"
-                  triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
+                  planModeEnabled={settings.planModeEnabled}
+                  mixedModel={mixedWriterModel}
                   triggerAriaLabel="Source control writer model"
-                  {...(mixedWriterModel ? { triggerLabel: "Mixed" } : {})}
+                  rejectedTitle="Source control writer model not saved"
+                  getModelDisabledReason={writerModelDisabledReason}
                   {...(environmentId
                     ? {
                         onOpenProviderSetup: (instanceId: ProviderInstanceId) => {
@@ -318,20 +318,11 @@ export function SourceControlWritingSettingsSection() {
                         },
                       }
                     : {})}
-                  getModelDisabledReason={writerModelDisabledReason}
-                  onInstanceModelChange={(instanceId, model) => {
-                    const reason = writerModelDisabledReason(instanceId, model);
-                    if (reason) {
-                      toastManager.add({
-                        type: "error",
-                        title: "Source control writer model not saved",
-                        description: reason,
-                      });
-                      return;
+                  onChange={({ modelSelection }) => {
+                    // The complete accepted options; unedited saved values stay.
+                    if (modelSelection) {
+                      updateSettings({ sourceControlWriterModelSelection: modelSelection });
                     }
-                    updateSettings({
-                      sourceControlWriterModelSelection: createModelSelection(instanceId, model),
-                    });
                   }}
                 />
               ) : null}

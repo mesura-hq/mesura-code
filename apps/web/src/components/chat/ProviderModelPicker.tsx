@@ -174,6 +174,15 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           combined.onApply(candidate);
           setIsMenuOpen(false);
         },
+        ...(combined.onApplyAccess
+          ? {
+              onApplyAccess: (runtimeMode) => {
+                if (props.disabled) return;
+                combined.onApplyAccess?.(runtimeMode);
+                setIsMenuOpen(false);
+              },
+            }
+          : {}),
       }
     : undefined;
   const triggerTraits = props.triggerLabel === undefined ? props.triggerTraits : undefined;
