@@ -46,10 +46,9 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+n", command: "terminal.new", when: "terminalFocus" },
   { key: "mod+w", command: "terminal.close", when: "terminalFocus" },
   { key: "mod+w", command: "rightPanel.close", when: "!terminalFocus" },
-  // Moved off mod+d so the reading scroll can take the vim pair mod+u/mod+d.
-  // The move reaches existing configs through RETIRED_KEYBINDING_DEFAULTS
-  // below, which startup applies before it backfills missing defaults.
-  { key: "mod+shift+d", command: "diff.toggle", when: "!terminalFocus" },
+  // Mesura: diff.toggle ships unbound. It gave mod+d to the reading scroll and
+  // then mod+shift+d to dictation.toggle; WITHDRAWN_KEYBINDING_DEFAULTS takes
+  // both old rules out of existing configs.
   { key: "mod+shift+j", command: "preview.toggle" },
   { key: "mod+r", command: "preview.refresh", when: "previewFocus" },
   { key: "mod+alt+l", command: "preview.focusUrl", when: "previewFocus" },
@@ -97,8 +96,11 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // Mesura dictation. Active only while a recording or the last stopped job is
   // live, and listed after hosts.peek on purpose: resolution is last-wins, so
   // alt+s selects save during a dictation and stays the Hosts peek otherwise.
-  // dictation.toggle ships unbound; the user guide gives the Hyprland bind.
-  // New commands, so the per-command startup backfill installs them.
+  // dictation.toggle starts and stops a recording while Mesura has focus; the
+  // user guide gives the Hyprland bind for other apps. New commands, so the
+  // per-command startup backfill installs them, on the chord the diff.toggle
+  // withdrawal frees in the same startup.
+  { key: "mod+shift+d", command: "dictation.toggle", when: "!terminalFocus" },
   { key: "alt+s", command: "dictation.mode.clipboard", when: "dictationActive" },
   { key: "alt+i", command: "dictation.mode.inject", when: "dictationActive" },
   { key: "alt+enter", command: "dictation.mode.submit", when: "dictationActive" },
@@ -224,11 +226,6 @@ export const RETIRED_KEYBINDING_DEFAULTS: ReadonlyArray<{
   readonly toKey: string;
   readonly toWhen?: string;
 }> = [
-  {
-    // Freed for chat.scrollHalfPageDown; see the diff.toggle default above.
-    from: { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
-    toKey: "mod+shift+d",
-  },
   {
     // Freed for projectScope.toggle; see the projectSearch.toggle default above.
     // The rewrite runs before the per-command backfill, which is what lets the
@@ -390,6 +387,17 @@ export const WITHDRAWN_KEYBINDING_DEFAULTS: ReadonlyArray<WithdrawnKeybindingDef
   {
     id: "2026-09-withdraw-composer-effort-mod-shift-e",
     rule: { key: "mod+shift+e", command: "composer.effort", when: "!terminalFocus" },
+  },
+  // diff.toggle lost its last default to dictation.toggle. Both of its old
+  // rules go: the mod+d one was a retired default moving to mod+shift+d, and
+  // rewriting it there now would block dictation.toggle's backfill.
+  {
+    id: "2026-10-withdraw-diff-toggle-mod-d",
+    rule: { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
+  },
+  {
+    id: "2026-10-withdraw-diff-toggle-mod-shift-d",
+    rule: { key: "mod+shift+d", command: "diff.toggle", when: "!terminalFocus" },
   },
 ];
 

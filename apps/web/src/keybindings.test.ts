@@ -1186,8 +1186,8 @@ describe("shipped defaults on Linux", () => {
     assert.strictEqual(resolve(press("d", { ctrlKey: true }), true), "terminal.split");
   });
 
-  it("moved diff.toggle to Ctrl+Shift+D without colliding with the terminal split", () => {
-    assert.strictEqual(resolve(press("d", { ctrlKey: true, shiftKey: true })), "diff.toggle");
+  it("gives Ctrl+Shift+D to dictation without colliding with the terminal split", () => {
+    assert.strictEqual(resolve(press("d", { ctrlKey: true, shiftKey: true })), "dictation.toggle");
     assert.strictEqual(
       resolve(press("d", { ctrlKey: true, shiftKey: true }), true),
       "terminal.splitVertical",

@@ -251,10 +251,11 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.equal(soleKeyFor("thread.copyReference"), "mod+shift+c");
       assert.equal(soleKeyFor("chat.scrollHalfPageUp"), "mod+u");
       assert.equal(soleKeyFor("chat.scrollHalfPageDown"), "mod+d");
-      // diff.toggle gave mod+d up to the reading scroll. terminal.splitVertical
-      // also sits on mod+shift+d, but only while the terminal has focus, so the
-      // two never resolve at the same time.
-      assert.equal(soleKeyFor("diff.toggle"), "mod+shift+d");
+      // Mesura: dictation.toggle took mod+shift+d from diff.toggle, which ships
+      // unbound. terminal.splitVertical also sits on mod+shift+d, but only while
+      // the terminal has focus, so the two never resolve at the same time.
+      assert.equal(soleKeyFor("dictation.toggle"), "mod+shift+d");
+      assert.deepEqual(keysFor("diff.toggle"), []);
     }),
   );
 
@@ -413,19 +414,15 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         appliedIds: new Set(),
       });
       assert.deepEqual(exact.config, [other]);
-      assert.deepEqual(
-        exact.results.map((entry) => entry.outcome),
-        ["dropped"],
-      );
+      const effortOutcome = (results: typeof exact.results) =>
+        results.find((entry) => entry.rule.command === "composer.effort")?.outcome;
+      assert.equal(effortOutcome(exact.results), "dropped");
 
       // No `when` is a different rule, and so the user's own.
       const edited = { key: "mod+shift+e", command: "composer.effort" } as const;
       const kept = dropWithdrawnKeybindingDefaults({ config: [edited], appliedIds: new Set() });
       assert.deepEqual(kept.config, [edited]);
-      assert.deepEqual(
-        kept.results.map((entry) => entry.outcome),
-        ["absent"],
-      );
+      assert.equal(effortOutcome(kept.results), "absent");
 
       const recorded = dropWithdrawnKeybindingDefaults({
         config: [withdrawn],
@@ -454,11 +451,12 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
   it.effect("persists a rewrite even when there is nothing to backfill", () =>
     Effect.gen(function* () {
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
-      // Every default present, but diff.toggle still on its retired key. The
-      // backfill has nothing to add, so only the rewrite justifies a write.
+      // Every default present, but threadSearch.toggle still on its retired
+      // key. The backfill has nothing to add, so only the rewrite justifies a
+      // write.
       yield* writeKeybindingsConfig(keybindingsConfigPath, [
-        ...Keybindings.DEFAULT_KEYBINDINGS.filter((rule) => rule.command !== "diff.toggle"),
-        { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
+        ...Keybindings.DEFAULT_KEYBINDINGS.filter((rule) => rule.command !== "threadSearch.toggle"),
+        { key: "mod+shift+k", command: "threadSearch.toggle", when: "!terminalFocus" },
       ]);
 
       yield* Effect.gen(function* () {
@@ -468,8 +466,10 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
 
       const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
       assert.deepEqual(
-        persisted.filter((entry) => entry.command === "diff.toggle").map((entry) => entry.key),
-        ["mod+shift+d"],
+        persisted
+          .filter((entry) => entry.command === "threadSearch.toggle")
+          .map((entry) => entry.key),
+        ["mod+alt+k"],
       );
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
@@ -568,11 +568,11 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
   it.effect("keeps a retired default when its new key is already taken", () =>
     Effect.gen(function* () {
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
-      // Moving onto mod+shift+d would put two commands on one chord and, since
+      // Moving onto mod+alt+k would put two commands on one chord and, since
       // resolution is last-wins, silently disable one of them.
       yield* writeKeybindingsConfig(keybindingsConfigPath, [
-        { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
-        { key: "mod+shift+d", command: "preview.toggle", when: "!terminalFocus" },
+        { key: "mod+shift+k", command: "threadSearch.toggle", when: "!terminalFocus" },
+        { key: "mod+alt+k", command: "preview.toggle", when: "!terminalFocus" },
       ]);
 
       yield* Effect.gen(function* () {
@@ -582,13 +582,13 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
 
       const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
       assert.deepEqual(
-        persisted.filter((entry) => entry.command === "diff.toggle").map((entry) => entry.key),
-        ["mod+d"],
+        persisted
+          .filter((entry) => entry.command === "threadSearch.toggle")
+          .map((entry) => entry.key),
+        ["mod+shift+k"],
       );
       assert.isTrue(
-        persisted.some(
-          (entry) => entry.command === "preview.toggle" && entry.key === "mod+shift+d",
-        ),
+        persisted.some((entry) => entry.command === "preview.toggle" && entry.key === "mod+alt+k"),
       );
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
@@ -596,11 +596,11 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
   it.effect("rewrites when a same-command rule differs only by its when clause", () =>
     Effect.gen(function* () {
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
-      // An unrelated diff.toggle rule already sits on mod+shift+d but under a
-      // different `when`, so the destination context is free.
+      // An unrelated threadSearch.toggle rule already sits on mod+alt+k but
+      // under a different `when`, so the destination context is free.
       yield* writeKeybindingsConfig(keybindingsConfigPath, [
-        { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
-        { key: "mod+shift+d", command: "diff.toggle", when: "terminalOpen" },
+        { key: "mod+shift+k", command: "threadSearch.toggle", when: "!terminalFocus" },
+        { key: "mod+alt+k", command: "threadSearch.toggle", when: "terminalOpen" },
       ]);
 
       yield* Effect.gen(function* () {
@@ -612,13 +612,15 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.isTrue(
         persisted.some(
           (entry) =>
-            entry.command === "diff.toggle" &&
-            entry.key === "mod+shift+d" &&
+            entry.command === "threadSearch.toggle" &&
+            entry.key === "mod+alt+k" &&
             entry.when === "!terminalFocus",
         ),
       );
       assert.isFalse(
-        persisted.some((entry) => entry.key === "mod+d" && entry.command === "diff.toggle"),
+        persisted.some(
+          (entry) => entry.key === "mod+shift+k" && entry.command === "threadSearch.toggle",
+        ),
       );
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
@@ -627,8 +629,8 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     Effect.gen(function* () {
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
       yield* writeKeybindingsConfig(keybindingsConfigPath, [
-        { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
-        { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
+        { key: "mod+shift+k", command: "threadSearch.toggle", when: "!terminalFocus" },
+        { key: "mod+shift+k", command: "threadSearch.toggle", when: "!terminalFocus" },
       ]);
 
       yield* Effect.gen(function* () {
@@ -638,8 +640,10 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
 
       const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
       assert.deepEqual(
-        persisted.filter((entry) => entry.command === "diff.toggle").map((entry) => entry.key),
-        ["mod+shift+d"],
+        persisted
+          .filter((entry) => entry.command === "threadSearch.toggle")
+          .map((entry) => entry.key),
+        ["mod+alt+k"],
       );
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
@@ -855,10 +859,46 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }),
   );
 
-  it.effect("moves a retired default onto its current key and backfills what it freed", () =>
+  it.effect("withdraws diff.toggle and gives its chord to dictation in one startup", () =>
     Effect.gen(function* () {
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
-      // The rule an install written before the diff.toggle move still carries.
+      // An install from before dictation.toggle had a default: every other
+      // default, with diff.toggle on mod+shift+d. The withdrawal has to run
+      // before the backfill, or the backfill sees the chord taken and skips.
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        ...Keybindings.DEFAULT_KEYBINDINGS.filter((rule) => rule.command !== "dictation.toggle"),
+        { key: "mod+shift+d", command: "diff.toggle", when: "!terminalFocus" },
+      ]);
+
+      const sync = Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+      yield* sync;
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.isFalse(persisted.some((entry) => entry.command === "diff.toggle"));
+      assert.deepEqual(
+        persisted.filter((entry) => entry.command === "dictation.toggle"),
+        [{ key: "mod+shift+d", command: "dictation.toggle", when: "!terminalFocus" }],
+      );
+
+      // Once: a user who binds diff.toggle there again keeps it.
+      const rebound = { key: "mod+alt+d", command: "diff.toggle", when: "!terminalFocus" } as const;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [...persisted, rebound]);
+      yield* sync;
+      const afterSecondStartup = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.isTrue(
+        afterSecondStartup.some((entry) => Keybindings.isSameKeybindingRule(entry, rebound)),
+      );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("withdraws diff.toggle's older mod+d rule and backfills what it freed", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      // The rule an install written before diff.toggle first moved still
+      // carries. Rewriting it onto mod+shift+d now would block dictation.toggle.
       yield* writeKeybindingsConfig(keybindingsConfigPath, [
         { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
       ]);
@@ -869,9 +909,11 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       });
 
       const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
-      assert.deepEqual(
-        persisted.filter((entry) => entry.command === "diff.toggle").map((entry) => entry.key),
-        ["mod+shift+d"],
+      assert.isFalse(persisted.some((entry) => entry.command === "diff.toggle"));
+      assert.isTrue(
+        persisted.some(
+          (entry) => entry.command === "dictation.toggle" && entry.key === "mod+shift+d",
+        ),
       );
       // Freeing mod+d is the whole point. Without the rewrite the scroll
       // default reads as conflicting and is skipped, so half the shipped pair
@@ -938,10 +980,10 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
 
       // A plain key move carries no context, so the field stays absent.
       const keyMove = migrateRetiredKeybindingDefaults([
-        { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
+        { key: "mod+shift+k", command: "threadSearch.toggle", when: "!terminalFocus" },
       ]);
       assert.deepEqual(keyMove.rewrites, [
-        { command: "diff.toggle", fromKey: "mod+d", toKey: "mod+shift+d" },
+        { command: "threadSearch.toggle", fromKey: "mod+shift+k", toKey: "mod+alt+k" },
       ]);
     }),
   );
@@ -1181,7 +1223,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     Effect.gen(function* () {
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
       yield* writeKeybindingsConfig(keybindingsConfigPath, [
-        { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
+        { key: "mod+shift+k", command: "threadSearch.toggle", when: "!terminalFocus" },
       ]);
 
       yield* Effect.gen(function* () {
@@ -1192,8 +1234,10 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
 
       const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
       assert.deepEqual(
-        persisted.filter((entry) => entry.command === "diff.toggle").map((entry) => entry.key),
-        ["mod+shift+d"],
+        persisted
+          .filter((entry) => entry.command === "threadSearch.toggle")
+          .map((entry) => entry.key),
+        ["mod+alt+k"],
       );
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
