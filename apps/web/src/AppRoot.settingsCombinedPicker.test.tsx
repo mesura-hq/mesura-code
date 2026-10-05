@@ -29,6 +29,21 @@ import {
   type ServerSettings,
 } from "@t3tools/contracts";
 import type { AppRouter } from "./router";
+import {
+  pickerContent,
+  searchInput,
+  rows,
+  row,
+  highlightedRow,
+  effortValue,
+  buttonByLabel,
+  moreOptionsToggle,
+  extrasRegion,
+  accessSummary,
+  press,
+  click,
+  openMoreOptions,
+} from "./test/combinedPickerDom";
 
 const fixture = vi.hoisted(() => {
   const codexModels = [
@@ -469,83 +484,9 @@ function rowTrigger(id: string) {
   return trigger!;
 }
 
-function pickerContent() {
-  return document.querySelector<HTMLElement>("[data-model-picker-content]");
-}
-
-function searchInput() {
-  const input = pickerContent()?.querySelector<HTMLInputElement>("input");
-  expect(input, "Expected the model picker search input").toBeTruthy();
-  return input!;
-}
-
-function rows() {
-  return [...(pickerContent()?.querySelectorAll<HTMLElement>('[role="option"]') ?? [])];
-}
-
-function row(name: string) {
-  const match = rows().find((entry) => entry.textContent?.includes(name));
-  expect(
-    match,
-    `Expected model row ${name}; rendered: ${pickerContent()?.textContent}`,
-  ).toBeTruthy();
-  return match!;
-}
-
-function highlightedRow() {
-  return rows().find((entry) => entry.hasAttribute("data-highlighted")) ?? null;
-}
-
-function effortValue(name: string) {
-  return (
-    row(name).querySelector("[data-combined-picker-effort-value]")?.textContent?.trim() ?? null
-  );
-}
-
-function buttonByLabel(label: string | RegExp, scope: ParentNode = document) {
-  return (
-    [...scope.querySelectorAll<HTMLButtonElement>("button")].find((button) => {
-      const name = button.getAttribute("aria-label") ?? button.textContent ?? "";
-      return typeof label === "string" ? name.trim() === label : label.test(name.trim());
-    }) ?? null
-  );
-}
-
-function moreOptionsToggle() {
-  return buttonByLabel(/^(More options|Back to models)/, pickerContent() ?? document);
-}
-
-function extrasRegion() {
-  const controls = moreOptionsToggle()?.getAttribute("aria-controls");
-  return controls ? document.getElementById(controls) : null;
-}
-
-function accessSummary() {
-  return moreOptionsToggle()?.textContent ?? "";
-}
-
-async function press(target: EventTarget, key: string, init: Omit<KeyboardEventInit, "key"> = {}) {
-  await act(async () => {
-    target.dispatchEvent(
-      new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init }),
-    );
-  });
-}
-
-async function click(element: HTMLElement) {
-  await act(async () => element.click());
-}
-
 async function openRowPicker(id: string) {
   await click(rowTrigger(id));
   expect(pickerContent(), `Expected the ${id} picker to open`).toBeTruthy();
-}
-
-async function openMoreOptions() {
-  const toggle = moreOptionsToggle();
-  expect(toggle, "Expected one More options disclosure in the Settings picker").toBeTruthy();
-  if (toggle!.getAttribute("aria-expanded") !== "true") await click(toggle!);
-  expect(toggle!.getAttribute("aria-expanded")).toBe("true");
 }
 
 async function highlight(name: string) {
@@ -1162,7 +1103,9 @@ describe("settings combined picker keyboard and access independence", () => {
     ]);
     await mountSettings("general");
     await openRowPicker("default-permissions");
+    await click(moreOptionsToggle()!);
     expect(selectedRailLabel()).toBe("Favorites");
+    await openMoreOptions();
     await chooseOption("Access level", "Supervised");
     await click(applyAccessButton());
 
@@ -1316,8 +1259,9 @@ describe("settings combined picker regression coverage", () => {
         focusTarget().dispatchEvent(event);
       });
       expect(event.defaultPrevented, "Tab in More options must reach the browser").toBe(false);
-      expect(selectedRailLabel()).toBe("Codex");
     }
+    await click(moreOptionsToggle()!);
+    expect(selectedRailLabel()).toBe("Codex");
   });
 
   it("settings combined picker: a project access edit with no model row keeps the inherited model and options", async () => {

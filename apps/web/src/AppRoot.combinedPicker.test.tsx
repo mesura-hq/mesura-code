@@ -25,6 +25,21 @@ import {
 import type { Thread } from "./types";
 import type { CombinedPickerCandidate } from "./components/chat/combinedPickerState";
 import type { AppRouter } from "./router";
+import {
+  pickerContent,
+  searchInput,
+  rows,
+  row,
+  highlightedRow,
+  effortValue,
+  buttonByLabel,
+  moreOptionsToggle,
+  extrasRegion,
+  accessSummary,
+  press,
+  click,
+  openMoreOptions,
+} from "./test/combinedPickerDom";
 
 const fixture = vi.hoisted(() => {
   const codexModels = [
@@ -472,16 +487,6 @@ function savedSnapshot() {
   };
 }
 
-function pickerContent() {
-  return document.querySelector<HTMLElement>("[data-model-picker-content]");
-}
-
-function searchInput() {
-  const input = pickerContent()?.querySelector<HTMLInputElement>("input");
-  expect(input, "Expected the model picker search input").toBeTruthy();
-  return input!;
-}
-
 function modelTrigger() {
   const triggers = [
     ...container.querySelectorAll<HTMLButtonElement>('[data-chat-provider-model-picker="true"]'),
@@ -490,59 +495,11 @@ function modelTrigger() {
   return triggers[0]!;
 }
 
-function rows() {
-  return [...(pickerContent()?.querySelectorAll<HTMLElement>('[role="option"]') ?? [])];
-}
-
-function row(name: string) {
-  const match = rows().find((entry) => entry.textContent?.includes(name));
-  expect(
-    match,
-    `Expected model row ${name}; rendered: ${pickerContent()?.textContent}`,
-  ).toBeTruthy();
-  return match!;
-}
-
-function highlightedRow() {
-  return rows().find((entry) => entry.hasAttribute("data-highlighted")) ?? null;
-}
-
-function effortValue(name: string) {
-  return (
-    row(name).querySelector("[data-combined-picker-effort-value]")?.textContent?.trim() ?? null
-  );
-}
-
 function selectedRailLabel() {
   const selected = pickerContent()?.querySelector<HTMLElement>(
     '[data-model-picker-sidebar] button[aria-pressed="true"]',
   );
   return selected?.getAttribute("aria-label") ?? selected?.textContent ?? null;
-}
-
-function buttonByLabel(label: string | RegExp, scope: ParentNode = document) {
-  return (
-    [...scope.querySelectorAll<HTMLButtonElement>("button")].find((button) => {
-      const name = button.getAttribute("aria-label") ?? button.textContent ?? "";
-      return typeof label === "string" ? name.trim() === label : label.test(name.trim());
-    }) ?? null
-  );
-}
-
-function moreOptionsToggle() {
-  return buttonByLabel(/^(More options|Back to models)/, pickerContent() ?? document);
-}
-
-async function press(target: EventTarget, key: string, init: Omit<KeyboardEventInit, "key"> = {}) {
-  await act(async () => {
-    target.dispatchEvent(
-      new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init }),
-    );
-  });
-}
-
-async function click(element: HTMLElement) {
-  await act(async () => element.click());
 }
 
 async function openPicker() {
@@ -598,17 +555,6 @@ async function chooseOption(controlLabel: string, optionLabel: string) {
   await click(choice!);
 }
 
-async function openMoreOptions() {
-  const toggle = moreOptionsToggle();
-  expect(toggle, "Expected one More options disclosure in the picker").toBeTruthy();
-  await click(toggle!);
-  expect(toggle!.getAttribute("aria-expanded")).toBe("true");
-}
-
-function accessSummary() {
-  return moreOptionsToggle()?.textContent ?? "";
-}
-
 type ComposerLayout = "expanded" | "compact" | "resting";
 
 function useComposerLayout(layout: ComposerLayout) {
@@ -630,11 +576,6 @@ function expectComposerLayout(layout: ComposerLayout) {
 
 function focusTarget(): EventTarget {
   return document.activeElement ?? document.body;
-}
-
-function extrasRegion() {
-  const controls = moreOptionsToggle()?.getAttribute("aria-controls");
-  return controls ? document.getElementById(controls) : null;
 }
 
 async function pressOutside() {
@@ -965,6 +906,75 @@ describe("combined picker cancellation", () => {
 });
 
 describe("combined picker More options", () => {
+  it("combined picker options ignores hover and control focus on a disabled model", async () => {
+    fixture.environments[0]!.serverConfig.providers = [
+      { ...fixture.codexProvider, requiresNewThreadForModelChange: true },
+      { ...fixture.claudeProvider },
+    ];
+    fixture.thread = {
+      ...makeThread("approval-required"),
+      session: {
+        threadId,
+        status: "ready",
+        providerName: "codex",
+        providerInstanceId: CODEX,
+        runtimeMode: "approval-required",
+        activeTurnId: null,
+        lastError: null,
+        updatedAt: now,
+      },
+    };
+    await mountApp();
+    const before = savedSnapshot();
+    await openPicker();
+    await highlight("GPT-5.4");
+    expect(row("GPT-5.5").getAttribute("aria-disabled")).toBe("true");
+    await act(async () => {
+      row("GPT-5.5").dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+      buttonByLabel("Add to favorites", row("GPT-5.5"))!.focus();
+    });
+    await openMoreOptions();
+    expect(extrasRegion()?.textContent).toContain("GPT-5.4 · Codex");
+    expect(buttonByLabel("Use GPT-5.5", extrasRegion()!)).toBeNull();
+    expect(savedSnapshot()).toEqual(before);
+  });
+
+  it("combined picker options does not guess a target after a provider switch without a highlight", async () => {
+    await mountApp();
+    await openPicker();
+    await press(searchInput(), "Tab");
+    expect(highlightedRow()).toBeNull();
+    await openMoreOptions();
+    expect(extrasRegion()?.textContent).toContain("No model highlighted");
+    expect(buttonByLabel(/^Use /, extrasRegion()!)).toBeNull();
+    await click(moreOptionsToggle()!);
+    await press(searchInput(), "ArrowDown");
+    await openMoreOptions();
+    expect(extrasRegion()?.textContent).toContain("Claude Opus 5 · Claude");
+    expect(buttonByLabel("Use Claude Opus 5", extrasRegion()!)).toBeTruthy();
+  });
+
+  it("combined picker options does not substitute the saved model after its target disappears", async () => {
+    await mountApp();
+    const before = savedSnapshot();
+    await openPicker();
+    await highlight("GPT-5.5");
+    await openMoreOptions();
+    expect(buttonByLabel("Use GPT-5.5", extrasRegion()!)).toBeTruthy();
+    await publishProviders([
+      {
+        ...fixture.codexProvider,
+        models: fixture.codexProvider.models.filter(
+          (model) => (model as { slug: string }).slug !== "gpt-5.5",
+        ),
+      },
+      { ...fixture.claudeProvider },
+    ]);
+    expect(extrasRegion()?.textContent).toContain("No model highlighted");
+    expect(buttonByLabel(/^Use /, extrasRegion()!)).toBeNull();
+    expect(savedSnapshot()).toEqual(before);
+  });
+
   it.each(["keyboard", "row control focus", "pointer"] as const)(
     "combined picker More options targets the %s model instead of the saved model",
     async (interaction) => {
@@ -1099,6 +1109,7 @@ describe("combined picker More options", () => {
 
     await press(access!, "Tab");
     await press(access!, "ArrowRight");
+    await click(moreOptionsToggle()!);
     expect(selectedRailLabel()).toBe("Codex");
     expect(effortValue("GPT-5.4")).toBe("Medium");
   });

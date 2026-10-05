@@ -68,14 +68,18 @@ export const ModelListRow = memo(function ModelListRow(props: {
         props.preferShortName ? { preferShortName: true } : undefined,
       );
 
+  const handleHighlight = () => {
+    if (!props.disabledReason) props.onHighlight?.(props.instanceId, props.model.slug);
+  };
+
   const row = (
     <ComboboxItem
       hideIndicator
       index={props.index}
       value={modelPickerModelKey(props.instanceId, props.model.slug)}
       disabled={Boolean(props.disabledReason)}
-      onPointerEnter={() => props.onHighlight?.(props.instanceId, props.model.slug)}
-      onFocusCapture={() => props.onHighlight?.(props.instanceId, props.model.slug)}
+      onPointerEnter={handleHighlight}
+      onFocusCapture={handleHighlight}
       contentClassName="flex w-full items-center gap-3"
       className={cn(
         "group relative w-full !min-w-0 max-w-full cursor-pointer rounded-md px-2 py-2 transition-[background-color,box-shadow,color]",

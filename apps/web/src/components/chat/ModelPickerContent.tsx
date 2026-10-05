@@ -259,9 +259,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const [extrasTargetKey, setExtrasTargetKey] = useState<string | null>(null);
   const [extrasExpanded, setExtrasExpanded] = useState(combined?.initialExtrasExpanded === true);
   const extrasExpandedRef = useRef(extrasExpanded);
-  useLayoutEffect(() => {
-    extrasExpandedRef.current = extrasExpanded;
-  }, [extrasExpanded]);
   const [effortAnnouncement, setEffortAnnouncement] = useState("");
   const extrasRegionId = useId();
   const extrasRegionRef = useRef<HTMLDivElement>(null);
@@ -962,6 +959,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   // move focus into it or back to search after the render that shows it.
   const pendingExtrasFocusRef = useRef<"extras" | "search" | null>(null);
   const setExtras = useCallback((expanded: boolean) => {
+    extrasExpandedRef.current = expanded;
     setExtrasExpanded(expanded);
     if (expanded) setExtrasTargetKey(lastHighlightedModelKeyRef.current);
     pendingExtrasFocusRef.current = expanded ? "extras" : "search";
@@ -1066,9 +1064,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             ? "grid max-h-[min(21.625rem,var(--model-picker-fit-height,21.625rem))] grid-cols-[auto_minmax(0,1fr)]"
             : "flex max-h-86.5 flex-row",
           combined &&
-            (extrasExpanded
-              ? "grid-rows-[minmax(0,1fr)] [&_[data-model-picker-sidebar]]:hidden"
-              : "grid-rows-[minmax(0,1fr)_auto]"),
+            (extrasExpanded ? "grid-rows-[minmax(0,1fr)]" : "grid-rows-[minmax(0,1fr)_auto]"),
         )}
         data-model-picker-content="true"
         onKeyDown={
@@ -1083,7 +1079,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         }
       >
         {/* Sidebar */}
-        {showSidebar && (
+        {showSidebar && !extrasExpanded && (
           <ModelPickerSidebar
             selectedInstanceId={selectedInstanceId}
             onSelectInstance={handleSelectInstance}

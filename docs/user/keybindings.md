@@ -39,9 +39,10 @@ In the model picker, Tab and Shift+Tab move to the next or previous provider,
 including Favorites. Up/Down highlight a model, and Left/Right change that
 model's effort without choosing it. Enter or a click uses the highlighted model
 with its effort. `alt+e` opens or closes **More options**, which holds the
-highlighted model's other settings and the access mode. This screen replaces model search;
-**Back to models** returns to search and keeps pending edits. Tab moves through
-the options normally. Escape or a click outside cancels the pending edits.
+hovered, highlighted, or focused model's other settings and the access mode.
+This screen replaces model search. **Back to models** returns to search and
+keeps pending edits. Tab moves through the options normally. Escape or a click
+outside closes the picker and discards pending edits.
 `mod+shift+up` and `mod+shift+down` also switch providers and clear the search.
 These provider shortcuts can also be changed in Settings.
 
