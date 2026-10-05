@@ -4,7 +4,8 @@ import {
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ZapIcon } from "lucide-react";
 import type { VariantProps } from "class-variance-authority";
 import { Badge } from "../ui/badge";
 import { buttonVariants } from "../ui/button";
@@ -26,6 +27,7 @@ import {
 } from "./ComposerControl";
 import { useComposerMenuProps } from "./composerEventScope";
 import { shortcutLabelForCommand } from "../../keybindings";
+import type { CombinedPickerConfig } from "./combinedPickerState";
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /**
@@ -56,9 +58,18 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   onOpenProviderSetup?: (instanceId: ProviderInstanceId) => void;
   getModelDisabledReason?: (instanceId: ProviderInstanceId, model: string) => string | null;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
+  /**
+   * Opt into the combined model, effort, options, and access picker. Callers
+   * without it keep the model-only picker.
+   */
+  combined?: CombinedPickerConfig;
+  /** The saved effort and traits, shown after the model name in the trigger. */
+  triggerTraits?: { label: string; showFastModeIcon: boolean };
 }) {
   const composerFloatingLayerProps = useComposerMenuProps();
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const getTriggerRect = useCallback(() => triggerRef.current?.getBoundingClientRect() ?? null, []);
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
   const size = props.size ?? "sm";
 
@@ -154,6 +165,27 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     props.onInstanceModelChange(instanceId, model);
     setIsMenuOpen(false);
   };
+  const combined = props.combined;
+  const combinedConfig: CombinedPickerConfig | undefined = combined
+    ? {
+        ...combined,
+        onApply: (candidate) => {
+          if (props.disabled) return;
+          combined.onApply(candidate);
+          setIsMenuOpen(false);
+        },
+        ...(combined.onApplyAccess
+          ? {
+              onApplyAccess: (runtimeMode) => {
+                if (props.disabled) return;
+                combined.onApplyAccess?.(runtimeMode);
+                setIsMenuOpen(false);
+              },
+            }
+          : {}),
+      }
+    : undefined;
+  const triggerTraits = props.triggerLabel === undefined ? props.triggerTraits : undefined;
 
   const shortcutLabel = props.keybindings
     ? shortcutLabelForCommand(props.keybindings, "modelPicker.toggle")
@@ -174,6 +206,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       }}
     >
       <PopoverTrigger
+        ref={triggerRef}
         render={
           <ComposerControl
             aria-label={props.triggerAriaLabel}
@@ -220,6 +253,22 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             </TooltipTrigger>
             <TooltipPopup side="top">{triggerTooltipContent}</TooltipPopup>
           </Tooltip>
+          {triggerTraits && (triggerTraits.label || triggerTraits.showFastModeIcon) ? (
+            <span
+              className="flex shrink-0 items-center gap-1 text-muted-foreground"
+              data-chat-provider-model-picker-traits="true"
+            >
+              {triggerTraits.showFastModeIcon ? (
+                <>
+                  <ZapIcon aria-hidden="true" className="size-3 fill-current opacity-80" />
+                  <span className="sr-only">Fast mode on</span>
+                </>
+              ) : null}
+              {triggerTraits.label ? (
+                <span className="max-w-24 truncate">{triggerTraits.label}</span>
+              ) : null}
+            </span>
+          ) : null}
           {selectedModel?.isUnavailable && props.triggerLabel === undefined ? (
             <Badge variant="outline" size="sm">
               Unavailable
@@ -251,6 +300,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             ? { getModelDisabledReason: props.getModelDisabledReason }
             : {})}
           onInstanceModelChange={handleInstanceModelChange}
+          {...(combinedConfig ? { combined: combinedConfig, getAnchorRect: getTriggerRect } : {})}
         />
       </PopoverPopup>
     </Popover>

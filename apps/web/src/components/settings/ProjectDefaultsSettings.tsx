@@ -4,7 +4,6 @@ import {
   type ModelSelection,
   type ProviderInstanceId,
 } from "@t3tools/contracts";
-import { createModelSelection } from "@t3tools/shared/model";
 import { useNavigate } from "@tanstack/react-router";
 
 import { useT3ProjectFileState } from "../../hooks/useT3ProjectFileScripts";
@@ -18,22 +17,16 @@ import {
 import { useEnvironments } from "../../state/environments";
 import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
 import { resolveEnvModeLabel } from "../BranchToolbar.logic";
-import { ProviderModelPicker } from "../chat/ProviderModelPicker";
-import { runtimeModeConfig, runtimeModeOptions } from "../chat/runtimeModeConfig";
+import { runtimeModeConfig } from "../chat/runtimeModeConfig";
 import { PULL_REQUEST_MERGE_METHOD_LABELS } from "../pullRequest/pullRequestDetail.logic";
-import { TraitsPicker } from "../chat/TraitsPicker";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
 import { Switch } from "../ui/switch";
 import type { ProjectSettingsCategory } from "./ProjectSettingsPanel";
+import { CombinedPickerSettings, type SettingsPickerChange } from "./CombinedPickerSettings";
 import { searchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
-import {
-  SETTINGS_PICKER_TRIGGER_CLASSNAME,
-  SettingResetButton,
-  SettingsRow,
-  SettingsSection,
-} from "./settingsLayout";
+import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
 import {
   useScopedSettings,
   useScopedSettingsMixed,
@@ -69,7 +62,6 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   const activeEntry = entries.find((entry) => entry.instanceId === selection?.instanceId);
   const mixedModel = useScopedSettingsMixed(["defaultModelSelection"]);
   const mixedPermissions = useScopedSettingsMixed(["defaultRuntimeMode"]);
-  const PermissionIcon = runtimeModeConfig[settings.defaultRuntimeMode].icon;
   const mixedWorkspace = useScopedSettingsMixed(["defaultThreadEnvMode"]);
   const mixedBrowser = useScopedSettingsMixed(["enableAgentBrowserAccess"]);
   const mixedAutoPull = useScopedSettingsMixed(["defaultAutoPull"]);
@@ -131,6 +123,35 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
     }
     updateSettings({ defaultModelSelection: value });
   };
+  // The Model and Permissions rows open the same picker. Each write carries
+  // only the fields that opening changed, so a model choice keeps every
+  // target's access and an access edit keeps a Mixed or inherited model. The
+  // picker has already checked a changed model against every target.
+  const newThreadPickerProps = {
+    kind: "new-thread-defaults",
+    instanceEntries: entries,
+    modelOptionsByInstance: modelOptions,
+    planModeEnabled: settings.planModeEnabled,
+    mixedModel,
+    runtimeMode: settings.defaultRuntimeMode,
+    runtimeModeMixed: mixedPermissions,
+    rejectedTitle: "Default model not saved",
+    getModelDisabledReason: modelDisabledReason,
+    ...(representative
+      ? {
+          onOpenProviderSetup: (instanceId: ProviderInstanceId) =>
+            void navigate({
+              to: "/settings/providers",
+              search: { environmentId: representative.environmentId, instanceId },
+            }),
+        }
+      : {}),
+    onChange: ({ modelSelection, runtimeMode }: SettingsPickerChange) =>
+      updateSettings({
+        ...(modelSelection ? { defaultModelSelection: modelSelection } : {}),
+        ...(runtimeMode ? { defaultRuntimeMode: runtimeMode } : {}),
+      }),
+  } as const;
 
   return (
     <SettingsSection
@@ -176,48 +197,11 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
             }
             control={
               selection && activeEntry ? (
-                <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
-                  <ProviderModelPicker
-                    activeInstanceId={selection.instanceId}
-                    model={selection.model}
-                    lockedProvider={null}
-                    instanceEntries={entries}
-                    modelOptionsByInstance={modelOptions}
-                    triggerVariant="outline"
-                    triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                    {...(mixedModel ? { triggerLabel: "Mixed" } : {})}
-                    getModelDisabledReason={modelDisabledReason}
-                    onOpenProviderSetup={(instanceId) => {
-                      if (representative)
-                        void navigate({
-                          to: "/settings/providers",
-                          search: { environmentId: representative.environmentId, instanceId },
-                        });
-                    }}
-                    onInstanceModelChange={(instanceId, model) =>
-                      setModel(createModelSelection(instanceId, model))
-                    }
-                  />
-                  {!mixedModel ? (
-                    <TraitsPicker
-                      provider={activeEntry.driverKind}
-                      models={activeEntry.models}
-                      model={selection.model}
-                      prompt=""
-                      onPromptChange={() => {}}
-                      modelOptions={selection.options ?? []}
-                      allowPromptInjectedEffort={false}
-                      planModeEnabled={settings.planModeEnabled}
-                      triggerVariant="outline"
-                      triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                      onModelOptionsChange={(options) =>
-                        setModel(
-                          createModelSelection(selection.instanceId, selection.model, options),
-                        )
-                      }
-                    />
-                  ) : null}
-                </div>
+                <CombinedPickerSettings
+                  {...newThreadPickerProps}
+                  selection={selection}
+                  triggerAriaLabel="Default model"
+                />
               ) : (
                 <span className="text-sm text-muted-foreground">No providers available</span>
               )
@@ -246,42 +230,18 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
               ) : null
             }
             control={
-              <Select
-                value={mixedPermissions ? null : settings.defaultRuntimeMode}
-                onValueChange={(value) => {
-                  if (value) updateSettings({ defaultRuntimeMode: value });
-                }}
-              >
-                <SelectTrigger size="sm" aria-label="Default permissions">
-                  {!mixedPermissions && (
-                    <PermissionIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                  )}
-                  <SelectValue>
-                    {mixedPermissions
-                      ? "Mixed"
-                      : runtimeModeConfig[settings.defaultRuntimeMode].label}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  {runtimeModeOptions.map((mode) => {
-                    const option = runtimeModeConfig[mode];
-                    const Icon = option.icon;
-                    return (
-                      <SelectItem key={mode} value={mode} className="min-w-64 py-2">
-                        <div className="grid gap-0.5">
-                          <span className="inline-flex items-center gap-1.5 font-medium">
-                            <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-                            {option.label}
-                          </span>
-                          <span className="text-xs leading-4 text-muted-foreground">
-                            {option.description}
-                          </span>
-                        </div>
-                      </SelectItem>
-                    );
-                  })}
-                </SelectPopup>
-              </Select>
+              // Access is edited in the shared picker's More options, opened
+              // expanded. It does not depend on a selectable provider: with
+              // none, the picker still applies an access-only edit.
+              <CombinedPickerSettings
+                {...newThreadPickerProps}
+                selection={selection && activeEntry ? selection : null}
+                triggerLabel={
+                  mixedPermissions ? "Mixed" : runtimeModeConfig[settings.defaultRuntimeMode].label
+                }
+                triggerAriaLabel="Default permissions"
+                opensOnExtras
+              />
             }
           />
           <SettingsRow

@@ -3,13 +3,23 @@ import {
   type ProviderInstanceId,
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
+  type ServerProviderModel,
 } from "@t3tools/contracts";
 import { resolveSelectableModel } from "@t3tools/shared/model";
 import { useAtomValue } from "@effect/atom-react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
-import { memo, useMemo, useState, useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import {
+  memo,
+  useMemo,
+  useState,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+} from "react";
 import { ChevronRightIcon, SearchIcon } from "lucide-react";
-import { ModelListRow } from "./ModelListRow";
+import { ModelListRow, type ModelListRowEffort } from "./ModelListRow";
 import { ModelPickerSidebar } from "./ModelPickerSidebar";
 import { getProviderStatusMessage, hasProviderSetup } from "./ProviderStatusBanner";
 import {
@@ -46,6 +56,19 @@ import {
   type ProviderInstanceEntry,
 } from "../../providerInstances";
 import { providerModelKey, sortProviderModelItems } from "../../modelOrdering";
+import { subscribePickerAction } from "../../lib/pickerActionBus";
+import { CombinedPickerOptions } from "./CombinedPickerOptions";
+import {
+  buildCombinedPickerCandidate,
+  createCombinedPickerState,
+  resolveCombinedPickerRow,
+  setCombinedPickerOption,
+  setCombinedPickerRuntimeMode,
+  stepCombinedPickerEffort,
+  type CombinedPickerConfig,
+  type CombinedPickerRowInput,
+} from "./combinedPickerState";
+import { getDisplayModelName } from "./providerIconUtils";
 
 type ModelPickerItem = {
   slug: string;
@@ -143,6 +166,32 @@ export function adjacentModelPickerProvider(input: {
 
 const EMPTY_MODEL_JUMP_LABELS = new Map<string, string>();
 
+// WORKAROUND: the combined picker sizes itself from its trigger's position
+// instead of Base UI's `--available-height`. Base UI's popup measurement
+// (usePopupAutoResize) temporarily sets that variable to `max-content`, so a
+// cap built on it measures at full height and opens off-screen on short
+// viewports. The margin mirrors Base UI internals: the 4px side offset, the
+// flip padding (5px plus two 1px side biases), the popup's 1px borders, and
+// 2px for subpixel rounding; with less, Base UI flips the popup to the side.
+// Remove this, and `resolveModelPickerFitHeight`, once Base UI offers a
+// supported way to cap popup content by the available height during
+// measurement; re-check the margin on every Base UI upgrade until then.
+const MODEL_PICKER_VIEWPORT_MARGIN_PX = 16;
+const EMPTY_CATALOG: ReadonlyArray<ServerProviderModel> = [];
+
+/**
+ * The tallest the combined picker can be while it still opens beside its
+ * trigger: the room on the larger side of the trigger, less the popup margin.
+ */
+export function resolveModelPickerFitHeight(input: {
+  anchorTop: number;
+  anchorBottom: number;
+  viewportHeight: number;
+}): number {
+  const space = Math.max(input.anchorTop, input.viewportHeight - input.anchorBottom);
+  return Math.max(0, Math.floor(space - MODEL_PICKER_VIEWPORT_MARGIN_PX));
+}
+
 function ModelListSeparator() {
   return <div className="h-0.5" />;
 }
@@ -179,6 +228,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   onOpenProviderSetup?: (instanceId: ProviderInstanceId) => void;
   getModelDisabledReason?: (instanceId: ProviderInstanceId, model: string) => string | null;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
+  /** Adds inline effort, More options, and access; applies a complete choice. */
+  combined?: CombinedPickerConfig;
+  /** The trigger's viewport rect, so the combined picker can fit beside it. */
+  getAnchorRect?: () => DOMRect | null;
 }) {
   const {
     keybindings: providedKeybindings,
@@ -186,6 +239,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     instanceEntries,
     getModelDisabledReason,
     onInstanceModelChange,
+    combined,
   } = props;
   const [searchQuery, setSearchQuery] = useState("");
   const [showTopScrollFade, setShowTopScrollFade] = useState(false);
@@ -193,6 +247,23 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const modelListRef = useRef<LegendListRef | null>(null);
   const highlightedModelKeyRef = useRef<string | null>(null);
+  // Combined picker: the pending edits of this opening. Dismissal unmounts
+  // this content, which discards them.
+  const [pickerState, setPickerState] = useState(() =>
+    combined ? createCombinedPickerState(combined.readSavedSelection()) : null,
+  );
+  // More options snapshots the last highlighted model when it opens. Keep
+  // that target while hidden navigation changes its highlight on focus loss.
+  // Hover only updates a ref, so it does not re-render the model list.
+  const lastHighlightedModelKeyRef = useRef<string | null>(null);
+  const [extrasTargetKey, setExtrasTargetKey] = useState<string | null>(null);
+  const [extrasExpanded, setExtrasExpanded] = useState(combined?.initialExtrasExpanded === true);
+  const extrasExpandedRef = useRef(extrasExpanded);
+  const [effortAnnouncement, setEffortAnnouncement] = useState("");
+  const extrasRegionId = useId();
+  const extrasRegionRef = useRef<HTMLDivElement>(null);
+  const extrasToggleRef = useRef<HTMLButtonElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const favorites = useClientSettings((s) => s.favorites ?? []);
   const activeEntry = props.instanceEntries.find(
     (entry) => entry.instanceId === props.activeInstanceId,
@@ -258,6 +329,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
 
   const handleSelectInstance = useCallback(
     (instanceId: ProviderInstanceId | "favorites") => {
+      lastHighlightedModelKeyRef.current = null;
       setSelectedInstanceId(instanceId);
       window.requestAnimationFrame(() => {
         focusSearchInput();
@@ -266,19 +338,53 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     [focusSearchInput],
   );
 
+  // The first control in More options, or its toggle when it has none.
+  const focusExtras = useCallback(() => {
+    const target =
+      extrasRegionRef.current?.querySelector<HTMLElement>(
+        "select:not(:disabled), button:not(:disabled), input:not(:disabled), [role='switch']",
+      ) ?? extrasToggleRef.current;
+    target?.focus({ preventScroll: true });
+  }, []);
+  const opensOnExtras = combined?.initialExtrasExpanded === true;
+
   useLayoutEffect(() => {
-    focusSearchInput();
+    const focusInitialTarget = opensOnExtras ? focusExtras : focusSearchInput;
+    focusInitialTarget();
     const frame = window.requestAnimationFrame(() => {
-      focusSearchInput();
+      focusInitialTarget();
     });
     const timeout = window.setTimeout(() => {
-      focusSearchInput();
+      focusInitialTarget();
     }, 0);
     return () => {
       window.cancelAnimationFrame(frame);
       window.clearTimeout(timeout);
     };
-  }, [focusSearchInput]);
+  }, [focusExtras, focusSearchInput, opensOnExtras]);
+
+  // WORKAROUND (see MODEL_PICKER_VIEWPORT_MARGIN_PX): size the combined
+  // picker to the larger side of its trigger. This layout effect runs before
+  // Base UI's measurement, because the popup is an ancestor of this content.
+  const isCombined = combined !== undefined;
+  const getAnchorRect = props.getAnchorRect;
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!isCombined || !root || !getAnchorRect) return;
+    const fitToViewport = () => {
+      const anchor = getAnchorRect();
+      if (!anchor) return;
+      const fitHeight = resolveModelPickerFitHeight({
+        anchorTop: anchor.top,
+        anchorBottom: anchor.bottom,
+        viewportHeight: window.visualViewport?.height ?? window.innerHeight,
+      });
+      root.style.setProperty("--model-picker-fit-height", `${fitHeight}px`);
+    };
+    fitToViewport();
+    window.addEventListener("resize", fitToViewport);
+    return () => window.removeEventListener("resize", fitToViewport);
+  }, [getAnchorRect, isCombined]);
 
   // Create a Set for efficient lookup. Favorites are keyed by
   // `${instanceId}:${slug}`; the storage schema widened from ProviderDriverKind
@@ -297,6 +403,33 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const entryByInstanceId = useMemo(
     () => new Map(instanceEntries.map((entry) => [entry.instanceId, entry])),
     [instanceEntries],
+  );
+  // Each row's catalog entry, indexed once per catalog update. A row resolves
+  // its options against this one-entry catalog, so pending effort edits never
+  // scan an instance's whole catalog per mounted row.
+  const catalogEntryByModelKey = useMemo(() => {
+    const index = new Map<string, ReadonlyArray<ServerProviderModel>>();
+    for (const entry of instanceEntries) {
+      for (const model of entry.models) {
+        index.set(modelPickerModelKey(entry.instanceId, model.slug), [model]);
+      }
+    }
+    return index;
+  }, [instanceEntries]);
+  const combinedRowInput = useCallback(
+    (instanceId: ProviderInstanceId, slug: string): CombinedPickerRowInput | null => {
+      const entry = entryByInstanceId.get(instanceId);
+      return entry
+        ? {
+            instanceId,
+            driverKind: entry.driverKind,
+            model: slug,
+            models:
+              catalogEntryByModelKey.get(modelPickerModelKey(instanceId, slug)) ?? EMPTY_CATALOG,
+          }
+        : null;
+    },
+    [catalogEntryByModelKey, entryByInstanceId],
   );
   const matchesLockedProvider = useCallback(
     (entry: Pick<ProviderInstanceEntry, "driverKind" | "continuationGroupKey">): boolean => {
@@ -575,8 +708,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   }, []);
 
   const handleModelSelect = useCallback(
-    (modelSlug: string, instanceId: ProviderInstanceId) => {
-      if (getModelDisabledReason?.(instanceId, modelSlug)) {
+    (modelSlug: string, instanceId: ProviderInstanceId, appliedFrom: "row" | "use" = "row") => {
+      const disabled = getModelDisabledReason?.(instanceId, modelSlug) != null;
+      // Use on the saved, unedited row carries only an access edit, so the
+      // caller validates it; every other disabled model stays unselectable.
+      if (disabled && !(combined && appliedFrom === "use")) {
         return;
       }
       const options = modelOptionsByInstance.get(instanceId);
@@ -591,11 +727,39 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       // (slug casing etc.). Custom instances share their driver's
       // normalization rules, so pass the driver kind here.
       const resolvedModel = resolveSelectableModel(entry.driverKind, modelSlug, options);
-      if (resolvedModel) {
-        onInstanceModelChange(instanceId, resolvedModel);
+      if (!resolvedModel) {
+        return;
       }
+      const row = combined && pickerState ? combinedRowInput(instanceId, modelSlug) : null;
+      if (disabled && !row) return;
+      if (combined && pickerState && row) {
+        // Apply the row's whole pending choice; the caller validates it
+        // before writing anything.
+        const candidate = buildCombinedPickerCandidate(
+          pickerState,
+          row,
+          combined.context,
+          combined.readCurrentPrompt(),
+        );
+        if (disabled && candidate.selectionEdited) return;
+        combined.onApply({
+          ...candidate,
+          modelSelection: { ...candidate.modelSelection, model: resolvedModel },
+          appliedFrom,
+        });
+        return;
+      }
+      onInstanceModelChange(instanceId, resolvedModel);
     },
-    [entryByInstanceId, getModelDisabledReason, modelOptionsByInstance, onInstanceModelChange],
+    [
+      combined,
+      combinedRowInput,
+      entryByInstanceId,
+      getModelDisabledReason,
+      modelOptionsByInstance,
+      onInstanceModelChange,
+      pickerState,
+    ],
   );
 
   const toggleFavorite = useCallback(
@@ -665,6 +829,38 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       ),
     [visibleModels],
   );
+  const stepEffort = useCallback(
+    (instanceId: ProviderInstanceId, slug: string, direction: 1 | -1) => {
+      if (!combined || !pickerState || getModelDisabledReason?.(instanceId, slug)) return;
+      const row = combinedRowInput(instanceId, slug);
+      if (!row) return;
+      const next = stepCombinedPickerEffort(pickerState, row, combined.context, direction);
+      if (next === pickerState) return;
+      setPickerState(next);
+      const effort = resolveCombinedPickerRow(next, row, combined.context).effort;
+      const model = filteredModelByKey.get(modelPickerModelKey(instanceId, slug));
+      setEffortAnnouncement(`${model?.name ?? slug} effort ${effort?.label ?? ""}`);
+    },
+    [combined, combinedRowInput, filteredModelByKey, getModelDisabledReason, pickerState],
+  );
+  const rememberHighlightedModel = useCallback((modelKey: string) => {
+    if (extrasExpandedRef.current) return;
+    lastHighlightedModelKeyRef.current = modelKey;
+  }, []);
+  const rememberHighlightedRow = useCallback(
+    (instanceId: ProviderInstanceId, slug: string) => {
+      rememberHighlightedModel(modelPickerModelKey(instanceId, slug));
+    },
+    [rememberHighlightedModel],
+  );
+  const stepEffortFromPointer = useCallback(
+    (instanceId: ProviderInstanceId, slug: string, direction: 1 | -1) => {
+      rememberHighlightedRow(instanceId, slug);
+      stepEffort(instanceId, slug, direction);
+    },
+    [rememberHighlightedRow, stepEffort],
+  );
+
   const updateModelListScrollFades = useCallback(() => {
     const scrollElement = modelListRef.current?.getScrollableNode();
     if (!(scrollElement instanceof HTMLElement)) {
@@ -700,10 +896,85 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     }
     return mapping.size > 0 ? mapping : EMPTY_MODEL_JUMP_LABELS;
   }, [keybindings, modelJumpCommandByKey, modelJumpShortcutContext]);
+  // Pending effort lives outside the row data, so the virtual list re-renders
+  // its mounted rows when it changes.
   const modelListExtraData = useMemo(
-    () => ({ favoritesSet, modelJumpLabelByKey }),
-    [favoritesSet, modelJumpLabelByKey],
+    () => ({ favoritesSet, modelJumpLabelByKey, pickerState }),
+    [favoritesSet, modelJumpLabelByKey, pickerState],
   );
+  const resolveRowEffort = (model: ModelPickerItem): ModelListRowEffort | null => {
+    if (!combined || !pickerState) return null;
+    const row = combinedRowInput(model.instanceId, model.slug);
+    const effort = row ? resolveCombinedPickerRow(pickerState, row, combined.context).effort : null;
+    return effort
+      ? {
+          label: effort.label ?? "Default",
+          canDecrease: effort.canDecrease,
+          canIncrease: effort.canIncrease,
+          readOnlyReason: effort.readOnlyReason,
+        }
+      : null;
+  };
+  const extrasTarget = (() => {
+    if (!combined || !pickerState || !extrasExpanded) return null;
+    // Only a model the current search and provider show can be the target.
+    const targetKey = extrasTargetKey ?? activeModelKey;
+    const model = targetKey ? filteredModelByKey.get(targetKey) : undefined;
+    const row = model ? combinedRowInput(model.instanceId, model.slug) : null;
+    if (!model || !row) return null;
+    return {
+      model,
+      row,
+      modelName: getDisplayModelName(model, isLocked ? undefined : { preferShortName: true }),
+      providerName: model.instanceDisplayName,
+      ...resolveCombinedPickerRow(pickerState, row, combined.context),
+    };
+  })();
+  const extrasShortcutLabel = combined
+    ? shortcutLabelForCommand(keybindings, "traitsPicker.toggle")
+    : null;
+
+  const selectAdjacentProvider = useCallback(
+    (direction: 1 | -1) => {
+      const next = adjacentModelPickerProvider({
+        entries: sidebarInstanceEntries,
+        selectedInstanceId,
+        direction,
+        disabledInstanceIds: lockedDisabledInstanceIds,
+        selectableUnavailableInstanceIds,
+      });
+      setSearchQuery("");
+      handleSelectInstance(next);
+    },
+    [
+      handleSelectInstance,
+      lockedDisabledInstanceIds,
+      selectableUnavailableInstanceIds,
+      selectedInstanceId,
+      sidebarInstanceEntries,
+    ],
+  );
+
+  // More options: the traits shortcut and the toggle open or close it, then
+  // move focus into it or back to search after the render that shows it.
+  const pendingExtrasFocusRef = useRef<"extras" | "search" | null>(null);
+  const setExtras = useCallback((expanded: boolean) => {
+    extrasExpandedRef.current = expanded;
+    setExtrasExpanded(expanded);
+    if (expanded) setExtrasTargetKey(lastHighlightedModelKeyRef.current);
+    pendingExtrasFocusRef.current = expanded ? "extras" : "search";
+  }, []);
+  useLayoutEffect(() => {
+    const target = pendingExtrasFocusRef.current;
+    if (target === null) return;
+    pendingExtrasFocusRef.current = null;
+    if (target === "extras") focusExtras();
+    else focusSearchInput();
+  });
+  useEffect(() => {
+    if (!combined?.respondsToShortcut) return;
+    return subscribePickerAction("traits", () => setExtras(!extrasExpanded));
+  }, [combined?.respondsToShortcut, extrasExpanded, setExtras]);
 
   useEffect(() => {
     const onWindowKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -715,18 +986,24 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         platform: navigator.platform,
         context: modelJumpShortcutContext,
       });
+      // The traits shortcut (and its composer.effort alias) toggles More
+      // options while the combined picker is open, including where no ChatView
+      // dispatches it, such as Settings. In the composer ChatView may see the
+      // event first; each handler skips an event the other already handled,
+      // so the section toggles once.
+      if (isCombined && (command === "traitsPicker.toggle" || command === "composer.effort")) {
+        event.preventDefault();
+        event.stopPropagation();
+        setExtras(!extrasExpanded);
+        return;
+      }
+      // Model navigation belongs to the model screen. Options keep normal
+      // control keys until the user returns through Back to models.
+      if (extrasExpanded) return;
       if (command === "modelPicker.previousProvider" || command === "modelPicker.nextProvider") {
         event.preventDefault();
         event.stopPropagation();
-        const next = adjacentModelPickerProvider({
-          entries: sidebarInstanceEntries,
-          selectedInstanceId,
-          direction: command === "modelPicker.nextProvider" ? 1 : -1,
-          disabledInstanceIds: lockedDisabledInstanceIds,
-          selectableUnavailableInstanceIds,
-        });
-        setSearchQuery("");
-        handleSelectInstance(next);
+        selectAdjacentProvider(command === "modelPicker.nextProvider" ? 1 : -1);
         return;
       }
       const jumpIndex = modelPickerJumpIndexFromCommand(command ?? "");
@@ -753,15 +1030,14 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       window.removeEventListener("keydown", onWindowKeyDown, true);
     };
   }, [
+    extrasExpanded,
     handleModelSelect,
-    handleSelectInstance,
+    isCombined,
     keybindings,
-    lockedDisabledInstanceIds,
     modelJumpModelKeys,
     modelJumpShortcutContext,
-    selectableUnavailableInstanceIds,
-    selectedInstanceId,
-    sidebarInstanceEntries,
+    selectAdjacentProvider,
+    setExtras,
   ]);
 
   useLayoutEffect(() => {
@@ -781,11 +1057,29 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   return (
     <TooltipProvider delay={0}>
       <div
-        className="relative flex h-screen max-h-86.5 w-screen max-w-90 flex-row overflow-hidden"
+        ref={rootRef}
+        className={cn(
+          "relative h-screen w-screen max-w-90 overflow-hidden",
+          combined
+            ? "grid max-h-[min(21.625rem,var(--model-picker-fit-height,21.625rem))] grid-cols-[auto_minmax(0,1fr)]"
+            : "flex max-h-86.5 flex-row",
+          combined &&
+            (extrasExpanded ? "grid-rows-[minmax(0,1fr)]" : "grid-rows-[minmax(0,1fr)_auto]"),
+        )}
         data-model-picker-content="true"
+        onKeyDown={
+          combined
+            ? (event) => {
+                if (event.key !== "Escape") return;
+                event.preventDefault();
+                event.stopPropagation();
+                props.onRequestClose?.();
+              }
+            : undefined
+        }
       >
         {/* Sidebar */}
-        {showSidebar && (
+        {showSidebar && !extrasExpanded && (
           <ModelPickerSidebar
             selectedInstanceId={selectedInstanceId}
             onSelectInstance={handleSelectInstance}
@@ -815,6 +1109,18 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           value={activeModelKey}
           onItemHighlighted={(modelKey, eventDetails) => {
             highlightedModelKeyRef.current = typeof modelKey === "string" ? modelKey : null;
+            // Base UI can restore the saved selection when focus leaves a
+            // row control. That reset must not replace the user's target.
+            if (
+              combined &&
+              typeof modelKey === "string" &&
+              parseModelPickerModelKey(modelKey) &&
+              (eventDetails.reason !== "none" ||
+                !lastHighlightedModelKeyRef.current ||
+                !filteredModelByKey.has(lastHighlightedModelKeyRef.current))
+            ) {
+              rememberHighlightedModel(modelKey);
+            }
             if (eventDetails.reason === "keyboard" && eventDetails.index >= 0) {
               void modelListRef.current?.scrollIndexIntoView?.({
                 index: eventDetails.index,
@@ -838,8 +1144,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           }}
         >
           <div
+            hidden={extrasExpanded}
+            inert={extrasExpanded}
             className={cn(
-              "flex min-h-0 flex-1 flex-col overflow-hidden bg-muted/40",
+              "col-start-2 min-h-0 flex-1 flex-col overflow-hidden bg-muted/40",
+              extrasExpanded ? "hidden" : "flex",
               showSidebar && "border-l border-border/70",
             )}
           >
@@ -856,9 +1165,46 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                     <SearchIcon className="-translate-x-0.5 size-4 shrink-0 text-muted-foreground opacity-70" />
                   }
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(e) => {
+                    lastHighlightedModelKeyRef.current = null;
+                    setSearchQuery(e.target.value);
+                  }}
                   onKeyDown={(e) => {
                     if (
+                      combined &&
+                      !e.altKey &&
+                      !e.ctrlKey &&
+                      !e.metaKey &&
+                      !e.nativeEvent.isComposing
+                    ) {
+                      // Combined mode: Tab cycles providers and plain Left/Right
+                      // adjust the highlighted row's effort instead of moving
+                      // the caret or focus.
+                      if (e.key === "Tab") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        selectAdjacentProvider(e.shiftKey ? -1 : 1);
+                        return;
+                      }
+                      const highlightedModel =
+                        (e.key === "ArrowLeft" || e.key === "ArrowRight") &&
+                        !e.shiftKey &&
+                        highlightedModelKeyRef.current
+                          ? parseModelPickerModelKey(highlightedModelKeyRef.current)
+                          : null;
+                      if (highlightedModel) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        stepEffort(
+                          highlightedModel.instanceId,
+                          highlightedModel.slug,
+                          e.key === "ArrowRight" ? 1 : -1,
+                        );
+                        return;
+                      }
+                    }
+                    if (
+                      !combined &&
                       showSidebar &&
                       !e.altKey &&
                       !e.ctrlKey &&
@@ -975,6 +1321,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                         unavailable={model.isUnavailable === true}
                         jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
                         disabledReason={disabledReason}
+                        effort={resolveRowEffort(model)}
+                        onStepEffort={stepEffortFromPointer}
+                        {...(combined ? { onHighlight: rememberHighlightedRow } : {})}
                         onToggleFavorite={() => toggleFavorite(model.instanceId, model.slug)}
                       />
                     );
@@ -1026,6 +1375,58 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             )}
           </div>
         </Combobox>
+        {combined && pickerState ? (
+          <div className="col-span-2 flex min-h-0 flex-col">
+            <CombinedPickerOptions
+              expanded={extrasExpanded}
+              regionId={extrasRegionId}
+              regionRef={extrasRegionRef}
+              toggleRef={extrasToggleRef}
+              shortcutLabel={extrasShortcutLabel}
+              runtimeMode={pickerState.runtimeMode}
+              runtimeModeMixed={
+                pickerState.saved.runtimeModeMixed === true && !pickerState.runtimeModeTouched
+              }
+              accessReadOnlyLabel={combined.context.accessReadOnlyLabel ?? null}
+              {...(combined.onApplyAccess && !combined.context.accessReadOnlyLabel
+                ? {
+                    onApplyAccess: pickerState.runtimeModeTouched
+                      ? () => combined.onApplyAccess?.(pickerState.runtimeMode)
+                      : null,
+                  }
+                : {})}
+              target={extrasTarget}
+              onToggle={() => setExtras(!extrasExpanded)}
+              onRuntimeModeChange={(mode) =>
+                setPickerState((current) =>
+                  current ? setCombinedPickerRuntimeMode(current, mode) : current,
+                )
+              }
+              onOptionChange={(descriptorId, value) => {
+                if (!extrasTarget) return;
+                setPickerState((current) =>
+                  current
+                    ? setCombinedPickerOption(
+                        current,
+                        extrasTarget.row,
+                        combined.context,
+                        descriptorId,
+                        value,
+                      )
+                    : current,
+                );
+              }}
+              onUse={() => {
+                if (extrasTarget) {
+                  handleModelSelect(extrasTarget.model.slug, extrasTarget.model.instanceId, "use");
+                }
+              }}
+            />
+            <span aria-live="polite" className="sr-only">
+              {effortAnnouncement}
+            </span>
+          </div>
+        ) : null}
       </div>
     </TooltipProvider>
   );

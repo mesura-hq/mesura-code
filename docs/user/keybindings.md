@@ -27,17 +27,24 @@ and logs a warning instead.
 ## Composer controls
 
 Use `mod+shift+m` to choose a model and `mod+shift+h` to choose a host.
-Use `alt+e` for effort, `mod+shift+a` for access mode, `mod+shift+x` for the
-workspace, and `mod+shift+g` for the Git branch. The workspace menu includes the
+Use `alt+e` to open the model picker on **More options**, which holds the
+model's extra settings and the access mode. `mod+shift+a` opens the same model
+picker. Use `mod+shift+x` for the workspace, and `mod+shift+g` for the Git branch. The workspace menu includes the
 current checkout, a new worktree, and the previous worktree when available.
 Use `mod+shift+l` to reuse the previous worktree directly.
 Use `mod+alt+a` to attach files. `alt+a` does the same where your desktop
 does not keep `Alt+A` for itself.
 
-In the model picker, press Left in an empty search field or Shift+Tab to reach
-the provider list. Use Up/Down to move and Enter to choose. Right returns to
-model search. `mod+shift+up` and `mod+shift+down` switch providers directly and clear the
-search. These provider shortcuts can also be changed in Settings.
+In the model picker, Tab and Shift+Tab move to the next or previous provider,
+including Favorites. Up/Down highlight a model, and Left/Right change that
+model's effort without choosing it. Enter or a click uses the highlighted model
+with its effort. `alt+e` opens or closes **More options**, which holds the
+hovered, highlighted, or focused model's other settings and the access mode.
+This screen replaces model search. **Back to models** returns to search and
+keeps pending edits. Tab moves through the options normally. Escape or a click
+outside closes the picker and discards pending edits.
+`mod+shift+up` and `mod+shift+down` also switch providers and clear the search.
+These provider shortcuts can also be changed in Settings.
 
 These shortcuts run inside the focused web or desktop client. `mod` uses Command
 on macOS and Ctrl on Windows and Linux, including GNOME, KDE Plasma, Niri, and
@@ -67,7 +74,7 @@ behavior in Settings → Keyboard.
 ## Edit the configuration file
 
 Keybindings live on the environment's machine, in
-`~/.t3/userdata/keybindings.json` by default. You can edit this file directly.
+`~/.mesura-code/userdata/keybindings.json` by default (upstream T3 Code uses `~/.t3/userdata/keybindings.json`). You can edit this file directly.
 It is a JSON array of rules:
 
 ```json
@@ -167,12 +174,12 @@ case-insensitive matching.
 ### Composer pickers and question prompts
 
 `modelPicker.toggle` opens the model picker from the composer and defaults to `mod+shift+m`, and
-additionally to `alt+m`. While it is open, `mod+1` through `mod+9` select a model directly.
+additionally to `alt+m`. On the model search screen, `mod+1` through `mod+9` select a model directly.
 
-`traitsPicker.toggle` opens the composer control that holds reasoning effort, thinking, fast mode,
-context window, and agent. It defaults to `alt+e`. Two cases make it do nothing, both by design:
-a provider that exposes none of those traits does not render the control at all, and a narrow
-composer folds the traits into its compact controls menu, which has no separate picker to open.
+`traitsPicker.toggle` opens the model picker's **More options** screen: thinking, fast mode,
+context window, agent, and the access mode. While the picker is open it switches between options
+and model search. It defaults to `alt+e`. `composer.effort` does the same and has no default binding.
+`composer.mode` (`mod+shift+a`) opens the model search screen.
 
 `question.toggleCollapse` defaults to `alt+q`. On web and desktop it jumps to the first pending
 request in the conversation and focuses its first unanswered field or option. If all answers are
