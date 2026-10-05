@@ -47,21 +47,36 @@ sync therefore brings some of the removed paths back:
 
 - **modify/delete conflicts** on files upstream edited;
 - **new files** under the removed directories, which merge with no conflict at all;
-- **patch entries** in `pnpm-workspace.yaml` for native packages that upstream bumps.
+- **patch entries** in `pnpm-workspace.yaml` for native packages, which come back with
+  upstream's version of that file and break `pnpm install` (`ENOENT` when the patch file
+  stays deleted, `ERR_PNPM_UNUSED_PATCH` when upstream adds a new one).
 
 ## Rule for upstream sync
 
 After `git merge upstream/main`, before resolving anything else:
 
 1. Run `node scripts/remove-native-mobile.ts`. It deletes every tracked file under the
-   removed paths, which resolves the modify/delete conflicts and drops the new files. The
-   list lives in `scripts/lib/native-mobile-removal.ts`. Add a prefix there when upstream
-   adds a new native-only path.
-2. Run `pnpm install`. When it fails with `ERR_PNPM_UNUSED_PATCH`, delete the entries it
-   names from `patchedDependencies` in `pnpm-workspace.yaml`, and their files under
-   `patches/`.
-3. `tests/unit/native-mobile-removed.test.ts` fails while any removed path is still
-   tracked.
+   removed paths, which resolves the modify/delete conflicts and drops the new files. It
+   also removes the `patchedDependencies` entries in `pnpm-workspace.yaml` for packages only
+   the native apps used, with their patch files. While `pnpm-workspace.yaml` still has
+   conflict markers it skips that part and exits 1: resolve the file, then run it again.
+2. Resolve `pnpm-lock.yaml` by regenerating it. A merged lockfile can fail to parse (the
+   2026-10-05 rehearsal produced a duplicate key), so take either side and let
+   `pnpm install` rewrite it. Without a terminal, add `--config.confirmModulesPurge=false`.
+3. If `pnpm install` fails with `ERR_PNPM_UNUSED_PATCH`, upstream patched a new
+   native-only package. Add its name to `REMOVED_NATIVE_MOBILE_PATCHED_PACKAGES` and run
+   step 1 again.
+4. `tests/unit/native-mobile-removed.test.ts` fails while any removed path or native patch
+   entry is still there.
+
+Both lists live in `scripts/lib/native-mobile-removal.ts`. Add a prefix there when upstream
+adds a new native-only path.
+
+This sequence was rehearsed on 2026-10-05 against `upstream/main` in a throwaway clone. The
+merge brought back 586 native paths, 343 of them conflicted. The script removed all of them
+and 11 patch entries. `pnpm install` then named three new native patches (`expo-blur`,
+`expo-glass-effect`, `react-native-nitro-markdown`), which are now on the list, and the
+install passed.
 
 Do not restore a native path to resolve a conflict. Where an upstream commit changes both
 shared code and the native app, keep the shared half.
