@@ -76,7 +76,9 @@ This sequence was rehearsed on 2026-10-05 against `upstream/main` in a throwaway
 merge brought back 586 native paths, 343 of them conflicted. The script removed all of them
 and 11 patch entries. `pnpm install` then named three new native patches (`expo-blur`,
 `expo-glass-effect`, `react-native-nitro-markdown`), which are now on the list, and the
-install passed.
+install passed. CI's release smoke check then named two more (`@expo/metro-config`,
+`expo-widgets`): the orphaned Expo cycle still installs them in the full workspace, but the
+trimmed release workspace does not, so their patches failed there as unused.
 
 Do not restore a native path to resolve a conflict. Where an upstream commit changes both
 shared code and the native app, keep the shared half.

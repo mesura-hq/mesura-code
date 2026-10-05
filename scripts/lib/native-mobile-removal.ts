@@ -37,6 +37,7 @@ export function isRemovedNativeMobilePath(repositoryPath: string): boolean {
  */
 export const REMOVED_NATIVE_MOBILE_PATCHED_PACKAGES = [
   "@clerk/expo",
+  "@expo/metro-config",
   "@react-native-ai/apple",
   "@react-native-menu/menu",
   "@react-navigation/native-stack",
@@ -44,6 +45,7 @@ export const REMOVED_NATIVE_MOBILE_PATCHED_PACKAGES = [
   "expo-blur",
   "expo-glass-effect",
   "expo-sharing",
+  "expo-widgets",
   "react-native-gesture-handler",
   "react-native-keyboard-controller",
   "react-native-nitro-markdown",

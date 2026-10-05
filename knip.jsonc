@@ -26,8 +26,9 @@
       "vitest": { "entry": [".github/**/*.test.cjs"] },
     },
     "scripts": {
-      // Knip loads its preprocessor through a CLI option.
-      "entry": ["knip-schemas.ts"],
+      // Knip loads its preprocessor through a CLI option. The upstream sync runs
+      // remove-native-mobile.ts directly (ADR-008).
+      "entry": ["knip-schemas.ts", "remove-native-mobile.ts"],
     },
     "apps/server": {
       // Vite+ pack entries and the launcher used by installed background services.
