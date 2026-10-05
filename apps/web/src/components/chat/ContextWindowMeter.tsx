@@ -34,9 +34,9 @@ export function ContextWindowMeter(props: {
   const segments = deriveContextWindowSegments(usage);
   // mesura: from half full the ring alone takes one pressure colour, yellow to
   // red; the token labels stay muted.
-  const pressureColor = deriveContextWindowPressureColor(usage.usedPercentage);
   const usageColor =
-    pressureColor ?? "color-mix(in oklab, var(--color-muted-foreground) 72%, transparent)";
+    deriveContextWindowPressureColor(usage.usedPercentage) ??
+    "color-mix(in oklab, var(--color-muted-foreground) 72%, transparent)";
 
   return (
     <Popover>
@@ -53,8 +53,11 @@ export function ContextWindowMeter(props: {
           >
             <span className="font-medium">{labels.used}</span>
             <span className="relative flex size-4 shrink-0 items-center justify-center">
-              {segments.length > 0 && pressureColor === null ? (
-                <ContextWindowSegmentedRing segments={segments} />
+              {segments.length > 0 ? (
+                <ContextWindowSegmentedRing
+                  segments={segments}
+                  usedPercentage={usage.usedPercentage}
+                />
               ) : (
                 <svg
                   viewBox="0 0 24 24"

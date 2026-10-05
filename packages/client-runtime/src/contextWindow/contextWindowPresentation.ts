@@ -74,21 +74,19 @@ export function deriveContextWindowPressureColor(usedPercentage: number | null):
     return null;
   }
   const clamped = Math.min(usedPercentage, 100);
-  let lower = CONTEXT_WINDOW_PRESSURE_STOPS[0];
-  for (const upper of CONTEXT_WINDOW_PRESSURE_STOPS) {
-    if (lower === undefined || clamped <= lower.percentage) {
-      return formatHexColor(upper.rgb);
+  for (let index = 1; index < CONTEXT_WINDOW_PRESSURE_STOPS.length; index++) {
+    const lower = CONTEXT_WINDOW_PRESSURE_STOPS[index - 1];
+    const upper = CONTEXT_WINDOW_PRESSURE_STOPS[index];
+    if (lower === undefined || upper === undefined || clamped > upper.percentage) {
+      continue;
     }
-    if (clamped <= upper.percentage) {
-      const weight = (clamped - lower.percentage) / (upper.percentage - lower.percentage);
-      const [r, g, b] = lower.rgb;
-      return formatHexColor([
-        r + (upper.rgb[0] - r) * weight,
-        g + (upper.rgb[1] - g) * weight,
-        b + (upper.rgb[2] - b) * weight,
-      ]);
-    }
-    lower = upper;
+    const weight = Math.max(0, clamped - lower.percentage) / (upper.percentage - lower.percentage);
+    const [r, g, b] = lower.rgb;
+    return formatHexColor([
+      r + (upper.rgb[0] - r) * weight,
+      g + (upper.rgb[1] - g) * weight,
+      b + (upper.rgb[2] - b) * weight,
+    ]);
   }
   return null;
 }

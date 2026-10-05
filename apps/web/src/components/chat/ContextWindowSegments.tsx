@@ -3,6 +3,7 @@ import {
   CONTEXT_WINDOW_RING_RADIUS,
   type ContextWindowSegment,
   type ContextWindowSegmentKind,
+  deriveContextWindowPressureColor,
   deriveContextWindowRingArcs,
 } from "~/lib/contextWindow";
 
@@ -18,11 +19,17 @@ const CONTEXT_WINDOW_SEGMENT_COLORS: Readonly<Record<ContextWindowSegmentKind, s
 /**
  * The composer ring, filled clockwise from the top with one arc per segment.
  * Arcs are drawn to true scale: a segment smaller than the gap is not drawn.
+ * From half full, one arc of the used share in the pressure colour replaces
+ * the segments; the token labels beside the ring stay muted.
  */
 export function ContextWindowSegmentedRing(props: {
   segments: ReadonlyArray<ContextWindowSegment>;
+  usedPercentage: number | null;
 }) {
-  const arcs = deriveContextWindowRingArcs(props.segments);
+  const pressureColor = deriveContextWindowPressureColor(props.usedPercentage);
+  const arcs = pressureColor === null ? deriveContextWindowRingArcs(props.segments) : [];
+  const pressureLength =
+    (Math.min(100, props.usedPercentage ?? 0) / 100) * CONTEXT_WINDOW_RING_CIRCUMFERENCE;
 
   return (
     <svg
@@ -51,6 +58,18 @@ export function ContextWindowSegmentedRing(props: {
           strokeDashoffset={-arc.start}
         />
       ))}
+      {pressureColor === null ? null : (
+        <circle
+          cx="12"
+          cy="12"
+          r={CONTEXT_WINDOW_RING_RADIUS}
+          fill="none"
+          stroke={pressureColor}
+          strokeWidth="3"
+          strokeLinecap="round"
+          strokeDasharray={`${pressureLength} ${CONTEXT_WINDOW_RING_CIRCUMFERENCE}`}
+        />
+      )}
     </svg>
   );
 }
