@@ -52,6 +52,8 @@ export const ModelListRow = memo(function ModelListRow(props: {
    */
   effort?: ModelListRowEffort | null;
   onStepEffort?: (instanceId: ProviderInstanceId, slug: string, direction: 1 | -1) => void;
+  /** Keeps options aimed at this row when its controls receive focus or hover. */
+  onHighlight?: (instanceId: ProviderInstanceId, slug: string) => void;
   onToggleFavorite: () => void;
 }) {
   const ProviderIcon = PROVIDER_ICON_BY_PROVIDER[props.driverKind] ?? null;
@@ -72,6 +74,8 @@ export const ModelListRow = memo(function ModelListRow(props: {
       index={props.index}
       value={modelPickerModelKey(props.instanceId, props.model.slug)}
       disabled={Boolean(props.disabledReason)}
+      onPointerEnter={() => props.onHighlight?.(props.instanceId, props.model.slug)}
+      onFocusCapture={() => props.onHighlight?.(props.instanceId, props.model.slug)}
       contentClassName="flex w-full items-center gap-3"
       className={cn(
         "group relative w-full !min-w-0 max-w-full cursor-pointer rounded-md px-2 py-2 transition-[background-color,box-shadow,color]",

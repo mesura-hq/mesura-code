@@ -252,13 +252,16 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const [pickerState, setPickerState] = useState(() =>
     combined ? createCombinedPickerState(combined.readSavedSelection()) : null,
   );
-  // More options edits the last highlighted model. The highlight is tracked in
-  // a ref and copied into state only while the section is open, so hovering
-  // the list does not re-render the picker. A highlight cleared by the pointer
-  // leaving the list keeps the previous model.
+  // More options snapshots the last highlighted model when it opens. Keep
+  // that target while hidden navigation changes its highlight on focus loss.
+  // Hover only updates a ref, so it does not re-render the model list.
   const lastHighlightedModelKeyRef = useRef<string | null>(null);
   const [extrasTargetKey, setExtrasTargetKey] = useState<string | null>(null);
   const [extrasExpanded, setExtrasExpanded] = useState(combined?.initialExtrasExpanded === true);
+  const extrasExpandedRef = useRef(extrasExpanded);
+  useLayoutEffect(() => {
+    extrasExpandedRef.current = extrasExpanded;
+  }, [extrasExpanded]);
   const [effortAnnouncement, setEffortAnnouncement] = useState("");
   const extrasRegionId = useId();
   const extrasRegionRef = useRef<HTMLDivElement>(null);
@@ -329,6 +332,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
 
   const handleSelectInstance = useCallback(
     (instanceId: ProviderInstanceId | "favorites") => {
+      lastHighlightedModelKeyRef.current = null;
       setSelectedInstanceId(instanceId);
       window.requestAnimationFrame(() => {
         focusSearchInput();
@@ -842,19 +846,22 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     },
     [combined, combinedRowInput, filteredModelByKey, getModelDisabledReason, pickerState],
   );
-  const rememberHighlightedModel = useCallback(
-    (modelKey: string) => {
-      lastHighlightedModelKeyRef.current = modelKey;
-      if (extrasExpanded) setExtrasTargetKey(modelKey);
+  const rememberHighlightedModel = useCallback((modelKey: string) => {
+    if (extrasExpandedRef.current) return;
+    lastHighlightedModelKeyRef.current = modelKey;
+  }, []);
+  const rememberHighlightedRow = useCallback(
+    (instanceId: ProviderInstanceId, slug: string) => {
+      rememberHighlightedModel(modelPickerModelKey(instanceId, slug));
     },
-    [extrasExpanded],
+    [rememberHighlightedModel],
   );
   const stepEffortFromPointer = useCallback(
     (instanceId: ProviderInstanceId, slug: string, direction: 1 | -1) => {
-      rememberHighlightedModel(modelPickerModelKey(instanceId, slug));
+      rememberHighlightedRow(instanceId, slug);
       stepEffort(instanceId, slug, direction);
     },
-    [rememberHighlightedModel, stepEffort],
+    [rememberHighlightedRow, stepEffort],
   );
 
   const updateModelListScrollFades = useCallback(() => {
@@ -914,9 +921,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const extrasTarget = (() => {
     if (!combined || !pickerState || !extrasExpanded) return null;
     // Only a model the current search and provider show can be the target.
-    const model =
-      (extrasTargetKey ? filteredModelByKey.get(extrasTargetKey) : undefined) ??
-      (activeModelKey ? filteredModelByKey.get(activeModelKey) : undefined);
+    const targetKey = extrasTargetKey ?? activeModelKey;
+    const model = targetKey ? filteredModelByKey.get(targetKey) : undefined;
     const row = model ? combinedRowInput(model.instanceId, model.slug) : null;
     if (!model || !row) return null;
     return {
@@ -993,6 +999,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         setExtras(!extrasExpanded);
         return;
       }
+      // Model navigation belongs to the model screen. Options keep normal
+      // control keys until the user returns through Back to models.
+      if (extrasExpanded) return;
       if (command === "modelPicker.previousProvider" || command === "modelPicker.nextProvider") {
         event.preventDefault();
         event.stopPropagation();
@@ -1053,15 +1062,13 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         ref={rootRef}
         className={cn(
           "relative h-screen w-screen max-w-90 overflow-hidden",
-          // Combined: the list keeps at least half the height (up to 7.5rem)
-          // and More options shrinks and scrolls inside the rest.
           combined
-            ? "grid grid-cols-[auto_minmax(0,1fr)] grid-rows-[minmax(min(7.5rem,50%),1fr)_minmax(0,auto)]"
+            ? "grid max-h-[min(21.625rem,var(--model-picker-fit-height,21.625rem))] grid-cols-[auto_minmax(0,1fr)]"
             : "flex max-h-86.5 flex-row",
           combined &&
             (extrasExpanded
-              ? "max-h-[min(30rem,var(--model-picker-fit-height,30rem))]"
-              : "max-h-[min(21.625rem,var(--model-picker-fit-height,21.625rem))]"),
+              ? "grid-rows-[minmax(0,1fr)] [&_[data-model-picker-sidebar]]:hidden"
+              : "grid-rows-[minmax(0,1fr)_auto]"),
         )}
         data-model-picker-content="true"
         onKeyDown={
@@ -1106,7 +1113,16 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           value={activeModelKey}
           onItemHighlighted={(modelKey, eventDetails) => {
             highlightedModelKeyRef.current = typeof modelKey === "string" ? modelKey : null;
-            if (combined && typeof modelKey === "string" && parseModelPickerModelKey(modelKey)) {
+            // Base UI can restore the saved selection when focus leaves a
+            // row control. That reset must not replace the user's target.
+            if (
+              combined &&
+              typeof modelKey === "string" &&
+              parseModelPickerModelKey(modelKey) &&
+              (eventDetails.reason !== "none" ||
+                !lastHighlightedModelKeyRef.current ||
+                !filteredModelByKey.has(lastHighlightedModelKeyRef.current))
+            ) {
               rememberHighlightedModel(modelKey);
             }
             if (eventDetails.reason === "keyboard" && eventDetails.index >= 0) {
@@ -1132,8 +1148,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           }}
         >
           <div
+            hidden={extrasExpanded}
+            inert={extrasExpanded}
             className={cn(
-              "col-start-2 flex min-h-0 flex-1 flex-col overflow-hidden bg-muted/40",
+              "col-start-2 min-h-0 flex-1 flex-col overflow-hidden bg-muted/40",
+              extrasExpanded ? "hidden" : "flex",
               showSidebar && "border-l border-border/70",
             )}
           >
@@ -1150,7 +1169,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                     <SearchIcon className="-translate-x-0.5 size-4 shrink-0 text-muted-foreground opacity-70" />
                   }
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(e) => {
+                    lastHighlightedModelKeyRef.current = null;
+                    setSearchQuery(e.target.value);
+                  }}
                   onKeyDown={(e) => {
                     if (
                       combined &&
@@ -1305,6 +1327,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                         disabledReason={disabledReason}
                         effort={resolveRowEffort(model)}
                         onStepEffort={stepEffortFromPointer}
+                        {...(combined ? { onHighlight: rememberHighlightedRow } : {})}
                         onToggleFavorite={() => toggleFavorite(model.instanceId, model.slug)}
                       />
                     );

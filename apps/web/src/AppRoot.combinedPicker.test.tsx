@@ -530,7 +530,7 @@ function buttonByLabel(label: string | RegExp, scope: ParentNode = document) {
 }
 
 function moreOptionsToggle() {
-  return buttonByLabel(/^More options/, pickerContent() ?? document);
+  return buttonByLabel(/^(More options|Back to models)/, pickerContent() ?? document);
 }
 
 async function press(target: EventTarget, key: string, init: Omit<KeyboardEventInit, "key"> = {}) {
@@ -965,6 +965,70 @@ describe("combined picker cancellation", () => {
 });
 
 describe("combined picker More options", () => {
+  it.each(["keyboard", "row control focus", "pointer"] as const)(
+    "combined picker More options targets the %s model instead of the saved model",
+    async (interaction) => {
+      await mountApp();
+      const before = savedSnapshot();
+      await openPicker();
+      if (interaction === "keyboard") {
+        await highlight("GPT-5.5");
+      } else if (interaction === "row control focus") {
+        const favorite = buttonByLabel("Add to favorites", row("GPT-5.5"));
+        expect(favorite).toBeTruthy();
+        await act(async () => favorite!.focus());
+      } else {
+        await act(async () => {
+          row("GPT-5.5").dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+        });
+      }
+      await openMoreOptions();
+      expect(extrasRegion()?.textContent).toContain("GPT-5.5");
+      expect(extrasRegion()?.querySelector('[aria-label="Service tier"]')).toBeNull();
+      expect(savedSnapshot()).toEqual(before);
+
+      // A hidden list update must not retarget the options screen.
+      await press(searchInput(), "ArrowDown");
+      expect(buttonByLabel("Use GPT-5.5", extrasRegion()!)).toBeTruthy();
+      await click(buttonByLabel("Use GPT-5.5", extrasRegion()!)!);
+      expect(draft()?.modelSelectionByProvider[CODEX]?.model).toBe("gpt-5.5");
+    },
+  );
+
+  it("combined picker options replaces navigation and Back preserves the search and pending edits", async () => {
+    await mountApp();
+    const before = savedSnapshot();
+    await openPicker();
+    await typeSearch("5.4");
+    await highlight("GPT-5.4");
+    await press(searchInput(), "ArrowRight");
+    await openMoreOptions();
+
+    expect(searchInput().closest("[hidden][inert]")).toBeTruthy();
+    expect(buttonByLabel(/^Back to models/, pickerContent()!)).toBeTruthy();
+    expect(extrasRegion()?.contains(document.activeElement)).toBe(true);
+    await chooseOption("Service tier", "Fast");
+    await chooseOption("Access level", "Full access");
+
+    await click(moreOptionsToggle()!);
+    expect(searchInput().closest("[hidden]")).toBeNull();
+    expect(document.activeElement).toBe(searchInput());
+    expect(searchInput().value).toBe("5.4");
+    expect(effortValue("GPT-5.4")).toBe("High");
+    expect(savedSnapshot()).toEqual(before);
+
+    await openMoreOptions();
+    expect(
+      extrasRegion()?.querySelector<HTMLSelectElement>('[aria-label="Service tier"]')?.value,
+    ).toBe("priority");
+    expect(
+      extrasRegion()?.querySelector<HTMLSelectElement>('[aria-label="Access level"]')?.value,
+    ).toBe("full-access");
+    await press(focusTarget(), "Escape");
+    expect(pickerContent()).toBeNull();
+    expect(savedSnapshot()).toEqual(before);
+  });
+
   it("combined picker has one More options row that edits extras and access without applying", async () => {
     await mountApp();
     const before = savedSnapshot();
@@ -1171,11 +1235,15 @@ describe("combined picker rework regressions", () => {
     await openMoreOptions();
     expect(extrasRegion()?.textContent).toContain("GPT-5.4");
 
+    await click(moreOptionsToggle()!);
     await typeSearch("5.5");
+    await openMoreOptions();
     expect(extrasRegion()?.textContent ?? "").not.toContain("GPT-5.4");
     expect(buttonByLabel("Use GPT-5.4", pickerContent()!)).toBeNull();
 
+    await click(moreOptionsToggle()!);
     await highlight("GPT-5.5");
+    await openMoreOptions();
     expect(buttonByLabel("Use GPT-5.5", extrasRegion()!)).toBeTruthy();
   });
 
@@ -1185,12 +1253,16 @@ describe("combined picker rework regressions", () => {
     await highlight("GPT-5.5");
     await openMoreOptions();
 
+    await click(moreOptionsToggle()!);
     await press(searchInput(), "Tab");
     expect(selectedRailLabel()).toBe("Claude");
+    await openMoreOptions();
     expect(extrasRegion()?.textContent ?? "").not.toContain("GPT-5.5");
     expect(buttonByLabel("Use GPT-5.5", pickerContent()!)).toBeNull();
 
+    await click(moreOptionsToggle()!);
     await highlight("Claude Opus 5");
+    await openMoreOptions();
     expect(buttonByLabel("Use Claude Opus 5", extrasRegion()!)).toBeTruthy();
   });
 

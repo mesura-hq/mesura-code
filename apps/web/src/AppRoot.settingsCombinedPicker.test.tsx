@@ -512,7 +512,7 @@ function buttonByLabel(label: string | RegExp, scope: ParentNode = document) {
 }
 
 function moreOptionsToggle() {
-  return buttonByLabel(/^More options/, pickerContent() ?? document);
+  return buttonByLabel(/^(More options|Back to models)/, pickerContent() ?? document);
 }
 
 function extrasRegion() {
@@ -627,6 +627,19 @@ async function mountProjectScope(laptop: SettingsOverrides) {
 }
 
 describe("settings combined picker new-thread defaults", () => {
+  it("settings combined picker: options edits the focused model instead of the saved default", async () => {
+    await mountSettings("general");
+    await openRowPicker("default-model");
+    const favorite = buttonByLabel("Add to favorites", row("GPT-5.5"));
+    expect(favorite).toBeTruthy();
+    await act(async () => favorite!.focus());
+    await openMoreOptions();
+    expect(extrasRegion()?.textContent).toContain("GPT-5.5");
+    expect(fixture.writes).toEqual([]);
+    await click(useButton());
+    expect(serverSettings(LAPTOP).defaultModelSelection?.model).toBe("gpt-5.5");
+  });
+
   it("settings combined picker: environment default model saves effort and options from one picker", async () => {
     await mountSettings("general");
     await openRowPicker("default-model");
@@ -702,7 +715,15 @@ describe("settings combined picker new-thread defaults", () => {
     expect(rowTrigger("default-model").textContent).toContain("Mixed");
     await openRowPicker("default-permissions");
     expect(moreOptionsToggle()?.getAttribute("aria-expanded")).toBe("true");
+    expect(searchInput().closest("[hidden][inert]")).toBeTruthy();
     await chooseOption("Access level", "Supervised");
+    await click(moreOptionsToggle()!);
+    expect(searchInput().closest("[hidden]")).toBeNull();
+    expect(document.activeElement).toBe(searchInput());
+    await openMoreOptions();
+    expect(
+      extrasRegion()?.querySelector<HTMLSelectElement>('[aria-label="Access level"]')?.value,
+    ).toBe("approval-required");
     expect(fixture.writes).toEqual([]);
     await click(useButton());
 

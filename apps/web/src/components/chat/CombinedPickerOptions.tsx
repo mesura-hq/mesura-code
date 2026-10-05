@@ -3,7 +3,7 @@ import {
   getProviderOptionCurrentLabel,
   getProviderOptionCurrentValue,
 } from "@t3tools/shared/model";
-import { CheckIcon, ChevronDownIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
 import type { ReactNode, Ref } from "react";
 
 import { cn } from "~/lib/utils";
@@ -17,11 +17,9 @@ import {
 import { runtimeModeConfig, runtimeModeOptions } from "./runtimeModeConfig";
 
 /**
- * The combined picker's single "More options" disclosure. Collapsed, it is one
- * row with a small access summary. Expanded, it holds the highlighted model's
- * extra provider controls, the access level, and a button that applies the
- * pending choice. It sits outside the model list's keyboard handling, so Tab
- * moves through its controls normally.
+ * More options replaces model navigation inside the same bounded popup.
+ * Back to models restores navigation without discarding pending edits.
+ * Its controls scroll independently below the fixed back button.
  */
 
 export interface CombinedPickerOptionsTarget {
@@ -165,7 +163,10 @@ export function CombinedPickerOptions(props: {
   return (
     <section
       aria-label="Additional model options"
-      className="flex min-h-0 flex-1 flex-col border-t border-border/70 bg-muted/40"
+      className={cn(
+        "flex min-h-0 flex-1 flex-col bg-muted/40",
+        !props.expanded && "border-t border-border/70",
+      )}
     >
       <button
         ref={props.toggleRef}
@@ -175,7 +176,12 @@ export function CombinedPickerOptions(props: {
         onClick={props.onToggle}
         className="flex h-8 w-full shrink-0 items-center gap-2 px-3 text-left text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:bg-foreground/5 focus-visible:text-foreground"
       >
-        <span className="shrink-0 font-medium">More options</span>
+        {props.expanded ? (
+          <ChevronLeftIcon aria-hidden="true" className="size-3.5 shrink-0" />
+        ) : null}
+        <span className="shrink-0 font-medium">
+          {props.expanded ? "Back to models" : "More options"}
+        </span>
         {props.shortcutLabel ? (
           <Kbd className="h-4 min-w-0 rounded-sm px-1 text-[10px]">{props.shortcutLabel}</Kbd>
         ) : null}
@@ -185,16 +191,15 @@ export function CombinedPickerOptions(props: {
           )}
           <span className="truncate">{accessSummary}</span>
         </span>
-        <ChevronDownIcon
-          aria-hidden="true"
-          className={cn("size-3.5 shrink-0", props.expanded && "rotate-180")}
-        />
+        {!props.expanded ? (
+          <ChevronDownIcon aria-hidden="true" className="size-3.5 shrink-0" />
+        ) : null}
       </button>
       {props.expanded ? (
         <div
           ref={props.regionRef}
           id={props.regionId}
-          className="max-h-48 min-h-0 flex-1 overflow-y-auto border-t border-border/50 px-3 pt-1.5 pb-2"
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-border/50 px-3 pt-1.5 pb-2"
         >
           <div className="truncate pb-1 text-[11px] font-medium text-foreground">
             {target ? `${target.modelName} · ${target.providerName}` : "No model highlighted"}

@@ -39,8 +39,9 @@ In the model picker, Tab and Shift+Tab move to the next or previous provider,
 including Favorites. Up/Down highlight a model, and Left/Right change that
 model's effort without choosing it. Enter or a click uses the highlighted model
 with its effort. `alt+e` opens or closes **More options**, which holds the
-model's other settings and the access mode; Tab moves through those controls
-normally. Escape or a click outside closes the picker without changing anything.
+highlighted model's other settings and the access mode. This screen replaces model search;
+**Back to models** returns to search and keeps pending edits. Tab moves through
+the options normally. Escape or a click outside cancels the pending edits.
 `mod+shift+up` and `mod+shift+down` also switch providers and clear the search.
 These provider shortcuts can also be changed in Settings.
 
@@ -172,12 +173,12 @@ case-insensitive matching.
 ### Composer pickers and question prompts
 
 `modelPicker.toggle` opens the model picker from the composer and defaults to `mod+shift+m`, and
-additionally to `alt+m`. While it is open, `mod+1` through `mod+9` select a model directly.
+additionally to `alt+m`. On the model search screen, `mod+1` through `mod+9` select a model directly.
 
-`traitsPicker.toggle` opens the model picker with **More options** expanded: thinking, fast mode,
-context window, agent, and the access mode. While the picker is open it expands or collapses that
-section. It defaults to `alt+e`. `composer.effort` does the same and has no default binding.
-`composer.mode` (`mod+shift+a`) opens the model picker without expanding the section.
+`traitsPicker.toggle` opens the model picker's **More options** screen: thinking, fast mode,
+context window, agent, and the access mode. While the picker is open it switches between options
+and model search. It defaults to `alt+e`. `composer.effort` does the same and has no default binding.
+`composer.mode` (`mod+shift+a`) opens the model search screen.
 
 `question.toggleCollapse` defaults to `alt+q`. On web and desktop it jumps to the first pending
 request in the conversation and focuses its first unanswered field or option. If all answers are
