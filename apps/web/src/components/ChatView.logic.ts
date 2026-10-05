@@ -47,6 +47,7 @@ import * as Schema from "effect/Schema";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentThreadDetails } from "../state/threads";
 import { stripInlineContextReferences } from "~/lib/composerContextReferences";
+import { countPendingDictationSlots } from "@t3tools/shared/dictationSlots";
 import { filterTerminalContextsWithText, type TerminalContextDraft } from "../lib/terminalContext";
 import type { DraftThreadEnvMode } from "../composerDraftStore";
 import { collapseExpandedComposerCursor, type ComposerSubmissionIntent } from "../composer-logic";
@@ -939,9 +940,12 @@ export function deriveComposerSendState(options: {
   trimmedPrompt: string;
   sendableTerminalContexts: TerminalContextDraft[];
   expiredTerminalContextCount: number;
+  /** Transcriptions still pending in the prompt. While any remain, nothing is sendable. */
+  pendingDictationSlotCount: number;
   hasSendableContent: boolean;
 } {
   const trimmedPrompt = stripInlineContextReferences(options.prompt).trim();
+  const pendingDictationSlotCount = countPendingDictationSlots(options.prompt);
   const sendableTerminalContexts = filterTerminalContextsWithText(options.terminalContexts);
   const expiredTerminalContextCount =
     options.terminalContexts.length - sendableTerminalContexts.length;
@@ -950,11 +954,13 @@ export function deriveComposerSendState(options: {
     trimmedPrompt,
     sendableTerminalContexts,
     expiredTerminalContextCount,
+    pendingDictationSlotCount,
     hasSendableContent:
-      trimmedPrompt.length > 0 ||
-      options.imageCount > 0 ||
-      sendableTerminalContexts.length > 0 ||
-      elementContextCount > 0,
+      pendingDictationSlotCount === 0 &&
+      (trimmedPrompt.length > 0 ||
+        options.imageCount > 0 ||
+        sendableTerminalContexts.length > 0 ||
+        elementContextCount > 0),
   };
 }
 

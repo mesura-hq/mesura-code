@@ -34,16 +34,6 @@ import { repositoryRoot } from "./contractHarness.ts";
 const read = (relativePath: string) =>
   NodeFS.readFileSync(NodePath.join(repositoryRoot, relativePath), "utf8");
 
-it("gates the mobile compact command on a real provider session", () => {
-  const composer = read("apps/mobile/src/features/threads/ThreadComposer.tsx");
-  const call = composer.slice(composer.indexOf("useComposerCommandMenu({"));
-  assert.include(
-    call.slice(0, 600),
-    "hasExistingSession: props.selectedThread.session !== null",
-    "the composer menu no longer derives hasExistingSession from the thread's session, so /compact can offer itself before one exists",
-  );
-});
-
 it("keeps the sidebar project scope on the store the keybinding writes", () => {
   const sidebar = read("apps/web/src/components/Sidebar.tsx");
   assert.include(
@@ -99,35 +89,6 @@ it("handles the attach shortcut in the composer that owns the file input", () =>
     body.indexOf("return;"),
     body.indexOf("event.preventDefault()"),
     "the attach shortcut claims alt+a before deciding whether it can open the picker, so the keystroke can be swallowed with nothing opening",
-  );
-});
-
-const THREAD_SORT_PERSISTENCE_CONSUMERS = [
-  "apps/mobile/src/features/home/HomeRouteScreen.tsx",
-  "apps/mobile/src/features/threads/ThreadNavigationSidebar.tsx",
-];
-
-for (const consumer of THREAD_SORT_PERSISTENCE_CONSUMERS) {
-  it(`persists the mobile thread sort order from ${consumer}`, () => {
-    assert.include(
-      read(consumer),
-      "useThreadSortOrderPersistence({",
-      `${consumer} no longer persists the thread sort order, so the picker works but the choice resets on the next cold start`,
-    );
-  });
-}
-
-it("keeps the mobile preference store out of home-list-options", () => {
-  // Not a style rule. `home-list-options.ts` is imported by pure-function tests,
-  // and the preference store pulls `react-native` in with it, which the test
-  // runner cannot parse — moving the persistence hook into that module fails
-  // home-list-options.test.ts and home-list-filter-menu.test.ts at collection.
-  // That is why the hook lives in its own file; do not tidy it back in.
-  const options = read("apps/mobile/src/features/home/home-list-options.ts");
-  assert.notInclude(
-    options,
-    "state/preferences",
-    "home-list-options.ts reaches the preference store, which drags react-native into modules that pure tests import",
   );
 });
 

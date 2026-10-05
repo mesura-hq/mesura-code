@@ -262,4 +262,18 @@ describe("provider projection", () => {
     expect(projected).not.toContain("another payload");
     expect(projected).not.toContain("boom");
   });
+
+  it("leaves a dictation marker alone instead of projecting it as a missing record", () => {
+    const dictation = "[Transcribing](t3-context://v1/dictation/job-1)";
+    expect(projectComposerContextForProvider({ text: `fix ${dictation}`, records: [] })).toBe(
+      `fix ${dictation}`,
+    );
+    const projected = projectComposerContextForProvider({
+      text: `[log](t3-context://v1/terminal/ctx_t) then ${dictation}`,
+      records: [terminal],
+    });
+    expect(projected.split("\n\n")[0]).toBe(`[Terminal: log; ref=ctx_t] then ${dictation}`);
+    expect(projected).not.toContain('kind="dictation"');
+    expect(projected).toContain('<context kind="terminal" id="ctx_t">');
+  });
 });

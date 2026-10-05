@@ -18,7 +18,7 @@ import { readThread, useThread } from "../state/entities";
 import { useEnvironments } from "../state/environments";
 import { threadEnvironment } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
-import { buildDirectedTurnStartInput } from "../symmetria/directedComposerSubmission";
+import { buildDirectedTurnStartInput } from "../dictation/directedComposerSubmission";
 
 const EMPTY_PROVIDERS: ReadonlyArray<ServerProvider> = [];
 

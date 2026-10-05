@@ -5,7 +5,6 @@
  */
 import { dispatchPickerAction } from "./lib/pickerActionBus";
 
-import { SymmetriaDictationSessionId } from "@symmetria/broker-contract";
 import { act, useSyncExternalStore, type ReactNode, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
@@ -22,7 +21,6 @@ import {
   ProviderInstanceId,
   EventId,
   ApprovalRequestId,
-  CommandId,
   MessageId,
 } from "@t3tools/contracts";
 import type { Thread } from "./types";
@@ -205,10 +203,7 @@ vi.mock("@legendapp/list/react", () => ({
     );
   },
 }));
-import {
-  pendingUserInputRequestKey,
-  usePendingUserInputDraftStore,
-} from "./pendingUserInputDraftStore";
+import { usePendingUserInputDraftStore } from "./pendingUserInputDraftStore";
 
 import { AppRoot } from "./AppRoot";
 import ChatView from "./components/ChatView";
@@ -218,8 +213,6 @@ import { useComposerDraftStore } from "./composerDraftStore";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { questionAttachmentDraftId, useQuestionAttachmentPreparation } from "./questionAttachments";
 import * as attachmentUploads from "./lib/attachmentUploadQueue";
-import { dictationCoordinator } from "./symmetria/dictationCoordinator";
-import { useDictationSessionStore } from "./symmetria/dictationSessionStore";
 import { useQueuedMessageStore } from "./queuedMessageStore";
 
 const environmentId = EnvironmentId.make("phase-two-environment");
@@ -232,8 +225,6 @@ let container: HTMLDivElement;
 beforeEach(() => {
   fixture.pendingRowsVisible = true;
   fixture.savedThreads.clear();
-  dictationCoordinator.restoreSession(null);
-  useDictationSessionStore.setState({ session: null, bridgeAvailable: false, error: null });
   usePendingUserInputDraftStore.setState({ requests: {} });
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   fixture.environments[0]!.connection.phase = "connected";
@@ -308,7 +299,6 @@ afterEach(async () => {
   useComposerDraftStore.getState().clearComposerContent(scopeThreadRef(environmentId, threadId));
   useQuestionAttachmentPreparation.setState({ counts: {} });
   useQueuedMessageStore.getState().drain(scopedThreadKey(scopeThreadRef(environmentId, threadId)));
-  useDictationSessionStore.setState({ session: null, bridgeAvailable: false, error: null });
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -399,127 +389,6 @@ it("phase two normal composer keeps its own message draft during a pending reque
   const queued = useQueuedMessageStore.getState().queuesByThreadKey[scopedThreadKey(target)] ?? [];
   expect(fixture.startTurn.mock.calls.length + queued.length).toBeGreaterThan(0);
   expect(fixture.respond).not.toHaveBeenCalled();
-});
-
-it("phase two dictation targets a focused question without submitting the request", async () => {
-  await mountApp();
-  const field = questionField("timing");
-  expect(field).not.toBeNull();
-  await act(async () => field!.focus());
-  const protocolVersion = { major: 1 as const, minor: 2 };
-  const reservation = await dictationCoordinator.reserve({
-    protocolVersion,
-    sessionId: SymmetriaDictationSessionId.make("inline-question-dictation"),
-    commandId: CommandId.make("reserve-inline"),
-    createdAt: now,
-    source: "shell",
-  });
-  await act(async () => questionField("scope")!.focus());
-  let outcome: string | undefined;
-  await act(async () => {
-    const receipt = await dictationCoordinator.deliver({
-      type: "dictation.deliver",
-      protocolVersion,
-      sessionId: SymmetriaDictationSessionId.make("inline-question-dictation"),
-      commandId: CommandId.make("deliver-inline"),
-      createdAt: now,
-      target: reservation.target,
-      mode: "submit",
-      text: "Tomorrow morning",
-    });
-    outcome = receipt.outcome;
-  });
-  expect(outcome).toBe("inserted");
-  expect(questionField("timing")?.value).toBe("[voiced] Tomorrow morning");
-  expect(questionField("scope")?.value).toBe("");
-  expect(fixture.respond).not.toHaveBeenCalled();
-  expect(fixture.startTurn).not.toHaveBeenCalled();
-});
-
-it("inline microphone pins its own answer before Shell reserves after focus moves", async () => {
-  let releaseBridge: () => void = () => undefined;
-  const bridgeReady = new Promise<void>((resolve) => {
-    releaseBridge = resolve;
-  });
-  let reservation: Awaited<ReturnType<typeof dictationCoordinator.reserve>> | null = null;
-  const sendCommand = vi.fn(async (command: unknown) => {
-    await bridgeReady;
-    reservation = await dictationCoordinator.reserve(
-      command as Parameters<typeof dictationCoordinator.reserve>[0],
-    );
-    return reservation;
-  });
-  vi.stubGlobal("symmetriaDictationBridge", { sendCommand });
-  await mountApp();
-  await act(async () => useDictationSessionStore.getState().setBridgeAvailable(true));
-
-  await act(async () => questionField("scope")!.focus());
-  const microphone = container.querySelector<HTMLButtonElement>(
-    'button[aria-label="Dictate into Timing"]',
-  );
-  expect(microphone).not.toBeNull();
-  await act(async () => microphone!.click());
-  await vi.waitFor(() => expect(sendCommand).toHaveBeenCalledOnce());
-  const otherMicrophone = container.querySelector<HTMLButtonElement>(
-    'button[aria-label="Dictate into Scope"]',
-  );
-  await act(async () => otherMicrophone!.click());
-  expect(sendCommand).toHaveBeenCalledOnce();
-  await act(async () => questionField("scope")!.focus());
-  await act(async () => releaseBridge());
-
-  const capturedReservation = reservation as Awaited<
-    ReturnType<typeof dictationCoordinator.reserve>
-  > | null;
-  if (!capturedReservation) throw new Error("Shell did not reserve the clicked question");
-  const startCommand = sendCommand.mock.calls[0]?.[0] as { sessionId: string } | undefined;
-  if (!startCommand) throw new Error("The microphone did not start Shell dictation");
-  expect(capturedReservation.target).toMatchObject({
-    kind: "draft",
-    draftId: questionAttachmentDraftId(
-      environmentId,
-      threadId,
-      ApprovalRequestId.make(requestId),
-      "timing",
-    ),
-  });
-  await act(async () => {
-    const receipt = await dictationCoordinator.deliver({
-      type: "dictation.deliver",
-      protocolVersion: { major: 1, minor: 2 },
-      sessionId: SymmetriaDictationSessionId.make(startCommand.sessionId),
-      commandId: CommandId.make("inline-microphone-transcript"),
-      createdAt: now,
-      target: capturedReservation.target,
-      mode: "inject",
-      text: "Tomorrow morning",
-    });
-    expect(receipt.outcome).toBe("inserted");
-  });
-  expect(questionField("timing")?.value).toBe("[voiced] Tomorrow morning");
-  expect(questionField("scope")?.value).toBe("");
-  expect(fixture.respond).not.toHaveBeenCalled();
-});
-
-it("inline microphone explains a failed dictation start", async () => {
-  vi.stubGlobal("symmetriaDictationBridge", {
-    sendCommand: vi.fn(async () => {
-      throw new Error("Microphone access denied");
-    }),
-  });
-  await mountApp();
-  await act(async () => useDictationSessionStore.getState().setBridgeAvailable(true));
-
-  const microphone = container.querySelector<HTMLButtonElement>(
-    'button[aria-label="Dictate into Timing"]',
-  );
-  expect(microphone).not.toBeNull();
-  await act(async () => microphone!.click());
-
-  await vi.waitFor(() => {
-    expect(microphone!.getAttribute("aria-label")).toBe("Microphone access denied");
-    expect(microphone!.getAttribute("data-dictation-start-error")).toBe("true");
-  });
 });
 
 it("phase two per-question upload state appears beside its own text field", async () => {
@@ -835,104 +704,6 @@ it("phase two picked question file uses the shared upload draft and request atta
   useComposerDraftStore.getState().clearComposerContent(key);
 });
 
-async function reserveQuestion(sessionId: string) {
-  return dictationCoordinator.reserve({
-    protocolVersion: { major: 1, minor: 2 },
-    sessionId,
-    commandId: CommandId.make(`reserve-${sessionId}`),
-    createdAt: now,
-    source: "shell",
-  });
-}
-
-it("phase two rework restores normal dictation when the focused request resolves", async () => {
-  await mountApp();
-  await act(async () => questionField("timing")!.focus());
-  expect((await reserveQuestion("before-resolution")).target.kind).toBe("draft");
-  await act(async () => {
-    fixture.thread = {
-      ...fixture.thread!,
-      activities: [
-        ...fixture.thread!.activities,
-        {
-          id: EventId.make("rework-resolved"),
-          kind: "user-input.resolved",
-          summary: "Resolved",
-          tone: "info",
-          turnId: null,
-          createdAt: now,
-          payload: { requestId },
-        },
-      ],
-    };
-    for (const listener of fixture.threadListeners) listener();
-  });
-  expect((await reserveQuestion("after-resolution")).target).toEqual({
-    kind: "thread",
-    environmentId,
-    threadId,
-  });
-});
-
-it("phase two rework delivers reserved question dictation after its application unmounts", async () => {
-  await mountApp();
-  await act(async () => questionField("timing")!.focus());
-  const { target } = await reserveQuestion("question-unmount");
-  const originalThread = fixture.thread!;
-  fixture.savedThreads.set(JSON.stringify([environmentId, threadId]), originalThread);
-  await act(async () => root!.unmount());
-  root = undefined;
-  fixture.thread = null;
-  const receipt = await dictationCoordinator.deliver({
-    type: "dictation.deliver",
-    protocolVersion: { major: 1, minor: 2 },
-    sessionId: SymmetriaDictationSessionId.make("question-unmount"),
-    commandId: CommandId.make("unmounted-transcript"),
-    createdAt: now,
-    target,
-    mode: "submit",
-    text: "After navigation",
-  });
-  expect(receipt.outcome).toBe("inserted");
-  expect(
-    usePendingUserInputDraftStore.getState().requests[
-      pendingUserInputRequestKey(environmentId, threadId, ApprovalRequestId.make(requestId))
-    ]?.answers.timing?.customAnswer,
-  ).toBe("[voiced] After navigation");
-  expect(fixture.respond).not.toHaveBeenCalled();
-  fixture.thread = originalThread;
-  await mountApp();
-  expect(questionField("timing")?.value).toBe("[voiced] After navigation");
-});
-
-it("phase two rework focuses a choice-only question without keeping an old dictation target", async () => {
-  const activity = fixture.thread!.activities[0]!;
-  const payload = activity.payload as { questions: Array<Record<string, unknown>> };
-  fixture.thread = {
-    ...fixture.thread!,
-    activities: [
-      {
-        ...activity,
-        payload: {
-          ...payload,
-          requestId,
-          questions: payload.questions.map((question) =>
-            question.id === "timing" ? { ...question, allowCustomAnswer: false } : question,
-          ),
-        },
-      },
-    ],
-  };
-  await mountApp();
-  await act(async () => questionField("scope")!.focus());
-  await act(async () => button("Now").focus());
-  expect((await reserveQuestion("choice-only-focus")).target).toEqual({
-    kind: "thread",
-    environmentId,
-    threadId,
-  });
-});
-
 it("phase two rework clears missing-answer feedback as soon as a choice answers it", async () => {
   await mountApp();
   await act(async () => button("Submit").click());
@@ -990,7 +761,7 @@ it("phase two rework unrelated activity leaves existing Markdown rows unrendered
   expect(fixture.markdownRenders).toBe(before);
 });
 
-it("phase two regression long request keeps answers and reserved dictation across virtual scrolling", async () => {
+it("phase two regression long request keeps answers across virtual scrolling", async () => {
   const activity = fixture.thread!.activities[0]!;
   const questions = Array.from({ length: 12 }, (_, index) => ({
     id: `long-${index}`,
@@ -1006,8 +777,6 @@ it("phase two regression long request keeps answers and reserved dictation acros
   await mountApp();
   expect(container.querySelectorAll("[data-question-id] textarea")).toHaveLength(12);
   await typeQuestion("long-11", "Last answer\nWith more detail");
-  await act(async () => questionField("long-11")!.focus());
-  const { target } = await reserveQuestion("scrolled-question");
   await act(async () => {
     fixture.pendingRowsVisible = false;
     for (const listener of fixture.threadListeners) listener();
@@ -1015,70 +784,12 @@ it("phase two regression long request keeps answers and reserved dictation acros
   expect(questionField("long-11")).toBeNull();
   expect(container.querySelector("[data-normal-composer]")).not.toBeNull();
   await act(async () => {
-    const receipt = await dictationCoordinator.deliver({
-      type: "dictation.deliver",
-      protocolVersion: { major: 1, minor: 2 },
-      sessionId: SymmetriaDictationSessionId.make("scrolled-question"),
-      commandId: CommandId.make("scrolled-transcript"),
-      createdAt: now,
-      target,
-      mode: "submit",
-      text: "Keep this too",
-    });
-    expect(receipt.outcome).toBe("inserted");
-  });
-  expect((await reserveQuestion("normal-after-scroll")).target).toEqual({
-    kind: "thread",
-    environmentId,
-    threadId,
-  });
-  await act(async () => {
     fixture.pendingRowsVisible = true;
     for (const listener of fixture.threadListeners) listener();
   });
   expect(questionField("long-11")?.value).toContain("Last answer\nWith more detail");
-  expect(questionField("long-11")?.value).toContain("[voiced] Keep this too");
   expect(fixture.respond).not.toHaveBeenCalled();
   expect(fixture.startTurn).not.toHaveBeenCalled();
-});
-
-it("phase two regression resolved question refuses a delayed transcript instead of recreating its answer", async () => {
-  await mountApp();
-  await act(async () => questionField("scope")!.focus());
-  const { target } = await reserveQuestion("resolved-question");
-  await act(async () => {
-    fixture.thread = {
-      ...fixture.thread!,
-      activities: [
-        ...fixture.thread!.activities,
-        {
-          id: EventId.make("resolved-before-transcript"),
-          kind: "user-input.resolved",
-          summary: "Resolved",
-          tone: "info",
-          turnId: null,
-          createdAt: now,
-          payload: { requestId },
-        },
-      ],
-    };
-    for (const listener of fixture.threadListeners) listener();
-  });
-  const receipt = await dictationCoordinator.deliver({
-    type: "dictation.deliver",
-    protocolVersion: { major: 1, minor: 2 },
-    sessionId: SymmetriaDictationSessionId.make("resolved-question"),
-    commandId: CommandId.make("late-resolved-transcript"),
-    createdAt: now,
-    target,
-    mode: "submit",
-    text: "Must not land",
-  });
-  expect(receipt.outcome).toBe("refused");
-  expect(JSON.stringify(usePendingUserInputDraftStore.getState().requests)).not.toContain(
-    "Must not land",
-  );
-  expect(fixture.respond).not.toHaveBeenCalled();
 });
 
 it("phase two regression both file pickers preserve normal and question attachment ownership", async () => {

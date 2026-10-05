@@ -53,6 +53,12 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.serverUpsertKeybinding]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverRemoveKeybinding]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverGetSettings]: AuthOrchestrationReadScope,
+  // Mesura: transcribing spends the environment's OpenAI key, like any operation.
+  [WS_METHODS.dictationStart]: AuthOrchestrationOperateScope,
+  [WS_METHODS.dictationRetry]: AuthOrchestrationOperateScope,
+  [WS_METHODS.dictationCancel]: AuthOrchestrationOperateScope,
+  [WS_METHODS.dictationSetMode]: AuthOrchestrationOperateScope,
+  [WS_METHODS.subscribeDictationJobs]: AuthOrchestrationReadScope,
   [WS_METHODS.serverUpdateSettings]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverDiscoverSourceControl]: AuthOrchestrationReadScope,
   [WS_METHODS.serverGetTraceDiagnostics]: AuthOrchestrationReadScope,

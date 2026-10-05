@@ -1,4 +1,5 @@
 import { formatComposerContextReference } from "@t3tools/shared/composerContextReferences";
+import { isDictationContextKind } from "@t3tools/shared/dictationSlots";
 import type { ComposerContextId } from "@t3tools/contracts";
 import {
   $applyNodeReplacement,
@@ -9,6 +10,7 @@ import {
 } from "lexical";
 import type { ReactElement } from "react";
 
+import { DictationSlotChip } from "~/dictation/DictationSlotChip";
 import { randomUUID } from "~/lib/utils";
 import { COMPOSER_INLINE_CHIP_DECORATOR_CLASS_NAME } from "./composerInlineChip";
 import { ComposerContextReferenceChip } from "./composerContextPresentation";
@@ -115,6 +117,9 @@ export class ComposerContextReferenceNode extends DecoratorNode<ReactElement> {
 
   override decorate(): ReactElement {
     const latest = this.getLatest();
+    if (isDictationContextKind(latest.__kind)) {
+      return <DictationSlotChip jobId={latest.__contextId} />;
+    }
     return (
       <ComposerContextReferenceChip
         kind={latest.__kind}

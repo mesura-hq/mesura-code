@@ -231,6 +231,10 @@
       "types": "./src/composerContextReferences.ts",
       "import": "./src/composerContextReferences.ts"
     },
+    "./dictationSlots": {
+      "types": "./src/dictationSlots.ts",
+      "import": "./src/dictationSlots.ts"
+    },
     "./composerContextLegacy": {
       "types": "./src/composerContextLegacy.ts",
       "import": "./src/composerContextLegacy.ts"

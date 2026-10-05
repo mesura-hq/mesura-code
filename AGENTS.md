@@ -2,7 +2,7 @@
 
 Mesura Code is a private fork of **T3 Code**, maintained by one developer for one developer's workflow. Upstream lives at https://github.com/pingdotgg/t3code and is worth reading directly.
 
-The product is a minimal GUI for coding agents. A Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity) and serves web, desktop, and mobile clients. T3 Code is an open source "bring-your-own-subscription" alternative to apps like Claude Desktop, Codex App, Cursor Glass and Conductor; this fork inherits all of that and changes very little of it.
+The product is a minimal GUI for coding agents. A Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity) and serves web, desktop, and mobile clients — upstream ships native Android and iOS apps, which this fork removed (see principle 4). T3 Code is an open source "bring-your-own-subscription" alternative to apps like Claude Desktop, Codex App, Cursor Glass and Conductor; this fork inherits all of that and changes very little of it.
 
 ## What this fork is, and is not
 
@@ -30,7 +30,9 @@ What follows from it, in order of how often it bites:
 
 Where this fork already differs from upstream is listed in `.factory/` and in the commits with a `mesura` scope. Keep that list short.
 
-**Running the sync.** The full procedure is in `.factory/mesura-code-identity-plan.md`. Four things about it are not guessable, and each one failed silently the first time — none of them announced itself as an error:
+**Running the sync.** The full procedure is in `.factory/mesura-code-identity-plan.md`. Five things about it are not guessable, and each one failed silently the first time, or would — none of them announces itself as an error:
+
+- **Delete the native mobile paths right after merging**, before resolving anything else: `node scripts/remove-native-mobile.ts`. About one upstream commit in five touches the native apps this fork removed, so every sync brings some back — as modify/delete conflicts, as new files that merge without any conflict, and as patch entries that break `pnpm install`. The script removes all three; the order of steps and what to do when pnpm names a new native patch are in `docs/mesura/adr-008-remove-native-mobile.md`.
 
 - **Read the conflict surface before merging**, as the intersection of what upstream touched and what we touched: `git diff --name-only <last-sha>..upstream/main` against `…<last-sha>..HEAD`, then `comm -12`. It is far smaller than either side. The first sync had 104 upstream files and 240 of ours, 11 in common, and one real conflict.
 - **Use Node 24 via nvm, never the system's Node 26.** Node 26 breaks `extract-zip` in electron's postinstall and exits 0 having written 548 KB of a 310 MB archive. Skip `pnpm install` entirely when the lockfile did not change.
@@ -51,14 +53,14 @@ The websocket layer (`npx t3`) is what enables the remote features, and they are
 
 ### 4. Surfaces, and which two matter here
 
-The product has three surfaces: **web**, **desktop**, and **mobile**. Upstream weights them differently than this fork does.
+Upstream ships three surfaces: **web**, **desktop**, and native **mobile** apps for Android and iOS. **This fork removed the native mobile apps** (`docs/mesura/adr-008-remove-native-mobile.md`). On a phone it is used through the web app in the browser. Do not add native mobile work, plan a native phase, or bring `apps/mobile` back to resolve a merge.
 
-**Two are the ones this fork is actually used on**, and they are where a change has to be correct:
+**Two surfaces are the ones this fork is actually used on**, and they are where a change has to be correct:
 
 - **Desktop on Linux.** A full Electron app that bundles the server runner. It is also the host server, so the other surfaces connect to it.
-- **Mobile on Android.** A React Native app, used to drive work remotely against that desktop host.
+- **The web app on a phone.** Chrome on Android, reaching a host over the tailnet, used to drive work remotely. It is the same web client as on the desktop, so a change to it has to work at a phone's width and with touch.
 
-**The rest stay supported, not prioritised**: the web app in both its forms — served locally by `npx t3`, and built for a hosted deployment, which upstream runs at `app.t3.codes` and this fork does not run at all — plus desktop on macOS and Windows, and mobile on iOS. Do not break them, do not remove them, and keep contracts honest across all of them. They simply do not earn the same verification effort, and a change does not need a pass on them before it ships here.
+**The rest stay supported, not prioritised**: the web app in a desktop browser — served locally by `npx t3`, and built for a hosted deployment, which upstream runs at `app.t3.codes` and this fork does not run at all — plus desktop on macOS and Windows. Do not break them, do not remove them, and keep contracts honest across all of them. They simply do not earn the same verification effort, and a change does not need a pass on them before it ships here.
 
 ## Quality decides, merge cost informs
 
@@ -111,7 +113,7 @@ We need to be on the same page with terminology. When communicating, use this la
 - **user** means the person using Mesura Code to direct coding agents. Here that is the same person as the developer.
 - **agent** means the coding agent a user runs inside Mesura Code. Depending on context, that may also include you.
 - **provider** means the agent runtime or harness Mesura Code talks to, such as Codex, Claude, Cursor, or OpenCode.
-- **client** means the web, desktop, or mobile UI.
+- **client** means the web or desktop UI. On a phone, the client is the web UI in a browser; this fork has no native mobile client.
 - **environment** means one running server and the machine, filesystem, provider credentials, and state it owns.
 - **project** means an environment-local workspace record rooted at a directory.
 - **thread** means the durable conversation and work history for a project.
@@ -129,9 +131,9 @@ We need to be on the same page with terminology. When communicating, use this la
 The most common defect in this repo is a change that works on the path you tested and is missing everywhere else. Before calling frontend work done, walk this list and say which entries applied:
 
 - **Entry points.** A behavior reachable from the chat view is usually also reachable from Settings, the command palette, and a keybinding. Fixing one is not fixing the feature.
-- **Clients.** Web, desktop (wraps web, adds Electron shell/IPC), and mobile (React Native, separate navigation). Shared logic lives in `packages/client-runtime`
+- **Clients.** Web, desktop (wraps web, adds Electron shell/IPC), and the web app at a phone's width. Shared logic lives in `packages/client-runtime`. There is no native mobile client: never write a native version of a feature.
 - **Providers.** Codex, Claude, Cursor, Grok, OpenCode, and Antigravity each have an adapter. Provider-shaped features need a decision per adapter, even if the decision is "not supported here".
-- **Contracts.** Anything crossing the wire is typed in `packages/contracts`. Change the schema and the server, web, mobile, and desktop all follow.
+- **Contracts.** Anything crossing the wire is typed in `packages/contracts`. Change the schema and the server, web, and desktop all follow.
 - **Reverse states.** If you added a way in, add the way out and the way to see it. Snooze needs unsnooze. Close needs reopen. A one-way door is a bug.
 - **Connection modes.** Local, remote/relay, and tunnel behave differently. Multi-device and multi-environment cases are real.
 - **Docs.** Check whether the change makes existing guidance inaccurate. Apply the [documentation rules](#documentation) before adding anything.
@@ -168,14 +170,12 @@ An empty database is a bad test. Seed your worktree's `.t3` with a copy of real 
 - Smallest proof that the change works. `vp test run <files>` for the tests you touched, targeted lint and typecheck for the scope you changed.
 - Test meaningful logic or observable behavior. Do not render components to static markup to assert props or attributes, or add tests that merely assert callback wiring or mirror the implementation.
 - **Do not run repo-wide checks.** No `vp check`, no `vp run -r test`, no `vp run -r typecheck` unless I ask. CI owns the full suite.
-- **`pnpm test` can take the machine down, and this is measured, not theoretical.** The root config's `test.maxWorkers` reaches only `apps/server`, because it is the one package that composes the root config; `apps/web`, `apps/mobile`, `apps/desktop` and `infra/relay` each open their own default-sized pool. A full run reached load 38 with swap fully exhausted and had to be killed. If a full run is genuinely asked for, run it package by package with an explicit bound — `vp test run --max-workers=3` from inside each package — and never in parallel with another. Tracked as issue #3.
+- **`pnpm test` can take the machine down, and this is measured, not theoretical.** The root config's `test.maxWorkers` reaches only `apps/server`, because it is the one package that composes the root config; `apps/web`, `apps/desktop` and `infra/relay` each open their own default-sized pool. A full run reached load 38 with swap fully exhausted and had to be killed. If a full run is genuinely asked for, run it package by package with an explicit bound — `vp test run --max-workers=3` from inside each package — and never in parallel with another. Tracked as issue #3.
 - Backend behavior changes ship with focused tests for that behavior.
 - The server is event-sourced and its async flows emit typed receipts. Wait on receipts and worker drains, never on sleeps or polling. A test that needs a timeout to pass is wrong.
-- **Verify a user-visible frontend change before reporting it done**, so what reaches the developer differs on taste rather than on whether it works. The preview tool needs no permission and shows nothing on screen with `open: false`. Its automation channel does not reach Mesura Code's own web app today (issue #36); until it does, this app's own UI is proved by targeted tests plus the instance below. `test-t3-app` and `test-t3-mobile` set the clients up.
+- **Verify a user-visible frontend change before reporting it done**, so what reaches the developer differs on taste rather than on whether it works. The preview tool needs no permission and shows nothing on screen with `open: false`. Its automation channel does not reach Mesura Code's own web app today (issue #36); until it does, this app's own UI is proved by targeted tests plus the instance below. `test-t3-app` sets the client up. Anything a phone shows gets one more look at a phone's viewport in the headless browser (Playwright's `devices['Pixel 7']`), because the phone is a primary surface.
 - **Then leave that instance running.** `vp run dev` in the background, handing over the pairing URL with its token — the developer tests from a browser, so that is the default. When only the desktop shell shows the change, do every step up to the window and hand over the exact command; opening a window is theirs to run. Stop only what you started, by the PID you captured.
 - Subagents do not launch their own dev servers. A headed browser still needs asking — Playwright `--headed` and headed chrome-devtools put windows on the developer's desktop, which the preview tool never does.
-
-For authorized mobile verification, a missing or outdated native client is a build step, not a blocker. Run `node scripts/mobile-native-client.ts ensure <ios|android> <device-id>` on the simulator host before starting Metro. It checks the local Expo fingerprint and builds/installs when needed. See `test-t3-mobile` for the full workflow.
 
 ## Pull requests
 
@@ -216,12 +216,12 @@ Full glossary with file links: `docs/internals/glossary.md`
 ## Where code lives
 
 - `apps/server` - WebSocket, orchestration, providers, checkpointing. Effect-heavy: read `.repos/effect-smol/LLMS.md` before writing Effect code.
-- `apps/web` - React/Vite UI. `apps/desktop` wraps it, `apps/mobile` is React Native.
+- `apps/web` - React/Vite UI, also the phone client. `apps/desktop` wraps it.
 - `apps/marketing` - **upstream's** public site, including the Terms of Service, Privacy Policy and Security Policy of T3 Tools, Inc. This fork does not publish any of it. Never rebrand these pages: a privacy policy carrying our name would be a legal document we never wrote, describing services we do not operate.
 - `infra/relay` - **upstream's** T3 Connect relay, which T3 operates and we do not. Same rule as above.
 - `packages/contracts` - Effect/Schema contracts plus small derived helpers. No heavy runtime logic.
 - `packages/shared` - shared runtime utils, subpath exports, no barrel.
-- `packages/client-runtime` - client code shared by web and mobile.
+- `packages/client-runtime` - client code upstream shares between its web and native clients. Here only web uses it, so some modules in it have no caller.
 - `.repos/` - vendored read-only references. Prefer their patterns over invented ones. Never edit or import from them. Sync with `vpr sync:repos` when bumping the matching dependency.
 - `vendor/symmetria-file-manager` - the Symmetria File Manager as a git subtree; four of its packages are workspace members: the web app imports the tree and the file manager's UI (and, from `fm-main`, its channel table and nothing else), the server runs its privileged half. Never format, lint or test it from here; the sync commands and the edits pending push-back are in `docs/operations/vendor-symmetria-file-manager.md`.
 

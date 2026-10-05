@@ -27,7 +27,6 @@
     "@noble/hashes": "catalog:",
     "@pierre/diffs": "catalog:",
     "@pierre/trees": "1.0.0-beta.4",
-    "@symmetria/broker-contract": "workspace:*",
     "@symmetria/fm-core": "workspace:*",
     "@symmetria/fm-main": "workspace:*",
     "@symmetria/fm-search": "workspace:*",

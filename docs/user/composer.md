@@ -121,13 +121,13 @@ Use **Submit** once to send the whole request. If an answer is missing, Submit f
 and keeps every draft editable. Failed responses keep the drafts and offer **Retry**. The normal
 composer stays separate: it sends or queues a normal message, never a question answer.
 
-On Linux desktop, use the microphone beside a question's text field to dictate into that answer.
-Dictation appends to the question's draft and does not submit it. Use **Submit** when the complete
-request is ready. Files belong to their own question; wait for uploads to finish or retry or remove
-a failed upload.
+Use the microphone beside a question's text field to dictate into that answer. The text lands at
+the field's caret. In Send mode, the request is submitted once the text lands; otherwise use
+**Submit** when the complete request is ready. Files belong to their own question; wait for uploads
+to finish or retry or remove a failed upload.
 
 On mobile, pending requests appear as cards in the conversation, with all questions in each request
-together. Submit sends the complete request. The regular message composer stays separate. The web
+together. Dictation fills an answer but never submits it. Submit sends the complete request. The regular message composer stays separate. The web
 and desktop keyboard shortcuts do not apply to mobile.
 
 ## Prompt stash
@@ -143,39 +143,66 @@ and use **Attach again** or remove the missing file before sending.
 
 ## Voice dictation
 
-The Linux desktop app can use Symmetria Shell for voice dictation. The microphone beside Send starts
-one Shell recording for the chat that is open at that moment. Mesura Code keeps that chat as the
-destination if you open another chat while recording or transcription continues.
+Mesura Code transcribes on its server with your OpenAI key. Set the key once in **Settings →
+Dictation**; every device connected to that server uses it. The same page takes vocabulary hints,
+one name or term per line, for words the transcription should spell correctly.
 
-The strip above the composer shows elapsed time, a high-contrast center-out live waveform, and the
-recording controls. The mode button cycles through Copy, Insert, and Send. You can change the mode
-while recording, while processing, and during the three-second delay before delivery.
+Select the microphone beside Send to start recording. The strip above the composer shows the
+elapsed time, a live waveform, and pause, restart, cancel and stop. Stop and transcribe ends the
+recording; the composer stays editable the whole time.
 
-Mesura Code shows the strip only while its window is focused on the destination chat. Symmetria Shell
-shows its recorder widget everywhere else. The two surfaces control the same recording.
+The mode button cycles through three modes:
 
-If Mesura cannot reserve the chat, Symmetria Shell shows an error but keeps recording and
-transcribing. It copies the result to the clipboard for manual paste and does not send it to another
-chat.
+- **Copy** copies the text to the clipboard and leaves the draft alone.
+- **Insert** puts the text in the draft.
+- **Send** puts the text in the draft and sends the message.
 
-Symmetria Shell always reports the final result. A send success means Mesura Code confirmed that the
-dictated user message started the matching provider turn. If the destination no longer exists,
-Symmetria Shell keeps the transcript available for clipboard recovery and does not send it to the
-chat that happens to be open.
+While a recording or its transcription is in progress, Alt+S selects Copy, Alt+I selects Insert
+and Alt+Enter selects Send. These keys only choose the mode; they do not stop the recording.
 
-## Voice input on iPhone
+When you stop, a small marker with a moving wave appears where your caret is. Keep typing, move the
+caret, record again, or open another chat: the text replaces its marker when it arrives, even in a
+chat you are not looking at. If you delete a marker, its text stays in the Transcriptions list. A
+failed marker offers **Retry** and **Discard**.
 
-On supported iPhones with iOS 26 or later, use the composer's microphone to record,
-then confirm to transcribe. Text is inserted where your selection was when
-recording started, ready for you to review and edit before sending.
+A message in Send mode goes out once its last marker is filled. Pressing Send while a marker is
+still waiting does the same, and a banner says the message will send when the text lands. Choose
+**Don't send** to keep the text without sending. A message with dictated text starts with one
+`[voiced]` tag.
 
-The first use may download Apple's speech model and needs a network connection.
-Later transcription works offline for that language. Recordings can be up to five
-minutes long. Canceling, leaving the screen, or an audio interruption discards the
-recording and preserves your existing draft.
+**Transcriptions** in the command palette lists recent dictation on the server, to copy or retry.
+The server keeps it for a day, and a server restart clears it.
 
-Transcription runs on your device. T3 Code deletes the temporary audio after
-transcription or cancellation; only the message text is sent when you submit.
+### Dictation on a phone
+
+On a phone, open Mesura Code in the browser and dictate the same way: the browser asks once for the
+microphone, and the marker, modes and send-when-ready work as on the desktop.
+
+### Dictate from another app on Hyprland
+
+With Mesura Code running, `mesura-code --dictation toggle` starts a recording, and running it again
+stops it. The transcript goes to the last chat you had open. To use it from any app, add a bind to
+your Hyprland config, for example:
+
+```
+bind = SUPER ALT, M, exec, mesura-code --dictation toggle
+```
+
+Any free key works. Symmetria Shell's own dictation key stays as it is for other apps.
+
+While a recording or its transcription is in progress, Mesura Code binds Alt+S (copy), Alt+I
+(insert), Alt+Enter (send), Alt+Space (pause), Alt+R (restart) and Alt+X (cancel), and releases them
+when it ends.
+
+A small widget at the bottom of the screen shows the recording while another app has focus. Add these
+window rules so it floats on every workspace and never takes focus:
+
+```
+windowrule = float on, match:title ^(mesura-dictation-overlay)$
+windowrule = pin on, match:title ^(mesura-dictation-overlay)$
+windowrule = no_initial_focus on, match:title ^(mesura-dictation-overlay)$
+windowrule = no_focus on, match:title ^(mesura-dictation-overlay)$
+```
 
 ## Commands and skills
 

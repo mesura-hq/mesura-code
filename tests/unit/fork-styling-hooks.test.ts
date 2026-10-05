@@ -32,19 +32,25 @@ const read = (relativePath: string) =>
 // Each entry: a fork component, and the styling hooks it sets that the fork's
 // own stylesheet has to answer. Named individually rather than scraped, so a
 // hook removed from the component fails here instead of passing vacuously.
-const STYLED_FORK_COMPONENTS = [
-  {
-    component: "apps/web/src/symmetria/DictationStrip.tsx",
-    stylesheet: "apps/web/src/mesura.css",
-    hooks: ["mesura-dictation-strip", "data-phase", "data-dictation-mode-control"],
-  },
+const STYLED_FORK_COMPONENTS: ReadonlyArray<{
+  readonly component: string;
+  readonly stylesheet: string;
+  readonly hooks: ReadonlyArray<string>;
+}> = [
+  // DictationStripBanner is deliberately absent. It still sets
+  // `mesura-dictation-strip`, `data-phase` and `data-dictation-mode-control`,
+  // but the only rule they fed was the confirmation pulse on Symmetria Shell's
+  // `delivering` and `confirming` phases, which went with the Shell link. A
+  // recording in Mesura is only `recording` or `paused`. The hooks stay as
+  // stable selectors for tests and browser checks.
+  //
   // AccountLimitsPanel is deliberately absent. It still sets
   // `data-usage-limits-panel`, but that attribute stopped being a styling hook
   // when the panel became a band inside the sidebar: the rule it fed existed to
   // strip upstream's popover glass, and it went with the popover. The attribute
   // is kept as a stable selector for browser checks, so it has nothing to land
   // on by design. Listing it here asserts the opposite and fails.
-] as const;
+];
 
 for (const entry of STYLED_FORK_COMPONENTS) {
   it(`styles every hook ${entry.component} sets`, () => {
@@ -77,13 +83,13 @@ it("stacks the dictation strip inside the composer's banner column", () => {
   const chatView = read("apps/web/src/components/ChatView.tsx");
   assert.match(
     chatView,
-    /dictationStrip=\{dictationStrip\}/,
+    /dictationStrip=\{DICTATION_RECORDING_STRIP\}/,
     "ChatView no longer hands the dictation strip to ChatComposer",
   );
   assert.equal(
-    chatView.match(/<DictationStrip\b/g)?.length,
+    chatView.match(/<DictationRecordingStrip\b/g)?.length,
     1,
-    "DictationStrip must mount exactly once, through ChatComposer",
+    "DictationRecordingStrip must mount exactly once, through ChatComposer",
   );
 });
 
