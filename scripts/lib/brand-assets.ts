@@ -1,8 +1,5 @@
 export const BRAND_ASSET_PATHS = {
   monochromeSourceSvg: "assets/mesura-code/monochrome.svg",
-  mobileAndroidMonochromeIconPng: "apps/mobile/assets/android-icon-mark.png",
-  mobileAndroidNotificationIconPng: "apps/mobile/assets/android-notification-icon.png",
-  mobileWidgetMarkSvg: "apps/mobile/assets/widget/T3Mark.svg",
   desktopMasterPng: "assets/mesura-code/desktop-master.png",
   // The boot splash draws the cube alone, with no channel container behind it,
   // so one mark serves every channel. The stage label is rendered as text next
@@ -52,9 +49,8 @@ export const MASTER_RASTER_SIZE = 1254;
  * First row of the strip a channel master may treat as its own. Above it the
  * development and nightly masters are the production artwork verbatim, which
  * is what rules out a coloured frame around the cube; below it they carry the
- * uppercase channel wordmark. Guards in `brand-icon-source.test.ts` and
- * `mobile-brand-assets.test.ts` both derive their bounds from this, so the
- * two cannot drift apart.
+ * uppercase channel wordmark. The guard in `brand-icon-source.test.ts`
+ * derives its bounds from this.
  *
  * The band sits outside Android's adaptive-icon safe zone, so an adaptive
  * launcher clips the wordmark. That is not a regression: the coloured frame

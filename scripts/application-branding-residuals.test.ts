@@ -29,7 +29,6 @@ describe("application branding residuals", () => {
     for (const relativePath of [
       "apps/desktop/resources/dmg/dmg-background-latest.svg",
       "apps/desktop/resources/dmg/dmg-background-nightly.svg",
-      "apps/mobile/assets/widget/T3Mark.svg",
       "assets/mesura-code/monochrome.svg",
       "assets/prod/logo.svg",
     ]) {
