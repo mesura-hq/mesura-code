@@ -1,5 +1,4 @@
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
-import { runtimeModeConfig, runtimeModeOptions } from "./runtimeModeConfig";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { AttachmentFilePreview } from "../files/AttachmentFilePreview";
 import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
@@ -87,7 +86,6 @@ import {
 } from "./composerMentionDrag";
 import {
   composerFloatingLayerProps,
-  useComposerMenuProps,
   isInsideCollapsedComposerControls,
   isInsideComposerFloatingLayer,
   isInsideRestingComposerControlScope,
@@ -115,7 +113,6 @@ import {
 } from "../../promptStashStore";
 import { ComposerStashBadge } from "./ComposerStashBadge";
 import { ComposerStashMenu } from "./ComposerStashMenu";
-import { useComposerMenuState } from "./useComposerMenuState";
 import { useComposerFocusState } from "./useComposerFocusState";
 import { useComposerMultilinePrompt } from "./useComposerMultilinePrompt";
 import {
@@ -243,12 +240,7 @@ import { ComposerImageThumbnail } from "./ComposerImageThumbnail";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
-import {
-  ComposerControl,
-  ComposerControlIcon,
-  ComposerControlSeparator,
-  ComposerSelectControl,
-} from "./ComposerControl";
+import { ComposerControl, ComposerControlIcon, ComposerControlSeparator } from "./ComposerControl";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { buildPullRequestReferenceContext } from "../pullRequest/pullRequestDetail.logic";
 import {
@@ -259,12 +251,15 @@ import {
   searchSlashCommandItems,
   slashCommandItemsForPromptPosition,
 } from "./composerSlashCommandSearch";
-import {
-  getComposerPromptInjectionState,
-  getComposerProviderState,
-  renderProviderTraitsMenuContent,
-  renderProviderTraitsPicker,
-} from "./composerProviderState";
+import { getComposerPromptInjectionState, getComposerProviderState } from "./composerProviderState";
+import { resolveComposerOptionSelections, resolveProviderOptionState } from "./providerOptionState";
+import { buildTraitsTriggerDisplay } from "./TraitsPicker";
+import type {
+  CombinedPickerCandidate,
+  CombinedPickerConfig,
+  CombinedPickerSavedSelection,
+} from "./combinedPickerState";
+import { subscribePickerAction } from "../../lib/pickerActionBus";
 import { ContextWindowMeter, ContextWindowMeterPlaceholder } from "./ContextWindowMeter";
 import {
   providerSupportsManualCompaction,
@@ -914,7 +909,6 @@ function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children:
   );
 }
 import { Button } from "../ui/button";
-import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import {
@@ -1021,26 +1015,22 @@ function useRestingComposerControlsLayout(host: HTMLDivElement | null) {
   return { controlsRef, hiddenBlockCount: layout.hiddenCount, controlsVisible: layout.visible };
 }
 
+/**
+ * The composer's Chat/Plan toggle. Access and effort live in the combined
+ * model picker; this block only exists while plan mode is offered.
+ */
 const ComposerFooterModeControls = memo(function ComposerFooterModeControls(props: {
-  showInteractionModeToggle: boolean;
   interactionMode: ProviderInteractionMode;
-  runtimeMode: RuntimeMode;
   size?: "sm" | "xs";
-  hidden?: boolean;
   onToggleInteractionMode: () => void;
-  onRuntimeModeChange: (mode: RuntimeMode) => void;
 }) {
   const size = props.size ?? "sm";
-  const composerFloatingLayerProps = useComposerMenuProps();
-  const [open, setOpen] = useComposerMenuState(props.hidden);
-  const runtimeModeOption = runtimeModeConfig[props.runtimeMode];
-  const RuntimeModeIcon = runtimeModeOption.icon;
   const interactionModeTooltip =
     props.interactionMode === "plan"
       ? "Plan mode — click to return to normal build mode"
       : "Default mode — click to enter plan mode";
 
-  const interactionModeToggle = props.showInteractionModeToggle ? (
+  return (
     <>
       <ComposerControlSeparator size={size} />
       <Tooltip>
@@ -1081,59 +1071,6 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
         </TooltipTrigger>
         <TooltipPopup side="top">{interactionModeTooltip}</TooltipPopup>
       </Tooltip>
-    </>
-  ) : null;
-
-  return (
-    <>
-      <ComposerControlSeparator size={size} />
-
-      <Tooltip>
-        <Select
-          open={open}
-          onOpenChange={setOpen}
-          value={props.runtimeMode}
-          onValueChange={(value) => props.onRuntimeModeChange(value!)}
-        >
-          <TooltipTrigger
-            render={
-              <ComposerSelectControl
-                data-composer-shortcut="composer.mode"
-                size={size}
-                className={size === "xs" ? undefined : "font-medium"}
-                aria-label="Runtime mode"
-              />
-            }
-          >
-            <ComposerControlIcon icon={RuntimeModeIcon} size={size} />
-            <SelectValue>{runtimeModeOption.label}</SelectValue>
-          </TooltipTrigger>
-          <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
-            {runtimeModeOptions.map((mode) => {
-              const option = runtimeModeConfig[mode];
-              const OptionIcon = option.icon;
-              return (
-                <SelectItem key={mode} value={mode} hideIndicator className="min-w-64 py-2">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="grid min-w-0 flex-1 gap-0.5">
-                      <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
-                        <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                        {option.label}
-                      </span>
-                      <span className="text-muted-foreground text-xs leading-4">
-                        {option.description}
-                      </span>
-                    </div>
-                  </div>
-                </SelectItem>
-              );
-            })}
-          </SelectPopup>
-        </Select>
-        <TooltipPopup side="top">{runtimeModeOption.description}</TooltipPopup>
-      </Tooltip>
-
-      {interactionModeToggle}
     </>
   );
 });
@@ -1407,10 +1344,14 @@ export interface ChatComposerProps {
   ) => Promise<unknown>;
 
   onProviderModelSelect: (instanceId: ProviderInstanceId, model: string) => void;
+  /**
+   * Validates and saves a complete combined-picker choice. Returns false when
+   * the choice was rejected, in which case nothing was written.
+   */
+  onProviderSelectionApply: (candidate: CombinedPickerCandidate) => boolean;
   onOpenProviderSetup: (instanceId: ProviderInstanceId) => void;
   getModelDisabledReason: (instanceId: ProviderInstanceId, model: string) => string | null;
   toggleInteractionMode: () => void;
-  handleRuntimeModeChange: (mode: RuntimeMode) => void;
   handleInteractionModeChange: (mode: ProviderInteractionMode) => void;
 
   focusComposer: () => void;
@@ -1497,10 +1438,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onImplementPlanInNewThread,
     onRespondToApproval,
     onProviderModelSelect,
+    onProviderSelectionApply,
     onOpenProviderSetup,
     getModelDisabledReason,
     toggleInteractionMode,
-    handleRuntimeModeChange,
     handleInteractionModeChange,
     focusComposer,
     scheduleComposerFocus,
@@ -2529,32 +2470,85 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [composerDraftTarget, promptRef, scheduleComposerFocus, setComposerDraftPrompt],
   );
 
-  const providerTraitsMenuContent = renderProviderTraitsMenuContent({
-    provider: selectedProvider,
-    instanceId: selectedInstanceId,
-    ...(routeKind === "server" ? { threadRef: routeThreadRef } : {}),
-    ...(routeKind === "draft" && draftId ? { draftId } : {}),
-    model: selectedModel,
-    models: selectedProviderModels,
-    modelOptions: composerModelOptions?.[selectedInstanceId],
+  // ------------------------------------------------------------------
+  // Combined model, effort, options, and access picker
+  // ------------------------------------------------------------------
+  const modelPickerTriggerTraits = useMemo(() => {
+    const { selections } = resolveComposerOptionSelections(
+      selectedProviderModels,
+      selectedModel,
+      selectedProvider,
+      composerModelOptions?.[selectedInstanceId],
+      settings.planModeEnabled,
+    );
+    const optionState = resolveProviderOptionState({
+      provider: selectedProvider,
+      models: selectedProviderModels,
+      model: selectedModel,
+      prompt,
+      modelOptions: selections,
+      planModeEnabled: settings.planModeEnabled,
+    });
+    return optionState.hasAnyControls
+      ? buildTraitsTriggerDisplay({
+          provider: selectedProvider,
+          descriptors: optionState.descriptors,
+          primarySelectDescriptorId: optionState.promptEffortDescriptor?.id ?? null,
+          ultrathinkPromptControlled: optionState.ultrathinkPromptControlled,
+        })
+      : undefined;
+  }, [
+    composerModelOptions,
     prompt,
-    onPromptChange: setPromptFromTraits,
-    planModeEnabled: settings.planModeEnabled,
-  });
-  const providerTraitsPickerInput = {
-    provider: selectedProvider,
-    instanceId: selectedInstanceId,
-    ...(routeKind === "server" ? { threadRef: routeThreadRef } : {}),
-    ...(routeKind === "draft" && draftId ? { draftId } : {}),
-    model: selectedModel,
-    models: selectedProviderModels,
-    modelOptions: composerModelOptions?.[selectedInstanceId],
-    prompt,
-    onPromptChange: setPromptFromTraits,
-    planModeEnabled: settings.planModeEnabled,
-    isComposerOwned: true,
-  } satisfies Parameters<typeof renderProviderTraitsPicker>[0];
-  const providerTraitsPicker = renderProviderTraitsPicker(providerTraitsPickerInput);
+    selectedInstanceId,
+    selectedModel,
+    selectedProvider,
+    selectedProviderModels,
+    settings.planModeEnabled,
+  ]);
+  // Set when the effort shortcut opens the picker, so it opens on More options.
+  const [modelPickerOpensOnExtras, setModelPickerOpensOnExtras] = useState(false);
+  const readCombinedPickerSavedSelection = useCallback(
+    (): CombinedPickerSavedSelection => ({
+      instanceId: selectedInstanceId,
+      model: selectedModel,
+      modelOptionsByInstance: composerModelOptions,
+      prompt: promptRef.current,
+      runtimeMode,
+    }),
+    [composerModelOptions, promptRef, runtimeMode, selectedInstanceId, selectedModel],
+  );
+  const handleCombinedPickerApply = useCallback(
+    (candidate: CombinedPickerCandidate) => {
+      if (!onProviderSelectionApply(candidate)) return;
+      // The prompt changes last, and only after the choice was accepted.
+      if (candidate.prompt !== promptRef.current) {
+        setPromptFromTraits(candidate.prompt);
+      }
+    },
+    [onProviderSelectionApply, promptRef, setPromptFromTraits],
+  );
+  const combinedPickerConfig = useMemo<CombinedPickerConfig>(
+    () => ({
+      readSavedSelection: readCombinedPickerSavedSelection,
+      readCurrentPrompt: () => promptRef.current,
+      context: { planModeEnabled: settings.planModeEnabled, allowPromptInjectedEffort: true },
+      onApply: handleCombinedPickerApply,
+      initialExtrasExpanded: modelPickerOpensOnExtras,
+      respondsToShortcut: true,
+    }),
+    [
+      handleCombinedPickerApply,
+      modelPickerOpensOnExtras,
+      promptRef,
+      readCombinedPickerSavedSelection,
+      settings.planModeEnabled,
+    ],
+  );
+  const handleModelPickerOpenChange = useCallback((open: boolean) => {
+    if (!open) setModelPickerOpensOnExtras(false);
+    setIsComposerModelPickerOpen(open);
+  }, []);
   const {
     controlsRef: restingComposerControlsRef,
     hiddenBlockCount: restingControlsHiddenBlockCount,
@@ -4500,6 +4494,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerControlsHidden = composerControlsInStrip && !restingControlsVisible;
   if (composerControlsHidden && isComposerModelPickerOpen) {
     setIsComposerModelPickerOpen(false);
+    setModelPickerOpensOnExtras(false);
   }
   useLayoutEffect(() => {
     onRestingControlsVisibilityChange(composerControlsVisibleInStrip);
@@ -4694,40 +4689,22 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const restingHiddenBlockCount = composerControlsInStrip ? restingControlsHiddenBlockCount : 0;
   const composerControlsCompact = !composerControlsInStrip && isComposerFooterCompact;
-  const restingProviderTraitsPicker = renderProviderTraitsPicker({
-    ...providerTraitsPickerInput,
-    size: "xs",
-    hidden: composerControlsHidden || restingHiddenBlockCount > 1,
-  });
-  const restingBlockDefs = [
-    ...(providerTraitsPicker
-      ? [
-          {
-            id: "traits",
-            content: (
-              <>
-                <ComposerControlSeparator size={composerControlsInStrip ? "xs" : "sm"} />
-                {composerControlsInStrip ? restingProviderTraitsPicker : providerTraitsPicker}
-              </>
-            ),
-          },
-        ]
-      : []),
-    {
-      id: "mode",
-      content: (
-        <ComposerFooterModeControls
-          showInteractionModeToggle={planModeUiEnabled}
-          interactionMode={interactionMode}
-          runtimeMode={runtimeMode}
-          size={composerControlsInStrip ? "xs" : "sm"}
-          hidden={composerControlsHidden || restingHiddenBlockCount > 0}
-          onToggleInteractionMode={toggleInteractionMode}
-          onRuntimeModeChange={handleRuntimeModeChange}
-        />
-      ),
-    },
-  ];
+  // Effort, provider options, and access live in the combined model picker.
+  // Only the Chat/Plan toggle remains as a separate block.
+  const restingBlockDefs = planModeUiEnabled
+    ? [
+        {
+          id: "mode",
+          content: (
+            <ComposerFooterModeControls
+              interactionMode={interactionMode}
+              size={composerControlsInStrip ? "xs" : "sm"}
+              onToggleInteractionMode={toggleInteractionMode}
+            />
+          ),
+        },
+      ]
+    : [];
   const hiddenRestingBlockIds = restingBlockDefs
     .slice(restingBlockDefs.length - restingHiddenBlockCount)
     .map((def) => def.id);
@@ -4779,7 +4756,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         size={composerControlsInStrip ? "xs" : "sm"}
         triggerClassName={
           composerControlsInStrip
-            ? "min-w-13 shrink text-xs! @max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:w-0 @max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:flex-none"
+            ? "min-w-13 shrink text-xs! @max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:w-0 @max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:flex-none @max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-traits]]:hidden"
             : "-ms-2.5"
         }
         terminalOpen={terminalOpen}
@@ -4798,21 +4775,21 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               ),
             }
           : {})}
-        onOpenChange={setIsComposerModelPickerOpen}
+        onOpenChange={handleModelPickerOpenChange}
         getModelDisabledReason={getModelDisabledReason}
         onInstanceModelChange={onProviderModelSelect}
         onOpenProviderSetup={onOpenProviderSetup}
+        combined={combinedPickerConfig}
+        {...(modelPickerTriggerTraits ? { triggerTraits: modelPickerTriggerTraits } : {})}
       />
 
       {composerControlsCompact ? (
-        <CompactComposerControlsMenu
-          interactionMode={interactionMode}
-          runtimeMode={runtimeMode}
-          showInteractionModeToggle={planModeUiEnabled}
-          traitsMenuContent={providerTraitsMenuContent}
-          onToggleInteractionMode={toggleInteractionMode}
-          onRuntimeModeChange={handleRuntimeModeChange}
-        />
+        planModeUiEnabled ? (
+          <CompactComposerControlsMenu
+            interactionMode={interactionMode}
+            onToggleInteractionMode={toggleInteractionMode}
+          />
+        ) : null
       ) : (
         <>
           {restingBlockDefs.map((def, index) => {
@@ -4835,7 +4812,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               </div>
             );
           })}
-          {composerControlsInStrip ? (
+          {composerControlsInStrip && restingBlockDefs.length > 0 ? (
             <div
               data-resting-controls-overflow
               aria-hidden={hiddenRestingBlockIds.length === 0 || undefined}
@@ -4847,17 +4824,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             >
               <CompactComposerControlsMenu
                 interactionMode={interactionMode}
-                runtimeMode={runtimeMode}
                 size="xs"
                 hidden={composerControlsHidden || hiddenRestingBlockIds.length === 0}
-                showInteractionModeToggle={
-                  planModeUiEnabled && hiddenRestingBlockIds.includes("mode")
-                }
-                traitsMenuContent={
-                  hiddenRestingBlockIds.includes("traits") ? providerTraitsMenuContent : undefined
-                }
                 onToggleInteractionMode={toggleInteractionMode}
-                onRuntimeModeChange={handleRuntimeModeChange}
               />
             </div>
           ) : null}
@@ -5451,17 +5420,27 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // ------------------------------------------------------------------
   // Imperative handle
   // ------------------------------------------------------------------
-  const openModelPicker = useCallback(() => {
-    if (composerControlsHidden) {
-      if (composerBlurFrameRef.current !== null) {
-        window.cancelAnimationFrame(composerBlurFrameRef.current);
-        composerBlurFrameRef.current = null;
+  const openModelPicker = useCallback(
+    (options?: { extras?: boolean }) => {
+      setModelPickerOpensOnExtras(options?.extras === true);
+      if (composerControlsHidden) {
+        if (composerBlurFrameRef.current !== null) {
+          window.cancelAnimationFrame(composerBlurFrameRef.current);
+          composerBlurFrameRef.current = null;
+        }
+        setIsComposerScrollCollapsed(false);
+        setIsComposerFocused(true);
       }
-      setIsComposerScrollCollapsed(false);
-      setIsComposerFocused(true);
-    }
-    setIsComposerModelPickerOpen(true);
-  }, [composerControlsHidden, setIsComposerFocused, setIsComposerScrollCollapsed]);
+      setIsComposerModelPickerOpen(true);
+    },
+    [composerControlsHidden, setIsComposerFocused, setIsComposerScrollCollapsed],
+  );
+  // The effort shortcut opens the picker on More options. While the picker is
+  // open, the picker itself owns the shortcut and toggles that section.
+  useEffect(() => {
+    if (isComposerModelPickerOpen || showProviderUnavailable) return;
+    return subscribePickerAction("traits", () => openModelPicker({ extras: true }));
+  }, [isComposerModelPickerOpen, openModelPicker, showProviderUnavailable]);
 
   useImperativeHandle(
     composerRef,

@@ -9,6 +9,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { deriveProviderInstanceEntries } from "../../providerInstances";
 import {
   adjacentModelPickerProvider,
+  resolveModelPickerFitHeight,
   resolveModelPickerSelectedModel,
   shouldIncludeModelPickerOption,
   shouldOfferModelPickerSetup,
@@ -283,5 +284,29 @@ describe("adjacentModelPickerProvider", () => {
         direction: -1,
       }),
     ).toBe(claude.instanceId);
+  });
+});
+
+describe("resolveModelPickerFitHeight", () => {
+  // Regression: the combined picker once capped itself with Base UI's
+  // --available-height, which Base UI replaces with max-content while it
+  // measures. The picker then measured at full height and opened above the
+  // top of a 390x480 viewport, hiding its search field.
+  it("combined picker fits the larger side of a trigger near the bottom of a short viewport", () => {
+    expect(
+      resolveModelPickerFitHeight({ anchorTop: 266, anchorBottom: 294, viewportHeight: 480 }),
+    ).toBe(250);
+  });
+
+  it("combined picker fits below a trigger near the top of the viewport", () => {
+    expect(
+      resolveModelPickerFitHeight({ anchorTop: 40, anchorBottom: 68, viewportHeight: 900 }),
+    ).toBe(816);
+  });
+
+  it("combined picker fit never goes below zero when the trigger fills the viewport", () => {
+    expect(
+      resolveModelPickerFitHeight({ anchorTop: 4, anchorBottom: 196, viewportHeight: 200 }),
+    ).toBe(0);
   });
 });

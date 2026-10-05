@@ -593,7 +593,17 @@ interface ComposerDraftStoreState {
   /** Removes draft-session metadata after promotion is complete. */
   finalizePromotedDraftThread: (threadRef: ComposerThreadTarget) => void;
   clearDraftThread: (threadRef: ComposerThreadTarget) => void;
-  setStickyModelSelection: (modelSelection: ModelSelection | null | undefined) => void;
+  setStickyModelSelection: (
+    modelSelection: ModelSelection | null | undefined,
+    opts?: {
+      /**
+       * Replace the sticky entry's options outright, as `setModelSelection`
+       * does. Used for complete picker selections, where absent options mean
+       * "no options" rather than "keep the previous traits".
+       */
+      replaceOptions?: boolean;
+    },
+  ) => void;
   setPrompt: (threadRef: ComposerThreadTarget, prompt: string) => void;
   setTerminalContexts: (threadRef: ComposerThreadTarget, contexts: TerminalContextDraft[]) => void;
   setModelSelection: (
@@ -739,6 +749,26 @@ function providerSelectionsFromModelSelection(
     return null;
   }
   return { [modelSelection.instanceId]: options };
+}
+
+/**
+ * Saved options per instance. A draft entry is the user's choice for its
+ * instance, so it replaces inherited thread or project options for that
+ * instance even when it carries none; inherited options fill only instances
+ * the draft has no entry for.
+ */
+function resolveEffectiveModelOptions(
+  draftSelections: Partial<Record<string, ModelSelection>> | null | undefined,
+  inherited: ProviderOptionSelectionsByProvider | null,
+): ProviderOptionSelectionsByProvider | null {
+  const result: ProviderOptionSelectionsByProvider = {};
+  for (const [instanceId, options] of Object.entries(inherited ?? {})) {
+    if (options && !draftSelections?.[instanceId]) {
+      result[instanceId] = options;
+    }
+  }
+  Object.assign(result, modelSelectionByProviderToOptions(draftSelections));
+  return Object.keys(result).length > 0 ? result : null;
 }
 
 function modelSelectionByProviderToOptions(
@@ -1271,11 +1301,11 @@ export function deriveEffectiveComposerModelState(input: {
         activeSelection.model,
       ))
     : baseModel;
-  const modelOptions =
-    modelSelectionByProviderToOptions(input.draft?.modelSelectionByProvider) ??
+  const modelOptions = resolveEffectiveModelOptions(
+    input.draft?.modelSelectionByProvider,
     providerSelectionsFromModelSelection(input.threadModelSelection) ??
-    providerSelectionsFromModelSelection(input.projectModelSelection) ??
-    null;
+      providerSelectionsFromModelSelection(input.projectModelSelection),
+  );
 
   return {
     selectedModel,
@@ -3024,7 +3054,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             return removeDraftThreadReferences(state, threadKey);
           });
         },
-        setStickyModelSelection: (modelSelection) => {
+        setStickyModelSelection: (modelSelection, opts) => {
           const normalized = normalizeModelSelection(modelSelection);
           set((state) => {
             if (!normalized) {
@@ -3035,7 +3065,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             // setModelSelection). Keep the last sticky traits so Fast/Normal
             // survives Composer 2 → 2.5 and new chats.
             const nextSelection =
-              normalized.options !== undefined
+              normalized.options !== undefined || opts?.replaceOptions
                 ? normalized
                 : createModelSelection(normalized.instanceId, normalized.model, current?.options);
             const nextMap: Partial<Record<ProviderInstanceId, ModelSelection>> = {

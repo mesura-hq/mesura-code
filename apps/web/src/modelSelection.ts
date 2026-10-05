@@ -291,7 +291,15 @@ export function resolveAppModelSelectionForInstance(
   settings: UnifiedSettings,
   providers: ReadonlyArray<ServerProvider>,
   selectedModel: string | null | undefined,
-  resolutionOptions?: { readonly preserveUnavailableSelection?: boolean },
+  resolutionOptions?: {
+    readonly preserveUnavailableSelection?: boolean;
+    /**
+     * False returns null when the instance does not offer `selectedModel`,
+     * instead of substituting its default model. Complete selections use it
+     * so a stale or unknown model is rejected rather than replaced.
+     */
+    readonly fallbackToDefault?: boolean;
+  },
 ): string | null {
   const entry = deriveProviderInstanceEntries(providers).find(
     (candidate) => candidate.instanceId === instanceId,
@@ -320,6 +328,9 @@ export function resolveAppModelSelectionForInstance(
     ) {
       return unavailableSelection;
     }
+  }
+  if (resolutionOptions?.fallbackToDefault === false) {
+    return null;
   }
   return options.find((option) => option.isDefault)?.slug ?? options[0]?.slug ?? null;
 }

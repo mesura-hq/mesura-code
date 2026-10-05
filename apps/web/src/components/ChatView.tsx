@@ -198,6 +198,8 @@ import { ThreadPreviewMiniPlayer } from "./preview/ThreadPreviewMiniPlayer";
 import { subscribePreviewAction } from "./preview/previewActionBus";
 import { getConfiguredPreviewUrls } from "./preview/previewEmptyStateLogic";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
+import type { CombinedPickerCandidate } from "./chat/combinedPickerState";
+import { resolveComposerModelSelection } from "./chat/composerModelSelectionValidation";
 import {
   isSameSidebarThreadRef,
   useSidebarPendingFileDropStore,
@@ -272,7 +274,6 @@ import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useRemoveClonedProject } from "../hooks/useRemoveClonedProject";
 import { useOpenPanelPullRequestUrl } from "../hooks/useOpenPanelPullRequestUrl";
 import { useThreadActions } from "../hooks/useThreadActions";
-import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { confirmTerminalClose, isTerminalCloseConfirmPending } from "../lib/terminalCloseConfirm";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { getTerminalFocusOwner } from "../lib/terminalFocus";
@@ -6819,12 +6820,24 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
-      if (
-        command === "composer.host" ||
-        command === "composer.effort" ||
-        command === "composer.mode" ||
-        command === "composer.workspace"
-      ) {
+      // Effort and access live in the combined model picker. composer.effort
+      // opens it on More options, like traitsPicker.toggle; composer.mode
+      // opens it plainly, without jumping to access.
+      if (command === "composer.effort") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) dispatchPickerAction("traits");
+        return;
+      }
+
+      if (command === "composer.mode") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) composerRef.current?.openModelPicker();
+        return;
+      }
+
+      if (command === "composer.host" || command === "composer.workspace") {
         event.preventDefault();
         event.stopPropagation();
         if (!event.repeat) composerRef.current?.openControl(command);
@@ -6869,8 +6882,8 @@ export default function ChatView(props: ChatViewProps) {
       if (command === "traitsPicker.toggle") {
         event.preventDefault();
         event.stopPropagation();
-        // No-op when the composer is in its compact layout or the selected
-        // provider exposes no traits: neither renders the picker at all.
+        // Opens the combined model picker on More options, or toggles that
+        // section while the picker is open. No-op without a provider picker.
         dispatchPickerAction("traits");
         return;
       }
@@ -8968,81 +8981,115 @@ export default function ChatView(props: ChatViewProps) {
     [activeThread, providerStatuses],
   );
 
+  // Every thread restriction on changing models, checked before anything is
+  // written. Returns the normalized selection, or null after giving the same
+  // feedback a rejected model-only change gives.
+  const resolveAcceptedModelSelection = useCallback(
+    (
+      instanceId: ProviderInstanceId,
+      model: string,
+      requireOfferedModel: boolean,
+    ): ModelSelection | null => {
+      if (!activeThread) return null;
+      const savedDraftModel = useComposerDraftStore.getState().getComposerDraft(composerDraftTarget)
+        ?.modelSelectionByProvider[instanceId]?.model;
+      const decision = resolveComposerModelSelection({
+        instanceId,
+        model,
+        providers: providerStatuses,
+        settings,
+        lockedProvider,
+        thread: activeThread,
+        requireOfferedModel,
+        savedModel:
+          savedDraftModel ??
+          (activeThread.modelSelection.instanceId === instanceId
+            ? activeThread.modelSelection.model
+            : null),
+      });
+      if (decision.accepted) return decision.modelSelection;
+      if (decision.feedback) {
+        toastManager.add({ type: "warning", ...decision.feedback });
+      }
+      return null;
+    },
+    [activeThread, composerDraftTarget, lockedProvider, providerStatuses, settings],
+  );
+
   const onProviderModelSelect = useCallback(
     (instanceId: ProviderInstanceId, model: string) => {
       if (!activeThread) return;
-      // Look up the configured instance so model normalization and custom
-      // model lookup stay scoped to that exact instance. Unknown instance ids
-      // are rejected by returning early; the server remains authoritative too.
-      const entry = providerStatuses.find((snapshot) => snapshot.instanceId === instanceId);
-      const resolvedDriverKind = entry?.driver ?? null;
-      if (
-        lockedProvider !== null &&
-        resolvedDriverKind !== null &&
-        resolvedDriverKind !== lockedProvider
-      ) {
-        scheduleComposerFocus();
-        return;
-      }
-      if (lockedProvider !== null && activeThread.session?.providerInstanceId) {
-        const currentEntry = providerStatuses.find(
-          (snapshot) => snapshot.instanceId === activeThread.session?.providerInstanceId,
-        );
-        if (
-          currentEntry?.continuation?.groupKey &&
-          entry?.continuation?.groupKey &&
-          currentEntry.continuation.groupKey !== entry.continuation.groupKey
-        ) {
-          scheduleComposerFocus();
-          return;
-        }
-      }
-      const resolvedModel = resolveAppModelSelectionForInstance(
-        instanceId,
-        settings,
-        providerStatuses,
-        model,
-      );
-      if (!resolvedModel) {
-        scheduleComposerFocus();
-        return;
-      }
-      const nextModelSelection: ModelSelection = {
-        instanceId,
-        model: resolvedModel,
-      };
-      const modelChangeBlockReason = getStartedThreadModelChangeBlockReason({
-        providers: providerStatuses,
-        hasStartedSession: activeThread.session !== null,
-        currentModelSelection: activeThread.modelSelection,
-        currentProviderInstanceId: activeThread.session?.providerInstanceId ?? null,
-        nextModelSelection,
-      });
-      if (modelChangeBlockReason) {
-        toastManager.add({
-          type: "warning",
-          title: modelChangeBlockReason.title,
-          description: modelChangeBlockReason.description,
+      const nextModelSelection = resolveAcceptedModelSelection(instanceId, model, false);
+      if (nextModelSelection) {
+        // Model-only change: keep each store's existing options for the instance.
+        setComposerDraftModelSelection(composerDraftTarget, nextModelSelection, {
+          explicit: true,
         });
-        scheduleComposerFocus();
-        return;
+        setStickyComposerModelSelection(nextModelSelection);
       }
-      setComposerDraftModelSelection(
-        scopeThreadRef(activeThread.environmentId, activeThread.id),
-        nextModelSelection,
-        { explicit: true },
-      );
-      setStickyComposerModelSelection(nextModelSelection);
       scheduleComposerFocus();
     },
     [
       activeThread,
-      lockedProvider,
+      composerDraftTarget,
+      resolveAcceptedModelSelection,
       scheduleComposerFocus,
       setComposerDraftModelSelection,
       setStickyComposerModelSelection,
-      providerStatuses,
-      settings,
+    ],
+  );
+
+  // Applies a complete combined-picker choice. Validation runs first; a
+  // rejected choice writes no model, option, prompt, or access change. The
+  // composer writes the prompt itself, after this returns true.
+  const onProviderSelectionApply = useCallback(
+    (candidate: CombinedPickerCandidate): boolean => {
+      if (!activeThread) return false;
+      // The prompt changed after the effort was staged and now pins it.
+      if (candidate.blockedReason !== undefined) {
+        toastManager.add({
+          type: "warning",
+          title: "Effort is set by your prompt",
+          description: candidate.blockedReason,
+        });
+        scheduleComposerFocus();
+        return false;
+      }
+      const accepted = resolveAcceptedModelSelection(
+        candidate.modelSelection.instanceId,
+        candidate.modelSelection.model,
+        true,
+      );
+      if (!accepted) {
+        scheduleComposerFocus();
+        return false;
+      }
+      // The candidate carries the row's complete options, so both stores
+      // replace theirs; cleared options must not fall back to old traits.
+      const nextModelSelection = createModelSelection(
+        accepted.instanceId,
+        accepted.model,
+        candidate.modelSelection.options,
+      );
+      setComposerDraftModelSelection(composerDraftTarget, nextModelSelection, {
+        explicit: true,
+        replaceOptions: true,
+      });
+      setStickyComposerModelSelection(nextModelSelection, { replaceOptions: true });
+      if (candidate.runtimeMode !== undefined) {
+        handleRuntimeModeChange(candidate.runtimeMode);
+      }
+      scheduleComposerFocus();
+      return true;
+    },
+    [
+      activeThread,
+      composerDraftTarget,
+      handleRuntimeModeChange,
+      resolveAcceptedModelSelection,
+      scheduleComposerFocus,
+      setComposerDraftModelSelection,
+      setStickyComposerModelSelection,
     ],
   );
   const onEnvModeChange = useCallback(
@@ -9870,10 +9917,10 @@ export default function ChatView(props: ChatViewProps) {
                             onRespondToApproval={onRespondToApproval}
 
                             onProviderModelSelect={onProviderModelSelect}
+                            onProviderSelectionApply={onProviderSelectionApply}
                             onOpenProviderSetup={openProviderSetup}
                             getModelDisabledReason={getModelDisabledReason}
                             toggleInteractionMode={toggleInteractionMode}
-                            handleRuntimeModeChange={handleRuntimeModeChange}
                             handleInteractionModeChange={handleInteractionModeChange}
                             focusComposer={focusComposer}
                             scheduleComposerFocus={scheduleComposerFocus}

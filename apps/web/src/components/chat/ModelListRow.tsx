@@ -1,6 +1,7 @@
 import { type ProviderDriverKind, type ProviderInstanceId } from "@t3tools/contracts";
 import { memo } from "react";
-import { StarIcon } from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon, StarIcon } from "lucide-react";
+import type { SyntheticEvent } from "react";
 import {
   getDisplayModelName,
   getTriggerDisplayModelLabel,
@@ -14,6 +15,13 @@ import { Kbd } from "../ui/kbd";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { modelPickerModelKey } from "./modelPickerKeys";
+
+export interface ModelListRowEffort {
+  label: string;
+  canDecrease: boolean;
+  canIncrease: boolean;
+  readOnlyReason: string | null;
+}
 
 export const ModelListRow = memo(function ModelListRow(props: {
   index: number;
@@ -38,12 +46,25 @@ export const ModelListRow = memo(function ModelListRow(props: {
   unavailable?: boolean;
   jumpLabel?: string | null;
   disabledReason?: string | null;
+  /**
+   * Inline effort for the combined picker. Omitted outside it and for models
+   * whose provider exposes no effort control.
+   */
+  effort?: ModelListRowEffort | null;
+  onStepEffort?: (instanceId: ProviderInstanceId, slug: string, direction: 1 | -1) => void;
   onToggleFavorite: () => void;
 }) {
   const ProviderIcon = PROVIDER_ICON_BY_PROVIDER[props.driverKind] ?? null;
   const providerLabel = props.model.subProvider
     ? `${props.providerDisplayName} · ${props.model.subProvider}`
     : props.providerDisplayName;
+
+  const displayName = props.useTriggerLabel
+    ? getTriggerDisplayModelLabel(props.model)
+    : getDisplayModelName(
+        props.model,
+        props.preferShortName ? { preferShortName: true } : undefined,
+      );
 
   const row = (
     <ComboboxItem
@@ -61,14 +82,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
     >
       <div className="min-w-0 flex-1 text-left">
         <div className="flex min-w-0 items-center gap-2">
-          <div className="min-w-0 truncate text-xs font-medium leading-snug">
-            {props.useTriggerLabel
-              ? getTriggerDisplayModelLabel(props.model)
-              : getDisplayModelName(
-                  props.model,
-                  props.preferShortName ? { preferShortName: true } : undefined,
-                )}
-          </div>
+          <div className="min-w-0 truncate text-xs font-medium leading-snug">{displayName}</div>
           {props.showNewBadge ? (
             <span
               className="shrink-0 rounded border border-update/35 bg-update/15 px-0.5 py-px text-[10px] font-bold uppercase leading-none tracking-wide text-update-foreground"
@@ -96,6 +110,16 @@ export const ModelListRow = memo(function ModelListRow(props: {
       <div className="flex shrink-0 items-center gap-1.5">
         {props.jumpLabel ? (
           <Kbd className="h-4 min-w-0 rounded-sm px-1.5 text-[10px]">{props.jumpLabel}</Kbd>
+        ) : null}
+        {props.effort ? (
+          <ModelRowEffort
+            effort={props.effort}
+            modelName={displayName}
+            disabled={Boolean(props.disabledReason)}
+            onStep={(direction) =>
+              props.onStepEffort?.(props.instanceId, props.model.slug, direction)
+            }
+          />
         ) : null}
         <Tooltip>
           <TooltipTrigger
@@ -147,3 +171,72 @@ export const ModelListRow = memo(function ModelListRow(props: {
     </Tooltip>
   );
 });
+
+/** Keeps a stepper press from selecting the row or moving focus out of search. */
+function stopRowSelection(event: SyntheticEvent) {
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+const EFFORT_STEPPER_CLASS_NAME =
+  "flex size-4 items-center justify-center rounded-sm text-muted-foreground/70 hover:bg-foreground/10 hover:text-foreground focus-visible:outline-1 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-30";
+
+function ModelRowEffort(props: {
+  effort: ModelListRowEffort;
+  modelName: string;
+  disabled: boolean;
+  onStep: (direction: 1 | -1) => void;
+}) {
+  const { effort } = props;
+  const value = (
+    <span
+      data-combined-picker-effort-value
+      className="min-w-10 truncate text-center text-[11px] leading-none text-muted-foreground"
+    >
+      {effort.label}
+    </span>
+  );
+  if (effort.readOnlyReason !== null) {
+    return (
+      <Tooltip>
+        <TooltipTrigger render={<div className="flex max-w-24 shrink-0 items-center" />}>
+          {value}
+        </TooltipTrigger>
+        <TooltipPopup side="top" className="max-w-64 text-balance leading-snug">
+          {effort.readOnlyReason}
+        </TooltipPopup>
+      </Tooltip>
+    );
+  }
+  const stepper = (direction: 1 | -1) => (
+    <button
+      type="button"
+      tabIndex={-1}
+      className={EFFORT_STEPPER_CLASS_NAME}
+      aria-label={`${direction === 1 ? "Increase" : "Decrease"} effort for ${props.modelName}`}
+      disabled={props.disabled || (direction === 1 ? !effort.canIncrease : !effort.canDecrease)}
+      onPointerDown={stopRowSelection}
+      onMouseDown={stopRowSelection}
+      onPointerUp={(event) => event.stopPropagation()}
+      onMouseUp={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        stopRowSelection(event);
+        props.onStep(direction);
+      }}
+    >
+      {direction === 1 ? (
+        <ChevronRightIcon className="size-3" />
+      ) : (
+        <ChevronLeftIcon className="size-3" />
+      )}
+    </button>
+  );
+  return (
+    <div className="flex max-w-28 shrink-0 items-center gap-0.5">
+      {stepper(-1)}
+      {value}
+      {stepper(1)}
+    </div>
+  );
+}

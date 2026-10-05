@@ -18,7 +18,9 @@ import {
   type ModelSelection,
   type PreviewAnnotationPayload,
   type ProviderOptionSelection,
+  type ServerProvider,
 } from "@t3tools/contracts";
+import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { createModelSelection } from "@t3tools/shared/model";
 import {
   collectAssistantCitations,
@@ -71,6 +73,7 @@ import {
   appendPersistedDictation,
   clearComposerDraftsEnvironment,
   composerDraftHasUserContent,
+  deriveEffectiveComposerModelState,
   finalizePromotedDraftThreadByRef,
   markPromotedDraftThreadByRef,
   restoreFailedBackgroundDraftThread,
@@ -2421,6 +2424,44 @@ describe("composerDraftStore sticky composer settings", () => {
     );
   });
 
+  it("replaces sticky provider options when a complete selection opts into replacement", () => {
+    const store = useComposerDraftStore.getState();
+
+    store.setStickyModelSelection(
+      modelSelection(CURSOR_DRIVER, "composer-2", {
+        fastMode: true,
+      }),
+    );
+    store.setStickyModelSelection(modelSelection(CURSOR_DRIVER, "composer-2.5"), {
+      replaceOptions: true,
+    });
+
+    expect(
+      useComposerDraftStore.getState().stickyModelSelectionByProvider[CURSOR_INSTANCE],
+    ).toEqual(modelSelection(CURSOR_DRIVER, "composer-2.5"));
+    expect(useComposerDraftStore.getState().stickyActiveProvider).toBe("cursor");
+  });
+
+  it("guard: draft model replacement drops stale options of the same instance", () => {
+    const store = useComposerDraftStore.getState();
+    const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("thread-replace-options"));
+
+    store.setModelSelection(
+      threadRef,
+      modelSelection(CODEX_DRIVER, "gpt-5.4", { reasoningEffort: "high", serviceTier: "priority" }),
+    );
+    store.setModelSelection(threadRef, modelSelection(CODEX_DRIVER, "gpt-5.5"), {
+      explicit: true,
+      replaceOptions: true,
+    });
+
+    expect(
+      useComposerDraftStore.getState().getComposerDraft(threadRef)?.modelSelectionByProvider[
+        CODEX_INSTANCE
+      ],
+    ).toEqual(modelSelection(CODEX_DRIVER, "gpt-5.5"));
+  });
+
   it("applies sticky activeProvider to new drafts", () => {
     const store = useComposerDraftStore.getState();
     const threadId = ThreadId.make("thread-sticky-active-provider");
@@ -3588,5 +3629,68 @@ describe("dictation persistence verification", () => {
     expect(useComposerDraftStore.getState().getComposerDraft(target)?.prompt).toBe(
       "[voiced] dictated words",
     );
+  });
+});
+
+describe("composerDraftStore effective model options", () => {
+  const codexProvider: ServerProvider = {
+    instanceId: CODEX_INSTANCE,
+    driver: CODEX_DRIVER,
+    enabled: true,
+    installed: true,
+    version: null,
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: "2026-10-05T12:00:00.000Z",
+    models: ["gpt-5.4", "gpt-5.5"].map((slug) => ({
+      slug,
+      name: slug,
+      isCustom: false,
+      capabilities: {},
+    })),
+    slashCommands: [],
+    skills: [],
+  };
+  const threadSelection = modelSelection(CODEX_DRIVER, "gpt-5.4", { serviceTier: "priority" });
+
+  function effectiveOptions(
+    modelSelectionByProvider: Partial<Record<ProviderInstanceId, ModelSelection>>,
+  ) {
+    return deriveEffectiveComposerModelState({
+      draft: { activeProvider: CODEX_INSTANCE, modelSelectionByProvider },
+      providers: [codexProvider],
+      selectedProvider: CODEX_DRIVER,
+      selectedInstanceId: CODEX_INSTANCE,
+      threadModelSelection: threadSelection,
+      projectModelSelection: null,
+      settings: DEFAULT_UNIFIED_SETTINGS,
+    }).modelOptions;
+  }
+
+  it("an optionless draft selection suppresses the thread's options for its instance", () => {
+    // Regression: the thread's options came back whenever no draft entry had
+    // options, undoing a complete choice that cleared them.
+    expect(
+      effectiveOptions({ [CODEX_INSTANCE]: modelSelection(CODEX_DRIVER, "gpt-5.5") })?.[
+        CODEX_INSTANCE
+      ],
+    ).toBeUndefined();
+  });
+
+  it("guard: an instance without a draft entry still inherits the thread's options", () => {
+    expect(effectiveOptions({})?.[CODEX_INSTANCE]).toEqual(threadSelection.options);
+  });
+
+  it("another instance's draft options no longer hide this instance's thread options", () => {
+    expect(
+      effectiveOptions({
+        [CLAUDE_AGENT_INSTANCE]: modelSelection(CLAUDE_AGENT_DRIVER, "claude-opus-4-6", {
+          effort: "high",
+        }),
+      }),
+    ).toEqual({
+      [CODEX_INSTANCE]: threadSelection.options,
+      [CLAUDE_AGENT_INSTANCE]: [{ id: "effort", value: "high" }],
+    });
   });
 });
