@@ -39,6 +39,60 @@ export const CONTEXT_WINDOW_RING_CIRCUMFERENCE = 2 * Math.PI * CONTEXT_WINDOW_RI
 /** Gap between neighbouring arcs, in viewBox units, so adjacent colours stay distinct. */
 export const CONTEXT_WINDOW_RING_SEGMENT_GAP = 0.9;
 
+/** Below this used share the ring keeps its segment colours. */
+const CONTEXT_WINDOW_PRESSURE_START_PERCENTAGE = 50;
+/**
+ * Ring colour stops by used share: yellow where pressure starts, orange at
+ * three quarters, red at the limit. Tailwind's yellow-500, orange-500 and
+ * red-500, so the web and the native ring paint the same colour.
+ */
+const CONTEXT_WINDOW_PRESSURE_STOPS: ReadonlyArray<{
+  readonly percentage: number;
+  readonly rgb: readonly [number, number, number];
+}> = [
+  { percentage: CONTEXT_WINDOW_PRESSURE_START_PERCENTAGE, rgb: [234, 179, 8] },
+  { percentage: 75, rgb: [249, 115, 22] },
+  { percentage: 100, rgb: [239, 68, 68] },
+];
+
+function formatHexColor(rgb: readonly [number, number, number]): string {
+  return `#${rgb.map((channel) => Math.round(channel).toString(16).padStart(2, "0")).join("")}`;
+}
+
+/**
+ * The single colour the composer ring takes once the window is at least half
+ * full, blended between the stops; `null` below that or when the share is
+ * unknown, so the ring keeps its segment colours. Only the ring takes it: the
+ * token labels stay muted.
+ */
+export function deriveContextWindowPressureColor(usedPercentage: number | null): string | null {
+  if (
+    usedPercentage === null ||
+    !Number.isFinite(usedPercentage) ||
+    usedPercentage < CONTEXT_WINDOW_PRESSURE_START_PERCENTAGE
+  ) {
+    return null;
+  }
+  const clamped = Math.min(usedPercentage, 100);
+  let lower = CONTEXT_WINDOW_PRESSURE_STOPS[0];
+  for (const upper of CONTEXT_WINDOW_PRESSURE_STOPS) {
+    if (lower === undefined || clamped <= lower.percentage) {
+      return formatHexColor(upper.rgb);
+    }
+    if (clamped <= upper.percentage) {
+      const weight = (clamped - lower.percentage) / (upper.percentage - lower.percentage);
+      const [r, g, b] = lower.rgb;
+      return formatHexColor([
+        r + (upper.rgb[0] - r) * weight,
+        g + (upper.rgb[1] - g) * weight,
+        b + (upper.rgb[2] - b) * weight,
+      ]);
+    }
+    lower = upper;
+  }
+  return null;
+}
+
 export interface ContextWindowRingArc {
   readonly kind: ContextWindowSegmentKind;
   /** Distance along the circle where the arc starts; use as a negative dash offset. */

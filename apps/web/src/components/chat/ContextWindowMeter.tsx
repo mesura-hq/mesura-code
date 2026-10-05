@@ -1,6 +1,7 @@
 import { Button } from "../ui/button";
 import {
   type ContextWindowSnapshot,
+  deriveContextWindowPressureColor,
   deriveContextWindowSegments,
   formatContextWindowAccessibilityLabel,
   formatContextWindowIndicatorLabels,
@@ -29,12 +30,13 @@ export function ContextWindowMeter(props: {
   const dashOffset = circumference * (1 - normalizedPercentage / 100);
   const totalProcessedTokens = usage.totalProcessedTokens ?? null;
   const showTotalProcessed = totalProcessedTokens !== null && totalProcessedTokens > 0;
-  const isOverloaded = normalizedPercentage > 90;
   const labels = formatContextWindowIndicatorLabels(usage);
   const segments = deriveContextWindowSegments(usage);
-  const usageColor = isOverloaded
-    ? "var(--color-error)"
-    : "color-mix(in oklab, var(--color-muted-foreground) 72%, transparent)";
+  // mesura: from half full the ring alone takes one pressure colour, yellow to
+  // red; the token labels stay muted.
+  const pressureColor = deriveContextWindowPressureColor(usage.usedPercentage);
+  const usageColor =
+    pressureColor ?? "color-mix(in oklab, var(--color-muted-foreground) 72%, transparent)";
 
   return (
     <Popover>
@@ -49,14 +51,9 @@ export function ContextWindowMeter(props: {
             className="h-7 gap-1 rounded-full px-1.5 text-[11px] tabular-nums hover:text-muted-foreground data-pressed:text-muted-foreground sm:h-7 sm:text-[11px]"
             aria-label={formatContextWindowAccessibilityLabel(usage)}
           >
-            <span
-              className="font-medium"
-              style={isOverloaded ? { color: "var(--color-error)" } : undefined}
-            >
-              {labels.used}
-            </span>
+            <span className="font-medium">{labels.used}</span>
             <span className="relative flex size-4 shrink-0 items-center justify-center">
-              {segments.length > 0 ? (
+              {segments.length > 0 && pressureColor === null ? (
                 <ContextWindowSegmentedRing segments={segments} />
               ) : (
                 <svg

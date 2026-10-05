@@ -4,6 +4,7 @@ import {
   type ContextWindowSegment,
   type ContextWindowSegmentKind,
   type ContextWindowSnapshot,
+  deriveContextWindowPressureColor,
   deriveContextWindowRingArcs,
   deriveContextWindowSegments,
   formatContextWindowAccessibilityLabel,
@@ -18,9 +19,6 @@ import { cn } from "../../lib/cn";
 import { layoutContextWindowBarParts } from "./contextWindowIndicatorState";
 
 const ThemedSvg = withUniwind(Svg);
-
-/** Above this used share the label turns the theme's error colour, as on the web. */
-const OVERLOADED_PERCENTAGE = 90;
 
 /**
  * The web's sky-500, amber-500 and violet-500, legible on light and dark
@@ -50,12 +48,18 @@ function segmentFill(kind: ContextWindowSegmentKind) {
 /**
  * One arc per segment, clockwise from the top, with the web ring's geometry.
  * `currentColor` resolves to the theme's muted foreground through Uniwind.
+ * From half full, one arc of the used share in the pressure colour replaces
+ * the segments, as on the web.
  */
 export function ContextWindowSegmentedRing(props: {
   readonly segments: ReadonlyArray<ContextWindowSegment>;
+  readonly usedPercentage: number | null;
   readonly size: number;
 }) {
-  const arcs = deriveContextWindowRingArcs(props.segments);
+  const pressureColor = deriveContextWindowPressureColor(props.usedPercentage);
+  const arcs = pressureColor === null ? deriveContextWindowRingArcs(props.segments) : [];
+  const pressureLength =
+    (Math.min(100, props.usedPercentage ?? 0) / 100) * CONTEXT_WINDOW_RING_CIRCUMFERENCE;
   return (
     <ThemedSvg
       width={props.size}
@@ -90,6 +94,18 @@ export function ContextWindowSegmentedRing(props: {
             />
           );
         })}
+        {pressureColor === null ? null : (
+          <Circle
+            cx={12}
+            cy={12}
+            r={CONTEXT_WINDOW_RING_RADIUS}
+            fill="none"
+            stroke={pressureColor}
+            strokeWidth={3}
+            strokeLinecap="round"
+            strokeDasharray={[pressureLength, CONTEXT_WINDOW_RING_CIRCUMFERENCE]}
+          />
+        )}
       </G>
     </ThemedSvg>
   );
@@ -145,7 +161,6 @@ export function ContextWindowIndicator(props: {
   const { snapshot } = props;
   const segments = deriveContextWindowSegments(snapshot);
   const labels = formatContextWindowIndicatorLabels(snapshot);
-  const isOverloaded = (snapshot.usedPercentage ?? 0) > OVERLOADED_PERCENTAGE;
   return (
     <Pressable
       accessibilityLabel={formatContextWindowAccessibilityLabel(snapshot)}
@@ -159,16 +174,15 @@ export function ContextWindowIndicator(props: {
       onPress={props.onPress}
     >
       {props.variant === "pill" ? (
-        <Text
-          className={cn(
-            "text-xs font-t3-medium tabular-nums",
-            isOverloaded ? "text-danger-foreground" : "text-foreground-muted",
-          )}
-        >
+        <Text className="text-xs font-t3-medium tabular-nums text-foreground-muted">
           {labels.used}
         </Text>
       ) : null}
-      <ContextWindowSegmentedRing segments={segments} size={props.variant === "pill" ? 16 : 20} />
+      <ContextWindowSegmentedRing
+        segments={segments}
+        usedPercentage={snapshot.usedPercentage}
+        size={props.variant === "pill" ? 16 : 20}
+      />
       {props.variant === "pill" && labels.max !== null ? (
         <Text className="text-xs tabular-nums text-foreground-muted">{labels.max}</Text>
       ) : null}

@@ -10,6 +10,7 @@ import {
   CONTEXT_WINDOW_RING_RADIUS,
   CONTEXT_WINDOW_RING_SEGMENT_GAP,
   deriveContextWindowCacheSplit,
+  deriveContextWindowPressureColor,
   deriveContextWindowRingArcs,
   deriveContextWindowRequestBreakdown,
   formatContextWindowAccessibilityLabel,
@@ -156,5 +157,25 @@ describe("context-window cold cache rule", () => {
 
   it("is never cold when the provider reports no cache split", () => {
     expect(isContextWindowCacheCold(breakdownOf({ inputTokens: 1_000 }))).toBe(false);
+  });
+});
+
+describe("context-window ring pressure colour", () => {
+  it("leaves the ring to its segment colours below half full or when the share is unknown", () => {
+    expect(deriveContextWindowPressureColor(null)).toBeNull();
+    expect(deriveContextWindowPressureColor(Number.NaN)).toBeNull();
+    expect(deriveContextWindowPressureColor(49.9)).toBeNull();
+  });
+
+  it("turns yellow at half, orange at three quarters and red at the limit", () => {
+    expect(deriveContextWindowPressureColor(50)).toBe("#eab308");
+    expect(deriveContextWindowPressureColor(75)).toBe("#f97316");
+    expect(deriveContextWindowPressureColor(100)).toBe("#ef4444");
+  });
+
+  it("blends between the stops and stays red past the limit", () => {
+    expect(deriveContextWindowPressureColor(62.5)).toBe("#f2930f");
+    expect(deriveContextWindowPressureColor(95)).toBe("#f14d3b");
+    expect(deriveContextWindowPressureColor(130)).toBe("#ef4444");
   });
 });
