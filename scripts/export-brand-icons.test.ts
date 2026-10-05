@@ -91,28 +91,6 @@ describe("cross-platform brand icon export", () => {
     }
   });
 
-  it("owns every generated mobile system asset", async () => {
-    const generated = await collectGeneratedBrandAssets(REPOSITORY_ROOT);
-    const mobilePaths = [
-      BRAND_ASSET_PATHS.mobileAndroidMonochromeIconPng,
-      BRAND_ASSET_PATHS.mobileAndroidNotificationIconPng,
-      BRAND_ASSET_PATHS.mobileWidgetMarkSvg,
-    ];
-    expect([...generated.keys()]).toHaveLength(33);
-    expect(mobilePaths.every((relativePath) => generated.has(relativePath))).toBe(true);
-
-    const temporaryRoot = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "mesura-mobile-icons-"),
-    );
-    try {
-      await expect(findStaleGeneratedAssetPaths(temporaryRoot, generated)).resolves.toEqual(
-        expect.arrayContaining(mobilePaths),
-      );
-    } finally {
-      NodeFS.rmSync(temporaryRoot, { recursive: true, force: true });
-    }
-  });
-
   it("renders the approved rounded master only for the production Linux desktop", async () => {
     const generated = await collectGeneratedBrandAssets(REPOSITORY_ROOT);
     const expected = await renderRasterIcon(

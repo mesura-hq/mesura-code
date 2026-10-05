@@ -1,37 +1,21 @@
 /**
- * Phase 7 (mobile dictation), shared decisions. Entry point: the
- * `@t3tools/client-runtime/dictation` subpath export, which web and mobile both
- * import. These are the platform-free rules the two clients must not write twice:
- * the mode cycle, whether the host can transcribe, when an armed draft sends, the
- * one-prefix rule, fill-once by job id, and the stop → marker → upload → start order.
+ * Shared dictation decisions. Entry point: the `@t3tools/client-runtime/dictation`
+ * subpath export the web client imports. These are the platform-free rules: the mode
+ * cycle, when an armed draft sends, the one-prefix rule, and the
+ * stop → marker → upload → start order.
  */
-import {
-  DictationJobId,
-  type DictationJob,
-  type DictationMode,
-  SECRET_SETTING_REDACTION_MARKER,
-} from "@t3tools/contracts";
+import { DictationJobId, type DictationMode } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 
 import {
   armedDraftSendDecision,
-  createDictationDeliveryLedger,
   DEFAULT_DICTATION_MODE,
   dictatedMessageText,
-  hostHasDictationKey,
   nextDictationMode,
   runDictationStop,
 } from "@t3tools/client-runtime/dictation";
 
 const marker = (jobId: string) => `[Transcribing](t3-context://v1/dictation/${jobId})`;
-
-const job = (id: string, status: DictationJob["status"], text?: string) =>
-  ({
-    id: DictationJobId.make(id),
-    status,
-    createdAt: "2026-10-04T10:00:00.000Z",
-    ...(text === undefined ? {} : { text }),
-  }) as unknown as DictationJob;
 
 describe("shared dictation mode cycle", () => {
   it("starts a recording in send mode", () => {
@@ -42,19 +26,6 @@ describe("shared dictation mode cycle", () => {
     const seen: DictationMode[] = ["clipboard"];
     for (let step = 0; step < 3; step += 1) seen.push(nextDictationMode(seen.at(-1)!));
     expect(seen).toEqual(["clipboard", "inject", "submit", "clipboard"]);
-  });
-});
-
-describe("shared dictation host key", () => {
-  const config = (openAiApiKey: string) => ({ settings: { dictation: { openAiApiKey } } });
-
-  it("reports a key when the host sends the redaction marker", () => {
-    expect(hostHasDictationKey(config(SECRET_SETTING_REDACTION_MARKER))).toBe(true);
-  });
-
-  it("reports no key for an empty key or an unknown host", () => {
-    expect(hostHasDictationKey(config(""))).toBe(false);
-    expect(hostHasDictationKey(null)).toBe(false);
   });
 });
 
@@ -101,35 +72,6 @@ describe("shared dictated message text", () => {
   it("sends an undictated draft untouched and an empty one as empty", () => {
     expect(dictatedMessageText("fix the build", false)).toBe("fix the build");
     expect(dictatedMessageText("   ", true)).toBe("");
-  });
-});
-
-describe("shared dictation delivery ledger", () => {
-  const own = (id: string) => id !== "someone-else";
-
-  it("hands out each completed own job once per job id", () => {
-    const ledger = createDictationDeliveryLedger();
-    const jobs = [job("job-1", "completed", "said it")];
-    expect(ledger.take(jobs, own).map((entry) => entry.id)).toEqual(["job-1"]);
-    expect(ledger.take(jobs, own)).toEqual([]);
-    expect(ledger.take([job("job-1", "completed", "said it again")], own)).toEqual([]);
-  });
-
-  it("holds back jobs that are not completed or not this device's", () => {
-    const ledger = createDictationDeliveryLedger();
-    expect(
-      ledger.take(
-        [
-          job("job-1", "transcribing"),
-          job("job-2", "failed"),
-          job("someone-else", "completed", "theirs"),
-        ],
-        own,
-      ),
-    ).toEqual([]);
-    expect(ledger.take([job("job-1", "completed", "now")], own).map((entry) => entry.id)).toEqual([
-      "job-1",
-    ]);
   });
 });
 

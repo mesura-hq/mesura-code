@@ -43,7 +43,7 @@ A server-side watch on the one file a client currently has open, which streams a
 
 #### Background scope
 
-A declared interest a client reports while it is looking at something: version-control status, diagnostics, or a thread. Scopes travel in the client's activity lease and are read by the server's background policy, which uses them to decide what work is worth doing while nobody is waiting on it. A scope is explicitly retained by the view that shows the thing, not derived from whether a subscription is open: subscriptions outlive the view that opened them, so deriving the scope would report a thread as watched for minutes after the user left it. See `apps/web/src/lib/backgroundActivityReporter.ts` and its mobile twin in `apps/mobile/src/connection/background-activity-scopes.ts`.
+A declared interest a client reports while it is looking at something: version-control status, diagnostics, or a thread. Scopes travel in the client's activity lease and are read by the server's background policy, which uses them to decide what work is worth doing while nobody is waiting on it. A scope is explicitly retained by the view that shows the thing, not derived from whether a subscription is open: subscriptions outlive the view that opened them, so deriving the scope would report a thread as watched for minutes after the user left it. See `apps/web/src/lib/backgroundActivityReporter.ts`.
 
 ### Thread timeline
 
@@ -225,8 +225,7 @@ A theme an environment's machine publishes for clients to follow, one file per t
 The environment's theme, held in its `settings.json` as `defaultTheme` (with `defaultThemeSetAt`
 as the set-generation) and set with `t3 theme set <id>`. Web and desktop clients apply each set
 once — live when connected, on the next connect otherwise — so setting it switches them, while a
-theme a user picks in Settings afterwards sticks until the next set; mobile keeps its own
-appearance settings. Naming a published [environment theme](#environment-theme) is how a desktop
+theme a user picks in Settings afterwards sticks until the next set. Naming a published [environment theme](#environment-theme) is how a desktop
 ships T3 Code already matching it.
 
 ### Pane focus

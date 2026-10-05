@@ -179,33 +179,18 @@ packageExtensions:
       vite: "catalog:"
 
 patchedDependencies:
-  "@clerk/expo@4.6.8": patches/@clerk__expo@4.6.8.patch
   "@effect/vitest@4.0.0-rc.112": patches/@effect__vitest@4.0.0-rc.112.patch
   "@expo/metro-config@57.0.12": patches/@expo__metro-config@57.0.12.patch
   "@ff-labs/fff-node@0.9.4": patches/@ff-labs__fff-node@0.9.4.patch
   "@legendapp/list@3.3.5": patches/@legendapp__list@3.3.5.patch
   "@pierre/diffs@1.3.0-beta.10": patches/@pierre%2Fdiffs@1.3.0-beta.10.patch
-  "@react-native-ai/apple@0.12.0": patches/@react-native-ai__apple@0.12.0.patch
-  "@react-native-menu/menu@2.0.0": patches/@react-native-menu__menu@2.0.0.patch
-  "@react-navigation/native-stack@7.17.6": patches/@react-navigation%2Fnative-stack@7.17.6.patch
   # Mesura: sharp 0.35.0 declares `types` at the top level but omits it from its
   # `exports` map, so NodeNext resolution finds no declarations and every import
   # is an implicit any. The declarations ship; only the map is wrong.
   sharp@0.35.0: patches/sharp@0.35.0.patch
   dbus-next@0.10.2: patches/dbus-next@0.10.2.patch
   effect@4.0.0-rc.112: patches/effect@4.0.0-rc.112.patch
-  expo-audio@57.0.4: patches/expo-audio@57.0.4.patch
-  expo-sharing@57.0.17: patches/expo-sharing@57.0.17.patch
   expo-widgets@57.0.15: patches/expo-widgets@57.0.15.patch
-  react-native-gesture-handler@2.32.0: patches/react-native-gesture-handler@2.32.0.patch
-  react-native-keyboard-controller@1.21.13: patches/react-native-keyboard-controller@1.21.13.patch
-  react-native-nitro-modules@0.35.9: patches/react-native-nitro-modules@0.35.9.patch
-  # Preserve the final layout frame. Backport of [#10171](https://github.com/software-mansion/react-native-reanimated/pull/10171).
-  react-native-reanimated@4.5.5: patches/react-native-reanimated@4.5.5.patch
-  react-native-screens@4.26.2: patches/react-native-screens@4.26.2.patch
-  # Search only bundled Android ABI libraries; host oniguruma links against glibc.
-  react-native-shiki-engine@0.3.12: patches/react-native-shiki-engine@0.3.12.patch
-  uniwind@1.11.0: patches/uniwind@1.11.0.patch
 
 peerDependencyRules:
   allowAny:

@@ -1,7 +1,8 @@
 # Dictation
 
 Mesura Code owns dictation end to end. A client records audio, the server transcribes it, and the
-client that holds the draft places the text. Web, desktop, Android and iPhone use the same path.
+client that holds the draft places the text. Web and desktop use the same path, and a phone uses it
+through the web app in its browser; this fork has no native mobile client (ADR-008).
 
 ## The server job
 
@@ -12,8 +13,8 @@ key from server settings and pushes every job's state and text to subscribed cli
 
 The server owns transcription for two reasons:
 
-- Android has no transcription engine, and every device must give the same quality in Spanish and
-  English.
+- A phone browser has no reliable transcription engine, and every device must give the same
+  quality in Spanish and English.
 - The OpenAI key is set once per host, in Settings, and every client of that host uses it. The
   key stays in the secret store and never reaches a client.
 
@@ -35,7 +36,7 @@ Two traps follow from that choice:
 - The link never has a context record. Code that walks context links must skip the `dictation`
   kind, or it reports a missing record or sends the link to a provider. The send state refuses a
   prompt that still holds a marker.
-- The native editors draw the marker as a still chip. The web editor draws the stepped wave.
+- The web editor draws the marker as the stepped wave.
 
 ## Filling is idempotent by job id
 
@@ -62,12 +63,6 @@ insertion. Mid-sentence insertions would otherwise scatter tags through the mess
 A draft for a thread that is not on screen sends through the directed submission path in
 [`directedComposerSubmission.ts`](../../apps/web/src/dictation/directedComposerSubmission.ts). That
 path refuses to send while a button approval is pending, because free text cannot answer one.
-
-Mobile differs in two places:
-
-- A question card's answer waits. Its marker fills, but the answer is not submitted by itself.
-- A new-task draft sends only while its screen is mounted, because only that screen can start
-  the thread. If the screen is gone, the text stays in the draft for the user to send.
 
 ## The desktop widget
 

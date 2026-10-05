@@ -175,12 +175,8 @@ The server keeps it for a day, and a server restart clears it.
 
 ### Dictation on a phone
 
-On Android and iPhone, the microphone appears once the server has a key. The toolbar shows cancel,
-the waveform with the time, a mode button and stop. Leaving the app or the screen stops the recording and
-transcribes what you said. On a phone the marker does not move.
-
-A message for a new task sends by itself only while its screen is open; otherwise the text waits in
-the draft for you to send.
+On a phone, open Mesura Code in the browser and dictate the same way: the browser asks once for the
+microphone, and the marker, modes and send-when-ready work as on the desktop.
 
 ### Dictate from another app on Hyprland
 
@@ -207,11 +203,6 @@ windowrule = pin on, match:title ^(mesura-dictation-overlay)$
 windowrule = no_initial_focus on, match:title ^(mesura-dictation-overlay)$
 windowrule = no_focus on, match:title ^(mesura-dictation-overlay)$
 ```
-
-## Voice input on iPhone
-
-T3 Code transcribes on the iPhone itself. Mesura Code uses its server dictation on the iPhone
-instead, as described in [Voice dictation](#voice-dictation).
 
 ## Commands and skills
 

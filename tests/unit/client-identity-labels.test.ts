@@ -32,10 +32,6 @@ const LABEL_PRODUCERS = [
     file: "apps/desktop/src/backend/DesktopLocalEnvironmentAuth.ts",
     labels: ["Mesura Code Desktop"],
   },
-  {
-    file: "apps/mobile/src/lib/authClientMetadata.ts",
-    labels: ["Mesura Code Mobile"],
-  },
 ] as const;
 
 const read = (relativePath: string) =>

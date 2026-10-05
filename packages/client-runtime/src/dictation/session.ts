@@ -1,11 +1,10 @@
-import type { DictationJob, DictationJobId, DictationMode } from "@t3tools/contracts";
+import type { DictationJobId, DictationMode } from "@t3tools/contracts";
 import { countPendingDictationSlots, withVoicedPrefix } from "@t3tools/shared/dictationSlots";
 
 /**
- * The dictation decisions web and mobile share: how a recording's mode cycles, whether a host
- * can transcribe at all, when an armed draft sends, how a dictated message is prefixed, which
- * completed jobs a client still has to deliver, and the order a stopped recording goes through.
- * Each client keeps only its own storage and transport around these.
+ * The platform-free dictation decisions: how a recording's mode cycles, when an armed draft
+ * sends, how a dictated message is prefixed, and the order a stopped recording goes through.
+ * The client keeps only its own storage and transport around these.
  */
 
 /** A recording starts in send mode: the draft goes out once its last marker fills. */
@@ -16,13 +15,6 @@ export function nextDictationMode(mode: DictationMode): DictationMode {
   if (mode === "clipboard") return "inject";
   if (mode === "inject") return "submit";
   return "clipboard";
-}
-
-/** The host transcribes only with a key; a client sees the redaction marker, never the key. */
-export function hostHasDictationKey(
-  config: { readonly settings: { readonly dictation: { readonly openAiApiKey: string } } } | null,
-): boolean {
-  return (config?.settings.dictation.openAiApiKey ?? "").length > 0;
 }
 
 /**
@@ -45,25 +37,6 @@ export function armedDraftSendDecision(input: {
 export function dictatedMessageText(prompt: string, voiced: boolean): string {
   const trimmed = prompt.trim();
   return trimmed === "" ? "" : withVoicedPrefix(trimmed, voiced);
-}
-
-/** Hands out each completed job of this client once, however often the job list repeats it. */
-export function createDictationDeliveryLedger(): {
-  readonly take: (
-    jobs: ReadonlyArray<DictationJob>,
-    isOwn: (jobId: string) => boolean,
-  ) => ReadonlyArray<DictationJob>;
-} {
-  const delivered = new Set<string>();
-  return {
-    take: (jobs, isOwn) => {
-      const taken = jobs.filter(
-        (job) => job.status === "completed" && !delivered.has(job.id) && isOwn(job.id),
-      );
-      for (const job of taken) delivered.add(job.id);
-      return taken;
-    },
-  };
 }
 
 /**
