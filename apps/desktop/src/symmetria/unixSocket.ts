@@ -1,11 +1,9 @@
 /**
  * Binding and unbinding a Unix socket server, as promises.
  *
- * Extracted from `SttSocket.ts` when a second socket appeared. Both of these
- * are about the LISTENER and know nothing about what is served over it, which
- * is why they extract cleanly and `createSttServer` does not: that one encodes
- * dictation's one-line-in-one-line-out shape, and the thread publisher pushes
- * instead of answering. Two servers, one way to bind.
+ * Both of these are about the LISTENER and know nothing about what is served
+ * over it: the framing belongs to `threadStream.ts`, which pushes rather than
+ * answers.
  *
  * Only `node:net` here, for the same reason `socketFiles.ts` holds no net: the
  * repository's diagnostics forbid node builtins wherever an Effect service

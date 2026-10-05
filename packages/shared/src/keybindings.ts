@@ -94,6 +94,17 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // per-command startup backfill installs it; no RETIRED or ADDED entry. No
   // `when` clause, like alt+u: both docks open over a focused terminal too.
   { key: "alt+s", command: "hosts.peek" },
+  // Mesura dictation. Active only while a recording or the last stopped job is
+  // live, and listed after hosts.peek on purpose: resolution is last-wins, so
+  // alt+s selects save during a dictation and stays the Hosts peek otherwise.
+  // dictation.toggle ships unbound; the user guide gives the Hyprland bind.
+  // New commands, so the per-command startup backfill installs them.
+  { key: "alt+s", command: "dictation.mode.clipboard", when: "dictationActive" },
+  { key: "alt+i", command: "dictation.mode.inject", when: "dictationActive" },
+  { key: "alt+enter", command: "dictation.mode.submit", when: "dictationActive" },
+  { key: "alt+space", command: "dictation.pause", when: "dictationActive" },
+  { key: "alt+r", command: "dictation.restart", when: "dictationActive" },
+  { key: "alt+x", command: "dictation.cancel", when: "dictationActive" },
   { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+n", command: "chat.newLocal", when: "!terminalFocus" },

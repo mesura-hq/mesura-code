@@ -13,6 +13,7 @@ import { getFocusedPane, isSidebarSearchFocused, type PaneId } from "./lib/paneF
 // The direction union stays where upstream declares it.
 import type { ThreadTraversalDirection } from "./components/Sidebar.logic";
 import { isFileManagerOpen } from "~/components/files/mesuraFileManager/isFileManagerOpen";
+import { isDictationLive } from "~/dictation/dictationSessionStore";
 import { isMacPlatform } from "./lib/utils";
 
 export interface ShortcutEventLike {
@@ -203,6 +204,17 @@ function resolveContext(options: ShortcutMatchOptions | undefined): ShortcutMatc
     if (options?.context !== undefined && key in options.context) continue;
     Object.defineProperty(context, key, {
       get: () => isFocused(pane),
+      enumerable: true,
+      configurable: true,
+    });
+  }
+
+  // Mesura dictation: the mode keys exist only while a recording or the last stopped job is
+  // live. Read for every caller, so a dock that matches its own chord (Alt+S, the Hosts peek)
+  // sees the dictation rule claim it.
+  if (options?.context === undefined || !("dictationActive" in options.context)) {
+    Object.defineProperty(context, "dictationActive", {
+      get: isDictationLive,
       enumerable: true,
       configurable: true,
     });

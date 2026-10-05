@@ -7,7 +7,6 @@ import {
 import * as Schema from "effect/Schema";
 import {
   defaultInstanceIdForDriver,
-  CommandId,
   EnvironmentId,
   MessageId,
   ProjectId,
@@ -70,7 +69,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import {
   COMPOSER_DRAFT_STORAGE_KEY,
   beginBackgroundDraftSubmissionByRef,
-  appendPersistedDictation,
   clearComposerDraftsEnvironment,
   composerDraftHasUserContent,
   deriveEffectiveComposerModelState,
@@ -83,7 +81,6 @@ import {
   partializeComposerDraftStoreState,
   useComposerDraftStore,
   DraftId,
-  verifyPersistedDictationReadback,
 } from "./composerDraftStore";
 import { removeLocalStorageItem, setLocalStorageItem } from "./hooks/useLocalStorage";
 import { insertInlineContextReference } from "./lib/composerContextReferences";
@@ -916,6 +913,31 @@ describe("composerDraftStore terminal contexts", () => {
     else store.clearTerminalContexts(threadRef);
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.prompt).toBe("Explain");
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.terminalContexts).toEqual([]);
+  });
+
+  it("keeps a dictation marker in the prompt when terminal links are reconciled", () => {
+    const store = useComposerDraftStore.getState();
+    const dictation = "[Transcribing](t3-context://v1/dictation/job-1)";
+    store.setPrompt(threadRef, `Explain ${dictation}`);
+    store.addTerminalContext(threadRef, makeTerminalContext({ id: "ctx-1" }));
+    store.setTerminalContexts(threadRef, []);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.prompt).toBe(`Explain ${dictation}`);
+  });
+
+  it("keeps a dictation marker through draft persistence and hydration", () => {
+    const store = useComposerDraftStore.getState();
+    const dictation = "[Transcribing](t3-context://v1/dictation/job-1)";
+    store.setPrompt(threadRef, `Explain ${dictation} later`);
+    const merge = useComposerDraftStore.persist.getOptions().merge!;
+    const state = merge(
+      JSON.parse(
+        JSON.stringify(partializeComposerDraftStoreState(useComposerDraftStore.getState())),
+      ),
+      useComposerDraftStore.getInitialState(),
+    );
+    expect(state.draftsByThreadKey[scopedThreadKey(threadRef)]?.prompt).toBe(
+      `Explain ${dictation} later`,
+    );
   });
 
   it("clears terminal contexts when clearing composer content", () => {
@@ -3501,134 +3523,49 @@ describe("composerDraftStore attachment references", () => {
   });
 });
 
-describe("dictation persistence verification", () => {
-  const targetKey = scopedThreadKey(
-    scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("thread-dictation-verification")),
-  );
-  const commandId = CommandId.make("command-dictation-verification");
-  const expectedPrompt = "typed context [voiced] dictated words";
-  const persistedState = (
-    overrides: {
-      prompt?: string;
-      applications?: ReadonlyArray<{ commandId: string; version: number }>;
-    } = {},
-  ) =>
-    JSON.stringify({
-      version: 8,
-      state: {
-        draftsByThreadKey: {
-          [targetKey]: {
-            prompt: overrides.prompt ?? expectedPrompt,
-            attachments: [],
-          },
-        },
-        draftThreadsByThreadKey: {},
-        logicalProjectDraftThreadKeyByLogicalProjectKey: {},
-        stickyModelSelectionByProvider: {},
-        stickyActiveProvider: null,
-        appliedDictationCommandsByTargetKey: {
-          [targetKey]: overrides.applications ?? [{ commandId, version: 1 }],
-        },
-      },
-    });
-
-  it("returns durable metadata after exact prompt and command readback", async () => {
-    const raw = persistedState();
-
-    const result = await verifyPersistedDictationReadback({
-      raw,
-      targetKey,
-      commandId,
-      version: 1,
-      expectedPrompt,
-    });
-
-    expect(result).toMatchObject({
-      ok: true,
-      persistedBytes: new TextEncoder().encode(raw).byteLength,
-    });
-    if (result.ok) expect(result.promptHash).toMatch(/^[a-f0-9]{64}$/u);
+describe("composer draft store without the Shell dictation ledger", () => {
+  afterEach(async () => {
+    await useComposerDraftStore.persist.clearStorage();
   });
 
-  it.each([
-    { name: "missing persisted state", raw: null, stage: "persisted-state-missing" },
-    { name: "decode failure", raw: "{broken", stage: "decode-failed" },
-    {
-      name: "missing target",
-      raw: JSON.stringify({
+  it("loads a saved draft that still carries the removed appliedDictationCommandsByTargetKey ledger and drops the field", async () => {
+    vi.useFakeTimers();
+    try {
+      const targetKey = scopedThreadKey(
+        scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("thread-with-old-dictation-ledger")),
+      );
+      const storage = useComposerDraftStore.persist.getOptions().storage;
+      expect(storage).toBeDefined();
+      storage?.setItem(COMPOSER_DRAFT_STORAGE_KEY, {
         version: 8,
         state: {
-          draftsByThreadKey: {},
+          draftsByThreadKey: {
+            [targetKey]: { prompt: "typed context [voiced] dictated words", attachments: [] },
+          },
           draftThreadsByThreadKey: {},
           logicalProjectDraftThreadKeyByLogicalProjectKey: {},
+          stickyModelSelectionByProvider: {},
+          stickyActiveProvider: null,
+          appliedDictationCommandsByTargetKey: {
+            [targetKey]: [{ commandId: "command-from-shell", version: 1 }],
+          },
         },
-      }),
-      stage: "target-missing",
-    },
-    {
-      name: "missing command",
-      raw: persistedState({ applications: [] }),
-      stage: "command-missing",
-    },
-    {
-      name: "prompt mismatch",
-      raw: persistedState({ prompt: "stale prompt" }),
-      stage: "prompt-mismatch",
-    },
-  ])("classifies $name", async ({ raw, stage }) => {
-    const result = await verifyPersistedDictationReadback({
-      raw,
-      targetKey,
-      commandId,
-      version: 1,
-      expectedPrompt,
-    });
+      } as never);
+      await vi.advanceTimersByTimeAsync(300);
 
-    expect(result).toMatchObject({ ok: false, stage });
-  });
+      await useComposerDraftStore.persist.rehydrate();
 
-  it("classifies a forced durable-write exception before readback", async () => {
-    const target = scopeThreadRef(
-      TEST_ENVIRONMENT_ID,
-      ThreadId.make("thread-dictation-write-failure"),
-    );
-
-    const result = await appendPersistedDictation(target, commandId, "dictated words", null, {
-      flush: () => {
-        throw new DOMException("quota exceeded", "QuotaExceededError");
-      },
-      readRaw: () => persistedState(),
-    });
-
-    expect(result).toMatchObject({
-      ok: true,
-      persistenceFailure: { stage: "storage-write-failed" },
-    });
-    expect(useComposerDraftStore.getState().getComposerDraft(target)?.prompt).toBe(
-      "[voiced] dictated words",
-    );
-  });
-
-  it("classifies a storage read exception and keeps the transcript recoverable", async () => {
-    const target = scopeThreadRef(
-      TEST_ENVIRONMENT_ID,
-      ThreadId.make("thread-dictation-read-failure"),
-    );
-
-    const result = await appendPersistedDictation(target, commandId, "dictated words", null, {
-      flush: () => undefined,
-      readRaw: () => {
-        throw new DOMException("storage unavailable", "InvalidStateError");
-      },
-    });
-
-    expect(result).toMatchObject({
-      ok: true,
-      persistenceFailure: { stage: "storage-read-failed" },
-    });
-    expect(useComposerDraftStore.getState().getComposerDraft(target)?.prompt).toBe(
-      "[voiced] dictated words",
-    );
+      const state = useComposerDraftStore.getState();
+      expect(state.draftsByThreadKey[targetKey]?.prompt).toBe(
+        "typed context [voiced] dictated words",
+      );
+      expect(state).not.toHaveProperty("appliedDictationCommandsByTargetKey");
+      expect(partializeComposerDraftStoreState(state)).not.toHaveProperty(
+        "appliedDictationCommandsByTargetKey",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

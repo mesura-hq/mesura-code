@@ -10,7 +10,6 @@ import {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildThreadFeed, type ThreadFeedActivity } from "../../mobile/src/lib/threadActivity.ts";
 import { deriveLatestContextWindowSnapshot } from "../../web/src/lib/contextWindow.ts";
 import { deriveWorkLogEntries } from "../../web/src/session-logic.ts";
 import {
@@ -135,27 +134,6 @@ const fixtures = [
 ] satisfies ReadonlyArray<OrchestrationThreadActivity>;
 
 describe("projectActivityPayload", () => {
-  function comparableActivity(activity: ThreadFeedActivity) {
-    return {
-      ...activity,
-      fullDetail: activity.getFullDetail(),
-      copyText: activity.getCopyText(),
-      getFullDetail: undefined,
-      getCopyText: undefined,
-    };
-  }
-
-  function comparableThreadFeed(activities: ReadonlyArray<OrchestrationThreadActivity>) {
-    return buildThreadFeed(makeThread(activities)).map((entry) =>
-      entry.type === "activity-group"
-        ? {
-            ...entry,
-            activities: entry.activities.map(comparableActivity),
-          }
-        : entry,
-    );
-  }
-
   it("drops unread bulk while retaining command, file, tool, and summary inputs", () => {
     const projected = projectActivityPayload(fixtures[0]!);
     expect(projected.payload).toEqual({
@@ -184,7 +162,7 @@ describe("projectActivityPayload", () => {
     });
   });
 
-  it("projects a Claude Bash result for the web and mobile expanded rows", () => {
+  it("projects a Claude Bash result for the web expanded rows", () => {
     const command = `printf 'first line\nsecond line'\n&& printf done`;
     const source: OrchestrationThreadActivity = {
       ...makeActivity("claude-bash", "command_execution", {}),
@@ -220,14 +198,6 @@ describe("projectActivityPayload", () => {
 
     const [webEntry] = deriveWorkLogEntries([projected]);
     expect(webEntry).toMatchObject({ command, detail: "first output line" });
-
-    const [mobileGroup] = buildThreadFeed(makeThread([projected]));
-    expect(mobileGroup?.type).toBe("activity-group");
-    if (mobileGroup?.type !== "activity-group") return;
-    const [mobileRow] = mobileGroup.activities;
-    expect(mobileRow).toMatchObject({ detail: command, canExpand: true });
-    expect(mobileRow?.getFullDetail()).toBe(`${command}\n\nfirst output line`);
-    expect(mobileRow?.getCopyText()).toBe(`Command run\n${command}\n\nfirst output line`);
   });
 
   it("slims MCP tool data to the fields the expanded row renders", () => {
@@ -247,7 +217,7 @@ describe("projectActivityPayload", () => {
     });
   });
 
-  it("keeps current web and mobile derived fields for every tool item type", () => {
+  it("keeps current web derived fields for every tool item type", () => {
     for (const activity of fixtures) {
       const projected = projectActivityPayload(activity);
       if (activity === fixtures[0]) {
@@ -256,17 +226,6 @@ describe("projectActivityPayload", () => {
             command: "pnpm test",
             rawCommand: 'bash -lc "pnpm test"',
             detail: "first useful line",
-          },
-        ]);
-        expect(comparableThreadFeed([projected])).toMatchObject([
-          {
-            type: "activity-group",
-            activities: [
-              {
-                detail: "pnpm test",
-                fullDetail: 'bash -lc "pnpm test"\n\nfirst useful line',
-              },
-            ],
           },
         ]);
         continue;
@@ -283,11 +242,10 @@ describe("projectActivityPayload", () => {
         continue;
       }
       expect(deriveWorkLogEntries([projected])).toEqual(deriveWorkLogEntries([activity]));
-      expect(comparableThreadFeed([projected])).toEqual(comparableThreadFeed([activity]));
     }
   });
 
-  it("preserves failed stored tool outcomes for web and mobile clients", () => {
+  it("preserves failed stored tool outcomes for web clients", () => {
     const activities = [
       makeActivity("failed-command", "command_execution", {
         item: {
@@ -312,12 +270,6 @@ describe("projectActivityPayload", () => {
 
       const [webEntry] = deriveWorkLogEntries([projected]);
       expect(webEntry?.toolLifecycleStatus).toBe("failed");
-
-      const [mobileGroup] = buildThreadFeed(makeThread([projected]));
-      expect(mobileGroup).toMatchObject({ type: "activity-group" });
-      if (mobileGroup?.type === "activity-group") {
-        expect(mobileGroup.activities[0]?.status).toBe("failure");
-      }
     }
   });
 

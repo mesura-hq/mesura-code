@@ -1,9 +1,8 @@
 /**
  * The filesystem side of a Unix socket this process owns.
  *
- * Extracted from `sttSocketFiles.ts` when a second socket appeared. Nothing
- * here knows what travels over the socket: it is where the node lives, that
- * nothing else can write to it, and that it does not survive the process.
+ * Nothing here knows what travels over the socket: it is where the node lives,
+ * that nothing else can write to it, and that it does not survive the process.
  *
  * Effect's `FileSystem` and `Path` rather than the node builtins, which the
  * repository's diagnostics enforce at typecheck — that requirement is why this
@@ -19,10 +18,9 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
 /**
- * Owner-only. Anything able to write to one of these sockets can put text in
- * the composer and send it, or read the whole projected thread list, and
- * `listen` creates the node with the process umask applied — which is a default
- * rather than a guarantee.
+ * Owner-only. Anything able to connect to the thread socket reads the whole
+ * projected thread list, and `listen` creates the node with the process umask
+ * applied — which is a default rather than a guarantee.
  */
 export const SOCKET_MODE = 0o600;
 

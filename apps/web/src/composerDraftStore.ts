@@ -1,7 +1,6 @@
 import { elementContextToPreviewAnnotation } from "./lib/elementContext";
 import {
   ElementContextDetails,
-  type CommandId,
   DEFAULT_MODEL,
   DEFAULT_MODEL_BY_PROVIDER,
   defaultInstanceIdForDriver,
@@ -76,7 +75,8 @@ import { getDefaultServerModel } from "./providerModels";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import { UnifiedSettings } from "@t3tools/contracts/settings";
 import { ReviewCommentContextSchema, type ReviewCommentContext } from "./reviewCommentContext";
-import { appendComposerTextAtEnd } from "./symmetria/dictationTarget";
+import { fillDictationSlot, removeDictationSlot } from "@t3tools/shared/dictationSlots";
+import { appendDictationSlot } from "./dictation/dictationSlotEdits";
 const isRuntimeMode = Schema.is(RuntimeMode);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
 const isReviewCommentContext = Schema.is(ReviewCommentContextSchema);
@@ -345,17 +345,6 @@ const PersistedComposerDraftStoreState = Schema.Struct({
     Schema.Record(ProviderInstanceId, ModelSelection),
   ),
   stickyActiveProvider: Schema.optionalKey(Schema.NullOr(ProviderInstanceId)),
-  appliedDictationCommandsByTargetKey: Schema.optionalKey(
-    Schema.Record(
-      Schema.String,
-      Schema.Array(
-        Schema.Struct({
-          commandId: Schema.String,
-          version: Schema.Number,
-        }),
-      ),
-    ),
-  ),
 });
 type PersistedComposerDraftStoreState = typeof PersistedComposerDraftStoreState.Type;
 
@@ -506,10 +495,6 @@ interface ComposerDraftStoreState {
   rewindingThreadKeys: ReadonlySet<string>;
   stickyModelSelectionByProvider: Partial<Record<ProviderInstanceId, ModelSelection>>;
   stickyActiveProvider: ProviderInstanceId | null;
-  appliedDictationCommandsByTargetKey: Record<
-    string,
-    ReadonlyArray<{ readonly commandId: string; readonly version: number }>
-  >;
   /** Returns the editable composer content for a draft session or server thread. */
   getComposerDraft: (target: ComposerThreadTarget) => ComposerThreadDraftState | null;
   /** Looks up the active draft session for a logical project identity. */
@@ -809,7 +794,6 @@ const EMPTY_PERSISTED_DRAFT_STORE_STATE = Object.freeze<PersistedComposerDraftSt
   logicalProjectDraftThreadKeyByLogicalProjectKey: {},
   stickyModelSelectionByProvider: {},
   stickyActiveProvider: null,
-  appliedDictationCommandsByTargetKey: {},
 });
 
 const EMPTY_IMAGES: ComposerImageAttachment[] = [];
@@ -1686,7 +1670,6 @@ function removeDraftThreadReferences(
     | "draftThreadsByThreadKey"
     | "draftsByThreadKey"
     | "logicalProjectDraftThreadKeyByLogicalProjectKey"
-    | "appliedDictationCommandsByTargetKey"
   >,
   threadKey: string,
   composerDestination?: ScopedThreadRef,
@@ -1695,7 +1678,6 @@ function removeDraftThreadReferences(
   | "draftThreadsByThreadKey"
   | "draftsByThreadKey"
   | "logicalProjectDraftThreadKeyByLogicalProjectKey"
-  | "appliedDictationCommandsByTargetKey"
 > {
   const nextLogicalMappings = Object.fromEntries(
     Object.entries(state.logicalProjectDraftThreadKeyByLogicalProjectKey).filter(
@@ -1705,8 +1687,6 @@ function removeDraftThreadReferences(
   const { [threadKey]: _removedDraftThread, ...restDraftThreadsByThreadKey } =
     state.draftThreadsByThreadKey;
   const { [threadKey]: removedComposerDraft, ...restDraftsByThreadKey } = state.draftsByThreadKey;
-  const { [threadKey]: _removedDictationCommands, ...restAppliedDictationCommands } =
-    state.appliedDictationCommandsByTargetKey;
   if (composerDestination && removedComposerDraft) {
     restDraftsByThreadKey[composerTargetKey(composerDestination)] = removedComposerDraft;
   } else {
@@ -1716,7 +1696,6 @@ function removeDraftThreadReferences(
     draftsByThreadKey: restDraftsByThreadKey,
     draftThreadsByThreadKey: restDraftThreadsByThreadKey,
     logicalProjectDraftThreadKeyByLogicalProjectKey: nextLogicalMappings,
-    appliedDictationCommandsByTargetKey: restAppliedDictationCommands,
   };
 }
 
@@ -2177,37 +2156,6 @@ function migratePersistedComposerDraftStoreState(
   };
 }
 
-const MAX_PERSISTED_DICTATION_COMMANDS_PER_TARGET = 64;
-const MAX_PERSISTED_DICTATION_TARGETS = 128;
-
-function normalizeAppliedDictationCommands(
-  raw: unknown,
-): Record<string, ReadonlyArray<{ readonly commandId: string; readonly version: number }>> {
-  if (!raw || typeof raw !== "object") return {};
-  const normalized: Record<
-    string,
-    ReadonlyArray<{ readonly commandId: string; readonly version: number }>
-  > = {};
-  for (const [targetKey, entries] of Object.entries(raw as Record<string, unknown>)) {
-    if (targetKey.length === 0 || !Array.isArray(entries)) continue;
-    const valid = entries.flatMap((entry) => {
-      if (!entry || typeof entry !== "object") return [];
-      const candidate = entry as Record<string, unknown>;
-      return typeof candidate.commandId === "string" &&
-        candidate.commandId.length > 0 &&
-        typeof candidate.version === "number" &&
-        Number.isInteger(candidate.version) &&
-        candidate.version >= 0
-        ? [{ commandId: candidate.commandId, version: candidate.version }]
-        : [];
-    });
-    if (valid.length > 0) {
-      normalized[targetKey] = valid.slice(-MAX_PERSISTED_DICTATION_COMMANDS_PER_TARGET);
-    }
-  }
-  return normalized;
-}
-
 /** Select the persisted draft fields when the storage write is ready to flush. */
 export function partializeComposerDraftStoreState(
   state: ComposerDraftStoreState,
@@ -2338,15 +2286,6 @@ export function partializeComposerDraftStoreState(
       state.stickyModelSelectionByProvider,
     ),
     stickyActiveProvider: state.stickyActiveProvider,
-    appliedDictationCommandsByTargetKey: Object.fromEntries(
-      Object.entries(state.appliedDictationCommandsByTargetKey)
-        .filter(([targetKey]) => persistedDraftsByThreadKey[targetKey] !== undefined)
-        .map(([targetKey, entries]) => [
-          targetKey,
-          entries.slice(-MAX_PERSISTED_DICTATION_COMMANDS_PER_TARGET),
-        ])
-        .slice(-MAX_PERSISTED_DICTATION_TARGETS),
-    ),
   };
 }
 
@@ -2417,9 +2356,6 @@ function normalizeCurrentPersistedComposerDraftStoreState(
     logicalProjectDraftThreadKeyByLogicalProjectKey,
     stickyModelSelectionByProvider: compactModelSelectionByProvider(stickyModelSelectionByProvider),
     stickyActiveProvider,
-    appliedDictationCommandsByTargetKey: normalizeAppliedDictationCommands(
-      normalizedPersistedState.appliedDictationCommandsByTargetKey,
-    ),
   };
 }
 
@@ -2654,7 +2590,6 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
         rewindingThreadKeys: new Set<string>(),
         stickyModelSelectionByProvider: {},
         stickyActiveProvider: null,
-        appliedDictationCommandsByTargetKey: {},
         getComposerDraft: (target) => getComposerDraftState(get(), target),
         getDraftThreadByLogicalProjectKey: (logicalProjectKey) => {
           return get().getDraftSessionByLogicalProjectKey(logicalProjectKey);
@@ -2966,7 +2901,6 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               draftThreadsByThreadKey: state.draftThreadsByThreadKey,
               logicalProjectDraftThreadKeyByLogicalProjectKey:
                 state.logicalProjectDraftThreadKeyByLogicalProjectKey,
-              appliedDictationCommandsByTargetKey: state.appliedDictationCommandsByTargetKey,
             };
             for (const threadKey of matchingThreadKeys) {
               nextState = removeDraftThreadReferences(nextState, threadKey);
@@ -3041,14 +2975,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               state.logicalProjectDraftThreadKeyByLogicalProjectKey,
             ).includes(threadKey);
             const hasComposerDraft = state.draftsByThreadKey[threadKey] !== undefined;
-            const hasDictationCommands =
-              state.appliedDictationCommandsByTargetKey[threadKey] !== undefined;
-            if (
-              !hasDraftThread &&
-              !hasLogicalProjectMapping &&
-              !hasComposerDraft &&
-              !hasDictationCommands
-            ) {
+            if (!hasDraftThread && !hasLogicalProjectMapping && !hasComposerDraft) {
               return state;
             }
             return removeDraftThreadReferences(state, threadKey);
@@ -4216,8 +4143,6 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             normalizedPersisted.logicalProjectDraftThreadKeyByLogicalProjectKey,
           stickyModelSelectionByProvider: normalizedPersisted.stickyModelSelectionByProvider ?? {},
           stickyActiveProvider: normalizedPersisted.stickyActiveProvider ?? null,
-          appliedDictationCommandsByTargetKey:
-            normalizedPersisted.appliedDictationCommandsByTargetKey ?? {},
         };
       },
     },
@@ -4260,259 +4185,118 @@ export function useBackgroundDraftSubmissionPending(threadRef: ScopedThreadRef |
   );
 }
 
-export type PersistedDictationAppendResult =
-  | {
-      readonly ok: true;
-      readonly application: "first" | "replay";
-      readonly prompt: string;
-      readonly version: number;
-      readonly targetKey: string;
-      readonly persistedBytes: number;
-      readonly promptHash?: string | undefined;
-      readonly persistenceFailure?: DictationPersistenceFailure | undefined;
+/**
+ * A mounted composer fills its own dictation markers, so the caret stays where the user is
+ * typing; a draft with no composer open is filled in the store. Runtime-only: never persisted.
+ */
+export type DictationSlotFillHandler = (jobId: string, transcript: string) => "filled" | "missing";
+const dictationSlotFillHandlers = new Map<string, DictationSlotFillHandler>();
+
+export function registerDictationSlotFillHandler(
+  target: ComposerThreadTarget,
+  handler: DictationSlotFillHandler,
+): () => void {
+  const threadKey = resolveComposerDraftKey(useComposerDraftStore.getState(), target);
+  if (!threadKey) return () => undefined;
+  dictationSlotFillHandlers.set(threadKey, handler);
+  return () => {
+    if (dictationSlotFillHandlers.get(threadKey) === handler) {
+      dictationSlotFillHandlers.delete(threadKey);
     }
-  | { readonly ok: false; readonly reason: "missing-target" };
-
-export type DictationPersistenceFailureStage =
-  | "storage-write-failed"
-  | "storage-read-failed"
-  | "persisted-state-missing"
-  | "decode-failed"
-  | "target-missing"
-  | "command-missing"
-  | "prompt-mismatch";
-
-export type DictationPersistenceFailure = {
-  readonly stage: DictationPersistenceFailureStage;
-  readonly persistedBytes: number;
-  readonly expectedPromptHash?: string | undefined;
-  readonly actualPromptHash?: string | undefined;
-};
-
-type DictationPersistenceReadbackInput = {
-  readonly raw: string | null;
-  readonly targetKey: string;
-  readonly commandId: string;
-  readonly version: number;
-  readonly expectedPrompt: string;
-};
-
-type DictationPersistenceReadbackResult =
-  | {
-      readonly ok: true;
-      readonly persistedBytes: number;
-      readonly promptHash?: string | undefined;
-    }
-  | ({ readonly ok: false } & DictationPersistenceFailure);
-
-type DictationPersistenceDependencies = {
-  readonly flush: () => void;
-  readonly readRaw: () => string | null | Promise<string | null>;
-  readonly hashText?: (text: string) => string | undefined | Promise<string | undefined>;
-};
-
-const textEncoder = new TextEncoder();
-
-async function hashPersistedDictationText(text: string): Promise<string> {
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", textEncoder.encode(text));
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-async function safeHashPersistedDictationText(
-  text: string,
-  hashText: (
-    text: string,
-  ) => string | undefined | Promise<string | undefined> = hashPersistedDictationText,
-): Promise<string | undefined> {
-  try {
-    return await hashText(text);
-  } catch {
-    return undefined;
-  }
-}
-
-const persistenceFailure = (
-  stage: DictationPersistenceFailureStage,
-  persistedBytes: number,
-  hashes: {
-    readonly expectedPromptHash?: string | undefined;
-    readonly actualPromptHash?: string | undefined;
-  } = {},
-): DictationPersistenceReadbackResult => ({ ok: false, stage, persistedBytes, ...hashes });
-
-/** Verifies a serialized composer snapshot without exposing its text in diagnostics. */
-export async function verifyPersistedDictationReadback(
-  input: DictationPersistenceReadbackInput,
-  hashText?: (text: string) => string | undefined | Promise<string | undefined>,
-): Promise<DictationPersistenceReadbackResult> {
-  const expectedPromptHash = await safeHashPersistedDictationText(input.expectedPrompt, hashText);
-  if (input.raw === null) {
-    return persistenceFailure("persisted-state-missing", 0, { expectedPromptHash });
-  }
-  const persistedBytes = textEncoder.encode(input.raw).byteLength;
-  let normalized: PersistedComposerDraftStoreState;
-  try {
-    const persisted = decodePersistedComposerDraftStoreStorage(input.raw);
-    normalized = normalizeCurrentPersistedComposerDraftStoreState(persisted.state);
-  } catch {
-    return persistenceFailure("decode-failed", persistedBytes, { expectedPromptHash });
-  }
-  const prompt = normalized.draftsByThreadKey[input.targetKey]?.prompt;
-  if (prompt === undefined) {
-    return persistenceFailure("target-missing", persistedBytes, { expectedPromptHash });
-  }
-  const actualPromptHash = await safeHashPersistedDictationText(prompt, hashText);
-  const applications = normalized.appliedDictationCommandsByTargetKey?.[input.targetKey] ?? [];
-  const storedApplication = applications.find(
-    (entry) => entry.commandId === input.commandId && entry.version === input.version,
-  );
-  if (storedApplication === undefined) {
-    return persistenceFailure("command-missing", persistedBytes, {
-      expectedPromptHash,
-      actualPromptHash,
-    });
-  }
-  if (prompt !== input.expectedPrompt) {
-    return persistenceFailure("prompt-mismatch", persistedBytes, {
-      expectedPromptHash,
-      actualPromptHash,
-    });
-  }
-  return { ok: true, persistedBytes, promptHash: actualPromptHash };
-}
-
-export async function readPersistedDictationTarget(targetKey: string): Promise<{
-  readonly prompt: string;
-  readonly applications: ReadonlyArray<{ readonly commandId: string; readonly version: number }>;
-} | null> {
-  const raw = await composerDebouncedStorage.getItem(COMPOSER_DRAFT_STORAGE_KEY);
-  if (!raw) return null;
-  const persisted = decodePersistedComposerDraftStoreStorage(raw);
-  const normalized = normalizeCurrentPersistedComposerDraftStoreState(persisted.state);
-  const prompt = normalized.draftsByThreadKey[targetKey]?.prompt;
-  if (prompt === undefined) return null;
-  return {
-    prompt,
-    applications: normalized.appliedDictationCommandsByTargetKey?.[targetKey] ?? [],
   };
 }
 
-/** Atomically appends one dictated command and attempts a verified durable snapshot. */
-export async function appendPersistedDictation(
+/** Writes the drafts through now; `false` when the storage refused them. */
+export function persistComposerDrafts(): boolean {
+  try {
+    composerDebouncedStorage.flush();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Rewrites one draft's prompt in a single store update. `edit` returns `null` to leave the
+ * draft alone. Returns whether the draft changed; callers write it through themselves.
+ *
+ * The store is touched only when the prompt changes: every `set` makes the persist middleware
+ * save this tab's whole draft store, which would overwrite a draft another tab just saved.
+ */
+function editComposerDraftPrompt(
   target: ComposerThreadTarget,
-  commandId: CommandId,
-  transcript: string,
-  sourceTargetKey: string | null = null,
-  persistence: DictationPersistenceDependencies = {
-    flush: () => composerDebouncedStorage.flush(),
-    readRaw: () => composerDebouncedStorage.getItem(COMPOSER_DRAFT_STORAGE_KEY),
-  },
-): Promise<PersistedDictationAppendResult> {
-  const targetKey = typeof target === "string" ? target : scopedThreadKey(target);
-  const appendState: {
-    applied?: {
-      readonly application: "first" | "replay";
-      readonly prompt: string;
-      readonly version: number;
-    };
-  } = {};
-
-  useComposerDraftStore.setState((state) => {
-    if (targetKey.length === 0) return state;
-    if (typeof target === "string" && state.draftThreadsByThreadKey[targetKey] === undefined) {
-      return state;
-    }
-    const priorApplications = state.appliedDictationCommandsByTargetKey[targetKey] ?? [];
-    const replay = priorApplications.find((entry) => entry.commandId === commandId);
-    const currentDraft = state.draftsByThreadKey[targetKey] ?? createEmptyThreadDraft();
-    if (replay !== undefined) {
-      appendState.applied = {
-        application: "replay",
-        prompt: currentDraft.prompt,
-        version: replay.version,
-      };
-      return state;
-    }
-
-    const version = (priorApplications.at(-1)?.version ?? 0) + 1;
-    const sourceDraft =
-      sourceTargetKey && sourceTargetKey !== targetKey
-        ? state.draftsByThreadKey[sourceTargetKey]
-        : undefined;
-    const prompt = appendComposerTextAtEnd(
-      sourceDraft?.prompt ?? currentDraft.prompt,
-      `[voiced] ${transcript}`,
-    );
-    appendState.applied = { application: "first", prompt, version };
-    const nextApplications = {
-      ...state.appliedDictationCommandsByTargetKey,
-      [targetKey]: [...priorApplications, { commandId, version }].slice(
-        -MAX_PERSISTED_DICTATION_COMMANDS_PER_TARGET,
-      ),
-    };
-    return {
-      draftsByThreadKey: {
-        ...state.draftsByThreadKey,
-        [targetKey]: { ...currentDraft, prompt },
-        ...(sourceDraft && sourceTargetKey
-          ? { [sourceTargetKey]: { ...sourceDraft, prompt } }
-          : {}),
-      },
-      appliedDictationCommandsByTargetKey: Object.fromEntries(
-        Object.entries(nextApplications).slice(-MAX_PERSISTED_DICTATION_TARGETS),
-      ),
-    };
-  });
-
-  const applied = appendState.applied;
-  if (applied === undefined) return { ok: false, reason: "missing-target" };
-  const appliedResult = (
-    persistedBytes: number,
-    persistenceFailure?: DictationPersistenceFailure,
-  ): PersistedDictationAppendResult => ({
-    ok: true,
-    targetKey,
-    ...applied,
-    persistedBytes,
-    ...(persistenceFailure ? { persistenceFailure } : {}),
-  });
-  const safePromptHash = (prompt: string) =>
-    safeHashPersistedDictationText(prompt, persistence.hashText);
-  try {
-    persistence.flush();
-  } catch {
-    return appliedResult(0, {
-      stage: "storage-write-failed",
-      persistedBytes: 0,
-      expectedPromptHash: await safePromptHash(applied.prompt),
-    });
-  }
-  let raw: string | null;
-  try {
-    raw = await persistence.readRaw();
-  } catch {
-    return appliedResult(0, {
-      stage: "storage-read-failed",
-      persistedBytes: 0,
-      expectedPromptHash: await safePromptHash(applied.prompt),
-    });
-  }
-  const readback = await verifyPersistedDictationReadback(
-    {
-      raw,
-      targetKey,
-      commandId,
-      version: applied.version,
-      expectedPrompt: applied.prompt,
+  edit: (prompt: string) => string | null,
+): boolean {
+  const threadKey = resolveComposerDraftKey(useComposerDraftStore.getState(), target);
+  if (!threadKey) return false;
+  const current =
+    useComposerDraftStore.getState().draftsByThreadKey[threadKey] ?? createEmptyThreadDraft();
+  const prompt = edit(current.prompt);
+  if (prompt === null || prompt === current.prompt) return false;
+  useComposerDraftStore.setState((state) => ({
+    draftsByThreadKey: {
+      ...state.draftsByThreadKey,
+      [threadKey]: { ...(state.draftsByThreadKey[threadKey] ?? current), prompt },
     },
-    persistence.hashText,
-  );
-  if (!readback.ok) {
-    const { ok: _readbackFailed, ...failure } = readback;
-    return appliedResult(failure.persistedBytes, failure);
+  }));
+  return true;
+}
+
+/**
+ * Replaces the dictation marker for `jobId` with its transcript. `missing` when the marker was
+ * deleted; `unsaved` when the draft holds the transcript but the write to storage failed, so the
+ * caller must not treat the delivery as done.
+ */
+export function fillDictationSlotInDraft(
+  target: ComposerThreadTarget,
+  jobId: string,
+  transcript: string,
+): "filled" | "unsaved" | "missing" {
+  const threadKey = resolveComposerDraftKey(useComposerDraftStore.getState(), target);
+  const handler = threadKey ? dictationSlotFillHandlers.get(threadKey) : undefined;
+  const filled = handler
+    ? handler(jobId, transcript) === "filled"
+    : editComposerDraftPrompt(target, (prompt) => {
+        const result = fillDictationSlot(prompt, jobId, transcript);
+        return "missing" in result ? null : result.text;
+      });
+  if (!filled) return "missing";
+  return persistComposerDrafts() ? "filled" : "unsaved";
+}
+
+/**
+ * The prompt storage holds for a draft, as the last tab to write it left it; `""` when storage
+ * holds no such draft. `null` when storage cannot be read or decoded, so nothing can be judged.
+ */
+export async function readStoredDraftPrompt(target: ComposerThreadTarget): Promise<string | null> {
+  const threadKey = resolveComposerDraftKey(useComposerDraftStore.getState(), target);
+  if (!threadKey) return null;
+  try {
+    const raw = await composerDebouncedStorage.getItem(COMPOSER_DRAFT_STORAGE_KEY);
+    if (!raw) return "";
+    const persisted = decodePersistedComposerDraftStoreStorage(raw);
+    const normalized = normalizeCurrentPersistedComposerDraftStoreState(persisted.state);
+    return normalized.draftsByThreadKey[threadKey]?.prompt ?? "";
+  } catch {
+    return null;
   }
-  const { ok: _readbackSucceeded, ...verification } = readback;
-  return { ok: true, targetKey, ...applied, ...verification };
+}
+
+/** Puts a dictation marker at the end of a draft that has no composer to take it at the caret. */
+export function appendDictationSlotToDraft(target: ComposerThreadTarget, slot: string): boolean {
+  const changed = editComposerDraftPrompt(target, (prompt) => appendDictationSlot(prompt, slot));
+  if (changed) persistComposerDrafts();
+  return changed;
+}
+
+/** Deletes the dictation marker for `jobId`, as Discard does. */
+export function removeDictationSlotFromDraft(target: ComposerThreadTarget, jobId: string): boolean {
+  const changed = editComposerDraftPrompt(target, (prompt) => {
+    const result = removeDictationSlot(prompt, jobId);
+    return "missing" in result ? null : result.text;
+  });
+  if (changed) persistComposerDrafts();
+  return changed;
 }
 
 export function clearComposerDraftsEnvironment(environmentId: EnvironmentId): void {
@@ -4564,19 +4348,11 @@ export function clearComposerDraftsEnvironment(environmentId: EnvironmentId): vo
         ([threadKey]) => parseScopedThreadKey(threadKey)?.environmentId !== environmentId,
       ),
     ) as Record<string, true>;
-    const nextAppliedDictationCommands = Object.fromEntries(
-      Object.entries(state.appliedDictationCommandsByTargetKey).filter(
-        ([targetKey]) =>
-          !removedThreadKeys.has(targetKey) &&
-          parseScopedThreadKey(targetKey)?.environmentId !== environmentId,
-      ),
-    );
 
     return {
       draftsByThreadKey: nextDrafts,
       draftThreadsByThreadKey: nextDraftThreads,
       logicalProjectDraftThreadKeyByLogicalProjectKey: nextLogicalMappings,
-      appliedDictationCommandsByTargetKey: nextAppliedDictationCommands,
       backgroundSubmissionThreadKeys: nextBackgroundSubmissionThreadKeys,
       rewindingThreadKeys: new Set(
         [...state.rewindingThreadKeys].filter(

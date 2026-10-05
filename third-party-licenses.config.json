@@ -134,21 +134,6 @@
           "copyrights": ["Copyright 2009, 2010, 2013 André Berg"]
         }
       ]
-    },
-    {
-      "bundles": ["mobile"],
-      "license": "MIT",
-      "name": "react-native-uitextview",
-      "noticeFile": "apps/mobile/modules/t3-markdown-text/LICENSE",
-      "sourceUrl": "https://github.com/bluesky-social/react-native-uitextview",
-      "version": "2.2.0"
-    },
-    {
-      "bundles": ["mobile"],
-      "license": "MIT",
-      "name": "Expo text editor implementation",
-      "noticeFile": "apps/mobile/modules/t3-composer-editor/LICENSE",
-      "sourceUrl": "https://github.com/expo/expo"
     }
   ],
   "packageOverrides": [
@@ -367,14 +352,6 @@
         "licenseId": "MIT",
         "copyrights": ["Copyright (c) 2026 React Navigation Contributors"]
       }
-    },
-    {
-      "name": "@expo/sdk-runtime-versions",
-      "noticeFile": "apps/mobile/modules/t3-composer-editor/LICENSE"
-    },
-    {
-      "name": "@expo/ws-tunnel",
-      "noticeFile": "apps/mobile/modules/t3-composer-editor/LICENSE"
     },
     {
       "name": "stream-buffers",

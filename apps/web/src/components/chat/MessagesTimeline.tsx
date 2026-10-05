@@ -3162,7 +3162,8 @@ const userMessageContextPresentationRegistry = createContextPresentationRegistry
   UserMessageContextRenderContext,
   ReactNode
 >({
-  requiredKinds: COMPOSER_CONTEXT_KINDS,
+  // Mesura: a dictation marker never reaches a sent message, so it needs no transcript chip.
+  requiredKinds: COMPOSER_CONTEXT_KINDS.filter((kind) => kind !== "dictation"),
   handlers: [
     {
       kind: "mention",

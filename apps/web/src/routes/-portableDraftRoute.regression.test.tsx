@@ -156,10 +156,6 @@ vi.mock("../components/ThreadTerminalDrawer", () => ({ default: () => null }));
 vi.mock("../components/WorkspacePageHeader", () => ({ WorkspacePageHeader: () => null }));
 vi.mock("../components/chat/ExpandedImageDialog", () => ({ ExpandedImageDialog: () => null }));
 vi.mock("../components/PullRequestThreadDialog", () => ({ PullRequestThreadDialog: () => null }));
-vi.mock("../symmetria/DictationStrip", () => ({
-  DictationStrip: () => null,
-  DictationMicrophoneButton: () => null,
-}));
 
 vi.mock("../components/chat/useAutoBalanceUpdateBanner", () => ({
   useAutoBalanceUpdateBanner: () => null,

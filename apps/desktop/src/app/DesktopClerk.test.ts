@@ -24,8 +24,10 @@ vi.mock("@clerk/electron/storage", () => ({
 
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
+import { DICTATION_COMMAND_LINE_CHANNEL } from "../ipc/channels.ts";
 import * as DesktopClerk from "./DesktopClerk.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import { resolveDesktopUserDataIdentity } from "../../../../scripts/lib/brand-assets.ts";
@@ -202,4 +204,114 @@ describe("DesktopClerk", () => {
       Effect.provideService(ElectronWindow.ElectronWindow, electronWindow),
     );
   });
+});
+
+/**
+ * Entry point: the `second-instance` listener `DesktopClerk.configure` registers,
+ * called with the argv Electron forwards from a second launch of the binary.
+ *
+ * STT redesign, phase 6, criteria 1 and 2.
+ */
+describe("dictation phase 6 fence: second instance", () => {
+  const runSecondInstance = (argv: ReadonlyArray<string>) => {
+    storageMock.mockReturnValue(storageAdapter);
+    createClerkBridgeMock.mockReturnValue({ cleanup: vi.fn(), isPrimaryInstance: true });
+    const listeners = new Map<string, (...args: ReadonlyArray<unknown>) => void>();
+    const electronApp = {
+      quit: Effect.void,
+      on: (eventName: string, listener: (...args: ReadonlyArray<unknown>) => void) =>
+        Effect.sync(() => {
+          listeners.set(eventName, listener);
+        }),
+    } as unknown as ElectronApp.ElectronApp["Service"];
+    // The listener runs its effect as a detached promise; it settles on a send or a reveal.
+    let handled: () => void = () => undefined;
+    const handledOnce = new Promise<void>((resolve) => {
+      handled = resolve;
+    });
+    const sent: Array<ReadonlyArray<unknown>> = [];
+    const send = (...args: ReadonlyArray<unknown>) => {
+      sent.push(args);
+      handled();
+    };
+    const mainWindow = { isDestroyed: () => false, webContents: { send } };
+    const reveal = vi.fn((_window: unknown) => handled());
+    const electronWindow = {
+      main: Effect.succeed(Option.some(mainWindow)),
+      currentMainOrFirst: Effect.succeed(Option.some(mainWindow)),
+      focusedMainOrFirst: Effect.succeed(Option.some(mainWindow)),
+      reveal: (window: unknown) => Effect.sync(() => reveal(window)),
+      sendAll: (...args: ReadonlyArray<unknown>) => Effect.sync(() => send(...args)),
+    } as unknown as ElectronWindow.ElectronWindow["Service"];
+
+    return Effect.gen(function* () {
+      const clerk = yield* DesktopClerk.DesktopClerk;
+      yield* Effect.scoped(clerk.configure);
+      const listener = listeners.get("second-instance");
+      assert.isDefined(listener);
+      listener!({}, argv, "/home/dev");
+      yield* Effect.promise(() => handledOnce);
+      return { sent, reveal, mainWindow };
+    }).pipe(
+      Effect.provide(makeDesktopClerkLayer()),
+      Effect.provideService(ElectronApp.ElectronApp, electronApp),
+      Effect.provideService(ElectronWindow.ElectronWindow, electronWindow),
+    );
+  };
+
+  it.effect(
+    "dictation phase 6 AC1: --dictation toggle in a second instance reaches the renderer and opens no window",
+    () =>
+      Effect.gen(function* () {
+        const { sent, reveal } = yield* runSecondInstance([
+          "/opt/mesura-code/mesura-code",
+          "--dictation",
+          "toggle",
+        ]);
+        assert.deepEqual(sent, [[DICTATION_COMMAND_LINE_CHANNEL, "dictation.toggle"]]);
+        assert.equal(reveal.mock.calls.length, 0);
+      }),
+  );
+
+  it.effect(
+    "dictation phase 6 AC2: --dictation mode inject in a second instance reaches the renderer the same way",
+    () =>
+      Effect.gen(function* () {
+        const { sent, reveal } = yield* runSecondInstance([
+          "/opt/mesura-code/mesura-code",
+          "--dictation",
+          "mode",
+          "inject",
+        ]);
+        assert.deepEqual(sent, [[DICTATION_COMMAND_LINE_CHANNEL, "dictation.mode.inject"]]);
+        assert.equal(reveal.mock.calls.length, 0);
+      }),
+  );
+
+  it.effect(
+    "dictation phase 6 guard: a second instance without a dictation command still reveals the window",
+    () =>
+      Effect.gen(function* () {
+        const { sent, reveal, mainWindow } = yield* runSecondInstance([
+          "/opt/mesura-code/mesura-code",
+        ]);
+        assert.deepEqual(sent, []);
+        assert.deepEqual(reveal.mock.calls, [[mainWindow]]);
+      }),
+  );
+
+  it.effect(
+    "dictation phase 6 guard: a malformed dictation command reveals the window and sends nothing",
+    () =>
+      Effect.gen(function* () {
+        const { sent, reveal } = yield* runSecondInstance([
+          "/opt/mesura-code/mesura-code",
+          "--dictation",
+          "mode",
+          "shout",
+        ]);
+        assert.deepEqual(sent, []);
+        assert.equal(reveal.mock.calls.length, 1);
+      }),
+  );
 });

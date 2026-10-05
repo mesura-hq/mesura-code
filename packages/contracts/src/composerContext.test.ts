@@ -16,7 +16,13 @@ const decodeTurnStart = Schema.decodeUnknownSync(ThreadTurnStartCommand);
 
 const base = { version: 1, contextId: "ctx_1" } as const;
 
-const knownRecords: Record<(typeof COMPOSER_CONTEXT_KINDS)[number], Record<string, unknown>> = {
+// A dictation marker is a placeholder in the prompt text and never carries a record.
+type RecordKind = Exclude<(typeof COMPOSER_CONTEXT_KINDS)[number], "dictation">;
+const RECORD_KINDS = COMPOSER_CONTEXT_KINDS.filter(
+  (kind): kind is RecordKind => kind !== "dictation",
+);
+
+const knownRecords: Record<RecordKind, Record<string, unknown>> = {
   image: {
     ...base,
     kind: "image",
@@ -110,7 +116,7 @@ const knownRecords: Record<(typeof COMPOSER_CONTEXT_KINDS)[number], Record<strin
 };
 
 describe("ComposerContextRecord", () => {
-  it.each(COMPOSER_CONTEXT_KINDS)("round-trips a %s record", (kind) => {
+  it.each(RECORD_KINDS)("round-trips a %s record", (kind) => {
     const decoded = decodeRecord(knownRecords[kind]);
     expect(Option.isSome(decoded)).toBe(true);
     expect(Option.getOrThrow(decoded)).toEqual(knownRecords[kind]);
@@ -130,6 +136,14 @@ describe("ComposerContextRecord", () => {
       label: "Future",
       payload: { anything: [1, 2, 3] },
     });
+  });
+
+  it("rejects a record that claims the dictation marker kind", () => {
+    expect(
+      Option.isNone(
+        decodeRecord({ ...base, kind: "dictation", label: "Transcribing", payload: {} }),
+      ),
+    ).toBe(true);
   });
 
   it("does not let a malformed known kind slide through as unknown", () => {

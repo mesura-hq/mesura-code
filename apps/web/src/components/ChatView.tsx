@@ -1,5 +1,4 @@
 import { createPendingUserInputProjection } from "../pendingUserInput";
-import type { SymmetriaDictationTarget } from "@symmetria/broker-contract";
 import { usePendingUserInputDraftStore } from "../pendingUserInputDraftStore";
 import { useRepositoryDefaults } from "~/lib/t3ProjectFileDefaults";
 import { applyImplicitDraftModelDefaults } from "~/lib/chatThreadActions";
@@ -303,10 +302,16 @@ import {
   DraftId,
 } from "../composerDraftStore";
 import { formatOutgoingComposerPrompt } from "./chat/composerSubmission";
-import { dictationCoordinator } from "../symmetria/dictationCoordinator";
-import { captureDictationTarget, dictationTargetsEqual } from "../symmetria/dictationTarget";
-import { buildDirectedTurnStartInput } from "../symmetria/directedComposerSubmission";
-import { DictationMicrophoneButton, DictationStrip } from "../symmetria/DictationStrip";
+import {
+  buildDirectedTurnStartInput,
+  type DirectedSubmissionContext,
+} from "../dictation/directedComposerSubmission";
+import { DictationRecordingStrip, DictationStartButton } from "../dictation/DictationControls";
+import { useDictationComposer } from "../dictation/useDictationSession";
+import { reclaimDictationComposer } from "../dictation/dictationController";
+import { withDictatedPrefix } from "../dictation/sendWhenReady";
+import { registerQuestionResponder } from "../dictation/questionSendWhenReady";
+import { collectQuestionAttachments } from "../pendingUserInputResponse";
 import {
   formatTerminalContextLabel,
   type TerminalContextDraft,
@@ -542,7 +547,8 @@ const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 // Built once. The composer forwards this into a memoized footer group, and an
 // element created inline here would take a new identity on every ChatView
 // render, re-rendering that group on every keystroke and every streaming delta.
-const DICTATION_START_CONTROL = <DictationMicrophoneButton />;
+const DICTATION_START_CONTROL = <DictationStartButton />;
+const DICTATION_RECORDING_STRIP = <DictationRecordingStrip />;
 function useDraftHeroLayoutTransition(isDraftHeroState: boolean) {
   const transitionGroupRef = useRef<HTMLDivElement | null>(null);
   const composerAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -1748,9 +1754,6 @@ export default function ChatView(props: ChatViewProps) {
     window.addEventListener("dragend", clearWorkspaceFileDrag);
     return () => window.removeEventListener("dragend", clearWorkspaceFileDrag);
   }, [isWorkspaceFileDragActive]);
-  const [normalComposerFocusRevision, setNormalComposerFocusRevision] = useState(0);
-  const [questionDictationTarget, setQuestionDictationTarget] =
-    useState<SymmetriaDictationTarget | null>(null);
   const shouldUseRightPanelSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const isMobileViewport = useMediaQuery("max-sm");
   const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0);
@@ -7437,13 +7440,18 @@ export default function ChatView(props: ChatViewProps) {
         : sendContextPreviewAnnotations;
     // A direct "send annotation" writes the draft and sends in the same tick; the reference
     // must be in the text now, not after the next render.
+    // One `[voiced] ` tag when a transcript was filled into this draft since its last send. Every
+    // path below (queue, plan follow-up, turn) reads this text; a queued one already carries it.
     const promptForSend = queuedMessage
       ? queuedMessage.prompt
-      : directAnnotation
-        ? ensureInlineContextReferences(promptRef.current, [
-            previewAnnotationContextReference(directAnnotation.annotation),
-          ])
-        : promptRef.current;
+      : withDictatedPrefix(
+          composerDraftTarget,
+          directAnnotation
+            ? ensureInlineContextReferences(promptRef.current, [
+                previewAnnotationContextReference(directAnnotation.annotation),
+              ])
+            : promptRef.current,
+        );
     const {
       trimmedPrompt: trimmed,
       sendableTerminalContexts: sendableComposerTerminalContexts,
@@ -8281,53 +8289,34 @@ export default function ChatView(props: ChatViewProps) {
     }
   };
 
-  const registeredDictationTarget = useMemo(
-    () =>
-      captureDictationTarget(
-        composerDraftTarget,
-        typeof composerDraftTarget === "string" ? draftThread : null,
-      ),
-    [composerDraftTarget, draftThread],
-  );
-  useEffect(() => {
-    if (registeredDictationTarget === null) return;
-    return dictationCoordinator.registerComposer({
-      target: registeredDictationTarget,
-      projectName: activeProject?.title ?? null,
-      handle: {
-        replacePrompt: (prompt) => composerRef.current?.replacePrompt(prompt) ?? false,
-      },
-      readSubmissionContext: () => {
-        const sendContext = composerRef.current?.getSendContext();
-        if (!sendContext) return null;
-        const pendingAction = activePendingApproval
-          ? { kind: "button-approval" as const }
-          : showPlanFollowUpPrompt && activeProposedPlan
-            ? {
-                kind: "plan-follow-up" as const,
-                planId: activeProposedPlan.id,
-                planMarkdown: activeProposedPlan.planMarkdown,
-              }
-            : { kind: "composer" as const };
-        return {
-          providerAvailable: sendContext.providerAvailable,
-          provider: sendContext.selectedProvider,
-          model: sendContext.selectedModel,
-          models: sendContext.selectedProviderModels,
-          effort: sendContext.selectedPromptEffort,
-          pendingAction,
-        };
-      },
-    });
-  }, [
-    activePendingApproval,
-    activeProject?.title,
-    activeProposedPlan,
+  // What a send that leaves without the composer (dictation) needs to know from it.
+  const readDirectedSubmissionContext = useCallback((): DirectedSubmissionContext | null => {
+    const sendContext = composerRef.current?.getSendContext();
+    if (!sendContext) return null;
+    const pendingAction = activePendingApproval
+      ? { kind: "button-approval" as const }
+      : showPlanFollowUpPrompt && activeProposedPlan
+        ? {
+            kind: "plan-follow-up" as const,
+            planId: activeProposedPlan.id,
+            planMarkdown: activeProposedPlan.planMarkdown,
+          }
+        : { kind: "composer" as const };
+    return {
+      providerAvailable: sendContext.providerAvailable,
+      provider: sendContext.selectedProvider,
+      model: sendContext.selectedModel,
+      models: sendContext.selectedProviderModels,
+      effort: sendContext.selectedPromptEffort,
+      pendingAction,
+    };
+  }, [activePendingApproval, activeProposedPlan, composerRef, showPlanFollowUpPrompt]);
+  useDictationComposer({
+    environmentId: routeThreadRef.environmentId,
+    composerDraftTarget,
     composerRef,
-    registeredDictationTarget,
-    normalComposerFocusRevision,
-    showPlanFollowUpPrompt,
-  ]);
+    readSubmissionContext: readDirectedSubmissionContext,
+  });
 
   // Sends the oldest queued message once it is due: a tool call finished
   // after it was queued, or the turn ended. Only one leaves per boundary; the
@@ -8433,34 +8422,21 @@ export default function ChatView(props: ChatViewProps) {
       if (!request || activeEnvironmentUnavailable) return false;
       const responseKey = JSON.stringify([environmentId, activeThreadId, requestId]);
       if (userInputResponsesInFlight.current.has(responseKey)) return false;
-      const attachmentsByQuestionId = new Map<
-        string,
-        import("@t3tools/contracts").UserInputAttachments[string]
-      >();
-      for (const question of request.questions) {
-        const target = questionAttachmentDraftId(
-          environmentId,
+      const attachments = collectQuestionAttachments({
+        environmentId,
+        threadId: activeThreadId,
+        requestId,
+        questions: request.questions,
+      });
+      if (attachments.status === "preparing") return false;
+      if (attachments.status === "not-uploaded") {
+        setThreadError(
           activeThreadId,
-          requestId,
-          question.id,
+          "Wait for attachments to finish uploading, or remove failed uploads.",
         );
-        if ((useQuestionAttachmentPreparation.getState().counts[target] ?? 0) > 0) return false;
-        const draft = useComposerDraftStore.getState().getComposerDraft(target);
-        const attachments = draft ? [...draft.images, ...draft.files] : [];
-        if (attachments.length === 0) continue;
-        const uploaded = getUploadedAttachments({ environmentId, images: attachments });
-        if (!uploaded) {
-          setThreadError(
-            activeThreadId,
-            "Wait for attachments to finish uploading, or remove failed uploads.",
-          );
-          return false;
-        }
-        attachmentsByQuestionId.set(
-          question.id,
-          uploaded as import("@t3tools/contracts").UserInputAttachments[string],
-        );
+        return false;
       }
+      const { attachmentsByQuestionId } = attachments;
       userInputResponsesInFlight.current.add(responseKey);
       setRespondingUserInputRequestKeys((existing) =>
         existing.includes(responseKey) ? existing : [...existing, responseKey],
@@ -8472,9 +8448,7 @@ export default function ChatView(props: ChatViewProps) {
             threadId: activeThreadId,
             requestId,
             answers,
-            ...(attachmentsByQuestionId.size > 0
-              ? { attachmentsByQuestionId: Object.fromEntries(attachmentsByQuestionId) }
-              : {}),
+            ...(Object.keys(attachmentsByQuestionId).length > 0 ? { attachmentsByQuestionId } : {}),
           },
         });
         if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
@@ -8507,6 +8481,15 @@ export default function ChatView(props: ChatViewProps) {
       respondToThreadUserInput,
       setThreadError,
     ],
+  );
+
+  // A dictated answer that submits itself goes through this thread's own respond while shown.
+  useEffect(
+    () =>
+      activeThreadId
+        ? registerQuestionResponder(environmentId, activeThreadId, onRespondToUserInput)
+        : undefined,
+    [activeThreadId, environmentId, onRespondToUserInput],
   );
 
   // Closes an async question without messaging the agent. The server records
@@ -8556,23 +8539,6 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
 
-  const onQuestionDictationTargetChange = useCallback(
-    (target: SymmetriaDictationTarget | null, previous?: SymmetriaDictationTarget) => {
-      setQuestionDictationTarget(
-        (current) =>
-          target ??
-          (previous && current && !dictationTargetsEqual(current, previous) ? current : null),
-      );
-    },
-    [],
-  );
-  const isQuestionResponding = useCallback(
-    (requestId: ApprovalRequestId) =>
-      userInputResponsesInFlight.current.has(
-        JSON.stringify([environmentId, activeThreadId, requestId]),
-      ),
-    [environmentId, activeThreadId],
-  );
   const inlinePendingUserInput = useMemo(
     () =>
       activeThreadId && pendingUserInputs.length > 0
@@ -8592,8 +8558,6 @@ export default function ChatView(props: ChatViewProps) {
               .map((request) => request.requestId),
             onRespond: onRespondToUserInput,
             onDismiss: onDismissUserInput,
-            onDictationTargetChange: onQuestionDictationTargetChange,
-            isResponding: isQuestionResponding,
           }
         : null,
     [
@@ -8606,33 +8570,8 @@ export default function ChatView(props: ChatViewProps) {
       respondingUserInputRequestKeys,
       onRespondToUserInput,
       onDismissUserInput,
-      onQuestionDictationTargetChange,
-      isQuestionResponding,
     ],
   );
-  const activeQuestionDictationTarget =
-    questionDictationTarget?.kind === "draft" &&
-    activeThreadId &&
-    pendingUserInputs.some((request) =>
-      request.questions.some(
-        (question) =>
-          String(questionDictationTarget.draftId) ===
-          questionAttachmentDraftId(environmentId, activeThreadId, request.requestId, question.id),
-      ),
-    )
-      ? questionDictationTarget
-      : null;
-  // Keep the strip stable for ChatComposer while routing active question dictation to its field.
-  const dictationStrip = useMemo(
-    () =>
-      registeredDictationTarget ? (
-        <DictationStrip
-          displayedTarget={activeQuestionDictationTarget ?? registeredDictationTarget}
-        />
-      ) : null,
-    [activeQuestionDictationTarget, registeredDictationTarget],
-  );
-
   const onSubmitPlanFollowUp = useCallback(
     async ({
       text,
@@ -9800,9 +9739,7 @@ export default function ChatView(props: ChatViewProps) {
                               event.target instanceof HTMLElement &&
                               event.target.closest('[contenteditable="true"]')
                             ) {
-                              dictationCoordinator.clearQuestionTarget();
-                              setQuestionDictationTarget(null);
-                              setNormalComposerFocusRevision((value) => value + 1);
+                              reclaimDictationComposer();
                             }
                           }}
                         >
@@ -9886,7 +9823,7 @@ export default function ChatView(props: ChatViewProps) {
                             terminalOpen={Boolean(terminalUiState.terminalOpen)}
                             gitCwd={gitCwd}
                             dictationStartControl={DICTATION_START_CONTROL}
-                            dictationStrip={dictationStrip}
+                            dictationStrip={DICTATION_RECORDING_STRIP}
                             pullRequestProjectId={
                               supportsPullRequests ? (activeProject?.id ?? null) : null
                             }

@@ -42,11 +42,3 @@ it("recognises video attachments so they can be played rather than downloaded", 
     "upstream's video media-type table is missing, so a video attachment is not recognised as one",
   );
 });
-
-it("accepts files shared into the mobile app from other apps", () => {
-  assert.include(
-    read("apps/mobile/src/features/sharing/incoming-share-model.ts"),
-    "sharedFile",
-    "upstream's incoming shared-file handling is missing, so the mobile share sheet cannot deliver files",
-  );
-});

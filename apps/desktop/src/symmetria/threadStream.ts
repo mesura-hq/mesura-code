@@ -1,10 +1,8 @@
 /**
  * The Unix socket Symmetria Shell reads the projected thread list from.
  *
- * A PUSH stream, which is what makes it a different server from the dictation
- * one next door rather than a second use of it: dictation is one line in, one
- * line out on the same connection, and this writes without being asked. Only
- * the binding is shared, in `unixSocket.ts`.
+ * A PUSH stream: it writes without being asked, and ignores anything a peer
+ * sends. The binding lives in `unixSocket.ts`.
  *
  * The framing is the contract's: **a stream opens with a snapshot**, so every
  * peer receives one the moment it connects and never has to reason about what

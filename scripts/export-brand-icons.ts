@@ -255,28 +255,6 @@ export async function renderBrandIconVariant(
   ]);
 }
 
-export async function renderMobileSystemAssets(
-  repositoryRoot: string,
-): Promise<Map<string, Buffer>> {
-  const monochromeSource = await NodeFSP.readFile(
-    NodePath.join(repositoryRoot, BRAND_ASSET_PATHS.monochromeSourceSvg),
-  );
-  const whiteTemplateSource = monochromeSource
-    .toString("utf8")
-    .replaceAll("currentColor", "#ffffff");
-  const renderTemplate = (size: number) =>
-    sharp(Buffer.from(whiteTemplateSource))
-      .resize(size, size, { fit: "fill", kernel: sharp.kernel.lanczos3 })
-      .png({ adaptiveFiltering: true, compressionLevel: 9 })
-      .toBuffer();
-
-  return new Map<string, Buffer>([
-    [BRAND_ASSET_PATHS.mobileAndroidMonochromeIconPng, await renderTemplate(432)],
-    [BRAND_ASSET_PATHS.mobileAndroidNotificationIconPng, await renderTemplate(96)],
-    [BRAND_ASSET_PATHS.mobileWidgetMarkSvg, monochromeSource],
-  ]);
-}
-
 export async function collectGeneratedBrandAssets(
   repositoryRoot: string,
 ): Promise<Map<string, Buffer>> {
@@ -295,11 +273,6 @@ export async function collectGeneratedBrandAssets(
       throw new Error(`Generated development web icon is missing: ${override.sourceRelativePath}`);
     }
     generated.set(override.targetRelativePath, sourceContents);
-  }
-
-  const mobileSystemAssets = await renderMobileSystemAssets(repositoryRoot);
-  for (const [relativePath, contents] of mobileSystemAssets) {
-    generated.set(relativePath, contents);
   }
 
   generated.set(

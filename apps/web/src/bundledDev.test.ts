@@ -28,6 +28,7 @@ it("initializes React refresh before a shared UI chunk runs in bundled dev", asy
 
   try {
     await NodeFSP.mkdir(NodePath.join(root, "src/lib"), { recursive: true });
+    await NodeFSP.mkdir(NodePath.join(root, "src/dictation"), { recursive: true });
     await NodeFSP.writeFile(NodePath.join(root, "package.json"), '{"type":"module"}');
     for (const file of ["index.html", "src/bootstrap.ts", "src/lib/bootError.ts"]) {
       await NodeFSP.copyFile(new URL(`../${file}`, import.meta.url), NodePath.join(root, file));
@@ -39,6 +40,13 @@ it("initializes React refresh before a shared UI chunk runs in bundled dev", asy
     await NodeFSP.writeFile(
       NodePath.join(root, "src/main.tsx"),
       `import { Shared } from "./shared";
+export const startup = Promise.resolve().then(() => globalThis.onStarted(Shared()));`,
+    );
+    // Mesura: bootstrap.ts loads this entry instead in the desktop's dictation widget window.
+    // It shares the UI chunk with main, so refresh must be ready for either entry.
+    await NodeFSP.writeFile(
+      NodePath.join(root, "src/dictation/dictationWidgetMain.tsx"),
+      `import { Shared } from "../shared";
 export const startup = Promise.resolve().then(() => globalThis.onStarted(Shared()));`,
     );
 
@@ -101,6 +109,7 @@ export const startup = Promise.resolve().then(() => globalThis.onStarted(Shared(
       `import assert from "node:assert/strict";
 const started = Promise.withResolvers();
 globalThis.window = globalThis;
+globalThis.location = { search: process.argv[2] ?? "" };
 globalThis.document = {
   createElement: () => ({ relList: { supports: () => true } }),
   getElementById: () => null,
@@ -120,6 +129,8 @@ console.log("App started with React refresh ready.");`,
     );
     const result = await execFile("node", [runner]);
     expect(result.stdout).toContain("App started with React refresh ready.");
+    const widget = await execFile("node", [runner, "?window=dictation-widget"]);
+    expect(widget.stdout).toContain("App started with React refresh ready.");
   } finally {
     await server?.close();
     await NodeFSP.rm(root, { recursive: true, force: true });

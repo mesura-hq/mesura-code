@@ -846,6 +846,8 @@ export interface ComposerPromptEditorHandle {
     expandedCursor: number;
     contextIds: string[];
   };
+  /** True when the editor holds a selection, so text can land at the caret instead of the end. */
+  hasCaret: () => boolean;
   /**
    * True when a collapsed caret sits on the first ("start") or last ("end")
    * visual line, counting soft wraps. Prompt history only claims ArrowUp and
@@ -1867,6 +1869,7 @@ function ComposerPromptEditorInner({
         if (target) setOpenCitationComment(target);
       },
       readSnapshot,
+      hasCaret: () => editor.getEditorState().read(() => $isRangeSelection($getSelection())),
       isCaretOnVisualEdge: (edge) => {
         const snapshot = readSnapshot();
         if (snapshot.value.length === 0) return true;

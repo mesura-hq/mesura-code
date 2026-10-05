@@ -142,6 +142,7 @@ import { linkCreatedPullRequest } from "./git/linkCreatedPullRequest.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
+import { DictationJobs } from "./dictation/DictationJobs.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as FactorySnapshotStore from "./factory/FactorySnapshotStore.ts";
@@ -626,6 +627,7 @@ const makeWsRpcLayer = (
       const factorySnapshots = yield* FactorySnapshotStore.FactorySnapshotStore;
       const factoryRunTracker = yield* FactoryRunTracker.FactoryRunTracker;
       const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
+      const dictationJobs = yield* DictationJobs;
       const repositoryIdentityResolver =
         yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
       // Clone hooks run on the tracker's fiber, outside any RPC, so the
@@ -2994,6 +2996,30 @@ const makeWsRpcLayer = (
         [WS_METHODS.subscribeProjectClones]: () =>
           observeRpcStream(WS_METHODS.subscribeProjectClones, projectCloneTracker.stream, {
             "rpc.aggregate": "source-control",
+          }),
+        [WS_METHODS.dictationStart]: (input) =>
+          observeRpcEffect(WS_METHODS.dictationStart, dictationJobs.start(input), {
+            "rpc.aggregate": "dictation",
+          }),
+        [WS_METHODS.dictationRetry]: (input) =>
+          observeRpcEffect(WS_METHODS.dictationRetry, dictationJobs.retry(input.jobId), {
+            "rpc.aggregate": "dictation",
+          }),
+        [WS_METHODS.dictationCancel]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.dictationCancel,
+            dictationJobs.cancel(input.jobId).pipe(Effect.map((applied) => ({ applied }))),
+            { "rpc.aggregate": "dictation" },
+          ),
+        [WS_METHODS.dictationSetMode]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.dictationSetMode,
+            dictationJobs.setMode(input.jobId, input.mode),
+            { "rpc.aggregate": "dictation" },
+          ),
+        [WS_METHODS.subscribeDictationJobs]: () =>
+          observeRpcStream(WS_METHODS.subscribeDictationJobs, dictationJobs.stream, {
+            "rpc.aggregate": "dictation",
           }),
         [WS_METHODS.sourceControlPublishRepository]: (input) =>
           observeRpcEffect(
