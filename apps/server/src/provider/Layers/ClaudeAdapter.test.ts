@@ -5106,6 +5106,155 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  // mesura: phase 1 of the context indicator. Each case drives one Claude
+  // `result` message through the adapter and reads the snapshot it emits.
+  const collectClaudeResultUsageSnapshot = (
+    harness: ReturnType<typeof makeHarness>,
+    sessionId: string,
+    usage: Record<string, unknown>,
+  ) =>
+    Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.takeUntil((event) => event.type === "turn.completed"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: "hello",
+        attachments: [],
+      });
+
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        duration_ms: 1234,
+        duration_api_ms: 1200,
+        num_turns: 1,
+        result: "done",
+        stop_reason: "end_turn",
+        session_id: sessionId,
+        usage,
+        modelUsage: {
+          [SYNTHETIC_CLAUDE_CAPABLE_MODEL]: {
+            contextWindow: 200000,
+            maxOutputTokens: 64000,
+          },
+        },
+      } as unknown as SDKMessage);
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const usageEvent = runtimeEvents.findLast(
+        (event) => event.type === "thread.token-usage.updated",
+      );
+      assert.equal(usageEvent?.type, "thread.token-usage.updated");
+      return usageEvent?.type === "thread.token-usage.updated"
+        ? usageEvent.payload.usage
+        : undefined;
+    });
+
+  const CLAUDE_CACHE_SPLIT_USAGE = {
+    input_tokens: 400,
+    cache_read_input_tokens: 63500,
+    cache_creation_input_tokens: 600,
+    output_tokens: 100,
+  };
+
+  it.effect("splits Claude cache read and cache write out of the context snapshot", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const usage = yield* collectClaudeResultUsageSnapshot(
+        harness,
+        "sdk-session-cache-split",
+        CLAUDE_CACHE_SPLIT_USAGE,
+      );
+      assert.equal(usage?.cachedInputTokens, 63500);
+      assert.equal(usage?.cacheCreationTokens, 600);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("keeps Claude input and used totals unchanged when the cache split is reported", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const usage = yield* collectClaudeResultUsageSnapshot(
+        harness,
+        "sdk-session-cache-split-totals",
+        CLAUDE_CACHE_SPLIT_USAGE,
+      );
+      assert.equal(usage?.inputTokens, 64500);
+      assert.equal(usage?.usedTokens, 64600);
+      assert.equal(usage?.lastUsedTokens, 64600);
+      assert.equal(usage?.outputTokens, 100);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("omits the Claude cache split when the usage record carries no cache fields", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const usage = yield* collectClaudeResultUsageSnapshot(
+        harness,
+        "sdk-session-cache-split-absent",
+        { input_tokens: 400, output_tokens: 100 },
+      );
+      assert.equal(usage?.inputTokens, 400);
+      assert.isFalse(usage !== undefined && "cachedInputTokens" in usage);
+      assert.isFalse(usage !== undefined && "cacheCreationTokens" in usage);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("takes the Claude cache split from the same last iteration as the input count", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const usage = yield* collectClaudeResultUsageSnapshot(
+        harness,
+        "sdk-session-cache-split-iterations",
+        {
+          input_tokens: 900,
+          cache_read_input_tokens: 99999,
+          cache_creation_input_tokens: 777,
+          output_tokens: 300,
+          iterations: [
+            {
+              input_tokens: 10,
+              cache_read_input_tokens: 5000,
+              cache_creation_input_tokens: 200,
+              output_tokens: 30,
+            },
+            {
+              input_tokens: 20,
+              cache_read_input_tokens: 63500,
+              cache_creation_input_tokens: 600,
+              output_tokens: 40,
+            },
+          ],
+        },
+      );
+      assert.equal(usage?.inputTokens, 64120);
+      assert.equal(usage?.cachedInputTokens, 63500);
+      assert.equal(usage?.cacheCreationTokens, 600);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("emits Claude context window on result completion usage snapshots", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
@@ -5162,6 +5311,8 @@ describe("ClaudeAdapterLive", () => {
             usedTokens: 24542,
             lastUsedTokens: 24542,
             inputTokens: 23863,
+            cachedInputTokens: 21144,
+            cacheCreationTokens: 2715,
             outputTokens: 679,
             maxTokens: 200000,
           },

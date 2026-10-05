@@ -70,6 +70,30 @@ describe("contextWindow", () => {
     expect(formatContextWindowTokens(258_000)).toBe("258k");
   });
 
+  it("re-exports exactly the shared client-runtime context-window module", async () => {
+    const webModule: Record<string, unknown> = await import("./contextWindow");
+    // A non-literal specifier keeps Vite from resolving it at transform time,
+    // so a missing subpath fails this case alone rather than the whole file.
+    const sharedModuleSpecifier = "@t3tools/client-runtime/context-window";
+    const sharedModule: Record<string, unknown> = await import(
+      /* @vite-ignore */ sharedModuleSpecifier
+    );
+
+    expect(Object.keys(webModule).toSorted()).toEqual(Object.keys(sharedModule).toSorted());
+    for (const name of [
+      "deriveLatestContextWindowSnapshot",
+      "formatContextWindowTokens",
+      "formatContextWindowIndicatorLabels",
+      "deriveContextWindowRequestBreakdown",
+      "deriveContextWindowSegments",
+      "COLD_CACHE_PERCENTAGE",
+      "CONTEXT_WINDOW_SEGMENT_LABELS",
+    ] as const) {
+      expect(sharedModule[name], name).toBeDefined();
+      expect(webModule[name], name).toBe(sharedModule[name]);
+    }
+  });
+
   it("includes total processed tokens when available", () => {
     const snapshot = deriveLatestContextWindowSnapshot([
       makeActivity("activity-1", "context-window.updated", {

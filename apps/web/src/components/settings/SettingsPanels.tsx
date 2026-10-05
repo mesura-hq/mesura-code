@@ -1384,6 +1384,32 @@ export function AppearanceSettingsPanel() {
             </div>
           }
         />
+        <SettingsRow
+          {...searchableSetting("context-window-indicator")}
+          description="Shows how full the context window is in the composer: tokens used, a ring coloured by the last request's cache use, and the model's total."
+          resetAction={
+            settings.contextWindowMeterEnabled !==
+            DEFAULT_UNIFIED_SETTINGS.contextWindowMeterEnabled ? (
+              <SettingResetButton
+                label="context window indicator"
+                onClick={() =>
+                  updateSettings({
+                    contextWindowMeterEnabled: DEFAULT_UNIFIED_SETTINGS.contextWindowMeterEnabled,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.contextWindowMeterEnabled}
+              onCheckedChange={(checked) =>
+                updateSettings({ contextWindowMeterEnabled: Boolean(checked) })
+              }
+              aria-label="Context window indicator"
+            />
+          }
+        />
       </SettingsSection>
 
       <SettingsSection id="motion" title="Motion">
@@ -2073,7 +2099,6 @@ function AutoSettleDaysInput({
 // expand the section before its target can mount and scroll.
 const LEGACY_FEATURE_TARGET_IDS: ReadonlySet<string> = new Set([
   "legacy-plan-mode",
-  "legacy-context-window-indicator",
   "legacy-sidebar",
 ]);
 
@@ -2125,19 +2150,6 @@ function LegacyFeaturesSection() {
                     updateSettings({ planModeEnabled: Boolean(checked) });
                   }}
                   aria-label="Plan mode (legacy)"
-                />
-              }
-            />
-            <SettingsRow
-              {...searchableSetting("legacy-context-window-indicator")}
-              description="Shows context window usage as a circular indicator in the composer."
-              control={
-                <Switch
-                  checked={settings.contextWindowMeterEnabled}
-                  onCheckedChange={(checked) =>
-                    updateSettings({ contextWindowMeterEnabled: Boolean(checked) })
-                  }
-                  aria-label="Context window indicator (legacy)"
                 />
               }
             />

@@ -5,9 +5,11 @@ import {
   classifyTaskAgentKind,
   ProviderRuntimeEvent,
   type ProviderRuntimeEventType,
+  ThreadTokenUsageSnapshot,
 } from "./providerRuntime.ts";
 
 const decodeRuntimeEvent = Schema.decodeUnknownSync(ProviderRuntimeEvent);
+const decodeThreadTokenUsageSnapshot = Schema.decodeUnknownSync(ThreadTokenUsageSnapshot);
 
 describe("ProviderRuntimeEvent", () => {
   it("includes every runtime event in the public event type", () => {
@@ -253,5 +255,26 @@ describe("classifyTaskAgentKind", () => {
     expect(classifyTaskAgentKind({ taskType: undefined, agentId: "owner" })).toBe("background");
     // Nested agent: outlives its parent, stays in the roster.
     expect(classifyTaskAgentKind({ taskType: "local_agent", agentId: "owner" })).toBe("agent");
+  });
+});
+
+describe("ThreadTokenUsageSnapshot", () => {
+  it("accepts the Claude cache-write fields on a context snapshot", () => {
+    expect(
+      decodeThreadTokenUsageSnapshot({
+        usedTokens: 64600,
+        inputTokens: 64500,
+        cachedInputTokens: 63500,
+        cacheCreationTokens: 600,
+        lastCacheCreationTokens: 600,
+      }),
+    ).toMatchObject({ cacheCreationTokens: 600, lastCacheCreationTokens: 600 });
+  });
+
+  it("refuses negative or fractional Claude cache-write counts", () => {
+    for (const field of ["cacheCreationTokens", "lastCacheCreationTokens"]) {
+      expect(() => decodeThreadTokenUsageSnapshot({ usedTokens: 1, [field]: -1 })).toThrow();
+      expect(() => decodeThreadTokenUsageSnapshot({ usedTokens: 1, [field]: 1.5 })).toThrow();
+    }
   });
 });

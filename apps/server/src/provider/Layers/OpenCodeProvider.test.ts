@@ -297,6 +297,20 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
     }),
   );
 
+  it.effect("declares that OpenCode reports its context window on every probe outcome", () =>
+    Effect.gen(function* () {
+      const readySnapshot = yield* checkProvider(makeOpenCodeSettings());
+      runtimeMock.state.runVersionError = new Error("spawn opencode ENOENT");
+      const missingBinarySnapshot = yield* checkProvider(makeOpenCodeSettings());
+
+      NodeAssert.equal(missingBinarySnapshot.status, "error");
+      NodeAssert.deepStrictEqual(
+        [readySnapshot.reportsContextWindow, missingBinarySnapshot.reportsContextWindow],
+        [true, true],
+      );
+    }),
+  );
+
   it.effect("includes OpenCode skills in the provider snapshot", () =>
     Effect.gen(function* () {
       runtimeMock.state.inventory = {
