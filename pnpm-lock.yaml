@@ -347,9 +347,6 @@ importers:
       '@pierre/trees':
         specifier: 1.0.0-beta.4
         version: 1.0.0-beta.4(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
-      '@symmetria/broker-contract':
-        specifier: workspace:*
-        version: link:../../packages/symmetria-broker-contract
       '@symmetria/fm-core':
         specifier: workspace:*
         version: link:../../vendor/symmetria-file-manager/packages/fm-core

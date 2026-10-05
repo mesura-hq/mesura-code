@@ -103,10 +103,15 @@ import {
   composerFileNeedsReattach,
   composerTargetKey,
   hydrateImagesFromPersisted,
+  registerDictationSlotFillHandler,
   useComposerDraftStore,
   useComposerThreadDraft,
   useEffectiveComposerModelState,
 } from "../../composerDraftStore";
+import { fillDictationSlotKeepingCaret } from "../../dictation/dictationSlotEdits";
+import { countPendingDictationSlots } from "@t3tools/shared/dictationSlots";
+import { armSendWhenReady } from "../../dictation/sendWhenReady";
+import { SendWhenReadyBanner } from "../../dictation/SendWhenReadyBanner";
 import {
   MAX_STASH_ENTRIES,
   partitionStashAttachments,
@@ -1237,6 +1242,8 @@ export interface ChatComposerHandle {
     options?: { ensureLeadingBoundary?: boolean; clipboardData?: DataTransfer },
   ) => boolean;
   replacePrompt: (prompt: string) => boolean;
+  /** Mesura dictation: drop a marker at the caret, or at the end when the editor has none. */
+  insertDictationSlot: (slot: string) => boolean;
   /** Apply large-paste folding for text redirected from a blurred composer. */
   pasteTextAtEnd: (text: string, options?: { bypassAutoAttachment?: boolean }) => boolean;
   citeAssistantText: (
@@ -2560,15 +2567,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     hiddenBlockCount: restingControlsHiddenBlockCount,
     controlsVisible: restingControlsVisible,
   } = useRestingComposerControlsLayout(restingControlsHost);
+  const canArmSendWhenReady = composerSendState.pendingDictationSlotCount > 0;
   const collapsedComposerPrimaryActionDisabled =
     phase === "running" ||
     isSendBusy ||
-    isSendDisabled ||
+    (isSendDisabled && !canArmSendWhenReady) ||
     isConnecting ||
     noProviderAvailable ||
     projectSelectionRequired ||
     environmentUnavailable !== null ||
-    !composerSendState.hasSendableContent;
+    !(composerSendState.hasSendableContent || canArmSendWhenReady);
   const collapsedComposerPrimaryActionLabel = "Send message";
   // ------------------------------------------------------------------
   // Prompt helpers
@@ -3573,6 +3581,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const submitComposer = useCallback(
     (event?: { preventDefault: () => void }, intent: ComposerSubmissionIntent = "foreground") => {
+      // A transcription still pending: Send arms the draft to go once it lands.
+      if (countPendingDictationSlots(promptRef.current) > 0) {
+        event?.preventDefault();
+        armSendWhenReady(composerDraftTarget);
+        return;
+      }
       if (noProviderAvailable || isSendDisabled) {
         event?.preventDefault();
         return;
@@ -3627,6 +3641,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       activeThread?.session,
       attachmentTargetKey,
       blurMobileComposerAfterSend,
+      composerDraftTarget,
       isSendDisabled,
       noProviderAvailable,
       onSend,
@@ -5362,6 +5377,40 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     return setContextInsertionHandler(composerDraftTarget, insertContextReferencesAtCaret);
   }, [composerDraftTarget, insertContextReferencesAtCaret, setContextInsertionHandler]);
 
+  // Mesura dictation: a transcript landing in this composer moves the caret with the text,
+  // instead of the controlled update putting it back at its old offset. Several transcripts can
+  // land before the editor re-renders; until it does, its caret still belongs to the old text,
+  // so the caret this handler last set is used while the prompt is still the one it wrote.
+  const lastDictationFillRef = useRef<{ prompt: string; expandedCursor: number } | null>(null);
+  // Children commit first, so by here the editor holds the filled text and its caret.
+  useLayoutEffect(() => {
+    lastDictationFillRef.current = null;
+  });
+  useEffect(
+    () =>
+      registerDictationSlotFillHandler(composerDraftTarget, (jobId, transcript) => {
+        const lastFill = lastDictationFillRef.current;
+        const filled = fillDictationSlotKeepingCaret(
+          promptRef.current,
+          lastFill?.prompt === promptRef.current
+            ? lastFill.expandedCursor
+            : readComposerSnapshot().expandedCursor,
+          jobId,
+          transcript,
+        );
+        if ("missing" in filled) return "missing";
+        lastDictationFillRef.current = {
+          prompt: filled.text,
+          expandedCursor: filled.expandedCursor,
+        };
+        promptRef.current = filled.text;
+        setPrompt(filled.text);
+        setComposerCursor(collapseExpandedComposerCursor(filled.text, filled.expandedCursor));
+        return "filled";
+      }),
+    [composerDraftTarget, promptRef, readComposerSnapshot, setPrompt],
+  );
+
   // File-tree drags land as mentions. Handled in the capture phase so the
   // editor never sees the drop; the load-bearing rules (native stop, "move"
   // effect, no eager focus) live in makeComposerMentionDragHandlers.
@@ -5500,6 +5549,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       replacePrompt: (prompt: string) =>
         applyPromptReplacement(0, promptRef.current.length, prompt, {
           focusEditorAfterReplace: false,
+        }),
+      insertDictationSlot: (slot: string) =>
+        insertComposerText(`${slot} `, composerEditorRef.current?.hasCaret() ? "cursor" : "end", {
+          ensureLeadingBoundary: true,
         }),
       pasteTextAtEnd: (text: string, options) => {
         const bypassAutoAttachment =
@@ -5842,6 +5895,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               />
             </ComposerBanner.Attachment>
           ) : null}
+          <SendWhenReadyBanner
+            target={composerDraftTarget}
+            pendingCount={composerSendState.pendingDictationSlotCount}
+          />
           {dictationStrip}
         </ComposerBanner.Column>
         {!isComposerApprovalState ? (
@@ -6466,7 +6523,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     showPlanFollowUpPrompt={showPlanFollowUpPrompt}
                     promptHasText={prompt.trim().length > 0}
                     isSendBusy={isSendBusy}
-                    sendDisabledReason={sendDisabledReason}
+                    // Pressing Send is how a draft with a pending transcription is armed.
+                    sendDisabledReason={canArmSendWhenReady ? null : sendDisabledReason}
                     isConnecting={isConnecting}
                     isEnvironmentUnavailable={
                       environmentUnavailable !== null ||
@@ -6474,7 +6532,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       projectSelectionRequired
                     }
                     isPreparingWorktree={isPreparingWorktree}
-                    hasSendableContent={composerSendState.hasSendableContent}
+                    hasSendableContent={composerSendState.hasSendableContent || canArmSendWhenReady}
                     preserveComposerFocusOnPointerDown={isMobileViewport || isComposerResting}
                     onInterrupt={handleInterruptPrimaryAction}
                     onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}

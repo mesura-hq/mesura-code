@@ -1655,6 +1655,29 @@ describe("deriveComposerSendState", () => {
     expect(state.hasSendableContent).toBe(true);
   });
 
+  it("never reports a prompt holding a dictation marker as ready to send", () => {
+    const dictation = "[Transcribing](t3-context://v1/dictation/job-1)";
+    for (const prompt of [dictation, `fix the build ${dictation}`]) {
+      expect(
+        deriveComposerSendState({
+          prompt,
+          imageCount: 1,
+          terminalContexts: [],
+          elementContextCount: 1,
+        }).hasSendableContent,
+      ).toBe(false);
+    }
+  });
+
+  it("reports how many dictation markers are still pending in the prompt", () => {
+    const dictation = (jobId: string) => `[Transcribing](t3-context://v1/dictation/${jobId})`;
+    const count = (prompt: string) =>
+      deriveComposerSendState({ prompt, imageCount: 0, terminalContexts: [] })
+        .pendingDictationSlotCount;
+    expect(count(`a ${dictation("job-1")} b ${dictation("job-2")}`)).toBe(2);
+    expect(count("[Terminal 1 line 4](t3-context://v1/terminal/ctx-1) plain")).toBe(0);
+  });
+
   it("does NOT treat zero element contexts as sendable", () => {
     expect(
       deriveComposerSendState({

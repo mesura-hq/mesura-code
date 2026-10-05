@@ -74,6 +74,22 @@ export const CHAT_SCROLL_KEYBINDING_COMMANDS = [
 ] as const;
 export type ChatScrollKeybindingCommand = (typeof CHAT_SCROLL_KEYBINDING_COMMANDS)[number];
 
+/**
+ * Mesura's own dictation. The mode commands only select where the transcript goes, as
+ * Symmetria Shell's keys do; stopping is `dictation.toggle` or the strip's stop button.
+ * The rename warning on `question.toggleCollapse` below applies to every id here.
+ */
+export const DICTATION_KEYBINDING_COMMANDS = [
+  "dictation.toggle",
+  "dictation.mode.clipboard",
+  "dictation.mode.inject",
+  "dictation.mode.submit",
+  "dictation.pause",
+  "dictation.restart",
+  "dictation.cancel",
+] as const;
+export type DictationKeybindingCommand = (typeof DICTATION_KEYBINDING_COMMANDS)[number];
+
 export const STATIC_KEYBINDING_COMMANDS = [
   // Directional pane focus. The application claims these in the capture
   // phase in every pane, the embedded editor and the terminal included, so a
@@ -173,6 +189,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   ...CHAT_SCROLL_KEYBINDING_COMMANDS,
   ...MODEL_PICKER_KEYBINDING_COMMANDS,
   ...THREAD_KEYBINDING_COMMANDS,
+  ...DICTATION_KEYBINDING_COMMANDS,
 ] as const;
 
 export const SCRIPT_RUN_COMMAND_PATTERN = Schema.TemplateLiteral([

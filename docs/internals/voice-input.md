@@ -1,9 +1,13 @@
 # Voice input
 
+This page covers upstream's on-device voice input for iPhone. It lived in the native mobile
+app this fork removed (ADR-008). Mesura Code uses environment-backed transcription instead,
+described in [dictation.md](./dictation.md); the shared controller below stays in
+`packages/client-runtime` from upstream.
+
 Transcription edits a composer draft. It does not submit an agent turn. Audio is
 temporary client input, and only normal message submission sends the resulting
-text. The only implementation transcribed locally on iOS, in the native mobile app this fork
-removed (ADR-008); the shared controller below remains in `packages/client-runtime` from upstream.
+text. The only implementation transcribed locally on iOS.
 
 The [shared controller](../../packages/client-runtime/src/voice-input/controller.ts)
 owns the operation while the client supplies capture and transcription. Preparation

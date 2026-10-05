@@ -10,6 +10,7 @@ import {
   formatComposerContextReference,
   replaceComposerContextReferences,
 } from "@t3tools/shared/composerContextReferences";
+import { isDictationContextKind } from "@t3tools/shared/dictationSlots";
 import {
   $createLineBreakNode,
   $createTextNode,
@@ -155,8 +156,11 @@ export function readPastedComposerContext(
     decodeComposerContextFragment(clipboardData.getData(COMPOSER_CONTEXT_CLIPBOARD_MIME)) ??
     decodeComposerContextClipboardHtml(clipboardData.getData("text/html"));
   if (decodedFragment === null) return null;
+  // A dictation slot has no record; its job id must not select a record that shares it.
   const pastedIds = new Set<string>(
-    collectComposerContextReferences(pastedText).map((occurrence) => occurrence.contextId),
+    collectComposerContextReferences(pastedText)
+      .filter((occurrence) => !isDictationContextKind(occurrence.kind))
+      .map((occurrence) => occurrence.contextId),
   );
   for (const record of decodedFragment.records) {
     if (
@@ -186,7 +190,9 @@ export function importPastedComposerText(
   const text =
     rewrittenIds && rewrittenIds.size > 0
       ? replaceComposerContextReferences(pastedText, (occurrence) => {
-          const nextId = rewrittenIds.get(occurrence.contextId);
+          const nextId = isDictationContextKind(occurrence.kind)
+            ? undefined
+            : rewrittenIds.get(occurrence.contextId);
           return nextId
             ? formatComposerContextReference({
                 ...occurrence,

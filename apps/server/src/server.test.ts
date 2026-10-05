@@ -160,6 +160,7 @@ import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import * as EditorSessionManager from "./editor/Manager.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
+import * as DictationJobs from "./dictation/DictationJobs.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as FactoryRunShellSummaries from "./factory/FactoryRunShellSummaries.ts";
 import * as FactoryRunTracker from "./factory/FactoryRunTracker.ts";
@@ -985,6 +986,8 @@ const buildAppUnderTest = (options?: {
               }),
             ),
           ),
+          // Mesura: dictation is covered by its own tests; the router only needs the service.
+          Layer.mock(DictationJobs.DictationJobs)({}),
         ),
       ),
       Layer.provide(

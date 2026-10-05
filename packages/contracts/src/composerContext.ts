@@ -16,6 +16,13 @@ import {
  * `ChatAttachment` by id.
  */
 
+/**
+ * Mesura: a pending transcription held in the prompt text as a context link. It never carries a
+ * record, so listing it below also stops an `UnknownContextRecord` from claiming the kind. See
+ * `@t3tools/shared/dictationSlots`.
+ */
+export const DICTATION_CONTEXT_KIND = "dictation";
+
 export const COMPOSER_CONTEXT_KINDS = [
   "image",
   "file",
@@ -25,6 +32,7 @@ export const COMPOSER_CONTEXT_KINDS = [
   "review-comment",
   "mention",
   "skill",
+  DICTATION_CONTEXT_KIND,
 ] as const;
 export type KnownComposerContextKind = (typeof COMPOSER_CONTEXT_KINDS)[number];
 

@@ -16,6 +16,7 @@ export type SettingsPath =
   | "/settings/snap-shot"
   | "/settings/providers"
   | "/settings/integrations"
+  | "/settings/dictation"
   | "/settings/source-control"
   | "/settings/connections"
   | "/settings/archived";
@@ -79,6 +80,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/snap-shot": "SnapShots",
   "/settings/providers": "Providers",
   "/settings/integrations": "Integrations",
+  "/settings/dictation": "Dictation",
   "/settings/source-control": "Source Control",
   "/settings/connections": "Connections",
   "/settings/archived": "Archive",
@@ -498,6 +500,20 @@ export const SETTINGS_SEARCH_ITEMS = [
     providerSettingsOnly: true,
   },
   {
+    id: "dictation-openai-key",
+    title: "OpenAI API key",
+    to: "/settings/dictation",
+    searchTerms: ["dictation speech to text transcription voice whisper secret"],
+    environmentOnly: true,
+  },
+  {
+    id: "dictation-vocabulary-hints",
+    title: "Vocabulary hints",
+    to: "/settings/dictation",
+    searchTerms: ["dictation speech to text transcription words names spelling prompt"],
+    environmentOnly: true,
+  },
+  {
     id: "agent-browser-access",
     title: "Agent browser access",
     to: "/settings/integrations",
@@ -757,6 +773,8 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/keybindings": null,
   "/settings/providers": null,
   "/settings/integrations": null,
+  // Like Providers, the page shows the representative environment.
+  "/settings/dictation": null,
   "/settings/source-control": "environment-defaults",
   "/settings/connections": "connections",
   "/settings/archived": "project-defaults",

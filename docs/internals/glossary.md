@@ -10,6 +10,7 @@ This is a living glossary for T3 Code. It explains what common terms mean in thi
 - [Thread timeline](#thread-timeline)
 - [Orchestration](#orchestration)
 - [Provider runtime](#provider-runtime)
+- [Dictation](#dictation)
 - [Symmetria integration](#symmetria-integration)
 - [Checkpointing](#checkpointing)
 - [Appearance](#appearance)
@@ -42,7 +43,7 @@ A server-side watch on the one file a client currently has open, which streams a
 
 #### Background scope
 
-A declared interest a client reports while it is looking at something: version-control status, diagnostics, or a thread. Scopes travel in the client's activity lease and are read by the server's background policy, which uses them to decide what work is worth doing while nobody is waiting on it. A scope is explicitly retained by the view that shows the thing, not derived from whether a subscription is open: subscriptions outlive the view that opened them, so deriving the scope would report a thread as watched for minutes after the user left it. See `apps/web/src/lib/backgroundActivityReporter.ts` and its mobile twin in `apps/mobile/src/connection/background-activity-scopes.ts`.
+A declared interest a client reports while it is looking at something: version-control status, diagnostics, or a thread. Scopes travel in the client's activity lease and are read by the server's background policy, which uses them to decide what work is worth doing while nobody is waiting on it. A scope is explicitly retained by the view that shows the thing, not derived from whether a subscription is open: subscriptions outlive the view that opened them, so deriving the scope would report a thread as watched for minutes after the user left it. See `apps/web/src/lib/backgroundActivityReporter.ts`.
 
 ### Thread timeline
 
@@ -132,30 +133,26 @@ Controls how assistant text reaches the thread timeline. In [the contracts][1], 
 
 A point-in-time view of state. The word is used in multiple layers, including orchestration, provider, and checkpointing. See [ProjectionSnapshotQuery.ts][10], [ProviderAdapter.ts][15], and [CheckpointStore.ts][19].
 
+### Dictation
+
+#### Dictation job
+
+One server transcription of one uploaded recording, with its mode, target and text. Jobs live in
+server memory for 24 hours and stream to every client of that environment. See [dictation.md][27]
+and [DictationJobs.ts][28].
+
+#### Dictation marker
+
+The pending-transcription link `[Transcribing](t3-context://v1/dictation/<jobId>)`, dropped into
+a draft at the caret when a recording stops. The job with that id replaces it with the transcript.
+Code also calls it a dictation slot.
+
+#### Armed draft
+
+A draft set to send itself once no dictation marker remains in its text. Send mode and a Send
+press with a pending marker both arm it.
+
 ### Symmetria integration
-
-#### Dictation session
-
-One Shell-owned recording and delivery lifecycle. The session carries phase, mode, immutable target,
-and presentation ownership. It does not carry partial transcript text. See
-[symmetria-dictation.md][25] and [the dictation contract][26].
-
-#### Reserved target
-
-The immutable Mesura destination captured before Shell starts audio. A server target contains an
-`environmentId` and `threadId`. A draft target contains a `draftId` and `futureThreadRef`.
-
-#### Presentation lease
-
-A short claim that lets a focused Mesura renderer show the dictation controls for the reserved
-target. Shell shows the controls when the lease is absent or expired. The lease changes only the
-presentation owner; it does not pause, cancel, or retarget the dictation session.
-
-#### Dictation receipt
-
-A production protocol result that confirms the effect of one dictation command. This term does not
-mean a test-only runtime receipt. A dictation receipt can confirm clipboard copy, persisted insert,
-provider-turn start, pending confirmation, refusal, or failure.
 
 #### File tree
 
@@ -330,7 +327,6 @@ See [composer context references](./composer-context-references.md) for the cont
 - If you see `requested`, think "intent recorded".
 - If you see `completed`, think "result applied".
 - If you see `RuntimeReceiptBus`, think "async milestone signal, for tests".
-- If you see `SymmetriaDictationReceipt`, think "confirmed production delivery result".
 - If you see `checkpoint`, think "workspace snapshot for diff/restore".
 - If you see `quiesced`, think "all relevant follow-up work has gone idle".
 
@@ -373,7 +369,7 @@ See [composer context references](./composer-context-references.md) for the cont
 [22]: ../../apps/server/src/checkpointing/Utils.ts
 [23]: ../../apps/server/src/checkpointing/Diffs.ts
 [24]: ./overview.md
-[25]: ./symmetria-dictation.md
-[26]: ../../packages/symmetria-broker-contract/src/dictation.ts
+[27]: ./dictation.md
+[28]: ../../apps/server/src/dictation/DictationJobs.ts
 [25]: ../../apps/server/src/environmentTheme.ts
 [26]: ../user/environment-theme.md

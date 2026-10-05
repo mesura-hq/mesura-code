@@ -50,6 +50,7 @@ import {
   GitPullRequestArrowIcon,
   LinkIcon,
   MessagesSquareIcon,
+  MicIcon,
   PaletteIcon,
   ServerIcon,
   SettingsIcon,
@@ -170,6 +171,7 @@ import type { ThreadSearchBackHandler } from "./threads/AgentThreadSearch";
 import { AgentThreadSearchSessionProvider } from "./threads/AgentThreadSearchSession";
 import { ThreadSearchPicker } from "./threads/ThreadSearchPicker";
 import { openLinkPullRequestDialog } from "./pullRequest/LinkPullRequestDialog";
+import { openTranscriptionsList, TranscriptionsListHost } from "./dictation/TranscriptionsList";
 import { ProjectContentSearchDialog } from "./search/ProjectContentSearchDialog";
 import { toggleThemeEditorForTheme } from "./settings/themeEditorStore";
 import { searchSettings, SETTINGS_SECTION_LABELS } from "./settings/settingsSearch";
@@ -585,6 +587,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   return (
     <AgentThreadSearchSessionProvider reopen={reopenThreadSearch}>
       {palette}
+      <TranscriptionsListHost />
     </AgentThreadSearchSessionProvider>
   );
 }
@@ -1861,6 +1864,19 @@ function OpenCommandPaletteDialog(props: {
     icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
       await navigate({ to: "/settings" });
+    },
+  });
+
+  // Mesura: recent server-side dictation, with Copy and Retry.
+  actionItems.push({
+    kind: "action",
+    value: "action:transcriptions",
+    searchTerms: ["transcriptions", "dictation", "speech", "voice", "copy", "retry"],
+    title: "Transcriptions",
+    icon: <MicIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      // The route names the thread's environment even before its detail loads.
+      openTranscriptionsList(routeThreadRef?.environmentId ?? currentProjectEnvironmentId);
     },
   });
 

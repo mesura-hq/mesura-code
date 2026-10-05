@@ -77,9 +77,18 @@ describe("hosts.peek", () => {
   });
 
   it("leaves alt+s free of any command but the hosts peek", () => {
+    // Dictation's save mode shares the chord only while a dictation is live, and comes after
+    // the peek so last-wins resolution picks it then and only then.
     const collisions = DEFAULT_KEYBINDINGS.filter(
-      (binding) => binding.key === "alt+s" && binding.command !== "hosts.peek",
+      (binding) =>
+        binding.key === "alt+s" &&
+        binding.command !== "hosts.peek" &&
+        !(binding.command === "dictation.mode.clipboard" && binding.when === "dictationActive"),
     );
     expect(collisions).toEqual([]);
+    const order = DEFAULT_KEYBINDINGS.filter((binding) => binding.key === "alt+s").map(
+      (binding) => binding.command,
+    );
+    expect(order).toEqual(["hosts.peek", "dictation.mode.clipboard"]);
   });
 });

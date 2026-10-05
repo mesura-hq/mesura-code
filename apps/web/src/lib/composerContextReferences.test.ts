@@ -62,6 +62,20 @@ describe("composerContextReferences", () => {
     expect(ensureInlineContextReferences("", [review])).toBe(`${reviewLink} `);
     expect(ensureInlineContextReferences(reviewLink, [review])).toBe(reviewLink);
   });
+
+  it("does not count a dictation marker as the reference of a record that shares its id", () => {
+    const dictation = "[Transcribing](t3-context://v1/dictation/rc-1)";
+    expect(ensureInlineContextReferences(`see ${dictation}`, [review])).toBe(
+      `see ${dictation} ${reviewLink} `,
+    );
+  });
+
+  it("does not remove a dictation marker when removing a record that shares its id", () => {
+    const dictation = "[Transcribing](t3-context://v1/dictation/rc-1)";
+    expect(removeInlineContextReference(`${reviewLink} mid ${dictation}`, "rc-1").prompt).toBe(
+      `mid ${dictation}`,
+    );
+  });
 });
 
 describe("toComposerContextId", () => {
