@@ -5,7 +5,7 @@ description: Launch, retain, and test the Mesura Code web app in isolated develo
 
 # Test T3 App
 
-Use this skill for the web client. For iOS Simulator, Android Emulator, or physical-device testing against an isolated T3 backend, use the sibling [`test-t3-mobile`](../test-t3-mobile/SKILL.md) skill.
+Use this skill for the web client, including the phone-sized checks this fork relies on in place of native mobile clients (removed, see `docs/mesura/adr-008-remove-native-mobile.md`).
 
 ## Start an isolated web environment
 
