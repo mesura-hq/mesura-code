@@ -3,8 +3,9 @@
  * binds. The main window's renderer publishes its dictation state on
  * `PUBLISH_DICTATION_WIDGET_STATE_CHANNEL`; this service relays it to the widget window, shows
  * the widget while no Mesura window has focus, and binds the dictation keys in Hyprland while a
- * session is live. The `--dictation …` command line itself is forwarded in `DesktopClerk`, where
- * the single-instance lock lives.
+ * session is live. It also listens on the dictation socket, the fast way in for those binds and
+ * for a hand-written global bind; a `--dictation …` second launch, their fallback, is forwarded in
+ * `DesktopClerk`, where the single-instance lock lives.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -16,8 +17,10 @@ import * as Electron from "electron";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import { makeComponentLogger } from "../app/DesktopObservability.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
+import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import { getDesktopUrl } from "../electron/ElectronProtocol.ts";
 import {
+  DICTATION_COMMAND_LINE_CHANNEL,
   DICTATION_WIDGET_RENDERED_CHANNEL,
   GET_DICTATION_WIDGET_STATE_CHANNEL,
   PUBLISH_DICTATION_WIDGET_STATE_CHANNEL,
@@ -27,6 +30,12 @@ import {
   createDictationWidgetWindow,
   type DictationWidgetPresence,
 } from "./DictationWidgetWindow.ts";
+import {
+  dictationSocketCommand,
+  listenForDictationCommands,
+  processSocketDefaults,
+  resolveDictationSocketPath,
+} from "./dictationControlSocket.ts";
 import { resolveDictationLauncher } from "./dictationLauncher.ts";
 import { createHyprlandSessionBinds, executeHyprctl } from "./hyprlandSessionBinds.ts";
 
@@ -66,6 +75,7 @@ export class DesktopDictationWidget extends Context.Service<DesktopDictationWidg
 export const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const electronApp = yield* ElectronApp.ElectronApp;
+  const electronWindow = yield* ElectronWindow.ElectronWindow;
   const ipc = yield* DesktopIpc.DesktopIpc;
   const context = yield* Effect.context<never>();
   const runFork = Effect.runForkWith(context);
@@ -99,9 +109,35 @@ export const make = Effect.gen(function* () {
     cwd: process.cwd(),
     env: process.env,
   });
+  const socketPath = resolveDictationSocketPath({
+    env: process.env,
+    isDevelopment: environment.isDevelopment,
+    userDataPath: Electron.app.getPath("userData"),
+    ...processSocketDefaults(),
+  });
+  const socket = listenForDictationCommands({
+    socketPath,
+    onCommand: (command) =>
+      runFork(
+        Effect.gen(function* () {
+          const mainWindow = yield* electronWindow.currentMainOrFirst;
+          if (Option.isSome(mainWindow)) {
+            mainWindow.value.webContents.send(DICTATION_COMMAND_LINE_CHANNEL, command);
+          }
+        }),
+      ),
+    onError: (cause) =>
+      runFork(
+        logWarning("the dictation socket is not listening; binds fall back to a second launch", {
+          socketPath,
+          message: cause instanceof Error ? cause.message : String(cause),
+        }),
+      ),
+  });
+
   const binds = createHyprlandSessionBinds({
     env: process.env,
-    launcher,
+    commandFor: (command) => dictationSocketCommand({ socketPath, launcher, command }),
     execute: executeHyprctl,
     onError: (cause) =>
       runFork(
@@ -121,7 +157,10 @@ export const make = Effect.gen(function* () {
     setImmediate(() => widget.setFocusedWindow(Electron.BrowserWindow.getFocusedWindow()));
   yield* electronApp.on("browser-window-focus", syncFocus);
   yield* electronApp.on("browser-window-blur", syncFocus);
-  yield* electronApp.on("before-quit", () => void binds.dispose());
+  yield* electronApp.on("before-quit", () => {
+    void binds.dispose();
+    socket.close();
+  });
 
   /** The renderer that publishes; when it goes away its dictation goes with it. */
   const publishers = new Set<number>();
@@ -161,7 +200,10 @@ export const make = Effect.gen(function* () {
   });
 
   yield* Effect.addFinalizer(() =>
-    Effect.promise(() => binds.dispose()).pipe(Effect.andThen(Effect.sync(widget.dispose))),
+    Effect.promise(() => binds.dispose()).pipe(
+      Effect.andThen(Effect.sync(widget.dispose)),
+      Effect.andThen(Effect.sync(socket.close)),
+    ),
   );
 
   return DesktopDictationWidget.of({});

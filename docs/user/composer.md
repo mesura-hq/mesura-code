@@ -180,15 +180,17 @@ microphone, and the marker, modes and send-when-ready work as on the desktop.
 
 ### Dictate from another app on Hyprland
 
-With Mesura Code running, `mesura-code --dictation toggle` starts a recording, and running it again
-stops it. The transcript goes to the last chat you had open. To use it from any app, add a bind to
-your Hyprland config, for example:
+With Mesura Code running, sending `toggle` to its dictation socket starts a recording, and sending
+it again stops it. The transcript goes to the last chat you had open. To use it from any app, install
+`socat` and add a bind to your Hyprland config, with your user id in the path (`id -u`):
 
 ```
-bind = SUPER ALT, M, exec, mesura-code --dictation toggle
+bind = SUPER ALT, M, exec, printf 'toggle\n' | socat -u - UNIX-CONNECT:/run/user/1000/mesura-code/dictation.sock || mesura-code --dictation toggle
 ```
 
-Any free key works. Symmetria Shell's own dictation key stays as it is for other apps.
+The socket answers in milliseconds. The part after `||` starts Mesura Code when it is not running,
+which takes a few seconds. Any free key works. Symmetria Shell's own dictation key stays as it is for
+other apps.
 
 While a recording or its transcription is in progress, Mesura Code binds Alt+S (copy), Alt+I
 (insert), Alt+Enter (send), Alt+Space (pause), Alt+R (restart) and Alt+X (cancel), and releases them
