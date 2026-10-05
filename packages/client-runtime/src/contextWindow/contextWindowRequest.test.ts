@@ -1,6 +1,6 @@
 /**
  * Phase 3 fence, acceptance criteria 1–6: the shared context-window logic the
- * web pill and the Android indicator both read. Entry point: the public subpath
+ * web pill reads. Entry point: the public subpath
  * `@t3tools/client-runtime/context-window`, imported by name so the export
  * surface itself is under test. Expected values are written out from the
  * approved plan, never computed from the module under test.

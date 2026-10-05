@@ -1,7 +1,7 @@
 /**
- * Phase 5: the presentation helpers both the web pill and the Android
- * indicator read, moved here so neither client keeps its own copy. Entry
- * point: the public subpath `@t3tools/client-runtime/context-window`.
+ * The presentation helpers the web pill reads: labels, ring geometry, the
+ * cache split and the ring's pressure colour. Entry point: the public subpath
+ * `@t3tools/client-runtime/context-window`.
  */
 import { describe, expect, it } from "vite-plus/test";
 

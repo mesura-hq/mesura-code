@@ -33,7 +33,7 @@ export function formatContextWindowAccessibilityLabel(
     : `Context window ${formatContextWindowTokens(usage.usedTokens)} tokens used`;
 }
 
-/** Ring geometry in a 24-unit viewBox, shared by the web SVG and the native one. */
+/** Ring geometry in a 24-unit viewBox. */
 export const CONTEXT_WINDOW_RING_RADIUS = 9.75;
 export const CONTEXT_WINDOW_RING_CIRCUMFERENCE = 2 * Math.PI * CONTEXT_WINDOW_RING_RADIUS;
 /** Gap between neighbouring arcs, in viewBox units, so adjacent colours stay distinct. */
@@ -43,8 +43,8 @@ export const CONTEXT_WINDOW_RING_SEGMENT_GAP = 0.9;
 const CONTEXT_WINDOW_PRESSURE_START_PERCENTAGE = 50;
 /**
  * Ring colour stops by used share: yellow where pressure starts, orange at
- * three quarters, red at the limit. Tailwind's yellow-500, orange-500 and
- * red-500, so the web and the native ring paint the same colour.
+ * three quarters, red at the limit. They are Tailwind's yellow-500, orange-500 and
+ * red-500 in sRGB, so the blend between them stays a plain hex colour.
  */
 const CONTEXT_WINDOW_PRESSURE_STOPS: ReadonlyArray<{
   readonly percentage: number;
