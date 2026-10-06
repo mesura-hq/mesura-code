@@ -234,7 +234,7 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
       const token = "reusable-dev-auth-token-that-is-long-enough";
       const normal = yield* sessions.issue({ subject: "normal-session" });
 
-      yield* TestClock.adjust(Duration.days(31));
+      yield* TestClock.adjust(Duration.days(366));
 
       expect((yield* sessions.verify(token)).subject).toBe("reusable-dev-token");
       expect((yield* Effect.flip(sessions.verify(normal.token)))._tag).toBe(
@@ -323,6 +323,21 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
       });
     }).pipe(Effect.provide(failingSessionLookupCredentialLayer)),
   );
+  it.effect("keeps a paired session for a year, then expires it", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore.SessionStore;
+      const issued = yield* sessions.issue({ subject: "phone" });
+
+      yield* TestClock.adjust(Duration.days(364));
+      expect((yield* sessions.verify(issued.token)).subject).toBe("phone");
+
+      yield* TestClock.adjust(Duration.days(2));
+      expect((yield* Effect.flip(sessions.verify(issued.token)))._tag).toBe(
+        "SessionTokenExpiredError",
+      );
+    }).pipe(Effect.provide(Layer.merge(makeSessionStoreLayer(), TestClock.layer()))),
+  );
+
   it.effect("verifies session tokens against the Effect clock", () =>
     Effect.gen(function* () {
       const sessions = yield* SessionStore.SessionStore;

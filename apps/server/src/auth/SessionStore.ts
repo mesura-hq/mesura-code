@@ -420,7 +420,9 @@ export class SessionStore extends Context.Service<
 >()("t3/auth/SessionStore") {}
 
 const SIGNING_SECRET_NAME = "server-signing-key";
-const DEFAULT_SESSION_TTL = Duration.days(30);
+// Mesura: a year, not upstream's 30 days. The expiry is a signed claim and use never extends it, so
+// a phone paired to the host dropped back to "Pair with this environment" every 30 days.
+const DEFAULT_SESSION_TTL = Duration.days(365);
 const DEFAULT_WEBSOCKET_TOKEN_TTL = Duration.minutes(5);
 const SessionClaims = Schema.Struct({
   v: Schema.Literal(1),

@@ -54,7 +54,8 @@ and restarting invalidates the old credential and its WebSocket tickets.
 Normal credentials keep precedence. A rejected normal credential never falls
 back to the reusable credential. OAuth exchanges create ordinary local bearer
 or DPoP children with normal expiry and revocation. The reusable cookie expires
-after 30 days.
+after a year, like every session this fork issues without an explicit TTL
+(upstream uses 30 days).
 
 ## The environment is the filesystem boundary
 
