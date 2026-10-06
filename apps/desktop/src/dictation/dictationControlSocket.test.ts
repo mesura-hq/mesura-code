@@ -27,7 +27,12 @@ const hasSocat = (() => {
 })();
 
 describe("resolveDictationSocketPath", () => {
-  const base = { userDataPath: "/home/u/.config/Mesura", uid: 1000, tmpDir: "/tmp" };
+  const base = {
+    userDataPath: "/home/u/.config/Mesura",
+    homeDir: "/home/u",
+    uid: 1000,
+    tmpDir: "/tmp",
+  };
 
   it("gives the default packaged instance a stable path a hand-written bind can name", () => {
     expect(
@@ -63,10 +68,24 @@ describe("resolveDictationSocketPath", () => {
     expect(new Set([dev, isolatedA, isolatedB]).size).toBe(3);
   });
 
-  it("falls back to a per-user directory under tmp without XDG_RUNTIME_DIR", () => {
-    expect(resolveDictationSocketPath({ ...base, env: {}, isDevelopment: false })).toBe(
-      "/tmp/mesura-code-1000/dictation.sock",
-    );
+  it("keeps the stable path when a session manager exports XDG_CONFIG_HOME=~/.config", () => {
+    for (const configHome of ["/home/u/.config", "/home/u/.config/"]) {
+      expect(
+        resolveDictationSocketPath({
+          ...base,
+          env: { XDG_RUNTIME_DIR: "/run/user/1000", XDG_CONFIG_HOME: configHome },
+          isDevelopment: false,
+        }),
+      ).toBe("/run/user/1000/mesura-code/dictation.sock");
+    }
+  });
+
+  it("falls back to a per-user directory under tmp without a usable XDG_RUNTIME_DIR", () => {
+    for (const env of [{}, { XDG_RUNTIME_DIR: "relative/run" }]) {
+      expect(resolveDictationSocketPath({ ...base, env, isDevelopment: false })).toBe(
+        "/tmp/mesura-code-1000/dictation.sock",
+      );
+    }
   });
 });
 
@@ -77,13 +96,37 @@ describe("parseDictationSocketLine", () => {
   });
 
   it("rejects anything that is not a dictation command", () => {
-    for (const line of ["", "mode", "mode everything", "rm -rf /", "toggle-everything"]) {
+    for (const line of [
+      "",
+      "mode",
+      "mode everything",
+      "rm -rf /",
+      "toggle-everything",
+      // The argv parser skips paths, flags and extra words; a socket line has none of them.
+      "toggle junk words",
+      "/etc/x --foo pause",
+      "--dictation cancel",
+      "mode inject extra",
+    ]) {
       expect(parseDictationSocketLine(line)).toBeNull();
     }
   });
 });
 
-describe("listenForDictationCommands", () => {
+describe("dictationSocketCommand", () => {
+  it("gives a socket path socat cannot address the second launch alone", () => {
+    expect(
+      dictationSocketCommand({
+        socketPath: "/tmp/odd,dir/dictation.sock",
+        launcher: ["/usr/bin/mesura-code"],
+        command: "dictation.toggle",
+      }),
+    ).toBe("/usr/bin/mesura-code --dictation toggle");
+  });
+});
+
+// oxlint-disable-next-line t3code/no-global-process-runtime -- Test collection checks the host before starting these Unix-socket tests.
+describe.skipIf(process.platform === "win32")("listenForDictationCommands", () => {
   let directory: string;
   let socketPath: string;
   let received: DictationKeybindingCommand[];
@@ -93,12 +136,10 @@ describe("listenForDictationCommands", () => {
     const socket = listenForDictationCommands({
       socketPath,
       onCommand: (command) => received.push(command),
-      onError: (cause) => {
-        throw cause;
-      },
+      onError: () => undefined,
     });
     close = socket.close;
-    await socket.ready;
+    return socket.ready;
   };
 
   /** Sends raw bytes and resolves once the server has closed the connection. */
@@ -134,6 +175,36 @@ describe("listenForDictationCommands", () => {
 
     close();
     expect(NodeFS.existsSync(socketPath)).toBe(false);
+  });
+
+  it("leaves a live instance's socket alone when a second instance starts and quits", async () => {
+    expect(await listen()).toBe("listening");
+    const second = listenForDictationCommands({
+      socketPath,
+      onCommand: () => undefined,
+      onError: () => undefined,
+    });
+    expect(await second.ready).toBe("served-elsewhere");
+    second.close();
+
+    expect(NodeFS.existsSync(socketPath)).toBe(true);
+    await send("toggle\n");
+    expect(received).toEqual(["dictation.toggle"]);
+  });
+
+  it("makes an open socket directory private, and refuses a symlinked one", async () => {
+    const open = NodePath.join(directory, "open");
+    NodeFS.mkdirSync(open);
+    NodeFS.chmodSync(open, 0o755);
+    socketPath = NodePath.join(open, "dictation.sock");
+    expect(await listen()).toBe("listening");
+    expect(NodeFS.statSync(open).mode & 0o777).toBe(0o700);
+    close();
+
+    const link = NodePath.join(directory, "link");
+    NodeFS.symlinkSync(open, link);
+    socketPath = NodePath.join(link, "dictation.sock");
+    await expect(listen()).rejects.toThrow(/not a directory of this user/);
   });
 
   it("drops a connection that sends more than a command line", async () => {

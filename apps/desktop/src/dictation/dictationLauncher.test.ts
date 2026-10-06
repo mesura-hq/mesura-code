@@ -126,8 +126,13 @@ describe("dictation phase 6 regressions: bind launcher", () => {
       },
     });
     await binds.setSessionActive(true);
-    expect(batches[0]).toContain(
-      `2>/dev/null || env VITE_DEV_SERVER_URL=http://127.0.0.1:6328 ${ELECTRON} --no-sandbox --t3code-dev-root=${DESKTOP} ${DESKTOP}/dist-electron/main.cjs --dictation mode clipboard ; `,
-    );
+    const clipboardBind = batches[0]!
+      .split(" ; ")
+      .find((line) => line.startsWith("keyword bind ALT,S,exec,"));
+    expect(
+      clipboardBind?.endsWith(
+        `|| env VITE_DEV_SERVER_URL=http://127.0.0.1:6328 ${ELECTRON} --no-sandbox --t3code-dev-root=${DESKTOP} ${DESKTOP}/dist-electron/main.cjs --dictation mode clipboard`,
+      ),
+    ).toBe(true);
   });
 });

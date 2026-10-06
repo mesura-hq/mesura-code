@@ -19,11 +19,27 @@ const COMMAND_LINE_ACTIONS: Record<DictationKeybindingCommand, ReadonlyArray<str
 
 const ACTION_WORDS = new Set(Object.values(COMMAND_LINE_ACTIONS).map(([action]) => action));
 
+/** The words after `--dictation` that run `command`; also the dictation socket's protocol. */
+export function dictationCommandWords(command: DictationKeybindingCommand): ReadonlyArray<string> {
+  return COMMAND_LINE_ACTIONS[command];
+}
+
 /** The arguments that run `command`, after the binary. */
 export function dictationCommandLineArguments(
   command: DictationKeybindingCommand,
 ): ReadonlyArray<string> {
-  return [DICTATION_FLAG, ...COMMAND_LINE_ACTIONS[command]];
+  return [DICTATION_FLAG, ...dictationCommandWords(command)];
+}
+
+/** The command whose words are exactly `words`, or `null`. */
+export function dictationCommandFromWords(
+  words: ReadonlyArray<string>,
+): DictationKeybindingCommand | null {
+  for (const [command, expected] of Object.entries(COMMAND_LINE_ACTIONS)) {
+    if (expected.length === words.length && expected.every((word, index) => word === words[index]))
+      return command as DictationKeybindingCommand;
+  }
+  return null;
 }
 
 /**
@@ -43,10 +59,7 @@ export function parseDictationCommandLine(
     .filter((argument) => !argument.startsWith("-") && !argument.includes("/"));
   const [action, argument] = words;
   if (action === undefined || !ACTION_WORDS.has(action)) return null;
-  const expected = action === "mode" ? [action, argument] : [action];
-  for (const [command, words] of Object.entries(COMMAND_LINE_ACTIONS)) {
-    if (words.length === expected.length && words.every((word, index) => word === expected[index]))
-      return command as DictationKeybindingCommand;
-  }
-  return null;
+  return dictationCommandFromWords(
+    action === "mode" && argument !== undefined ? [action, argument] : [action],
+  );
 }

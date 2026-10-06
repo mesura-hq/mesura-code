@@ -17,7 +17,7 @@ const SOCKET = "/run/user/1000/mesura-code/dictation.sock";
 
 /** A session key: the words to the socket, the second launch as the fallback. */
 const viaSocket = (words: string) =>
-  `printf '${words}\\n' | socat -u - UNIX-CONNECT:${SOCKET} 2>/dev/null || /usr/bin/mesura-code --dictation ${words}`;
+  `printf '%s\\n' ${words.includes(" ") ? `'${words}'` : words} | socat -u - UNIX-CONNECT:${SOCKET} 2>/dev/null || /usr/bin/mesura-code --dictation ${words}`;
 
 const BIND_BATCH = [
   "keyword unbind ALT,S",
@@ -198,6 +198,8 @@ describe("dictation phase 6 fence: Hyprland binds that existed before the sessio
   it("dictation phase 6 AC5: a bind an earlier Mesura left behind and binds on other combos are not put back", async () => {
     const { binds, batches } = makeBinds(HYPRLAND, LAUNCHER, [
       reportedBind({ key: "S", arg: "/usr/bin/mesura-code --dictation mode clipboard" }),
+      // A crashed instance's socket-form bind is its own too: its fallback carries the flag.
+      reportedBind({ key: "I", arg: viaSocket("mode inject") }),
       reportedBind({ key: "V", arg: "qs ipc call stt paste" }),
       reportedBind({ key: "space", modmask: 9, arg: "notify-send shifted" }),
     ]);
@@ -259,7 +261,7 @@ describe("dictation phase 6 rework: restored binds that carry semicolons", () =>
     expect(second).toEqual([
       "keyword",
       "bind",
-      `ALT,S,exec,printf 'mode clipboard\\n' | socat -u - UNIX-CONNECT:${SOCKET} 2>/dev/null || '/opt/odd;dir/mesura-code' --dictation mode clipboard`,
+      `ALT,S,exec,printf '%s\\n' 'mode clipboard' | socat -u - UNIX-CONNECT:${SOCKET} 2>/dev/null || '/opt/odd;dir/mesura-code' --dictation mode clipboard`,
     ]);
     expect(third).toBe("keyword unbind ALT,I");
   });

@@ -185,11 +185,13 @@ it again stops it. The transcript goes to the last chat you had open. To use it 
 `socat` and add a bind to your Hyprland config, with your user id in the path (`id -u`):
 
 ```
-bind = SUPER ALT, M, exec, printf 'toggle\n' | socat -u - UNIX-CONNECT:/run/user/1000/mesura-code/dictation.sock || mesura-code --dictation toggle
+bind = SUPER ALT, M, exec, printf 'toggle\n' | socat -u - UNIX-CONNECT:/run/user/1000/mesura-code/dictation.sock 2>/dev/null || mesura-code --dictation toggle
 ```
 
 The socket answers in milliseconds. The part after `||` starts Mesura Code when it is not running,
-which takes a few seconds. Any free key works. Symmetria Shell's own dictation key stays as it is for
+which takes a few seconds. That path belongs to the installed app; a development build or one run
+with its own `XDG_CONFIG_HOME` listens elsewhere, so this bind reaches it only through the slower
+fallback. Any free key works. Symmetria Shell's own dictation key stays as it is for
 other apps.
 
 While a recording or its transcription is in progress, Mesura Code binds Alt+S (copy), Alt+I
