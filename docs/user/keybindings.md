@@ -237,8 +237,11 @@ leave the editor and `Ctrl+H` to reach the chat, and the pair works again.
 Scrolling up also stops the timeline following the live edge, the same as scrolling with the
 wheel. Without that, the next chunk of a streaming reply would pull you back to the bottom.
 
-`mod+shift+d` starts and stops voice dictation (`dictation.toggle`). `diff.toggle` has no default
-shortcut; bind it here if you want one. A reply's changed files still open the diff.
+### Dictation and the diff panel
+
+`mod+shift+d` starts and stops voice dictation (`dictation.toggle`) everywhere except the terminal,
+where it splits the terminal. `diff.toggle` has no default shortcut; bind it in Settings →
+Keybindings if you want one. A reply's changed files still open the diff.
 
 ### Moving between threads
 

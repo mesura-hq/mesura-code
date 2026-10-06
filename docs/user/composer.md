@@ -147,9 +147,9 @@ Mesura Code transcribes on its server with your OpenAI key. Set the key once in 
 Dictation**; every device connected to that server uses it. The same page takes vocabulary hints,
 one name or term per line, for words the transcription should spell correctly.
 
-Select the microphone beside Send, or press `Ctrl+Shift+D` (`Cmd+Shift+D` on macOS), to start
-recording; the same key stops it. The strip above the composer shows the
-elapsed time, a live waveform, and pause, restart, cancel and stop. Stop and transcribe ends the
+Select the microphone beside Send, or press `Ctrl+Shift+D` (`Cmd+Shift+D` on macOS) outside the
+terminal, to start recording; the same key stops it. The strip above the composer shows the elapsed
+time, a live waveform, and pause, restart, cancel and stop. Stop and transcribe ends the
 recording; the composer stays editable the whole time.
 
 The mode button cycles through three modes:

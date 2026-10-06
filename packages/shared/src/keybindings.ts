@@ -46,9 +46,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+n", command: "terminal.new", when: "terminalFocus" },
   { key: "mod+w", command: "terminal.close", when: "terminalFocus" },
   { key: "mod+w", command: "rightPanel.close", when: "!terminalFocus" },
-  // Mesura: diff.toggle ships unbound. It gave mod+d to the reading scroll and
-  // then mod+shift+d to dictation.toggle; WITHDRAWN_KEYBINDING_DEFAULTS takes
-  // both old rules out of existing configs.
+  // Mesura: diff.toggle ships unbound; see WITHDRAWN_KEYBINDING_DEFAULTS.
   { key: "mod+shift+j", command: "preview.toggle" },
   { key: "mod+r", command: "preview.refresh", when: "previewFocus" },
   { key: "mod+alt+l", command: "preview.focusUrl", when: "previewFocus" },
@@ -97,9 +95,10 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // live, and listed after hosts.peek on purpose: resolution is last-wins, so
   // alt+s selects save during a dictation and stays the Hosts peek otherwise.
   // dictation.toggle starts and stops a recording while Mesura has focus; the
-  // user guide gives the Hyprland bind for other apps. New commands, so the
-  // per-command startup backfill installs them, on the chord the diff.toggle
-  // withdrawal frees in the same startup.
+  // user guide gives the Hyprland bind for other apps. The backfill installs
+  // these only in configs that never mention the command, so a user who bound
+  // dictation.toggle elsewhere keeps that key. On an installed config the
+  // diff.toggle withdrawal frees mod+shift+d in the same startup.
   { key: "mod+shift+d", command: "dictation.toggle", when: "!terminalFocus" },
   { key: "alt+s", command: "dictation.mode.clipboard", when: "dictationActive" },
   { key: "alt+i", command: "dictation.mode.inject", when: "dictationActive" },

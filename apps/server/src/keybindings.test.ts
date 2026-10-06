@@ -883,13 +883,39 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         [{ key: "mod+shift+d", command: "dictation.toggle", when: "!terminalFocus" }],
       );
 
-      // Once: a user who binds diff.toggle there again keeps it.
-      const rebound = { key: "mod+alt+d", command: "diff.toggle", when: "!terminalFocus" } as const;
+      // Once: a user who binds diff.toggle again, with the exact withdrawn
+      // rule, keeps it. Without the ledger the second startup would drop it.
+      const rebound = { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" } as const;
       yield* writeKeybindingsConfig(keybindingsConfigPath, [...persisted, rebound]);
       yield* sync;
       const afterSecondStartup = yield* readKeybindingsConfig(keybindingsConfigPath);
       assert.isTrue(
         afterSecondStartup.some((entry) => Keybindings.isSameKeybindingRule(entry, rebound)),
+      );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("keeps a dictation key the user chose and leaves the freed chord empty", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+shift+d", command: "diff.toggle", when: "!terminalFocus" },
+        { key: "mod+alt+v", command: "dictation.toggle", when: "!terminalFocus" },
+      ]);
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.isFalse(persisted.some((entry) => entry.command === "diff.toggle"));
+      assert.deepEqual(
+        persisted.filter((entry) => entry.command === "dictation.toggle").map((entry) => entry.key),
+        ["mod+alt+v"],
+      );
+      assert.isFalse(
+        persisted.some((entry) => entry.key === "mod+shift+d" && entry.when === "!terminalFocus"),
       );
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
