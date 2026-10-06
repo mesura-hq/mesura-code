@@ -323,6 +323,7 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
       });
     }).pipe(Effect.provide(failingSessionLookupCredentialLayer)),
   );
+
   it.effect("keeps a paired session for a year, then expires it", () =>
     Effect.gen(function* () {
       const sessions = yield* SessionStore.SessionStore;

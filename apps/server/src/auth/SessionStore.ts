@@ -421,7 +421,9 @@ export class SessionStore extends Context.Service<
 
 const SIGNING_SECRET_NAME = "server-signing-key";
 // Mesura: a year, not upstream's 30 days. The expiry is a signed claim and use never extends it, so
-// a phone paired to the host dropped back to "Pair with this environment" every 30 days.
+// a phone paired to the host dropped back to "Pair with this environment" every 30 days. Keep it at
+// or below 400 days: Chrome caps a cookie's Expires at 400, and the session cookie's expiry follows
+// this TTL.
 const DEFAULT_SESSION_TTL = Duration.days(365);
 const DEFAULT_WEBSOCKET_TOKEN_TTL = Duration.minutes(5);
 const SessionClaims = Schema.Struct({
