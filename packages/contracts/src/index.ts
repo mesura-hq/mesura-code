@@ -47,6 +47,7 @@ export * from "./hostStats.ts";
 export * from "./usage.ts";
 export * from "./accountLimits.ts";
 export * from "./fileManager.ts";
+export * from "./gitChanges.ts";
 export * from "./rpc.ts";
 export * from "./worktreeSetup.ts";
 export * from "./factory.ts";

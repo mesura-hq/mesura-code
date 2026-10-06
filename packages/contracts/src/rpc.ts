@@ -101,6 +101,7 @@ import {
   ReviewDiffPreviewInput,
   ReviewDiffPreviewResult,
 } from "./review.ts";
+import { GitWorkingTreeChangesInput, GitWorkingTreeChangesResult } from "./gitChanges.ts";
 import { KeybindingsConfigError } from "./keybindings.ts";
 import {
   ClientOrchestrationCommand,
@@ -371,6 +372,9 @@ export const WS_METHODS = {
   // Review methods
   reviewGetDiffPreview: "review.getDiffPreview",
   reviewGetDiffFileContents: "review.getDiffFileContents",
+  // Fork addition: per-file status for the Git status surface (gitChanges.ts).
+  reviewGetWorkingTreeChanges: "review.getWorkingTreeChanges",
+  reviewSubscribeWorkingTreeChanges: "review.subscribeWorkingTreeChanges",
 
   // Terminal methods
   terminalOpen: "terminal.open",
@@ -1227,6 +1231,23 @@ const WsReviewGetDiffFileContentsRpc = Rpc.make(WS_METHODS.reviewGetDiffFileCont
   error: Schema.Union([ReviewDiffPreviewError, EnvironmentAuthorizationError]),
 });
 
+const WsReviewGetWorkingTreeChangesRpc = Rpc.make(WS_METHODS.reviewGetWorkingTreeChanges, {
+  payload: GitWorkingTreeChangesInput,
+  success: GitWorkingTreeChangesResult,
+  error: Schema.Union([ReviewDiffPreviewError, EnvironmentAuthorizationError]),
+});
+
+/** Fork addition: the same result, pushed again whenever it changes on disk. */
+const WsReviewSubscribeWorkingTreeChangesRpc = Rpc.make(
+  WS_METHODS.reviewSubscribeWorkingTreeChanges,
+  {
+    payload: GitWorkingTreeChangesInput,
+    success: GitWorkingTreeChangesResult,
+    error: Schema.Union([ReviewDiffPreviewError, EnvironmentAuthorizationError]),
+    stream: true,
+  },
+);
+
 const EditorSessionRpcErrors = Schema.Union([EditorSessionError, EnvironmentAuthorizationError]);
 
 const WsEditorSessionOpenRpc = Rpc.make(WS_METHODS.editorSessionOpen, {
@@ -1693,6 +1714,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsVcsInitRpc,
   WsReviewGetDiffPreviewRpc,
   WsReviewGetDiffFileContentsRpc,
+  WsReviewGetWorkingTreeChangesRpc,
+  WsReviewSubscribeWorkingTreeChangesRpc,
   WsTerminalOpenRpc,
   WsTerminalAttachRpc,
   WsTerminalWriteRpc,
