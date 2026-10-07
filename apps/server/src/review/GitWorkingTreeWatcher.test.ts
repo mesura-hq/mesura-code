@@ -272,6 +272,33 @@ describe("GitWorkingTreeWatcher via ReviewService.subscribeWorkingTreeChanges", 
     ),
   );
 
+  it.live("watcher guard: a cwd below the root sees a file created and edited outside it", () =>
+    withTempRepository("tree-watch-subdir-", (repository) => {
+      // A project opened at a subfolder of its repository, as a dev server's
+      // fallback to its own cwd (`apps/server`) is: git reports the whole
+      // repository, so the watches must cover the whole repository too.
+      const subdirectory = NodePath.join(repository.root, "src");
+      return Effect.gen(function* () {
+        const { queue } = yield* subscribeIntoQueue(subdirectory);
+        yield* nextEmission(queue, "waiting for the baseline");
+
+        repository.write("outside.ts", "first\n");
+        const created = yield* nextEmission(queue, "waiting for the file created at the root");
+        assert.deepInclude(fileByPath(created, "outside.ts"), {
+          index: "?",
+          worktree: "?",
+          unstaged: { insertions: 1, deletions: 0 },
+        });
+
+        repository.write("outside.ts", "first\nsecond\n");
+        const edited = yield* nextEmission(queue, "waiting for the edit at the root");
+        assert.deepInclude(fileByPath(edited, "outside.ts"), {
+          unstaged: { insertions: 2, deletions: 0 },
+        });
+      }).pipe(Effect.scoped, Effect.provide(makeLayer(subdirectory)));
+    }),
+  );
+
   it.live("watcher spec: git add and git commit each emit with no working-tree file touched", () =>
     withTempRepository("tree-watch-git-ops-", (repository) =>
       Effect.gen(function* () {

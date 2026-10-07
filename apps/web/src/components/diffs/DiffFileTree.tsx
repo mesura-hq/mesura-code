@@ -1,7 +1,7 @@
-import type { GitStatusEntry } from "@pierre/trees";
+import type { FileTreeRowDecoration, GitStatusEntry } from "@pierre/trees";
 import { FileTree, useFileTree, useFileTreeSelector } from "@pierre/trees/react";
 import { ChevronsDownUpIcon, ChevronsUpDownIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import { useTheme } from "~/hooks/useTheme";
 import { cn } from "~/lib/utils";
@@ -21,6 +21,35 @@ import {
 
 export type { DiffFileTreeEntry } from "./diffFileTree.logic";
 
+/**
+ * Fork addition: Symmetria IDE's git palette instead of Pierre's, whose blue
+ * for a modified file is the same blue as an untracked one and as the app's
+ * links. Modified is amber, so blue is left to untracked alone. The values are
+ * the app's own tokens, so both themes follow. Custom properties inherit into
+ * Pierre's shadow root, where its `--trees-git-*-color-override` hooks read them.
+ */
+const GIT_STATUS_COLOR_STYLE = {
+  "--trees-git-added-color-override": "var(--success)",
+  "--trees-git-modified-color-override": "var(--warning)",
+  "--trees-git-deleted-color-override": "var(--destructive)",
+  "--trees-git-renamed-color-override":
+    "color-mix(in srgb, var(--warning) 60%, var(--destructive))",
+  "--trees-git-untracked-color-override": "var(--info)",
+} as CSSProperties;
+
+/**
+ * Pierre labels an untracked file `U`, which git uses for a conflict. The IDE,
+ * like `git status --short`, shows `?`; the label is swapped in CSS because
+ * Pierre's letters are not configurable.
+ */
+const UNTRACKED_LETTER_CSS = `
+  [data-item-git-status='untracked'] > [data-item-section='git'] > span { font-size: 0; }
+  [data-item-git-status='untracked'] > [data-item-section='git'] > span::after {
+    content: '?';
+    font-size: var(--trees-font-size-override, 12px);
+  }
+`;
+
 interface DiffFileTreeProps {
   readonly entries: ReadonlyArray<DiffFileTreeEntry>;
   /** Called with the file's path when the reader picks a file row. */
@@ -32,6 +61,12 @@ interface DiffFileTreeProps {
   readonly selectedPath?: string | null;
   readonly revealRequestId?: number;
   readonly ariaLabel: string;
+  /** The header's label. */
+  readonly title?: string;
+  /** False for a host that draws its own header above the tree. */
+  readonly showHeader?: boolean;
+  /** Text after a file's name, such as its line counts. Directories get none. */
+  readonly renderFileDecoration?: (path: string) => FileTreeRowDecoration | null;
   /** Right-aligned content in the header row, after the file count. */
   readonly headerAccessory?: ReactNode;
   /** Rendered under the tree, for a host that still has files to fetch. */
@@ -49,6 +84,9 @@ export function DiffFileTree({
   selectedPath = null,
   revealRequestId = 0,
   ariaLabel,
+  title = "Files",
+  showHeader = true,
+  renderFileDecoration,
   headerAccessory,
   footer,
   className,
@@ -72,6 +110,9 @@ export function DiffFileTree({
   );
   const filePathsRef = useRef<ReadonlySet<string>>(new Set(paths));
   const onSelectFileRef = useRef(onSelectFile);
+  // Pierre takes the renderer once, at creation; the ref keeps it current.
+  const renderFileDecorationRef = useRef(renderFileDecoration);
+  renderFileDecorationRef.current = renderFileDecoration;
   // Selection driven by `selectedPath` below is an echo of a file already on screen, not a
   // request to scroll to it again.
   const syncingSelectionRef = useRef(false);
@@ -94,9 +135,11 @@ export function DiffFileTree({
       if (path && filePathsRef.current.has(path)) onSelectFileRef.current(path);
     },
     paths: [],
+    renderRowDecoration: ({ item }) =>
+      item.kind === "file" ? (renderFileDecorationRef.current?.(item.path) ?? null) : null,
     search: false,
     sort: ordering.sort,
-    unsafeCSS: PIERRE_TREE_UNSAFE_CSS,
+    unsafeCSS: PIERRE_TREE_UNSAFE_CSS + UNTRACKED_LETTER_CSS,
   });
   const allDirectoriesExpanded = useFileTreeSelector(model, (currentModel) =>
     areAllDirectoriesExpanded(currentModel, directoryPaths),
@@ -165,42 +208,44 @@ export function DiffFileTree({
 
   return (
     <div className={cn("flex min-h-0 flex-1 flex-col bg-background", className)}>
-      <div
-        className="flex h-10 min-h-10 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-2 text-xs text-muted-foreground in-data-[preview-panel-mode=inline]:mb-3 in-data-[preview-panel-mode=inline]:h-7 in-data-[preview-panel-mode=inline]:min-h-7 in-data-[preview-panel-mode=inline]:border-b-transparent"
-        data-surface-subheader
-      >
-        <span className="px-1 font-medium text-foreground">Files</span>
-        <span className="ml-auto tabular-nums">{entries.length}</span>
-        {headerAccessory}
-        {directoryPaths.length > 0 ? (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  type="button"
-                  size="icon-xs"
-                  variant="ghost"
-                  aria-label={
-                    allDirectoriesExpanded ? "Collapse all folders" : "Expand all folders"
-                  }
-                  onClick={() =>
-                    setAllDirectoriesExpanded(model, directoryPaths, !allDirectoriesExpanded)
-                  }
-                />
-              }
-            >
-              {allDirectoriesExpanded ? (
-                <ChevronsDownUpIcon className="size-3.5" />
-              ) : (
-                <ChevronsUpDownIcon className="size-3.5" />
-              )}
-            </TooltipTrigger>
-            <TooltipPopup>
-              {allDirectoriesExpanded ? "Collapse all folders" : "Expand all folders"}
-            </TooltipPopup>
-          </Tooltip>
-        ) : null}
-      </div>
+      {showHeader ? (
+        <div
+          className="flex h-10 min-h-10 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-2 text-xs text-muted-foreground in-data-[preview-panel-mode=inline]:mb-3 in-data-[preview-panel-mode=inline]:h-7 in-data-[preview-panel-mode=inline]:min-h-7 in-data-[preview-panel-mode=inline]:border-b-transparent"
+          data-surface-subheader
+        >
+          <span className="px-1 font-medium text-foreground">{title}</span>
+          <span className="ml-auto tabular-nums">{entries.length}</span>
+          {headerAccessory}
+          {directoryPaths.length > 0 ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant="ghost"
+                    aria-label={
+                      allDirectoriesExpanded ? "Collapse all folders" : "Expand all folders"
+                    }
+                    onClick={() =>
+                      setAllDirectoriesExpanded(model, directoryPaths, !allDirectoriesExpanded)
+                    }
+                  />
+                }
+              >
+                {allDirectoriesExpanded ? (
+                  <ChevronsDownUpIcon className="size-3.5" />
+                ) : (
+                  <ChevronsUpDownIcon className="size-3.5" />
+                )}
+              </TooltipTrigger>
+              <TooltipPopup>
+                {allDirectoriesExpanded ? "Collapse all folders" : "Expand all folders"}
+              </TooltipPopup>
+            </Tooltip>
+          ) : null}
+        </div>
+      ) : null}
       <FileTree
         model={model}
         aria-label={ariaLabel}
@@ -228,7 +273,7 @@ export function DiffFileTree({
           if (clickedSelectedRow) onSelectFileRef.current(path);
         }}
         className="min-h-0 flex-1 overflow-hidden"
-        style={pierreTreeStyle(resolvedTheme)}
+        style={{ ...pierreTreeStyle(resolvedTheme), ...GIT_STATUS_COLOR_STYLE }}
       />
       {footer}
     </div>

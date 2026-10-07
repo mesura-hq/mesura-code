@@ -20,10 +20,38 @@ describe("diffPanelStore", () => {
     ).toEqual({ kind: "branch", baseRef: null });
   });
 
-  it("defaults each thread to working changes when the working tree is dirty", () => {
+  it("defaults each thread to Tree diff when the working tree is dirty", () => {
+    expect(
+      selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF, true),
+    ).toEqual({ kind: "tree" });
+  });
+
+  it("selects Tree diff as its own scope, dropping a turn's fields", () => {
+    const store = useDiffPanelStore.getState();
+    store.selectTurn(THREAD_REF, TurnId.make("turn-1"), "src/app.ts");
+    store.selectGitScope(THREAD_REF, "tree");
+
+    expect(
+      selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
+    ).toEqual({ kind: "tree" });
+  });
+
+  it("keeps a stored Files diff selection over the Tree diff default", () => {
+    useDiffPanelStore.getState().selectGitScope(THREAD_REF, "unstaged");
+
     expect(
       selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF, true),
     ).toEqual({ kind: "unstaged" });
+  });
+
+  it("restores the selected branch base after visiting Tree diff", () => {
+    useDiffPanelStore.getState().selectBranchBaseRef(THREAD_REF, "origin/main");
+    useDiffPanelStore.getState().selectGitScope(THREAD_REF, "tree");
+    useDiffPanelStore.getState().selectGitScope(THREAD_REF, "branch");
+
+    expect(
+      selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
+    ).toEqual({ kind: "branch", baseRef: "origin/main" });
   });
 
   it("preserves an explicit scope selection when the working tree state changes", () => {
