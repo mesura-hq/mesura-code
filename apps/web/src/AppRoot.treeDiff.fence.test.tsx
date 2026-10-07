@@ -5,6 +5,12 @@
  * same store the Diff tab and `diff.toggle` write. ChatView, DiffPanel, the
  * Tree diff view and the diff store remain real.
  *
+ * Tree diff phase 3's keys and file tabs (the `Tree diff keys fence:` tests)
+ * mount the same way, with the root route wrapping the real `CommandPalette`
+ * around the page and the thread route mounting `useFileTreeShortcut`, as
+ * `routes/__root.tsx` and `routes/_chat.tsx` do. Keys are dispatched on the
+ * focused element and reach the window listeners the app installs.
+ *
  * Tree diff phase 2, acceptance criteria 1–5, 7 and 8. Criterion 6 (colours)
  * is a visual criterion: the colours are CSS custom properties on the tree host
  * and a letter swapped in CSS, and AGENTS.md rules out asserting markup; the
@@ -29,6 +35,7 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
+  Outlet,
 } from "@tanstack/react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 import {
@@ -52,7 +59,18 @@ type FixtureResult =
 
 const fixture = vi.hoisted(() => ({
   thread: null as Thread | null,
-  noopCommand: async () => ({ _tag: "Success", value: undefined }),
+  project: {
+    id: "tree-diff-fence-project",
+    environmentId: "tree-diff-fence-environment",
+    title: "Tree diff fence",
+    workspaceRoot: "/tmp/tree-diff-fence/repo",
+    scripts: [],
+    createdAt: "2026-10-06T12:00:00.000Z",
+    defaultModelSelection: { instanceId: "codex", model: "gpt-5.4" },
+  },
+  // Commands succeed with nothing to report. With a project in the workspace the
+  // composer refreshes providers and reads `providers` off the answer.
+  noopCommand: async () => ({ _tag: "Success", value: { providers: [] } }),
   empty: [],
   threadListeners: new Set<() => void>(),
   /** Every fixture atom, so the query hook can tell them from real ones. */
@@ -70,9 +88,12 @@ const fixture = vi.hoisted(() => ({
     {
       environmentId: "tree-diff-fence-environment",
       label: "Fence environment",
+      // The command palette reads where each environment lives.
+      entry: { target: { _tag: "PrimaryConnectionTarget" } },
       connection: { phase: "connected" },
       serverConfig: {
-        environment: { capabilities: {} },
+        environment: { capabilities: {}, platform: { machine: "server" } },
+        settings: { environmentIcon: null },
         providers: [
           {
             instanceId: "codex",
@@ -177,7 +198,8 @@ vi.mock("./state/entities", async (importOriginal) => {
     useThreadShell: useFixtureThread,
     useThreadRefs: () => fixture.empty,
     useProjects: () => fixture.empty,
-    useProject: () => null,
+    // A file surface renders only inside a project's workspace.
+    useProject: () => fixture.project,
   };
 });
 vi.mock("./state/environments", async (importOriginal) => ({
@@ -209,7 +231,11 @@ vi.mock("./hooks/useSettings", async (importOriginal) => {
     useClientSettingsHydrated: () => true,
   };
 });
-vi.mock("./hooks/useHandleNewThread", () => ({ useNewThreadHandler: () => fixture.noopCommand }));
+vi.mock("./hooks/useHandleNewThread", async (importOriginal) => ({
+  // The real `useHandleNewThread` stays: the command palette reads the route's thread through it.
+  ...(await importOriginal<typeof import("./hooks/useHandleNewThread")>()),
+  useNewThreadHandler: () => fixture.noopCommand,
+}));
 vi.mock("./hooks/useThreadActions", () => ({
   useThreadActions: () => ({
     settleThread: fixture.noopCommand,
@@ -223,10 +249,12 @@ vi.mock("./components/preview/PreviewAutomationHosts", () => ({
 vi.mock("./browser/ElectronBrowserHost", () => ({ ElectronBrowserHost: () => null }));
 vi.mock("./components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }));
 vi.mock("./components/chat/ChatHeader", () => ({ ChatHeader: () => null }));
-// happy-dom has no module workers. Files diff's code view renders without its
-// highlighting pool, which is unrelated to the file tree under test.
-vi.mock("./components/DiffWorkerPoolProvider", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./components/DiffWorkerPoolProvider")>()),
+// happy-dom has no module workers. Files diff's code view and a file tab's
+// source preview render without their highlighting pool, which is unrelated to
+// the trees under test. The real module is not loaded at all: it imports
+// Pierre's worker script, which then runs on the page and logs every window
+// message it does not recognise, outliving the run.
+vi.mock("./components/DiffWorkerPoolProvider", () => ({
   DiffWorkerPoolProvider: ({ children }: { children?: ReactNode }) => children,
 }));
 vi.mock("./components/BranchToolbar", () => ({ BranchToolbar: () => null }));
@@ -249,11 +277,19 @@ vi.mock("@legendapp/list/react", () => ({
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { AppRoot } from "./AppRoot";
 import ChatView from "./components/ChatView";
+import { CommandPalette } from "./components/CommandPalette";
+import { useFileTreeShortcut } from "./components/files/mesuraTree/useFileTreeShortcut";
+import { useFileTreeStore } from "./components/files/mesuraTree/fileTreeStore";
+import { openCommandPalette } from "./commandPaletteBus";
 import { SidebarProvider } from "./components/ui/sidebar";
 import { useDiffPanelStore, type DiffGitScope } from "./diffPanelStore";
 import { gitChangeRows } from "./components/treeDiff/treeDiff.logic";
 import { openGitChangeFile } from "./components/treeDiff/useWorkingTreeChanges";
-import { selectThreadRightPanelState, useRightPanelStore } from "./rightPanelStore";
+import {
+  selectActiveRightPanelSurface,
+  selectThreadRightPanelState,
+  useRightPanelStore,
+} from "./rightPanelStore";
 
 const environmentId = EnvironmentId.make("tree-diff-fence-environment");
 const threadId = ThreadId.make("tree-diff-fence-thread");
@@ -261,6 +297,8 @@ const threadRef = scopeThreadRef(environmentId, threadId);
 const worktreePath = "/tmp/tree-diff-fence/repo";
 const now = "2026-10-06T12:00:00.000Z";
 let root: Root | undefined;
+/** The mounted app's router, so a spec can navigate away from the thread and back. */
+let appRouter: { navigate: (options: { to: string }) => Promise<void> } | undefined;
 let container: HTMLDivElement;
 
 function change(
@@ -307,6 +345,18 @@ function dirtyVcsStatus() {
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  // A browser's ClipboardItem owns the promises it is given. Monaco hands it one
+  // on every click and cancels it on the next; happy-dom's leaves it unhandled.
+  vi.stubGlobal(
+    "ClipboardItem",
+    class {
+      readonly types: ReadonlyArray<string>;
+      constructor(items: Record<string, Promise<unknown>>) {
+        this.types = Object.keys(items);
+        for (const item of Object.values(items)) Promise.resolve(item).catch(() => {});
+      }
+    },
+  );
   localStorage.clear();
   useDiffPanelStore.setState({ byThreadKey: {}, branchBaseRefByThreadKey: {} });
   useRightPanelStore.setState({ byThreadKey: {}, userActionRevisionByThreadKey: {} });
@@ -351,35 +401,69 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+/** The chat route's shell around ChatView: the `fileTree.toggle` listener `_chat.tsx` mounts. */
+function ThreadRoute() {
+  useFileTreeShortcut(threadRef);
+  return (
+    <SidebarProvider>
+      <ChatView environmentId={environmentId} threadId={threadId} routeKind="server" />
+    </SidebarProvider>
+  );
+}
+
 /** Mounts the app with the thread's right panel open on the Diff surface. */
 async function mountDiffSurface(storedScope?: DiffGitScope | "tree") {
   if (storedScope !== undefined) {
     useDiffPanelStore.getState().selectGitScope(threadRef, storedScope as DiffGitScope);
   }
   useRightPanelStore.getState().open(threadRef, "diff");
+  await mountApp();
+  // DiffPanel is lazy: wait for its chunk to load and render its header.
+  await waitFor(() => document.body.querySelector('[aria-label^="Diff scope: "]') !== null);
+}
+
+/**
+ * Mounts AppRoot on the thread's route, with the right panel as the stores
+ * leave it. The root route wraps the command palette around the page, as
+ * `routes/__root.tsx` does.
+ */
+async function mountApp() {
   // DiffPanel reads the thread from the route's params, as on `/$environmentId/$threadId`.
-  const route = createRootRoute();
+  const route = createRootRoute({
+    component: () => (
+      <CommandPalette>
+        <Outlet />
+      </CommandPalette>
+    ),
+  });
   const threadRoute = createRoute({
     getParentRoute: () => route,
     path: "/$environmentId/$threadId",
-    component: () => (
-      <SidebarProvider>
-        <ChatView environmentId={environmentId} threadId={threadId} routeKind="server" />
-      </SidebarProvider>
-    ),
+    component: ThreadRoute,
+  });
+  // Any other page: leaving the thread unmounts ChatView, as Settings does.
+  const elsewhereRoute = createRoute({
+    getParentRoute: () => route,
+    path: "/elsewhere",
+    component: () => <div>Elsewhere</div>,
   });
   const router = createRouter({
-    routeTree: route.addChildren([threadRoute]),
+    routeTree: route.addChildren([threadRoute, elsewhereRoute]),
     history: createMemoryHistory({ initialEntries: [`/${environmentId}/${threadId}`] }),
   });
   await router.load();
+  appRouter = router as unknown as typeof appRouter;
   await act(async () => {
     root = createRoot(container);
     root.render(<AppRoot router={router as unknown as AppRouter} />);
   });
-  // DiffPanel is lazy: wait for its chunk to load and render its header.
+  await settle();
+}
+
+/** Lets lazy chunks load until `ready` holds, then settles. */
+async function waitFor(ready: () => boolean) {
   for (let attempt = 0; attempt < 200; attempt += 1) {
-    if (document.body.querySelector('[aria-label^="Diff scope: "]')) break;
+    if (ready()) break;
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
@@ -679,4 +763,321 @@ it("Tree diff fence: Branch changes keeps a new file added and reads no working-
 
   expect(treeRow("src/untracked-new.ts")).toMatchObject({ status: "added" });
   expect(requestsFor(WS_METHODS.reviewGetWorkingTreeChanges)).toEqual([]);
+});
+
+// ---------------------------------------------------------------------------
+// Tree diff phase 3: Alt+G, Alt+C, the palette row, and file tabs opened from
+// Tree diff without the explorer.
+// ---------------------------------------------------------------------------
+
+const panelState = () =>
+  selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef);
+const activeSurface = () =>
+  selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, threadRef);
+
+/** A keydown on the focused element, bubbling to the app's window listeners. */
+async function pressKey(
+  key: string,
+  modifiers: { altKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean } = {},
+) {
+  const target = (document.activeElement as HTMLElement | null) ?? document.body;
+  await act(async () => {
+    target.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key,
+        code: key.length === 1 ? `Key${key.toUpperCase()}` : key,
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        ...modifiers,
+      }),
+    );
+  });
+  await settle();
+}
+
+const pressAlt = (key: string) => pressKey(key, { altKey: true });
+const diffSurfaceReady = () => document.body.querySelector('[aria-label^="Diff scope: "]') !== null;
+const menuItems = () => [...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+
+/** The file header's explorer button: its name says what a press does. */
+function explorerButton(): HTMLElement {
+  const button = document.body.querySelector<HTMLElement>(
+    '[aria-label="Show file explorer"], [aria-label="Hide file explorer"]',
+  );
+  expect(button, `Expected the explorer button; rendered: ${viewText()}`).not.toBeNull();
+  return button!;
+}
+
+/** The workspace explorer beside the file: the Files tree, not Tree diff's. */
+const explorerShown = () => document.body.querySelector('aside [aria-label$=" files"]') !== null;
+
+async function waitForFileTab() {
+  await waitFor(
+    () =>
+      document.body.querySelector(
+        '[aria-label="Show file explorer"], [aria-label="Hide file explorer"]',
+      ) !== null,
+  );
+}
+
+/** Clicks a Tree diff row the way a pointer does, inside Pierre's shadow root. */
+async function clickTreeRow(path: string) {
+  const row = treeRows().find((entry) => entry.getAttribute("data-item-path") === path);
+  expect(row, `Expected a tree row for ${path}; rows: ${treeRowPaths().join(", ")}`).toBeDefined();
+  await act(async () => {
+    row!.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, composed: true, button: 0 }),
+    );
+    row!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, composed: true, button: 0 }));
+    row!.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, composed: true, button: 0 }));
+    row!.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true, button: 0 }));
+  });
+  await waitForFileTab();
+}
+
+it("Tree diff keys fence: Alt+G with the panel closed opens the Diff surface on Tree diff", async () => {
+  useDiffPanelStore.getState().selectGitScope(threadRef, "branch");
+  await mountApp();
+  expect(panelState().isOpen).toBe(false);
+
+  await pressAlt("g");
+  await waitFor(diffSurfaceReady);
+  expect(panelState().isOpen).toBe(true);
+  expect(activeSurface()?.kind).toBe("diff");
+  expect(selectedMode()).toBe("Tree diff");
+});
+
+it("Tree diff keys fence: Alt+G on the Diff surface in another mode switches it to Tree diff", async () => {
+  await mountDiffSurface("branch");
+  await pressAlt("g");
+  expect(panelState().isOpen).toBe(true);
+  expect(selectedMode()).toBe("Tree diff");
+});
+
+it("Tree diff keys fence: Alt+G closes the panel when Tree diff is the active mode and tab", async () => {
+  await mountDiffSurface("tree");
+  await pressAlt("g");
+  expect(panelState().isOpen).toBe(false);
+});
+
+it("Tree diff keys fence: Alt+G on another tab brings the Diff surface forward on Tree diff", async () => {
+  await mountDiffSurface("tree");
+  await act(async () => useRightPanelStore.getState().openFile(threadRef, "src/edited.ts"));
+  await settle();
+  expect(activeSurface()?.kind).toBe("file");
+
+  await pressAlt("g");
+  await waitFor(diffSurfaceReady);
+  expect(panelState().isOpen).toBe(true);
+  expect(activeSurface()?.kind).toBe("diff");
+  expect(selectedMode()).toBe("Tree diff");
+});
+
+it("Tree diff keys fence: Alt+C with the panel closed opens the Diff surface and its mode menu", async () => {
+  useDiffPanelStore.getState().selectGitScope(threadRef, "branch");
+  await mountApp();
+
+  await pressAlt("c");
+  await waitFor(() => menuItems().length > 0);
+  expect(panelState().isOpen).toBe(true);
+  expect(activeSurface()?.kind).toBe("diff");
+  expect(menuItems().map((item) => item.textContent?.trim())).toContain("Tree diff");
+});
+
+it("Tree diff keys fence: in the Alt+C menu a mode's first letter and Enter select it", async () => {
+  await mountDiffSurface("tree");
+  await pressAlt("c");
+  await waitFor(() => menuItems().length > 0);
+
+  await pressKey("f");
+  await pressKey("Enter");
+  expect(menuItems()).toEqual([]);
+  expect(selectedMode()).toBe("Files diff");
+
+  // Tree diff and Turn both start with T: the first T is Tree diff.
+  await pressAlt("c");
+  await waitFor(() => menuItems().length > 0);
+  await pressKey("t");
+  await pressKey("Enter");
+  expect(selectedMode()).toBe("Tree diff");
+});
+
+it("Tree diff keys fence: the palette's Show tree diff row shows Alt+G and opens Tree diff", async () => {
+  useDiffPanelStore.getState().selectGitScope(threadRef, "branch");
+  await mountApp();
+  await act(async () => openCommandPalette({ query: ">tree diff" }));
+  await waitFor(() => document.body.querySelector("[data-command-palette]") !== null);
+
+  const row = [...document.body.querySelectorAll<HTMLElement>('[role="option"]')].find((option) =>
+    option.textContent?.includes("Show tree diff"),
+  );
+  const paletteText = document.body.querySelector("[data-command-palette]")?.textContent;
+  expect(row, `Expected a Show tree diff row; the palette shows: ${paletteText}`).toBeDefined();
+  expect(row!.textContent).toContain("Alt+G");
+
+  await act(async () => row!.click());
+  await waitFor(diffSurfaceReady);
+  expect(panelState().isOpen).toBe(true);
+  expect(activeSurface()?.kind).toBe("diff");
+  expect(selectedMode()).toBe("Tree diff");
+});
+
+it("Tree diff keys fence: a file clicked in Tree diff opens alone in its own tab without the explorer", async () => {
+  useFileTreeStore.getState().setExplorerOpen(true);
+  await mountDiffSurface("tree");
+  await clickTreeRow("src/edited.ts");
+
+  expect(panelState().surfaces.map((surface) => surface.id)).toEqual([
+    "diff",
+    "file:src/edited.ts",
+  ]);
+  expect(activeSurface()?.id).toBe("file:src/edited.ts");
+  expect(explorerButton().getAttribute("aria-label")).toBe("Show file explorer");
+  expect(explorerShown()).toBe(false);
+  // The stored preference is the reader's, and this tab does not change it.
+  expect(useFileTreeStore.getState().explorerOpen).toBe(true);
+});
+
+it("Tree diff keys fence: the file header's explorer button shows the explorer on a Tree diff tab", async () => {
+  useFileTreeStore.getState().setExplorerOpen(false);
+  await mountDiffSurface("tree");
+  await clickTreeRow("src/edited.ts");
+  expect(explorerShown()).toBe(false);
+
+  await act(async () => explorerButton().click());
+  await settle();
+  expect(explorerButton().getAttribute("aria-label")).toBe("Hide file explorer");
+  expect(explorerShown()).toBe(true);
+});
+
+it("Tree diff keys fence: Mod+E shows the explorer on a Tree diff tab", async () => {
+  useFileTreeStore.getState().setExplorerOpen(true);
+  await mountDiffSurface("tree");
+  await clickTreeRow("src/edited.ts");
+  expect(explorerShown()).toBe(false);
+
+  await pressKey("e", { ctrlKey: true });
+  expect(explorerButton().getAttribute("aria-label")).toBe("Hide file explorer");
+  expect(explorerShown()).toBe(true);
+});
+
+it("Tree diff keys fence (guard): a file opened elsewhere follows the stored explorer preference", async () => {
+  useFileTreeStore.getState().setExplorerOpen(true);
+  await mountDiffSurface("tree");
+  await act(async () => useRightPanelStore.getState().openFile(threadRef, "src/edited.ts"));
+  await waitForFileTab();
+  expect(explorerButton().getAttribute("aria-label")).toBe("Hide file explorer");
+  expect(explorerShown()).toBe(true);
+
+  await act(async () => useFileTreeStore.getState().setExplorerOpen(false));
+  await settle();
+  expect(explorerButton().getAttribute("aria-label")).toBe("Show file explorer");
+  expect(explorerShown()).toBe(false);
+});
+
+it("Tree diff keys fence (guard): reopening a Tree diff file from elsewhere restores the stored preference", async () => {
+  useFileTreeStore.getState().setExplorerOpen(true);
+  await mountDiffSurface("tree");
+  await clickTreeRow("src/edited.ts");
+  expect(explorerShown()).toBe(false);
+
+  await act(async () => useRightPanelStore.getState().openFile(threadRef, "src/edited.ts", 3));
+  await settle();
+  expect(explorerButton().getAttribute("aria-label")).toBe("Hide file explorer");
+  expect(explorerShown()).toBe(true);
+});
+
+// ---------------------------------------------------------------------------
+// Tree diff phase 3 review: the default mode, menu requests across a ChatView
+// remount, and Mod+E on a hidden panel.
+// ---------------------------------------------------------------------------
+
+/** Leaves the thread for another page and comes back, remounting ChatView. */
+async function leaveThreadAndReturn() {
+  await act(async () => appRouter!.navigate({ to: "/elsewhere" }));
+  await waitFor(() => viewText().includes("Elsewhere"));
+  await act(async () => appRouter!.navigate({ to: `/${environmentId}/${threadId}` }));
+  await settle();
+}
+
+async function closeModeMenu() {
+  await pressKey("Escape");
+  await waitFor(() => menuItems().length === 0);
+}
+
+it("Tree diff review: Alt+G closes the panel when Tree diff shows as a dirty thread's default", async () => {
+  await mountDiffSurface();
+  expect(selectedMode()).toBe("Tree diff");
+
+  await pressAlt("g");
+  expect(panelState().isOpen).toBe(false);
+});
+
+it("Tree diff review: Alt+G switches to Tree diff when the open panel still shows the default it mounted with", async () => {
+  fixture.vcsStatus = { ...dirtyVcsStatus(), hasWorkingTreeChanges: false };
+  await mountDiffSurface();
+  expect(selectedMode()).toBe("Branch changes");
+
+  // The tree turns dirty while the panel is open; the panel keeps its mode.
+  await act(async () => {
+    fixture.vcsStatus = dirtyVcsStatus();
+    for (const listener of Array.from(fixture.listeners)) listener();
+  });
+  await settle();
+  expect(selectedMode()).toBe("Branch changes");
+
+  await pressAlt("g");
+  expect(panelState().isOpen).toBe(true);
+  expect(selectedMode()).toBe("Tree diff");
+});
+
+it("Tree diff review: after leaving and returning to the thread with Diff open, the mode menu stays shut until Alt+C", async () => {
+  await mountDiffSurface("tree");
+  await pressAlt("c");
+  await waitFor(() => menuItems().length > 0);
+  await closeModeMenu();
+
+  await leaveThreadAndReturn();
+  await waitFor(diffSurfaceReady);
+  expect(menuItems()).toEqual([]);
+
+  await pressAlt("c");
+  await waitFor(() => menuItems().length > 0);
+  expect(menuItems().length).toBeGreaterThan(0);
+});
+
+it("Tree diff review: after leaving and returning to the thread with Diff closed, Alt+C opens Diff and its mode menu", async () => {
+  await mountDiffSurface("tree");
+  await pressAlt("c");
+  await waitFor(() => menuItems().length > 0);
+  await closeModeMenu();
+  await act(async () => useRightPanelStore.getState().close(threadRef));
+  await settle();
+
+  await leaveThreadAndReturn();
+  expect(panelState().isOpen).toBe(false);
+
+  await pressAlt("c");
+  await waitFor(() => menuItems().length > 0);
+  expect(panelState().isOpen).toBe(true);
+  expect(activeSurface()?.kind).toBe("diff");
+  expect(menuItems().length).toBeGreaterThan(0);
+});
+
+it("Tree diff review: Mod+E on a hidden panel holding a Tree diff file shows it with the explorer", async () => {
+  useFileTreeStore.getState().setExplorerOpen(true);
+  await mountDiffSurface("tree");
+  await clickTreeRow("src/edited.ts");
+  expect(explorerShown()).toBe(false);
+  await act(async () => useRightPanelStore.getState().close(threadRef));
+  await settle();
+  expect(panelState().isOpen).toBe(false);
+
+  await pressKey("e", { ctrlKey: true });
+  await waitForFileTab();
+  expect(panelState().isOpen).toBe(true);
+  expect(activeSurface()?.id).toBe("file:src/edited.ts");
+  expect(explorerButton().getAttribute("aria-label")).toBe("Hide file explorer");
+  expect(explorerShown()).toBe(true);
 });

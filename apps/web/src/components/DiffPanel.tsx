@@ -6,6 +6,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
+import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
 import type { ScopedThreadRef, TurnId } from "@t3tools/contracts";
 import {
@@ -36,6 +37,10 @@ import {
   type DiffGitScope,
 } from "../diffPanelStore";
 import { TreeDiffView } from "./treeDiff/TreeDiffView";
+import {
+  claimDiffModeMenuRequest,
+  recordMountedDiffPanelDefault,
+} from "./treeDiff/diffPanelCommandBridge";
 import { useFilesDiffUntrackedEntries } from "./treeDiff/useFilesDiffUntrackedEntries";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useTheme } from "../hooks/useTheme";
@@ -112,11 +117,6 @@ interface DiffPanelProps {
   modeMenuRequestId?: number;
 }
 
-// Fork addition: the last `diff.modeMenu` request served. Module scope, because
-// the panel remounts on a thread switch and must not reopen the menu for a
-// request it already answered.
-let handledModeMenuRequestId = 0;
-
 export default function DiffPanel({
   mode = "inline",
   composerDraftTarget,
@@ -144,10 +144,10 @@ export default function DiffPanel({
   const [codeViewRevision, setCodeViewRevision] = useState(0);
   const [codeView, setCodeView] = useState<AnnotatableCodeViewHandle | null>(null);
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
+  // Fork addition: each `diff.modeMenu` request opens the menu once, so a
+  // remount on a thread switch or a navigation never reopens it.
   useEffect(() => {
-    if (modeMenuRequestId === handledModeMenuRequestId) return;
-    handledModeMenuRequestId = modeMenuRequestId;
-    setModeMenuOpen(true);
+    if (claimDiffModeMenuRequest(modeMenuRequestId)) setModeMenuOpen(true);
   }, [modeMenuRequestId]);
 
   const routeThreadRef = useParams({
@@ -191,6 +191,15 @@ export default function DiffPanel({
       routeThreadRef,
       initialGitScope === "unstaged",
     ),
+  );
+  // Fork addition: `treeDiff.toggle` reads the default this panel fixed at mount.
+  const routeThreadKey = routeThreadRef ? scopedThreadKey(routeThreadRef) : null;
+  useEffect(
+    () =>
+      routeThreadKey === null
+        ? undefined
+        : recordMountedDiffPanelDefault(routeThreadKey, initialGitScope === "unstaged"),
+    [initialGitScope, routeThreadKey],
   );
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =

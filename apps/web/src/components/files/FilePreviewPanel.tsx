@@ -94,6 +94,9 @@ interface FilePreviewPanelProps {
   onPendingChange: (relativePath: string, pending: boolean) => void;
   selectedFilePending: boolean;
   workspaceMutationId: string | null;
+  /** Fork addition: this tab hides the explorer whatever the shared preference says. */
+  explorerHidden?: boolean;
+  onRevealExplorer?: () => void;
 }
 
 const RENDER_MARKDOWN_STORAGE_KEY = "t3code.renderMarkdown";
@@ -596,6 +599,8 @@ export default function FilePreviewPanel({
   onPendingChange,
   selectedFilePending,
   workspaceMutationId,
+  explorerHidden = false,
+  onRevealExplorer,
 }: FilePreviewPanelProps) {
   const { resolvedTheme } = useTheme();
   const wordWrap = useClientSettings((settings) => settings.wordWrap);
@@ -640,11 +645,13 @@ export default function FilePreviewPanel({
   // copy would be a second one that drifts.
   const explorerOpen = useFileTreeStore((state) => state.explorerOpen);
   const toggleExplorer = useFileTreeStore((state) => state.toggleExplorer);
-  const showExplorer = shouldShowFileExplorer({
-    relativePath,
-    explorerOpen,
-    attachmentOpen: attachment !== undefined,
-  });
+  const showExplorer =
+    !explorerHidden &&
+    shouldShowFileExplorer({
+      relativePath,
+      explorerOpen,
+      attachmentOpen: attachment !== undefined,
+    });
   // Reading markdown rendered is a preference, not a property of one file. Keeping
   // it on the panel meant a thread switch dropped it and forced source back.
   const [renderMarkdownPreferred, setRenderMarkdownPreferred] = useLocalStorage(
@@ -881,9 +888,17 @@ export default function FilePreviewPanel({
           ) : null}
           {!isHostFile ? (
             <FileSurfaceAction
-              label={explorerOpen ? "Hide file explorer" : "Show file explorer"}
-              pressed={explorerOpen}
-              onPress={toggleExplorer}
+              label={showExplorer ? "Hide file explorer" : "Show file explorer"}
+              pressed={showExplorer}
+              onPress={() => {
+                // A tab opened without the explorer brings it back, open.
+                if (explorerHidden) {
+                  if (!explorerOpen) toggleExplorer();
+                  onRevealExplorer?.();
+                  return;
+                }
+                toggleExplorer();
+              }}
             >
               <FolderTree className="size-3.5" />
             </FileSurfaceAction>

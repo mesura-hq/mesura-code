@@ -33,10 +33,13 @@ export function runFileTreeToggle(routeThreadRef: ScopedThreadRef | null): void 
   const store = useFileTreeStore.getState();
   const panels = useRightPanelStore.getState();
   const active = selectActiveRightPanelSurface(panels.byThreadKey, routeThreadRef);
+  // A file tab opened from Tree diff hides the explorer on its own; the
+  // shortcut treats it as closed and brings it back there.
+  const hiddenOnTab = active?.kind === "file" && active.explorerHidden === true;
   const action = decideFileTreeShortcut({
     hasThread: routeThreadRef !== null,
     surfaceKind: active?.kind ?? null,
-    explorerOpen: store.explorerOpen,
+    explorerOpen: store.explorerOpen && !hiddenOnTab,
     treeFocused: isFileTreeFocused(),
   });
   switch (action) {
@@ -51,6 +54,9 @@ export function runFileTreeToggle(routeThreadRef: ScopedThreadRef | null): void 
     }
     case "show-and-focus":
       store.setExplorerOpen(true);
+      if (hiddenOnTab && routeThreadRef && active) {
+        panels.revealFileExplorer(routeThreadRef, active.id);
+      }
       if (focusTarget("tree")) store.clearPendingFocus();
       else store.requestFocus();
       return;
@@ -63,11 +69,15 @@ export function runFileTreeToggle(routeThreadRef: ScopedThreadRef | null): void 
 
 /**
  * A hidden panel that still holds a file keeps it; showing beats replacing
- * the developer's open file with the bare files surface.
+ * the developer's open file with the bare files surface. A file tab opened
+ * from Tree diff gets its explorer back, which is what the shortcut asked for.
  */
 function showFilesSurface(routeThreadRef: ScopedThreadRef): void {
   const panels = useRightPanelStore.getState();
   const selected = selectSelectedRightPanelSurface(panels.byThreadKey, routeThreadRef);
+  if (selected?.kind === "file" && selected.explorerHidden === true) {
+    panels.revealFileExplorer(routeThreadRef, selected.id);
+  }
   if (selected?.kind === "file" || selected?.kind === "files") panels.show(routeThreadRef);
   else panels.open(routeThreadRef, "files");
 }

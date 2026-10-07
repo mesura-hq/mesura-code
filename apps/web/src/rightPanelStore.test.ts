@@ -986,3 +986,49 @@ describe("right panel state persisted before the Factory surface (phase 2 guards
     ).toEqual({ byThreadKey: { "env-1:thread-A": threadState } });
   });
 });
+
+describe("file tabs opened without the explorer (Tree diff phase 3)", () => {
+  const fileSurface = (relativePath: string) =>
+    selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces.find(
+      (surface) => surface.id === `file:${relativePath}`,
+    );
+
+  it("openFile with explorerHidden opens a file tab that hides the explorer", () => {
+    const store = useRightPanelStore.getState();
+    store.open(refA, "diff");
+    store.openFile(refA, "src/edited.ts", undefined, { explorerHidden: true });
+
+    const state = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+    expect(state.surfaces.map((surface) => surface.id)).toEqual(["diff", "file:src/edited.ts"]);
+    expect(state.activeSurfaceId).toBe("file:src/edited.ts");
+    expect(fileSurface("src/edited.ts")).toMatchObject({ explorerHidden: true });
+  });
+
+  it("a later plain openFile of the same path shows the explorer again", () => {
+    const store = useRightPanelStore.getState();
+    store.openFile(refA, "src/edited.ts", undefined, { explorerHidden: true });
+    store.openFile(refA, "src/edited.ts", 12);
+
+    const surface = fileSurface("src/edited.ts");
+    expect(surface).toMatchObject({ revealLine: 12 });
+    expect(surface).not.toHaveProperty("explorerHidden");
+  });
+
+  it("a plain openFile never hides the explorer", () => {
+    useRightPanelStore.getState().openFile(refA, "src/plain.ts");
+    expect(fileSurface("src/plain.ts")).not.toHaveProperty("explorerHidden");
+  });
+
+  it("revealFileExplorer shows the explorer on that tab only", () => {
+    const store = useRightPanelStore.getState();
+    store.openFile(refA, "src/one.ts", undefined, { explorerHidden: true });
+    store.openFile(refA, "src/two.ts", undefined, { explorerHidden: true });
+    store.revealFileExplorer(refA, "file:src/one.ts");
+
+    expect(fileSurface("src/one.ts")).not.toHaveProperty("explorerHidden");
+    expect(fileSurface("src/two.ts")).toMatchObject({ explorerHidden: true });
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).activeSurfaceId,
+    ).toBe("file:src/two.ts");
+  });
+});

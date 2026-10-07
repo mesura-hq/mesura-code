@@ -153,6 +153,12 @@ export const STATIC_KEYBINDING_COMMANDS = [
   // RENAMED_KEYBINDING_COMMANDS in packages/shared.
   "fileTree.toggle",
   "fileTree.miller",
+  // The Diff surface's Tree diff mode: the working tree's changed files.
+  // Opens the surface on that mode, or closes it when that mode is showing.
+  "treeDiff.toggle",
+  // Opens the Diff surface's mode menu (Tree diff, Files diff, Branch changes,
+  // Latest turn, Turn).
+  "diff.modeMenu",
   "usage.peek",
   // Held like usage.peek, and opens the sidebar's Hosts dock instead.
   "hosts.peek",
