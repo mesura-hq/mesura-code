@@ -225,9 +225,12 @@
    moving the cursor never touches the timeline's DOM. Static: no transition. */
 /* The letter under the cursor takes the page's background colour, as a
    terminal block cursor reverses the cell. A white letter read as a stray
-   line on thin glyphs such as "l". */
+   line on thin glyphs such as "l". On a glyph narrower than half an em the
+   cursor is the widened overlay instead (`keys/blockCursor.ts`), which redraws
+   the glyph and shares these colours. */
 ::highlight(mesura-chat-cursor),
-::highlight(mesura-composer-cursor) {
+::highlight(mesura-composer-cursor),
+[data-mesura-block-cursor="glyph"] {
   background-color: oklch(68.5% 0.169 237.323);
   color: var(--background);
 }

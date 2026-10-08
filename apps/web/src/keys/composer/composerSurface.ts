@@ -6,7 +6,7 @@ import { composerEditorElement, isComposerMenuOpen } from "../focusScope";
 import { paintHighlight } from "../highlights";
 import { chatSurface } from "../chat/chatSurface";
 import { copyToClipboard } from "../clipboard";
-import { setCursorOverlay } from "../cursorOverlayStore";
+import { paintBlockCursor, paintEmptyLineCursor } from "../blockCursor";
 import {
   findOccurrences,
   handleFlashKey,
@@ -172,9 +172,8 @@ function enterInsert(): void {
   mode = "insert";
   session = null;
   context = createInitialContext({ line: 0, col: 0 });
-  paintHighlight("mesura-composer-cursor", []);
+  paintBlockCursor("mesura-composer-cursor", null, null);
   paintHighlight("mesura-composer-visual", []);
-  setCursorOverlay(null);
   markComposerVimMode(null);
   bumpComposerLayout();
 }
@@ -220,13 +219,18 @@ function paint(syncCaret = true): void {
   const char = text[offset];
   if (char === undefined || char === "\n") {
     // Nothing to highlight under the cursor: draw the block as an element.
-    paintHighlight("mesura-composer-cursor", []);
     const rect = caretRectAt(editor, offset);
-    setCursorOverlay(rect ? { left: rect.left, top: rect.top, height: rect.height } : null);
+    paintEmptyLineCursor(
+      "mesura-composer-cursor",
+      rect ? { left: rect.left, top: rect.top, height: rect.height } : null,
+    );
   } else {
-    setCursorOverlay(null);
-    const cursorRange = rangeAt(editor, offset, offset + 1);
-    paintHighlight("mesura-composer-cursor", cursorRange ? [cursorRange] : []);
+    // Drawn in the editor's host: Lexical owns everything inside the editor.
+    paintBlockCursor(
+      "mesura-composer-cursor",
+      rangeAt(editor, offset, offset + 1),
+      editor.parentElement,
+    );
   }
   if (isVisual() && context.visualAnchor) {
     const anchor = offsetOf(text, context.visualAnchor.line, context.visualAnchor.col);
@@ -319,9 +323,8 @@ function handleNormalKey(token: string): boolean {
 
   if (context.mode === "insert") {
     mode = "insert";
-    paintHighlight("mesura-composer-cursor", []);
+    paintBlockCursor("mesura-composer-cursor", null, null);
     paintHighlight("mesura-composer-visual", []);
-    setCursorOverlay(null);
     markComposerVimMode(null);
     if (!changed) {
       adapter.setCursor(offset);

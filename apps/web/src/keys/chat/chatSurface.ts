@@ -8,7 +8,7 @@ import {
 
 import type { KeySurface } from "../keyEngine";
 import { updateKeyEngineSnapshot, type EngineModeLabel } from "../keyEngineStore";
-import { paintHighlight } from "../highlights";
+import { paintBlockCursor } from "../blockCursor";
 import { copyToClipboard } from "../clipboard";
 import {
   findOccurrences,
@@ -99,19 +99,47 @@ function storeCursor(next: RowPosition | null): void {
 
 /**
  * Tells the chat surface which thread is open. Its remembered cursor comes
- * back; a thread not seen this session starts at the first visible line. A
- * remembered row the virtual list has not mounted yet stays stored, and the
- * cursor shows on the first visible line until it mounts.
+ * back, painted where it was if its row is mounted; a thread not seen this
+ * session paints nothing and starts at the first visible line on the first
+ * key. A remembered row the virtual list has not mounted yet stays stored,
+ * and a key puts the cursor on the first visible line until it mounts.
  */
 export function setChatThreadKey(key: string | null): void {
   if (key === threadKey) return;
   threadKey = key;
+  // The left thread's cursor is not this one's: clear its paint and stop
+  // following it. The memory of where it was stays in `threadCursors`.
+  paintBlockCursor("mesura-chat-cursor", null, null);
   cursor = key === null ? null : (threadCursors.get(key) ?? null);
   // A scroll motion still settling belongs to the thread that was left.
   scrollGeneration += 1;
   if (isVisual()) clearVisualSelection();
   context = createInitialContext(context.cursor);
   stopFlash();
+  // The remembered cursor shows where it was left, without a key. The thread's
+  // rows are normally in this commit; a virtual list that mounts them a frame
+  // later gets one more try, and a row still not mounted waits for a key.
+  if (cursor !== null && !paintRememberedCursor()) {
+    const returnedTo = threadKey;
+    window.requestAnimationFrame(() => {
+      if (threadKey === returnedTo) paintRememberedCursor();
+    });
+  }
+}
+
+/**
+ * Paints the open thread's remembered cursor if its row is mounted, with no
+ * scroll and no reveal; false when the row is not there.
+ */
+function paintRememberedCursor(): boolean {
+  const viewport = chatViewport();
+  if (viewport === null || cursor === null) return false;
+  const buffer = buildChatBuffer(viewport);
+  const position = fromRowPosition(buffer, cursor);
+  if (position === null) return false;
+  context = { ...context, cursor: clampPosition(buffer, position) };
+  paint(buffer, false);
+  return true;
 }
 
 function vimKey(token: string): { key: string; ctrl: boolean } {
@@ -175,9 +203,15 @@ function cursorRange(buffer: ChatBuffer): Range | null {
 
 function paint(buffer: ChatBuffer, reveal: boolean): void {
   const range = cursorRange(buffer);
-  paintHighlight("mesura-chat-cursor", range ? [range] : []);
-  paintVisualSelection(buffer);
+  // Reveal first: a widened cursor is measured where the glyph ends up.
   if (reveal && range) revealRange(range);
+  paintBlockCursor("mesura-chat-cursor", range, range ? rowOf(range) : null);
+  paintVisualSelection(buffer);
+}
+
+/** The timeline row a range is in: where its widened cursor is drawn. */
+function rowOf(range: Range): HTMLElement | null {
+  return range.startContainer.parentElement?.closest<HTMLElement>("[data-timeline-row-id]") ?? null;
 }
 
 function paintVisualSelection(buffer: ChatBuffer): void {
@@ -513,7 +547,7 @@ function applyActions(actions: readonly VimAction[]): void {
 
 /** Clears everything the chat surface painted, for when Vim mode turns off. */
 export function clearChatSurfacePaint(): void {
-  paintHighlight("mesura-chat-cursor", []);
+  paintBlockCursor("mesura-chat-cursor", null, null);
   stopFlash();
   cursor = null;
   // The host sets the key again when it turns Vim mode back on, which brings

@@ -1,5 +1,5 @@
 import { useParams, useRouter } from "@tanstack/react-router";
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { displayToken } from "@mesura/keys/keyToken";
 
@@ -19,7 +19,7 @@ import {
   useComposerExpanded,
 } from "./composer/composerExpanded";
 import { caretRectAt } from "./composer/composerProjection";
-import { useCursorOverlay } from "./cursorOverlayStore";
+import { useCursorOverlays, type CursorGlyph, type CursorOverlay } from "./cursorOverlayStore";
 import { composerEditorElement } from "./focusScope";
 import { configureKeyEngine, registerKeySurface } from "./keyEngine";
 import { useKeyEngineSnapshot } from "./keyEngineStore";
@@ -214,15 +214,71 @@ function FlashLabels() {
   );
 }
 
+/**
+ * The block cursors a highlight cannot paint (`blockCursor.ts`): an empty
+ * line's, fixed to the viewport; and a narrow glyph's, widened to half an em
+ * with the glyph redrawn inside in its own font, drawn in the glyph's own
+ * container so it is clipped and covered where the glyph is. The widened
+ * cursor's colours live in `mesura.css` with the highlight cursor's.
+ */
 function BlockCursor() {
-  const overlay = useCursorOverlay();
-  if (overlay === null) return null;
+  const overlays = useCursorOverlays();
+  return [...overlays].map(([owner, overlay]) =>
+    overlay.glyph && overlay.container ? (
+      createPortal(
+        <WidenedCursor overlay={overlay} glyph={overlay.glyph} />,
+        overlay.container,
+        owner,
+      )
+    ) : (
+      <span
+        key={owner}
+        aria-hidden
+        className="pointer-events-none fixed z-[61] w-[0.6em] bg-sky-500/80"
+        style={{ left: overlay.left, top: overlay.top, height: overlay.height }}
+      />
+    ),
+  );
+}
+
+/**
+ * An out-of-flow anchor at its static position in the container, with the
+ * cursor placed from it: the anchor's box turns the viewport coordinates into
+ * the container's, whatever positioned ancestor the anchor resolves against.
+ * Placed in the commit, before paint.
+ */
+function WidenedCursor({ overlay, glyph }: { overlay: CursorOverlay; glyph: CursorGlyph }) {
+  const anchorRef = useRef<HTMLSpanElement>(null);
+  const cursorRef = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current?.getBoundingClientRect();
+    const cursor = cursorRef.current;
+    if (!anchor || !cursor) return;
+    cursor.style.left = `${overlay.left - anchor.left}px`;
+    cursor.style.top = `${overlay.top - anchor.top}px`;
+  }, [overlay]);
   return (
-    <span
-      aria-hidden
-      className="pointer-events-none fixed z-[61] w-[0.6em] bg-sky-500/80"
-      style={{ left: overlay.left, top: overlay.top, height: overlay.height }}
-    />
+    <span ref={anchorRef} aria-hidden className="pointer-events-none absolute">
+      <span
+        ref={cursorRef}
+        data-mesura-block-cursor="glyph"
+        className="pointer-events-none absolute select-none overflow-hidden whitespace-pre text-center"
+        style={{
+          width: overlay.width,
+          height: overlay.height,
+          // The glyph's box is its font's content area: a line exactly that
+          // high puts the redrawn glyph where the original one is.
+          lineHeight: `${overlay.height}px`,
+          fontFamily: glyph.fontFamily,
+          fontSize: glyph.fontSize,
+          fontWeight: glyph.fontWeight,
+          fontStyle: glyph.fontStyle,
+          clipPath: overlay.clip,
+        }}
+      >
+        {glyph.text}
+      </span>
+    </span>
   );
 }
 

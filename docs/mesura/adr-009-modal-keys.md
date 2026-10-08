@@ -119,6 +119,15 @@ painting.**
   `processKeystroke(key, ctx, buffer)` over a `TextBuffer`), read-only.
 - The cursor is a CSS highlight (`mesura-chat-cursor`). A visual selection is
   the native selection, so copy and the cite pipeline work on it unchanged.
+- On a glyph narrower than half an em the cursor is an overlay instead
+  (`blockCursor.ts`): half an em wide, centred on the glyph, with the glyph
+  redrawn inside in its own font and the highlight's colours. It is drawn in
+  the glyph's own row, placed from an out-of-flow anchor there, so the
+  timeline clips it and the composer or a dialog covers it exactly where they
+  clip and cover the glyph. A fixed overlay above every layer was tried first
+  and showed through the composer and the palette. It is measured again on
+  scroll, on a resize of its container (a pane resize reflows the text) and
+  on composer layout changes, in the event, with no frame loop.
 - The chat and the file editor share key meanings, not an implementation.
 
 ### Cite
@@ -143,6 +152,9 @@ The composer in normal or visual mode wears a ring in the mode's colour on
 its card (`[data-chat-composer-main-surface]`). A cursor with no character
 under it (an empty line, the end of a line) is drawn as an element
 (`cursorOverlayStore.ts`), because a highlight needs a character to paint.
+A cursor on a narrow glyph is widened as in the chat, drawn in the editor's
+host because Lexical owns the editable content; the editor's scrolling
+clips it through a `clip-path`.
 
 `<leader>e` toggles the expanded composer: half the window high, with a
 gutter of hybrid line numbers (the cursor's line absolute, the others
@@ -289,6 +301,10 @@ These are recorded for the plan. Each one cost a debugging round.
 - **A white letter under a blue block reads as a stray caret** on thin
   glyphs such as "l". The cursor letter takes the page background instead,
   as a terminal block cursor reverses the cell.
+- **A highlight paints only its glyph's box**, so on "l" the block was a
+  sliver. A highlight cannot set a width, hence the widened overlay. The
+  empty-line overlay keeps its own look (`bg-sky-500/80`, 80% opacity), which
+  differs from the highlight's opaque sky-500.
 - **The file tree's flash did not open in a headless browser**, with Vim mode
   on or off; the tree receives `s` unprevented. Not investigated further; the
   tree's flash styling was checked by setting its flash state by hand.
