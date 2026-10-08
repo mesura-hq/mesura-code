@@ -254,6 +254,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
               wrapper.clientWidth - nextWidth >= THREAD_MAIN_CONTENT_MIN_WIDTH,
             storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
             onResize: setSidebarWidth,
+            onResetWidth: resetSidebarWidth,
           }}
         >
           {isOnSettings ? (

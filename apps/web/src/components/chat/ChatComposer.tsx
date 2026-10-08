@@ -173,6 +173,8 @@ import {
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { getTerminalFocusOwner } from "../../lib/terminalFocus";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
+import { getClientSettings } from "~/hooks/useSettings";
+import { registerComposerVimAdapter } from "~/keys/composer/composerSurface";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../../keybindings";
 import {
   type TerminalContextDraft,
@@ -3333,6 +3335,26 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [promptRef, setPrompt],
   );
 
+  // Mesura: Vim normal mode in the composer reads and rewrites the prompt
+  // through the same replacement path as every other edit.
+  useEffect(
+    () =>
+      registerComposerVimAdapter({
+        read: () => ({
+          prompt: promptRef.current,
+          cursor: composerEditorRef.current?.readSnapshot().cursor ?? promptRef.current.length,
+        }),
+        write: (prompt, cursor) => {
+          applyPromptReplacement(0, promptRef.current.length, prompt, {
+            focusEditorAfterReplace: false,
+          });
+          window.requestAnimationFrame(() => composerEditorRef.current?.focusAt(cursor));
+        },
+        setCursor: (cursor) => composerEditorRef.current?.focusAt(cursor),
+      }),
+    [applyPromptReplacement, promptRef],
+  );
+
   const readComposerSnapshot = useCallback((): {
     value: string;
     cursor: number;
@@ -5301,6 +5323,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         ensureLeadingBoundary?: boolean;
         citationCommentAnchor?: AssistantCitationSourceAnchor;
         clipboardData?: DataTransfer;
+        focusEditor?: boolean;
       },
     ): boolean => {
       if (
@@ -5334,7 +5357,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               },
               focusEditorAfterReplace: false,
             }
-          : undefined,
+          : options?.focusEditor === false
+            ? { focusEditorAfterReplace: false }
+            : undefined,
       );
     },
     [
@@ -5574,11 +5599,21 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return true;
       },
       citeAssistantText: (citation, sourceAnchor) =>
-        insertComposerText(
-          formatAssistantCitationForComposer(citation, citation.comment),
-          "cursor",
-          { ensureLeadingBoundary: true, citationCommentAnchor: sourceAnchor },
-        ),
+        // Mesura: in Vim mode a cite is chat-native. It lands at the end of the
+        // prompt on its own line as `<chip>: `, the comment is ordinary text
+        // typed after it, and focus stays where the citing happened. No
+        // comment popover. See docs/mesura/adr-009-modal-keys.md, "Cite".
+        getClientSettings().vimMode
+          ? insertComposerText(
+              `${promptRef.current.length === 0 || promptRef.current.endsWith("\n") ? "" : "\n"}${formatAssistantCitationForComposer(citation, undefined).trimEnd()}: `,
+              "end",
+              { focusEditor: false },
+            )
+          : insertComposerText(
+              formatAssistantCitationForComposer(citation, citation.comment),
+              "cursor",
+              { ensureLeadingBoundary: true, citationCommentAnchor: sourceAnchor },
+            ),
       openModelPicker,
       toggleModelPicker: () => {
         if (isComposerModelPickerOpen) {

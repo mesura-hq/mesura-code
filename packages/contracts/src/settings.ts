@@ -487,6 +487,12 @@ export const ClientSettingsSchema = Schema.Struct({
    * when Neovim cannot start.
    */
   modalEditing: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /**
+   * Mesura: the app-wide modal keyboard layer (normal / insert / visual
+   * modes, Space leader with which-key, the chat as a buffer). Off by default
+   * while it is a prototype; see docs/mesura/adr-009-modal-keys.md.
+   */
+  vimMode: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
 });
 export type ClientSettings = typeof ClientSettingsSchema.Type;
 
@@ -1590,5 +1596,6 @@ export const ClientSettingsPatch = Schema.Struct({
   snapShotAnimations: Schema.optionalKey(Schema.Boolean),
   wordWrap: Schema.optionalKey(Schema.Boolean),
   modalEditing: Schema.optionalKey(Schema.Boolean),
+  vimMode: Schema.optionalKey(Schema.Boolean),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;

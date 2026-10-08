@@ -25,6 +25,7 @@ import { usePaneNavigation } from "~/lib/usePaneNavigation";
 import { MesuraFileManagerLayer } from "~/components/files/mesuraFileManager/MesuraFileManagerLayer";
 import { useFileTreeShortcut } from "~/components/files/mesuraTree/useFileTreeShortcut";
 import { primaryServerKeybindingsAtom } from "~/state/server";
+import { KeyEngineHost } from "~/keys/KeyEngineHost";
 
 function ChatRouteGlobalShortcuts() {
   const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
@@ -187,6 +188,7 @@ function ChatRouteLayout() {
   return (
     <>
       <ChatRouteGlobalShortcuts />
+      <KeyEngineHost />
       <Outlet />
     </>
   );

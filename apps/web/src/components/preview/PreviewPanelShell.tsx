@@ -9,6 +9,7 @@ import {
 
 import { isElectron } from "~/env";
 import { useResizableWidth } from "~/hooks/useResizableWidth";
+import { usePaneEdge } from "~/lib/paneEdges";
 import { cn } from "~/lib/utils";
 
 import { RightPanelResizeHandle } from "./RightPanelResizeHandle";
@@ -73,12 +74,24 @@ export function PreviewPanelShell(props: {
   // Only inline non-maximized mode applies `width`/`maxWidth`; skip the
   // container measurement (and its re-renders) everywhere else.
   const maxWidth = useClampedMaxWidth(hostRef, isInline && !maximized);
-  const { width, handlers } = useResizableWidth({
+  const { width, handlers, resizeTo, reset } = useResizableWidth({
     storageKey: props.widthStorageKey ?? PREVIEW_PANEL_WIDTH_STORAGE_KEY,
     defaultWidth: props.defaultWidth ?? PREVIEW_PANEL_DEFAULT_WIDTH,
     minWidth: PREVIEW_PANEL_MIN_WIDTH,
     maxWidth,
     edge: "left",
+  });
+  // Fork: the handle's keyboard resize and Vim mode's PANE mode (lib/paneEdges.ts).
+  const separatorProps = usePaneEdge({
+    id: "right-panel",
+    side: "left",
+    enabled: isInline && !maximized && open,
+    size: () => width,
+    resizeTo,
+    reset,
+    valueNow: width,
+    valueMin: PREVIEW_PANEL_MIN_WIDTH,
+    valueMax: maxWidth,
   });
   // Derive suppression before the layout commits so the browser never creates
   // a width transition for resize or maximize changes.
@@ -143,7 +156,9 @@ export function PreviewPanelShell(props: {
       data-preview-panel-mode={props.mode}
       data-preview-panel-maximized={maximized ? "true" : "false"}
     >
-      {isInline && !maximized ? <RightPanelResizeHandle handlers={handlers} /> : null}
+      {isInline && !maximized ? (
+        <RightPanelResizeHandle handlers={handlers} separatorProps={separatorProps} />
+      ) : null}
       <div className={cn("h-full min-h-0 w-full", collapsible && "overflow-clip")}>
         <div
           className="flex h-full min-h-0 min-w-0 flex-col"

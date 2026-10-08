@@ -15,6 +15,11 @@ import {
 } from "./lib/windowControlsOverlay";
 import { AppRoot } from "./AppRoot";
 import { clearChunkReloadGuard, reloadOnceForChunkLoadError } from "./lib/chunkReloadGuard";
+import { installKeyEngine } from "./keys/keyEngine";
+
+// Mesura: before any component registers a key listener, so the modal key
+// engine runs first in the capture phase. Inert until Vim mode is on.
+installKeyEngine();
 
 // Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
 const history = isElectron ? createHashHistory() : createBrowserHistory();

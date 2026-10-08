@@ -220,3 +220,111 @@
 [data-terminal-owner="drawer"]:focus-within::after {
   border-color: var(--mesura-pane-focus-frame);
 }
+
+/* Vim mode (apps/web/src/keys). Painted by the CSS Custom Highlight API, so
+   moving the cursor never touches the timeline's DOM. Static: no transition. */
+/* The letter under the cursor takes the page's background colour, as a
+   terminal block cursor reverses the cell. A white letter read as a stray
+   line on thin glyphs such as "l". */
+::highlight(mesura-chat-cursor),
+::highlight(mesura-composer-cursor) {
+  background-color: oklch(68.5% 0.169 237.323);
+  color: var(--background);
+}
+::highlight(mesura-composer-visual) {
+  background-color: color-mix(in oklab, oklch(76.9% 0.188 70.08) 35%, transparent);
+}
+/* ── Flash: one look for every flash in the app ─────────────────────────────
+   The file editor's flash is flash.nvim inside Neovim, styled by the
+   developer's colourscheme (wine_theme): the backdrop is its `Comment`, grey
+   and italic, faded to 0.4 by the host (`nvimHighlightStyles.ts`); matches and
+   labels are its `Search`, #6d94e9 behind #131313. Every other flash takes the
+   same look from these tokens: the Vim-mode chat and composer flash
+   (`keys/flashSession.ts`), the file tree's, and the file manager's Miller and
+   overview flashes. Change the look here, once. */
+:root {
+  --mesura-flash-accent: #6d94e9;
+  --mesura-flash-ink: #131313;
+  --mesura-flash-dim-opacity: 0.4;
+  --mesura-flash-backdrop: color-mix(in oklab, var(--foreground) 40%, transparent);
+}
+
+/* Vim-mode flash. The backdrop fades by colour through a highlight, not by
+   opacity on the rows, so the match highlight above it stays at full
+   strength. Italic is not a property a highlight may set, so it comes from
+   the surface while `<html data-mesura-flash>` names it. */
+::highlight(mesura-flash-backdrop) {
+  color: var(--mesura-flash-backdrop);
+}
+::highlight(mesura-flash-match) {
+  background-color: var(--mesura-flash-accent);
+  color: var(--mesura-flash-ink);
+}
+[data-mesura-flash="chat"] [data-assistant-citation-viewport] [data-timeline-row-id],
+[data-mesura-flash="composer"] [data-testid="composer-editor"] {
+  font-style: italic;
+}
+
+/* The file tree (Symmetria's viewport flash, `tree.css`, `overview.css`):
+   rows fade and turn italic; the overlay that redraws the matched letters
+   takes the accent behind them. */
+[data-mesura-file-tree] .tree-frame[data-flash-mode="true"] .tree-row {
+  opacity: var(--mesura-flash-dim-opacity);
+  font-style: italic;
+}
+.overview-flash .overview-flash-match {
+  background: var(--mesura-flash-accent);
+  color: var(--mesura-flash-ink);
+}
+.overview-flash .overview-flash-label {
+  background: var(--mesura-flash-accent);
+  color: var(--mesura-flash-ink);
+  font-weight: 700;
+}
+
+/* The file manager's overview graph, the same viewport flash. */
+[data-mesura-file-manager] [data-flash-mode="true"] .overview-row[data-search-match="false"],
+[data-mesura-file-manager] [data-flash-mode="true"] .folder-group-name[data-search-match="false"],
+[data-mesura-file-manager] [data-flash-mode="true"] .folder-ancestors,
+[data-mesura-file-manager] [data-flash-mode="true"] .overview-links,
+[data-mesura-file-manager] [data-flash-mode="true"] [data-search-match="true"] > .overview-name {
+  opacity: var(--mesura-flash-dim-opacity);
+}
+[data-mesura-file-manager] [data-flash-mode="true"] .overview-row {
+  font-style: italic;
+}
+
+/* The file manager's Miller flash (`styles.css`): unreachable rows fade; on a
+   matching row only the matched letters and the label keep full strength. */
+[data-mesura-file-manager] .row--flash-dim {
+  opacity: var(--mesura-flash-dim-opacity);
+  font-style: italic;
+}
+[data-mesura-file-manager] [data-flash="match"] {
+  color: var(--mesura-flash-backdrop);
+  font-style: italic;
+}
+[data-mesura-file-manager] .row__flash-query {
+  color: var(--mesura-flash-ink);
+}
+/* Composer normal mode shows the block cursor above, not the caret. */
+[data-mesura-vim] {
+  caret-color: transparent;
+}
+/* The composer in Vim normal or visual mode: a ring on its box says the keys
+   are commands, not text. Colours match the mode indicator. */
+[data-chat-composer-main-surface]:has([data-mesura-vim="normal"]) {
+  outline: 1.5px solid oklch(68.5% 0.169 237.323);
+  outline-offset: -1px;
+}
+[data-chat-composer-main-surface]:has([data-mesura-vim="visual"]) {
+  outline: 1.5px solid oklch(76.9% 0.188 70.08);
+  outline-offset: -1px;
+}
+/* The expanded composer (Space e): half the window, with room for the gutter
+   that `ComposerLineNumbers` draws. */
+[data-mesura-composer-expanded] [data-testid="composer-editor"] {
+  min-height: 50vh;
+  max-height: 50vh;
+  padding-left: 3.5ch;
+}

@@ -391,6 +391,16 @@ describe("ClientSettings modal editing", () => {
   });
 });
 
+describe("ClientSettings vim mode", () => {
+  it("defaults off while the modal key layer is a prototype", () => {
+    expect(decodeClientSettings({}).vimMode).toBe(false);
+  });
+
+  it("carries it in a patch, or turning it on springs back", () => {
+    expect(decodeClientSettingsPatch({ vimMode: true }).vimMode).toBe(true);
+  });
+});
+
 describe("ClientSettings quit confirmation", () => {
   it("defaults to hold", () => {
     expect(decodeClientSettings({}).confirmQuit).toBe("hold");
