@@ -292,7 +292,6 @@ These are recorded for the plan. Each one cost a debugging round.
 - **The file tree's flash did not open in a headless browser**, with Vim mode
   on or off; the tree receives `s` unprevented. Not investigated further; the
   tree's flash styling was checked by setting its flash state by hand.
-- `u` in the composer undoes within one normal-mode session only.
 - **`resolveKeyScope` returned early for the composer without reading the
   focused pane**, so the pane remembered for a later blur stayed stale. A
   thread opens with the terminal drawer focused; after a click into the
@@ -321,7 +320,11 @@ extraction of `fm-core/src/keys`, citing user messages, and search (`/`).
 New files: `packages/keys/`, `apps/web/src/keys/`. Seams in upstream files
 (commits on `upstream/main` in the three months to 2026-10-07):
 
-- `ChatComposer.tsx` (134): the adapter registration and the Vim cite branch.
+- `ChatComposer.tsx` (134): the adapter registration (with its `draftKey`)
+  and the Vim cite branch.
+- `composerDraftStore.ts` (28): one `clearComposerUndoHistory` call in
+  `clearComposerContent`, the action every send path (the composer form, a
+  preview annotation, a directed dictation) consumes the draft through.
 - `AssistantSelectionToolbar.tsx` (2): a shared capture helper and the cite
   request subscription.
 - `assistantTextSelection.ts` (1): two exports.

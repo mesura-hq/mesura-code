@@ -1,4 +1,4 @@
-import { TextBuffer, createInitialContext, processKeystroke, type VimContext } from "@vimee/core";
+import { createInitialContext, processKeystroke, type VimContext } from "@vimee/core";
 
 import type { KeySurface } from "../keyEngine";
 import { updateKeyEngineSnapshot, type EngineModeLabel } from "../keyEngineStore";
@@ -25,6 +25,13 @@ import {
   projectPrompt,
   type ComposerProjection,
 } from "./composerProjection";
+import {
+  ComposerTextBuffer,
+  recordComposerUndoState,
+  redoComposerChange,
+  undoComposerChange,
+  type ComposerUndoStep,
+} from "./composerUndo";
 
 /**
  * Vim inside the composer.
@@ -38,8 +45,9 @@ import {
  * The composer registers an adapter while it is mounted; that is the only
  * seam in `ChatComposer.tsx`.
  *
- * Known prototype limits: `u` undoes within one normal-mode session only,
- * because typing in insert mode goes to Lexical's history, not Vim's.
+ * `u` and `<C-r>` walk the draft's whole edit history (`composerUndo.ts`),
+ * not vimee's, whose stack lives in one normal-mode session's buffer: an
+ * insert session is one step, and each normal-mode change is one more.
  */
 
 export interface ComposerVimAdapter {
@@ -48,6 +56,8 @@ export interface ComposerVimAdapter {
   /** Replaces the whole prompt and places the collapsed cursor; keeps focus. */
   write(prompt: string, cursor: number): void;
   setCursor(cursor: number): void;
+  /** The draft the composer is open on, which keys its undo history. */
+  draftKey?(): string;
 }
 
 const OWNED_BY_KEYMAP = new Set(["s", "[", "]"]);
@@ -55,8 +65,11 @@ const OWNED_BY_KEYMAP = new Set(["s", "[", "]"]);
 let adapter: ComposerVimAdapter | null = null;
 let mode: "insert" | "normal" = "insert";
 let context: VimContext = createInitialContext({ line: 0, col: 0 });
-let session: { projection: ComposerProjection; buffer: TextBuffer; prompt: string } | null = null;
+let session: { projection: ComposerProjection; buffer: ComposerTextBuffer; prompt: string } | null =
+  null;
 let focusListenerInstalled = false;
+/** Where the current insert session started typing: the start of its undo step. */
+let insertStartOffset: number | null = null;
 /** Set by `resumeComposerNormalOnFocus`: where arriving focus resumes normal mode. */
 let pendingNormalOffset: number | null = null;
 /** The surface the ring was drawn on, so it clears even once the editor is gone. */
@@ -134,11 +147,28 @@ function installFocusListener(): void {
   );
 }
 
+/** An adapter that names no draft shares one history. */
+function undoDraftKey(): string {
+  return adapter?.draftKey?.() ?? "";
+}
+
+/** Records `prompt` as the draft's current state; `hint` is where its change started. */
+function recordUndoState(prompt: string, hint: number): void {
+  if (adapter) recordComposerUndoState(undoDraftKey(), prompt, hint);
+}
+
 function isVisual(): boolean {
   return context.mode === "visual" || context.mode === "visual-line";
 }
 
 function enterInsert(): void {
+  // An insert session starts here: what it types becomes one step when
+  // normal mode is entered again.
+  if (adapter) {
+    const { prompt, cursor } = adapter.read();
+    recordUndoState(prompt, cursor);
+    insertStartOffset = cursor;
+  }
   mode = "insert";
   session = null;
   context = createInitialContext({ line: 0, col: 0 });
@@ -154,11 +184,13 @@ function enterNormal(at?: number): void {
   if (!adapter) return;
   const { prompt, cursor } = adapter.read();
   const projection = projectPrompt(prompt);
-  session = { projection, buffer: new TextBuffer(projection.text), prompt };
+  session = { projection, buffer: new ComposerTextBuffer(projection.text), prompt };
   // Leaving insert mode steps the cursor back one, as Vim does.
   const offset = at ?? Math.max(0, cursor - 1);
   const position = positionOf(projection.text, Math.min(offset, projection.text.length));
   context = createInitialContext(position);
+  recordUndoState(prompt, insertStartOffset ?? offset);
+  insertStartOffset = null;
   mode = "normal";
   markComposerVimMode("normal");
   paint();
@@ -170,7 +202,7 @@ function currentSession(): NonNullable<typeof session> | null {
   const { prompt } = adapter.read();
   if (session === null || session.prompt !== prompt) {
     const projection = projectPrompt(prompt);
-    session = { projection, buffer: new TextBuffer(projection.text), prompt };
+    session = { projection, buffer: new ComposerTextBuffer(projection.text), prompt };
   }
   return session;
 }
@@ -247,10 +279,16 @@ function handleNormalKey(token: string): boolean {
   // Keys the keymap owns in the composer's normal mode: flash and the
   // `[` / `]` groups. Vim's own `s` and bracket motions give way to them.
   if (context.phase === "idle" && context.count === 0 && OWNED_BY_KEYMAP.has(token)) return false;
+  if (context.phase === "idle" && !isVisual() && (token === "u" || token === "<C-r>")) {
+    stepUndoHistory(current, token === "u" ? undoComposerChange : redoComposerChange);
+    return true;
+  }
   const key = vimKey(token);
   if (key === null) return false;
 
   const before = current.buffer.getContent();
+  const beforeOffset = offsetOf(before, context.cursor.line, context.cursor.col);
+  const selectionStart = visualSelectionStart(before);
   const result = processKeystroke(key.key, context, current.buffer, key.ctrl, false);
   context = result.newCtx;
   const text = current.buffer.getContent();
@@ -262,6 +300,14 @@ function handleNormalKey(token: string): boolean {
     const prompt = expandProjection(text, current.projection.tokens);
     session = { ...current, prompt };
     adapter.write(prompt, offset);
+    // An edit starts at the leftmost of the cursor before the key, the cursor
+    // after it (a backward `dh`, `db`) and a visual selection's start. A
+    // change that enters insert mode (`cw`) becomes one step with that insert
+    // session.
+    const changeHint = Math.min(beforeOffset, offset, selectionStart ?? beforeOffset);
+    recordUndoState(current.prompt, beforeOffset);
+    if (context.mode === "insert") insertStartOffset = changeHint;
+    else recordUndoState(prompt, changeHint);
   } else {
     // Vim fills its register on deletes too; only a pure yank is a copy.
     const yank = result.actions.find((action) => action.type === "yank");
@@ -277,13 +323,51 @@ function handleNormalKey(token: string): boolean {
     paintHighlight("mesura-composer-visual", []);
     setCursorOverlay(null);
     markComposerVimMode(null);
-    if (!changed) adapter.setCursor(offset);
+    if (!changed) {
+      adapter.setCursor(offset);
+      insertStartOffset = offset;
+    }
     session = null;
     return true;
   }
   markComposerVimMode(isVisual() ? "visual" : "normal");
   paint(!changed);
   return true;
+}
+
+/** The start of the visual selection in `text`, before a key edits it; null outside visual mode. */
+function visualSelectionStart(text: string): number | null {
+  if (!isVisual() || !context.visualAnchor) return null;
+  const anchor = offsetOf(text, context.visualAnchor.line, context.visualAnchor.col);
+  const start = Math.min(anchor, offsetOf(text, context.cursor.line, context.cursor.col));
+  return context.mode === "visual-line" ? text.lastIndexOf("\n", start - 1) + 1 : start;
+}
+
+/**
+ * `u` or `<C-r>`, `count` times, through the draft's history. The restored
+ * prompt is written as every other change is, with the cursor at the start
+ * of the changed text.
+ */
+function stepUndoHistory(
+  current: NonNullable<typeof session>,
+  step: (draftKey: string, prompt: string, cursor: number) => ComposerUndoStep | null,
+): void {
+  let prompt = current.prompt;
+  let cursor = offsetOf(current.buffer.getContent(), context.cursor.line, context.cursor.col);
+  let moved = false;
+  for (let repeat = Math.max(1, context.count); repeat > 0; repeat -= 1) {
+    const next = step(undoDraftKey(), prompt, cursor);
+    if (next === null) break;
+    ({ prompt, cursor } = next);
+    moved = true;
+  }
+  context = { ...context, count: 0 };
+  if (!moved || !adapter) return;
+  const projection = projectPrompt(prompt);
+  session = { projection, buffer: new ComposerTextBuffer(projection.text), prompt };
+  context = { ...context, cursor: positionOf(projection.text, cursor) };
+  adapter.write(prompt, cursor);
+  paint(false);
 }
 
 /** Flash targets in the composer: matches inside the editor's visible box. */

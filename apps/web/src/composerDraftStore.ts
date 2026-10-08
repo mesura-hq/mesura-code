@@ -37,6 +37,7 @@ import { DeepMutable } from "effect/Types";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import { useMemo } from "react";
 import { getLocalStorageItem } from "./hooks/useLocalStorage";
+import { clearComposerUndoHistory } from "./keys/composer/composerUndo";
 import { resolveAppModelSelection, resolveAppModelSelectionForInstance } from "./modelSelection";
 import {
   DEFAULT_INTERACTION_MODE,
@@ -4023,6 +4024,11 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
           if (threadKey.length === 0) {
             return;
           }
+          // Mesura: a consumed draft starts a fresh Vim undo history.
+          clearComposerUndoHistory(
+            composerTargetKey(threadRef),
+            get().draftsByThreadKey[threadKey]?.prompt ?? "",
+          );
           set((state) => {
             const current = state.draftsByThreadKey[threadKey];
             if (!current) {

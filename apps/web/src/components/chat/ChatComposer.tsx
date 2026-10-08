@@ -3352,6 +3352,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           window.requestAnimationFrame(() => composerEditorRef.current?.focusAt(cursor));
         },
         setCursor: (cursor) => composerEditorRef.current?.focusAt(cursor),
+        draftKey: () => composerDraftTargetKeyRef.current,
       }),
     [applyPromptReplacement, promptRef],
   );
