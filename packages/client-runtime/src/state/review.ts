@@ -18,6 +18,12 @@ export function createReviewEnvironmentAtoms<R, E>(
       tag: WS_METHODS.reviewGetDiffPreview,
       staleTimeMs: 5_000,
     }),
+    // Fork addition: per-file status for Tree diff's refresh button.
+    workingTreeChanges: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:review:working-tree-changes",
+      tag: WS_METHODS.reviewGetWorkingTreeChanges,
+      staleTimeMs: 2_000,
+    }),
     diffFileContents: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:review:diff-file-contents",
       tag: WS_METHODS.reviewGetDiffFileContents,
