@@ -24,6 +24,9 @@ Either way, when the key involved already belongs to a rule of yours, nothing is
 two commands on one chord would quietly disable one of them, so the server leaves your rule alone
 and logs a warning instead.
 
+To drive the app with Vim-style modes and a Space leader instead of chords, see
+[Vim mode](./vim-mode.md).
+
 ## Composer controls
 
 Use `mod+shift+m` to choose a model and `mod+shift+h` to choose a host.

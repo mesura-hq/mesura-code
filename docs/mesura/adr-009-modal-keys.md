@@ -1,13 +1,16 @@
 # ADR-009 — A modal key layer: Vim modes, a Space leader, the chat as a buffer
 
-**Status:** Proposed, 2026-10-07. A prototype is built behind the `vimMode`
-client setting (on by default) on `t3code/b1ffc179`. The plan and the epic
-follow from testing that prototype.
+**Status:** Accepted, 2026-10-08. The production cycle (#86) hardened the
+prototype on `t3code/design-vim-keyboard-navigation`: a command registry
+replaced the chord replay, Vim mode is on by default, the six prototype bugs
+are fixed, and `tests/unit/modal-keys-wired.test.ts` guards every seam in an
+upstream file.
 
 **Scope:** how the web client (and the Linux desktop app, which wraps it) reads
 keys: modes, sequences, which-key, the chat timeline as a navigable buffer, Vim
-editing in the composer, cite by keyboard, and flash jumps. The phone is out of
-scope: it has no keyboard, and the layer is inert there.
+editing in the composer, cite by keyboard, flash jumps and keyboard pane
+resizing. The phone is out of scope: it has no keyboard, and the layer is
+inert on touch screens. The user guide is `docs/user/vim-mode.md`.
 
 ## The problem
 
@@ -33,16 +36,29 @@ resolve the same keybinding table, ordered by registration and capture phase.
 6. Architecture over merge cost: more upstream conflict is accepted for the
    sound design.
 7. Modifier chords are removed once the modal layer is good. Then `AGENTS.md`
-   gains a "keyboard first" principle.
-8. `Ctrl+1..9` numbers the sidebar rows that are visible, not the first nine.
+   gains a "keyboard first" principle (#83).
+8. `Ctrl+1..9` numbers the sidebar rows that are visible, not the first nine
+   (#79).
 9. The key engine is extracted from Symmetria's `fm-core/src/keys` into a
-   shared package.
+   shared package (#82).
 10. Prototype first: real code, behind a setting.
-11. Panes resize from the keyboard (2026-10-08): a sticky PANE mode on
-    `<leader>w`, keys that move a border in their own direction, a step of
-    5% of the viewport,
-    and the clean design (keyboard-operable separators) over replayed pointer
-    drags. Resize only: moving or reordering panes is not wanted.
+11. Panes resize from the keyboard: a sticky PANE mode on `<leader>w`, keys
+    that move a border in their own direction, a step of 5% of the viewport,
+    and keyboard-operable separators over replayed pointer drags. Resize
+    only: moving or reordering panes is not wanted.
+
+Decisions of the production cycle:
+
+12. Harden the committed prototype, do not rebuild it. The front end stays
+    one-to-one with the prototype's look; the widened cursor on a narrow
+    glyph is the one agreed visual change.
+13. Vim mode is on by default. A stored `false` stays off.
+14. The command registry replaces the chord replay in this cycle, not later.
+    Only the key engine calls it; the chord listeners and the palette keep
+    their own dispatch until #87.
+15. All six prototype bugs are fixed in this cycle. Everything else the
+    prototype did not build is deferred, each item to its own issue (see
+    "Not built").
 
 ## Decision
 
@@ -52,10 +68,13 @@ resolve the same keybinding table, ordered by registration and capture phase.
    (`keyToken.ts`), keymap tries per mode and scope (`keymap.ts`), the pending
    sequence machine (`sequence.ts`), flash label assignment (`flash.ts`).
 2. **`apps/web/src/keys/`** — the host: one `keydown` listener on `window`,
-   capture phase, installed in `main.tsx` before React renders, so it runs
-   before every other window listener (same target and phase run in
-   registration order). Consumed keys are stopped with
-   `stopImmediatePropagation`.
+   capture phase, installed in `main.tsx` before the router and React exist,
+   so it runs before every other window listener (same target and phase run
+   in registration order). Consumed keys are stopped with
+   `stopImmediatePropagation`. `KeyEngineHost.tsx`, mounted in the chat route
+   layout, turns the engine on while Vim mode is on and the chat layout is
+   mounted, so Space on a Settings control presses it instead of starting a
+   leader sequence.
 3. **Surfaces** — `chat/chatSurface.ts` and `composer/composerSurface.ts`. Each
    owns its own Vim grammar and reports its mode.
 
@@ -63,7 +82,8 @@ resolve the same keybinding table, ordered by registration and capture phase.
 
 - Scope is read from the DOM on every key, never stored (ADR-004's rule):
   `focusScope.ts` returns `composer`, `insert` (any other text input),
-  `passthrough`, `sidebar`, `chat` or `panel`.
+  `passthrough`, `sidebar`, `chat` or `panel`. It reads the focused pane
+  first, on every call, before any early return (see "Traps").
 - Passthrough is total: the terminal, the Neovim editor, the file tree, any
   open dialog, menu or listbox, and the command palette keep their own keys.
 - Insert is derived from focus (Tridactyl's `isTextEditable`), except in the
@@ -77,6 +97,24 @@ resolve the same keybinding table, ordered by registration and capture phase.
   key first: flash (`flashSession.ts`) and PANE (`paneMode.ts`, see
   "Resizing panes"). A passthrough or insert scope ends PANE mode.
 
+### Landing in normal mode
+
+Decision 1 holds on every way into the chat, not only on thread open:
+
+- **Pane entry.** While Vim mode is on, `KeyEngineHost` registers the chat's
+  pane entry through `registerPaneEntry` (`lib/paneFocus.ts`). `Ctrl+K` from
+  the terminal and `Ctrl+L` from the sidebar land in the chat buffer in
+  normal mode, with visual mode and pending keys cleared and the cursor kept.
+  With Vim mode off, ADR-004's entry at the composer applies unchanged.
+- **The command palette.** The engine records the scope and the composer mode
+  the palette opened from. On close, `restorePaletteOrigin()` (one fork check
+  in the palette's `finalFocus`) returns to the chat in normal mode, or to
+  the composer in normal mode at the same offset. Opened from composer insert
+  mode or anywhere else, the palette's own focus target applies. The
+  composer keeps a restored normal mode while focus arrives more than once on
+  close; the engine ends that resume at the next key, so `Esc` then `i` still
+  enters insert mode.
+
 ### Keymap rules
 
 - **A key is a command or a prefix, never both** (Helix, Tridactyl, Vimium).
@@ -88,17 +126,43 @@ resolve the same keybinding table, ordered by registration and capture phase.
   "+N keybinds"; both are worse.
 - A deeper scope shadows an outer one.
 
+### The command registry
+
+A leader row names a keybinding command (`thread.pin`, `rightPanel.toggle`,
+…). The engine runs it through `apps/web/src/commands/commandRegistry.ts`:
+
+- Each owner of a command calls `useCommandHandlers` with the same function
+  its chord branch already calls. Where the branch body was inline, it moved
+  into one named local function that the branch and the block both call, so
+  a leader key and a chord have one effect.
+- The registry keeps a stack per command: the latest registration runs, and
+  unmounting restores the previous one. Two owners can be mounted together
+  (the chat route and the pull requests route both own the right panel); the
+  inner one wins. An owner passes `undefined` for a command that does not
+  apply in its current state.
+- A leader key with no mounted owner shows "<command> is not available here".
+- Commands that are the engine's own (`composer.insert`, `chat.cite`,
+  `flash.jump`, `pane.resizeMode`, …) are not keybinding commands and run in
+  `keyEngine.ts`.
+
+Rejected: replaying the command's chord as a synthetic `keydown` so the
+existing listener runs it. The prototype did that. It cannot run a command
+that has no chord, it runs the wrong owner when a chord means two things, and
+it fakes input to reach code the app already owns.
+`tests/unit/modal-keys-command-registry.test.ts` keeps the replay out.
+
 ### The chat buffer
 
 Rejected, with the reason:
 
-- **The file editor's Neovim, read-only.** The predicted delay is 20.4 ms per key at the
-  tailnet minimum (`docs/internals/editor-session.md`), one session per thread,
-  and a second map between a plain-text buffer and the rich rendering.
-- **The browser's `Selection.modify()`, the way Vimium and Surfingkeys do it.** Word movement differs between
-  operating systems and engines. Firefox (Zen) lacks sentence, paragraph and
-  document movement. No extension implements `iw` or `ip`, and none copes with a
-  virtualized list.
+- **The file editor's Neovim, read-only.** The predicted delay is 20.4 ms per
+  key at the tailnet minimum (`docs/internals/editor-session.md`), one session
+  per thread, and a second map between a plain-text buffer and the rich
+  rendering.
+- **The browser's `Selection.modify()`, the way Vimium and Surfingkeys do it.**
+  Word movement differs between operating systems and engines. Firefox (Zen)
+  lacks sentence, paragraph and document movement. No extension implements
+  `iw` or `ip`, and none copes with a virtualized list.
 - **A CodeMirror or Monaco view of the chat.** It loses the rendering the chat
   exists for.
 
@@ -111,23 +175,43 @@ painting.**
   the same text, so a visual selection is already a citation.
 - An assistant row is read from its `[data-assistant-citation-source]`, not the
   whole row, which keeps the author label out of the buffer. Blank lines
-  inside a row are dropped; one empty line separates rows.
+  inside a row are dropped. One empty line separates rows, and that separator
+  is a cursor position of its own, so `k` from a message's first line crosses
+  into the previous message and `j` comes back.
+- Whitespace reads as the browser renders it. A newline that the element's
+  `white-space` collapses (`normal`, `nowrap`) reads as one space, one
+  character for one, so a soft break does not split a rendered line;
+  `pre` and `pre-wrap` still split. Collapsible whitespace at a line start is
+  skipped; a no-break space is kept.
 - The cursor is stored as `{ rowId, offset }` and the buffer is rebuilt on
   every key, because the list is virtualized. `gg` / `G` and the scroll keys
   scroll first, then place the cursor on the next frame.
+- The cursor is remembered per thread, in memory only, for the 50 most recent
+  threads, keyed from the router params in `KeyEngineHost`. A thread opened
+  for the first time starts on the first visible line. On a return the
+  remembered cursor is painted without scrolling. A key pressed while the
+  remembered row is not rendered yet does not overwrite the remembered
+  position.
 - Motions run in **`@vimee/core` 0.3.0** (MIT, a pure
-  `processKeystroke(key, ctx, buffer)` over a `TextBuffer`), read-only.
+  `processKeystroke(key, ctx, buffer)` over a `TextBuffer`), read-only: a key
+  that would enter insert mode is answered with an Escape.
 - The cursor is a CSS highlight (`mesura-chat-cursor`). A visual selection is
   the native selection, so copy and the cite pipeline work on it unchanged.
+  The letter under the cursor takes the page background, as a terminal block
+  cursor reverses the cell; a white letter under the blue block read as a
+  stray caret on thin glyphs.
 - On a glyph narrower than half an em the cursor is an overlay instead
-  (`blockCursor.ts`): half an em wide, centred on the glyph, with the glyph
-  redrawn inside in its own font and the highlight's colours. It is drawn in
-  the glyph's own row, placed from an out-of-flow anchor there, so the
-  timeline clips it and the composer or a dialog covers it exactly where they
-  clip and cover the glyph. A fixed overlay above every layer was tried first
-  and showed through the composer and the palette. It is measured again on
-  scroll, on a resize of its container (a pane resize reflows the text) and
-  on composer layout changes, in the event, with no frame loop.
+  (`blockCursor.ts`), because a highlight paints only its glyph's box and
+  cannot set a width. The overlay is half an em wide, centred on the glyph,
+  with the glyph redrawn inside in its own font and the highlight's colours.
+  It is drawn inside the glyph's own container (the timeline row), placed
+  from an `aria-hidden` out-of-flow anchor there, so the timeline clips it
+  and the composer or a dialog covers it exactly where they clip and cover
+  the glyph; inner clipping is a `clip-path`. Rejected: a fixed overlay above
+  every layer, which showed through the composer and the palette. It is
+  measured again on scroll, on a resize of its container (a pane resize
+  reflows the text) and on composer layout changes, in the event, with no
+  frame loop. A thread change clears it.
 - The chat and the file editor share key meanings, not an implementation.
 
 ### Cite
@@ -135,7 +219,9 @@ painting.**
 `<leader>c` in chat visual mode asks `AssistantSelectionToolbar` (one
 subscription, `chat/chatCiteBus.ts`) to capture the native selection and call
 its existing `onCite`. In Vim mode, `ChatComposer.citeAssistantText` appends
-`\n<chip>: ` at the end with no popover and no focus.
+`\n<chip>: ` at the end of the prompt with no popover and no focus
+(`focusEditor: false`). With Vim mode off, upstream's cite at the caret with
+its comment popover applies.
 
 ### The composer
 
@@ -148,13 +234,31 @@ token's identity when an earlier one is deleted. A second Escape leaves for the
 chat. Rejected: a Neovim-backed composer (tailnet latency, no token model),
 and replacing Lexical with CodeMirror (a rewrite of the composer).
 
+Undo is the composer's own, not vimee's (`composer/composerUndo.ts`; the
+vimee buffer records no snapshots):
+
+- A per-draft history of the prompt, in memory: an insert session is one
+  step, each normal-mode change is one step. `u` and `Ctrl+R` walk it across
+  sessions, with a count; a new change clears the redo steps. At most 200
+  states per draft and 50 drafts.
+- Each state stores where its change starts, so the cursor after `u` and
+  `Ctrl+R` lands at the edit's leftmost offset, also for visual deletes,
+  backward operators and repeated text. Tokens come back as the same tokens.
+- The history resets in `clearComposerContent` (`composerDraftStore.ts`), the
+  one action every send path consumes a draft through (the composer form, a
+  preview annotation, a directed dictation). A failed send keeps the history,
+  a restored draft gets it back, and a thread's history survives a return to
+  that thread. The adapter's `draftKey` names the draft.
+
 The composer in normal or visual mode wears a ring in the mode's colour on
-its card (`[data-chat-composer-main-surface]`). A cursor with no character
-under it (an empty line, the end of a line) is drawn as an element
-(`cursorOverlayStore.ts`), because a highlight needs a character to paint.
-A cursor on a narrow glyph is widened as in the chat, drawn in the editor's
-host because Lexical owns the editable content; the editor's scrolling
-clips it through a `clip-path`.
+its card (`[data-chat-composer-main-surface]`, anchored on the
+`data-mesura-composer-vim` attribute; the fork's styling guard forbids
+`:has()` there). A cursor with no character under it (an empty line, the end
+of a line) is drawn as an element (`cursorOverlayStore.ts`), because a
+highlight needs a character to paint; it keeps its own look
+(`bg-sky-500/80`). A cursor on a narrow glyph is widened as in the chat,
+drawn in the editor's host because Lexical owns the editable content; the
+editor's scrolling clips it through a `clip-path`.
 
 `<leader>e` toggles the expanded composer: half the window high, with a
 gutter of hybrid line numbers (the cursor's line absolute, the others
@@ -207,15 +311,15 @@ the file manager's Miller and overview flashes (the vendored rules are
 overridden from fork-owned CSS, so the subtree is untouched). The Vim-mode
 backdrop fades by colour through a highlight, not by opacity, so matches
 painted above it keep full strength; italic comes from the surface, because a
-highlight cannot set `font-style`.
+highlight cannot set `font-style`. The editor's colours follow the
+colourscheme; the tokens do not, so a colourscheme change needs the tokens
+changed by hand.
 
-Not unified yet: the code. Four label algorithms exist (flash.nvim's, two in
+Not unified: the code. Four label algorithms exist (flash.nvim's, two in
 Symmetria's `fm-core`, and `@mesura/keys/flash`), and they differ in
 behaviour: two-character labels, whether the query's own letters are
 excluded, cursor-distance order. The natural home for one implementation is
-`fm-core/src/flash/labels.ts`, the most complete, as part of the extraction
-in decision 9. The editor's colours follow the colourscheme; the tokens do
-not, so a colourscheme change needs the tokens changed by hand.
+`fm-core/src/flash/labels.ts`, the most complete, as part of #82.
 
 ### Resizing panes
 
@@ -233,13 +337,18 @@ fork module, `lib/paneEdges.ts`:
   direction. This is the W3C ARIA window splitter pattern
   (https://www.w3.org/WAI/ARIA/apg/patterns/windowsplitter/). It works with
   Vim mode off, which makes it an accessibility fix upstream could take; if
-  upstream takes it, most of the merge cost below goes away.
+  upstream takes it, most of the pane-resizing merge cost goes away.
 - **PANE mode** (`keys/paneMode.ts`), entered with `<leader>w`, moves a
   border with the same rule as the arrows: `h` left, `l` right, `k` up, `j`
   down. A count multiplies the step, `=` resets every edge (Neovim's
   `<C-w>=`). It is sticky (`l l l` without the leader again). `Esc`, `q` and
   Enter leave; any other key leaves and then runs as in normal mode, so
   `<leader>w l i` resizes and enters the composer.
+- **The sidebar rail stays a `button`**, not a `separator`: it also toggles
+  the sidebar when collapsed. It gains a tab stop and arrow keys only while
+  it can resize, and no `aria-valuenow`, because the rail does not hold the
+  width in state. Its keyboard reset runs the layout's `onResetWidth`, the
+  same reset as the rail's double-click.
 
 The focused pane (or the last focused one after a blur to `<body>`, ADR-004)
 only picks which border the key moves:
@@ -265,129 +374,151 @@ minimum and at the main column's minimum, the drawer between 180 px and 75%
 of the viewport height. Persistence is the drag's: the sidebar and panel
 widths in `localStorage`, the drawer height in the thread's terminal state.
 
-Rejected: replaying pointer events on the handles (the chord bridge's
-technique). It needs no upstream edit, but it fakes input to reach state the
-code already owns, and it cannot read the size it is about to change.
+Rejected: replaying pointer events on the handles. It needs no upstream edit,
+but it fakes input to reach state the code already owns, and it cannot read
+the size it is about to change.
 
-Not built: maximize from PANE mode (#85). `rightPanel.toggleMaximized` has no
-default chord; the command registry can run it once an owner registers it.
+## Traps
 
-These are recorded for the plan. Each one cost a debugging round.
+Each of these cost a debugging round and still shapes the code. Read the
+entry before changing the code it names.
 
-- **The chord bridge is gone**: the command registry
-  (`apps/web/src/commands/commandRegistry.ts`) replaced it.
 - **The composer's editor takes focus whenever it moves its DOM selection**,
-  even when asked not to focus. A cite therefore needs `keepFocusInChat`
-  (WORKAROUND) to return focus to the chat.
+  even when asked not to focus. A Vim-mode cite therefore calls
+  `keepFocusInChat` (a marked WORKAROUND in `chatSurface.ts`) to return focus
+  to the chat.
 - **Moving the composer caret in the same tick as a write reverts the write.**
-  `focusAt` reports the editor's stale text as a change. A write must place
-  the caret itself, after the editor has the new prompt.
+  `focusAt` reports the editor's stale text as a change. The adapter's
+  `write` places the caret itself, on the next frame, after the editor has
+  the new prompt.
 - **vimee does not report every edit** (`ciw`, a visual `d`) as a
   `content-change`. The composer compares text before and after instead.
 - **Live-follow only learns about reading from wheel, touch and pointer
-  events.** Upward cursor motion dispatches a synthetic wheel event
-  (WORKAROUND) so a streaming reply does not yank the view back.
+  events.** Upward cursor motion dispatches a synthetic wheel event (a marked
+  WORKAROUND, `breakLiveFollow` in `chatSurface.ts`) so a streaming reply does
+  not yank the view back.
 - **Hit-testing a point to place the cursor misses** between blocks and in the
   centred column's gutter. Placement reads line boxes instead
   (`lineAtOrBelow`).
-- **Closing the command palette returns focus to the composer**, which lands
-  in insert mode. In Vim mode, focus should return to the scope it left.
 - **Screen-reader-only text is in the projection**: each message starts with
   an `sr-only` author heading ("You", "T3 Code"). The buffer drops lines made
   only of such text, or the cursor would land somewhere invisible.
 - **Lexical's `<br>` carries no marker**, and a paragraph ending in an empty
   line has one extra placeholder `<br>`. The composer's offset map counts
   every `<br>` except that trailing placeholder.
-- **A white letter under a blue block reads as a stray caret** on thin
-  glyphs such as "l". The cursor letter takes the page background instead,
-  as a terminal block cursor reverses the cell.
-- **A highlight paints only its glyph's box**, so on "l" the block was a
-  sliver. A highlight cannot set a width, hence the widened overlay. The
-  empty-line overlay keeps its own look (`bg-sky-500/80`, 80% opacity), which
-  differs from the highlight's opaque sky-500.
-- **The file tree's flash did not open in a headless browser**, with Vim mode
-  on or off; the tree receives `s` unprevented. Not investigated further; the
-  tree's flash styling was checked by setting its flash state by hand.
-- **`resolveKeyScope` returned early for the composer without reading the
-  focused pane**, so the pane remembered for a later blur stayed stale. A
-  thread opens with the terminal drawer focused; after a click into the
-  composer and `Esc Esc`, focus was on `<body>` with the terminal remembered,
-  every key passed through, and ChatView's type-to-focus typed `Space w l`
-  into the composer. The resolver now reads the focused pane first, on every
-  call (`focusScope.ts`).
-- **`Ctrl+K` from the terminal lands in the composer in insert mode**: ADR-004
-  enters the chat pane at the composer. Resizing from the terminal is
-  therefore `Ctrl+K`, `Esc`, `<leader>w`. In Vim mode, entering the chat pane
-  should land in normal mode (decision 1).
-- **The sidebar rail stays a `button`**, not a `separator`: it also toggles
-  the sidebar when collapsed. It gains a tab stop and arrow keys only while it
-  can resize, and no `aria-valuenow`, because the rail does not hold the
-  width in state.
+- **`resolveKeyScope` must read the focused pane before any early return.**
+  The prototype returned early for the composer, so the pane remembered for a
+  later blur stayed stale: after `Esc Esc` from the composer, focus was on
+  `<body>` with the terminal remembered, every key passed through, and
+  type-to-focus typed `Space w l` into the composer. `focusScope.test.ts`
+  pins the order.
+- **The file tree's flash does not open in a headless browser**, with Vim
+  mode on or off; the tree receives `s` unprevented. Not investigated; check
+  the tree's flash styling by setting its flash state by hand.
 
-## Not built in the prototype
+## Not built
 
-The sidebar list primitive (the cursor apart from the open thread, `Ctrl+D/U`
-scroll without opening, visible-row numbering), the project filter's Tab to
-"All projects", right-panel scopes, the `keymap.json` user config, the
-extraction of `fm-core/src/keys`, citing user messages, and search (`/`).
+Each item has its own issue on `mesura-hq/mesura-code`, tracked by #86:
+
+- #79: feat(keys): sidebar thread list as a keyboard list in Vim mode — the
+  cursor apart from the open thread, `Ctrl+D/U` without opening, `Ctrl+1..9`
+  on visible rows, and Tab to "All projects".
+- #80: feat(keys): keyboard scopes inside the right panel.
+- #81: feat(keys): user keymap file for the modal key layer.
+- #82: refactor(keys): extract the fm-core key engine and unify the flash
+  label algorithms.
+- #83: chore(keys): remove the modifier chords and add a keyboard-first
+  principle.
+- #84: feat(keys): cite your own messages and search the chat buffer (`/`).
+- #85: feat(keys): maximize the right panel from PANE mode.
+  `rightPanel.toggleMaximized` has no default chord; the registry can run it
+  once an owner registers it.
+- #87: refactor(keys): one command list for the palette, the chords and the
+  modal keys — the chord listeners and the palette rows reading the registry.
 
 ## Merge cost
 
-New files: `packages/keys/`, `apps/web/src/keys/`. Seams in upstream files
-(commits on `upstream/main` in the three months to 2026-10-07):
+Fork-owned files carry no merge cost: `packages/keys/`, `apps/web/src/keys/`,
+`apps/web/src/commands/`, `apps/web/src/lib/paneEdges.ts`, the fork's CSS and
+hooks, and the `AppRoot.*.fence.test.tsx` and `-settingsVimMode.fence.test.tsx`
+tests. `tests/unit/modal-keys-wired.test.ts` fails when a sync drops any seam
+below.
 
-- `ChatComposer.tsx` (134): the adapter registration (with its `draftKey`)
-  and the Vim cite branch.
-- `composerDraftStore.ts` (28): one `clearComposerUndoHistory` call in
-  `clearComposerContent`, the action every send path (the composer form, a
-  preview annotation, a directed dictation) consumes the draft through.
-- `AssistantSelectionToolbar.tsx` (2): a shared capture helper and the cite
-  request subscription.
-- `assistantTextSelection.ts` (1): two exports.
-- `_chat.tsx` (11), `main.tsx` (10): mounting and installing.
-- `settings.ts` (101), `SettingsPanels.tsx`, `settingsSearch.ts`: the setting.
-- `MessagesTimeline.tsx` (152): one subscription in `TimelineMinimap` for
+Every upstream file the branch changes, measured with
+`git diff --name-only 42575864a8 HEAD -- apps packages` against
+`upstream/main` at `12069eefd7`. The number is the file's commits on
+`upstream/main` in the three months to 2026-10-08.
+
+Engine, setting and chat buffer:
+
+- `main.tsx` (10): the `installKeyEngine()` call.
+- `routes/_chat.tsx` (11): `<KeyEngineHost />` in `ChatRouteLayout`, and the
+  registry block (below).
+- `packages/contracts/src/settings.ts` (102): `vimMode` in
+  `ClientSettingsSchema` and `ClientSettingsPatch`.
+- `packages/contracts/src/settings.test.ts` (59): the default and the stored
+  `false`.
+- `SettingsPanels.tsx` (98): `VimModeRow` in the Typography section.
+- `settingsSearch.ts` (80): the `vim-mode` search entry.
+- `apps/web/package.json` (42): the `@mesura/keys` and `@vimee/core`
+  dependencies.
+- `AssistantSelectionToolbar.tsx` (2): the shared `captureCitation` helper and
+  the cite request subscription.
+- `MessagesTimeline.tsx` (159): one subscription in `TimelineMinimap` for
   `[u` / `]u`.
+- `lib/assistantTextSelection.ts` (1): two exports, `readAssistantText` and
+  `TextChunk`.
 
-Pane resizing (commits in the three months to 2026-10-08):
+Composer:
+
+- `ChatComposer.tsx` (139): the Vim adapter registration (with `draftKey`),
+  the Vim cite branch and the `focusEditor` option, and the registry block
+  with `canOpenAttachmentPicker` and `stashCurrentPromptWhenAllowed` lifted
+  out of the chord handler.
+- `composerDraftStore.ts` (28): one `clearComposerUndoHistory` call in
+  `clearComposerContent`.
+
+Command registry — one `useCommandHandlers` block per owner, and the chord
+branch bodies lifted into named functions:
+
+- `ChatView.tsx` (282): the block, plus `toggleActiveThreadSettlement`,
+  `toggleActiveThreadPin` and `firstQueuedMessage`. The engine pre-empts
+  type-to-focus from its own listener, and the chat buffer reads the
+  timeline's existing data attributes, so this is the file's only seam.
+- `Sidebar.tsx` (163): `adjacentThreadKey` and `openThreadByKey`.
+- `CommandPalette.tsx` (65): the block, built from `OVERLAY_MODE_BY_COMMAND`,
+  and the `restorePaletteOrigin()` check in `finalFocus`, beside
+  `keepFocusInFileManager()`.
+- `_chat.pull-requests.tsx` (59): the block, plus `copyPullRequestLink`.
+- `LegacySidebar.tsx` (55): `adjacentThread`.
+- `routes/_chat.tsx` (11): `startContextualNewThread`, `startNewThread` and
+  `togglePreviewPanel`.
+- `AppSidebarLayout.tsx` (35), `OpenInPicker.tsx` (12): the block only.
+
+Pane resizing:
 
 - `ui/sidebar.tsx` (23): the rail's width code is split into
   `findSidebarElements`, `acceptSidebarWidth` and `commitSidebarWidth`,
   shared by the drag and the keyboard, plus the rail's `usePaneEdge` call and
   an `onResetWidth` option. The largest seam: it moves upstream lines.
-- `ThreadTerminalDrawer.tsx` (28): `resizeDrawerTo`, the `usePaneEdge` call,
+- `ThreadTerminalDrawer.tsx` (29): `resizeDrawerTo`, the `usePaneEdge` call,
   and the separator props on its two handle elements.
-- `PreviewPanelShell.tsx` (9), `RightPanelResizeHandle.tsx` (0),
-  `useResizableWidth.ts` (3): `resizeTo` and `reset` from the hook, the edge
-  registration, the handle's focus.
-- `AppSidebarLayout.tsx` (35): one line, `onResetWidth`.
+- `PreviewPanelShell.tsx` (9): the `usePaneEdge` call and the props handed to
+  the handle.
+- `RightPanelResizeHandle.tsx` (0): the `separatorProps` prop and the
+  handle's focus style.
+- `useResizableWidth.ts` (3): `resizeTo` and `reset` returned from the hook.
+- `AppSidebarLayout.tsx` (35): `onResetWidth: resetSidebarWidth`.
 
-Command registry (commits in the three months to 2026-10-08). New file:
-`apps/web/src/commands/commandRegistry.ts`. Each owner gets one
-`useCommandHandlers` block; where a chord branch was inline, its body moved
-into one named local function that the branch and the block both call:
+User documentation (outside `apps` and `packages`, not guarded):
 
-- `ChatView.tsx` (276): the block, plus `toggleActiveThreadSettlement`,
-  `toggleActiveThreadPin` and `firstQueuedMessage` lifted out of the chord
-  handler. The engine pre-empts type-to-focus from its own listener, and the
-  chat buffer reads the timeline's existing data attributes, so this is the
-  file's only seam.
-- `Sidebar.tsx` (161): `adjacentThreadKey` and `openThreadByKey` lifted out of
-  the traversal handler.
-- `ChatComposer.tsx` (134): `canOpenAttachmentPicker` and
-  `stashCurrentPromptWhenAllowed` lifted out of the chord handler.
-- `CommandPalette.tsx` (64): the block, built from `OVERLAY_MODE_BY_COMMAND`.
-- `_chat.pull-requests.tsx` (58): the block, plus `copyPullRequestLink`.
-- `LegacySidebar.tsx` (55): `adjacentThread` lifted out of the traversal
-  handler.
-- `AppSidebarLayout.tsx` (35), `OpenInPicker.tsx` (12): the block only.
-- `_chat.tsx` (11): `startContextualNewThread`, `startNewThread` and
-  `togglePreviewPanel` lifted out of the chord handler.
+- `docs/user/keybindings.md` (33): one sentence linking `vim-mode.md`.
+- `docs/user/keyboard-focus.md` (1): one sentence on where the palette
+  returns focus in Vim mode.
 
-Landing in normal mode (commits in the three months to 2026-10-08):
-
-- `CommandPalette.tsx` (64): one fork check in `finalFocus`, beside
-  `keepFocusInFileManager()`, that calls the engine's `restorePaletteOrigin`.
-  The chat's pane entry is registered from `KeyEngineHost.tsx` through
-  `registerPaneEntry`, so `paneFocus.ts` and `usePaneNavigation.ts` gain no
-  seam.
+The chat's pane entry is registered from `KeyEngineHost.tsx` through
+`registerPaneEntry`, so `paneFocus.ts` and `usePaneNavigation.ts` gain no
+seam. The heaviest churn is in `ChatView.tsx`, `Sidebar.tsx` and
+`MessagesTimeline.tsx`. `MessagesTimeline.tsx` only adds lines; the other two
+also move chord branch bodies into the lifted functions, which is where a sync
+conflicts.

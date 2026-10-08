@@ -27,7 +27,7 @@ interface CommandEntry {
   readonly scope?: string;
 }
 
-/** Leader rows for existing keybinding commands, replayed through their chord. */
+/** Leader rows for existing keybinding commands, run through the command registry. */
 const BRIDGED: ReadonlyArray<CommandEntry & { readonly command: KeybindingCommand }> = [
   { keys: "<leader><Space>", command: "filePicker.toggle", title: "Find file" },
   { keys: "<leader>ff", command: "filePicker.toggle", title: "File" },
