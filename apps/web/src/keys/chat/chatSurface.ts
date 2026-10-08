@@ -46,6 +46,7 @@ import {
  *
  * The cursor is stored as a row and an offset, never as a line number,
  * because the buffer is rebuilt on every key from whatever rows are mounted.
+ * Each thread keeps its last cursor for the page's lifetime, in memory only.
  */
 
 const MOTION_KEYS = new Set([
@@ -64,13 +65,54 @@ const ARROW_TO_VIM: Readonly<Record<string, string>> = {
   "<Up>": "k",
   "<Down>": "j",
 };
+/** How many threads keep a remembered cursor; the least recently used goes first. */
+const REMEMBERED_THREADS = 50;
 /** A smooth scroll that never reports `scrollend` must not hold the cursor forever. */
 const SCROLL_SETTLE_TIMEOUT_MS = 800;
 
 let context: VimContext = createInitialContext({ line: 0, col: 0 });
 let cursor: RowPosition | null = null;
+/**
+ * Whether the last sync put the Vim cursor on the first visible line because
+ * `cursor` did not resolve (a fresh thread, or a remembered row not mounted).
+ * A key that leaves that fallback where it is must not replace the
+ * remembered position.
+ */
+let cursorIsFallback = false;
+/** The open thread's key, from the chat route; `null` off a thread route. */
+let threadKey: string | null = null;
+/** Each thread's last cursor, most recently used last. Never persisted. */
+const threadCursors = new Map<string, RowPosition>();
 /** Bumped by every scroll motion, so only the latest one places the cursor. */
 let scrollGeneration = 0;
+
+/** Moves the cursor and remembers it for the open thread. */
+function storeCursor(next: RowPosition | null): void {
+  cursor = next;
+  if (threadKey === null || next === null) return;
+  threadCursors.delete(threadKey);
+  threadCursors.set(threadKey, next);
+  if (threadCursors.size > REMEMBERED_THREADS) {
+    threadCursors.delete(threadCursors.keys().next().value!);
+  }
+}
+
+/**
+ * Tells the chat surface which thread is open. Its remembered cursor comes
+ * back; a thread not seen this session starts at the first visible line. A
+ * remembered row the virtual list has not mounted yet stays stored, and the
+ * cursor shows on the first visible line until it mounts.
+ */
+export function setChatThreadKey(key: string | null): void {
+  if (key === threadKey) return;
+  threadKey = key;
+  cursor = key === null ? null : (threadCursors.get(key) ?? null);
+  // A scroll motion still settling belongs to the thread that was left.
+  scrollGeneration += 1;
+  if (isVisual()) clearVisualSelection();
+  context = createInitialContext(context.cursor);
+  stopFlash();
+}
 
 function vimKey(token: string): { key: string; ctrl: boolean } {
   if (ARROW_TO_VIM[token]) return { key: ARROW_TO_VIM[token]!, ctrl: false };
@@ -97,7 +139,9 @@ function syncBuffer(): { buffer: ChatBuffer; text: TextBuffer } | null {
   if (viewport === null) return null;
   const buffer = buildChatBuffer(viewport);
   if (buffer.lines.length === 0) return null;
-  const position = (cursor && fromRowPosition(buffer, cursor)) ?? firstVisiblePosition(buffer);
+  const remembered = cursor && fromRowPosition(buffer, cursor);
+  cursorIsFallback = !remembered;
+  const position = remembered ?? firstVisiblePosition(buffer);
   context = { ...context, cursor: clampPosition(buffer, position) };
   if (context.visualAnchor) {
     context = { ...context, visualAnchor: clampPosition(buffer, context.visualAnchor) };
@@ -120,7 +164,7 @@ function firstVisiblePosition(buffer: ChatBuffer): BufferPosition {
 
 function setCursor(buffer: ChatBuffer, position: BufferPosition): void {
   context = { ...context, cursor: clampPosition(buffer, position) };
-  cursor = toRowPosition(buffer, context.cursor);
+  storeCursor(toRowPosition(buffer, context.cursor));
 }
 
 function cursorRange(buffer: ChatBuffer): Range | null {
@@ -294,7 +338,7 @@ function jumpToUserMessage(direction: "previous" | "next"): void {
   const generation = ++scrollGeneration;
   void settled.then(() => {
     if (generation !== scrollGeneration) return;
-    cursor = { rowId, offset: 0 };
+    storeCursor({ rowId, offset: 0 });
     const synced = syncBuffer();
     if (synced) paint(synced.buffer, false);
   });
@@ -405,6 +449,7 @@ export const chatSurface: KeySurface = {
     const previousPhase = context.phase;
     const { key, ctrl } = vimKey(token);
     const wasVisual = isVisual();
+    const before = context.cursor;
     const result = processKeystroke(key, context, synced.text, ctrl, true);
     context = result.newCtx;
     // Read-only: a key that would enter insert mode never leaves normal.
@@ -412,7 +457,8 @@ export const chatSurface: KeySurface = {
       context = processKeystroke("Escape", context, synced.text, false, true).newCtx;
     }
     applyActions(result.actions);
-    cursor = toRowPosition(synced.buffer, context.cursor);
+    const moved = context.cursor.line !== before.line || context.cursor.col !== before.col;
+    if (moved || !cursorIsFallback) storeCursor(toRowPosition(synced.buffer, context.cursor));
     if (wasVisual && !isVisual()) clearVisualSelection();
     paint(synced.buffer, true);
 
@@ -470,4 +516,7 @@ export function clearChatSurfacePaint(): void {
   paintHighlight("mesura-chat-cursor", []);
   stopFlash();
   cursor = null;
+  // The host sets the key again when it turns Vim mode back on, which brings
+  // the thread's remembered cursor back.
+  threadKey = null;
 }

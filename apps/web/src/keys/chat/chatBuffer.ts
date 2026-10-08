@@ -13,8 +13,9 @@ import { readAssistantText, type TextChunk } from "~/lib/assistantTextSelection"
  * near the edge scroll the list, the list mounts more rows, and the next key
  * rebuilds the buffer with them.
  *
- * Known limit: a soft line break inside a Markdown paragraph is a `\n` in its
- * text node, so it splits one rendered line into two buffer lines.
+ * A `\n` in a text node whose `white-space` collapses newlines (a soft break
+ * in a Markdown paragraph) renders as a space, so the projection reads it as
+ * one; the swap is one character for one, so every offset stays valid.
  */
 
 export const CHAT_VIEWPORT_SELECTOR = "[data-assistant-citation-viewport]";
@@ -43,11 +44,18 @@ export interface BufferPosition {
   readonly col: number;
 }
 
-/** A position that survives a rebuild: the row and an offset into its text. */
+/**
+ * A position that survives a rebuild: the row and an offset into its text.
+ * Offset `SEPARATOR_OFFSET` is the blank line between the row and the one
+ * before it, so a cursor that stops there (`k` from a row's first line, `{`)
+ * moves on from there on the next key instead of snapping back into the row.
+ */
 export interface RowPosition {
   readonly rowId: string;
   readonly offset: number;
 }
+
+export const SEPARATOR_OFFSET = -1;
 
 export function chatViewport(): HTMLElement | null {
   return document.querySelector<HTMLElement>(CHAT_VIEWPORT_SELECTOR);
@@ -67,8 +75,10 @@ export function buildChatBuffer(viewport: HTMLElement): ChatBuffer {
     // a visual selection inside what the cite pipeline can capture.
     const source =
       element.querySelector<HTMLElement>("[data-assistant-citation-source]") ?? element;
-    const { text, chunks } = readAssistantText(source);
-    if (text.trim().length === 0) continue;
+    const { text: rawText, chunks } = readAssistantText(source);
+    if (rawText.trim().length === 0) continue;
+    const collapses = collapseReader(chunks);
+    const text = renderedText(rawText, chunks, collapses);
     // Two kinds of projected line are dropped:
     // - blank lines, from whitespace between HTML blocks: a cursor there has
     //   no character to paint, and the one blank line between rows already
@@ -79,11 +89,15 @@ export function buildChatBuffer(viewport: HTMLElement): ChatBuffer {
     const lineStarts: number[] = [];
     let offset = 0;
     for (const line of text.split("\n")) {
-      if (line.trim().length > 0 && !isScreenReaderOnly(chunks, offset, offset + line.length)) {
-        rowLines.push(line);
-        lineStarts.push(offset);
+      // Collapsible whitespace at the start of a line renders as nothing,
+      // such as the newline remark-breaks puts after a `<br>`.
+      const start = offset + leadingCollapsedLength(line, offset, chunks, collapses);
+      const end = offset + line.length;
+      if (line.trim().length > 0 && !isScreenReaderOnly(chunks, start, end)) {
+        rowLines.push(text.slice(start, end));
+        lineStarts.push(start);
       }
-      offset += line.length + 1;
+      offset = end + 1;
     }
     if (rowLines.length === 0) continue;
     if (lines.length > 0) {
@@ -106,6 +120,72 @@ export function buildChatBuffer(viewport: HTMLElement): ChatBuffer {
   return { rows, lines, lineRow };
 }
 
+/**
+ * CSS's collapsible white space: spaces, tabs and segment breaks. Not `\s`,
+ * which also matches a no-break space, a character the browser renders.
+ */
+const COLLAPSIBLE_WHITESPACE = /[ \t\n\r]/;
+
+/** `white-space` values that render a `\n` as a line break. */
+const PRESERVED_NEWLINES = new Set(["pre", "pre-wrap", "pre-line", "break-spaces"]);
+
+/**
+ * Whether a chunk renders its whitespace collapsed, read lazily: the buffer
+ * is rebuilt on every key, so a style is read only for a chunk whose
+ * whitespace matters, once per parent. An unstyled element in a DOM without a
+ * user-agent stylesheet reports "", the initial `normal`.
+ */
+function collapseReader(chunks: readonly TextChunk[]): (index: number) => boolean {
+  const byParent = new Map<Element, boolean>();
+  return (index) => {
+    const parent = chunks[index]?.node.parentElement;
+    if (!parent) return true;
+    let collapses = byParent.get(parent);
+    if (collapses === undefined) {
+      collapses = !PRESERVED_NEWLINES.has(getComputedStyle(parent).whiteSpace);
+      byParent.set(parent, collapses);
+    }
+    return collapses;
+  };
+}
+
+/** The projected text with each collapsed `\n` read as the space it renders as. */
+function renderedText(
+  text: string,
+  chunks: readonly TextChunk[],
+  collapses: (index: number) => boolean,
+): string {
+  if (!text.includes("\n")) return text;
+  let rendered = "";
+  let offset = 0;
+  chunks.forEach((chunk, index) => {
+    // Separators between chunks are block and `<br>` breaks: always kept.
+    rendered += text.slice(offset, chunk.start);
+    const span = text.slice(chunk.start, chunk.end);
+    rendered += span.includes("\n") && collapses(index) ? span.replaceAll("\n", " ") : span;
+    offset = chunk.end;
+  });
+  return rendered + text.slice(offset);
+}
+
+function leadingCollapsedLength(
+  line: string,
+  lineStart: number,
+  chunks: readonly TextChunk[],
+  collapses: (index: number) => boolean,
+): number {
+  let length = 0;
+  let index = 0;
+  while (length < line.length && COLLAPSIBLE_WHITESPACE.test(line[length]!)) {
+    const offset = lineStart + length;
+    while (index < chunks.length && chunks[index]!.end <= offset) index += 1;
+    const chunk = chunks[index];
+    if (chunk === undefined || chunk.start > offset || !collapses(index)) break;
+    length += 1;
+  }
+  return length;
+}
+
 function isScreenReaderOnly(chunks: readonly TextChunk[], start: number, end: number): boolean {
   let any = false;
   for (const chunk of chunks) {
@@ -122,7 +202,7 @@ export function toRowPosition(buffer: ChatBuffer, position: BufferPosition): Row
   if (rowIndex === -1) {
     // A separator belongs to the row after it.
     const next = buffer.rows[buffer.lineRow[position.line + 1] ?? -1];
-    return next ? { rowId: next.id, offset: 0 } : null;
+    return next ? { rowId: next.id, offset: SEPARATOR_OFFSET } : null;
   }
   const row = buffer.rows[rowIndex]!;
   const lineInRow = position.line - row.firstLine;
@@ -132,6 +212,12 @@ export function toRowPosition(buffer: ChatBuffer, position: BufferPosition): Row
 export function fromRowPosition(buffer: ChatBuffer, position: RowPosition): BufferPosition | null {
   const row = buffer.rows.find((candidate) => candidate.id === position.rowId);
   if (row === undefined) return null;
+  if (position.offset === SEPARATOR_OFFSET) {
+    // The row before may have unmounted with its separator: then the row's start.
+    return buffer.lineRow[row.firstLine - 1] === -1
+      ? { line: row.firstLine - 1, col: 0 }
+      : { line: row.firstLine, col: 0 };
+  }
   let lineInRow = 0;
   for (let index = 0; index < row.lineStarts.length; index += 1) {
     if (row.lineStarts[index]! <= position.offset) lineInRow = index;

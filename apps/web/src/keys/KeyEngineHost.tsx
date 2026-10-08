@@ -1,4 +1,4 @@
-import { useRouter } from "@tanstack/react-router";
+import { useParams, useRouter } from "@tanstack/react-router";
 import { useEffect, useLayoutEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { displayToken } from "@mesura/keys/keyToken";
@@ -7,7 +7,7 @@ import { useClientSettings } from "~/hooks/useSettings";
 import { registerPaneEntry } from "~/lib/paneFocus";
 import { cn } from "~/lib/utils";
 
-import { clearChatSurfacePaint, chatSurface } from "./chat/chatSurface";
+import { clearChatSurfacePaint, chatSurface, setChatThreadKey } from "./chat/chatSurface";
 import {
   composerCursorLine,
   composerProjectedText,
@@ -61,6 +61,12 @@ export function KeyEngineHost() {
     };
   }, [vimMode]);
 
+  // The chat cursor is remembered per thread, keyed by the route's ids.
+  const threadKey = useChatThreadKey();
+  useEffect(() => {
+    if (vimMode) setChatThreadKey(threadKey);
+  }, [threadKey, vimMode]);
+
   const mainPanel = useMainPanelElement(vimMode);
 
   if (!vimMode) return null;
@@ -85,6 +91,13 @@ function enterChatBuffer(): boolean {
   // A chat left in VISUAL or mid-sequence comes back in NORMAL; the cursor stays.
   chatSurface.reset();
   return true;
+}
+
+/** The open thread's key from the chat route's params, or `null` off a thread. */
+function useChatThreadKey(): string | null {
+  const { environmentId, threadId, draftId } = useParams({ strict: false });
+  if (environmentId && threadId) return `${environmentId}/${threadId}`;
+  return draftId ? `draft/${draftId}` : null;
 }
 
 /**

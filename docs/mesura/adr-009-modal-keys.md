@@ -292,8 +292,6 @@ These are recorded for the plan. Each one cost a debugging round.
 - **The file tree's flash did not open in a headless browser**, with Vim mode
   on or off; the tree receives `s` unprevented. Not investigated further; the
   tree's flash styling was checked by setting its flash state by hand.
-- A soft line break inside a Markdown paragraph is a `\n` in its text node, so
-  it splits one rendered line into two buffer lines.
 - `u` in the composer undoes within one normal-mode session only.
 - **`resolveKeyScope` returned early for the composer without reading the
   focused pane**, so the pane remembered for a later blur stayed stale. A
@@ -316,9 +314,7 @@ These are recorded for the plan. Each one cost a debugging round.
 The sidebar list primitive (the cursor apart from the open thread, `Ctrl+D/U`
 scroll without opening, visible-row numbering), the project filter's Tab to
 "All projects", right-panel scopes, the `keymap.json` user config, the
-extraction of `fm-core/src/keys`, citing user messages, search (`/`), and
-a remembered cursor per thread (the cursor survives only while the same thread
-stays open).
+extraction of `fm-core/src/keys`, citing user messages, and search (`/`).
 
 ## Merge cost
 
