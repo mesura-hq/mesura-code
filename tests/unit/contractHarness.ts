@@ -20,11 +20,19 @@ export const vitePlusPath = NodePath.join(repositoryRoot, "node_modules/.bin/vp"
  */
 export const typecheckerPath = NodePath.join(repositoryRoot, "node_modules/.bin/tsc");
 
+/**
+ * Room for a `git grep --only-matching` over the whole tracked tree, which
+ * prints tens of megabytes. spawnSync's 1 MiB default truncates it silently
+ * into a non-zero status.
+ */
+const RUN_OUTPUT_LIMIT_BYTES = 256 * 1024 * 1024;
+
 export const run = (command: string, args: ReadonlyArray<string>, cwd = repositoryRoot) =>
   NodeChildProcess.spawnSync(command, args, {
     cwd,
     encoding: "utf8",
     env: process.env,
+    maxBuffer: RUN_OUTPUT_LIMIT_BYTES,
   });
 
 export const commandOutput = (result: NodeChildProcess.SpawnSyncReturns<string>) =>

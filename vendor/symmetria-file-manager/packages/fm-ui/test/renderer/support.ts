@@ -577,7 +577,7 @@ export function installBridge(options: BridgeOptions = {}): BridgeLog {
         value: {
           entries: [
             { score: 4536, path: "/home/jc/Downloads" },
-            { score: 446, path: "/home/jc/work/sales/bambin" },
+            { score: 446, path: "/home/jc/work/sales/acme" },
             { score: 278, path: "/home/jc/.dotfiles" },
           ],
         },

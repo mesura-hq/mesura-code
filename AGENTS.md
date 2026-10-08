@@ -1,6 +1,6 @@
 # Mesura Code
 
-Mesura Code is a private fork of **T3 Code**, maintained by one developer for one developer's workflow. Upstream lives at https://github.com/pingdotgg/t3code and is worth reading directly.
+Mesura Code is a fork of **T3 Code**, maintained by one developer for one developer's workflow. Upstream lives at https://github.com/pingdotgg/t3code and is worth reading directly.
 
 The product is a minimal GUI for coding agents. A Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity) and serves web, desktop, and mobile clients — upstream ships native Android and iOS apps, which this fork removed (see principle 4). T3 Code is an open source "bring-your-own-subscription" alternative to apps like Claude Desktop, Codex App, Cursor Glass and Conductor; this fork inherits all of that and changes very little of it.
 
@@ -10,7 +10,7 @@ Be accurate about the difference, because most of this repository's engineering 
 
 **T3 Code** is a large open source project: Theo, Julius and a substantial community build it, it has over 200,000 users, its roadmap and code are public, and many of those users run forks of their own.
 
-**Mesura Code** has none of that. It is a single person's fork, private, with no users but its author. It exists to fit one specific workflow, not to compete with upstream and not to diverge from it. Nothing in this repository should claim otherwise — no user counts, no community, no openness we do not have.
+**Mesura Code** has none of that. It is a single person's fork, with no users but its author. Whether its code is public changes nothing here: nobody else builds it, uses it or steers it. It exists to fit one specific workflow, not to compete with upstream and not to diverge from it. Nothing in this repository should claim otherwise — no user counts, no community, no public roadmap, no contribution process.
 
 Four things follow. The first is this fork's own; the other three are upstream's standards, inherited and worth keeping.
 
