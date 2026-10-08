@@ -2,7 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { assignFlashLabels } from "./flash.ts";
 import { keyTokenOf, parseKeySequence, type KeyPress } from "./keyToken.ts";
-import { compileKeymap, whichKeyRows, type KeymapConfig } from "./keymap.ts";
+import { compileKeymap, walkKeys, whichKeyRows, type KeymapConfig } from "./keymap.ts";
 import { IDLE_SEQUENCE, stepSequence, type SequenceState } from "./sequence.ts";
 
 const press = (overrides: Partial<KeyPress>): KeyPress => ({
@@ -129,6 +129,142 @@ describe("stepSequence", () => {
 
   it("reports keys that leave the trie as unbound", () => {
     expect(feed(["<Space>", "x"]).outcomes).toEqual(["pending", "unbound"]);
+  });
+});
+
+describe("stepSequence counts", () => {
+  const trie = compileKeymap(config).trieFor("normal", ["chat"]);
+
+  it("runs a command typed without a count with a null count", () => {
+    let state: SequenceState = IDLE_SEQUENCE;
+    state = stepSequence(trie, state, "g").state;
+    expect(stepSequence(trie, state, "g").outcome).toEqual({
+      kind: "command",
+      command: "chat.top",
+      count: null,
+    });
+  });
+
+  it("extends a count with 0 but never starts one with it", () => {
+    const zero = stepSequence(trie, IDLE_SEQUENCE, "0");
+    expect(zero.outcome).toEqual({ kind: "unbound", keys: ["0"] });
+    expect(zero.state).toEqual(IDLE_SEQUENCE);
+
+    let state: SequenceState = IDLE_SEQUENCE;
+    for (const token of ["1", "0"]) state = stepSequence(trie, state, token).state;
+    expect(state).toEqual({ pending: [], count: "10" });
+  });
+
+  it("lets a digit the trie binds win over a count (Helix rule)", () => {
+    const digitTrie = compileKeymap({
+      leader: "<Space>",
+      groups: [],
+      bindings: [{ mode: "normal", keys: "0", command: "line.start" }],
+    }).trieFor("normal", []);
+    expect(stepSequence(digitTrie, { pending: [], count: "3" }, "0").outcome).toEqual({
+      kind: "command",
+      command: "line.start",
+      count: 3,
+    });
+  });
+
+  it("treats a digit after a prefix as a key, not a count", () => {
+    let state: SequenceState = IDLE_SEQUENCE;
+    state = stepSequence(trie, state, "<Space>").state;
+    expect(stepSequence(trie, state, "2").outcome).toEqual({
+      kind: "unbound",
+      keys: ["<Space>", "2"],
+    });
+  });
+});
+
+describe("stepSequence cancel and unbound", () => {
+  const trie = compileKeymap(config).trieFor("normal", ["chat"]);
+
+  it("cancels a bare count on Escape", () => {
+    let state: SequenceState = IDLE_SEQUENCE;
+    state = stepSequence(trie, state, "4").state;
+    expect(stepSequence(trie, state, "<Esc>")).toEqual({
+      state: IDLE_SEQUENCE,
+      outcome: { kind: "cancelled" },
+    });
+  });
+
+  it("drops the count with the keys when a sequence leaves the trie", () => {
+    let state: SequenceState = IDLE_SEQUENCE;
+    for (const token of ["5", "<Space>"]) state = stepSequence(trie, state, token).state;
+    expect(stepSequence(trie, state, "x")).toEqual({
+      state: IDLE_SEQUENCE,
+      outcome: { kind: "unbound", keys: ["<Space>", "x"] },
+    });
+  });
+
+  it("steps back to no pending keys on Backspace and keeps the count", () => {
+    let state: SequenceState = IDLE_SEQUENCE;
+    for (const token of ["2", "<Space>"]) state = stepSequence(trie, state, token).state;
+    expect(stepSequence(trie, state, "<BS>")).toEqual({
+      state: { pending: [], count: "2" },
+      outcome: { kind: "count" },
+    });
+  });
+
+  it("reports an Escape with nothing pending as unbound", () => {
+    expect(stepSequence(trie, IDLE_SEQUENCE, "<Esc>").outcome).toEqual({
+      kind: "unbound",
+      keys: ["<Esc>"],
+    });
+  });
+});
+
+describe("compileKeymap conflicts", () => {
+  const compile = (bindings: KeymapConfig["bindings"]) =>
+    compileKeymap({ leader: "<Space>", groups: [], bindings });
+
+  it("reports a binding that extends an existing command and drops it", () => {
+    const keymap = compile([
+      { mode: "normal", keys: "g", command: "go" },
+      { mode: "normal", keys: "gg", command: "top" },
+    ]);
+    expect(keymap.conflicts).toEqual([
+      {
+        mode: "normal",
+        scope: undefined,
+        keys: "gg",
+        command: "top",
+        reason: "extends-existing-command",
+      },
+    ]);
+    expect(keymap.trieFor("normal", []).children.get("g")).toEqual({
+      kind: "leaf",
+      command: "go",
+      label: undefined,
+    });
+  });
+
+  it("reports a duplicate binding per mode and keeps the first", () => {
+    const keymap = compile([
+      { mode: ["normal", "visual"], keys: "x", command: "first" },
+      { mode: "visual", keys: "x", command: "second" },
+    ]);
+    expect(keymap.conflicts).toEqual([
+      { mode: "visual", scope: undefined, keys: "x", command: "second", reason: "duplicate" },
+    ]);
+    expect(walkKeys(keymap.trieFor("visual", []), ["x"])).toMatchObject({ command: "first" });
+  });
+
+  it("does not report the same keys in another scope as a conflict", () => {
+    const keymap = compile([
+      { mode: "normal", keys: "gg", command: "global.top" },
+      { mode: "normal", scope: "chat", keys: "g", command: "chat.go" },
+    ]);
+    expect(keymap.conflicts).toEqual([]);
+    // The deeper scope's command shadows every outer `g…` sequence.
+    expect(walkKeys(keymap.trieFor("normal", ["chat"]), ["g"])).toMatchObject({
+      command: "chat.go",
+    });
+    expect(walkKeys(keymap.trieFor("normal", []), ["g", "g"])).toMatchObject({
+      command: "global.top",
+    });
   });
 });
 
