@@ -10,7 +10,7 @@
  * the previous keystroke when that label is still allowed.
  */
 
-export const DEFAULT_FLASH_LABELS = "asdfghjklqwertyuiopzxcvbnm";
+const DEFAULT_FLASH_LABELS = "asdfghjklqwertyuiopzxcvbnm";
 
 export interface FlashMatch {
   readonly id: string;

@@ -312,12 +312,13 @@
   caret-color: transparent;
 }
 /* The composer in Vim normal or visual mode: a ring on its box says the keys
-   are commands, not text. Colours match the mode indicator. */
-[data-chat-composer-main-surface]:has([data-mesura-vim="normal"]) {
+   are commands, not text. Colours match the mode indicator. `composerSurface.ts`
+   writes the mode onto the surface itself, so no `:has()` is needed. */
+[data-chat-composer-main-surface][data-mesura-composer-vim="normal"] {
   outline: 1.5px solid oklch(68.5% 0.169 237.323);
   outline-offset: -1px;
 }
-[data-chat-composer-main-surface]:has([data-mesura-vim="visual"]) {
+[data-chat-composer-main-surface][data-mesura-composer-vim="visual"] {
   outline: 1.5px solid oklch(76.9% 0.188 70.08);
   outline-offset: -1px;
 }

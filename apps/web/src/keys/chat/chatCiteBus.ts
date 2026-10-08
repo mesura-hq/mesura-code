@@ -13,12 +13,15 @@ const EVENT_NAME = "mesura:chat-cite-selection";
 
 /** Dispatches synchronously, so the result is known on return. */
 export function requestChatCite(): boolean {
+  if (typeof window === "undefined") return false;
   const request: ChatCiteRequest = { cited: false };
   window.dispatchEvent(new CustomEvent<ChatCiteRequest>(EVENT_NAME, { detail: request }));
   return request.cited;
 }
 
 export function subscribeChatCiteRequest(listener: (request: ChatCiteRequest) => void): () => void {
+  // Test renderers in Node mount the subscriber with no DOM.
+  if (typeof window === "undefined") return () => {};
   const handler = (event: Event) => listener((event as CustomEvent<ChatCiteRequest>).detail);
   window.addEventListener(EVENT_NAME, handler);
   return () => window.removeEventListener(EVENT_NAME, handler);

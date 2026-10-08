@@ -57,13 +57,42 @@ let mode: "insert" | "normal" = "insert";
 let context: VimContext = createInitialContext({ line: 0, col: 0 });
 let session: { projection: ComposerProjection; buffer: TextBuffer; prompt: string } | null = null;
 let focusListenerInstalled = false;
+/** The surface the ring was drawn on, so it clears even once the editor is gone. */
+let markedSurface: HTMLElement | null = null;
+
+const COMPOSER_SURFACE_SELECTOR = "[data-chat-composer-main-surface]";
+const COMPOSER_SURFACE_VIM_ATTRIBUTE = "data-mesura-composer-vim";
 
 export function registerComposerVimAdapter(next: ComposerVimAdapter): () => void {
   adapter = next;
   installFocusListener();
   return () => {
-    if (adapter === next) adapter = null;
+    if (adapter !== next) return;
+    adapter = null;
+    if (mode !== "insert") enterInsert();
   };
+}
+
+/**
+ * Writes the Vim mode onto the editor (it hides the caret) and onto the
+ * composer's surface (it draws the ring), or clears both in insert mode. The
+ * surface carries its own attribute because `mesura.css` keeps `:has()` out.
+ */
+function markComposerVimMode(vimMode: "normal" | "visual" | null): void {
+  const editor = composerEditorElement();
+  const surface = editor?.closest<HTMLElement>(COMPOSER_SURFACE_SELECTOR) ?? null;
+  if (markedSurface !== null && markedSurface !== surface) {
+    markedSurface.removeAttribute(COMPOSER_SURFACE_VIM_ATTRIBUTE);
+  }
+  if (vimMode === null) {
+    editor?.removeAttribute("data-mesura-vim");
+    surface?.removeAttribute(COMPOSER_SURFACE_VIM_ATTRIBUTE);
+    markedSurface = null;
+    return;
+  }
+  editor?.setAttribute("data-mesura-vim", vimMode);
+  surface?.setAttribute(COMPOSER_SURFACE_VIM_ATTRIBUTE, vimMode);
+  markedSurface = surface;
 }
 
 /** Focus arriving from outside the composer always lands in insert mode. */
@@ -105,7 +134,7 @@ function enterInsert(): void {
   paintHighlight("mesura-composer-cursor", []);
   paintHighlight("mesura-composer-visual", []);
   setCursorOverlay(null);
-  composerEditorElement()?.removeAttribute("data-mesura-vim");
+  markComposerVimMode(null);
   bumpComposerLayout();
 }
 
@@ -119,7 +148,7 @@ function enterNormal(): void {
   const position = positionOf(projection.text, Math.min(offset, projection.text.length));
   context = createInitialContext(position);
   mode = "normal";
-  composerEditorElement()?.setAttribute("data-mesura-vim", "normal");
+  markComposerVimMode("normal");
   paint();
 }
 
@@ -235,12 +264,12 @@ function handleNormalKey(token: string): boolean {
     paintHighlight("mesura-composer-cursor", []);
     paintHighlight("mesura-composer-visual", []);
     setCursorOverlay(null);
-    composerEditorElement()?.removeAttribute("data-mesura-vim");
+    markComposerVimMode(null);
     if (!changed) adapter.setCursor(offset);
     session = null;
     return true;
   }
-  composerEditorElement()?.setAttribute("data-mesura-vim", isVisual() ? "visual" : "normal");
+  markComposerVimMode(isVisual() ? "visual" : "normal");
   paint(!changed);
   return true;
 }
