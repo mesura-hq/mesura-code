@@ -37,7 +37,7 @@ import {
   createRouter,
   Outlet,
 } from "@tanstack/react-router";
-import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vite-plus/test";
 import {
   EnvironmentId,
   ProjectId,
@@ -342,6 +342,17 @@ function dirtyVcsStatus() {
     workingTree: { files: [], insertions: 11, deletions: 3 },
   };
 }
+
+// ChatView lazy-loads the Diff and file panels. On a cold CI runner the file
+// panel's first import compiled for longer than `waitFor`'s 10 s, so the first
+// test that opened a file tab failed on time alone. Load both chunks up front,
+// under a hook timeout sized for that compile.
+beforeAll(async () => {
+  await Promise.all([
+    import("./components/DiffPanel"),
+    import("./components/files/FilePreviewPanel"),
+  ]);
+}, 120_000);
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
