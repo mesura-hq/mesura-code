@@ -171,6 +171,7 @@ import {
   formatAttachmentUploadProgress,
 } from "../../lib/attachmentUploadState";
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
+import { useCommandHandlers } from "../../commands/commandRegistry";
 import { getTerminalFocusOwner } from "../../lib/terminalFocus";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
 import { getClientSettings } from "~/hooks/useSettings";
@@ -4963,6 +4964,29 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setIsStashMenuOpen(false);
   }, [prompt]);
 
+  // The chord handler below and the command registry run these, so a leader
+  // key and the chord stop for the same conditions.
+  const canOpenAttachmentPicker = () =>
+    fileStagingLimit !== null &&
+    !isCommandPaletteOpen() &&
+    !isComposerApprovalState &&
+    !projectSelectionRequired;
+  const stashCurrentPromptWhenAllowed = () => {
+    if (isCommandPaletteOpen() || isRevertingCheckpoint) {
+      return;
+    }
+    if (isComposerApprovalState || projectSelectionRequired) {
+      return;
+    }
+    void stashCurrentPrompt();
+  };
+  useCommandHandlers({
+    "composer.attachFiles": () => {
+      if (canOpenAttachmentPicker()) openAttachmentPicker();
+    },
+    "composer.stash": stashCurrentPromptWhenAllowed,
+  });
+
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
       const command = resolveShortcutCommand(event, keybindings, {
@@ -4982,14 +5006,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         // dialog opens otherwise; alt+a has no browser default to suppress, so
         // claiming it while nothing opens would swallow the keystroke from
         // whatever else wanted it.
-        if (
-          fileStagingLimit === null ||
-          isCommandPaletteOpen() ||
-          isComposerApprovalState ||
-          projectSelectionRequired
-        ) {
-          return;
-        }
+        if (!canOpenAttachmentPicker()) return;
         event.preventDefault();
         event.stopPropagation();
         openAttachmentPicker();
@@ -5000,13 +5017,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       // even when the composer is in a state that can't stash.
       event.preventDefault();
       event.stopPropagation();
-      if (isCommandPaletteOpen() || isRevertingCheckpoint) {
-        return;
-      }
-      if (isComposerApprovalState || projectSelectionRequired) {
-        return;
-      }
-      void stashCurrentPrompt();
+      stashCurrentPromptWhenAllowed();
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);

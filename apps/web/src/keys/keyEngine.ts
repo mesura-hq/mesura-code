@@ -1,7 +1,9 @@
-import type { KeybindingCommand, ResolvedKeybindingsConfig } from "@t3tools/contracts";
+import type { KeybindingCommand } from "@t3tools/contracts";
 import { keyTokenOf } from "@mesura/keys/keyToken";
 import { compileKeymap, whichKeyRows, type KeyMode, type KeyNode } from "@mesura/keys/keymap";
 import { IDLE_SEQUENCE, stepSequence, type SequenceState } from "@mesura/keys/sequence";
+
+import { runRegisteredCommand } from "~/commands/commandRegistry";
 
 import { DEFAULT_KEYMAP, isEngineCommand } from "./defaultKeymap";
 import {
@@ -10,7 +12,6 @@ import {
   resolveKeyScope,
   type KeyScope,
 } from "./focusScope";
-import { isSyntheticKeybindingReplay, replayKeybindingCommand } from "./keybindingCommandBridge";
 import {
   readKeyEngineSnapshot,
   updateKeyEngineSnapshot,
@@ -30,7 +31,7 @@ import { handlePaneKey, isPaneModeActive, startPaneMode, stopPaneMode } from "./
  * `stopImmediatePropagation`, so none of them ever sees it.
  *
  * Routing for a key, in order:
- * 1. Off, a composition in progress, or a replayed chord: not ours.
+ * 1. Off, or a composition in progress: not ours.
  * 2. A passthrough scope (terminal, Neovim editor, file tree, open dialog or
  *    menu, command palette): not ours.
  * 3. The composer: its surface decides (insert passes keys, Escape leaves).
@@ -65,7 +66,6 @@ if (keymap.conflicts.length > 0 && import.meta.env.DEV) {
 }
 
 let enabled = false;
-let keybindings: ResolvedKeybindingsConfig = [];
 let sequence: SequenceState = IDLE_SEQUENCE;
 let whichKeyTimer: number | null = null;
 let helpOpen = false;
@@ -79,12 +79,8 @@ export function registerKeySurface(surface: KeySurface): () => void {
   };
 }
 
-export function configureKeyEngine(options: {
-  readonly enabled: boolean;
-  readonly keybindings: ResolvedKeybindingsConfig;
-}): void {
+export function configureKeyEngine(options: { readonly enabled: boolean }): void {
   enabled = options.enabled;
-  keybindings = options.keybindings;
   if (!enabled) resetEngine();
   updateKeyEngineSnapshot({ enabled });
   refreshModeIndicator();
@@ -146,7 +142,7 @@ function consume(event: KeyboardEvent): void {
 }
 
 function onKeyDown(event: KeyboardEvent): void {
-  if (!enabled || isSyntheticKeybindingReplay(event)) return;
+  if (!enabled) return;
   if (event.isComposing || event.keyCode === 229) return;
   const token = keyTokenOf({
     key: event.key,
@@ -275,8 +271,10 @@ function runCommand(command: string, count: number | null, surface: KeySurface |
         return;
     }
   }
-  if (!replayKeybindingCommand(keybindings, command as KeybindingCommand)) {
-    updateKeyEngineSnapshot({ notice: `${command} has no chord to run` });
+  // App commands run through the handler their owner registered. No owner
+  // mounted means the command does not apply where the developer is.
+  if (!runRegisteredCommand(command as KeybindingCommand)) {
+    updateKeyEngineSnapshot({ notice: `${command} is not available here` });
   }
 }
 

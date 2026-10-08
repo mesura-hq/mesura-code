@@ -119,6 +119,7 @@ import { useProjectScopeStore } from "../projectScopeStore";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
+import { useCommandHandlers } from "../commands/commandRegistry";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { useClientSettings } from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
@@ -174,6 +175,7 @@ import {
   planSidebarThreadDrop,
   reduceSidebarProjectScopeMenuState,
   resolveAdjacentThreadId,
+  type ThreadTraversalDirection,
   resolveSidebarDropTarget,
   resolveSidebarDropVerb,
   type SidebarDropVerb,
@@ -4279,6 +4281,30 @@ export default function Sidebar() {
       ? selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef).terminalOpen
       : false,
   );
+  // The chord handler below and the command registry run these, so a leader
+  // key and the chord walk the same ordered list.
+  const adjacentThreadKey = useCallback(
+    (direction: ThreadTraversalDirection) =>
+      resolveAdjacentThreadId({
+        threadIds: orderedThreadKeys,
+        currentThreadId: routeThreadKey,
+        direction,
+      }),
+    [orderedThreadKeys, routeThreadKey],
+  );
+  const openThreadByKey = useCallback(
+    (targetThreadKey: string | null) => {
+      const targetThread = targetThreadKey ? threadByKey.get(targetThreadKey) : undefined;
+      if (!targetThread) return false;
+      navigateToThread(scopeThreadRef(targetThread.environmentId, targetThread.id));
+      return true;
+    },
+    [navigateToThread, threadByKey],
+  );
+  useCommandHandlers({
+    "thread.next": () => openThreadByKey(adjacentThreadKey("next")),
+    "thread.previous": () => openThreadByKey(adjacentThreadKey("previous")),
+  });
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.repeat || isCommandPaletteOpen() || isModelPickerOpen()) {
@@ -4293,23 +4319,14 @@ export default function Sidebar() {
         },
       });
       const navigateToThreadKey = (targetThreadKey: string | null) => {
-        if (!targetThreadKey) return false;
-        const targetThread = threadByKey.get(targetThreadKey);
-        if (!targetThread) return false;
+        if (!targetThreadKey || !threadByKey.has(targetThreadKey)) return false;
         event.preventDefault();
         event.stopPropagation();
-        navigateToThread(scopeThreadRef(targetThread.environmentId, targetThread.id));
-        return true;
+        return openThreadByKey(targetThreadKey);
       };
       const traversalDirection = threadTraversalDirectionFromCommand(command);
       if (traversalDirection !== null) {
-        navigateToThreadKey(
-          resolveAdjacentThreadId({
-            threadIds: orderedThreadKeys,
-            currentThreadId: routeThreadKey,
-            direction: traversalDirection,
-          }),
-        );
+        navigateToThreadKey(adjacentThreadKey(traversalDirection));
         return;
       }
       const jumpIndex = threadJumpIndexFromCommand(command ?? "");
@@ -4325,6 +4342,8 @@ export default function Sidebar() {
     routeTerminalOpen,
     routeThreadKey,
     threadByKey,
+    adjacentThreadKey,
+    openThreadByKey,
   ]);
 
   // Same predicate as v1: hints show only while the held modifiers exactly

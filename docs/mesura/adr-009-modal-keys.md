@@ -257,16 +257,13 @@ Rejected: replaying pointer events on the handles (the chord bridge's
 technique). It needs no upstream edit, but it fakes input to reach state the
 code already owns, and it cannot read the size it is about to change.
 
-Not built: maximize from PANE mode. `rightPanel.toggleMaximized` has no
-default chord, so the chord bridge cannot run it; the command registry in the
-plan removes that limit.
+Not built: maximize from PANE mode (#85). `rightPanel.toggleMaximized` has no
+default chord; the command registry can run it once an owner registers it.
 
 These are recorded for the plan. Each one cost a debugging round.
 
-- **The chord bridge is a hack.** Leader rows run existing commands by
-  replaying their chord as a synthetic `keydown`
-  (`keybindingCommandBridge.ts`). The plan replaces it with a command registry
-  whose entries own `run()`; the palette then reads the same registry.
+- **The chord bridge is gone**: the command registry
+  (`apps/web/src/commands/commandRegistry.ts`) replaced it.
 - **The composer's editor takes focus whenever it moves its DOM selection**,
   even when asked not to focus. A cite therefore needs `keepFocusInChat`
   (WORKAROUND) to return focus to the chat.
@@ -350,6 +347,24 @@ Pane resizing (commits in the three months to 2026-10-08):
   registration, the handle's focus.
 - `AppSidebarLayout.tsx` (35): one line, `onResetWidth`.
 
-`ChatView.tsx` (276) is not edited: the engine pre-empts type-to-focus from
-its own listener, and the chat buffer reads the timeline's existing data
-attributes.
+Command registry (commits in the three months to 2026-10-08). New file:
+`apps/web/src/commands/commandRegistry.ts`. Each owner gets one
+`useCommandHandlers` block; where a chord branch was inline, its body moved
+into one named local function that the branch and the block both call:
+
+- `ChatView.tsx` (276): the block, plus `toggleActiveThreadSettlement`,
+  `toggleActiveThreadPin` and `firstQueuedMessage` lifted out of the chord
+  handler. The engine pre-empts type-to-focus from its own listener, and the
+  chat buffer reads the timeline's existing data attributes, so this is the
+  file's only seam.
+- `Sidebar.tsx` (161): `adjacentThreadKey` and `openThreadByKey` lifted out of
+  the traversal handler.
+- `ChatComposer.tsx` (134): `canOpenAttachmentPicker` and
+  `stashCurrentPromptWhenAllowed` lifted out of the chord handler.
+- `CommandPalette.tsx` (64): the block, built from `OVERLAY_MODE_BY_COMMAND`.
+- `_chat.pull-requests.tsx` (58): the block, plus `copyPullRequestLink`.
+- `LegacySidebar.tsx` (55): `adjacentThread` lifted out of the traversal
+  handler.
+- `AppSidebarLayout.tsx` (35), `OpenInPicker.tsx` (12): the block only.
+- `_chat.tsx` (11): `startContextualNewThread`, `startNewThread` and
+  `togglePreviewPanel` lifted out of the chord handler.

@@ -2,6 +2,7 @@ import type { ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import { useEffect } from "react";
 
 import { isCommandPaletteOpen } from "../commandPaletteBus";
+import { useCommandHandlers } from "../commands/commandRegistry";
 import { resolveShortcutCommand } from "../keybindings";
 import { getTerminalFocusOwner } from "../lib/terminalFocus";
 
@@ -35,4 +36,5 @@ export function useThreadRenameShortcut(input: {
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
   }, [enabled, keybindings, onStartRename]);
+  useCommandHandlers({ "thread.rename": enabled ? onStartRename : undefined });
 }

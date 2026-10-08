@@ -178,6 +178,7 @@ import { searchSettings, SETTINGS_SECTION_LABELS } from "./settings/settingsSear
 import { COMMAND_PALETTE_META_ICON_CLASS, CommandPaletteMetaDot } from "./ThreadCommandSubtitle";
 import { primaryServerKeybindingsAtom, primaryServerProvidersAtom } from "../state/server";
 import { resolveShortcutCommand } from "../keybindings";
+import { useCommandHandlers } from "../commands/commandRegistry";
 import { CommandDialog, CommandDialogPopup, CommandFooterAction } from "./ui/command";
 import { Button } from "./ui/button";
 import { Kbd, KbdGroup } from "./ui/kbd";
@@ -535,6 +536,16 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [keybindings, previewOpen, resolvedTheme, terminalOpen, theme, themeHalves, toggleMode]);
+
+  // The same toggles for the command registry, which Vim mode's leader keys run.
+  useCommandHandlers(
+    Object.fromEntries(
+      Object.entries(OVERLAY_MODE_BY_COMMAND).map(([command, mode]) => [
+        command,
+        () => toggleMode(mode),
+      ]),
+    ),
+  );
 
   useEffect(
     () =>

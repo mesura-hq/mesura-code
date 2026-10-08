@@ -1,11 +1,9 @@
-import { useAtomValue } from "@effect/atom-react";
 import { useRouter } from "@tanstack/react-router";
 import { useEffect, useLayoutEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { displayToken } from "@mesura/keys/keyToken";
 
 import { useClientSettings } from "~/hooks/useSettings";
-import { primaryServerKeybindingsAtom } from "~/state/server";
 import { cn } from "~/lib/utils";
 
 import { clearChatSurfacePaint, chatSurface } from "./chat/chatSurface";
@@ -34,11 +32,14 @@ import { useFlashSnapshot } from "./flashStore";
  */
 export function KeyEngineHost() {
   const vimMode = useClientSettings((settings) => settings.vimMode);
-  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
 
+  // The engine is global and installed once, but only the chat layout mounts
+  // this host: leaving it (Settings, the pull requests page) turns the engine
+  // off, so a key there is never read against the chat's remembered scope.
   useEffect(() => {
-    configureKeyEngine({ enabled: vimMode, keybindings });
-  }, [keybindings, vimMode]);
+    configureKeyEngine({ enabled: vimMode });
+    return () => configureKeyEngine({ enabled: false });
+  }, [vimMode]);
 
   useEffect(() => {
     if (!vimMode) return;

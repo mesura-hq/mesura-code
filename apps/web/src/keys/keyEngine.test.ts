@@ -85,14 +85,14 @@ let disposeSurfaces: Array<() => void> = [];
 beforeEach(() => {
   document.body.innerHTML = LAYOUT;
   reachedLaterListener.length = 0;
-  configureKeyEngine({ enabled: true, keybindings: [] });
+  configureKeyEngine({ enabled: true });
 });
 
 afterEach(() => {
   vi.useRealTimers();
   for (const dispose of disposeSurfaces) dispose();
   disposeSurfaces = [];
-  configureKeyEngine({ enabled: false, keybindings: [] });
+  configureKeyEngine({ enabled: false });
   document.body.innerHTML = "";
 });
 
@@ -148,6 +148,22 @@ describe("key engine leader in the chat", () => {
     press(" ", "Space");
     press("c");
     expect(chat.commands).toEqual([["chat.cite", null]]);
+  });
+
+  it("reports a leader command whose owner is not mounted as not available, and does nothing else", () => {
+    disposeSurfaces.push(fakeSurface("chat").dispose);
+    byTestId("chat-focus").focus();
+
+    expect(press(" ", "Space")).toEqual({ prevented: true, reachedLater: false });
+    expect(press("t")).toEqual({ prevented: true, reachedLater: false });
+    expect(press("p")).toEqual({ prevented: true, reachedLater: false });
+
+    expect(readKeyEngineSnapshot().notice).toContain("is not available here");
+    expect(reachedLaterListener.map((event) => event.key)).toEqual([]);
+    expect(readKeyEngineSnapshot().pending).toEqual([]);
+    expect(readKeyEngineSnapshot().whichKey).toBeNull();
+    expect(readKeyEngineSnapshot().mode).toBe("NORMAL");
+    expect(document.activeElement).toBe(byTestId("chat-focus"));
   });
 
   it("reports a leader sequence that leaves the keymap as not mapped", () => {
@@ -232,7 +248,7 @@ describe("key engine in the chat without a binding", () => {
 
   it("leaves every key alone while Vim mode is off", () => {
     disposeSurfaces.push(fakeSurface("chat").dispose);
-    configureKeyEngine({ enabled: false, keybindings: [] });
+    configureKeyEngine({ enabled: false });
     byTestId("chat-focus").focus();
 
     for (const { key, code } of KEYS) {
