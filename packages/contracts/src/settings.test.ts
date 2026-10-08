@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import {
   ClientSettingsSchema,
+  DEFAULT_CLIENT_SETTINGS,
   ClientSettingsPatch,
   ClaudeSettings,
   DEFAULT_SERVER_SETTINGS,
@@ -392,8 +393,13 @@ describe("ClientSettings modal editing", () => {
 });
 
 describe("ClientSettings vim mode", () => {
-  it("defaults off while the modal key layer is a prototype", () => {
-    expect(decodeClientSettings({}).vimMode).toBe(false);
+  it("decodes a client with no stored vimMode as Vim mode on", () => {
+    expect(decodeClientSettings({}).vimMode).toBe(true);
+    expect(DEFAULT_CLIENT_SETTINGS.vimMode).toBe(true);
+  });
+
+  it("keeps a stored vimMode false off", () => {
+    expect(decodeClientSettings({ vimMode: false }).vimMode).toBe(false);
   });
 
   it("carries it in a patch, or turning it on springs back", () => {

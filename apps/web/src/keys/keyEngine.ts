@@ -18,6 +18,13 @@ import {
   type EngineModeLabel,
 } from "./keyEngineStore";
 import { toggleComposerExpanded } from "./composer/composerExpanded";
+import {
+  cancelComposerNormalResume,
+  composerNormalOffset,
+  resumeComposerNormalOnFocus,
+} from "./composer/composerSurface";
+import { isCommandPaletteOpen } from "~/commandPaletteBus";
+import { focusPane } from "~/lib/paneFocus";
 import { handlePaneKey, isPaneModeActive, startPaneMode, stopPaneMode } from "./paneMode";
 
 /**
@@ -71,6 +78,15 @@ let whichKeyTimer: number | null = null;
 let helpOpen = false;
 const surfaces = new Map<KeyScope, KeySurface>();
 let installed = false;
+/**
+ * Where the keys went before the command palette took them, and the composer's
+ * normal-mode cursor if it was in normal mode. Read when the palette closes;
+ * opening it blurs the composer, which drops normal mode.
+ */
+let paletteOrigin: { readonly scope: KeyScope; readonly composerOffset: number | null } = {
+  scope: "chat",
+  composerOffset: null,
+};
 
 export function registerKeySurface(surface: KeySurface): () => void {
   surfaces.set(surface.scope, surface);
@@ -91,8 +107,9 @@ export function installKeyEngine(): void {
   installed = true;
   window.addEventListener("keydown", onKeyDown, true);
   // The indicator follows focus, not just keys: clicking into the composer
-  // is entering insert mode.
-  window.addEventListener("focusin", refreshModeIndicator, true);
+  // is entering insert mode. Read after the surfaces' own focus listeners,
+  // which run later and may change their mode.
+  window.addEventListener("focusin", () => queueMicrotask(settleOnInput), true);
   window.addEventListener("focusout", () => queueMicrotask(refreshModeIndicator), true);
 }
 
@@ -122,8 +139,9 @@ function showWhichKey(node: KeyNode, title: string, immediately: boolean): void 
   else whichKeyTimer = window.setTimeout(open, WHICH_KEY_DELAY_MS);
 }
 
-export function refreshModeIndicator(): void {
-  if (!enabled) return;
+/** Shows where the keys go and in which mode; returns that scope, or null while off. */
+export function refreshModeIndicator(): KeyScope | null {
+  if (!enabled) return null;
   const scope = resolveKeyScope();
   const surface = surfaces.get(scope);
   const mode: EngineModeLabel = isPaneModeActive()
@@ -134,6 +152,47 @@ export function refreshModeIndicator(): void {
         ? "INSERT"
         : "NORMAL";
   updateKeyEngineSnapshot({ scope, mode });
+  return scope;
+}
+
+/**
+ * After a key and when focus lands: refreshes the indicator and records where
+ * the keys go now, as the place a palette opened next returns to. Never when
+ * focus merely leaves: the palette's opening blurs the composer to <body>
+ * first, which would read as the chat.
+ */
+function settleOnInput(): void {
+  const scope = refreshModeIndicator();
+  if (scope === null || isCommandPaletteOpen()) return;
+  paletteOrigin = {
+    scope,
+    composerOffset: scope === "composer" ? composerNormalOffset() : null,
+  };
+}
+
+/**
+ * For the command palette as it closes: puts the keys back where it was
+ * opened from. The chat gets the keyboard back on `<body>` with its cursor
+ * where it was; the composer in normal mode gets focus and normal mode at the
+ * same cursor. Returns false when the palette's own focus target applies:
+ * Vim mode off, or anywhere else, composer insert mode included.
+ */
+export function restorePaletteOrigin(): boolean {
+  if (!enabled) return false;
+  const { scope, composerOffset } = paletteOrigin;
+  if (scope === "chat") {
+    focusPane("chat");
+  } else if (scope === "composer" && composerOffset !== null) {
+    const editor = composerEditorElement();
+    if (editor === null) return false;
+    resumeComposerNormalOnFocus(composerOffset);
+    editor.focus({ preventScroll: true });
+  } else {
+    return false;
+  }
+  // The palette is still in the page while it hands focus back.
+  queueMicrotask(refreshModeIndicator);
+  return true;
 }
 
 function consume(event: KeyboardEvent): void {
@@ -143,6 +202,9 @@ function consume(event: KeyboardEvent): void {
 
 function onKeyDown(event: KeyboardEvent): void {
   if (!enabled) return;
+  // Any key ends a composer resume the palette armed, before a command can
+  // move focus back into the composer.
+  cancelComposerNormalResume();
   if (event.isComposing || event.keyCode === 229) return;
   const token = keyTokenOf({
     key: event.key,
@@ -160,7 +222,7 @@ function onKeyDown(event: KeyboardEvent): void {
   try {
     if (handleKey(scope, token, event)) consume(event);
   } finally {
-    refreshModeIndicator();
+    settleOnInput();
   }
 }
 

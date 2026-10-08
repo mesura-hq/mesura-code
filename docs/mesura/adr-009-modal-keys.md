@@ -1,7 +1,7 @@
 # ADR-009 — A modal key layer: Vim modes, a Space leader, the chat as a buffer
 
 **Status:** Proposed, 2026-10-07. A prototype is built behind the `vimMode`
-client setting (off by default) on `t3code/b1ffc179`. The plan and the epic
+client setting (on by default) on `t3code/b1ffc179`. The plan and the epic
 follow from testing that prototype.
 
 **Scope:** how the web client (and the Linux desktop app, which wraps it) reads
@@ -368,3 +368,11 @@ into one named local function that the branch and the block both call:
 - `AppSidebarLayout.tsx` (35), `OpenInPicker.tsx` (12): the block only.
 - `_chat.tsx` (11): `startContextualNewThread`, `startNewThread` and
   `togglePreviewPanel` lifted out of the chord handler.
+
+Landing in normal mode (commits in the three months to 2026-10-08):
+
+- `CommandPalette.tsx` (64): one fork check in `finalFocus`, beside
+  `keepFocusInFileManager()`, that calls the engine's `restorePaletteOrigin`.
+  The chat's pane entry is registered from `KeyEngineHost.tsx` through
+  `registerPaneEntry`, so `paneFocus.ts` and `usePaneNavigation.ts` gain no
+  seam.

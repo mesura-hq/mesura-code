@@ -57,6 +57,8 @@ let mode: "insert" | "normal" = "insert";
 let context: VimContext = createInitialContext({ line: 0, col: 0 });
 let session: { projection: ComposerProjection; buffer: TextBuffer; prompt: string } | null = null;
 let focusListenerInstalled = false;
+/** Set by `resumeComposerNormalOnFocus`: where arriving focus resumes normal mode. */
+let pendingNormalOffset: number | null = null;
 /** The surface the ring was drawn on, so it clears even once the editor is gone. */
 let markedSurface: HTMLElement | null = null;
 
@@ -69,6 +71,7 @@ export function registerComposerVimAdapter(next: ComposerVimAdapter): () => void
   return () => {
     if (adapter !== next) return;
     adapter = null;
+    pendingNormalOffset = null;
     if (mode !== "insert") enterInsert();
   };
 }
@@ -95,17 +98,25 @@ function markComposerVimMode(vimMode: "normal" | "visual" | null): void {
   markedSurface = surface;
 }
 
-/** Focus arriving from outside the composer always lands in insert mode. */
+/**
+ * Focus arriving from outside the composer lands in insert mode, unless a
+ * surface asked for normal mode back (`resumeComposerNormalOnFocus`).
+ */
 function installFocusListener(): void {
   if (focusListenerInstalled) return;
   focusListenerInstalled = true;
+  // A key ends the resume too, from the engine's own handler
+  // (`cancelComposerNormalResume`): it consumes keys before any later
+  // window listener could see them.
+  window.addEventListener("pointerdown", cancelComposerNormalResume, true);
   window.addEventListener(
     "focusin",
     (event) => {
       const editor = composerEditorElement();
       if (!editor || !(event.target instanceof Node) || !editor.contains(event.target)) return;
       if (event.relatedTarget instanceof Node && editor.contains(event.relatedTarget)) return;
-      enterInsert();
+      if (pendingNormalOffset !== null) enterNormal(pendingNormalOffset);
+      else enterInsert();
     },
     true,
   );
@@ -138,13 +149,14 @@ function enterInsert(): void {
   bumpComposerLayout();
 }
 
-function enterNormal(): void {
+/** Enters normal mode at `at`, or one back from the caret when leaving insert mode. */
+function enterNormal(at?: number): void {
   if (!adapter) return;
   const { prompt, cursor } = adapter.read();
   const projection = projectPrompt(prompt);
   session = { projection, buffer: new TextBuffer(projection.text), prompt };
   // Leaving insert mode steps the cursor back one, as Vim does.
-  const offset = Math.max(0, cursor - 1);
+  const offset = at ?? Math.max(0, cursor - 1);
   const position = positionOf(projection.text, Math.min(offset, projection.text.length));
   context = createInitialContext(position);
   mode = "normal";
@@ -325,6 +337,29 @@ export function composerCursorLine(): number | null {
   return mode === "normal" ? context.cursor.line : null;
 }
 
+/** The normal-mode cursor's offset in the projected prompt; null in insert mode. */
+export function composerNormalOffset(): number | null {
+  if (mode !== "normal" || session === null) return null;
+  return offsetOf(session.buffer.getContent(), context.cursor.line, context.cursor.col);
+}
+
+/**
+ * Makes focus arriving in the composer resume normal mode at `offset` instead
+ * of entering insert mode, until the next key or pointer press. For a surface
+ * that hands focus back, such as the command palette closing: focus arrives
+ * more than once as it closes (React restores the focus it saw before the
+ * commit, then Lexical takes it back for its selection), so a single resume
+ * after the first arrival would be undone by the next.
+ */
+export function resumeComposerNormalOnFocus(offset: number): void {
+  pendingNormalOffset = offset;
+}
+
+/** Ends a resume `resumeComposerNormalOnFocus` armed: focus arriving enters insert mode again. */
+export function cancelComposerNormalResume(): void {
+  pendingNormalOffset = null;
+}
+
 /** The second Escape: out of the composer, into the chat buffer. */
 function leaveForChat(): void {
   enterInsert();
@@ -361,6 +396,7 @@ export const composerSurface: KeySurface = {
     return true;
   },
   reset() {
+    pendingNormalOffset = null;
     if (mode !== "insert") enterInsert();
   },
 };

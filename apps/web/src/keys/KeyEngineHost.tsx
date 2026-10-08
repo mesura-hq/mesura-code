@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { displayToken } from "@mesura/keys/keyToken";
 
 import { useClientSettings } from "~/hooks/useSettings";
+import { registerPaneEntry } from "~/lib/paneFocus";
 import { cn } from "~/lib/utils";
 
 import { clearChatSurfacePaint, chatSurface } from "./chat/chatSurface";
@@ -45,10 +46,15 @@ export function KeyEngineHost() {
     if (!vimMode) return;
     const disposeChat = registerKeySurface(chatSurface);
     const disposeComposer = registerKeySurface(composerSurface);
+    // Entering the chat by a pane chord is entering the chat buffer in normal
+    // mode, not the composer: the keyboard goes to <body>, and `focusPane`
+    // records the chat as the last pane, which is where body focus resolves.
+    const disposeChatEntry = registerPaneEntry("chat", enterChatBuffer);
     document.documentElement.dataset.mesuraVimMode = "on";
     return () => {
       disposeChat();
       disposeComposer();
+      disposeChatEntry();
       clearChatSurfacePaint();
       collapseComposer();
       delete document.documentElement.dataset.mesuraVimMode;
@@ -72,6 +78,13 @@ export function KeyEngineHost() {
       <ComposerLineNumbers />
     </>
   );
+}
+
+function enterChatBuffer(): boolean {
+  (document.activeElement as HTMLElement | null)?.blur?.();
+  // A chat left in VISUAL or mid-sequence comes back in NORMAL; the cursor stays.
+  chatSurface.reset();
+  return true;
 }
 
 /**

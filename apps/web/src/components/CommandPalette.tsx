@@ -167,6 +167,7 @@ import {
 import { ProjectScopePicker } from "./projects/ProjectScopePicker";
 import { requestSidebarDockPin } from "./sidebar/sidebarDockController";
 import { useIsMobile } from "../hooks/useMediaQuery";
+import { restorePaletteOrigin } from "../keys/keyEngine";
 import type { ThreadSearchBackHandler } from "./threads/AgentThreadSearch";
 import { AgentThreadSearchSessionProvider } from "./threads/AgentThreadSearchSession";
 import { ThreadSearchPicker } from "./threads/ThreadSearchPicker";
@@ -637,6 +638,8 @@ function CommandPaletteDialog(props: {
       finalFocus={() => {
         // Fork: a row that opened the file manager hands it the keyboard.
         if (keepFocusInFileManager()) return false;
+        // Fork: Vim mode returns to the chat, or to the composer's mode, it left.
+        if (restorePaletteOrigin()) return false;
         composerHandleRef?.current?.focusAtEnd();
         return false;
       }}
