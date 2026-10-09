@@ -9392,6 +9392,146 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  // Issue reads cross the authenticated websocket transport: `issues.list` and `issues.detail`.
+  it.effect(
+    "rejects issue reads without the orchestration read scope before resolving a repository",
+    () =>
+      Effect.gen(function* () {
+        let projectLookups = 0;
+        yield* buildAppUnderTest({
+          layers: {
+            projectionSnapshotQuery: {
+              getProjectShellById: () =>
+                Effect.sync(() => {
+                  projectLookups += 1;
+                  return Option.none();
+                }),
+            },
+          },
+        });
+
+        const { body: tokenBody } = yield* exchangeAccessToken(defaultDesktopBootstrapToken, {
+          scope: "terminal:operate",
+        });
+        const wsTicketResponse = yield* HttpClient.post("/api/auth/websocket-ticket", {
+          headers: { authorization: `Bearer ${tokenBody.access_token ?? ""}` },
+        });
+        const { ticket } = yield* responseJsonEffect<{ readonly ticket: string }>(wsTicketResponse);
+        const wsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?wsTicket=${encodeURIComponent(ticket)}`;
+        const projectId = ProjectId.make("issues-unauthorized-project");
+        const [listError, detailError] = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            Effect.all([
+              client[WS_METHODS.issuesList]({
+                projectId,
+                state: "open",
+                query: "",
+                limit: 10,
+              }).pipe(Effect.flip),
+              client[WS_METHODS.issuesDetail]({ projectId, number: 1 }).pipe(Effect.flip),
+            ]),
+          ),
+        );
+
+        for (const error of [listError, detailError]) {
+          assert.equal(error._tag, "EnvironmentAuthorizationError");
+          if (error._tag === "EnvironmentAuthorizationError") {
+            assert.equal(error.requiredScope, "orchestration:read");
+          }
+        }
+        assert.equal(projectLookups, 0);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("fails issue reads for missing and non-GitHub projects without starting a turn", () =>
+    Effect.gen(function* () {
+      const missingProjectId = ProjectId.make("issues-missing-project");
+      const gitlabProjectId = ProjectId.make("issues-gitlab-project");
+      const requestedProjects: Array<string> = [];
+      let dispatchedCommands = 0;
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            dispatch: () =>
+              Effect.sync(() => {
+                dispatchedCommands += 1;
+                return { sequence: 0 };
+              }),
+          },
+          projectionSnapshotQuery: {
+            getProjectShellById: (requestedProjectId) =>
+              Effect.sync(() => {
+                requestedProjects.push(requestedProjectId);
+                return requestedProjectId === gitlabProjectId
+                  ? Option.some({
+                      id: gitlabProjectId,
+                      title: "GitLab project",
+                      workspaceRoot: "/nonexistent/issues-gitlab-project",
+                      defaultModelSelection: null,
+                      scripts: [],
+                      createdAt: "2026-10-01T00:00:00.000Z",
+                      updatedAt: "2026-10-01T00:00:00.000Z",
+                      repositoryIdentity: {
+                        canonicalKey: "gitlab.com/acme/app",
+                        provider: "gitlab",
+                        webUrl: "https://gitlab.com/acme/app",
+                        locator: {
+                          source: "git-remote" as const,
+                          remoteName: "origin",
+                          remoteUrl: "git@gitlab.com:acme/app.git",
+                        },
+                      },
+                    })
+                  : Option.none();
+              }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const errors = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.all([
+            client[WS_METHODS.issuesList]({
+              projectId: missingProjectId,
+              state: "open",
+              query: "",
+              limit: 10,
+            }).pipe(Effect.flip),
+            client[WS_METHODS.issuesDetail]({ projectId: missingProjectId, number: 1 }).pipe(
+              Effect.flip,
+            ),
+            client[WS_METHODS.issuesList]({
+              projectId: gitlabProjectId,
+              state: "open",
+              query: "",
+              limit: 10,
+            }).pipe(Effect.flip),
+            client[WS_METHODS.issuesDetail]({ projectId: gitlabProjectId, number: 1 }).pipe(
+              Effect.flip,
+            ),
+          ]),
+        ),
+      );
+
+      assert.deepEqual(
+        errors.map((error) => error._tag),
+        ["IssueReadError", "IssueReadError", "IssueReadError", "IssueReadError"],
+      );
+      assert.equal(errors[0]?.message, "This project is no longer available.");
+      assert.equal(errors[1]?.message, "This project is no longer available.");
+      assertInclude(errors[2]?.message ?? "", "GitHub repositories");
+      assertInclude(errors[3]?.message ?? "", "GitHub repositories");
+      assert.deepEqual(requestedProjects, [
+        missingProjectId,
+        missingProjectId,
+        gitlabProjectId,
+        gitlabProjectId,
+      ]);
+      assert.equal(dispatchedCommands, 0);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("routes websocket rpc orchestration shell snapshot errors", () =>
     Effect.gen(function* () {
       const projectionError = new PersistenceSqlError({

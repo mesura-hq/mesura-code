@@ -310,8 +310,17 @@ import {
   SourceControlRepositoryLookupInput,
 } from "./sourceControl.ts";
 import { VcsError } from "./vcs.ts";
+import {
+  IssueListInput,
+  IssueListResult,
+  IssueDetailInput,
+  IssueDetail,
+  IssueReadError,
+} from "./issues.ts";
 
 export const WS_METHODS = {
+  issuesList: "issues.list",
+  issuesDetail: "issues.detail",
   // Project registry methods
   projectsList: "projects.list",
   projectsAdd: "projects.add",
@@ -758,6 +767,18 @@ const PullRequestRpcError = Schema.Union([
   PullRequestOperationError,
   EnvironmentAuthorizationError,
 ]);
+
+const WsIssuesListRpc = Rpc.make(WS_METHODS.issuesList, {
+  payload: IssueListInput,
+  success: IssueListResult,
+  error: Schema.Union([IssueReadError, EnvironmentAuthorizationError]),
+});
+
+const WsIssuesDetailRpc = Rpc.make(WS_METHODS.issuesDetail, {
+  payload: IssueDetailInput,
+  success: IssueDetail,
+  error: Schema.Union([IssueReadError, EnvironmentAuthorizationError]),
+});
 
 const WsPullRequestsListRpc = Rpc.make(WS_METHODS.pullRequestsList, {
   payload: PullRequestListInput,
@@ -1642,6 +1663,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
   WsPullRequestsListRpc,
+  WsIssuesListRpc,
+  WsIssuesDetailRpc,
   WsPullRequestsListStatsRpc,
   WsPullRequestsSummaryRpc,
   WsPullRequestsRoutingRpc,
