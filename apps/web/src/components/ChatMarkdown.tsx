@@ -195,6 +195,8 @@ import {
 } from "../browser/openFileInPreview";
 import { resolveLinkTarget } from "../browser/browserLinkTarget";
 import { PullRequestLinkPreview } from "./pullRequest/PullRequestLinkPreview";
+import { useOpenIssueReference } from "../lib/openIssueLink";
+import { useEnvironment } from "../state/environments";
 
 interface ChatMarkdownProps {
   text: string;
@@ -2301,6 +2303,8 @@ function useChatMarkdownState({
     [createAssetUrl, cwd, expandMedia, preparedConnection, threadRef],
   );
   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(environmentId));
+  // A cached config outlives a disconnect; only a connected server is asked to confirm a link.
+  const environmentConnected = useEnvironment(environmentId)?.connection.phase === "connected";
   const projects = useProjects();
   const availableEditors = serverConfig?.availableEditors ?? [];
   const [preferredEditor] = usePreferredEditor(availableEditors);
@@ -2393,6 +2397,20 @@ function useChatMarkdownState({
   }, []);
   const openChangeRequestLink = useOpenChangeRequestLink(threadRef, pullRequestPanelRef);
   const openDeferredMarkdownLink = useOpenLink(threadRef);
+  const openClassifiedPullRequest = useCallback(
+    (url: string) =>
+      openChangeRequestLink(
+        { metaKey: false, ctrlKey: false, preventDefault: () => {}, stopPropagation: () => {} },
+        url,
+        undefined,
+        environmentId ?? undefined,
+      ),
+    [environmentId, openChangeRequestLink],
+  );
+  const issueReferences = useOpenIssueReference(threadRef, {
+    openChangeRequest: openClassifiedPullRequest,
+    openFallback: openDeferredMarkdownLink,
+  });
   // Subscribed rather than read at click time: the anchor has to decide
   // synchronously whether to intercept its `_blank`, and a subscription is what
   // makes a persisted "app" apply once settings hydrate after launch.
@@ -2633,6 +2651,8 @@ function useChatMarkdownState({
       markdownFileLinkMetaByHref,
       onTaskListChange,
       onUseArtifactTemplate,
+      environmentConnected,
+      issueReferences,
       openChangeRequestLink,
       openDeferredMarkdownLink,
       openExternalLinkInPreview,
@@ -2662,6 +2682,8 @@ function useChatMarkdownState({
       markdownFileLinkMetaByHref,
       onTaskListChange,
       onUseArtifactTemplate,
+      environmentConnected,
+      issueReferences,
       openChangeRequestLink,
       openDeferredMarkdownLink,
       openExternalLinkInPreview,
@@ -2806,6 +2828,8 @@ const CHAT_MARKDOWN_COMPONENTS = {
       markdownFileLinkMetaByHref,
       threadRef,
       openMarkdownMedia,
+      environmentConnected,
+      issueReferences,
       openChangeRequestLink,
       openDeferredMarkdownLink,
       linkTargetPreference,
@@ -2846,7 +2870,10 @@ const CHAT_MARKDOWN_COMPONENTS = {
             ? plainHastText(node)
             : undefined;
       const isPullRequestAutolink = pullRequestCopy !== undefined;
-      const confirmBeforeOpen = pullRequestAutolink === "reference";
+      // GitHub's own classification decides an issue number where the server can read it; the
+      // pull-request confirmation stays the way in for servers that cannot.
+      const classifiesIssueReference = href ? issueReferences.targetOf(href) !== null : false;
+      const confirmBeforeOpen = pullRequestAutolink === "reference" && !classifiesIssueReference;
       const pullRequestCandidateUrl =
         confirmBeforeOpen && href ? pullRequestCandidateUrlFromReferenceAutolink(href) : href;
       const pullRequestCandidate = pullRequestCandidateUrl
@@ -2854,6 +2881,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
         : null;
       const pullRequestProject =
         environmentId !== null &&
+        environmentConnected &&
         serverConfig?.environment.capabilities.pullRequests === true &&
         pullRequestCandidate !== null
           ? findProjectForChangeRequest(
@@ -2913,6 +2941,9 @@ const CHAT_MARKDOWN_COMPONENTS = {
               );
               return;
             }
+            // An issue of the thread's project opens in the Issues surface beside the
+            // conversation, or in the pull-request surface when GitHub says it is one.
+            if (href && issueReferences.open(event, href)) return;
             // A link to a change request in a workspace project opens beside the
             // conversation instead of in a browser: it is the thing being talked about, and
             // the panel it opens offers the browser as one of its actions.
@@ -3013,7 +3044,11 @@ const CHAT_MARKDOWN_COMPONENTS = {
       if (!faviconHost || !href) {
         return link;
       }
-      if (pullRequestPreviewTarget !== null) {
+      // A reference GitHub classifies on click has no pull request to preview yet.
+      if (
+        pullRequestPreviewTarget !== null &&
+        !(pullRequestAutolink === "reference" && classifiesIssueReference)
+      ) {
         return (
           <PullRequestLinkPreview
             link={link}

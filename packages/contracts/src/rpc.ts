@@ -316,11 +316,14 @@ import {
   IssueDetailInput,
   IssueDetail,
   IssueReadError,
+  IssueReference,
+  IssueReferenceInput,
 } from "./issues.ts";
 
 export const WS_METHODS = {
   issuesList: "issues.list",
   issuesDetail: "issues.detail",
+  issuesResolveReference: "issues.resolve-reference",
   // Project registry methods
   projectsList: "projects.list",
   projectsAdd: "projects.add",
@@ -777,6 +780,12 @@ const WsIssuesListRpc = Rpc.make(WS_METHODS.issuesList, {
 const WsIssuesDetailRpc = Rpc.make(WS_METHODS.issuesDetail, {
   payload: IssueDetailInput,
   success: IssueDetail,
+  error: Schema.Union([IssueReadError, EnvironmentAuthorizationError]),
+});
+
+const WsIssuesResolveReferenceRpc = Rpc.make(WS_METHODS.issuesResolveReference, {
+  payload: IssueReferenceInput,
+  success: IssueReference,
   error: Schema.Union([IssueReadError, EnvironmentAuthorizationError]),
 });
 
@@ -1665,6 +1674,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsPullRequestsListRpc,
   WsIssuesListRpc,
   WsIssuesDetailRpc,
+  WsIssuesResolveReferenceRpc,
   WsPullRequestsListStatsRpc,
   WsPullRequestsSummaryRpc,
   WsPullRequestsRoutingRpc,

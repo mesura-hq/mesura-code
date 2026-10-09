@@ -7,7 +7,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
-import { listIssues, readIssueDetail } from "./readIssues.ts";
+import { listIssues, readIssueDetail, resolveIssueReference } from "./readIssues.ts";
 
 const projectId = ProjectId.make("issue-project");
 const project: OrchestrationProjectShell = {
@@ -674,5 +674,442 @@ for (const mismatch of mismatchedDetails) {
       assert.equal(error._tag, "IssueReadError");
       assert.equal(error.message, "GitHub did not return issue #1 of acme/app.");
     }),
+  );
+}
+
+// Issues pane, phase 3 fence. The measured case: the project's recorded identity names the
+// upstream repository and carries no web URL, while `gh repo view` without an argument would read
+// the checkout's default remote, a fork. A known identity must decide the repository.
+const upstreamIdentityProject = Option.some<OrchestrationProjectShell>({
+  ...project,
+  workspaceRoot: "/home/dev/repos/fork-checkout",
+  repositoryIdentity: {
+    canonicalKey: "github.com/pingdotgg/t3code",
+    provider: "github",
+    owner: "pingdotgg",
+    name: "t3code",
+    locator: {
+      source: "git-remote",
+      remoteName: "upstream",
+      remoteUrl: "git@github.com:pingdotgg/t3code.git",
+    },
+  },
+});
+
+/** `gh repo view` as a checkout with a fork as its default remote answers it. */
+function forkCheckoutRepositoryView(args: ReadonlyArray<string>) {
+  const positional = args[2] !== undefined && !args[2].startsWith("--") ? args[2] : null;
+  return positional !== null && /pingdotgg\/t3code(?:\.git)?\/?$/iu.test(positional)
+    ? output({ nameWithOwner: "pingdotgg/t3code", url: "https://github.com/pingdotgg/t3code" })
+    : output({
+        nameWithOwner: "mesura-hq/mesura-code",
+        url: "https://github.com/mesura-hq/mesura-code",
+      });
+}
+
+it.effect(
+  "issues phase 3 fence: a known GitHub identity without a web URL decides the listed repository over the checkout default",
+  () =>
+    Effect.gen(function* () {
+      const calls: Array<ReadonlyArray<string>> = [];
+      const result = yield* listIssues({ projectId, state: "open", query: "", limit: 10 }).pipe(
+        Effect.provide(
+          mockReads({
+            project: upstreamIdentityProject,
+            execute: ({ args }) => {
+              calls.push(args);
+              return args[0] === "repo"
+                ? forkCheckoutRepositoryView(args)
+                : output([
+                    {
+                      ...summary,
+                      number: 17402,
+                      url: "https://github.com/pingdotgg/t3code/issues/17402",
+                    },
+                  ]);
+            },
+          }),
+        ),
+      );
+      assert.equal(result.repository, "pingdotgg/t3code");
+      assert.equal(result.repositoryUrl, "https://github.com/pingdotgg/t3code");
+      assert.isFalse(calls.some((args) => args.some((arg) => /mesura-hq/iu.test(arg))));
+    }),
+);
+
+it.effect(
+  "issues phase 3 fence: a known GitHub identity without a web URL decides the detail repository over the checkout default",
+  () =>
+    Effect.gen(function* () {
+      const detail = yield* readIssueDetail({ projectId, number: 17402 }).pipe(
+        Effect.provide(
+          mockReads({
+            project: upstreamIdentityProject,
+            execute: ({ args }) =>
+              args[0] === "repo"
+                ? forkCheckoutRepositoryView(args)
+                : output({
+                    ...detailResponse,
+                    number: 17402,
+                    url: "https://github.com/pingdotgg/t3code/issues/17402",
+                    comments: [],
+                  }),
+          }),
+        ),
+      );
+      assert.equal(detail.url, "https://github.com/pingdotgg/t3code/issues/17402");
+    }),
+);
+
+it.effect(
+  "issues phase 3 fence: GitHub naming another repository than the known identity is an error, not a substitute",
+  () =>
+    Effect.gen(function* () {
+      const error = yield* listIssues({ projectId, state: "open", query: "", limit: 10 }).pipe(
+        Effect.provide(
+          mockReads({
+            project: upstreamIdentityProject,
+            execute: ({ args }) =>
+              args[0] === "repo"
+                ? output({
+                    nameWithOwner: "mesura-hq/mesura-code",
+                    url: "https://github.com/mesura-hq/mesura-code",
+                  })
+                : output([]),
+          }),
+        ),
+        Effect.flip,
+      );
+      assert.equal(error._tag, "IssueReadError");
+    }),
+);
+
+it.effect(
+  "issues phase 3 guard: a project with no recorded identity still reads the checkout's own repository",
+  () =>
+    Effect.gen(function* () {
+      const calls: Array<ReadonlyArray<string>> = [];
+      const result = yield* listIssues({ projectId, state: "open", query: "", limit: 10 }).pipe(
+        Effect.provide(
+          mockReads({
+            project: Option.some({ ...project, repositoryIdentity: null }),
+            execute: ({ args }) => {
+              calls.push(args);
+              return args[0] === "repo" ? repositoryOutput() : output([summary]);
+            },
+          }),
+        ),
+      );
+      assert.equal(result.repository, "acme/app");
+      assert.deepStrictEqual(calls[0], ["repo", "view", "--json", "nameWithOwner,url"]);
+    }),
+);
+
+/** The record GitHub's REST `repos/{owner}/{repo}/issues/{number}` endpoint returns. */
+function restIssueRecord(
+  number: number,
+  options: { pullRequest?: boolean; repository?: string } = {},
+) {
+  const repository = options.repository ?? "acme/app";
+  return {
+    number,
+    title: options.pullRequest ? "A pull request" : "An issue",
+    html_url: `https://github.com/${repository}/${options.pullRequest ? "pull" : "issues"}/${number}`,
+    state: "open",
+    ...(options.pullRequest
+      ? {
+          pull_request: {
+            url: `https://api.github.com/repos/${repository}/pulls/${number}`,
+            html_url: `https://github.com/${repository}/pull/${number}`,
+          },
+        }
+      : {}),
+  };
+}
+
+it.effect(
+  "issues phase 3 fence: reference resolution classifies an issue from the repository issues endpoint",
+  () =>
+    Effect.gen(function* () {
+      const calls: Array<ExecuteInput> = [];
+      const result = yield* resolveIssueReference({ projectId, number: 7 }).pipe(
+        Effect.provide(
+          mockReads({
+            execute: (input) => {
+              calls.push(input);
+              return input.args[0] === "repo" ? repositoryOutput() : output(restIssueRecord(7));
+            },
+          }),
+        ),
+      );
+      assert.deepStrictEqual(result, {
+        kind: "issue",
+        number: 7,
+        url: "https://github.com/acme/app/issues/7",
+        repository: "acme/app",
+      });
+      const read = calls.find((call) => call.args[0] === "api");
+      assert.isDefined(read);
+      assert.isTrue(read!.args.some((arg) => /repos\/acme\/app\/issues\/7$/iu.test(arg)));
+      assert.isTrue(Number.isFinite(read!.maxOutputBytes));
+      assert.isTrue(calls.every((call) => call.cwd === "/repo"));
+    }),
+);
+
+it.effect(
+  "issues phase 3 fence: reference resolution classifies a pull request that GitHub serves under issues",
+  () =>
+    Effect.gen(function* () {
+      const result = yield* resolveIssueReference({ projectId, number: 17404 }).pipe(
+        Effect.provide(
+          mockReads({
+            execute: ({ args }) =>
+              args[0] === "repo"
+                ? repositoryOutput()
+                : output(restIssueRecord(17404, { pullRequest: true })),
+          }),
+        ),
+      );
+      assert.deepStrictEqual(result, {
+        kind: "pull-request",
+        number: 17404,
+        url: "https://github.com/acme/app/pull/17404",
+        repository: "acme/app",
+      });
+    }),
+);
+
+it.effect(
+  "issues phase 3 fence: reference resolution reads the known identity's repository, not the checkout default",
+  () =>
+    Effect.gen(function* () {
+      const calls: Array<ReadonlyArray<string>> = [];
+      const result = yield* resolveIssueReference({ projectId, number: 17402 }).pipe(
+        Effect.provide(
+          mockReads({
+            project: upstreamIdentityProject,
+            execute: ({ args }) => {
+              calls.push(args);
+              return args[0] === "repo"
+                ? forkCheckoutRepositoryView(args)
+                : output(restIssueRecord(17402, { repository: "pingdotgg/t3code" }));
+            },
+          }),
+        ),
+      );
+      assert.equal(result.url, "https://github.com/pingdotgg/t3code/issues/17402");
+      assert.isFalse(calls.some((args) => args.some((arg) => /mesura-hq/iu.test(arg))));
+    }),
+);
+
+const mismatchedReferences = [
+  { name: "from another repository", record: restIssueRecord(7, { repository: "cli/cli" }) },
+  { name: "with a different number", record: restIssueRecord(8) },
+  { name: "without a web URL", record: { number: 7, state: "open" } },
+] as const;
+
+for (const mismatch of mismatchedReferences) {
+  it.effect(`issues phase 3 fence: reference resolution rejects a record ${mismatch.name}`, () =>
+    Effect.gen(function* () {
+      const error = yield* resolveIssueReference({ projectId, number: 7 }).pipe(
+        Effect.provide(
+          mockReads({
+            execute: ({ args }) =>
+              args[0] === "repo" ? repositoryOutput() : output(mismatch.record),
+          }),
+        ),
+        Effect.flip,
+      );
+      assert.equal(error._tag, "IssueReadError");
+    }),
+  );
+}
+
+for (const failure of gitHubCliFailures) {
+  it.effect(
+    `issues phase 3 fence: reference resolution reports ${failure.name} instead of guessing an issue`,
+    () =>
+      Effect.gen(function* () {
+        const error = yield* resolveIssueReference({ projectId, number: 7 }).pipe(
+          Effect.provide(
+            mockReads({
+              execute: ({ args }) =>
+                args[0] === "repo" ? repositoryOutput() : Effect.fail(failure.error),
+            }),
+          ),
+          Effect.flip,
+        );
+        assert.equal(error._tag, "IssueReadError");
+        assert.match(error.message, failure.remedy);
+      }),
+  );
+}
+
+it.effect(
+  "issues phase 3 fence: reference resolution reports an over-long record as an error",
+  () =>
+    Effect.gen(function* () {
+      const error = yield* resolveIssueReference({ projectId, number: 7 }).pipe(
+        Effect.provide(
+          mockReads({
+            execute: ({ args }) =>
+              args[0] === "repo" ? repositoryOutput() : truncatedOutput('{"number":7'),
+          }),
+        ),
+        Effect.flip,
+      );
+      assert.equal(error._tag, "IssueReadError");
+    }),
+);
+
+it.effect(
+  "issues phase 3 fence: reference resolution refuses other providers and missing projects before calling GitHub",
+  () =>
+    Effect.gen(function* () {
+      for (const missing of [Option.none<OrchestrationProjectShell>(), gitlabProject]) {
+        const error = yield* resolveIssueReference({ projectId, number: 7 }).pipe(
+          Effect.provide(mockReads({ project: missing, execute: forbidGitHub })),
+          Effect.flip,
+        );
+        assert.equal(error._tag, "IssueReadError");
+      }
+    }),
+);
+
+it.effect(
+  "issues phase 3 fence: reference resolution reads the null pull_request field GitHub's jq projection writes for an issue",
+  () =>
+    Effect.gen(function* () {
+      // The live shape `gh api --jq '{…, pull_request: .pull_request}'` printed for issue #17402.
+      const result = yield* resolveIssueReference({ projectId, number: 7 }).pipe(
+        Effect.provide(
+          mockReads({
+            execute: ({ args }) =>
+              args[0] === "repo"
+                ? repositoryOutput()
+                : output({
+                    html_url: "https://github.com/acme/app/issues/7",
+                    number: 7,
+                    pull_request: null,
+                  }),
+          }),
+        ),
+      );
+      assert.equal(result.kind, "issue");
+    }),
+);
+
+// Issues phase 3 rework (P1-1): a known identity that names its repository only through its
+// canonical key still decides the repository; one whose fields disagree is refused before `gh`.
+const canonicalOnlyIdentityProject = Option.some<OrchestrationProjectShell>({
+  ...project,
+  workspaceRoot: "/home/dev/repos/fork-checkout",
+  repositoryIdentity: {
+    canonicalKey: "github.com/pingdotgg/t3code",
+    provider: "github",
+    locator: {
+      source: "git-remote",
+      remoteName: "upstream",
+      remoteUrl: "git@github.com:pingdotgg/t3code.git",
+    },
+  },
+});
+
+it.effect(
+  "issues phase 3 regression: a canonical-only GitHub identity decides list, detail and reference reads over the checkout default",
+  () =>
+    Effect.gen(function* () {
+      const calls: Array<ReadonlyArray<string>> = [];
+      const reads = mockReads({
+        project: canonicalOnlyIdentityProject,
+        execute: ({ args }) => {
+          calls.push(args);
+          if (args[0] === "repo") return forkCheckoutRepositoryView(args);
+          if (args[0] === "api")
+            return output(restIssueRecord(17402, { repository: "pingdotgg/t3code" }));
+          return args[1] === "list"
+            ? output([
+                {
+                  ...summary,
+                  number: 17402,
+                  url: "https://github.com/pingdotgg/t3code/issues/17402",
+                },
+              ])
+            : output({
+                ...detailResponse,
+                number: 17402,
+                url: "https://github.com/pingdotgg/t3code/issues/17402",
+                comments: [],
+              });
+        },
+      });
+      const list = yield* listIssues({ projectId, state: "open", query: "", limit: 10 }).pipe(
+        Effect.provide(reads),
+      );
+      const detail = yield* readIssueDetail({ projectId, number: 17402 }).pipe(
+        Effect.provide(reads),
+      );
+      const reference = yield* resolveIssueReference({ projectId, number: 17402 }).pipe(
+        Effect.provide(reads),
+      );
+      assert.equal(list.repository, "pingdotgg/t3code");
+      assert.equal(detail.url, "https://github.com/pingdotgg/t3code/issues/17402");
+      assert.equal(reference.repository, "pingdotgg/t3code");
+      assert.isFalse(calls.some((args) => args.some((arg) => /mesura-hq/iu.test(arg))));
+    }),
+);
+
+const contradictoryIdentities = [
+  {
+    name: "an owner and name that name another repository than the canonical key",
+    identity: { owner: "mesura-hq", name: "mesura-code" },
+  },
+  {
+    name: "a display name that names another repository than the canonical key",
+    identity: { displayName: "mesura-hq/mesura-code" },
+  },
+  {
+    name: "a web URL that names another repository than the canonical key",
+    identity: { webUrl: "https://github.com/mesura-hq/mesura-code" },
+  },
+  {
+    name: "a web URL on another host than the canonical key",
+    identity: { webUrl: "https://github.acme.test/pingdotgg/t3code" },
+  },
+  {
+    name: "a canonical key that names no repository",
+    identity: { canonicalKey: "github.com" },
+  },
+] as const;
+
+for (const contradiction of contradictoryIdentities) {
+  it.effect(
+    `issues phase 3 regression: an identity with ${contradiction.name} is refused for every read before calling GitHub`,
+    () =>
+      Effect.gen(function* () {
+        const identityProject = Option.some<OrchestrationProjectShell>({
+          ...project,
+          repositoryIdentity: {
+            ...(canonicalOnlyIdentityProject.pipe(Option.getOrThrow).repositoryIdentity ?? {
+              canonicalKey: "",
+              locator: { source: "git-remote", remoteName: "origin", remoteUrl: "x" },
+            }),
+            ...contradiction.identity,
+          },
+        });
+        const reads = mockReads({ project: identityProject, execute: forbidGitHub });
+        const errors = [
+          yield* listIssues({ projectId, state: "open", query: "", limit: 10 }).pipe(
+            Effect.provide(reads),
+            Effect.flip,
+          ),
+          yield* readIssueDetail({ projectId, number: 1 }).pipe(Effect.provide(reads), Effect.flip),
+          yield* resolveIssueReference({ projectId, number: 1 }).pipe(
+            Effect.provide(reads),
+            Effect.flip,
+          ),
+        ];
+        for (const error of errors) assert.equal(error._tag, "IssueReadError");
+      }),
   );
 }

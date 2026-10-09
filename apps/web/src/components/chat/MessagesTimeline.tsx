@@ -106,6 +106,7 @@ import {
 } from "../../lib/diffRendering";
 import { PREFERRED_HIGHLIGHTER } from "../../lib/syntaxHighlighting";
 import ChatMarkdown, { ChatMarkdownAssetImage } from "../ChatMarkdown";
+import { useIssueReferenceAutolinks } from "~/lib/openIssueLink";
 import { T3Wordmark } from "../T3Wordmark";
 import {
   BotIcon,
@@ -2146,6 +2147,8 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
   const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+  // Linked once the message settles, so a streaming answer keeps incremental parsing.
+  const issueReferenceAutolinks = useIssueReferenceAutolinks(ctx.threadRef, !row.message.streaming);
 
   return (
     <>
@@ -2168,6 +2171,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
             headingLevelOffset={MESSAGE_HEADING_LEVEL}
             onUseArtifactTemplate={ctx.onUseArtifactTemplate}
             onImageExpand={ctx.onImageExpand}
+            extraRemarkPlugins={issueReferenceAutolinks}
           />
         </AssistantCitationSource>
         <AssistantChangedFilesSection

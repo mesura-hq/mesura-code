@@ -193,6 +193,25 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
     }),
   );
 
+  it.effect(
+    "issues phase 3 fence: advertises issue reference resolution beside the Issues reads",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-server-environment-issue-references-test-",
+        });
+
+        const descriptor = yield* Effect.gen(function* () {
+          const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
+          return yield* serverEnvironment.getDescriptor;
+        }).pipe(Effect.provide(makeServerEnvironmentLayer(baseDir)));
+
+        expect(descriptor.capabilities.issues).toBe(true);
+        expect(descriptor.capabilities.issueReferences).toBe(true);
+      }),
+  );
+
   it.effect("reports agent activity publishing from the current secret state", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

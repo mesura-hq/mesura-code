@@ -732,3 +732,82 @@ describe("Issues rework: project ownership of search, eligibility and catalog re
     expect(fixture.requests).toEqual([]);
   });
 });
+
+describe("Issues phase 3 fence: the thread pane follows each issue selection", () => {
+  const detailFor = (number: number) =>
+    container!.querySelector(`section[aria-label="Issue #${number} details"]`);
+
+  it("issues phase 3 fence: a pane opened on a selection shows that issue's detail", () => {
+    mount(<ThreadIssuesPanel project={alpha} selection={{ number: 7, requestId: 1 }} />);
+
+    expect(detailRequests().at(-1)?.input).toEqual({ projectId: alpha.id, number: 7 });
+    expect(detailFor(7)).not.toBeNull();
+  });
+
+  it("issues phase 3 fence: a new selection while the pane is open replaces the shown issue", () => {
+    mount(<ThreadIssuesPanel project={alpha} selection={{ number: 7, requestId: 1 }} />);
+    rerender(<ThreadIssuesPanel project={alpha} selection={{ number: 8, requestId: 2 }} />);
+
+    expect(detailRequests().at(-1)?.input).toEqual({ projectId: alpha.id, number: 8 });
+    expect(detailFor(8)).not.toBeNull();
+    expect(detailFor(7)).toBeNull();
+  });
+
+  it("issues phase 3 fence: Back keeps the list until the same issue is chosen again", async () => {
+    mount(<ThreadIssuesPanel project={alpha} selection={{ number: 7, requestId: 1 }} />);
+    expect(detailFor(7)).not.toBeNull();
+    await click(buttonNamed(/^\s*Issues\s*Close\s*$/));
+    expect(detailFor(7)).toBeNull();
+
+    // Re-rendering with the selection already consumed must not undo the reader's Back.
+    rerender(<ThreadIssuesPanel project={alpha} selection={{ number: 7, requestId: 1 }} />);
+    expect(detailFor(7)).toBeNull();
+
+    rerender(<ThreadIssuesPanel project={alpha} selection={{ number: 7, requestId: 2 }} />);
+    expect(detailFor(7)).not.toBeNull();
+  });
+
+  it("issues phase 3 fence: filters and search left in the pane never stop a selected issue from loading", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    mount(<ThreadIssuesPanel project={alpha} />);
+    await click(buttonNamed(/^Closed$/));
+    const search = container!.querySelector<HTMLInputElement>('input[aria-label="Search issues"]')!;
+    act(() => {
+      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      setValue.call(search, "label:docs");
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(400);
+    });
+
+    rerender(<ThreadIssuesPanel project={alpha} selection={{ number: 8, requestId: 1 }} />);
+
+    expect(detailRequests().at(-1)?.input).toEqual({ projectId: alpha.id, number: 8 });
+    expect(detailFor(8)).not.toBeNull();
+  });
+});
+
+describe("Issues phase 3 regression: a shown selection is not shown again", () => {
+  it("issues phase 3 regression: the pane reports the selection it opened and reopens a consumed one on the list", () => {
+    const consumed: number[] = [];
+    mount(
+      <ThreadIssuesPanel
+        project={alpha}
+        selection={{ number: 7, requestId: 3 }}
+        onSelectionConsumed={(requestId) => consumed.push(requestId)}
+      />,
+    );
+    expect(consumed).toEqual([3]);
+    act(() => root?.unmount());
+    container?.remove();
+
+    // Closing and reopening the pane after Back remounts it with the consumed choice.
+    fixture.requests = [];
+    mount(
+      <ThreadIssuesPanel project={alpha} selection={{ number: 7, requestId: 3, consumed: true }} />,
+    );
+    expect(detailRequests()).toEqual([]);
+    expect(container!.querySelector('section[aria-label="Issue #7 details"]')).toBeNull();
+  });
+});

@@ -1057,3 +1057,106 @@ describe("file tabs opened without the explorer (Tree diff phase 3)", () => {
     ).toBe("file:src/two.ts");
   });
 });
+
+describe("Issues surface selection (issues phase 3 fence)", () => {
+  function issuesSurfaceOf(ref: typeof refA) {
+    return selectThreadRightPanelState(
+      useRightPanelStore.getState().byThreadKey,
+      ref,
+    ).surfaces.find((surface) => surface.kind === "issues");
+  }
+
+  it("issues phase 3 fence: openIssue opens the Issues singleton on the selected project's issue", () => {
+    useRightPanelStore.getState().openIssue(refA, { projectId: "project-1", number: 7 });
+
+    const state = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+    expect(state.isOpen).toBe(true);
+    expect(state.activeSurfaceId).toBe("issues");
+    expect(state.surfaces.filter((surface) => surface.kind === "issues")).toHaveLength(1);
+    expect(issuesSurfaceOf(refA)).toMatchObject({
+      id: "issues",
+      kind: "issues",
+      selection: { projectId: "project-1", number: 7 },
+    });
+    expect(issuesSurfaceOf(refB)).toBeUndefined();
+  });
+
+  it("issues phase 3 fence: a second openIssue replaces the selection in the already open singleton", () => {
+    const store = useRightPanelStore.getState();
+    store.open(refA, "diff");
+    store.openIssue(refA, { projectId: "project-1", number: 7 });
+    store.activateSurface(refA, "diff");
+    store.openIssue(refA, { projectId: "project-1", number: 8 });
+
+    const state = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+    expect(state.activeSurfaceId).toBe("issues");
+    expect(state.surfaces.filter((surface) => surface.kind === "issues")).toHaveLength(1);
+    expect(issuesSurfaceOf(refA)).toMatchObject({
+      selection: { projectId: "project-1", number: 8 },
+    });
+  });
+
+  it("issues phase 3 fence: choosing the same issue again is a new selection the pane can consume", () => {
+    const store = useRightPanelStore.getState();
+    store.openIssue(refA, { projectId: "project-1", number: 7 });
+    const first = issuesSurfaceOf(refA);
+    store.openIssue(refA, { projectId: "project-1", number: 7 });
+    const second = issuesSurfaceOf(refA);
+
+    // After the reader went back to the list, the same reference must open the detail again,
+    // so a repeated choice cannot be indistinguishable from the one already consumed.
+    expect(second).not.toEqual(first);
+    expect(second).toMatchObject({ selection: { projectId: "project-1", number: 7 } });
+  });
+
+  it("issues phase 3 guard: the launcher still opens the current project's list without a selection", () => {
+    useRightPanelStore.getState().open(refA, "issues");
+
+    expect(issuesSurfaceOf(refA)).toEqual({ id: "issues", kind: "issues" });
+  });
+
+  it("issues phase 3 fence: a malformed persisted selection restores the plain Issues list", () => {
+    for (const selection of [
+      { projectId: "project-1", number: 0 },
+      { projectId: "project-1", number: "7" },
+      { projectId: 1, number: 7 },
+      "project-1#7",
+    ]) {
+      const migrated = migratePersistedRightPanelState({
+        byThreadKey: {
+          "env-1:thread-A": {
+            isOpen: true,
+            activeSurfaceId: "issues",
+            surfaces: [{ id: "issues", kind: "issues", selection }],
+          },
+        },
+      }).byThreadKey["env-1:thread-A"];
+      expect(migrated?.surfaces).toEqual([{ id: "issues", kind: "issues" }]);
+    }
+  });
+});
+
+describe("Issues surface selection consumption (issues phase 3 regression)", () => {
+  it("issues phase 3 regression: consuming a selection marks only that choice as shown", () => {
+    const store = useRightPanelStore.getState();
+    store.openIssue(refA, { projectId: "project-1", number: 7 });
+    const surfaceOf = () =>
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces.find(
+        (surface) => surface.kind === "issues",
+      ) as { selection?: { requestId: number; consumed?: boolean } } | undefined;
+    const first = surfaceOf()!.selection!.requestId;
+    const revision = store.getUserActionRevision(refA);
+
+    store.openIssue(refA, { projectId: "project-1", number: 8 });
+    store.consumeIssueSelection(refA, first);
+    expect(surfaceOf()?.selection?.consumed).toBeUndefined();
+
+    store.consumeIssueSelection(refA, surfaceOf()!.selection!.requestId);
+    expect(surfaceOf()?.selection).toMatchObject({ number: 8, consumed: true });
+    // Recording what the pane showed is not a reader's panel choice.
+    expect(useRightPanelStore.getState().getUserActionRevision(refA)).toBe(revision + 1);
+
+    store.openIssue(refA, { projectId: "project-1", number: 8 });
+    expect(surfaceOf()?.selection?.consumed).toBeUndefined();
+  });
+});

@@ -14,3 +14,10 @@ export const issueDetail = createEnvironmentRpcQueryAtomFamily(connectionAtomRun
   tag: WS_METHODS.issuesDetail,
   staleTimeMs: 30_000,
 });
+
+/** Read once per click on an issue reference, never while a message renders. */
+export const issueReference = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+  label: "mesura:issues:reference",
+  tag: WS_METHODS.issuesResolveReference,
+  staleTimeMs: 30_000,
+});

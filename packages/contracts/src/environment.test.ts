@@ -27,6 +27,24 @@ describe("ExecutionEnvironmentDescriptor", () => {
     ).toBe(true);
   });
 
+  it("issues phase 3 guard: treats a missing issue reference capability as unsupported under version skew", () => {
+    expect(
+      decodeDescriptor({
+        ...descriptor,
+        capabilities: { ...descriptor.capabilities, issues: true },
+      }).capabilities.issueReferences,
+    ).toBeUndefined();
+  });
+
+  it("issues phase 3 fence: preserves an advertised issue reference capability", () => {
+    expect(
+      decodeDescriptor({
+        ...descriptor,
+        capabilities: { ...descriptor.capabilities, issues: true, issueReferences: true },
+      }).capabilities.issueReferences,
+    ).toBe(true);
+  });
+
   it("treats a missing Issues capability as unsupported under version skew", () => {
     expect(decodeDescriptor(descriptor).capabilities.issues).toBeUndefined();
   });

@@ -2,8 +2,11 @@ import {
   IssueDetail,
   IssueReadError,
   IssueSummary,
+  issueRepositoryUrl,
   type IssueListInput,
   type IssueDetailInput,
+  type IssueReference,
+  type IssueReferenceInput,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -18,6 +21,16 @@ const decodeRepository = Schema.decodeUnknownEffect(
 );
 const decodeList = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(IssueSummary)));
 const decodeDetail = Schema.decodeUnknownEffect(Schema.fromJsonString(IssueDetail));
+/** The fields of GitHub's REST issue record that tell an issue from a pull request. */
+const decodeReferenceRecord = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      number: Schema.Int,
+      html_url: Schema.String,
+      pull_request: Schema.optionalKey(Schema.NullOr(Schema.Unknown)),
+    }),
+  ),
+);
 const isIssueReadError = Schema.is(IssueReadError);
 
 const resolveProjectRepository = Effect.fn("issues.resolveProjectRepository")(function* (
@@ -39,7 +52,20 @@ const resolveProjectRepository = Effect.fn("issues.resolveProjectRepository")(fu
   }
   const github = yield* GitHubCli.GitHubCli;
   const cwd = project.value.workspaceRoot;
-  const repositoryUrl = project.value.repositoryIdentity?.webUrl;
+  const identity = project.value.repositoryIdentity;
+  // Without a recorded identity, `gh` reads the checkout's default remote. A recorded one decides
+  // the repository, and one that is incomplete or names two repositories is refused rather than
+  // left to that default, which in a fork with an `upstream` remote is the fork.
+  const repositoryUrl = identity ? issueRepositoryUrl(identity) : null;
+  if (identity && repositoryUrl === null) {
+    return yield* new IssueReadError({
+      message: "This project's recorded repository is incomplete or inconsistent.",
+    });
+  }
+  const expected =
+    repositoryUrl === null
+      ? null
+      : new URL(repositoryUrl).pathname.replace(/^\/+|\/+$/gu, "").replace(/\.git$/u, "");
   const output = yield* github.execute({
     cwd,
     args: [
@@ -55,6 +81,11 @@ const resolveProjectRepository = Effect.fn("issues.resolveProjectRepository")(fu
       () => new IssueReadError({ message: "GitHub returned an invalid repository." }),
     ),
   );
+  if (expected !== null && repository.nameWithOwner.toLowerCase() !== expected.toLowerCase()) {
+    return yield* new IssueReadError({
+      message: `GitHub answered with ${repository.nameWithOwner} instead of this project's ${expected}.`,
+    });
+  }
   return { github, cwd, repository };
 });
 
@@ -169,4 +200,48 @@ export const readIssueDetail = Effect.fn("issues.detail")(function* (input: Issu
     });
   }
   return detail;
+}, Effect.mapError(readError));
+
+/**
+ * Whether an issue number of the project's repository names an issue or a pull request. GitHub's
+ * REST issue endpoint answers for both and marks a pull request with `pull_request`, so the
+ * answer is GitHub's, never a guess from the URL a reader clicked.
+ */
+export const resolveIssueReference = Effect.fn("issues.resolveReference")(function* (
+  input: IssueReferenceInput,
+) {
+  const { github, cwd, repository } = yield* resolveProjectRepository(input.projectId);
+  const repositoryUrl = new URL(repository.url);
+  const output = yield* github.execute({
+    cwd,
+    args: [
+      "api",
+      "--hostname",
+      repositoryUrl.host,
+      "--jq",
+      "{number: .number, html_url: .html_url, pull_request: .pull_request}",
+      `repos/${repository.nameWithOwner}/issues/${input.number}`,
+    ],
+    maxOutputBytes: 100_000,
+  });
+  yield* failWhenTruncated(output, "GitHub returned an unexpectedly large reference.");
+  const record = yield* decodeReferenceRecord(output.stdout).pipe(
+    Effect.mapError(
+      () => new IssueReadError({ message: "GitHub returned an invalid issue reference." }),
+    ),
+  );
+  const kind: IssueReference["kind"] =
+    record.pull_request === undefined || record.pull_request === null ? "issue" : "pull-request";
+  const expected = `${repository.url.replace(/\/+$/u, "")}/${kind === "issue" ? "issues" : "pull"}/${input.number}`;
+  if (record.number !== input.number || record.html_url.toLowerCase() !== expected.toLowerCase()) {
+    return yield* new IssueReadError({
+      message: `GitHub did not return #${input.number} of ${repository.nameWithOwner}.`,
+    });
+  }
+  return {
+    kind,
+    number: input.number,
+    url: record.html_url,
+    repository: repository.nameWithOwner,
+  } satisfies IssueReference;
 }, Effect.mapError(readError));

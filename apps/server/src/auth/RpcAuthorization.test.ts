@@ -64,6 +64,15 @@ describe("RPC authorization scopes", () => {
     );
   });
 
+  it("issues phase 3 fence: resolves issue references under the same read scope as issue reads", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.issuesResolveReference)).toBe(
+      AuthOrchestrationReadScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.issuesResolveReference)).toBe(
+      requiredScopeForRpcMethod(WS_METHODS.issuesDetail),
+    );
+  });
+
   it("reads GitHub issues under the orchestration read scope that pull request lists use", () => {
     // Issue reads run `gh` on the server's credential, so they must never be reachable with a
     // narrower scope than the pull request list beside them.

@@ -218,6 +218,7 @@ import { PullRequestsUnavailableState } from "./pullRequest/PullRequestsUnavaila
 import { RightPanelTabs } from "./RightPanelTabs";
 import { ThreadIssuesPanel } from "./issues/ThreadIssuesPanel";
 import { projectIssuesAvailability } from "./issues/issues.logic";
+import { issuesSurfaceProject } from "../lib/openIssueLink";
 import { AgentsPanel } from "./AgentsPanel";
 import { LinkPullRequestDialogHost } from "./pullRequest/LinkPullRequestDialog";
 import { ThreadPullRequestsPanel } from "./pullRequest/ThreadPullRequestsPanel";
@@ -4559,6 +4560,27 @@ export default function ChatView(props: ChatViewProps) {
     activeProjectIssuesAvailability !== null &&
     activeProjectIssuesAvailability !== "not-github" &&
     activeProjectIssuesAvailability !== "unsupported";
+  // An issue chosen from a message names its project on this thread's environment; a selection
+  // whose project is gone falls back to the thread's own list, never another project's issue.
+  const issuesSurfaceSelection =
+    renderedRightPanelSurface?.kind === "issues" ? renderedRightPanelSurface.selection : undefined;
+  const selectedIssuesProject =
+    activeThreadRef && issuesSurfaceSelection
+      ? issuesSurfaceProject({
+          selection: issuesSurfaceSelection,
+          environmentId: activeThreadRef.environmentId,
+          projects: allProjects,
+          activeProject,
+        })
+      : null;
+  const issuesPanelProject = selectedIssuesProject ?? activeProject;
+  const consumeIssuesSurfaceSelection = useCallback(
+    (requestId: number) => {
+      if (activeThreadRef)
+        useRightPanelStore.getState().consumeIssueSelection(activeThreadRef, requestId);
+    },
+    [activeThreadRef],
+  );
   const addIssuesSurface = useCallback(() => {
     if (!activeThreadRef || !issuesSurfaceAvailable) return;
     useRightPanelStore.getState().open(activeThreadRef, "issues");
@@ -9393,8 +9415,13 @@ export default function ChatView(props: ChatViewProps) {
       />
     ) : renderedRightPanelSurface?.kind === "pull-requests" && activeThreadRef ? (
       <ThreadPullRequestsPanel threadRef={activeThreadRef} />
-    ) : renderedRightPanelSurface?.kind === "issues" && activeProject ? (
-      <ThreadIssuesPanel key={activeProjectKey} project={activeProject} />
+    ) : renderedRightPanelSurface?.kind === "issues" && issuesPanelProject ? (
+      <ThreadIssuesPanel
+        key={`${issuesPanelProject.environmentId}:${issuesPanelProject.workspaceRoot}`}
+        project={issuesPanelProject}
+        selection={selectedIssuesProject ? issuesSurfaceSelection : undefined}
+        onSelectionConsumed={consumeIssuesSurfaceSelection}
+      />
     ) : renderedRightPanelSurface?.kind === "agents" ? (
       <AgentsPanel
         model={agentPanelModel}

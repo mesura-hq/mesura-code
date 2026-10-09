@@ -1,10 +1,19 @@
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
-import { IssueDetail, IssueListInput } from "./issues.ts";
+import {
+  IssueDetail,
+  IssueListInput,
+  IssueReference,
+  IssueReferenceInput,
+  issueRepositoryUrl,
+} from "./issues.ts";
 
 const decodeListInput = Schema.decodeUnknownExit(IssueListInput);
 const decodeDetail = Schema.decodeUnknownSync(IssueDetail);
+
+const decodeReferenceInput = Schema.decodeUnknownExit(IssueReferenceInput);
+const decodeReference = Schema.decodeUnknownExit(IssueReference);
 
 const listInput = { projectId: "project-1", state: "open", query: "", limit: 50 } as const;
 
@@ -61,5 +70,89 @@ describe("IssueDetail deleted authors", () => {
     });
     expect(detail.author).toEqual({ login: "" });
     expect(detail.comments.map((comment) => comment.author)).toEqual([null, { login: "ghost" }]);
+  });
+});
+
+describe("Issue reference resolution contract (issues phase 3 fence)", () => {
+  it("issues phase 3 fence: a reference names a project and a positive whole number, nothing else", () => {
+    expect(decodeReferenceInput({ projectId: "project-1", number: 17402 })._tag).toBe("Success");
+    for (const number of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(decodeReferenceInput({ projectId: "project-1", number })._tag).toBe("Failure");
+    }
+  });
+
+  it("issues phase 3 fence: a resolved reference is exactly an issue or a pull request with its canonical URL", () => {
+    const issue = {
+      kind: "issue",
+      number: 17402,
+      url: "https://github.com/pingdotgg/t3code/issues/17402",
+      repository: "pingdotgg/t3code",
+    };
+    expect(decodeReference(issue)._tag).toBe("Success");
+    expect(
+      decodeReference({
+        ...issue,
+        kind: "pull-request",
+        number: 17404,
+        url: "https://github.com/pingdotgg/t3code/pull/17404",
+      })._tag,
+    ).toBe("Success");
+    expect(decodeReference({ ...issue, kind: "discussion" })._tag).toBe("Failure");
+    expect(decodeReference({ ...issue, url: undefined })._tag).toBe("Failure");
+  });
+});
+
+describe("issueRepositoryUrl, the repository a recorded identity names (issues phase 3 regression)", () => {
+  const locator = { source: "git-remote", remoteName: "origin", remoteUrl: "x" } as const;
+
+  it("issues phase 3 regression: a canonical-only identity on an Enterprise host names that host", () => {
+    expect(
+      issueRepositoryUrl({
+        canonicalKey: "github.acme.test/platform/api",
+        provider: "github",
+        locator,
+      }),
+    ).toBe("https://github.acme.test/platform/api");
+  });
+
+  it("issues phase 3 regression: a web URL that differs only by case, .git or a trailing slash agrees with the canonical key", () => {
+    for (const webUrl of [
+      "https://github.com/PingDotGG/T3Code",
+      "https://github.com/pingdotgg/t3code.git",
+      "https://github.com/pingdotgg/t3code/",
+    ]) {
+      expect(
+        issueRepositoryUrl({
+          canonicalKey: "github.com/pingdotgg/t3code",
+          provider: "github",
+          webUrl,
+          owner: "pingdotgg",
+          name: "t3code",
+          locator,
+        }),
+        webUrl,
+      ).toBe(webUrl);
+    }
+  });
+
+  it("issues phase 3 regression: another provider or a web URL that is not a web address names no GitHub repository", () => {
+    expect(
+      issueRepositoryUrl({ canonicalKey: "gitlab.com/acme/alpha", provider: "gitlab", locator }),
+    ).toBeNull();
+    expect(
+      issueRepositoryUrl({
+        canonicalKey: "github.com/acme/alpha",
+        provider: "github",
+        webUrl: "ssh://github.com/acme/alpha",
+        locator,
+      }),
+    ).toBeNull();
+    expect(
+      issueRepositoryUrl({
+        canonicalKey: "github.com/acme/alpha/extra",
+        provider: "github",
+        locator,
+      }),
+    ).toBeNull();
   });
 });
