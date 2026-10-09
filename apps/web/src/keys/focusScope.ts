@@ -10,13 +10,12 @@ export const COMPOSER_EDITOR_SELECTOR = '[data-testid="composer-editor"]';
 
 /**
  * Surfaces that own every key they receive. The engine stands aside for them
- * completely, so the terminal, the Neovim editor, the file tree and any open
- * dialog or menu keep their own keyboard.
+ * completely, so the terminal, the Neovim editor and any open dialog or menu
+ * keep their own keyboard.
  */
 const PASSTHROUGH_SELECTOR = [
   "[data-terminal-owner]",
   ".monaco-editor",
-  '[role="tree"]',
   '[role="dialog"]',
   '[role="alertdialog"]',
   '[role="menu"]',
@@ -70,7 +69,21 @@ export function deepActiveElement(): Element | null {
   return active;
 }
 
-export type KeyScope = "composer" | "insert" | "passthrough" | "sidebar" | "chat" | "panel";
+/**
+ * A tree (the file tree, a diff's file list) owns its keys too, except the
+ * leader: `Space` and the sequence it starts stay the keymap's, so the panel
+ * launcher and the other leader commands work from inside a tree.
+ */
+const TREE_SELECTOR = '[role="tree"]';
+
+export type KeyScope =
+  | "composer"
+  | "insert"
+  | "passthrough"
+  | "tree"
+  | "sidebar"
+  | "chat"
+  | "panel";
 
 export function resolveKeyScope(active: Element | null = deepActiveElement()): KeyScope {
   // Read first, before any early return: `getFocusedPane` records the pane
@@ -84,6 +97,7 @@ export function resolveKeyScope(active: Element | null = deepActiveElement()): K
   if (active?.closest(PASSTHROUGH_SELECTOR)) return "passthrough";
   if (isTextEditable(active)) return "insert";
   if (document.querySelector(OPEN_LAYER_SELECTOR)) return "passthrough";
+  if (active?.closest(TREE_SELECTOR)) return "tree";
   const pane = focusedPane ?? getLastFocusedPane();
   if (pane === "terminal") return "passthrough";
   return pane;

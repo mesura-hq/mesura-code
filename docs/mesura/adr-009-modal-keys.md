@@ -68,6 +68,13 @@ Decisions of the production cycle:
     the surfaces, each on one letter. Which-key does not list them. A row that
     cannot run shows its reason on the row and in a notice when its letter is
     pressed: no reason may need a hover (`lib/panelLauncher.ts`).
+17. A surface is navigable the moment it shows, with no click first. Every
+    keyboard way into the right panel (`Ctrl+L` and the other pane moves, a
+    launcher letter, `Ctrl+Tab`, a close, a file opened from a tree) puts
+    focus on the element that owns the active surface's keys, never on its
+    tab title or a toolbar button. There the arrows move and `Ctrl+D` /
+    `Ctrl+U` move half a page. A tree keeps its own keys, but `Space` stays
+    the leader in it (`lib/panelSurfaceFocus.ts`).
 
 ## Decision
 
@@ -91,10 +98,13 @@ Decisions of the production cycle:
 
 - Scope is read from the DOM on every key, never stored (ADR-004's rule):
   `focusScope.ts` returns `composer`, `insert` (any other text input),
-  `passthrough`, `sidebar`, `chat` or `panel`. It reads the focused pane
-  first, on every call, before any early return (see "Traps").
-- Passthrough is total: the terminal, the Neovim editor, the file tree, any
-  open dialog, menu or listbox, and the command palette keep their own keys.
+  `passthrough`, `tree`, `sidebar`, `chat` or `panel`. It reads the focused
+  pane first, on every call, before any early return (see "Traps").
+- Passthrough is total: the terminal, the Neovim editor, any open dialog,
+  menu or listbox, and the command palette keep their own keys.
+- A tree (`role="tree"`: the file tree, a Pierre diff file list) is the
+  `tree` scope: every key is the tree's except the leader and the sequence it
+  starts, so the panel launcher opens from inside a tree.
 - Insert is derived from focus (Tridactyl's `isTextEditable`), except in the
   composer, which has its own normal mode and so stores one flag.
 - Routing for a key in normal or visual mode: a pending surface sequence first
@@ -115,6 +125,15 @@ Decision 1 holds on every way into the chat, not only on thread open:
   the terminal and `Ctrl+L` from the sidebar land in the chat buffer in
   normal mode, with visual mode and pending keys cleared and the cursor kept.
   With Vim mode off, ADR-004's entry at the composer applies unchanged.
+- **The right panel.** `RightPanelTabs` registers the panel's pane entry,
+  `enterPanel` (`lib/panelSurfaceFocus.ts`). A surface marks the element that
+  owns its keys with `data-pane-entry`, ranked when it shows two (the editor,
+  2, over its file tree, 1). An entry that is not focusable itself gets its
+  scroll region focused, so the browser's arrows scroll it; an entry whose
+  rows live in a shadow root (Pierre's tree, `diffs/pierreTreeKeys.ts`) names
+  its own focus. The same rule runs when the active surface changes while the
+  keyboard is in the panel, and it waits for a lazy surface's entry to render
+  (the tab title holds focus meanwhile).
 - **The command palette.** The engine records the scope and the composer mode
   the palette opened from. On close, `restorePaletteOrigin()` (one fork check
   in the palette's `finalFocus`) returns to the chat in normal mode, or to
@@ -538,6 +557,15 @@ Pane resizing:
   handle's focus style.
 - `useResizableWidth.ts` (3): `resizeTo` and `reset` returned from the hook.
 - `AppSidebarLayout.tsx` (35): `onResetWidth: resetSidebarWidth`.
+
+Right panel focus (decision 17):
+
+- `RightPanelTabs.tsx`: the `usePanelSurfaceKeys` call, beside the round-2
+  launcher and tab cycling seams.
+- `DiffPanel.tsx` (43): `data-pane-entry` on the code view's wrapper. One
+  attribute; the file moves often, so a sync may meet it in a conflict.
+- `diffs/DiffFileTree.tsx` (4): the `usePierreTreePaneEntry` call and the
+  wrapper's `ref`, `data-pane-entry` and `onKeyDown`.
 
 User documentation (outside `apps` and `packages`, not guarded):
 

@@ -24,7 +24,7 @@ import {
   resumeComposerNormalOnFocus,
 } from "./composer/composerSurface";
 import { isCommandPaletteOpen } from "~/commandPaletteBus";
-import { focusPane } from "~/lib/paneFocus";
+import { focusPane, getFocusedPane } from "~/lib/paneFocus";
 import { handlePaneKey, isPaneModeActive, startPaneMode, stopPaneMode } from "./paneMode";
 
 /**
@@ -39,8 +39,9 @@ import { handlePaneKey, isPaneModeActive, startPaneMode, stopPaneMode } from "./
  *
  * Routing for a key, in order:
  * 1. Off, or a composition in progress: not ours.
- * 2. A passthrough scope (terminal, Neovim editor, file tree, open dialog or
- *    menu, command palette): not ours.
+ * 2. A passthrough scope (terminal, Neovim editor, open dialog or menu,
+ *    command palette): not ours. In a tree, only the leader and the sequence
+ *    it starts are ours.
  * 3. The composer: its surface decides (insert passes keys, Escape leaves).
  * 4. Any other text input: not ours.
  * 5. PANE mode (`<leader>w`), while active, takes every key; a key it does
@@ -235,6 +236,11 @@ function handleKey(scope: KeyScope, token: string, event: KeyboardEvent): boolea
   if (scope === "insert") {
     if (isPaneModeActive()) stopPaneMode();
     return false;
+  }
+  if (scope === "tree") {
+    if (isPaneModeActive()) stopPaneMode();
+    if (sequence.pending.length === 0 && token !== keymap.leader) return false;
+    return stepKeymap(keymap.trieFor("normal", [getFocusedPane() ?? "panel"]), token, undefined);
   }
   if (isPaneModeActive() && handlePaneKey(token)) return true;
 

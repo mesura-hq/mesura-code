@@ -16,8 +16,13 @@ The indicator at the bottom-left of the chat shows the mode you are in.
 - **FLASH** labels places on screen so that you can jump to one with two or three keys.
 - **PANE** resizes the sidebar, the right panel and the terminal.
 
-The terminal, the file editor, the file tree, open dialogs and the command palette keep their
-own keys. Vim mode does not change how you use them.
+The terminal, the file editor, open dialogs and the command palette keep their own keys. Vim mode
+does not change how you use them. A tree (the file tree, the Diff's file list) keeps its keys too,
+but `Space` still opens the key menu from inside it.
+
+When the keyboard goes to the right panel (`Ctrl+L`, a launcher letter, `Ctrl+Tab`), it lands in
+the surface itself: the tree, the diff or the editor, not the tab. Use the arrows to move and
+`Ctrl+D` / `Ctrl+U` to move half a page; `Enter` opens the file under the cursor in a tree.
 
 ## The leader and the key menu
 

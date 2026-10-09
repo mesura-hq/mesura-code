@@ -58,6 +58,7 @@ import { useTheme } from "~/hooks/useTheme";
 import { pullRequestEnvironment } from "~/state/pullRequests";
 import { useEnvironmentQuery } from "~/state/query";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
+import { usePanelSurfaceKeys } from "~/lib/panelSurfaceFocus";
 import { useRightPanelTabCycling } from "~/lib/rightPanelTabCycling";
 import {
   closePanelLauncher,
@@ -927,6 +928,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     activeSurfaceId: props.activeSurfaceId,
     onActivate: props.onActivate,
   });
+  // Mesura: a pane move or a tab change lands in the active surface's content.
+  usePanelSurfaceKeys(tabListRef, props.activeSurfaceId);
   const [renamingDevice, setRenamingDevice] = useState<string | null>(null);
   const [tabScrollState, setTabScrollState] = useState({
     hasOverflow: false,

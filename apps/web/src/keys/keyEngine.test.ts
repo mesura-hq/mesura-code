@@ -181,7 +181,6 @@ describe("key engine passthrough scopes", () => {
   const cases: ReadonlyArray<readonly [string, () => void]> = [
     ["the terminal", () => byTestId("terminal-input").focus()],
     ["the Monaco editor", () => byTestId("monaco-input").focus()],
-    ["the file tree (role=tree)", () => byTestId("file-tree").focus()],
     [
       "an open dialog holding focus",
       () => {
@@ -226,6 +225,20 @@ describe("key engine passthrough scopes", () => {
       expect(readKeyEngineSnapshot().pending).toEqual([]);
     });
   }
+});
+
+describe("key engine in a tree", () => {
+  it("leaves the tree its own keys and takes the leader", () => {
+    byTestId("file-tree").focus();
+    for (const { key, code } of KEYS.filter(({ key }) => key !== " ")) {
+      expect({ key, ...press(key, code) }).toEqual({ key, prevented: false, reachedLater: true });
+    }
+    expect(press(" ", "Space")).toEqual({ prevented: true, reachedLater: false });
+    expect(readKeyEngineSnapshot().scope).toBe("tree");
+    expect(readKeyEngineSnapshot().pending).toEqual(["<Space>"]);
+    // The key after the leader is the sequence's, even one the tree would take.
+    expect(press("j")).toEqual({ prevented: true, reachedLater: false });
+  });
 });
 
 describe("key engine in the chat without a binding", () => {

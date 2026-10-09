@@ -13,6 +13,7 @@ import { useSyncExternalStore } from "react";
 import { runRegisteredCommand } from "~/commands/commandRegistry";
 import { toastManager } from "~/components/ui/toast";
 import { focusPane } from "~/lib/paneFocus";
+import { ACTIVE_TAB_TITLE_SELECTOR, focusPanelSurfaceAfterRender } from "~/lib/panelSurfaceFocus";
 
 /**
  * The right panel's launcher ("Open a surface") as the panel's one menu.
@@ -24,12 +25,6 @@ import { focusPane } from "~/lib/paneFocus";
  * letter that is not available says why instead of doing nothing: this is a
  * keyboard-first app, so a reason must never need a hover.
  */
-
-/** The active tab's title button: where focus rests in the panel after a key. */
-export const ACTIVE_TAB_TITLE_SELECTOR =
-  '[data-right-panel-tabbar] [data-active-tab="true"] button:not([aria-label])';
-/** Frames to wait for the panel to render its new active tab after a key. */
-export const ACTIVE_TAB_WAIT_FRAMES = 10;
 
 let launcherOpen = false;
 const listeners = new Set<() => void>();
@@ -188,23 +183,11 @@ export function runPanelLauncherAction(action: PanelLauncherAction): void {
 }
 
 /**
- * After a launcher row runs: the launcher that held focus is gone,
- * so focus would fall to <body> and `Ctrl+T` or `Ctrl+Tab` would no longer
- * read as the panel's. A surface that takes focus itself (a terminal, the
- * agents composer) keeps it; otherwise focus goes to the new active tab.
+ * After a launcher row runs: the launcher that held focus is gone, so focus
+ * would fall to <body>. It goes into the surface the row opened, or stays in
+ * the one under the launcher when the row ran a panel action
+ * (`panelSurfaceFocus.ts`).
  */
 export function keepFocusInPanelAfterRender(panel: Element): void {
-  let frames = 0;
-  const attempt = () => {
-    const active = document.activeElement;
-    if (active !== null && active !== document.body) return;
-    if (!panel.isConnected) return;
-    const target = panel.querySelector<HTMLElement>(ACTIVE_TAB_TITLE_SELECTOR);
-    if (target !== null) {
-      target.focus({ preventScroll: true });
-      return;
-    }
-    if (++frames < ACTIVE_TAB_WAIT_FRAMES) window.requestAnimationFrame(attempt);
-  };
-  window.requestAnimationFrame(attempt);
+  focusPanelSurfaceAfterRender(panel, panel.querySelector(ACTIVE_TAB_TITLE_SELECTOR));
 }

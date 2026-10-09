@@ -3,11 +3,7 @@ import { useEffect, useRef, type RefObject } from "react";
 
 import { resolveShortcutCommand } from "../keybindings";
 import { primaryServerKeybindingsAtom } from "../state/server";
-import {
-  ACTIVE_TAB_TITLE_SELECTOR,
-  ACTIVE_TAB_WAIT_FRAMES,
-  openPanelLauncher,
-} from "./panelLauncher";
+import { openPanelLauncher } from "./panelLauncher";
 import { isTerminalFocused } from "./terminalFocus";
 
 /**
@@ -16,8 +12,8 @@ import { isTerminalFocused } from "./terminalFocus";
  * the next or previous one, wrapping at the ends. Outside the panel the same
  * chords walk the threads; the `panelFocus` clause on these rules and
  * last-wins resolution are what tell the two apart. `rightPanel.newTab`
- * (`Ctrl+T` in the panel) opens the panel launcher, and a close keeps focus
- * in the panel.
+ * (`Ctrl+T` in the panel) opens the panel launcher. Focus then follows into
+ * the surface that is active (`usePanelSurfaceKeys`).
  *
  * `tabBarRef` is any element inside the panel's tab bar. Only the panel that
  * holds focus acts, so a second tab bar mounted for another layout stays
@@ -49,18 +45,11 @@ export function useRightPanelTabCycling<const Surface extends { readonly id: str
         openPanelLauncher();
         return;
       }
-      const cycles = command === "rightPanel.nextTab" || command === "rightPanel.previousTab";
-      // A close may arrive already handled (ChatView prevents its default);
-      // a cycle that something else handled is not ours.
-      if (cycles ? event.defaultPrevented : command !== "rightPanel.close") return;
+      if (command !== "rightPanel.nextTab" && command !== "rightPanel.previousTab") return;
+      if (event.defaultPrevented) return;
       const { tabBarRef, surfaces, activeSurfaceId, onActivate } = latest.current;
       const panel = tabBarRef.current?.closest("[data-preview-panel-mode]");
       if (!panel?.contains(document.activeElement)) return;
-      // Closing is the panel's own handler; focus only has to survive it.
-      if (!cycles) {
-        focusActiveTabAfterRender(panel);
-        return;
-      }
       if (surfaces.length === 0) return;
       event.preventDefault();
       event.stopPropagation();
@@ -69,35 +58,9 @@ export function useRightPanelTabCycling<const Surface extends { readonly id: str
       const next = surfaces[(index + step + surfaces.length) % surfaces.length];
       if (!next) return;
       onActivate(next);
-      focusActiveTabAfterRender(panel);
     };
-    // Capture: ChatView handles the close in the capture phase and stops
-    // propagation, which a bubble listener would never see past.
+    // Capture: a tree or the editor in the panel would take the chord first.
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [keybindings]);
-}
-
-/**
- * Focus follows the active tab, onto its title button (the close button is
- * the one with a label). Left where it was, it would sit on the old tab, or
- * drop to <body> with an unmounted or closed surface, and the next Ctrl+Tab
- * would walk the threads instead. The store renders the change a frame or
- * more later, so this waits until the active tab's button is a different one
- * from the button focused at the key. A panel closed with its last tab is
- * gone, and focus is left to whatever the close chose.
- */
-function focusActiveTabAfterRender(panel: Element): void {
-  const before = document.activeElement;
-  let frames = 0;
-  const attempt = () => {
-    if (!panel.isConnected) return;
-    const target = panel.querySelector<HTMLElement>(ACTIVE_TAB_TITLE_SELECTOR);
-    if (target !== null && target !== before) {
-      target.focus({ preventScroll: true });
-      return;
-    }
-    if (++frames < ACTIVE_TAB_WAIT_FRAMES) window.requestAnimationFrame(attempt);
-  };
-  window.requestAnimationFrame(attempt);
 }

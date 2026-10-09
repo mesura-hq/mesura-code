@@ -68,10 +68,8 @@ const PANE_ENTRY_SELECTORS: Record<PaneId, ReadonlyArray<string>> = {
     '[data-chat-column-maximized-away] [contenteditable="true"]',
     "[data-chat-column-maximized-away] textarea",
   ],
-  // Asked in type order rather than document order, deliberately: the Files
-  // surface renders its refresh button before its search box, and the search
-  // box is where someone arriving by keyboard wants to be. A single combined
-  // selector would give document order and land on the refresh button.
+  // The fallback only: the mounted panel registers `enterPanel`
+  // (`panelSurfaceFocus.ts`), which lands in the active surface's content.
   panel: [
     "[data-preview-panel-mode] input",
     "[data-preview-panel-mode] textarea",

@@ -57,10 +57,13 @@ describe("resolveKeyScope by focused element", () => {
     expect(scopeAfterFocusing("sidebar-search")).toBe("insert");
   });
 
-  it("reads the passthrough scope in the terminal, Monaco and the file tree", () => {
+  it("reads the passthrough scope in the terminal and Monaco", () => {
     expect(scopeAfterFocusing("terminal-input")).toBe("passthrough");
     expect(scopeAfterFocusing("monaco-input")).toBe("passthrough");
-    expect(scopeAfterFocusing("file-tree")).toBe("passthrough");
+  });
+
+  it("reads the tree scope in a tree, which leaves the leader to the keymap", () => {
+    expect(scopeAfterFocusing("file-tree")).toBe("tree");
   });
 
   it("reads the sidebar, chat and panel scopes from the focused pane", () => {
