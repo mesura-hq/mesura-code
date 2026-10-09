@@ -28,6 +28,7 @@ const RIGHT_PANEL_KINDS = [
   "terminal",
   "pull-request",
   "pull-requests",
+  "issues",
   "agents",
   "factory",
 ] as const;
@@ -89,6 +90,7 @@ export type RightPanelSurface =
     }
   /** The thread's linked pull requests, one singleton tab beside any number of `pull-request` tabs. */
   | { id: "pull-requests"; kind: "pull-requests" }
+  | { id: "issues"; kind: "issues" }
   | { id: "agents"; kind: "agents" }
   /** The Software Factory's plan, run and report for this thread: one tab, whose selection moves. */
   | {
@@ -224,6 +226,8 @@ const singletonSurface = (
       return { id: "files", kind };
     case "pull-requests":
       return { id: "pull-requests", kind };
+    case "issues":
+      return { id: "issues", kind };
     case "agents":
       return { id: "agents", kind };
     case "device":

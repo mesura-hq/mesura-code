@@ -43,6 +43,7 @@ import * as Option from "effect/Option";
 import {
   ArrowLeftIcon,
   Columns3Icon,
+  CircleDotIcon,
   CornerLeftUpIcon,
   FileSearchIcon,
   FolderIcon,
@@ -91,6 +92,7 @@ import { sourceControlEnvironment } from "../state/sourceControl";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
+import { parseIssueSearch, someEnvironmentHasIssues } from "./issues/issues.logic";
 import { useProjects, useServerConfigs, useThreadShells, waitForProject } from "../state/entities";
 import { useThreadSearch } from "../state/queries";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
@@ -1622,6 +1624,19 @@ function OpenCommandPaletteDialog(props: {
   ]);
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
+
+  if (someEnvironmentHasIssues(environments)) {
+    actionItems.push({
+      kind: "action",
+      value: "action:browse-issues",
+      searchTerms: ["browse issues", "github", "bugs", "backlog"],
+      title: "Browse issues",
+      icon: <CircleDotIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        await navigate({ to: "/issues", search: parseIssueSearch({}) });
+      },
+    });
+  }
 
   if (projects.length > 0) {
     const activeProjectTitle =

@@ -21,6 +21,31 @@ beforeEach(() => {
 });
 
 describe("rightPanelStore", () => {
+  it("keeps Issues as a thread-scoped singleton that can close and reopen", () => {
+    const store = useRightPanelStore.getState();
+    store.open(refA, "issues");
+    store.open(refA, "issues");
+    let state = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+    expect(state.surfaces).toEqual([{ id: "issues", kind: "issues" }]);
+    expect(state.activeSurfaceId).toBe("issues");
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refB).surfaces,
+    ).toEqual([]);
+    expect(
+      migratePersistedRightPanelState({ byThreadKey: { "env-1:thread-A": state } }).byThreadKey[
+        "env-1:thread-A"
+      ],
+    ).toEqual(state);
+    store.closeSurface(refA, "issues");
+    expect(
+      selectSelectedRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA),
+    ).toBeNull();
+    store.open(refA, "issues");
+    state = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+    expect(state.isOpen).toBe(true);
+    expect(state.activeSurfaceId).toBe("issues");
+  });
+
   it("gives each host/device its own tab and preserves renamed tabs", () => {
     const store = useRightPanelStore.getState();
     const android = {

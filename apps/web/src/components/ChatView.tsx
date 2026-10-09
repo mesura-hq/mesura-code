@@ -216,6 +216,8 @@ import { PullRequestDetailPanel } from "./pullRequest/PullRequestDetailPanel";
 import { PullRequestDetailGhost } from "./pullRequest/PullRequestGhosts";
 import { PullRequestsUnavailableState } from "./pullRequest/PullRequestsUnavailableState";
 import { RightPanelTabs } from "./RightPanelTabs";
+import { ThreadIssuesPanel } from "./issues/ThreadIssuesPanel";
+import { projectIssuesAvailability } from "./issues/issues.logic";
 import { AgentsPanel } from "./AgentsPanel";
 import { LinkPullRequestDialogHost } from "./pullRequest/LinkPullRequestDialog";
 import { ThreadPullRequestsPanel } from "./pullRequest/ThreadPullRequestsPanel";
@@ -4544,6 +4546,23 @@ export default function ChatView(props: ChatViewProps) {
     if (!activeThreadRef) return;
     useRightPanelStore.getState().open(activeThreadRef, "agents");
   }, [activeThreadRef]);
+  // A server known to lack Issues gets no entry; one still connecting opens the pane, which
+  // explains the wait and sends nothing until the capability arrives.
+  const activeProjectIssuesAvailability =
+    activeProject === null
+      ? null
+      : projectIssuesAvailability(
+          activeProject,
+          environmentById.get(activeProject.environmentId) ?? null,
+        );
+  const issuesSurfaceAvailable =
+    activeProjectIssuesAvailability !== null &&
+    activeProjectIssuesAvailability !== "not-github" &&
+    activeProjectIssuesAvailability !== "unsupported";
+  const addIssuesSurface = useCallback(() => {
+    if (!activeThreadRef || !issuesSurfaceAvailable) return;
+    useRightPanelStore.getState().open(activeThreadRef, "issues");
+  }, [activeThreadRef, issuesSurfaceAvailable]);
   const supportsThreadPullRequests =
     serverConfig?.environment.capabilities.threadPullRequests === true;
   const visiblePullRequestCount = visibleThreadPullRequests(
@@ -9374,6 +9393,8 @@ export default function ChatView(props: ChatViewProps) {
       />
     ) : renderedRightPanelSurface?.kind === "pull-requests" && activeThreadRef ? (
       <ThreadPullRequestsPanel threadRef={activeThreadRef} />
+    ) : renderedRightPanelSurface?.kind === "issues" && activeProject ? (
+      <ThreadIssuesPanel key={activeProjectKey} project={activeProject} />
     ) : renderedRightPanelSurface?.kind === "agents" ? (
       <AgentsPanel
         model={agentPanelModel}
@@ -10057,6 +10078,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddFiles={addFilesSurface}
           onAddPullRequest={addPullRequestSurface}
           onAddPullRequests={addPullRequestsSurface}
+          onAddIssues={issuesSurfaceAvailable ? addIssuesSurface : undefined}
           onAddAgents={addAgentsSurface}
           onAddFactory={factoryItems.length > 0 ? addFactorySurface : undefined}
           onAddDevice={addDeviceSurface}
@@ -10116,6 +10138,7 @@ export default function ChatView(props: ChatViewProps) {
             onAddFiles={addFilesSurface}
             onAddPullRequest={addPullRequestSurface}
             onAddPullRequests={addPullRequestsSurface}
+            onAddIssues={issuesSurfaceAvailable ? addIssuesSurface : undefined}
             onAddAgents={addAgentsSurface}
             onAddFactory={factoryItems.length > 0 ? addFactorySurface : undefined}
             onAddDevice={addDeviceSurface}

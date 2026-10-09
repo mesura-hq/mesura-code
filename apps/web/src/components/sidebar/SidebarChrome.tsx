@@ -1,6 +1,7 @@
 import {
   ArrowLeftIcon,
   ChartNoAxesColumnIcon,
+  CircleDotIcon,
   GitPullRequestIcon,
   ServerIcon,
   SettingsIcon,
@@ -12,6 +13,7 @@ import { Link, useCanGoBack, useLocation, useNavigate } from "@tanstack/react-ro
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { useEnvironments } from "../../state/environments";
+import { parseIssueSearch, someEnvironmentHasIssues } from "../issues/issues.logic";
 import { MesuraWordmark } from "../MesuraWordmark";
 import {
   resolveEnvironmentIdentificationPillLabel,
@@ -162,7 +164,9 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             ? "usage"
             : location.pathname === "/pull-requests"
               ? "pull-requests"
-              : null,
+              : location.pathname === "/issues"
+                ? "issues"
+                : null,
   });
   const { environments } = useEnvironments();
   // The dock takes sidebar height, so it only exists where the Usage entry that
@@ -181,6 +185,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const pullRequestsSupported = environments.some(
     (environment) => environment.serverConfig?.environment.capabilities.pullRequests === true,
   );
+  const issuesSupported = someEnvironmentHasIssues(environments);
   const closeMobileSidebar = useCallback(() => {
     if (isMobile) {
       setOpenMobile(false);
@@ -254,6 +259,16 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
                 icon={<GitPullRequestIcon />}
                 label="Pull Requests"
                 onClick={handlePullRequestsClick}
+              />
+            ) : null}
+            {issuesSupported ? (
+              <SidebarUtilityItem
+                icon={<CircleDotIcon />}
+                label="Issues"
+                onClick={() => {
+                  closeMobileSidebar();
+                  void navigate({ to: "/issues", search: parseIssueSearch({}) });
+                }}
               />
             ) : null}
             <SidebarUtilityItem
