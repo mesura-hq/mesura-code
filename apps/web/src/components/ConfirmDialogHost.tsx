@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 
 import {
   completeConfirmDialogClose,
@@ -62,6 +62,8 @@ export function ConfirmDialogHost() {
 
   const copy = resolveConfirmDialogCopy(state.status === "idle" ? "" : state.message);
   const confirmVariant = state.status === "idle" ? "default" : state.variant;
+  const confirmButtonRef = useRef<HTMLButtonElement>(null);
+  const focusConfirm = state.status === "confirming" && state.focusConfirm === true;
   const onCancel = () => respondToConfirmDialog(false);
   const onConfirm = () => respondToConfirmDialog(true);
 
@@ -75,7 +77,11 @@ export function ConfirmDialogHost() {
         if (!open) completeConfirmDialogClose();
       }}
     >
-      <AlertDialogPopup className="max-w-lg">
+      {/* Mesura: a routine confirmation opens on Confirm, so Enter answers it. */}
+      <AlertDialogPopup
+        className="max-w-lg"
+        {...(focusConfirm ? { initialFocus: confirmButtonRef } : {})}
+      >
         <AlertDialogHeader>
           <AlertDialogTitle>{copy.title}</AlertDialogTitle>
           {copy.description ? (
@@ -86,7 +92,7 @@ export function ConfirmDialogHost() {
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
-          <Button variant={confirmVariant} onClick={onConfirm}>
+          <Button ref={confirmButtonRef} variant={confirmVariant} onClick={onConfirm}>
             Confirm
           </Button>
         </AlertDialogFooter>

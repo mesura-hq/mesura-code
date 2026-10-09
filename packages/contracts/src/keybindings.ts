@@ -109,6 +109,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "rightPanel.toggleMaximized",
   "rightPanel.close",
   "rightPanel.nextTab",
+  "rightPanel.newTab",
   "rightPanel.previousTab",
   "pullRequest.copyNumber",
   "diff.toggle",

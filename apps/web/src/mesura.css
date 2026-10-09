@@ -110,6 +110,54 @@
    See docs/mesura/adr-004-pane-focus.md for why this shape and not the eight
    that were tried before it. */
 
+/* The keyboard focus ring, app-wide: the same neutral as the pane mark
+   instead of the theme's blue, so `Tab` reads as part of the app rather than
+   as a web page's default. Every `ring-ring` and `outline-ring` reads
+   `--ring`, so this one token recolours all of them. The selector matches the
+   theme rule in index.css that sets it, and wins by loading later. */
+:root,
+html[data-theme-id]:not([data-theme-id=""]) {
+  --ring: color-mix(in srgb, var(--contrast-foreground) 45%, transparent);
+}
+
+/* The browser's own focus outline is `outline: auto`, which Chromium draws in
+   its system blue whatever `outline-color` says. A solid outline takes the
+   colour above. Controls only: a text field shows its caret, and the composer
+   (a contenteditable) drew a heavy frame when every focusable was included.
+   `:where` keeps this at zero specificity: it still beats the browser's rule
+   (author over user agent), and any control that hides its outline
+   (`outline-none`, `outline-hidden`) keeps it hidden. */
+:where(
+  button,
+  a[href],
+  summary,
+  [role="button"],
+  [role="tab"],
+  [role="menuitem"],
+  [role="option"],
+  [role="checkbox"],
+  [role="switch"]
+):focus-visible {
+  outline-style: solid;
+}
+
+/* A confirmation answers Enter with whichever button holds focus, so that
+   button is always marked, however the dialog was opened (a click on a close
+   button gives no :focus-visible), and in the foreground colour, which reads
+   on the destructive red as well as on the outline button. */
+[data-slot="alert-dialog-popup"] button:focus {
+  outline: 2px solid var(--foreground);
+  outline-offset: 2px;
+}
+
+/* The right panel puts focus on its active tab's title after a key (Ctrl+Tab,
+   a launcher pick, a close) so the keys stay in the panel. The tab's own
+   highlight and the panel's hairline already mark it; a ring there is noise.
+   `lib/panelLauncher.ts`, `ACTIVE_TAB_TITLE_SELECTOR`. */
+[data-right-panel-tabbar] [data-active-tab="true"] button:not([aria-label]):focus-visible {
+  outline: none;
+}
+
 :root {
   /* Neutral rather than the accent. A saturated accent reads as "important"
      and over-signals what is only a hint about where the keys are going.

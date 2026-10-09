@@ -269,7 +269,8 @@ letters. Inside the sidebar's own search box they are letters too, so you can st
 thread whose name has a `j` in it.
 
 With the right panel focused, `Ctrl+Tab` and `Ctrl+Shift+Tab` move between its tabs instead, in
-the desktop app; a terminal tab keeps the pair for itself, as it does for threads.
+the desktop app; a terminal tab keeps the pair for itself, as it does for threads. `mod+t` there
+opens the panel's launcher, the list behind its `+` button, to open a new tab by its letter.
 
 Focus stays in the sidebar as you walk, on the row of the thread you just opened, so you can keep
 going. Clicking a thread with the mouse still puts the cursor in the composer, as before.

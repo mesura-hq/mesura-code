@@ -212,6 +212,9 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
     when: "panelFocus && !terminalFocus",
   },
   { key: "ctrl+tab", command: "rightPanel.nextTab", when: "panelFocus && !terminalFocus" },
+  // Mesura: a new tab is the panel launcher, as Ctrl+T is in a browser.
+  // Desktop only in practice: a browser keeps Ctrl+T for its own tabs.
+  { key: "mod+t", command: "rightPanel.newTab", when: "panelFocus && !terminalFocus" },
   { key: "mod+shift+c", command: "thread.copyReference", when: "!terminalFocus" },
   { key: "mod+shift+s", command: "thread.settle", when: "!terminalFocus" },
   { key: "mod+shift+p", command: "thread.pin", when: "!terminalFocus" },

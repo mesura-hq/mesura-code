@@ -1285,6 +1285,8 @@ describe("shipped defaults on Linux", () => {
       resolve(press("Tab", { ctrlKey: true, shiftKey: true }), false, panel),
       "rightPanel.previousTab",
     );
+    assert.strictEqual(resolve(press("t", { ctrlKey: true }), false, panel), "rightPanel.newTab");
+    assert.isNull(resolve(press("t", { ctrlKey: true })));
     // A terminal tab keeps ctrl+tab, as it does for the thread pair.
     assert.isNull(resolve(press("Tab", { ctrlKey: true }), true, panel));
     // The bracket pair still walks the threads from the panel.

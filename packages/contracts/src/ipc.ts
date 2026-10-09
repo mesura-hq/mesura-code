@@ -1486,6 +1486,12 @@ export type ConfirmDialogVariant = "default" | "destructive";
 
 export interface ConfirmDialogOptions {
   readonly variant?: ConfirmDialogVariant;
+  /**
+   * Mesura: the button focused when the dialog opens, so Enter answers it.
+   * Defaults to the dialog's own choice; a routine confirmation such as
+   * closing a terminal sets "confirm".
+   */
+  readonly initialFocus?: "confirm";
 }
 
 /**

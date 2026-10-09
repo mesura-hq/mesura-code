@@ -3,6 +3,11 @@ import { useEffect, useRef, type RefObject } from "react";
 
 import { resolveShortcutCommand } from "../keybindings";
 import { primaryServerKeybindingsAtom } from "../state/server";
+import {
+  ACTIVE_TAB_TITLE_SELECTOR,
+  ACTIVE_TAB_WAIT_FRAMES,
+  openPanelLauncher,
+} from "./panelLauncher";
 import { isTerminalFocused } from "./terminalFocus";
 
 /**
@@ -10,7 +15,9 @@ import { isTerminalFocused } from "./terminalFocus";
  * `Ctrl+Shift+Tab` while the right panel has focus): the active tab moves to
  * the next or previous one, wrapping at the ends. Outside the panel the same
  * chords walk the threads; the `panelFocus` clause on these rules and
- * last-wins resolution are what tell the two apart.
+ * last-wins resolution are what tell the two apart. `rightPanel.newTab`
+ * (`Ctrl+T` in the panel) opens the panel launcher, and a close keeps focus
+ * in the panel.
  *
  * `tabBarRef` is any element inside the panel's tab bar. Only the panel that
  * holds focus acts, so a second tab bar mounted for another layout stays
@@ -34,6 +41,14 @@ export function useRightPanelTabCycling<const Surface extends { readonly id: str
       const command = resolveShortcutCommand(event, keybindings, {
         context: { terminalFocus: isTerminalFocused() },
       });
+      if (command === "rightPanel.newTab") {
+        const panel = latest.current.tabBarRef.current?.closest("[data-preview-panel-mode]");
+        if (event.defaultPrevented || !panel?.contains(document.activeElement)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        openPanelLauncher();
+        return;
+      }
       const cycles = command === "rightPanel.nextTab" || command === "rightPanel.previousTab";
       // A close may arrive already handled (ChatView prevents its default);
       // a cycle that something else handled is not ours.
@@ -63,9 +78,6 @@ export function useRightPanelTabCycling<const Surface extends { readonly id: str
   }, [keybindings]);
 }
 
-/** Frames to wait for the panel to render its new active tab after a key. */
-const ACTIVE_TAB_WAIT_FRAMES = 10;
-
 /**
  * Focus follows the active tab, onto its title button (the close button is
  * the one with a label). Left where it was, it would sit on the old tab, or
@@ -80,9 +92,7 @@ function focusActiveTabAfterRender(panel: Element): void {
   let frames = 0;
   const attempt = () => {
     if (!panel.isConnected) return;
-    const target = panel.querySelector<HTMLElement>(
-      '[data-right-panel-tabbar] [data-active-tab="true"] button:not([aria-label])',
-    );
+    const target = panel.querySelector<HTMLElement>(ACTIVE_TAB_TITLE_SELECTOR);
     if (target !== null && target !== before) {
       target.focus({ preventScroll: true });
       return;

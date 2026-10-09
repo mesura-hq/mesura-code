@@ -26,8 +26,11 @@ can follow, grouped by what they do.
 
 - `Space f` finds things: files, a grep of the project, threads, commands.
 - `Space t` acts on the thread: new thread, rename, pin, settle, copy its reference.
-- `Space p` opens panels: diff, browser preview, file tree, file manager, terminal. `Space p f`
-  maximizes the right panel, and pressed again restores it.
+- `Space p` opens the right panel's launcher, the same one as the panel's `+` button. Type a
+  letter: `t` terminal, `f` files, `d` diff, `b` browser and the rest of the list, or a panel
+  action: `z` maximize or restore, `x` close the tab, `o` hide the panel, `e` file tree, `c` file
+  manager. A row that cannot open here says why on the row, and its letter shows the reason.
+  `Esc` closes the launcher.
 - `Space m` controls the composer: model, effort, agent mode, host, stash, attach files.
 - `Space b` toggles the sidebar. `Space o` opens the project in your editor.
 - `Space ?` lists every key.

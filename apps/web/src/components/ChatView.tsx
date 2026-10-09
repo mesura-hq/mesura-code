@@ -233,6 +233,7 @@ import { useChatReadingScroll } from "../lib/useChatReadingScroll";
 import { useThreadSettledToggle } from "../lib/useThreadSettledToggle";
 import { dispatchPickerAction } from "../lib/pickerActionBus";
 import { useCommandHandlers } from "../commands/commandRegistry";
+import { openPanelLauncher } from "../lib/panelLauncher";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
   AlarmClockIcon,
@@ -6742,6 +6743,10 @@ export default function ChatView(props: ChatViewProps) {
     "terminal.toggle": toggleTerminalVisibility,
     "rightPanel.toggle": toggleRightPanel,
     "rightPanel.toggleMaximized": toggleRightPanelMaximized,
+    "rightPanel.newTab": () => {
+      if (!rightPanelOpen) toggleRightPanel();
+      openPanelLauncher();
+    },
     "rightPanel.close": () => {
       if (activeRightPanelSurface) closeRightPanelSurface(activeRightPanelSurface);
     },

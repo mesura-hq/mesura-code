@@ -62,6 +62,12 @@ Decisions of the production cycle:
 15. All six prototype bugs are fixed in this cycle. Everything else the
     prototype did not build is deferred, each item to its own issue (see
     "Not built").
+16. The right panel has one menu: its launcher ("Open a surface"). It is the
+    empty panel, it opens over the tabs from `<leader>p`, `mod+t` in the
+    panel and the tab bar's `+`, and it carries the panel actions as well as
+    the surfaces, each on one letter. Which-key does not list them. A row that
+    cannot run shows its reason on the row and in a notice when its letter is
+    pressed: no reason may need a hover (`lib/panelLauncher.ts`).
 
 ## Decision
 
@@ -452,8 +458,8 @@ Each item has its own issue on `mesura-hq/mesura-code`, tracked by #86:
   principle.
 - #84: feat(keys): cite your own messages and search the chat buffer (`/`).
 - #85: feat(keys): maximize the right panel from PANE mode. Prototyped as
-  `<leader>pf` instead, through the registry (`rightPanel.toggleMaximized`,
-  registered by ChatView); PANE mode itself still has no key for it.
+  `Z` in the panel launcher instead (`<leader>p z`); PANE mode itself still
+  has no key for it.
   `rightPanel.toggleMaximized` has no default chord; the registry can run it
   once an owner registers it.
 - #87: refactor(keys): one command list for the palette, the chords and the
