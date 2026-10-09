@@ -123,11 +123,15 @@
   --mesura-pane-focus-ease: 150ms;
 }
 
-/* The two panes that light a row.
+/* The three panes that light a row.
 
    Hooks: `[data-chat-header]` is set on the chat column's top bar in
-   ChatView.tsx, and `[data-right-panel-tabbar]` on the right panel's tab row
-   in RightPanelTabs.tsx. The title inside the chat header is ChatHeader's
+   ChatView.tsx, `[data-right-panel-tabbar]` on the right panel's tab row
+   in RightPanelTabs.tsx, and the sidebar's is its header (the wordmark row),
+   `[data-slot="sidebar-header"]` from ui/sidebar.tsx inside
+   `[data-app-sidebar]`. All three rows are the top bar's height, so the
+   hairline sits at the same height whichever pane holds the keys. The
+   sidebar's wordmark does not recede: it is the app's name, not a title. The title inside the chat header is ChatHeader's
    `h2`, bound by tag rather than by class because that file changes often
    upstream. The panel's active tab carries `[data-active-tab="true"]`, which
    upstream's own code queries, so it cannot be renamed there unnoticed.
@@ -144,12 +148,14 @@
    was already positioned. The same holds for the sidebar and the drawer
    below. */
 [data-chat-header],
-[data-right-panel-tabbar] {
+[data-right-panel-tabbar],
+[data-app-sidebar] [data-slot="sidebar-header"] {
   position: relative;
 }
 
 [data-chat-header]::after,
-[data-right-panel-tabbar]::after {
+[data-right-panel-tabbar]::after,
+[data-app-sidebar] [data-slot="sidebar-header"]::after {
   content: "";
   position: absolute;
   right: 0;
@@ -185,21 +191,19 @@
 :root:not([data-mesura-drawer-focused])
   [data-chat-column-maximized-away]:focus-within
   [data-chat-header]::after,
-[data-preview-panel-mode]:focus-within [data-right-panel-tabbar]::after {
+[data-preview-panel-mode]:focus-within [data-right-panel-tabbar]::after,
+[data-app-sidebar]:focus-within [data-slot="sidebar-header"]::after {
   background-color: var(--mesura-pane-focus-tint);
 }
 
-/* The two panes with no row to light take a frame instead.
+/* The terminal drawer has no row to light and takes a frame instead.
 
-   Hooks: `[data-app-sidebar]` from AppSidebarLayout.tsx and
-   `[data-terminal-owner="drawer"]` from ThreadTerminalDrawer.tsx. Inset so
-   the frame sits inside the pane's own border rather than doubling it. */
-[data-app-sidebar],
+   Hook: `[data-terminal-owner="drawer"]` from ThreadTerminalDrawer.tsx. Inset
+   so the frame sits inside the pane's own border rather than doubling it. */
 [data-terminal-owner="drawer"] {
   position: relative;
 }
 
-[data-app-sidebar]::after,
 [data-terminal-owner="drawer"]::after {
   content: "";
   position: absolute;
@@ -208,15 +212,14 @@
   border-radius: 10px;
   pointer-events: none;
   /* Above everything drawn inside the pane, and below anything rendered into
-     a portal, which leaves this stacking context entirely. Both panes top out
-     at 20 today — the sidebar's drag rail and the drawer's resize rail — so
-     this has headroom on purpose. Raise it only against something new inside
+     a portal, which leaves this stacking context entirely. The drawer tops out
+     at 20 today — the drawer's resize rail — so this has headroom on
+     purpose. Raise it only against something new inside
      a pane, never against a menu or a tooltip. */
   z-index: 60;
   transition: border-color var(--mesura-pane-focus-ease) ease;
 }
 
-[data-app-sidebar]:focus-within::after,
 [data-terminal-owner="drawer"]:focus-within::after {
   border-color: var(--mesura-pane-focus-frame);
 }
@@ -236,6 +239,38 @@
 }
 ::highlight(mesura-composer-visual) {
   background-color: color-mix(in oklab, oklch(76.9% 0.188 70.08) 35%, transparent);
+}
+/* A keyboard cite flashes the cited text once (`keys/chat/citeFlash.ts`):
+   fade in, hold, fade out, then the element is removed. Opacity only, on one
+   element, so the compositor runs it. Reduced motion shows it still. */
+[data-mesura-cite-flash] {
+  position: absolute;
+  pointer-events: none;
+  animation: mesura-cite-flash 900ms ease-out forwards;
+}
+[data-mesura-cite-flash] > span {
+  position: absolute;
+  border-radius: 2px;
+  background-color: color-mix(in oklab, var(--mesura-flash-accent) 40%, transparent);
+}
+@keyframes mesura-cite-flash {
+  0% {
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  55% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-mesura-cite-flash] {
+    animation: none;
+  }
 }
 /* ── Flash: one look for every flash in the app ─────────────────────────────
    The file editor's flash is flash.nvim inside Neovim, styled by the

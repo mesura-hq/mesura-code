@@ -26,7 +26,8 @@ can follow, grouped by what they do.
 
 - `Space f` finds things: files, a grep of the project, threads, commands.
 - `Space t` acts on the thread: new thread, rename, pin, settle, copy its reference.
-- `Space p` opens panels: diff, browser preview, file tree, file manager, terminal.
+- `Space p` opens panels: diff, browser preview, file tree, file manager, terminal. `Space p f`
+  maximizes the right panel, and pressed again restores it.
 - `Space m` controls the composer: model, effort, agent mode, host, stash, attach files.
 - `Space b` toggles the sidebar. `Space o` opens the project in your editor.
 - `Space ?` lists every key.
@@ -47,9 +48,17 @@ In NORMAL mode the chat works like a read-only Vim buffer with a block cursor:
 - `y` with a motion copies text, for example `yiw` for a word. In VISUAL mode, `y` copies the
   selection.
 
-To cite part of an answer, select it in VISUAL mode and press `Space c`. The citation goes to
-the end of your prompt as `<citation>: `, and you stay in the chat. Select and cite more, then
-press `a` to type at the end of your prompt. Only assistant text can be cited.
+To cite part of an answer, press `Space c` in NORMAL mode. A label appears at the start of each
+sentence on screen: type the label where the cite starts. Labels then appear at the end of each
+sentence from there to the end of that answer: type the one where the cite ends. Labels are one
+or two characters, and `Esc` cancels.
+
+To cite an exact piece of text instead, select it in VISUAL mode and press `Space c`.
+
+Either way, the cited text flashes briefly, the citation goes to the end of your prompt as
+`<citation>: `, and the composer opens in INSERT mode, so you type or dictate your comment right
+away. Press `Esc` twice to go back to the chat
+and cite more. Only assistant text can be cited.
 
 Each thread remembers where its cursor was while the app stays open, so you return to the same
 place.

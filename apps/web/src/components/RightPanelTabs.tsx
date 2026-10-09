@@ -68,6 +68,7 @@ import { useTheme } from "~/hooks/useTheme";
 import { pullRequestEnvironment } from "~/state/pullRequests";
 import { useEnvironmentQuery } from "~/state/query";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
+import { useRightPanelTabCycling } from "~/lib/rightPanelTabCycling";
 
 import { PreviewPanelShell, type PreviewPanelMode } from "./preview/PreviewPanelShell";
 import { FaviconImage } from "./preview/PreviewFaviconIcon";
@@ -845,6 +846,13 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   const browserProfiles = useBrowserDefaults().profiles;
   const { resolvedTheme } = useTheme();
   const tabListRef = useRef<HTMLDivElement>(null);
+  // Mesura: Ctrl+Tab / Ctrl+Shift+Tab walk these tabs while the panel has focus.
+  useRightPanelTabCycling({
+    tabBarRef: tabListRef,
+    surfaces: props.surfaces,
+    activeSurfaceId: props.activeSurfaceId,
+    onActivate: props.onActivate,
+  });
   const [renamingDevice, setRenamingDevice] = useState<string | null>(null);
   const [addSurfaceMenuOpen, setAddSurfaceMenuOpen] = useState(false);
   const [tabScrollState, setTabScrollState] = useState({

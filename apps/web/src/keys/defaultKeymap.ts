@@ -51,6 +51,7 @@ const BRIDGED: ReadonlyArray<CommandEntry & { readonly command: KeybindingComman
   { keys: "<leader>pm", command: "fileTree.miller", title: "File manager" },
   { keys: "<leader>pt", command: "terminal.toggle", title: "Terminal" },
   { keys: "<leader>px", command: "rightPanel.close", title: "Close panel" },
+  { keys: "<leader>pf", command: "rightPanel.toggleMaximized", title: "Maximize / restore panel" },
   { keys: "<leader>b", command: "sidebar.toggle", title: "Toggle sidebar" },
   { keys: "<leader>mm", command: "modelPicker.toggle", title: "Model" },
   { keys: "<leader>me", command: "traitsPicker.toggle", title: "Effort & traits" },
@@ -68,13 +69,8 @@ const NATIVE: ReadonlyArray<CommandEntry & { readonly command: EngineCommand }> 
   { keys: "i", command: "composer.insert", title: "Insert in composer", mode: "normal" },
   { keys: "a", command: "composer.append", title: "Append in composer", mode: "normal" },
   { keys: "<leader>?", command: "keys.help", title: "All keys" },
-  {
-    keys: "<leader>c",
-    command: "chat.cite",
-    title: "Cite selection",
-    mode: "visual",
-    scope: "chat",
-  },
+  // Normal mode picks the start and the end with flash; visual mode cites the selection.
+  { keys: "<leader>c", command: "chat.cite", title: "Cite", scope: "chat" },
   { keys: "s", command: "flash.jump", title: "Flash", mode: ["normal", "visual"], scope: "chat" },
   {
     keys: "s",

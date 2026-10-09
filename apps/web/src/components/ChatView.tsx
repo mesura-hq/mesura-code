@@ -6700,6 +6700,7 @@ export default function ChatView(props: ChatViewProps) {
     },
     "terminal.toggle": toggleTerminalVisibility,
     "rightPanel.toggle": toggleRightPanel,
+    "rightPanel.toggleMaximized": toggleRightPanelMaximized,
     "rightPanel.close": () => {
       if (activeRightPanelSurface) closeRightPanelSurface(activeRightPanelSurface);
     },

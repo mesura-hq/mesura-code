@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { assignFlashLabels } from "./flash.ts";
+import { assignFlashLabels, assignJumpLabels } from "./flash.ts";
 import { keyTokenOf, parseKeySequence, type KeyPress } from "./keyToken.ts";
 import { compileKeymap, walkKeys, whichKeyRows, type KeymapConfig } from "./keymap.ts";
 import { IDLE_SEQUENCE, stepSequence, type SequenceState } from "./sequence.ts";
@@ -288,5 +288,28 @@ describe("assignFlashLabels", () => {
     );
     expect(labels.get("b")).toBe("a");
     expect(labels.get("a")).toBe("s");
+  });
+});
+
+describe("assignJumpLabels", () => {
+  it("gives one character each while the targets fit", () => {
+    expect(assignJumpLabels(3, "abc")).toEqual(["a", "b", "c"]);
+  });
+
+  it("turns the last characters into prefixes for the farthest targets", () => {
+    expect(assignJumpLabels(5, "abc")).toEqual(["a", "b", "ca", "cb", "cc"]);
+    expect(assignJumpLabels(7, "abc")).toEqual(["a", "ba", "bb", "bc", "ca", "cb", "cc"]);
+  });
+
+  it("never gives a label that starts another one", () => {
+    const labels = assignJumpLabels(120);
+    expect(new Set(labels).size).toBe(120);
+    for (const label of labels) {
+      expect(labels.some((other) => other !== label && other.startsWith(label))).toBe(false);
+    }
+  });
+
+  it("stops where two characters run out", () => {
+    expect(assignJumpLabels(20, "abc")).toHaveLength(9);
   });
 });

@@ -335,3 +335,35 @@ export function isRangeUnobscured(range: Range): boolean {
     (hit === container || container.contains(hit) || hit.contains(container))
   );
 }
+
+/** A sentence on one buffer line: its first and last characters, both inclusive. */
+export interface SentenceSpan {
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * Where a sentence ends: a run of `.`, `!`, `?` or `…`, any closing quotes,
+ * brackets or Markdown emphasis after it, then white space or the line's end.
+ * A `.` inside a number or a path (`3.5`, `a.ts`) has no space after it and
+ * does not end a sentence.
+ */
+const SENTENCE_END = /[.!?…]+[)\]"'”’*_`]*(?=\s|$)/;
+
+/**
+ * The sentences of one buffer line, in order. A buffer line is one block
+ * (a paragraph, a list item, a heading), so a sentence never spans lines;
+ * a block without end punctuation is one sentence up to its last character.
+ */
+export function sentenceSpans(line: string): SentenceSpan[] {
+  const spans: SentenceSpan[] = [];
+  let start = line.search(/\S/);
+  while (start !== -1) {
+    const match = SENTENCE_END.exec(line.slice(start));
+    const end = match ? start + match.index + match[0].length - 1 : line.trimEnd().length - 1;
+    spans.push({ start, end });
+    const next = line.slice(end + 1).search(/\S/);
+    start = match && next !== -1 ? end + 1 + next : -1;
+  }
+  return spans;
+}

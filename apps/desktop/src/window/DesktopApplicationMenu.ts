@@ -217,7 +217,12 @@ export const make = Effect.gen(function* () {
                 },
                 { type: "separator" as const },
               ]),
-          { role: environment.platform === "darwin" ? "close" : "quit" },
+          environment.platform === "darwin"
+            ? { role: "close" }
+            : environment.platform === "linux"
+              ? // Mesura: no accelerator, so Ctrl+Q reaches the page (DesktopWindow.ts).
+                { label: "Quit", click: () => void runPromise(electronApp.quit) }
+              : { role: "quit" },
         ],
       },
       {

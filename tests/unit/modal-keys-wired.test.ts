@@ -292,24 +292,25 @@ it("modal keys seam guard: the composer registers its Vim adapter", () => {
   ]);
 });
 
-it("modal keys seam guard: a cite in Vim mode lands at the prompt's end without focus", () => {
+it("modal keys seam guard: a cite in Vim mode lands at the prompt's end and focuses the composer", () => {
   const file = "apps/web/src/components/chat/ChatComposer.tsx";
-  const composer = read(file);
-  const cite = region(composer, "citeAssistantText:", "openModelPicker,", file);
+  // The implementation in the composer handle, not the handle type's declaration.
+  const cite = region(
+    read(file),
+    "citeAssistantText: (citation, sourceAnchor) =>",
+    "openModelPicker,",
+    file,
+  );
   assert.include(
     cite,
     tokens("getClientSettings().vimMode"),
     "citeAssistantText no longer branches on Vim mode",
   );
-  assert.include(
+  // The composer taking focus is what puts the keys in insert mode after a cite.
+  assert.notInclude(
     cite,
-    tokens("focusEditor: false"),
-    "the Vim mode cite moves focus into the composer",
-  );
-  assert.include(
-    composer,
-    tokens("options?.focusEditor === false"),
-    "insertComposerText ignores focusEditor, so a cite steals focus from the chat",
+    tokens("focusEditor"),
+    "the Vim mode cite passes a focus option, so it may no longer focus the composer",
   );
 });
 

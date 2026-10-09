@@ -50,3 +50,31 @@ export function assignFlashLabels(
   }
   return assigned;
 }
+
+/**
+ * Labels for a jump with no search pattern, after hop.nvim: every target is
+ * labelled up front, so no character is reserved for narrowing.
+ *
+ * Targets come nearest first. While they fit, each gets one character. Past
+ * that, the last characters of the set become prefixes: the nearest targets
+ * keep one-character labels and the farthest get two, the prefix then one
+ * more character. Returns one label per target, in order; targets beyond
+ * what two characters can label get none.
+ */
+export function assignJumpLabels(count: number, labels: string = DEFAULT_FLASH_LABELS): string[] {
+  const alphabet = [...labels];
+  if (count <= alphabet.length) return alphabet.slice(0, count);
+  const prefixCount = Math.min(
+    alphabet.length,
+    Math.ceil((count - alphabet.length) / (alphabet.length - 1)),
+  );
+  const singles = alphabet.slice(0, alphabet.length - prefixCount);
+  const assigned = [...singles];
+  for (const prefix of alphabet.slice(alphabet.length - prefixCount)) {
+    for (const second of alphabet) {
+      if (assigned.length === count) return assigned;
+      assigned.push(prefix + second);
+    }
+  }
+  return assigned;
+}

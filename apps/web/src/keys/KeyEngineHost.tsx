@@ -208,7 +208,7 @@ function FlashLabels() {
           TOUCH_HIDDEN,
         )}
       >
-        flash: {flash.pattern || "…"}
+        {flash.hint ?? `flash: ${flash.pattern || "…"}`}
       </div>
     </>
   );

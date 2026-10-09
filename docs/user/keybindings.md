@@ -248,14 +248,21 @@ wheel. Without that, the next chunk of a streaming reply would pull you back to 
 `ctrl+tab` and `ctrl+shift+tab`. The bracket pair works everywhere and is the one the app reports as
 the shortcut. The tab pair is desktop-only, because browsers keep those two chords for their own tab
 strip; it is also inactive while the terminal has focus, since the terminal encodes `ctrl+tab`
-itself. `mod+1` through `mod+9` jump straight to a thread by position.
+itself. `mod+1` through `mod+9` jump straight to a thread: hold `mod` and the threads on screen in
+the sidebar show their numbers, counted from the top of what you see. With the sidebar hidden, they
+count from the top of the list.
 
 With the sidebar focused, the list also walks under your fingers: `j` opens the next thread and
-`k` the previous one, and `mod+d` and `mod+u` step five at a time, stopping at the ends rather
-than wrapping. These are the only single letters the app binds to anything, so they apply in the
+`k` the previous one. `mod+d` and `mod+u` scroll the list half a page and open nothing, so you can
+look further down and then jump with a number; the numbers already show where the scroll will stop.
+The arrow keys move over the threads without opening them, showing each one's details as a mouse
+hover does, and `Enter` opens the one you are on. These are the only single letters the app binds to anything, so they apply in the
 sidebar and nowhere else — typed in the composer, in a terminal or in the file editor they are
 letters. Inside the sidebar's own search box they are letters too, so you can still search for a
 thread whose name has a `j` in it.
+
+With the right panel focused, `Ctrl+Tab` and `Ctrl+Shift+Tab` move between its tabs instead, in
+the desktop app; a terminal tab keeps the pair for itself, as it does for threads.
 
 Focus stays in the sidebar as you walk, on the row of the thread you just opened, so you can keep
 going. Clicking a thread with the mouse still puts the cursor in the composer, as before.
@@ -324,7 +331,10 @@ un-settle.
 
 ### Closing terminals and windows
 
-`terminal.close` defaults to `mod+w` while the terminal has focus. Anywhere else that key does
+`terminal.close` defaults to `mod+w` while the terminal has focus, and `rightPanel.close` to `mod+w`
+elsewhere. `Ctrl+Q` does the same two things, as `Super+Q` closes the focused window in a tiling
+window manager. In the Linux desktop app `Ctrl+Q` therefore no longer quits; on macOS `Cmd+Q`
+still does. Anywhere else `mod+w` does
 nothing on Linux and Windows: the desktop window there is the whole application, so closing it
 would quit Mesura Code. Quit from **File** → **Quit**, the titlebar, or your window manager
 instead. On macOS `Cmd+W` closes a window without quitting the app, as it does everywhere else on

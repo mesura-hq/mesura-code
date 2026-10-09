@@ -14,12 +14,16 @@ import {
   findOccurrences,
   handleFlashKey,
   isFlashActive,
+  applyFlashLook,
   startFlash,
+  startFlashPick,
   stopFlash,
+  type FlashPickTarget,
   type FlashProvider,
   type FlashTarget,
 } from "../flashSession";
 import { requestChatCite } from "./chatCiteBus";
+import { flashCitedRange } from "./citeFlash";
 import { requestTurnJump } from "./chatTurnBus";
 import {
   buildChatBuffer,
@@ -30,6 +34,7 @@ import {
   lineAtOrBelow,
   readingBounds,
   rangeBetween,
+  sentenceSpans,
   toRowPosition,
   type BufferPosition,
   type ChatBuffer,
@@ -214,23 +219,26 @@ function rowOf(range: Range): HTMLElement | null {
   return range.startContainer.parentElement?.closest<HTMLElement>("[data-timeline-row-id]") ?? null;
 }
 
-function paintVisualSelection(buffer: ChatBuffer): void {
-  const selection = window.getSelection();
-  if (!selection) return;
-  if (!isVisual() || context.visualAnchor === null) return;
+/** The text the visual selection covers, or null outside visual mode. */
+function visualRange(buffer: ChatBuffer): Range | null {
+  if (!isVisual() || context.visualAnchor === null) return null;
   const anchor = context.visualAnchor;
   const head = context.cursor;
   const forward = anchor.line < head.line || (anchor.line === head.line && anchor.col <= head.col);
   const [from, to] = forward ? [anchor, head] : [head, anchor];
-  const range =
-    context.mode === "visual-line"
-      ? rangeBetween(
-          buffer,
-          { line: from.line, col: 0 },
-          { line: to.line, col: buffer.lines[to.line]?.length ?? 0 },
-        )
-      : rangeBetween(buffer, from, { line: to.line, col: to.col + 1 });
-  if (range === null) return;
+  return context.mode === "visual-line"
+    ? rangeBetween(
+        buffer,
+        { line: from.line, col: 0 },
+        { line: to.line, col: buffer.lines[to.line]?.length ?? 0 },
+      )
+    : rangeBetween(buffer, from, { line: to.line, col: to.col + 1 });
+}
+
+function paintVisualSelection(buffer: ChatBuffer): void {
+  const selection = window.getSelection();
+  const range = visualRange(buffer);
+  if (!selection || range === null) return;
   selection.removeAllRanges();
   selection.addRange(range);
 }
@@ -379,22 +387,163 @@ function jumpToUserMessage(direction: "previous" | "next"): void {
 }
 
 /**
- * WORKAROUND: the composer's editor syncs its DOM selection after the prompt
- * changes, and a selection inside a contenteditable takes focus with it, so
- * the cite would leave the chat for the composer. The cite asks the composer
- * not to focus, but that flag does not reach the editor's selection sync.
- * Remove once the composer can apply a replacement without moving the DOM
- * selection (ADR-009, "Cite").
+ * Cites `range` through the selection toolbar's pipeline. The cited text
+ * flashes once, and the composer takes the cite and focus with it, so the
+ * keys go on in insert mode right after the citation, where its comment is
+ * typed.
  */
-function keepFocusInChat(): void {
-  window.requestAnimationFrame(() =>
-    window.requestAnimationFrame(() => {
-      const active = document.activeElement;
-      if (active instanceof HTMLElement && active.closest('[data-testid="composer-editor"]')) {
-        active.blur();
-      }
-    }),
-  );
+function citeRange(range: Range | null): void {
+  const selection = window.getSelection();
+  let cited = false;
+  if (range !== null && selection !== null) {
+    selection.removeAllRanges();
+    selection.addRange(range);
+    cited = requestChatCite();
+    const row = rowOf(range);
+    if (cited && row) flashCitedRange(range, row);
+  }
+  // The composer may already hold the selection, as its caret; only the
+  // chat's own selection is cleared.
+  const anchor = selection?.anchorNode;
+  if (anchor && chatViewport()?.contains(anchor)) selection.removeAllRanges();
+  updateKeyEngineSnapshot({
+    notice: cited ? "cited into the composer" : "only assistant text can be cited",
+  });
+}
+
+/** The text flash fades: each row's prose, or the whole row when it has none. */
+function chatBackdrop(buffer: ChatBuffer): Range[] {
+  return buffer.rows.map((row) => {
+    const range = document.createRange();
+    range.selectNodeContents(
+      row.element.querySelector("[data-assistant-citation-source]") ?? row.element,
+    );
+    return range;
+  });
+}
+
+/** Whether a reader can see `range`: inside the reading area and not under the composer. */
+function isOnScreen(range: Range, bounds: DOMRect): boolean {
+  const rect = range.getBoundingClientRect();
+  if (rect.top < bounds.top || rect.bottom > bounds.bottom || rect.width === 0) return false;
+  return isRangeUnobscured(range);
+}
+
+/** How far a target is from the cursor; flash labels the nearest first. */
+function distanceFromCursor(rect: DOMRect, cursorRect: DOMRect | undefined): number {
+  return cursorRect
+    ? Math.abs(rect.top - cursorRect.top) * 4 + Math.abs(rect.left - cursorRect.left)
+    : rect.top;
+}
+
+interface CitableSentence {
+  readonly row: number;
+  readonly start: BufferPosition;
+  readonly end: BufferPosition;
+}
+
+/** Every sentence of the assistant prose in the buffer, in reading order. */
+function citableSentences(buffer: ChatBuffer): CitableSentence[] {
+  const sentences: CitableSentence[] = [];
+  buffer.lines.forEach((line, lineIndex) => {
+    const row = buffer.lineRow[lineIndex] ?? -1;
+    if (row < 0) return;
+    if (!buffer.rows[row]?.element.querySelector("[data-assistant-citation-source]")) return;
+    for (const span of sentenceSpans(line)) {
+      sentences.push({
+        row,
+        start: { line: lineIndex, col: span.start },
+        end: { line: lineIndex, col: span.end },
+      });
+    }
+  });
+  return sentences;
+}
+
+function characterAt(buffer: ChatBuffer, at: BufferPosition): Range | null {
+  return rangeBetween(buffer, at, { line: at.line, col: at.col + 1 });
+}
+
+/**
+ * `<leader>c` in normal mode: a cite in two flash picks, with no selection to
+ * make first. The first labels the start of every sentence on screen, the
+ * second the end of every sentence from there to the end of that message;
+ * the text between the two is cited.
+ */
+function startCitePick(buffer: ChatBuffer): void {
+  const scroller = currentScroller();
+  if (!scroller) return;
+  // Labels are measured on the text as flash draws it.
+  applyFlashLook("chat");
+  const bounds = readingBounds(scroller);
+  const cursorRect = cursorRange(buffer)?.getBoundingClientRect();
+  const starts = new Map<string, CitableSentence>();
+  const targets: (FlashPickTarget & { distance: number })[] = [];
+  for (const sentence of citableSentences(buffer)) {
+    const range = characterAt(buffer, sentence.start);
+    if (range === null || !isOnScreen(range, bounds)) continue;
+    const id = `${sentence.start.line}:${sentence.start.col}`;
+    starts.set(id, sentence);
+    targets.push({
+      id,
+      range,
+      distance: distanceFromCursor(range.getBoundingClientRect(), cursorRect),
+    });
+  }
+  const started = startFlashPick({
+    scope: "chat",
+    hint: "cite: where it starts",
+    placement: "over",
+    backdrop: chatBackdrop(buffer),
+    targets: targets.toSorted((left, right) => left.distance - right.distance),
+    pick: (target) => {
+      const start = starts.get(target.id);
+      if (start) pickCiteEnd(start);
+    },
+  });
+  if (!started) updateKeyEngineSnapshot({ notice: "no assistant text on screen to cite" });
+}
+
+function pickCiteEnd(start: CitableSentence): void {
+  const synced = syncBuffer();
+  const scroller = currentScroller();
+  if (!synced || !scroller) return;
+  const { buffer } = synced;
+  applyFlashLook("chat");
+  const bounds = readingBounds(scroller);
+  const ends = new Map<string, CitableSentence>();
+  const targets: FlashPickTarget[] = [];
+  for (const sentence of citableSentences(buffer)) {
+    const after =
+      sentence.start.line > start.start.line ||
+      (sentence.start.line === start.start.line && sentence.start.col >= start.start.col);
+    if (sentence.row !== start.row || !after) continue;
+    const range = characterAt(buffer, sentence.end);
+    if (range === null || !isOnScreen(range, bounds)) continue;
+    const id = `${sentence.end.line}:${sentence.end.col}`;
+    ends.set(id, sentence);
+    targets.push({ id, range });
+  }
+  const startRange = characterAt(buffer, start.start);
+  const started = startFlashPick({
+    scope: "chat",
+    hint: "cite: where it ends",
+    placement: "after",
+    backdrop: chatBackdrop(buffer),
+    targets,
+    marked: startRange ? [startRange] : [],
+    pick: (target) => {
+      const end = ends.get(target.id);
+      const current = syncBuffer();
+      if (!end || !current) return;
+      setCursor(current.buffer, start.start);
+      paint(current.buffer, false);
+      citeRange(
+        rangeBetween(current.buffer, start.start, { line: end.end.line, col: end.end.col + 1 }),
+      );
+    },
+  });
+  if (!started) updateKeyEngineSnapshot({ notice: "that sentence ends off screen" });
 }
 
 /** Flash targets in the chat: matches a reader can see, not under the composer. */
@@ -403,14 +552,7 @@ function chatFlashProvider(): FlashProvider {
     scope: "chat",
     backdrop() {
       const synced = syncBuffer();
-      if (!synced) return [];
-      return synced.buffer.rows.map((row) => {
-        const range = document.createRange();
-        range.selectNodeContents(
-          row.element.querySelector("[data-assistant-citation-source]") ?? row.element,
-        );
-        return range;
-      });
+      return synced ? chatBackdrop(synced.buffer) : [];
     },
     collect(pattern, caseSensitive) {
       const synced = syncBuffer();
@@ -426,17 +568,12 @@ function chatFlashProvider(): FlashProvider {
             { line: lineIndex, col },
             { line: lineIndex, col: col + pattern.length },
           );
-          if (!range) continue;
-          const rect = range.getBoundingClientRect();
-          if (rect.top < bounds.top || rect.bottom > bounds.bottom || rect.width === 0) continue;
-          if (!isRangeUnobscured(range)) continue;
+          if (!range || !isOnScreen(range, bounds)) continue;
           targets.push({
             id: `${lineIndex}:${col}`,
             range,
             nextChar: line[col + pattern.length],
-            distance: cursorRect
-              ? Math.abs(rect.top - cursorRect.top) * 4 + Math.abs(rect.left - cursorRect.left)
-              : rect.top,
+            distance: distanceFromCursor(range.getBoundingClientRect(), cursorRect),
           });
         }
       });
@@ -513,16 +650,15 @@ export const chatSurface: KeySurface = {
         return true;
       case "chat.cite": {
         const synced = syncBuffer();
-        if (!isVisual() || !synced) return false;
-        paintVisualSelection(synced.buffer);
-        const cited = requestChatCite();
-        if (cited) keepFocusInChat();
+        if (!synced) return false;
+        if (!isVisual()) {
+          startCitePick(synced.buffer);
+          return true;
+        }
+        const range = visualRange(synced.buffer);
         context = processKeystroke("Escape", context, synced.text, false, true).newCtx;
-        clearVisualSelection();
         paint(synced.buffer, false);
-        updateKeyEngineSnapshot({
-          notice: cited ? "cited into the composer" : "only assistant text can be cited",
-        });
+        citeRange(range);
         return true;
       }
       default:

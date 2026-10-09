@@ -13,6 +13,8 @@ export interface FlashSnapshot {
   readonly labels: readonly FlashLabel[];
   /** Highlighted match ranges, painted by the CSS Highlight API, not DOM. */
   readonly active: boolean;
+  /** What a label jump asks for, shown in place of the search pattern. */
+  readonly hint?: string;
 }
 
 const IDLE: FlashSnapshot = { pattern: "", labels: [], active: false };

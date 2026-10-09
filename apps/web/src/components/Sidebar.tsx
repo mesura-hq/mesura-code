@@ -92,6 +92,12 @@ import {
   threadTraversalDirectionFromCommand,
 } from "../keybindings";
 import { useShortcutModifierState } from "../shortcutModifierState";
+import {
+  readViewportThreadKeys,
+  scrollThreadList,
+  useThreadRowArrowKeys,
+  useViewportThreadKeys,
+} from "../lib/sidebarThreadViewport";
 import { useTerminalFocus } from "../hooks/useTerminalFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isModelPickerOpen } from "../modelPickerVisibility";
@@ -1421,8 +1427,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         : hasUnsentDraft
           ? cn(draftSurfaceClassName, "text-sidebar-foreground")
           : shouldRecede
-            ? "text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
-            : "bg-transparent text-sidebar-foreground hover:bg-sidebar-row-hover",
+            ? "text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:bg-sidebar-row-hover focus-visible:text-sidebar-foreground"
+            : "bg-transparent text-sidebar-foreground hover:bg-sidebar-row-hover focus-visible:bg-sidebar-row-hover",
     isFileDragOver && "ring-1 ring-inset ring-primary/70",
     // The hover tint must not clobber an active/selected row's own surface.
     isFileDragOver && !props.isActive && !isSelected && "bg-sidebar-row-hover",
@@ -1606,6 +1612,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 role="button"
                 tabIndex={0}
                 data-testid="sidebar-row-slim"
+                data-mesura-thread-key={threadKey}
                 aria-busy={isRegeneratingTitle || undefined}
                 className={cn(rowSurfaceClassName, "flex h-9 items-center gap-2.5 px-2.5")}
                 onClick={handleClick}
@@ -1759,6 +1766,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               role="button"
               tabIndex={0}
               data-testid="sidebar-row-card"
+              data-mesura-thread-key={threadKey}
               aria-busy={isRegeneratingTitle || undefined}
               className={rowSurfaceClassName}
               onClick={handleClick}
@@ -2820,17 +2828,21 @@ export default function Sidebar() {
   const snoozedThreadKeysRef = useRef(snoozedThreadKeys);
   snoozedThreadKeysRef.current = snoozedThreadKeys;
 
+  const { showThreadJumpHints, updateThreadJumpHintsVisibility } = useThreadJumpHintVisibility();
+  // Mesura: the jump numbers go to the threads on screen, not the first nine
+  // of the list (ADR-009, decision 8).
+  const viewportThreadKeys = useViewportThreadKeys(showThreadJumpHints);
+  useThreadRowArrowKeys();
   const jumpLabelByKey = useMemo(() => {
     const mapping = new Map<string, string>();
-    for (const [index, threadKey] of orderedThreadKeys.entries()) {
+    for (const [index, threadKey] of (viewportThreadKeys ?? orderedThreadKeys).entries()) {
       const jumpCommand = threadJumpCommandForIndex(index);
       if (!jumpCommand) break;
       const label = shortcutLabelForCommand(keybindings, jumpCommand);
       if (label) mapping.set(threadKey, label);
     }
     return mapping;
-  }, [keybindings, orderedThreadKeys]);
-  const { showThreadJumpHints, updateThreadJumpHintsVisibility } = useThreadJumpHintVisibility();
+  }, [keybindings, orderedThreadKeys, viewportThreadKeys]);
 
   // Settled threads are live shells, so opening one is plain navigation:
   // history stays readable without un-settling, and sending a message or
@@ -4325,13 +4337,21 @@ export default function Sidebar() {
         return openThreadByKey(targetThreadKey);
       };
       const traversalDirection = threadTraversalDirectionFromCommand(command);
+      // Mesura: Ctrl+D and Ctrl+U scroll the list and open nothing (#79).
+      if (traversalDirection === "next-page" || traversalDirection === "previous-page") {
+        if (scrollThreadList(traversalDirection === "next-page" ? "down" : "up")) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        return;
+      }
       if (traversalDirection !== null) {
         navigateToThreadKey(adjacentThreadKey(traversalDirection));
         return;
       }
       const jumpIndex = threadJumpIndexFromCommand(command ?? "");
       if (jumpIndex === null) return;
-      navigateToThreadKey(orderedThreadKeys[jumpIndex] ?? null);
+      navigateToThreadKey((readViewportThreadKeys() ?? orderedThreadKeys)[jumpIndex] ?? null);
     };
     window.addEventListener("keydown", onWindowKeyDown);
     return () => window.removeEventListener("keydown", onWindowKeyDown);

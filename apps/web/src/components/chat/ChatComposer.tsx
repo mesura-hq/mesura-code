@@ -5335,7 +5335,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         ensureLeadingBoundary?: boolean;
         citationCommentAnchor?: AssistantCitationSourceAnchor;
         clipboardData?: DataTransfer;
-        focusEditor?: boolean;
       },
     ): boolean => {
       if (
@@ -5369,9 +5368,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               },
               focusEditorAfterReplace: false,
             }
-          : options?.focusEditor === false
-            ? { focusEditorAfterReplace: false }
-            : undefined,
+          : undefined,
       );
     },
     [
@@ -5612,14 +5609,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       },
       citeAssistantText: (citation, sourceAnchor) =>
         // Mesura: in Vim mode a cite is chat-native. It lands at the end of the
-        // prompt on its own line as `<chip>: `, the comment is ordinary text
-        // typed after it, and focus stays where the citing happened. No
-        // comment popover. See docs/mesura/adr-009-modal-keys.md, "Cite".
+        // prompt on its own line as `<chip>: ` and the composer takes focus in
+        // insert mode, so the comment is typed straight after it. No comment
+        // popover. See docs/mesura/adr-009-modal-keys.md, "Cite".
         getClientSettings().vimMode
           ? insertComposerText(
               `${promptRef.current.length === 0 || promptRef.current.endsWith("\n") ? "" : "\n"}${formatAssistantCitationForComposer(citation, undefined).trimEnd()}: `,
               "end",
-              { focusEditor: false },
             )
           : insertComposerText(
               formatAssistantCitationForComposer(citation, citation.comment),

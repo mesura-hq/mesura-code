@@ -29,9 +29,12 @@ resolve the same keybinding table, ordered by registration and capture phase.
    composer. Type-to-focus is removed in Vim mode.
 2. The leader is Space.
 3. The chat cursor: see "The chat buffer" below.
-4. Cite drops the comment popover: a cite lands inline as `<chip>: `, the
-   comment is ordinary prompt text, and focus stays in the chat. Citing user
-   messages is secondary.
+4. Cite drops the comment popover: a cite lands inline as `<chip>: ` and the
+   comment is ordinary prompt text. Every cite then puts the keys in the
+   composer in insert mode, so the comment is typed straight away. `<leader>c`
+   cites without a selection in chat normal mode (two flash picks, see
+   "Cite"), and cites the selection in visual mode. Citing user messages is
+   secondary.
 5. Vim editing inside the composer: yes.
 6. Architecture over merge cost: more upstream conflict is accepted for the
    sound design.
@@ -216,12 +219,32 @@ painting.**
 
 ### Cite
 
-`<leader>c` in chat visual mode asks `AssistantSelectionToolbar` (one
-subscription, `chat/chatCiteBus.ts`) to capture the native selection and call
-its existing `onCite`. In Vim mode, `ChatComposer.citeAssistantText` appends
-`\n<chip>: ` at the end of the prompt with no popover and no focus
-(`focusEditor: false`). With Vim mode off, upstream's cite at the caret with
-its comment popover applies.
+Both ways to cite end in `citeRange` (`chat/chatSurface.ts`), which sets the
+native selection and asks `AssistantSelectionToolbar` (one subscription,
+`chat/chatCiteBus.ts`) to capture it and call its existing `onCite`:
+
+- In chat visual mode, `<leader>c` cites the selection.
+- In chat normal mode, `<leader>c` runs two flash picks (`startFlashPick` in
+  `flashSession.ts`): every target is labelled up front, one or two
+  characters each (`assignJumpLabels` in `@mesura/keys/flash`, after
+  hop.nvim), with no search pattern. The first pick labels the first
+  character of every sentence of assistant prose on screen, the second the
+  last character of every sentence from there to the end of the same message.
+  A cite never spans two messages, because a citation belongs to one.
+  Sentences are split per buffer line by `sentenceSpans` (`chatBuffer.ts`).
+
+In Vim mode, `ChatComposer.citeAssistantText` appends `\n<chip>: ` at the end
+of the prompt with no popover, and the composer takes focus with its caret
+after the chip, which is insert mode. Because the keys leave the chat at
+once, the cited text flashes for 900 ms (`chat/citeFlash.ts`, one opacity
+animation in `mesura.css`, removed when it ends), so the reader sees what was
+cited. With Vim mode off, upstream's cite at
+the caret with its comment popover applies.
+
+Focus once stayed in the chat after a cite. That needed a WORKAROUND, because
+the composer's editor takes focus whenever it moves its DOM selection, even
+when asked not to. The developer chose the composer instead, which removed
+the workaround and the fork's `focusEditor` option on `insertComposerText`.
 
 ### The composer
 
@@ -383,10 +406,6 @@ the size it is about to change.
 Each of these cost a debugging round and still shapes the code. Read the
 entry before changing the code it names.
 
-- **The composer's editor takes focus whenever it moves its DOM selection**,
-  even when asked not to focus. A Vim-mode cite therefore calls
-  `keepFocusInChat` (a marked WORKAROUND in `chatSurface.ts`) to return focus
-  to the chat.
 - **Moving the composer caret in the same tick as a write reverts the write.**
   `focusAt` reports the editor's stale text as a change. The adapter's
   `write` places the caret itself, on the next frame, after the editor has
@@ -421,8 +440,10 @@ entry before changing the code it names.
 Each item has its own issue on `mesura-hq/mesura-code`, tracked by #86:
 
 - #79: feat(keys): sidebar thread list as a keyboard list in Vim mode — the
-  cursor apart from the open thread, `Ctrl+D/U` without opening, `Ctrl+1..9`
-  on visible rows, and Tab to "All projects".
+  cursor apart from the open thread and Tab to "All projects". Its other two
+  parts are prototyped: `Ctrl+D/U` scroll the list without opening a thread,
+  and `Ctrl+1..9` number the rows on screen (`lib/sidebarThreadViewport.ts`,
+  rows marked `data-mesura-thread-key` in `Sidebar.tsx`).
 - #80: feat(keys): keyboard scopes inside the right panel.
 - #81: feat(keys): user keymap file for the modal key layer.
 - #82: refactor(keys): extract the fm-core key engine and unify the flash
@@ -430,7 +451,9 @@ Each item has its own issue on `mesura-hq/mesura-code`, tracked by #86:
 - #83: chore(keys): remove the modifier chords and add a keyboard-first
   principle.
 - #84: feat(keys): cite your own messages and search the chat buffer (`/`).
-- #85: feat(keys): maximize the right panel from PANE mode.
+- #85: feat(keys): maximize the right panel from PANE mode. Prototyped as
+  `<leader>pf` instead, through the registry (`rightPanel.toggleMaximized`,
+  registered by ChatView); PANE mode itself still has no key for it.
   `rightPanel.toggleMaximized` has no default chord; the registry can run it
   once an owner registers it.
 - #87: refactor(keys): one command list for the palette, the chords and the
@@ -472,7 +495,7 @@ Engine, setting and chat buffer:
 Composer:
 
 - `ChatComposer.tsx` (139): the Vim adapter registration (with `draftKey`),
-  the Vim cite branch and the `focusEditor` option, and the registry block
+  the Vim cite branch, and the registry block
   with `canOpenAttachmentPicker` and `stashCurrentPromptWhenAllowed` lifted
   out of the chord handler.
 - `composerDraftStore.ts` (28): one `clearComposerUndoHistory` call in

@@ -107,8 +107,12 @@ keyboard out of the pane the developer is working in.
 
 ## The sidebar's list chords
 
-`j` and `k` walk the thread list, `Ctrl+D` and `Ctrl+U` step five. They are the
-only bare letters the app binds, which costs two things.
+`j` and `k` walk the thread list. `Ctrl+D` and `Ctrl+U` scroll it half a page
+without opening a thread (`lib/sidebarThreadViewport.ts`), and `Ctrl+1..9`
+number the rows on screen from there, read for where the scroll will stop so
+the numbers never trail the animation. Up and Down move the DOM focus over the
+rows, which is what shows a row's details tooltip without opening it. `j` and `k` are the only bare letters
+the app binds, which costs two things.
 
 They carry `!sidebarSearchFocus` so they type rather than jump in the
 sidebar's text entries. That context key is true for any `input`, `textarea`
@@ -130,10 +134,14 @@ indistinguishable at the moment the composer asks.
 ## The mark
 
 The pane holding the keyboard is marked in one of two shapes, chosen by
-whether it has a header row to light. The chat column and the right panel
-light their header — the title goes to full foreground and a hairline appears
-under the row. The sidebar and the terminal drawer take a rounded frame inset
-inside the pane.
+whether it has a header row to light. The chat column, the right panel and the
+sidebar light their header: a hairline appears under the row, and the chat
+title and the panel's active tab go to full foreground. All three header rows
+are the top bar's height, so the hairline sits at one height across the window
+whichever pane holds the keys; the developer asked for that consistency, which
+is why the sidebar left the frame. Its wordmark does not recede, being the
+app's name rather than a title. The terminal drawer takes a rounded frame
+inset inside the pane.
 
 It is CSS alone, in `apps/web/src/mesura.css`, keyed on `:focus-within`, and
 every rule changes colour only. Nothing about the mark reaches React and

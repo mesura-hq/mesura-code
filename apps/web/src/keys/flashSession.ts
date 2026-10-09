@@ -1,4 +1,4 @@
-import { assignFlashLabels } from "@mesura/keys/flash";
+import { assignFlashLabels, assignJumpLabels } from "@mesura/keys/flash";
 
 import { setFlashSnapshot, type FlashLabel } from "./flashStore";
 import { paintHighlight } from "./highlights";
@@ -7,10 +7,13 @@ import { updateKeyEngineSnapshot } from "./keyEngineStore";
 /**
  * One flash jump in progress, on whichever surface started it.
  *
- * The surface supplies the targets for a pattern and what a jump does; this
- * module owns the keys (pattern, labels, Enter, Backspace, Escape), the label
- * overlay, the match highlight and the backdrop. The label rules are
- * flash.nvim's and live in `@mesura/keys/flash`.
+ * Two kinds share the overlay, the backdrop and the keys:
+ * - a search (`s`): the surface supplies the targets for a pattern and what a
+ *   jump does; this module owns the pattern, labels, Enter, Backspace and
+ *   Escape. The label rules are flash.nvim's and live in `@mesura/keys/flash`.
+ * - a pick (`startFlashPick`): the surface labels every target up front, one
+ *   or two characters each, and the keys only choose a label. The chat's cite
+ *   runs two picks in a row, for where the cite starts and where it ends.
  *
  * The look is the file editor's flash.nvim one, shared by every flash in the
  * app through the `--mesura-flash-*` tokens in `mesura.css`: the text around
@@ -37,26 +40,83 @@ export interface FlashProvider {
   jump(target: FlashTarget): void;
 }
 
+export interface FlashPickTarget {
+  readonly id: string;
+  /** The character the label marks. */
+  readonly range: Range;
+}
+
+export interface FlashPick {
+  readonly scope: "chat" | "composer";
+  /** Shown in the flash bar while the labels are up. */
+  readonly hint: string;
+  /** A label covers its character (`over`) or sits just after it (`after`). */
+  readonly placement: "over" | "after";
+  readonly backdrop: Range[];
+  /** Nearest first: the nearest targets get the one-character labels. */
+  readonly targets: readonly FlashPickTarget[];
+  /** Ranges painted as matches while the labels are up, such as a chosen start. */
+  readonly marked?: readonly Range[];
+  pick(target: FlashPickTarget): void;
+}
+
 interface FlashState {
+  readonly kind: "search";
   readonly provider: FlashProvider;
   pattern: string;
   targets: FlashTarget[];
   labels: Map<string, string>;
 }
 
-let state: FlashState | null = null;
+interface PickState {
+  readonly kind: "pick";
+  readonly pick: FlashPick;
+  readonly labels: ReadonlyMap<string, FlashPickTarget>;
+  /** The first character of a two-character label, once typed. */
+  typed: string;
+}
+
+let state: FlashState | PickState | null = null;
 
 export function isFlashActive(): boolean {
   return state !== null;
 }
 
 export function startFlash(provider: FlashProvider): void {
-  state = { provider, pattern: "", targets: [], labels: new Map() };
+  state = { kind: "search", provider, pattern: "", targets: [], labels: new Map() };
   // The italic is set before any target is measured, so labels are placed on
   // the text as it is drawn during flash.
   document.documentElement.dataset.mesuraFlash = provider.scope;
   paintHighlight("mesura-flash-backdrop", provider.backdrop());
   setFlashSnapshot({ pattern: "", labels: [], active: true });
+}
+
+/**
+ * Labels every target of `pick` at once. The caller collects the targets
+ * with the flash look already applied (`applyFlashLook`), so they are measured
+ * on the text as flash draws it. False, with nothing shown, when there is
+ * no target.
+ */
+export function startFlashPick(pick: FlashPick): boolean {
+  if (pick.targets.length === 0) {
+    stopFlash();
+    return false;
+  }
+  const labels = new Map<string, FlashPickTarget>();
+  assignJumpLabels(pick.targets.length).forEach((label, index) => {
+    labels.set(label, pick.targets[index]!);
+  });
+  state = { kind: "pick", pick, labels, typed: "" };
+  document.documentElement.dataset.mesuraFlash = pick.scope;
+  paintHighlight("mesura-flash-backdrop", pick.backdrop);
+  paintHighlight("mesura-flash-match", pick.marked ?? []);
+  refreshPick(state);
+  return true;
+}
+
+/** Applies the flash look (the italic backdrop) before a pick's targets are measured. */
+export function applyFlashLook(scope: "chat" | "composer"): void {
+  document.documentElement.dataset.mesuraFlash = scope;
 }
 
 export function stopFlash(): void {
@@ -87,10 +147,54 @@ function refresh(flash: FlashState): void {
   setFlashSnapshot({ pattern: flash.pattern, labels, active: true });
 }
 
+function refreshPick(pick: PickState): void {
+  const labels: FlashLabel[] = [];
+  for (const [label, target] of pick.labels) {
+    if (!label.startsWith(pick.typed)) continue;
+    const rect = target.range.getBoundingClientRect();
+    labels.push({
+      id: target.id,
+      label: label.slice(pick.typed.length),
+      left: pick.pick.placement === "over" ? rect.left : rect.right,
+      top: rect.top,
+    });
+  }
+  setFlashSnapshot({ pattern: pick.typed, labels, active: true, hint: pick.pick.hint });
+}
+
+function handlePickKey(pick: PickState, token: string): boolean {
+  if (token === "<Esc>") {
+    stopFlash();
+    return true;
+  }
+  if (token === "<BS>") {
+    if (pick.typed.length === 0) stopFlash();
+    else {
+      pick.typed = "";
+      refreshPick(pick);
+    }
+    return true;
+  }
+  if (token.length !== 1) return true;
+  const typed = pick.typed + token;
+  const target = pick.labels.get(typed);
+  if (target) {
+    stopFlash();
+    pick.pick.pick(target);
+    return true;
+  }
+  if ([...pick.labels.keys()].some((label) => label.startsWith(typed))) {
+    pick.typed = typed;
+    refreshPick(pick);
+  }
+  return true;
+}
+
 /** Every key while flash is active comes here. Always consumes the key. */
 export function handleFlashKey(token: string): boolean {
   const flash = state;
   if (!flash) return false;
+  if (flash.kind === "pick") return handlePickKey(flash, token);
   if (token === "<Esc>") {
     stopFlash();
     return true;
