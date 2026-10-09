@@ -13,7 +13,9 @@ import { DEFAULT_KEYBINDINGS } from "./keybindings.ts";
  * reaches the Symmetria file tree in the files surface and leaves it again;
  * `fileTree.miller` opens the file manager's Miller columns over the window.
  * `thread.rename` opens the header's title rename, which upstream reaches only
- * by double-click and the thread menu.
+ * by double-click and the thread menu. `treeDiff.toggle` opens the Diff
+ * surface on Tree diff and closes it there; `diff.modeMenu` opens that
+ * surface's mode menu from the keyboard.
  *
  * Each is cheap to carry and easy to lose: a sync that takes upstream's
  * command list wholesale drops the command, and the shortcut then resolves to
@@ -29,6 +31,10 @@ const FORK_BINDINGS = [
   // Firefox and Zen keep mod+shift+e. The last one is the label.
   { command: "fileTree.miller", keys: ["mod+alt+e", "mod+shift+e"] },
   { command: "thread.rename", keys: ["mod+alt+r"] },
+  // The Diff surface's Tree diff mode and its mode menu. mod+shift+g, the
+  // chord Symmetria IDE used, is composer.branch here.
+  { command: "treeDiff.toggle", keys: ["alt+g"] },
+  { command: "diff.modeMenu", keys: ["alt+c"] },
 ] as const;
 
 describe("fork keybindings", () => {

@@ -146,6 +146,9 @@ jobs:
           cache: true
           run-install: true
 
+      # Mesura: the editor conformance harnesses need Neovim.
+      - uses: ./.github/actions/setup-neovim
+
       # No Electron setup here: `t3` (apps/server) has no Electron dependency
       # and none of its tests touch the runtime. Only the non-server `test`
       # job, which covers @t3tools/desktop, needs the download.

@@ -47,6 +47,7 @@ import {
   FileSearchIcon,
   FolderIcon,
   FolderPlusIcon,
+  GitCompareArrowsIcon,
   GitPullRequestArrowIcon,
   LinkIcon,
   MessagesSquareIcon,
@@ -112,6 +113,7 @@ import {
   selectActiveRightPanel,
   useRightPanelStore,
 } from "../rightPanelStore";
+import { useDiffPanelStore } from "../diffPanelStore";
 import { getLatestThreadForProject, sortThreads } from "../lib/threadSort";
 import {
   cn,
@@ -1671,6 +1673,24 @@ function OpenCommandPaletteDialog(props: {
       icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
       addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
       groups: [{ value: "projects", label: "Projects", items: projectThreadItems }],
+    });
+  }
+
+  // Fork: the Diff surface's Tree diff mode, the working tree's changed files.
+  // The mode itself says when the project is not a repository.
+  if (activeThread !== null) {
+    const treeDiffThreadRef = scopeThreadRef(activeThread.environmentId, activeThread.id);
+    actionItems.push({
+      kind: "action",
+      value: "action:open-tree-diff",
+      searchTerms: ["tree diff", "git status", "changes", "uncommitted", "staged", "working tree"],
+      title: "Show tree diff",
+      icon: <GitCompareArrowsIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "treeDiff.toggle",
+      run: async () => {
+        useDiffPanelStore.getState().selectGitScope(treeDiffThreadRef, "tree");
+        useRightPanelStore.getState().open(treeDiffThreadRef, "diff");
+      },
     });
   }
 

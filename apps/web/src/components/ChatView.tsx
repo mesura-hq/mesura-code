@@ -116,7 +116,11 @@ import * as Schema from "effect/Schema";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
-import { useDiffPanelStore } from "../diffPanelStore";
+import { selectThreadDiffPanelSelection, useDiffPanelStore } from "../diffPanelStore";
+import {
+  allocateDiffModeMenuRequestId,
+  mountedDiffPanelDefaultsToTreeDiff,
+} from "./treeDiff/diffPanelCommandBridge";
 import {
   collapseExpandedComposerCursor,
   type ComposerSubmissionIntent,
@@ -4500,6 +4504,43 @@ export default function ChatView(props: ChatViewProps) {
     if (!activeThreadRef || !activeProject) return;
     useRightPanelStore.getState().open(activeThreadRef, "files");
   }, [activeProject, activeThreadRef]);
+  // Fork addition: Tree diff is a mode of the Diff surface. `treeDiff.toggle`
+  // jumps to it, and `diff.modeMenu` opens the mode menu from the keyboard.
+  const [diffModeMenuRequestId, setDiffModeMenuRequestId] = useState(0);
+  const toggleTreeDiffMode = useCallback(() => {
+    if (!activeThreadRef || !isServerThread || !isGitRepo) return;
+    // What the panel shows: the stored mode, else the default the mounted
+    // panel fixed when it mounted.
+    const selection = selectThreadDiffPanelSelection(
+      useDiffPanelStore.getState().byThreadKey,
+      activeThreadRef,
+      mountedDiffPanelDefaultsToTreeDiff(scopedThreadKey(activeThreadRef)) ??
+        initialDiffPanelGitScope === "unstaged",
+    );
+    if (diffOpen && rightPanelOpen && selection.kind === "tree") {
+      useRightPanelStore.getState().toggle(activeThreadRef, "diff");
+      return;
+    }
+    useDiffPanelStore.getState().selectGitScope(activeThreadRef, "tree");
+    useRightPanelStore.getState().open(activeThreadRef, "diff");
+    onDiffPanelOpen?.();
+  }, [
+    activeThreadRef,
+    diffOpen,
+    initialDiffPanelGitScope,
+    isGitRepo,
+    isServerThread,
+    onDiffPanelOpen,
+    rightPanelOpen,
+  ]);
+  const openDiffModeMenu = useCallback(() => {
+    if (!activeThreadRef || !isServerThread || !isGitRepo) return;
+    if (!diffOpen || !rightPanelOpen) {
+      useRightPanelStore.getState().open(activeThreadRef, "diff");
+      onDiffPanelOpen?.();
+    }
+    setDiffModeMenuRequestId(allocateDiffModeMenuRequestId());
+  }, [activeThreadRef, diffOpen, isGitRepo, isServerThread, onDiffPanelOpen, rightPanelOpen]);
   const addAgentsSurface = useCallback(() => {
     if (!activeThreadRef) return;
     useRightPanelStore.getState().open(activeThreadRef, "agents");
@@ -6870,6 +6911,20 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      if (command === "treeDiff.toggle") {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleTreeDiffMode();
+        return;
+      }
+
+      if (command === "diff.modeMenu") {
+        event.preventDefault();
+        event.stopPropagation();
+        openDiffModeMenu();
+        return;
+      }
+
       if (command === "modelPicker.toggle") {
         event.preventDefault();
         event.stopPropagation();
@@ -7005,6 +7060,8 @@ export default function ChatView(props: ChatViewProps) {
     isServerThread,
     onInterrupt,
     onToggleDiff,
+    toggleTreeDiffMode,
+    openDiffModeMenu,
     pinThread,
     settleThread,
     supportsPinning,
@@ -9309,6 +9366,7 @@ export default function ChatView(props: ChatViewProps) {
           composerDraftTarget={composerDraftTarget}
           initialGitScope={initialDiffPanelGitScope}
           workspaceMutationId={workspaceMutationId}
+          modeMenuRequestId={diffModeMenuRequestId}
         />
       </Suspense>
     ) : renderedRightPanelSurface?.kind === "pull-request" && !pullRequestsCapabilityKnown ? (
@@ -9446,6 +9504,15 @@ export default function ChatView(props: ChatViewProps) {
             pendingFileSurfaceIds.has(renderedRightPanelSurface.id)
           }
           workspaceMutationId={workspaceMutationId}
+          explorerHidden={
+            renderedRightPanelSurface.kind === "file" &&
+            renderedRightPanelSurface.explorerHidden === true
+          }
+          onRevealExplorer={() =>
+            useRightPanelStore
+              .getState()
+              .revealFileExplorer(activeThreadRef, renderedRightPanelSurface.id)
+          }
         />
       </Suspense>
     ) : null

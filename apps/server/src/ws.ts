@@ -3444,6 +3444,18 @@ const makeWsRpcLayer = (
             review.getDiffFileContents(input),
             { "rpc.aggregate": "review" },
           ),
+        [WS_METHODS.reviewGetWorkingTreeChanges]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.reviewGetWorkingTreeChanges,
+            review.getWorkingTreeChanges(input),
+            { "rpc.aggregate": "review" },
+          ),
+        [WS_METHODS.reviewSubscribeWorkingTreeChanges]: (input) =>
+          observeRpcStream(
+            WS_METHODS.reviewSubscribeWorkingTreeChanges,
+            review.subscribeWorkingTreeChanges(input),
+            { "rpc.aggregate": "review" },
+          ),
         [WS_METHODS.editorSessionOpen]: (input) =>
           observeRpcEffect(WS_METHODS.editorSessionOpen, editorSessionManager.open(input), {
             "rpc.aggregate": "editorSession",

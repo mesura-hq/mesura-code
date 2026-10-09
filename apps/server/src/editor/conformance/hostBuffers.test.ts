@@ -1,5 +1,3 @@
-// @effect-diagnostics nodeBuiltinImport:off - locates the real nvim binary before spawning it.
-import * as NodeChildProcess from "node:child_process";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -8,6 +6,7 @@ import * as Layer from "effect/Layer";
 
 import { NodeNvimAdapter } from "../NodeNvimAdapter.ts";
 import { NvimBridge } from "../NvimBridge.ts";
+import { nvimAvailable, reportMissingNvim } from "./nvimOnPath.ts";
 
 /**
  * The host plugin's buffer module, run rather than read.
@@ -20,15 +19,6 @@ import { NvimBridge } from "../NvimBridge.ts";
  * `vim.fn.bufnr`, which treats its argument as a Vim pattern whenever nothing
  * matches exactly — which is always, the first time a path is opened.
  */
-
-const nvimAvailable = (() => {
-  try {
-    NodeChildProcess.execFileSync("nvim", ["--version"], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-})();
 
 const layer = NodeNvimAdapter.layer.pipe(Layer.provideMerge(NodeServices.layer));
 
@@ -45,11 +35,7 @@ const withHost = <A>(body: (bridge: NvimBridge.Session, root: string) => Effect.
 const lua = (bridge: NvimBridge.Session, code: string, args: ReadonlyArray<unknown> = []) =>
   bridge.request("nvim_exec_lua", [code, [...args]]);
 
-if (!nvimAvailable) {
-  it("skips the host-buffer tests, because nvim is not on PATH", () => {
-    assert.isFalse(nvimAvailable);
-  });
-}
+if (!nvimAvailable) reportMissingNvim("host-buffer harness");
 
 if (nvimAvailable)
   it.layer(layer, { excludeTestServices: true })("the host's buffers", (it) => {

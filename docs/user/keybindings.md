@@ -185,12 +185,13 @@ Number keys typed in a text field remain text.
 
 The shortcut does nothing when no question is pending or when the terminal has focus.
 
-Six defaults sit on `Alt` with a letter: `alt+e`, `alt+w`, `alt+b`, `alt+m`, `alt+q`, and `alt+u`.
+Several defaults sit on `Alt` with a letter, among them `alt+e`, `alt+w`, `alt+b`, `alt+m`,
+`alt+q`, `alt+u`, `alt+g`, and `alt+c`. **Settings** → **Keybindings** lists all of them.
 The app claims those chords before the character reaches the composer, which matters on two
 platforms. On macOS `Option` composes characters — `Option+E` starts an acute accent, `Option+Q`
 types `œ`, and the others type symbols like `∑` and `µ` — so a default may be swallowed or may
 suppress a character you wanted. Firefox uses `Alt` with a letter for menu access keys. Rebind any
-of them in **Settings** → **Keybindings**.
+of them there.
 
 On a Latin American layout, `AltGr+Q` types `@`. That is a different chord — the app sees `AltGr`
 as `Ctrl+Alt` — so `alt+q` never eats it.
@@ -241,6 +242,12 @@ Scrolling up also stops the timeline following the live edge, the same as scroll
 wheel. Without that, the next chunk of a streaming reply would pull you back to the bottom.
 
 `diff.toggle` defaults to `mod+shift+d`, which leaves `mod+d` to the pair above.
+
+`treeDiff.toggle` opens the Diff panel on Tree diff and defaults to `alt+g`. Pressed while Tree
+diff is already showing, it closes the panel. `diff.modeMenu` opens the Diff panel's menu of modes
+and defaults to `alt+c`; type a mode's first letter and press `Enter` to choose it. Both work from
+the file editor, and neither runs while the terminal has focus. See
+[Tree diff and Files diff](./file-panel.md#tree-diff-and-files-diff).
 
 ### Moving between threads
 
