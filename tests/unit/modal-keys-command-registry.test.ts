@@ -34,14 +34,31 @@ function sourceFiles(directory: string): string[] {
     .map((entry) => NodePath.join(directory, entry));
 }
 
-/** The keybinding commands the default modal keymap's leader rows reach. */
-function leaderAppCommands(): string[] {
-  const keymap = read("apps/web/src/keys/defaultKeymap.ts");
-  const start = keymap.indexOf("const BRIDGED");
-  const end = keymap.indexOf("];", start);
-  assert.isAbove(start, -1, "defaultKeymap.ts no longer declares its app command rows");
-  const rows = keymap.slice(start, end);
+/** The distinct `command: "…"` values in `file` from `startMarker` to the next `];`. */
+function commandsDeclaredIn(file: string, startMarker: string): string[] {
+  const source = read(file);
+  const start = source.indexOf(startMarker);
+  assert.isAbove(start, -1, `${file} no longer declares "${startMarker}"`);
+  const end = source.indexOf("];", start);
+  const rows = source.slice(start, end);
   return [...new Set([...rows.matchAll(/command: "([^"]+)"/g)].map((match) => match[1]!))];
+}
+
+/** The keybinding commands the default modal keymap's leader rows reach. */
+const leaderAppCommands = () =>
+  commandsDeclaredIn("apps/web/src/keys/defaultKeymap.ts", "const BRIDGED");
+
+/** The commands the panel launcher's Panel section runs (`panelLauncherActions`). */
+const panelLauncherCommands = () =>
+  commandsDeclaredIn("apps/web/src/lib/panelLauncher.ts", "export function panelLauncherActions(");
+
+/** The commands no source outside `apps/web/src/commands` registers a handler for. */
+function commandsWithoutOwner(commands: readonly string[]): string[] {
+  const owners = sourceFiles(webSource)
+    .filter((file) => !file.startsWith(NodePath.join(webSource, "commands")))
+    .map((file) => NodeFS.readFileSync(file, "utf8"))
+    .filter((source) => /\b(useCommandHandlers|registerCommandHandlers)\(/.test(source));
+  return commands.filter((command) => !owners.some((source) => source.includes(`"${command}":`)));
 }
 
 it("modal keys registry guard: the chord replay bridge is gone", () => {
@@ -72,12 +89,23 @@ it("modal keys registry guard: the registry module exists beside the key engine"
 it("modal keys registry guard: every leader app command has an owner that registers it", () => {
   const commands = leaderAppCommands();
   assert.isAtLeast(commands.length, 25, "the leader rows were not found");
-  const owners = sourceFiles(webSource)
-    .filter((file) => !file.startsWith(NodePath.join(webSource, "commands")))
-    .map((file) => NodeFS.readFileSync(file, "utf8"))
-    .filter((source) => /\b(useCommandHandlers|registerCommandHandlers)\(/.test(source));
-  const unowned = commands.filter(
-    (command) => !owners.some((source) => source.includes(`"${command}":`)),
+  assert.deepEqual(commandsWithoutOwner(commands), []);
+});
+
+// Round 7 moved the `<leader>p*` rows into the launcher, so the leader guard
+// above no longer sees these commands.
+it("modal keys registry guard: every panel launcher action has an owner that registers it", () => {
+  const commands = panelLauncherCommands();
+  assert.sameMembers(
+    commands,
+    [
+      "rightPanel.toggleMaximized",
+      "rightPanel.close",
+      "rightPanel.toggle",
+      "fileTree.toggle",
+      "fileTree.miller",
+    ],
+    "the launcher's Panel section no longer offers Z, X, O, E and C",
   );
-  assert.deepEqual(unowned, []);
+  assert.deepEqual(commandsWithoutOwner(commands), []);
 });

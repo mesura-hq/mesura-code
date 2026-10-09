@@ -216,8 +216,12 @@ describe("command registry from the key engine", () => {
     document.body.innerHTML = "";
   });
 
+  // Round 7 (`470f7c80c6`) replaced the `<leader>p*` rows with one `<leader>p`
+  // row that opens the panel launcher, which runs those commands itself. Their
+  // owners are pinned by "every panel launcher action has an owner that
+  // registers it" in `tests/unit/modal-keys-command-registry.test.ts`.
   it("covers every app command the default keymap binds", () => {
-    expect(OWNED_ROWS.length).toBeGreaterThanOrEqual(30);
+    expect(OWNED_ROWS.length).toBeGreaterThanOrEqual(27);
   });
 
   for (const row of OWNED_ROWS) {
