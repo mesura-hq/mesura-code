@@ -238,7 +238,11 @@ leave the editor and `Ctrl+H` to reach the chat, and the pair works again.
 Scrolling up also stops the timeline following the live edge, the same as scrolling with the
 wheel. Without that, the next chunk of a streaming reply would pull you back to the bottom.
 
-`diff.toggle` defaults to `mod+shift+d`, which leaves `mod+d` to the pair above.
+### Dictation and the diff panel
+
+`mod+shift+d` starts and stops voice dictation (`dictation.toggle`) everywhere except the terminal,
+where it splits the terminal. `diff.toggle` has no default shortcut; bind it in Settings →
+Keybindings if you want one. A reply's changed files still open the diff.
 
 `treeDiff.toggle` opens the Diff panel on Tree diff and defaults to `alt+g`. Pressed while Tree
 diff is already showing, it closes the panel. `diff.modeMenu` opens the Diff panel's menu of modes
@@ -338,8 +342,9 @@ that platform.
 
 Everything below reaches you with nothing to do by hand.
 
-`diff.toggle` used to default to `mod+d`. Its rule is rewritten to `mod+shift+d` on the next start,
-which is also what frees `mod+d` for the reading scroll in the same run.
+`diff.toggle` used to default to `mod+d`, and later to `mod+shift+d`. Either rule is removed on the
+next start, once, which frees `mod+d` for the reading scroll and `mod+shift+d` for dictation in the
+same run. If you bind `diff.toggle` again afterwards, your rule stays.
 
 `Ctrl+W` used to close the desktop window, and off macOS that quit the whole application. That one
 is a change to the native menu rather than to a keybinding, so it needs nothing from your config:

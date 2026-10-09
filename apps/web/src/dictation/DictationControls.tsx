@@ -1,10 +1,13 @@
+import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { MicIcon } from "lucide-react";
 import { memo } from "react";
 
 import { Button } from "~/components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
+import { shortcutLabelForCommand } from "~/keybindings";
 import { cn } from "~/lib/utils";
+import { primaryServerKeybindingsAtom } from "~/state/server";
 import {
   cancelDictation,
   cycleDictationMode,
@@ -35,7 +38,13 @@ export const DictationStartButton = memo(function DictationStartButton(props: {
   readonly onBeforeStart?: () => void;
 }) {
   const recording = useDictationSessionStore((state) => state.session !== null);
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const unavailable = recording || props.disabled === true;
+  // The key records into the composer, not into a question card's answer.
+  const shortcut =
+    unavailable || props.targetLabel
+      ? null
+      : shortcutLabelForCommand(keybindings, "dictation.toggle");
   const label = recording
     ? "A dictation session is already active"
     : props.disabled
@@ -70,6 +79,7 @@ export const DictationStartButton = memo(function DictationStartButton(props: {
       />
       <TooltipPopup side="top" className="max-w-72">
         {label}
+        {shortcut ? ` (${shortcut})` : ""}
       </TooltipPopup>
     </Tooltip>
   );
