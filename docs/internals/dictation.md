@@ -76,6 +76,15 @@ While a recording or its transcription exists, the desktop binds Alt+S, Alt+I, A
 Alt+Space, Alt+R and Alt+X through `hyprctl`. Every session start unbinds before it binds, so binds
 that leaked after a crash cannot stack.
 
+Those binds, and the global toggle bind in the user guide, write the command words to a Unix socket
+in Electron main ([`dictationControlSocket.ts`](../../apps/desktop/src/dictation/dictationControlSocket.ts))
+with `socat`. A second launch with `--dictation …` reaches the running instance through the
+single-instance lock too, but it boots Electron first: 2 to 3.5 s per key on the laptop. It stays only as each bind's fallback, after `||`. The default packaged instance listens
+on a stable path, `$XDG_RUNTIME_DIR/mesura-code/dictation.sock`, because a hand-written bind names
+it. Development and `XDG_CONFIG_HOME`-isolated instances name theirs from the userData path. A
+second instance builds the listener before it learns it is the second one and quits, so the
+listener probes first and leaves a live socket alone.
+
 ## Why the Symmetria Shell link was removed
 
 Desktop dictation used to be a protocol between two processes. Shell recorded and transcribed, and
