@@ -572,6 +572,12 @@ Engine, setting and chat buffer:
 - Root `package.json` (34): `--workspace packages/keys` in `knip:check`.
 - `pnpm-lock.yaml` (173): the `packages/keys` importer and `@vimee/core`.
   A lockfile conflict is resolved by re-running `pnpm install`, not by hand.
+- `scripts/release-smoke.ts` (11): `packages/keys/package.json` in the
+  manifest fixture, which the regenerated lockfile needs.
+- `scripts/lib/third-party-licenses.ts` (2): `@mesura/` in
+  `FIRST_PARTY_PACKAGE_PREFIXES`.
+- `third-party-licenses.config.json` (6): the `@vimee/core` override, because
+  its package ships no licence file.
 - `AssistantSelectionToolbar.tsx` (2): the shared `captureCitation` helper and
   the cite request subscription.
 - `MessagesTimeline.tsx` (159): one subscription in `TimelineMinimap` for
