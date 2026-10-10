@@ -37,7 +37,10 @@ to decide.
   attribute.
 - One sticky `lastFocusedPane` survives a blur to `body` (the editor's Escape
   in normal mode does exactly that today), so a chord typed with nothing
-  focused still moves from the pane the developer was last in.
+  focused still moves from the pane the developer was last in. When that
+  pane went away with focus in it (the panel after its last tab closed, a
+  collapsed sidebar), the key engine's scope falls back to the chat
+  (`keys/focusScope.ts`).
 - The keybinding `when` context gains three identifiers, `sidebarFocus`,
   `chatFocus` and `panelFocus`, filled in by `resolveContext` in
   `apps/web/src/keybindings.ts` from `getFocusedPane()`. Every existing caller
@@ -101,18 +104,27 @@ the keys are going, and any treatment with a texture of its own competes with
 the content for the same attention. An animated version was never on the table
 — it would repaint continuously and peg the GPU on a high-refresh display.
 
-- Rendered in `apps/web/src/mesura.css`, keyed on `:focus-within`. The
-  browser's own focus tree drives it: no React state and no re-render.
+- Rendered in `apps/web/src/mesura.css`, keyed on `:focus-within` by
+  default. The browser's own focus tree drives it: no React state and no
+  re-render. Two attributes on `<html>` cover what the focus tree cannot say,
+  each written only when its answer changes.
 - The chat column hands its mark to the terminal drawer whenever focus is
   inside the drawer, because the drawer is rendered inside the column and a
-  rule without that clause lights both at once. That clause is the one place a
-  listener is used: `lib/drawerFocusMark.ts` mirrors "focus is inside the
+  rule without that clause lights both at once. A listener answers that
+  clause: `lib/drawerFocusMark.ts` mirrors "focus is inside the
   drawer" onto `<html>` as `[data-mesura-drawer-focused]`, written to the DOM
   only when the answer changes. The first version asked it in CSS with
   `:has()` anchored on the chat column, and that made every thread switch
   restyle the whole column, measured against upstream v0.0.42 on the same
   data. `mesura.css` carries the numbers, and
   `tests/unit/fork-styling-hooks.test.ts` keeps `:has()` out of that file.
+- Vim mode's chat buffer holds the keys with focus on `body`, outside every
+  pane root, so `:focus-within` cannot see it. The key engine marks `<html>`
+  with `[data-mesura-chat-keys]` while its scope is the chat, and the chat
+  column's mark also keys on that (`keys/keyEngine.ts`).
+- A pointer press records the pane it lands in as `lastFocusedPane`
+  (`notePointerPane`). A click on a pane's plain text focuses nothing, and
+  the keys that follow are still meant for that pane.
 - The pane roots are upstream's existing hooks: `[data-app-sidebar]`,
   `[data-chat-column-maximized-away]`, `[data-terminal-owner="drawer"]` and
   `[data-preview-panel-mode]`. The two header rows are `[data-chat-header]`

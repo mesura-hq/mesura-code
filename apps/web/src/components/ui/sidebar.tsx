@@ -20,6 +20,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { useResizeDrag } from "~/hooks/useResizeDrag";
 import { useIsMobile } from "~/hooks/useMediaQuery";
 import { getLocalStorageItem, setLocalStorageItem } from "~/hooks/useLocalStorage";
+import { usePaneEdge } from "~/lib/paneEdges";
 import { resolveSidebarState, type ResponsiveSidebarState } from "./sidebarState";
 import * as Schema from "effect/Schema";
 
@@ -44,6 +45,8 @@ type SidebarResizableOptions = {
   maxWidth?: number;
   minWidth?: number;
   onResize?: (width: number) => void;
+  /** Fork: what the keyboard's reset runs; the rail's double-click handler, as a callback. */
+  onResetWidth?: () => void;
   shouldAcceptWidth?: (context: {
     currentWidth: number;
     nextWidth: number;
@@ -59,6 +62,8 @@ type SidebarResolvedResizableOptions = {
   maxWidth: number;
   minWidth: number;
   onResize?: (width: number) => void;
+  /** Fork: what the keyboard's reset runs; the rail's double-click handler, as a callback. */
+  onResetWidth?: () => void;
   shouldAcceptWidth?: (context: {
     currentWidth: number;
     nextWidth: number;
@@ -204,6 +209,7 @@ function Sidebar({
       minWidth: options.minWidth ?? SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH,
       storageKey: options.storageKey ?? null,
       ...(options.onResize ? { onResize: options.onResize } : {}),
+      ...(options.onResetWidth ? { onResetWidth: options.onResetWidth } : {}),
       ...(options.shouldAcceptWidth ? { shouldAcceptWidth: options.shouldAcceptWidth } : {}),
     };
   }, [collapsible, isMobile, resizable]);
@@ -350,6 +356,50 @@ function clampSidebarWidth(width: number, options: SidebarResolvedResizableOptio
   return Math.max(options.minWidth, Math.min(width, options.maxWidth));
 }
 
+function findSidebarElements(rail: HTMLElement) {
+  const wrapper = rail.closest<HTMLElement>("[data-slot='sidebar-wrapper']");
+  const sidebarRoot = rail.closest<HTMLElement>("[data-slot='sidebar']");
+  const sidebarContainer = sidebarRoot?.querySelector<HTMLElement>(
+    "[data-slot='sidebar-container']",
+  );
+  if (!wrapper || !sidebarRoot || !sidebarContainer) return null;
+  return { wrapper, sidebarRoot, sidebarContainer };
+}
+
+/**
+ * Clamps a width and, when the owner accepts it, writes it to the CSS
+ * variable. Returns the width in effect afterwards. Shared by the drag and
+ * the keyboard (fork).
+ */
+function acceptSidebarWidth(
+  options: SidebarResolvedResizableOptions,
+  context: {
+    currentWidth: number;
+    nextWidth: number;
+    rail: HTMLButtonElement;
+    side: "left" | "right";
+    sidebarRoot: HTMLElement;
+    wrapper: HTMLElement;
+  },
+): number {
+  const nextWidth = clampSidebarWidth(context.nextWidth, options);
+  const accepted = options.shouldAcceptWidth?.({ ...context, nextWidth }) ?? true;
+  if (!accepted) return context.currentWidth;
+  context.wrapper.style.setProperty("--sidebar-width", `${nextWidth}px`);
+  return nextWidth;
+}
+
+function commitSidebarWidth(options: SidebarResolvedResizableOptions, width: number): void {
+  if (options.storageKey) {
+    try {
+      setLocalStorageItem(options.storageKey, width, Schema.Finite);
+    } catch (error) {
+      console.error("Could not persist sidebar width.", error);
+    }
+  }
+  options.onResize?.(width);
+}
+
 function SidebarRail({
   className,
   onClick,
@@ -372,17 +422,14 @@ function SidebarRail({
   const canResize = resolvedResizable !== null && open;
   const railLabel = canResize ? "Resize Sidebar" : "Toggle Sidebar";
   const railTitle = canResize ? "Drag to resize sidebar" : "Toggle Sidebar";
+  const side = sidebarInstance?.side ?? "left";
   const resize = useResizeDrag<HTMLButtonElement>((event) => {
     if (!resolvedResizable || !open) return null;
     const rail = event.currentTarget;
-    const wrapper = rail.closest<HTMLElement>("[data-slot='sidebar-wrapper']");
-    const sidebarRoot = rail.closest<HTMLElement>("[data-slot='sidebar']");
-    const sidebarContainer = sidebarRoot?.querySelector<HTMLElement>(
-      "[data-slot='sidebar-container']",
-    );
-    if (!wrapper || !sidebarRoot || !sidebarContainer) return null;
+    const elements = findSidebarElements(rail);
+    if (!elements) return null;
+    const { wrapper, sidebarRoot, sidebarContainer } = elements;
 
-    const side = sidebarInstance?.side ?? "left";
     let width = clampSidebarWidth(
       sidebarContainer.getBoundingClientRect().width,
       resolvedResizable,
@@ -402,33 +449,20 @@ function SidebarRail({
       resize(value) {
         const options = latestResizable.current;
         if (!options) return width;
-        const nextWidth = clampSidebarWidth(value, options);
-        const accepted =
-          options.shouldAcceptWidth?.({
-            currentWidth: width,
-            nextWidth,
-            rail,
-            side,
-            sidebarRoot,
-            wrapper,
-          }) ?? true;
-        if (accepted) {
-          wrapper.style.setProperty("--sidebar-width", `${nextWidth}px`);
-          width = nextWidth;
-        }
+        width = acceptSidebarWidth(options, {
+          currentWidth: width,
+          nextWidth: value,
+          rail,
+          side,
+          sidebarRoot,
+          wrapper,
+        });
         return width;
       },
       finish(finalWidth, moved) {
         suppressClickRef.current = moved;
         const options = latestResizable.current;
-        if (options?.storageKey) {
-          try {
-            setLocalStorageItem(options.storageKey, finalWidth, Schema.Finite);
-          } catch (error) {
-            console.error("Could not persist sidebar width.", error);
-          }
-        }
-        options?.onResize?.(finalWidth);
+        if (options) commitSidebarWidth(options, finalWidth);
       },
       cleanup() {
         transitionTargets.forEach((element) => {
@@ -436,6 +470,45 @@ function SidebarRail({
         });
       },
     };
+  });
+
+  // Fork: arrow keys on the focused rail and Vim mode's PANE mode
+  // (lib/paneEdges.ts). The width is read from the CSS variable rather than
+  // measured, because the box is mid-transition while keys repeat.
+  const readSidebarWidth = () => {
+    const rail = railRef.current;
+    const elements = rail ? findSidebarElements(rail) : null;
+    if (!elements) return 0;
+    const variable = Number.parseFloat(elements.wrapper.style.getPropertyValue("--sidebar-width"));
+    return Number.isFinite(variable)
+      ? variable
+      : elements.sidebarContainer.getBoundingClientRect().width;
+  };
+  const separatorProps = usePaneEdge({
+    id: "sidebar",
+    side: side === "left" ? "right" : "left",
+    enabled: canResize,
+    size: readSidebarWidth,
+    resizeTo(value) {
+      const rail = railRef.current;
+      const options = latestResizable.current;
+      const elements = rail ? findSidebarElements(rail) : null;
+      if (!rail || !options || !elements) return value;
+      const currentWidth = clampSidebarWidth(readSidebarWidth(), options);
+      const width = acceptSidebarWidth(options, {
+        currentWidth,
+        nextWidth: value,
+        rail,
+        side,
+        ...elements,
+      });
+      if (width !== currentWidth) commitSidebarWidth(options, width);
+      return width;
+    },
+    reset: () => latestResizable.current?.onResetWidth?.(),
+    ...(resolvedResizable
+      ? { valueMin: resolvedResizable.minWidth, valueMax: resolvedResizable.maxWidth }
+      : {}),
   });
 
   const handleClick = React.useCallback(
@@ -493,6 +566,7 @@ function SidebarRail({
               "group-data-[collapsible=offcanvas]:translate-x-0 hover:group-data-[collapsible=offcanvas]:bg-sidebar group-data-[collapsible=offcanvas]:after:left-full",
               "[[data-side=left][data-collapsible=offcanvas]_&]:-right-2",
               "[[data-side=right][data-collapsible=offcanvas]_&]:-left-2",
+              "focus-visible:outline-none focus-visible:after:bg-primary/60",
               className,
             )}
             data-sidebar="rail"
@@ -519,7 +593,8 @@ function SidebarRail({
               if (!event.defaultPrevented) resize.onPointerUp(event);
             }}
             ref={railRef}
-            tabIndex={-1}
+            tabIndex={separatorProps.tabIndex}
+            onKeyDown={separatorProps.onKeyDown}
             type="button"
             {...props}
           />

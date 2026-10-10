@@ -205,6 +205,22 @@ const desktopEnvironmentLayer = DesktopEnvironment.layer(environmentInput).pipe(
   ),
 );
 
+// Mesura: the environment above on another platform, for the platform-specific
+// quit chord. Kept beside upstream's layer rather than folded into it, so the
+// upstream block merges untouched.
+const desktopEnvironmentLayerOn = (platform: NodeJS.Platform) =>
+  DesktopEnvironment.layer({ ...environmentInput, platform }).pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        NodeServices.layer,
+        DesktopConfig.layerTest({
+          T3CODE_PORT: "3773",
+          VITE_DEV_SERVER_URL: "http://127.0.0.1:5733",
+        }),
+      ),
+    ),
+  );
+
 const desktopWindowBoundsEquivalence = Schema.toEquivalence(
   DesktopAppSettings.DesktopWindowBoundsSchema,
 );
@@ -225,6 +241,7 @@ function makeTestLayer(input: {
   readonly onPopupTemplate?: (input: ElectronMenu.ElectronMenuTemplateInput) => Effect.Effect<void>;
   readonly previewZoomReapplies?: number[];
   readonly onReveal?: (window: Electron.BrowserWindow) => void;
+  readonly platform?: NodeJS.Platform;
 }) {
   let desktopSettings = input.desktopSettings ?? DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS;
   const desktopAppSettingsLayer = Layer.succeed(DesktopAppSettings.DesktopAppSettings, {
@@ -285,7 +302,7 @@ function makeTestLayer(input: {
     Layer.provide(
       Layer.mergeAll(
         desktopAssetsLayer,
-        desktopEnvironmentLayer,
+        input.platform ? desktopEnvironmentLayerOn(input.platform) : desktopEnvironmentLayer,
         desktopAppSettingsLayer,
         desktopClientSettingsLayer,
         desktopServerExposureLayer,
@@ -709,6 +726,50 @@ describe("DesktopWindow", () => {
         beforeInput(event, { ...input, meta: false });
         assert.isFalse(prevented);
       }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  const pressQuitChord = (platform: NodeJS.Platform) =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const layer = makeTestLayer({ window: fakeWindow.window, createCount, mainWindow, platform });
+
+      return yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+
+        const beforeInput = fakeWindow.webContentsListeners.get("before-input-event");
+        if (!beforeInput) {
+          return yield* Effect.die("before-input-event listener was not registered");
+        }
+        let prevented = false;
+        beforeInput(
+          { preventDefault: () => (prevented = true) },
+          {
+            type: "keyDown",
+            isAutoRepeat: false,
+            key: "q",
+            meta: false,
+            control: true,
+            alt: false,
+            shift: false,
+          },
+        );
+        return prevented;
+      }).pipe(Effect.provide(layer));
+    });
+
+  it.effect("leaves Ctrl+Q to the page on Linux without consulting the quit guard", () =>
+    Effect.gen(function* () {
+      assert.isFalse(yield* pressQuitChord("linux"));
+    }),
+  );
+
+  it.effect("still lets the quit guard take Ctrl+Q on Windows", () =>
+    Effect.gen(function* () {
+      assert.isTrue(yield* pressQuitChord("win32"));
     }),
   );
 

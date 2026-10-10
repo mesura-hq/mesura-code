@@ -6,6 +6,7 @@ export type ConfirmDialogState =
       readonly status: "confirming";
       readonly message: string;
       readonly variant: ConfirmDialogVariant;
+      readonly focusConfirm?: boolean;
     }
   | {
       readonly status: "closing";
@@ -16,6 +17,7 @@ export type ConfirmDialogState =
 type PendingConfirmation = {
   readonly message: string;
   readonly variant: ConfirmDialogVariant;
+  readonly focusConfirm: boolean;
   readonly resolve: (confirmed: boolean) => void;
 };
 
@@ -40,6 +42,16 @@ function resolvePendingConfirmations(confirmed: boolean): void {
   }
   activeConfirmation = null;
   queuedConfirmations = [];
+}
+
+/** The shown state; `focusConfirm` appears only when the request asked for it. */
+function confirmingState(pending: PendingConfirmation): ConfirmDialogState {
+  return {
+    status: "confirming",
+    message: pending.message,
+    variant: pending.variant,
+    ...(pending.focusConfirm ? { focusConfirm: true } : {}),
+  };
 }
 
 export function readConfirmDialogState(): ConfirmDialogState {
@@ -87,6 +99,7 @@ export function requestConfirmDialog(
     const pending = {
       message,
       variant: options?.variant ?? "default",
+      focusConfirm: options?.initialFocus === "confirm",
       resolve,
     } satisfies PendingConfirmation;
     if (activeConfirmation || state.status === "closing") {
@@ -95,7 +108,7 @@ export function requestConfirmDialog(
     }
 
     activeConfirmation = pending;
-    publish({ status: "confirming", message, variant: pending.variant });
+    publish(confirmingState(pending));
   });
 
   return confirmation;
@@ -120,7 +133,7 @@ export function completeConfirmDialogClose(): void {
   }
 
   activeConfirmation = next;
-  publish({ status: "confirming", message: next.message, variant: next.variant });
+  publish(confirmingState(next));
 }
 
 export function resetConfirmDialogForTests(): void {

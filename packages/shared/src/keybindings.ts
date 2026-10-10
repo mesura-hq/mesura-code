@@ -44,6 +44,12 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+d", command: "terminal.split", when: "terminalFocus" },
   { key: "mod+shift+d", command: "terminal.splitVertical", when: "terminalFocus" },
   { key: "mod+n", command: "terminal.new", when: "terminalFocus" },
+  // Mesura: Ctrl+Q closes what Ctrl+W closes, as Super+Q closes the focused
+  // window on Hyprland. Literal ctrl, not mod: Cmd+Q stays macOS's quit. The
+  // desktop app gives the chord up on Linux (DesktopWindow.ts). Placed first
+  // so the label each command shows stays mod+w (last wins).
+  { key: "ctrl+q", command: "terminal.close", when: "terminalFocus" },
+  { key: "ctrl+q", command: "rightPanel.close", when: "!terminalFocus" },
   { key: "mod+w", command: "terminal.close", when: "terminalFocus" },
   { key: "mod+w", command: "rightPanel.close", when: "!terminalFocus" },
   // Moved off mod+d so the reading scroll can take the vim pair mod+u/mod+d.
@@ -205,6 +211,19 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "ctrl+tab", command: "thread.next", when: "!terminalFocus" },
   { key: "mod+shift+[", command: "thread.previous" },
   { key: "mod+shift+]", command: "thread.next" },
+  // Mesura: inside the right panel the same chords walk its tabs. After the
+  // thread rules on purpose: resolution is last-wins, so with the panel
+  // focused these answer. New commands, so the per-command backfill installs
+  // them. A terminal tab keeps ctrl+tab, as the thread rules leave it.
+  {
+    key: "ctrl+shift+tab",
+    command: "rightPanel.previousTab",
+    when: "panelFocus && !terminalFocus",
+  },
+  { key: "ctrl+tab", command: "rightPanel.nextTab", when: "panelFocus && !terminalFocus" },
+  // Mesura: a new tab is the panel launcher, as Ctrl+T is in a browser.
+  // Desktop only in practice: a browser keeps Ctrl+T for its own tabs.
+  { key: "mod+t", command: "rightPanel.newTab", when: "panelFocus && !terminalFocus" },
   { key: "mod+shift+c", command: "thread.copyReference", when: "!terminalFocus" },
   { key: "mod+shift+s", command: "thread.settle", when: "!terminalFocus" },
   { key: "mod+shift+p", command: "thread.pin", when: "!terminalFocus" },
@@ -381,6 +400,17 @@ export const ADDED_KEYBINDING_DEFAULTS: ReadonlyArray<AddedKeybindingDefault> = 
   {
     id: "2026-09-attach-files-mod-alt-a",
     rule: { key: "mod+alt+a", command: "composer.attachFiles", when: "!terminalFocus" },
+  },
+  // Before mod+w, so mod+w stays the label of both commands.
+  {
+    id: "2026-10-terminal-close-ctrl-q",
+    rule: { key: "ctrl+q", command: "terminal.close", when: "terminalFocus" },
+    insertBefore: { key: "mod+w", command: "terminal.close", when: "terminalFocus" },
+  },
+  {
+    id: "2026-10-right-panel-close-ctrl-q",
+    rule: { key: "ctrl+q", command: "rightPanel.close", when: "!terminalFocus" },
+    insertBefore: { key: "mod+w", command: "rightPanel.close", when: "!terminalFocus" },
   },
 ];
 

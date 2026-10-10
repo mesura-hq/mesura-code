@@ -7,7 +7,11 @@ import {
   useState,
 } from "react";
 
-import { getLocalStorageItem, setLocalStorageItem } from "./useLocalStorage";
+import {
+  getLocalStorageItem,
+  removeLocalStorageItem,
+  setLocalStorageItem,
+} from "./useLocalStorage";
 import { useResizeDrag } from "./useResizeDrag";
 
 const WidthSchema = Schema.Finite;
@@ -46,6 +50,10 @@ export interface ResizableWidthHandlers {
 export function useResizableWidth(options: UseResizableWidthOptions): {
   readonly width: number;
   readonly handlers: ResizableWidthHandlers;
+  /** Fork: sets and persists a width at once, for keyboard resizing (`lib/paneEdges.ts`). */
+  readonly resizeTo: (width: number) => number;
+  /** Fork: forgets the persisted width and returns to the default. */
+  readonly reset: () => void;
 } {
   const { storageKey, defaultWidth, minWidth, maxWidth, edge } = options;
 
@@ -91,15 +99,35 @@ export function useResizableWidth(options: UseResizableWidthOptions): {
       },
       finish(finalWidth) {
         // Commit once at drag-end to avoid 60Hz localStorage writes.
-        try {
-          setLocalStorageItem(latestOptions.current.storageKey, finalWidth, WidthSchema);
-        } catch (error) {
-          console.error("Could not persist panel width.", error);
-        }
+        persistWidth(latestOptions.current.storageKey, finalWidth);
       },
     }),
     storageKey,
   );
 
-  return { width: clampedWidth, handlers };
+  const resizeTo = (value: number): number => {
+    const nextWidth = clamp(value);
+    setWidthState({ storageKey, width: nextWidth });
+    persistWidth(storageKey, nextWidth);
+    return nextWidth;
+  };
+
+  const reset = () => {
+    try {
+      removeLocalStorageItem(storageKey);
+    } catch (error) {
+      console.error("Could not clear persisted panel width.", error);
+    }
+    setWidthState({ storageKey, width: clamp(defaultWidth) });
+  };
+
+  return { width: clampedWidth, handlers, resizeTo, reset };
+}
+
+function persistWidth(storageKey: string, width: number): void {
+  try {
+    setLocalStorageItem(storageKey, width, WidthSchema);
+  } catch (error) {
+    console.error("Could not persist panel width.", error);
+  }
 }

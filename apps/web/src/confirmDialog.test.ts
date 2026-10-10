@@ -51,6 +51,17 @@ describe("confirm dialog coordinator", () => {
     unregister();
   });
 
+  it("opens on Confirm only when the request asks for it", () => {
+    const unregister = registerConfirmDialogHost();
+    void requestConfirmDialog("Close terminal?", { initialFocus: "confirm" });
+    expect(readConfirmDialogState()).toMatchObject({ status: "confirming", focusConfirm: true });
+    respondToConfirmDialog(false);
+    completeConfirmDialogClose();
+    void requestConfirmDialog("Delete thread?", { variant: "destructive" });
+    expect(readConfirmDialogState()).not.toHaveProperty("focusConfirm");
+    unregister();
+  });
+
   it("serializes concurrent confirmations", async () => {
     const unregister = registerConfirmDialogHost();
     const first = requireConfirmation(requestConfirmDialog("Delete the project?"));

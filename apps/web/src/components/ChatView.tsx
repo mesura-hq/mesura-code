@@ -232,6 +232,8 @@ import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings"
 import { useChatReadingScroll } from "../lib/useChatReadingScroll";
 import { useThreadSettledToggle } from "../lib/useThreadSettledToggle";
 import { dispatchPickerAction } from "../lib/pickerActionBus";
+import { useCommandHandlers } from "../commands/commandRegistry";
+import { openPanelLauncher } from "../lib/panelLauncher";
 import { isRunContextHostReachable } from "./runContext/runContextDrawer.logic";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
@@ -6672,6 +6674,94 @@ export default function ChatView(props: ChatViewProps) {
     [composerRef, previewPanelOpen, terminalUiState.terminalOpen],
   );
 
+  // The chord branches below and the command registry run these. Lifted
+  // out of the branches so a leader key and the chord share one body.
+  const toggleActiveThreadSettlement = useCallback(() => {
+    if (!isServerThread || !activeThreadRef || !supportsSettlement) return;
+    if (activeThreadSettled) {
+      void handleUnsettleActiveThread();
+      return;
+    }
+
+    void settleThread(activeThreadRef).then((result) => {
+      if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
+      const error = squashAtomCommandFailure(result);
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Failed to settle thread",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        }),
+      );
+    });
+  }, [
+    activeThreadRef,
+    activeThreadSettled,
+    handleUnsettleActiveThread,
+    isServerThread,
+    settleThread,
+    supportsSettlement,
+  ]);
+  const toggleActiveThreadPin = useCallback(() => {
+    if (!isServerThread || !activeThreadRef || !supportsPinning) return;
+    const pinned = activeThreadPinned;
+    void (pinned ? confirmAndUnpinThread(activeThreadRef) : pinThread(activeThreadRef)).then(
+      (result) => {
+        if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
+        const error = squashAtomCommandFailure(result);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: pinned ? "Failed to unpin thread" : "Failed to pin thread",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
+      },
+    );
+  }, [
+    activeThreadPinned,
+    activeThreadRef,
+    confirmAndUnpinThread,
+    isServerThread,
+    pinThread,
+    supportsPinning,
+  ]);
+  const firstQueuedMessage = useCallback(
+    () =>
+      activeThreadKey
+        ? useQueuedMessageStore.getState().queuesByThreadKey[activeThreadKey]?.[0]
+        : undefined,
+    [activeThreadKey],
+  );
+
+  useCommandHandlers({
+    "thread.copyReference": copyActiveThreadReference,
+    "thread.settle": toggleActiveThreadSettlement,
+    "thread.pin": toggleActiveThreadPin,
+    "thread.steerQueuedMessage": () => {
+      const message = firstQueuedMessage();
+      if (message) queuedMessageActionsRef.current.steer(message.id);
+    },
+    "terminal.toggle": toggleTerminalVisibility,
+    "rightPanel.toggle": toggleRightPanel,
+    "rightPanel.toggleMaximized": toggleRightPanelMaximized,
+    "rightPanel.newTab": () => {
+      if (!rightPanelOpen) toggleRightPanel();
+      openPanelLauncher();
+    },
+    "rightPanel.close": () => {
+      if (activeRightPanelSurface) closeRightPanelSurface(activeRightPanelSurface);
+    },
+    "diff.toggle": onToggleDiff,
+    "modelPicker.toggle": () => composerRef.current?.toggleModelPicker(),
+    "composer.host": () => composerRef.current?.openControl("composer.host"),
+    "composer.mode": () => composerRef.current?.openControl("composer.mode"),
+    "traitsPicker.toggle": () => dispatchPickerAction("traits"),
+    "workspacePicker.toggle": () => dispatchPickerAction("workspace"),
+    "branchPicker.toggle": () => dispatchPickerAction("branch"),
+    "question.toggleCollapse": () => dispatchPickerAction("question"),
+  });
+
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
       if (preventRepeatedTerminalCloseShortcut(event, keybindings)) {
@@ -6725,44 +6815,14 @@ export default function ChatView(props: ChatViewProps) {
       if (command === "thread.settle") {
         event.preventDefault();
         event.stopPropagation();
-        if (!isServerThread || !activeThreadRef || !supportsSettlement) return;
-        if (activeThreadSettled) {
-          void handleUnsettleActiveThread();
-          return;
-        }
-
-        void settleThread(activeThreadRef).then((result) => {
-          if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
-          const error = squashAtomCommandFailure(result);
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Failed to settle thread",
-              description: error instanceof Error ? error.message : "An error occurred.",
-            }),
-          );
-        });
+        toggleActiveThreadSettlement();
         return;
       }
 
       if (command === "thread.pin") {
         event.preventDefault();
         event.stopPropagation();
-        if (!isServerThread || !activeThreadRef || !supportsPinning) return;
-        const pinned = activeThreadPinned;
-        void (pinned ? confirmAndUnpinThread(activeThreadRef) : pinThread(activeThreadRef)).then(
-          (result) => {
-            if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
-            const error = squashAtomCommandFailure(result);
-            toastManager.add(
-              stackedThreadToast({
-                type: "error",
-                title: pinned ? "Failed to unpin thread" : "Failed to pin thread",
-                description: error instanceof Error ? error.message : "An error occurred.",
-              }),
-            );
-          },
-        );
+        toggleActiveThreadPin();
         return;
       }
 
@@ -6913,9 +6973,7 @@ export default function ChatView(props: ChatViewProps) {
       }
 
       if (command === "thread.steerQueuedMessage") {
-        const message = activeThreadKey
-          ? useQueuedMessageStore.getState().queuesByThreadKey[activeThreadKey]?.[0]
-          : undefined;
+        const message = firstQueuedMessage();
         if (!message) return;
         event.preventDefault();
         event.stopPropagation();
@@ -7042,6 +7100,9 @@ export default function ChatView(props: ChatViewProps) {
     composerRef,
     scrollTimelineForReading,
     toggleActiveThreadSettled,
+    toggleActiveThreadSettlement,
+    toggleActiveThreadPin,
+    firstQueuedMessage,
   ]);
 
   // Paste-to-focus: the resting composer blurs on a click into the timeline,

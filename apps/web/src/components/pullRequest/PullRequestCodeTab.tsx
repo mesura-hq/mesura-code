@@ -1369,6 +1369,7 @@ function PullRequestCodeTab({
             up; the viewer inside still owns its own scrolling. */}
         <div
           className="relative min-h-0 min-w-0 flex-1"
+          data-pane-entry="2"
           // The chevron answers this too, but the whole header row is the target a reader
           // actually aims for. The header lives in the viewer's shadow tree, so the capture
           // listener walks `composedPath` — the only way to see through the shadow boundary.

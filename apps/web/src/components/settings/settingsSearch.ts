@@ -227,6 +227,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["neovim vim modal editing file panel keys motions"],
   },
   {
+    id: "vim-mode",
+    title: "Vim mode",
+    to: "/settings/appearance",
+    searchTerms: ["vim mode keyboard first leader which-key normal insert visual chat buffer"],
+  },
+  {
     id: "project-grouping",
     title: "Project grouping",
     to: "/settings/general",

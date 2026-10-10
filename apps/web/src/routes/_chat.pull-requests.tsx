@@ -116,6 +116,7 @@ import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { isElectron } from "../env";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
+import { useCommandHandlers } from "../commands/commandRegistry";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { PanelLayoutControls } from "../components/chat/PanelLayoutControls";
 import { Button } from "../components/ui/button";
@@ -1899,12 +1900,9 @@ function PullRequestsRouteView() {
   };
 
   // This page has no ChatView, so it handles the shared panel shortcuts itself.
-  const copyPullRequestFromShortcut = useEffectEvent((event: KeyboardEvent) => {
-    if (!openPanelPullRequestUrl) return;
-    event.preventDefault();
-    event.stopPropagation();
-    if (event.repeat) return;
-    const url = openPanelPullRequestUrl;
+  // The shortcut below and the command registry run this, so a leader key and
+  // the chord copy the same way.
+  const copyPullRequestLink = (url: string) => {
     void writeTextToClipboard(url, "pull request link").then(
       (didCopy) => {
         if (didCopy)
@@ -1918,6 +1916,13 @@ function PullRequestsRouteView() {
         });
       },
     );
+  };
+  const copyPullRequestFromShortcut = useEffectEvent((event: KeyboardEvent) => {
+    if (!openPanelPullRequestUrl) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.repeat) return;
+    copyPullRequestLink(openPanelPullRequestUrl);
   });
   const closeActiveSurfaceFromShortcut = useEffectEvent((event: KeyboardEvent) => {
     if (activePullRequestSurface === null) return;
@@ -1944,6 +1949,17 @@ function PullRequestsRouteView() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [keybindings]);
+  useCommandHandlers({
+    "rightPanel.close": () => {
+      if (activePullRequestSurface !== null) closeSurface(activePullRequestSurface);
+    },
+    "rightPanel.toggle": () => {
+      if (rightPanelAvailable) toggleRightPanel();
+    },
+    "thread.copyReference": () => {
+      if (openPanelPullRequestUrl) copyPullRequestLink(openPanelPullRequestUrl);
+    },
+  });
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">

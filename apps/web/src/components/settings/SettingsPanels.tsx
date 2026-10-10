@@ -1716,6 +1716,32 @@ function ModalEditingRow() {
   );
 }
 
+function VimModeRow() {
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
+  return (
+    <SettingsRow
+      {...searchableSetting("vim-mode")}
+      description="Drive the whole app with Vim-style modes: Space opens a which-key menu, the chat becomes a buffer you can move through and select, and the composer edits modally. Prototype."
+      resetAction={
+        settings.vimMode !== DEFAULT_UNIFIED_SETTINGS.vimMode ? (
+          <SettingResetButton
+            label="vim mode"
+            onClick={() => updateSettings({ vimMode: DEFAULT_UNIFIED_SETTINGS.vimMode })}
+          />
+        ) : null
+      }
+      control={
+        <Switch
+          checked={settings.vimMode}
+          onCheckedChange={(checked) => updateSettings({ vimMode: Boolean(checked) })}
+          aria-label="Use Vim mode across the app"
+        />
+      }
+    />
+  );
+}
+
 function NeovimConfigDirectoryRow() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
@@ -1848,6 +1874,7 @@ function TypographySection() {
       {advanced ? <FontSettingsGroup /> : <SimpleFontRows />}
       <WordWrapRow />
       <ModalEditingRow />
+      <VimModeRow />
       <NeovimConfigDirectoryRow />
     </SettingsSection>
   );

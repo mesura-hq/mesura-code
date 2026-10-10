@@ -1,4 +1,5 @@
 import { subscribePickerAction } from "../../lib/pickerActionBus";
+import { subscribeTurnJumpRequest } from "~/keys/chat/chatTurnBus";
 import {
   InlinePendingUserInputCard,
   type InlinePendingUserInputContext,
@@ -1245,6 +1246,19 @@ function TimelineMinimap({
   const previousItem =
     resolvedCurrentIndex === null ? null : (items[resolvedCurrentIndex - 1] ?? null);
   const nextItem = resolvedCurrentIndex === null ? null : (items[resolvedCurrentIndex + 1] ?? null);
+
+  // Mesura: Vim mode's `[u` / `]u` use the same previous and next turn as the
+  // minimap's arrow buttons.
+  useEffect(
+    () =>
+      subscribeTurnJumpRequest((request) => {
+        const item = request.direction === "previous" ? previousItem : nextItem;
+        if (!item) return;
+        onSelect(item);
+        request.rowId = item.id;
+      }),
+    [nextItem, onSelect, previousItem],
+  );
 
   const resolveActiveIndexFromPointer = useCallback(
     (event: MouseEvent<HTMLElement>) => {

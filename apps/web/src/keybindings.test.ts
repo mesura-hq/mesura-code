@@ -1291,6 +1291,43 @@ describe("shipped defaults on Linux", () => {
     assert.strictEqual(resolve(press("[", { ctrlKey: true, shiftKey: true })), "thread.previous");
   });
 
+  it("walks the right panel's tabs with the tab pair while the panel has focus", () => {
+    const panel = { panelFocus: true };
+    assert.strictEqual(
+      resolve(press("Tab", { ctrlKey: true }), false, panel),
+      "rightPanel.nextTab",
+    );
+    assert.strictEqual(
+      resolve(press("Tab", { ctrlKey: true, shiftKey: true }), false, panel),
+      "rightPanel.previousTab",
+    );
+    assert.strictEqual(resolve(press("t", { ctrlKey: true }), false, panel), "rightPanel.newTab");
+    assert.isNull(resolve(press("t", { ctrlKey: true })));
+    // A terminal tab keeps ctrl+tab, as it does for the thread pair.
+    assert.isNull(resolve(press("Tab", { ctrlKey: true }), true, panel));
+    // The bracket pair still walks the threads from the panel.
+    assert.strictEqual(
+      resolve(press("]", { ctrlKey: true, shiftKey: true }), false, panel),
+      "thread.next",
+    );
+  });
+
+  it("closes with Ctrl+Q what Ctrl+W closes, and keeps Ctrl+W as the label", () => {
+    assert.strictEqual(resolve(press("q", { ctrlKey: true })), "rightPanel.close");
+    assert.strictEqual(resolve(press("q", { ctrlKey: true }), true), "terminal.close");
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "rightPanel.close", "Linux"),
+      "Ctrl+W",
+    );
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "terminal.close", {
+        platform: "Linux",
+        context: { terminalFocus: true },
+      }),
+      "Ctrl+W",
+    );
+  });
+
   it("reports the everywhere-works chord as the shortcut label", () => {
     // The resolver returns the binding that wins, which is the last match.
     // Naming ctrl+tab here would be wrong on every surface that never

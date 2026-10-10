@@ -2619,6 +2619,7 @@ export function PullRequestDetailPanel({
 
       <div
         className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
+        data-pane-entry="1"
         onScrollCapture={(event) => {
           const scroller = event.target as HTMLElement;
           scrollerRef.current = scroller;
