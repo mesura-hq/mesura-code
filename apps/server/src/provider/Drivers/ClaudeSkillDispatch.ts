@@ -24,13 +24,15 @@
  * @module provider/Drivers/ClaudeSkillDispatch
  */
 
+// WORKAROUND: portado de pingdotgg/t3code#15662 — quitar al sincronizar con upstream si se mergea.
+// Upstream's pattern opens with `\p{Sc}`; the fork keeps `\$` until that commit is synced.
 /**
- * Same token shape the composer and timeline chips recognise
- * (`packages/shared/src/composerInlineTokens.ts`), so a rendered chip and a
- * dispatched skill are always the same set.
+ * Composer tokens plus namespaced plugin names, checked against the discovered
+ * catalog below. Native plugin names can contain punctuation; whitespace ends
+ * the command name and starts its arguments.
  */
 const SKILL_MENTION_PATTERN =
-  /(^|\s)\$(?![0-9][0-9_]*(?:[kKmMbBtT]|[eE][0-9]+)?(?:\s|$))(?=[a-zA-Z0-9:_-]*[a-zA-Z])([a-zA-Z0-9][a-zA-Z0-9:_-]*)(?=\s|$)/g;
+  /(^|\s)\$((?![0-9][0-9_]*(?:[kKmMbBtT]|[eE][0-9]+)?(?:\s|$))(?=[a-zA-Z0-9:_-]*[a-zA-Z])[a-zA-Z0-9][a-zA-Z0-9:_-]*|[^\s:]+:[^\s]+)(?=\s|$)/g;
 
 export interface ClaudeSkillDispatch {
   /** Text before the dispatched mention, or `undefined` when it opens the prompt. */
