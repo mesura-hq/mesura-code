@@ -1,8 +1,10 @@
 // @vitest-environment happy-dom
-// Entry point: `startFlash` and `handleFlashKey` (`flashSession.ts`), driven
-// the way the chat and composer surfaces drive them: a provider supplies the
-// targets for each pattern and receives the jump. The labels are read the way
-// the overlay reads them, through `useFlashSnapshot`.
+// Entry point: `startFlash`, `startFlashPick` and `handleFlashKey`
+// (`flashSession.ts`), driven the way the chat and composer surfaces drive
+// them: a provider supplies the targets for each pattern and receives the
+// jump, or a pick labels its targets up front and receives the chosen one.
+// The labels are read the way the overlay reads them, through
+// `useFlashSnapshot`.
 import { act, createElement, useLayoutEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -12,9 +14,10 @@ import {
   handleFlashKey,
   isFlashActive,
   startFlash,
+  startFlashPick,
   stopFlash,
 } from "./flashSession";
-import type { FlashProvider, FlashTarget } from "./flashSession";
+import type { FlashPick, FlashProvider, FlashTarget } from "./flashSession";
 import { useFlashSnapshot, type FlashSnapshot } from "./flashStore";
 import { readKeyEngineSnapshot } from "./keyEngineStore";
 
@@ -155,5 +158,102 @@ describe("flash session keys", () => {
     type("c", "q");
     expect(isFlashActive()).toBe(false);
     expect(readKeyEngineSnapshot().notice).toBe("flash: no match for “cq”");
+  });
+});
+
+describe("flash label pick", () => {
+  let picked: string[];
+
+  /** A pick over `count` targets, each one character of the fixture text. */
+  function pickOver(count: number, overrides: Partial<FlashPick> = {}): FlashPick {
+    return {
+      scope: "chat",
+      hint: "cite: where it starts",
+      placement: "over",
+      backdrop: [],
+      targets: Array.from({ length: count }, (_, index) => {
+        const range = document.createRange();
+        range.setStart(textNode, index % TEXT.length);
+        range.setEnd(textNode, (index % TEXT.length) + 1);
+        return { id: `target-${index}`, range };
+      }),
+      pick: (target) => picked.push(target.id),
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    picked = [];
+  });
+
+  it("labels every pick target at once and shows the pick's hint", () => {
+    act(() => {
+      expect(startFlashPick(pickOver(3))).toBe(true);
+    });
+    expect(flash.active).toBe(true);
+    expect(flash.hint).toBe("cite: where it starts");
+    expect(flash.labels.map(({ id, label }) => [id, label])).toEqual([
+      ["target-0", "a"],
+      ["target-1", "s"],
+      ["target-2", "d"],
+    ]);
+  });
+
+  it("picks the target whose label is typed and ends the pick", () => {
+    act(() => {
+      startFlashPick(pickOver(3));
+    });
+    type("s");
+    expect(picked).toEqual(["target-1"]);
+    expect(isFlashActive()).toBe(false);
+  });
+
+  it("narrows a pick to the second characters after the first of a two-character label", () => {
+    // 27 targets over 26 label characters: the last two take two characters.
+    act(() => {
+      startFlashPick(pickOver(27));
+    });
+    expect(labelOf("target-26")).toBe("ms");
+    type("m");
+    expect(picked).toEqual([]);
+    expect(flash.pattern).toBe("m");
+    expect(flash.labels.map(({ id, label }) => [id, label])).toEqual([
+      ["target-25", "a"],
+      ["target-26", "s"],
+    ]);
+    type("s");
+    expect(picked).toEqual(["target-26"]);
+  });
+
+  it("clears a typed pick prefix on Backspace, then exits the pick on a second Backspace", () => {
+    act(() => {
+      startFlashPick(pickOver(27));
+    });
+    type("m", "<BS>");
+    expect(isFlashActive()).toBe(true);
+    expect(flash.pattern).toBe("");
+    expect(flash.labels).toHaveLength(27);
+    type("<BS>");
+    expect(isFlashActive()).toBe(false);
+    expect(picked).toEqual([]);
+  });
+
+  it("exits a pick on Escape and ignores a key that is no label", () => {
+    act(() => {
+      startFlashPick(pickOver(3));
+    });
+    type("z");
+    expect(isFlashActive()).toBe(true);
+    type("<Esc>");
+    expect(isFlashActive()).toBe(false);
+    expect(picked).toEqual([]);
+  });
+
+  it("shows nothing and reports false for a pick with no target", () => {
+    act(() => {
+      expect(startFlashPick(pickOver(0))).toBe(false);
+    });
+    expect(isFlashActive()).toBe(false);
+    expect(flash.active).toBe(false);
   });
 });

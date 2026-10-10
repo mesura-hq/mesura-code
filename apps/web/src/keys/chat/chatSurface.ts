@@ -464,6 +464,8 @@ function characterAt(buffer: ChatBuffer, at: BufferPosition): Range | null {
   return rangeBetween(buffer, at, { line: at.line, col: at.col + 1 });
 }
 
+const NOTHING_TO_CITE_NOTICE = "no assistant text on screen to cite";
+
 /**
  * `<leader>c` in normal mode: a cite in two flash picks, with no selection to
  * make first. The first labels the start of every sentence on screen, the
@@ -501,7 +503,7 @@ function startCitePick(buffer: ChatBuffer): void {
       if (start) pickCiteEnd(start);
     },
   });
-  if (!started) updateKeyEngineSnapshot({ notice: "no assistant text on screen to cite" });
+  if (!started) updateKeyEngineSnapshot({ notice: NOTHING_TO_CITE_NOTICE });
 }
 
 function pickCiteEnd(start: CitableSentence): void {
@@ -650,7 +652,11 @@ export const chatSurface: KeySurface = {
         return true;
       case "chat.cite": {
         const synced = syncBuffer();
-        if (!synced) return false;
+        // An empty timeline has no buffer, and so nothing to cite.
+        if (!synced) {
+          updateKeyEngineSnapshot({ notice: NOTHING_TO_CITE_NOTICE });
+          return true;
+        }
         if (!isVisual()) {
           startCitePick(synced.buffer);
           return true;

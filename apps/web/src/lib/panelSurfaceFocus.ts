@@ -238,14 +238,19 @@ function waitForEntry(panel: Element, parkedOn: HTMLElement): void {
   const stop = () => {
     observer.disconnect();
     window.clearTimeout(timer);
+    document.removeEventListener("focusin", onFocusIn, true);
     if (frame !== 0) window.cancelAnimationFrame(frame);
     if (cancelPendingEntry === stop) cancelPendingEntry = null;
+  };
+  // Focus went somewhere on its own: the developer moved, or the surface
+  // focused itself. The wait ends then, even if focus comes back to the title
+  // before the entry renders. A drop to <body> fires no `focusin` and keeps it.
+  const onFocusIn = (event: FocusEvent) => {
+    if (event.target !== parkedOn) stop();
   };
   const attempt = () => {
     frame = 0;
     const active = document.activeElement;
-    // Focus went somewhere on its own: the developer moved, or the surface
-    // focused itself.
     if (active !== parkedOn && active !== document.body) return stop();
     if (focusPanelSurface(panel)) stop();
   };
@@ -253,6 +258,7 @@ function waitForEntry(panel: Element, parkedOn: HTMLElement): void {
     if (frame === 0) frame = window.requestAnimationFrame(attempt);
   });
   observer.observe(content, { childList: true, subtree: true });
+  document.addEventListener("focusin", onFocusIn, true);
   const timer = window.setTimeout(stop, ENTRY_WAIT_MS);
   cancelPendingEntry = stop;
 }

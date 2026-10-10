@@ -40,6 +40,19 @@ function mountList(rows: Array<{ key: string; top: number }>, viewportWidth = 20
 
 let root: Root | null = null;
 
+function ArrowKeysProbe() {
+  useThreadRowArrowKeys();
+  return null;
+}
+
+/** Mounts `useThreadRowArrowKeys` as the sidebar does. */
+function mountArrowKeys(): void {
+  const container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  act(() => root!.render(createElement(ArrowKeysProbe)));
+}
+
 describe("sidebar thread viewport", () => {
   afterEach(() => {
     act(() => root?.unmount());
@@ -86,14 +99,7 @@ describe("sidebar thread viewport", () => {
       { key: "b", top: 100 },
       { key: "c", top: 200 },
     ]);
-    const container = document.createElement("div");
-    document.body.append(container);
-    root = createRoot(container);
-    const Probe = () => {
-      useThreadRowArrowKeys();
-      return null;
-    };
-    act(() => root!.render(createElement(Probe)));
+    mountArrowKeys();
     const focused = () => (document.activeElement as HTMLElement | null)?.dataset.mesuraThreadKey;
     const press = (key: string) =>
       window.dispatchEvent(new KeyboardEvent("keydown", { key, cancelable: true }));
@@ -110,5 +116,60 @@ describe("sidebar thread viewport", () => {
     expect(focused()).toBe("c");
     press("ArrowUp");
     expect(focused()).toBe("b");
+  });
+
+  // What a row does with a key is `Sidebar.tsx`'s own handler, which this
+  // fixture does not copy; this pins only that the hook moves focus without
+  // clicking a row, which is how a row opens its thread.
+  it("moves focus over the thread rows on Up and Down without clicking a thread row", () => {
+    const viewport = mountList([
+      { key: "a", top: 0 },
+      { key: "b", top: 100 },
+      { key: "c", top: 200 },
+    ]);
+    const clicked: string[] = [];
+    for (const row of viewport.querySelectorAll<HTMLElement>("[data-mesura-thread-key]")) {
+      row.addEventListener("click", () => clicked.push(row.dataset.mesuraThreadKey ?? ""));
+    }
+    mountArrowKeys();
+    const pressOnFocused = (key: string) => {
+      const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      (document.activeElement ?? document.body).dispatchEvent(event);
+      return event;
+    };
+    const focused = () => (document.activeElement as HTMLElement | null)?.dataset.mesuraThreadKey;
+
+    document.querySelector<HTMLElement>('[data-mesura-thread-key="c"]')!.focus();
+    const up = pressOnFocused("ArrowUp");
+    expect(focused()).toBe("b");
+    expect(up.defaultPrevented).toBe(true);
+    pressOnFocused("ArrowUp");
+    expect(focused()).toBe("a");
+    // The first row is the list's top: Up stays there.
+    pressOnFocused("ArrowUp");
+    expect(focused()).toBe("a");
+    pressOnFocused("ArrowDown");
+    expect(focused()).toBe("b");
+    expect(clicked).toEqual([]);
+  });
+
+  it("leaves Up and Down to a control inside a sidebar thread row", () => {
+    const viewport = mountList([
+      { key: "a", top: 0 },
+      { key: "b", top: 100 },
+    ]);
+    const rename = document.createElement("input");
+    viewport.querySelector('[data-mesura-thread-key="a"]')!.append(rename);
+    mountArrowKeys();
+
+    rename.focus();
+    const event = new KeyboardEvent("keydown", {
+      key: "ArrowDown",
+      bubbles: true,
+      cancelable: true,
+    });
+    rename.dispatchEvent(event);
+    expect(document.activeElement).toBe(rename);
+    expect(event.defaultPrevented).toBe(false);
   });
 });
