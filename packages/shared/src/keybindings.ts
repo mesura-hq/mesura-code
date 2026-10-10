@@ -127,7 +127,9 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // last and alt+m stays the alternate.
   { key: "alt+m", command: "modelPicker.toggle", when: "!terminalFocus" },
   { key: "mod+shift+m", command: "modelPicker.toggle", when: "!terminalFocus" },
-  { key: "mod+shift+h", command: "composer.host", when: "!terminalFocus" },
+  // The host chord now cycles machines; composer.host stays, unbound, and its
+  // strip chip opens the run context drawer on its Host tab.
+  { key: "mod+shift+h", command: "runContext.cycleMachine", when: "!terminalFocus" },
   // Fork: upstream's `mod+shift+e` for composer.effort is withdrawn; the chord
   // is fileTree.miller's, and alt+e (traitsPicker.toggle) opens the same
   // picker. The command stays, unbound, for anyone who wants it back.
@@ -139,7 +141,14 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+arrowup", command: "modelPicker.previousProvider", when: "modelPickerOpen" },
   { key: "mod+shift+arrowdown", command: "modelPicker.nextProvider", when: "modelPickerOpen" },
   { key: "alt+e", command: "traitsPicker.toggle", when: "!terminalFocus" },
-  { key: "alt+w", command: "workspacePicker.toggle", when: "!terminalFocus" },
+  // alt+w opens the whole run context drawer. workspacePicker.toggle stays,
+  // unbound, and opens the drawer on its Workspace tab when bound.
+  { key: "alt+w", command: "runContext.toggle", when: "!terminalFocus" },
+  // Two chords, and the label shows the last. Browsers keep mod+shift+w to
+  // close the window and never deliver it to the page, so alt+shift+w is the
+  // chord a browser lets through; mod+shift+w reaches the desktop app.
+  { key: "alt+shift+w", command: "runContext.toggleWorkspace", when: "!terminalFocus" },
+  { key: "mod+shift+w", command: "runContext.toggleWorkspace", when: "!terminalFocus" },
   { key: "alt+b", command: "branchPicker.toggle", when: "!terminalFocus" },
   // A new command, so no existing config mentions it and the ordinary
   // per-command startup backfill installs it. No ADDED_KEYBINDING_DEFAULTS
@@ -428,6 +437,17 @@ export const WITHDRAWN_KEYBINDING_DEFAULTS: ReadonlyArray<WithdrawnKeybindingDef
   {
     id: "2026-09-withdraw-composer-effort-mod-shift-e",
     rule: { key: "mod+shift+e", command: "composer.effort", when: "!terminalFocus" },
+  },
+  // The run context drawer takes both chords for new commands. Withdrawing
+  // the old rules first frees them, so the per-command backfill installs
+  // runContext.cycleMachine and runContext.toggle in the same startup.
+  {
+    id: "2026-10-withdraw-composer-host-mod-shift-h",
+    rule: { key: "mod+shift+h", command: "composer.host", when: "!terminalFocus" },
+  },
+  {
+    id: "2026-10-withdraw-workspace-picker-alt-w",
+    rule: { key: "alt+w", command: "workspacePicker.toggle", when: "!terminalFocus" },
   },
 ];
 

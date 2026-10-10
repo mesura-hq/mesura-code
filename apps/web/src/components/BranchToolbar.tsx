@@ -31,7 +31,6 @@ import {
   resolveEnvModeLabel,
   resolveEffectiveEnvMode,
   resolveLockedWorkspaceLabel,
-  resolvePreviousWorktreeLabel,
   resolvePreviousWorktreeSeed,
   shouldShowEnvironmentIndicator,
 } from "./BranchToolbar.logic";
@@ -39,8 +38,10 @@ import {
   BranchToolbarBranchSelector,
   type BranchToolbarBranchSelectorHandle,
 } from "./BranchToolbarBranchSelector";
-import { BranchToolbarEnvironmentSelector } from "./BranchToolbarEnvironmentSelector";
-import { BranchToolbarEnvModeSelector } from "./BranchToolbarEnvModeSelector";
+import { RunContextDrawer } from "./runContext/RunContextDrawer";
+import { RunContextStripTrigger } from "./runContext/RunContextStripTrigger";
+import type { RunContextTab } from "./runContext/runContextDrawer.logic";
+import { useRunContextController } from "./runContext/useRunContextController";
 import { Button } from "./ui/button";
 import {
   Menu,
@@ -70,7 +71,7 @@ interface BranchToolbarProps {
   threadId: ThreadId;
   showGitControls: boolean;
   draftId?: DraftId;
-  onEnvModeChange: (mode: EnvMode) => void;
+  onEnvModeChange: (mode: EnvMode, options?: { focusComposer?: boolean }) => void;
   effectiveEnvModeOverride?: EnvMode;
   activeThreadBranchOverride?: string | null;
   onActiveThreadBranchOverrideChange?: (branch: string | null) => void;
@@ -104,7 +105,9 @@ interface MobileRunContextSelectorProps {
   onUsePreviousWorktree: () => void;
 }
 
-const MobileRunContextSelector = memo(function MobileRunContextSelector({
+// Mesura: unused while the run context drawer prototype replaces it. Kept, not
+// deleted, so upstream edits to it still merge; remove once the drawer ships.
+const _MobileRunContextSelector = memo(function MobileRunContextSelector({
   autoEnvironmentLabel,
   onAutoEnvironment,
   envLocked,
@@ -341,6 +344,8 @@ function useLabelsOverflow(element: HTMLDivElement | null): boolean {
     let groups = 0;
     for (const child of current.children) {
       if (!(child instanceof HTMLElement)) continue;
+      // The run context drawer takes its own line above the strip's row.
+      if (child.dataset.runContextDrawer !== undefined) continue;
       // The host itself flexes into all remaining room. Reserve the natural
       // width of the controls inside it, blocks in overflow included, so Git
       // labels compact before squeezing out the model picker. Reserving only
@@ -474,7 +479,6 @@ export const BranchToolbar = memo(function BranchToolbar({
   startFromOrigin,
   onStartFromOriginChange,
   autoEnvironmentLabel,
-  onAutoEnvironment,
   envLocked,
   onCheckoutPullRequestRequest,
   onComposerFocusRequest,
@@ -529,9 +533,6 @@ export const BranchToolbar = memo(function BranchToolbar({
         : null,
     [activeWorktreePath, canUsePreviousWorktree, projectThreads],
   );
-  const previousWorktreeLabel = previousWorktreeSeed
-    ? resolvePreviousWorktreeLabel(previousWorktreeSeed)
-    : null;
   const onUsePreviousWorktree = useCallback(() => {
     if (!previousWorktreeSeed || !activeProjectRef) return;
     // Same shape the branch selector writes when picking a branch that
@@ -544,10 +545,12 @@ export const BranchToolbar = memo(function BranchToolbar({
     });
   }, [activeProjectRef, draftId, previousWorktreeSeed, setDraftThreadContext, threadRef]);
 
+  // Set once the run context controller exists, below.
+  const openRunContextAtBranchRef = useRef<() => void>(() => {});
   useImperativeHandle(
     ref,
     () => ({
-      openBranchPicker: () => branchSelectorRef.current?.open(),
+      openBranchPicker: () => openRunContextAtBranchRef.current(),
       usePreviousWorktree: () => {
         if (!showGitControls || !canUsePreviousWorktree || !previousWorktreeSeed) return;
         onUsePreviousWorktree();
@@ -575,6 +578,49 @@ export const BranchToolbar = memo(function BranchToolbar({
   const [stripElement, setStripElement] = useState<HTMLDivElement | null>(null);
   const labelsOverflow = useLabelsOverflow(stripElement);
 
+  const runContext = useRunContextController({
+    environmentId,
+    availableEnvironments,
+    envLocked,
+    isDraft: draftId !== undefined,
+    envModeLocked,
+    showGitControls,
+    autoEnvironmentLabel,
+    onEnvironmentChange,
+    effectiveEnvMode,
+    activeWorktreePath,
+    onEnvModeChange,
+    onComposerFocusRequest,
+  });
+  const openRunContext = runContext.open;
+  useEffect(() => {
+    openRunContextAtBranchRef.current = () => openRunContext("branch");
+  }, [openRunContext]);
+  const toggleRunContextAt = (tab: RunContextTab) => {
+    if (runContext.drawerOpen) runContext.close({ focusComposer: false });
+    else runContext.open(tab);
+  };
+  const activeEnvironmentLabel = autoEnvironmentLabel ?? activeEnvironmentOption?.label ?? "Run on";
+  const ActiveWorkspaceIcon =
+    effectiveEnvMode === "worktree"
+      ? FolderGit2Icon
+      : activeWorktreePath
+        ? FolderGitIcon
+        : FolderIcon;
+  const activeWorkspaceLabel = envModeLocked
+    ? resolveLockedWorkspaceLabel(activeWorktreePath)
+    : effectiveEnvMode === "worktree"
+      ? resolveEnvModeLabel("worktree")
+      : resolveCurrentWorkspaceLabel(activeWorktreePath);
+  const machineIcon = autoEnvironmentLabel ? (
+    <ScaleIcon className="size-3 shrink-0" aria-hidden="true" />
+  ) : (
+    <EnvironmentMachineIcon
+      kind={activeEnvironmentOption?.machine ?? "server"}
+      className="size-3 shrink-0"
+    />
+  );
+
   if (!hasActiveThread || !activeProject) return null;
 
   return (
@@ -583,29 +629,46 @@ export const BranchToolbar = memo(function BranchToolbar({
       data-compact={labelsOverflow ? "" : undefined}
       className={cn(
         "gap-1 text-xs font-normal text-muted-foreground/70",
+        runContext.drawerOpen && "flex-wrap",
         // A non-Git strip with no visible composer controls should occupy no
         // space, but its host must retain a prospective width so controls can
         // become visible again when the chat view grows.
         !contextStripVisible && "pointer-events-none invisible absolute inset-x-0 top-full",
       )}
     >
+      {/* Without Git there is no branch selector to host the drawer. With
+          Git, the selector renders it (below), so the Branch tab and the
+          strip chip share one instance. The drawer sorts itself first. */}
+      {runContext.drawerOpen && !showGitControls ? (
+        <RunContextDrawer {...runContext.drawerProps} branchLabel={null} branchPanel={null} />
+      ) : null}
       {showGitControls ? (
-        <div className="contents @3xl/composer-surface:hidden">
-          <MobileRunContextSelector
-            autoEnvironmentLabel={autoEnvironmentLabel}
-            onAutoEnvironment={onAutoEnvironment}
-            envLocked={envLocked}
-            envModeLocked={envModeLocked}
-            environmentId={environmentId}
-            availableEnvironments={availableEnvironments}
-            showEnvironmentPicker={showEnvironmentPicker}
-            showEnvironmentIndicator={showEnvironmentIndicator}
-            onEnvironmentChange={onEnvironmentChange}
-            effectiveEnvMode={effectiveEnvMode}
-            activeWorktreePath={activeWorktreePath}
-            onEnvModeChange={onEnvModeChange}
-            previousWorktreeLabel={previousWorktreeLabel}
-            onUsePreviousWorktree={onUsePreviousWorktree}
+        // The drawer's tab bar shows the same choices while it is open.
+        <div
+          className={cn("contents @3xl/composer-surface:hidden", runContext.drawerOpen && "hidden")}
+        >
+          <RunContextStripTrigger
+            className="max-w-[48%] flex-initial justify-start"
+            icon={
+              showEnvironmentIndicator ? (
+                // Button's base styles apply `-mx-0.5` to descendant SVGs;
+                // mx-0! keeps the pair 2px apart.
+                <span className="inline-flex shrink-0 items-center gap-0.5 [&_svg]:mx-0!">
+                  {machineIcon}
+                  <ActiveWorkspaceIcon className="size-3 shrink-0" />
+                </span>
+              ) : (
+                <ActiveWorkspaceIcon className="size-3 shrink-0" />
+              )
+            }
+            label={showEnvironmentIndicator ? activeEnvironmentLabel : activeWorkspaceLabel}
+            locked={envLocked && envModeLocked}
+            drawerOpen={runContext.drawerOpen}
+            onPress={() => toggleRunContextAt("host")}
+            ariaLabel="Run context"
+            // composer.workspace reaches the drawer through ChatView instead,
+            // so this chip, which opens on Host, answers only composer.host.
+            composerShortcut="composer.host"
           />
         </div>
       ) : null}
@@ -615,17 +678,20 @@ export const BranchToolbar = memo(function BranchToolbar({
             "min-h-7 min-w-10 items-center gap-1 sm:min-h-6",
             showGitControls ? "hidden @3xl/composer-surface:flex" : "flex",
             composerControlsHostRef ? "shrink" : "flex-1",
+            runContext.drawerOpen && "hidden @3xl/composer-surface:hidden",
           )}
         >
           {showEnvironmentIndicator && availableEnvironments && (
             <>
-              <BranchToolbarEnvironmentSelector
-                autoEnvironmentLabel={autoEnvironmentLabel}
-                onAutoEnvironment={onAutoEnvironment}
-                envLocked={envLocked}
-                environmentId={environmentId}
-                availableEnvironments={availableEnvironments}
-                {...(showEnvironmentPicker && onEnvironmentChange ? { onEnvironmentChange } : {})}
+              <RunContextStripTrigger
+                className="max-w-full"
+                icon={machineIcon}
+                label={activeEnvironmentLabel}
+                locked={!showEnvironmentPicker || envLocked || draftId === undefined}
+                drawerOpen={runContext.drawerOpen}
+                onPress={() => toggleRunContextAt("host")}
+                ariaLabel="Machine"
+                composerShortcut="composer.host"
               />
               {showGitControls ? (
                 <Separator
@@ -637,13 +703,14 @@ export const BranchToolbar = memo(function BranchToolbar({
             </>
           )}
           {showGitControls ? (
-            <BranchToolbarEnvModeSelector
-              envModeLocked={envModeLocked}
-              effectiveEnvMode={effectiveEnvMode}
-              activeWorktreePath={activeWorktreePath}
-              onEnvModeChange={onEnvModeChange}
-              previousWorktreeLabel={previousWorktreeLabel}
-              onUsePreviousWorktree={onUsePreviousWorktree}
+            <RunContextStripTrigger
+              className="shrink"
+              icon={<ActiveWorkspaceIcon className="size-3 shrink-0" />}
+              label={activeWorkspaceLabel}
+              locked={envModeLocked}
+              drawerOpen={runContext.drawerOpen}
+              onPress={() => toggleRunContextAt("workspace")}
+              ariaLabel="Workspace"
             />
           ) : null}
         </div>
@@ -664,7 +731,10 @@ export const BranchToolbar = memo(function BranchToolbar({
       {showGitControls ? (
         <BranchToolbarBranchSelector
           ref={branchSelectorRef}
-          className="min-w-0 flex-initial justify-end @3xl/composer-surface:ml-auto"
+          className={cn(
+            "min-w-0 flex-initial justify-end @3xl/composer-surface:ml-auto",
+            runContext.drawerOpen && "hidden",
+          )}
           environmentId={environmentId}
           threadId={threadId}
           {...(draftId ? { draftId } : {})}
@@ -676,6 +746,19 @@ export const BranchToolbar = memo(function BranchToolbar({
           onStartFromOriginChange={onStartFromOriginChange}
           {...(onCheckoutPullRequestRequest ? { onCheckoutPullRequestRequest } : {})}
           {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
+          presentation="drawer"
+          drawerBranchTabActive={runContext.drawerOpen && runContext.activeTab === "branch"}
+          onDrawerDone={() => runContext.close({ focusComposer: false })}
+          onOpenRequest={() => toggleRunContextAt("branch")}
+          renderDrawer={({ branchLabel, branchPanel }) =>
+            runContext.drawerOpen ? (
+              <RunContextDrawer
+                {...runContext.drawerProps}
+                branchLabel={branchLabel}
+                branchPanel={branchPanel}
+              />
+            ) : null
+          }
         />
       ) : null}
     </ComposerSurface.ContextStrip>

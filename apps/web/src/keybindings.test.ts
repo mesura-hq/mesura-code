@@ -1194,9 +1194,25 @@ describe("shipped defaults on Linux", () => {
     );
   });
 
-  it("opens the branch-toolbar pickers", () => {
-    assert.strictEqual(resolve(press("w", { altKey: true })), "workspacePicker.toggle");
+  it("opens the run context drawer and the branch picker", () => {
+    assert.strictEqual(resolve(press("w", { altKey: true })), "runContext.toggle");
     assert.strictEqual(resolve(press("b", { altKey: true })), "branchPicker.toggle");
+  });
+
+  it("cycles machines and toggles the workspace without opening the drawer", () => {
+    assert.strictEqual(
+      resolve(press("h", { ctrlKey: true, shiftKey: true })),
+      "runContext.cycleMachine",
+    );
+    assert.strictEqual(
+      resolve(press("w", { ctrlKey: true, shiftKey: true })),
+      "runContext.toggleWorkspace",
+    );
+    // The chord a browser lets through: it keeps Ctrl+Shift+W to close the window.
+    assert.strictEqual(
+      resolve(press("w", { altKey: true, shiftKey: true })),
+      "runContext.toggleWorkspace",
+    );
   });
 
   it("toggles the open thread's settled state on mod+shift+s, and leaves the terminal alone", () => {

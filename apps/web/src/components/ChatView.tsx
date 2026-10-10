@@ -234,6 +234,7 @@ import { useThreadSettledToggle } from "../lib/useThreadSettledToggle";
 import { dispatchPickerAction } from "../lib/pickerActionBus";
 import { useCommandHandlers } from "../commands/commandRegistry";
 import { openPanelLauncher } from "../lib/panelLauncher";
+import { isRunContextHostReachable } from "./runContext/runContextDrawer.logic";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
   AlarmClockIcon,
@@ -2492,6 +2493,7 @@ export default function ChatView(props: ChatViewProps) {
         label: environment?.label ?? p.environmentId,
         isPrimary,
         machine: resolveEnvironmentMachineKind(environment?.serverConfig ?? null),
+        reachable: isRunContextHostReachable(environment?.connection.phase),
       });
     }
     // Sort: primary first, then alphabetical
@@ -6937,11 +6939,18 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      if (command === "composer.workspace") {
+        // The run context drawer owns the workspace choice and opens on its tab.
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) dispatchPickerAction("workspace");
+        return;
+      }
+
       if (
         command === "composer.host" ||
         command === "composer.effort" ||
-        command === "composer.mode" ||
-        command === "composer.workspace"
+        command === "composer.mode"
       ) {
         event.preventDefault();
         event.stopPropagation();
@@ -7004,6 +7013,17 @@ export default function ChatView(props: ChatViewProps) {
         event.preventDefault();
         event.stopPropagation();
         dispatchPickerAction("branch");
+        return;
+      }
+
+      if (
+        command === "runContext.toggle" ||
+        command === "runContext.cycleMachine" ||
+        command === "runContext.toggleWorkspace"
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) dispatchPickerAction(command);
         return;
       }
 
@@ -9103,10 +9123,13 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
   const onEnvModeChange = useCallback(
-    (mode: DraftThreadEnvMode) => {
+    // The run context drawer passes focusComposer: false, because it keeps the
+    // keyboard while it stays open.
+    (mode: DraftThreadEnvMode, options?: { focusComposer?: boolean }) => {
+      const focusAfterChange = options?.focusComposer !== false;
       if (canOverrideServerThreadEnvMode) {
         setPendingServerThreadEnvMode(mode);
-        scheduleComposerFocus();
+        if (focusAfterChange) scheduleComposerFocus();
         return;
       }
       if (isLocalDraftThread) {
@@ -9119,7 +9142,7 @@ export default function ChatView(props: ChatViewProps) {
           ...(mode === "worktree" && draftThread?.worktreePath ? { worktreePath: null } : {}),
         });
       }
-      scheduleComposerFocus();
+      if (focusAfterChange) scheduleComposerFocus();
     },
     [
       canOverrideServerThreadEnvMode,

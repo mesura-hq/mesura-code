@@ -12,6 +12,8 @@ export interface EnvironmentOption {
   label: string;
   isPrimary: boolean;
   machine: EnvironmentMachineKind;
+  /** Mesura: false while the machine cannot be reached; absent means unknown. */
+  reachable?: boolean | undefined;
 }
 
 export const EnvMode = Schema.Literals(["local", "worktree"]);
