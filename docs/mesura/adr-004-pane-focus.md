@@ -113,6 +113,13 @@ the content for the same attention. An animated version was never on the table
   restyle the whole column, measured against upstream v0.0.42 on the same
   data. `mesura.css` carries the numbers, and
   `tests/unit/fork-styling-hooks.test.ts` keeps `:has()` out of that file.
+- Vim mode's chat buffer holds the keys with focus on `body`, outside every
+  pane root, so `:focus-within` cannot see it. The key engine marks `<html>`
+  with `[data-mesura-chat-keys]` while its scope is the chat, and the chat
+  column's mark also keys on that (`keys/keyEngine.ts`).
+- A pointer press records the pane it lands in as `lastFocusedPane`
+  (`notePointerPane`). A click on a pane's plain text focuses nothing, and
+  the keys that follow are still meant for that pane.
 - The pane roots are upstream's existing hooks: `[data-app-sidebar]`,
   `[data-chat-column-maximized-away]`, `[data-terminal-owner="drawer"]` and
   `[data-preview-panel-mode]`. The two header rows are `[data-chat-header]`

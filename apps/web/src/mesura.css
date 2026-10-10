@@ -80,9 +80,11 @@
    those take a frame inset inside the pane instead.
 
    Driven by `:focus-within`, so the browser's own focus tree is the only
-   state involved: no React state and no re-render. Focus leaving for a menu
-   or the command palette drops the mark while that is open, which is honest
-   about where the keys are going.
+   state involved: no React state and no re-render. The exception is Vim
+   mode's chat buffer, which holds the keys with focus on <body>: the key
+   engine marks the root for it (`[data-mesura-chat-keys]`). Focus leaving
+   for a menu or the command palette drops the mark while that is open, which
+   is honest about where the keys are going.
 
    One question is answered by a listener instead: whether focus is inside the
    terminal drawer, which renders inside the chat column and after its header.
@@ -213,8 +215,14 @@ html[data-theme-id]:not([data-theme-id=""]) {
 
 /* Unfocused: the row's title recedes. The chat column hands its mark to the
    terminal drawer whenever focus is inside the drawer, because the drawer is
-   rendered inside the column and would otherwise light both. */
-[data-chat-column-maximized-away]:not(:focus-within) [data-chat-header] h2,
+   rendered inside the column and would otherwise light both. The chat buffer
+   in Vim normal mode holds the keys with focus on <body>, outside the column,
+   so the key engine marks the root instead (`[data-mesura-chat-keys]`,
+   `keys/keyEngine.ts`). */
+:root:not([data-mesura-chat-keys])
+  [data-chat-column-maximized-away]:not(:focus-within)
+  [data-chat-header]
+  h2,
 [data-mesura-drawer-focused] [data-chat-header] h2,
 [data-preview-panel-mode]:not(:focus-within) [data-right-panel-tabbar] [data-active-tab="true"] {
   color: var(--muted-foreground);
@@ -224,6 +232,7 @@ html[data-theme-id]:not([data-theme-id=""]) {
 :root:not([data-mesura-drawer-focused])
   [data-chat-column-maximized-away]:focus-within
   [data-chat-header]::after,
+:root[data-mesura-chat-keys]:not([data-mesura-drawer-focused]) [data-chat-header]::after,
 [data-preview-panel-mode]:focus-within [data-right-panel-tabbar]::after,
 [data-app-sidebar]:focus-within [data-slot="sidebar-header"]::after {
   background-color: var(--mesura-pane-focus-tint);

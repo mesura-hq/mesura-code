@@ -24,7 +24,7 @@ import {
   resumeComposerNormalOnFocus,
 } from "./composer/composerSurface";
 import { isCommandPaletteOpen } from "~/commandPaletteBus";
-import { focusPane, getFocusedPane } from "~/lib/paneFocus";
+import { focusPane, getFocusedPane, notePointerPane } from "~/lib/paneFocus";
 import { handlePaneKey, isPaneModeActive, startPaneMode, stopPaneMode } from "./paneMode";
 
 /**
@@ -112,6 +112,18 @@ export function installKeyEngine(): void {
   // which run later and may change their mode.
   window.addEventListener("focusin", () => queueMicrotask(settleOnInput), true);
   window.addEventListener("focusout", () => queueMicrotask(refreshModeIndicator), true);
+  // A click on a pane's text moves the keys there without focusing anything.
+  // Where an element holds focus, the press blurs it next and `focusout`
+  // refreshes; refreshing now would read that element's pane back first.
+  window.addEventListener(
+    "pointerdown",
+    (event) => {
+      notePointerPane(event.target);
+      const active = document.activeElement;
+      if (active === null || active === document.body) queueMicrotask(refreshModeIndicator);
+    },
+    true,
+  );
 }
 
 function resetEngine(): void {
@@ -142,8 +154,12 @@ function showWhichKey(node: KeyNode, title: string, immediately: boolean): void 
 
 /** Shows where the keys go and in which mode; returns that scope, or null while off. */
 export function refreshModeIndicator(): KeyScope | null {
-  if (!enabled) return null;
+  if (!enabled) {
+    markChatBufferKeys(false);
+    return null;
+  }
   const scope = resolveKeyScope();
+  markChatBufferKeys(scope === "chat");
   const surface = surfaces.get(scope);
   const mode: EngineModeLabel = isPaneModeActive()
     ? "PANE"
@@ -154,6 +170,17 @@ export function refreshModeIndicator(): KeyScope | null {
         : "NORMAL";
   updateKeyEngineSnapshot({ scope, mode });
   return scope;
+}
+
+/**
+ * Marks the root while the chat buffer holds the keys, so the chat pane shows
+ * its focus mark (`mesura.css`). Normal mode in the chat leaves focus on
+ * <body>, where the column's `:focus-within` cannot see it.
+ */
+function markChatBufferKeys(on: boolean): void {
+  const root = document.documentElement;
+  if (on) root.dataset.mesuraChatKeys = "";
+  else delete root.dataset.mesuraChatKeys;
 }
 
 /**

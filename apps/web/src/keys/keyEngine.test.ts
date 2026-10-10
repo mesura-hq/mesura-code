@@ -270,6 +270,80 @@ describe("key engine in the chat without a binding", () => {
   });
 });
 
+describe("key engine chat pane mark", () => {
+  const chatKeysMarked = () => "mesuraChatKeys" in document.documentElement.dataset;
+  /** The engine refreshes in a microtask after focus and pointer events. */
+  const settle = () => Promise.resolve();
+
+  /** Plain message text: a press there focuses nothing. */
+  function chatText(): HTMLElement {
+    const text = document.createElement("p");
+    text.textContent = "an assistant message";
+    document.querySelector("[data-chat-column-maximized-away]")!.append(text);
+    return text;
+  }
+
+  function pressPointerOn(element: HTMLElement) {
+    element.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+  }
+
+  it("marks the chat while the chat buffer holds the keys with focus on <body>", async () => {
+    byTestId("chat-focus").focus();
+    (document.activeElement as HTMLElement).blur();
+    await settle();
+    expect(document.activeElement).toBe(document.body);
+    expect(readKeyEngineSnapshot().scope).toBe("chat");
+    expect(chatKeysMarked()).toBe(true);
+
+    byTestId("sidebar-row").focus();
+    await settle();
+    expect(chatKeysMarked()).toBe(false);
+  });
+
+  it("hands the keys and the mark to the chat on a press on its text, from the sidebar", async () => {
+    const text = chatText();
+    byTestId("sidebar-row").focus();
+    await settle();
+    expect(readKeyEngineSnapshot().scope).toBe("sidebar");
+
+    // The browser's order: pointerdown, its microtasks, then the blur of the
+    // focused row to <body>.
+    pressPointerOn(text);
+    await settle();
+    (document.activeElement as HTMLElement).blur();
+    await settle();
+
+    expect(readKeyEngineSnapshot().scope).toBe("chat");
+    expect(chatKeysMarked()).toBe(true);
+  });
+
+  it("hands the keys to the chat on a press on its text when <body> already has focus", async () => {
+    const text = chatText();
+    byTestId("sidebar-row").focus();
+    await settle();
+    (document.activeElement as HTMLElement).blur();
+    await settle();
+    expect(document.activeElement).toBe(document.body);
+    expect(readKeyEngineSnapshot().scope).toBe("sidebar");
+
+    pressPointerOn(text);
+    await settle();
+
+    expect(readKeyEngineSnapshot().scope).toBe("chat");
+    expect(chatKeysMarked()).toBe(true);
+  });
+
+  it("drops the mark when Vim mode turns off", async () => {
+    byTestId("chat-focus").focus();
+    (document.activeElement as HTMLElement).blur();
+    await settle();
+    expect(chatKeysMarked()).toBe(true);
+
+    configureKeyEngine({ enabled: false });
+    expect(chatKeysMarked()).toBe(false);
+  });
+});
+
 describe("default modal keymap", () => {
   it("compiles the default modal keymap without a conflict", () => {
     expect(compileKeymap(DEFAULT_KEYMAP).conflicts).toEqual([]);
