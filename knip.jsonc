@@ -69,17 +69,21 @@
       // named subcomponents even before they have callers; the file audit still
       // reports an entire component module when nothing imports it.
       "ignoreIssues": { "src/components/ui/*.tsx": ["exports", "nsExports", "duplicates"] },
-      // Mesura: upstream renders these three; this fork does not, and keeping the
+      // Mesura: upstream renders these; this fork does not, and keeping the
       // files is deliberate. `GitActionsControl` and the `StartTruncatedPath` it
       // uses were the chat header's git quick action, which this fork moved out of
       // the header; `useDirectoryEntries` belongs to upstream's file explorer,
-      // which this fork replaced with the Symmetria tree. Deleting them would be
-      // the change most likely to conflict at the next sync — upstream still edits
-      // all three — so they stay, unrendered, and knip is told why.
+      // which this fork replaced with the Symmetria tree. The two
+      // `BranchToolbar*Selector` files were the strip's host and workspace menus,
+      // which the run context drawer replaced. Deleting them would be the change
+      // most likely to conflict at the next sync — upstream still edits all of
+      // them — so they stay, unrendered, and knip is told why.
       "ignore": [
         "src/components/GitActionsControl.tsx",
         "src/components/StartTruncatedPath.tsx",
         "src/components/files/useDirectoryEntries.ts",
+        "src/components/BranchToolbarEnvironmentSelector.tsx",
+        "src/components/BranchToolbarEnvModeSelector.tsx",
       ],
     },
     "infra/relay": {

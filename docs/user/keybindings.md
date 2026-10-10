@@ -26,11 +26,10 @@ and logs a warning instead.
 
 ## Composer controls
 
-Use `mod+shift+m` to choose a model and `mod+shift+h` to choose a host.
-Use `alt+e` for effort, `mod+shift+a` for access mode, `mod+shift+x` for the
-workspace, and `mod+shift+g` for the Git branch. The workspace menu includes the
-current checkout, a new worktree, and the previous worktree when available.
-Use `mod+shift+l` to reuse the previous worktree directly.
+Use `mod+shift+m` to choose a model, `alt+e` for effort, and `mod+shift+a` for
+access mode. Use `alt+w` to choose where the thread runs: the host, the workspace,
+and the Git branch, in one drawer (see [Run context](#run-context)). Use
+`mod+shift+l` to reuse the previous worktree directly.
 Use `mod+alt+a` to attach files. `alt+a` does the same where your desktop
 does not keep `Alt+A` for itself.
 
@@ -193,17 +192,39 @@ of them there.
 On a Latin American layout, `AltGr+Q` types `@`. That is a different chord — the app sees `AltGr`
 as `Ctrl+Alt` — so `alt+q` never eats it.
 
-### Branch toolbar
+### Run context
 
-`branchPicker.toggle` opens the branch menu above the composer and defaults to `alt+b`. Note that
+`runContext.toggle` opens the run context drawer under the composer and defaults to `alt+w`. The
+drawer has three tabs, in order: **Host**, **Workspace**, and **Branch**. Each tab shows its current
+choice, so the tab bar is also a summary.
+
+- Tab and Shift+Tab move between the tabs. Left and Right do the same on Host and Workspace.
+- Up and Down choose in the open tab, and 1–9 choose directly. A host or workspace choice applies
+  at once.
+- Typing a letter opens the branch search with that letter. Enter on a branch selects it, which can
+  check it out, and closes the drawer.
+- Enter closes the drawer, and Escape closes it too.
+
+The usual pass is `alt+w`, a host, Tab, a workspace, Enter. Tapping any of the three choices under
+the composer opens the drawer on that tab, which is how it works on a phone.
+
+**Host** lists the machines you can reach; a machine that is offline leaves the list until it
+reconnects. With a single machine, Host is a locked summary. Automatic routing is a setting rather
+than a host: with load balancing on, a new draft shows **Auto balance** until you choose a machine. **Workspace**
+offers the current checkout and a new worktree. It reads **Current worktree** while the draft
+points at an existing worktree, for example after you choose a branch that is checked out there.
+
+Once a thread has started, its host and workspace are fixed: the drawer shows them locked and
+opens on **Branch**.
+
+Two shortcuts change the draft without opening the drawer. `runContext.cycleMachine` moves to the
+next host and defaults to `mod+shift+h`. `runContext.toggleWorkspace` switches between the current
+checkout and a new worktree and defaults to `mod+shift+w` and `alt+shift+w`. Browsers keep
+`mod+shift+w` to close the window, so in a browser use `alt+shift+w`.
+
+`branchPicker.toggle` (`alt+b`) and `composer.branch` (`mod+shift+g`) open the drawer on its
+**Branch** tab, and `composer.workspace` (`mod+shift+x`) opens it as well. Note that
 `mod+alt+b` is a different shortcut: it toggles the right panel.
-
-`workspacePicker.toggle` opens the workspace control beside it — the one choosing between the
-current checkout and a new worktree — and defaults to `alt+w`. Three situations make it do nothing.
-The choice can no longer change, because the thread already owns a worktree and the control has
-become plain text; the project exposes no git controls at all; or the window is narrow enough that
-the toolbar collapses into its compact layout, which uses a different control the shortcut does not
-reach.
 
 An explicit workspace choice in a new-thread draft takes priority. Otherwise, `defaultThreadEnvMode`
 in the checkout's root `.mesura.json` wins, followed by the machine-local project setting,
@@ -421,7 +442,7 @@ shortcut; assign one in **Settings → Keybindings**.
 In the desktop app, `mod+w` closes the focused terminal or the active right-panel
 tab. When nothing remains to close, it closes the window. In a browser, `mod+w`
 closes the browser tab; rebind `rightPanel.close` and `terminal.close` to an available
-shortcut such as `alt+w`.
+shortcut such as `alt+z`.
 
 Many defaults include `!terminalFocus` so they do not intercept terminal input.
 Keep that condition when remapping them if you want the same behavior.
