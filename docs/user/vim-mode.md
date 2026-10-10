@@ -20,10 +20,6 @@ The terminal, the file editor, open dialogs and the command palette keep their o
 does not change how you use them. A tree (the file tree, the Diff's file list) keeps its keys too,
 but `Space` still opens the key menu from inside it.
 
-When the keyboard goes to the right panel (`Ctrl+L`, a launcher letter, `Ctrl+Tab`), it lands in
-the surface itself: the tree, the diff or the editor, not the tab. Use the arrows to move and
-`Ctrl+D` / `Ctrl+U` to move half a page; `Enter` opens the file under the cursor in a tree.
-
 ## The leader and the key menu
 
 `Space` is the leader. Press it in NORMAL mode and wait a moment: a menu shows the keys that
@@ -45,6 +41,35 @@ cancels a sequence, and `Backspace` steps back one key.
 
 `]t` and `[t` open the next and previous thread.
 
+## The sidebar and the right panel
+
+These keys work with Vim mode on or off.
+
+In the sidebar:
+
+- `Ctrl+D` and `Ctrl+U` scroll the thread list half a page without opening a thread.
+- Hold `Ctrl` and the threads on screen show a number: `Ctrl+1` to `Ctrl+9` open one. After a
+  scroll, the numbers count from the top of what you now see.
+- The arrow keys move over the threads and show each one's details without opening it. `Enter`
+  opens the thread you are on.
+
+In the right panel:
+
+- When the keyboard goes to the panel (`Ctrl+L`, a launcher letter, `Ctrl+Tab`, closing a tab),
+  it lands in the tab's content: the tree, the diff, the editor, a preview or a list, not the
+  tab's title. Use the arrows to move and `Ctrl+D` / `Ctrl+U` to move half a page. `Enter` opens
+  the file under the cursor in a tree. A terminal tab takes the keyboard in the terminal. A
+  Browser or Device tab keeps it on the tab's title: its page or screen has keys of its own, so
+  click into it.
+- `Ctrl+Tab` and `Ctrl+Shift+Tab` move to the next and previous tab, in the desktop app. A
+  terminal tab keeps them for itself.
+- The `+` button and, in the desktop app, `Ctrl+T` in the panel open the launcher, as `Space p`
+  does in Vim mode.
+- `Ctrl+Q` closes the tab, as `Ctrl+W` does in the desktop app. In a terminal it closes the
+  terminal, after you confirm with `Enter`. In the Linux desktop app `Ctrl+Q` no longer quits
+  Mesura Code: quit from **File → Quit** or your window manager. In the Windows desktop app it
+  still quits.
+
 ## Read and cite the chat
 
 In NORMAL mode the chat works like a read-only Vim buffer with a block cursor:
@@ -61,12 +86,14 @@ sentence on screen: type the label where the cite starts. Labels then appear at 
 sentence from there to the end of that answer: type the one where the cite ends. Labels are one
 or two characters, and `Esc` cancels.
 
-To cite an exact piece of text instead, select it in VISUAL mode and press `Space c`.
+To cite an exact piece of text instead, select it in VISUAL mode and press `Space c`. With no
+answer on screen, `Space c` tells you there is nothing to cite.
 
 Either way, the cited text flashes briefly, the citation goes to the end of your prompt as
 `<citation>: `, and the composer opens in INSERT mode, so you type or dictate your comment right
 away. Press `Esc` twice to go back to the chat
-and cite more. Only assistant text can be cited.
+and cite more. Only assistant text can be cited. The **Cite** button that shows when you select
+text with the mouse flashes the cited text the same way.
 
 Each thread remembers where its cursor was while the app stays open, so you return to the same
 place.

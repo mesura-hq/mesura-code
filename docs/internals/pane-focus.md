@@ -42,6 +42,13 @@ step from inside it starts at the chat.
 - **How to enter a pane.** The element that owns the pane's key handling.
   Focusing a wrapper instead would satisfy `:focus-within` and then swallow
   every keystroke, which looks identical to the feature not working.
+  A pane entry registered through `registerPaneEntry` beats the selector
+  list in `PANE_ENTRY_SELECTORS`, which is only the fallback. The right
+  panel always registers one, `enterPanel` (`lib/panelSurfaceFocus.ts`): it
+  focuses the active surface's `[data-pane-entry]` element. A new panel
+  surface without that attribute, a terminal apart, leaves the keyboard on
+  its tab title, where no key reaches it (ADR-009, "Landing in normal
+  mode").
 
 The one piece of state is `lastFocusedPane`, and it exists because blurring to
 `<body>` is ordinary — leaving Neovim's normal mode does it — and a chord

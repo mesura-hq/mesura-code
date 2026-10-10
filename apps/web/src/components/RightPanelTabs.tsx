@@ -612,7 +612,14 @@ function RightPanelEmptyState(props: {
                       {props.browserProfiles.map((profile) => (
                         <MenuItem
                           key={profile.id}
-                          onClick={() => props.onAddBrowserInProfile(profile.id)}
+                          onClick={() =>
+                            // Mesura: a profile is the Browser row with another target,
+                            // so it closes the launcher the same way.
+                            runAction({
+                              ...action,
+                              onClick: () => props.onAddBrowserInProfile(profile.id),
+                            })
+                          }
                         >
                           <span className="min-w-0 truncate">{profile.name}</span>
                         </MenuItem>

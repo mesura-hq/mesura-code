@@ -180,6 +180,36 @@ function assertRegistersCommands(file: string, commands: readonly string[]): voi
   );
 }
 
+/**
+ * The `{…}` block that opens after `marker`, braces included. Every brace
+ * counts: the blocks this reads hold no unbalanced brace in a literal, and
+ * `canonicalize`'s literal marks can drift in the largest sources.
+ */
+function blockAfter(source: string, marker: string, file: string): string {
+  const text = canonicalize(source).text;
+  const start = text.indexOf(tokens(marker));
+  assert.isAbove(start, -1, `${file}: "${marker}" is gone`);
+  const open = text.indexOf("{", start + tokens(marker).length);
+  assert.isAbove(open, -1, `${file}: no block follows "${marker}"`);
+  let depth = 0;
+  for (let index = open; index < text.length; index += 1) {
+    if (text[index] === "{") depth += 1;
+    else if (text[index] === "}" && --depth === 0) return text.slice(open, index + 1);
+  }
+  assert.fail(`${file}: the block after "${marker}" never closes`);
+}
+
+/** The class names of each element that carries `attribute`, in source order. */
+function classNamesOf(source: string, attribute: string): string[][] {
+  const parts = source.split(tokens(attribute));
+  return parts.slice(0, -1).map((before, index) => {
+    const element = before.slice(before.lastIndexOf("<"));
+    const after = parts[index + 1]!;
+    const tag = element + attribute + after.slice(0, after.indexOf(">"));
+    return (/className="([^"]*)"/.exec(tag)?.[1] ?? "").split(" ").filter(Boolean);
+  });
+}
+
 /** Whether a canonical source renders `<Name …>` or `<Name/>`. */
 const rendersElement = (source: string, name: string) =>
   new RegExp(`<${name}(?![\\w$.])`).test(source);
@@ -486,4 +516,559 @@ it("modal keys seam guard: closing the palette returns to where Vim mode left", 
     finalFocus.indexOf(tokens("focusAtEnd()")),
     "the palette focuses the composer before Vim mode can restore its origin",
   );
+});
+
+// Round 2: the sidebar keys, the right panel's tabs and launcher, one focus
+// per surface, Ctrl+Q, and the terminal close confirmation. The cite flash is
+// pinned above, with the selection toolbar.
+
+/** How many times `fragment` occurs in a canonical source. */
+const countOf = (source: string, fragment: string) => source.split(tokens(fragment)).length - 1;
+
+it("modal keys seam guard round 2: the sidebar numbers and jumps to the threads on screen", () => {
+  const file = "apps/web/src/components/Sidebar.tsx";
+  assertCallCarries(file, "useViewportThreadKeys", ["showThreadJumpHints"]);
+  assert.include(
+    read(file),
+    tokens("(viewportThreadKeys ?? orderedThreadKeys).entries()"),
+    "the jump hints number the first nine threads of the list again, not the ones on screen",
+  );
+  assertCallCarries(file, "navigateToThreadKey", ["readViewportThreadKeys()"]);
+  assert.include(
+    read(file),
+    tokens("[keybindings, orderedThreadKeys, viewportThreadKeys]"),
+    "the jump hints no longer recompute when the threads on screen change",
+  );
+});
+
+it("modal keys seam guard round 2: Ctrl+D and Ctrl+U scroll the sidebar without opening a thread", () => {
+  const file = "apps/web/src/components/Sidebar.tsx";
+  const pageKeys = region(
+    read(file),
+    'traversalDirection === "next-page" || traversalDirection === "previous-page"',
+    "return;",
+    file,
+  );
+  assert.include(
+    pageKeys,
+    tokens("scrollThreadList("),
+    "the page keys no longer scroll the thread list, so they fall through to opening a thread",
+  );
+  // A scroll stops the key, and the branch returns whether or not the list
+  // scrolled, so neither key ever reaches the thread traversal below it.
+  const branch = blockAfter(
+    read(file),
+    'if (traversalDirection === "next-page" || traversalDirection === "previous-page")',
+    file,
+  );
+  const scrolled = blockAfter(branch, "if (scrollThreadList(", file);
+  for (const call of ["event.preventDefault()", "event.stopPropagation()"]) {
+    assert.include(scrolled, tokens(call), `a page-key scroll no longer calls ${call}`);
+  }
+  // The branch's last statement is the return, after the scroll, whether or not it scrolled.
+  assert.isTrue(
+    branch.slice(branch.indexOf(scrolled) + scrolled.length).endsWith(tokens("return;}")),
+    "the page-key branch no longer returns, so Ctrl+D or Ctrl+U opens a thread",
+  );
+});
+
+it("modal keys seam guard round 2: arrows move over the sidebar rows and only Enter or Space opens one", () => {
+  const file = "apps/web/src/components/Sidebar.tsx";
+  const sidebar = readCanonical(file);
+  assert.isAbove(
+    callArguments(sidebar, "useThreadRowArrowKeys").length,
+    0,
+    "Sidebar no longer calls useThreadRowArrowKeys()",
+  );
+  // The arrow hook finds rows by this attribute: both row kinds carry it, and
+  // both hand their keys to the row handler below.
+  const rows = sidebar.text.split(tokens("data-mesura-thread-key={threadKey}")).slice(1);
+  assert.lengthOf(
+    rows,
+    2,
+    "the slim and card thread rows no longer both carry data-mesura-thread-key",
+  );
+  for (const row of rows) {
+    const element = row.slice(0, row.indexOf("/>"));
+    assert.include(
+      element,
+      tokens("onKeyDown={handleKeyDown}"),
+      "a thread row lost its key handler",
+    );
+  }
+  // The row the arrows reach looks hovered, in both row kinds.
+  assert.isAtLeast(
+    countOf(sidebar.text, "focus-visible:bg-sidebar-row-hover"),
+    2,
+    "a focused thread row no longer shows the hover background",
+  );
+  assert.include(
+    sidebar.text,
+    tokens("focus-visible:text-sidebar-foreground"),
+    "a focused settled row no longer shows its title at full strength",
+  );
+  // An arrow reaching the row's own handler must not activate the thread.
+  const handler = region(
+    sidebar.text,
+    "if (event.target !== event.currentTarget) return;",
+    "onThreadActivate(threadRef)",
+    file,
+  );
+  assert.include(
+    handler,
+    tokens('if (event.key !== "Enter" && event.key !== " ") return;'),
+    "the thread row's key handler opens the thread on keys other than Enter and Space",
+  );
+});
+
+it("modal keys seam guard round 2: the right panel walks its tabs and lands in the surface", () => {
+  const file = "apps/web/src/components/RightPanelTabs.tsx";
+  assertCallCarries(file, "useRightPanelTabCycling", [
+    "tabBarRef: tabListRef",
+    "surfaces: props.surfaces",
+    "activeSurfaceId: props.activeSurfaceId",
+    "onActivate: props.onActivate",
+  ]);
+  assertCallCarries(file, "usePanelSurfaceKeys", ["tabListRef", "props.activeSurfaceId"]);
+});
+
+it("modal keys seam guard round 2: the panel launcher takes its keys, opens on + and shows over the tabs", () => {
+  const file = "apps/web/src/components/RightPanelTabs.tsx";
+  const source = read(file);
+  assertCallCarries(file, "registerLauncherKeyHandler", ["handler"]);
+  const escape = region(source, 'if (event.key === "Escape" && launcherOpen)', "};", file);
+  assert.include(
+    escape,
+    tokens("dismissPanelLauncher()"),
+    "Escape no longer dismisses the launcher",
+  );
+  assert.include(
+    source,
+    tokens("onClick={openPanelLauncher}"),
+    "the + button no longer opens the panel launcher",
+  );
+  // The overlay is drawn in the branch with open tabs, which stay mounted under it.
+  const shown = region(source, "{props.children}", "</>", file);
+  assert.include(
+    shown,
+    tokens("{launcherOpen ? ("),
+    "the launcher no longer opens over the open tabs",
+  );
+  assert.isTrue(
+    rendersElement(shown, "RightPanelEmptyState"),
+    "the launcher is no longer drawn over the open tabs while launcherOpen",
+  );
+});
+
+it("modal keys seam guard round 2: launcher rows close the launcher and keep focus in the panel", () => {
+  const file = "apps/web/src/components/RightPanelTabs.tsx";
+  const source = read(file);
+  const runAction = region(source, "const runAction = (action: SurfaceAction) =>", "};", file);
+  // The panel is read before the launcher closes, which can unmount the row.
+  assert.include(
+    runAction,
+    tokens('const panel = rootRef.current?.closest("[data-preview-panel-mode]");'),
+    "runAction no longer finds its panel, so focus is never kept in it",
+  );
+  for (const fragment of [
+    "closePanelLauncher()",
+    "action.onClick()",
+    "if (panel) keepFocusInPanelAfterRender(panel)",
+  ]) {
+    assert.include(runAction, tokens(fragment), `runAction lost ${fragment}`);
+  }
+  // Every way to choose a surface row goes through runAction: a letter, Enter
+  // on the highlight, and a click.
+  const letters = region(
+    source,
+    "const handler = (event: KeyboardEvent): boolean =>",
+    "registerLauncherKeyHandler(handler)",
+    file,
+  );
+  for (const fragment of [
+    "runPanelLauncherAction(chosen)",
+    "reportUnavailable(chosen.label, chosen.disabledReason)",
+    "current.runAction(chosen)",
+  ]) {
+    assert.include(letters, tokens(fragment), `the launcher's letter handler lost ${fragment}`);
+  }
+  // A browser profile is the Browser row with another target.
+  assertCallCarries(file, "runAction", [
+    "...action",
+    "onClick: () => props.onAddBrowserInProfile(profile.id)",
+  ]);
+  const enter = region(source, 'if (event.key === "Enter")', 'if (event.key === "Escape"', file);
+  assert.include(enter, tokens("runAction(action)"), "Enter on the launcher bypasses runAction");
+  for (const fragment of [
+    "onClick={() => runAction(action)}",
+    "onClick={() => reportUnavailable(action.label, action.disabledReason)}",
+  ]) {
+    assert.include(source, tokens(fragment), `a launcher row lost ${fragment}`);
+  }
+  // A Panel action row runs its action whether it is available or shows why not.
+  assert.equal(
+    countOf(source, "onClick={() => runPanelLauncherAction(action)}"),
+    2,
+    "a Panel action row no longer runs its action",
+  );
+  // The Panel section: both launchers, the empty panel and the overlay, get the actions.
+  assertCallCarries(file, "panelLauncherActions", ["hasActiveTab:", "maximized:"]);
+  assert.equal(
+    countOf(source, "panelActions={panelActions}"),
+    2,
+    "a launcher lost its Panel section",
+  );
+  assert.include(
+    source,
+    tokens("if (launcherOpen) rootRef.current?.focus({ preventScroll: true })"),
+    "a launcher already mounted no longer takes the keys when it opens again",
+  );
+});
+
+it("modal keys seam guard round 2: the launcher answers every letter and shows why a row cannot run", () => {
+  const file = "apps/web/src/components/RightPanelTabs.tsx";
+  const source = read(file);
+  // The empty state's own launcher state and the actions it hands its letters.
+  for (const fragment of [
+    "panelActions?: readonly PanelLauncherAction[];",
+    "const panelActions = props.panelActions ?? [];",
+    "useRef({ actions, runAction, panelActions })",
+    "shortcutActionsRef.current = { actions, runAction, panelActions };",
+    "rootRef.current = node;",
+  ]) {
+    assert.include(source, tokens(fragment), `the launcher lost ${fragment}`);
+  }
+  assert.equal(
+    countOf(source, "usePanelLauncherOpen()"),
+    2,
+    "the launcher or the tab bar no longer reads whether the launcher is open",
+  );
+  // Unavailable rows and Panel actions answer their letters; a key the page
+  // already took is left alone.
+  const letters = region(
+    source,
+    "const handler = (event: KeyboardEvent): boolean =>",
+    "registerLauncherKeyHandler(handler)",
+    file,
+  );
+  for (const fragment of [
+    "if (event.defaultPrevented) return false;",
+    "current.actions.map((entry) => ({ ...entry, available: true }))",
+    "current.panelActions.map((entry) => ({ ...entry, available: true }))",
+  ]) {
+    assert.include(letters, tokens(fragment), `the launcher's letter handler lost ${fragment}`);
+  }
+  const unavailable = blockAfter(letters, "if (!chosen.available)", file);
+  for (const call of [
+    "closePanelLauncher()",
+    "reportUnavailable(chosen.label, chosen.disabledReason)",
+  ]) {
+    assert.include(unavailable, tokens(call), `an unavailable row's letter no longer runs ${call}`);
+  }
+  assert.isTrue(
+    unavailable.endsWith(tokens("return true;}")),
+    "an unavailable row's letter no longer ends by taking the key",
+  );
+  const panelLetter = blockAfter(letters, "if (panelAction)", file);
+  assert.include(
+    panelLetter,
+    tokens("runPanelLauncherAction(chosen)"),
+    "a Panel action's letter no longer runs its action",
+  );
+  assert.isTrue(
+    panelLetter.endsWith(tokens("return true;}")),
+    "a Panel action's letter no longer ends by taking the key",
+  );
+  // The letters are read in the capture phase, ahead of app-level handlers,
+  // and the key engine reaches the same handler.
+  const registration = region(source, "registerLauncherKeyHandler(handler)", "}, []);", file);
+  for (const fragment of [
+    "const listener = (event: KeyboardEvent) => void handler(event);",
+    'window.addEventListener("keydown", listener, true);',
+    "unregister();",
+    'window.removeEventListener("keydown", listener, true);',
+  ]) {
+    assert.include(
+      registration,
+      tokens(fragment),
+      `the launcher's key registration lost ${fragment}`,
+    );
+  }
+  const launcherRoot = region(source, "ref={focusOnMount}", "className=", file);
+  assert.include(
+    launcherRoot,
+    tokens("data-key-passthrough"),
+    "the key engine takes the launcher's letters again",
+  );
+  // A row that cannot run shows its reason on the row; no hover tooltip.
+  assert.equal(
+    countOf(source, "<UnavailableLauncherRow"),
+    2,
+    "a launcher section lost its unavailable rows",
+  );
+  for (const fragment of ["reason={action.disabledReason}", "reason={action.unavailableReason}"]) {
+    assert.include(source, tokens(fragment), `an unavailable row lost ${fragment}`);
+  }
+  const row = region(source, "function UnavailableLauncherRow(", "</button>", file);
+  for (const fragment of ['aria-disabled="true"', "onClick={props.onClick}", "{props.reason}"]) {
+    assert.include(row, tokens(fragment), `UnavailableLauncherRow lost ${fragment}`);
+  }
+  // The Panel section under the surfaces.
+  for (const fragment of [
+    "panelActions.length > 0 ?",
+    "panelActions.map((action) =>",
+    "action.unavailableReason === null ?",
+    ">Panel</h3>",
+    "hasActiveTab: props.activeSurfaceId !== null",
+    "maximized: props.maximized === true",
+  ]) {
+    assert.include(source, tokens(fragment), `the launcher's Panel section lost ${fragment}`);
+  }
+  // The launcher over the tabs is the empty panel's launcher: it takes the
+  // same props, so a prop dropped from either, or added to one, fails here.
+  const launchers = source
+    .split("<RightPanelEmptyState")
+    .slice(1)
+    .map((rest) =>
+      [...rest.slice(0, rest.indexOf("/>")).matchAll(/([\w$]+)=\{([^{}]*)\}/g)]
+        .map(([attribute]) => attribute)
+        .toSorted(),
+    );
+  assert.lengthOf(launchers, 2, "RightPanelTabs no longer renders the empty panel and the overlay");
+  assert.isAtLeast(launchers[0]!.length, 20, "the empty panel's launcher lost its props");
+  assert.deepEqual(
+    launchers[1],
+    launchers[0],
+    "the launcher over the tabs and the empty panel's launcher take different props",
+  );
+  for (const prop of ["onAddFactory", "browserProfiles", "liveAgentCount", "panelActions"]) {
+    assert.isTrue(
+      launchers[0]!.some((attribute) => attribute.startsWith(`${prop}=`)),
+      `the launchers lost ${prop}`,
+    );
+  }
+  // The overlay covers the open tabs, positioned against the surface content.
+  assert.isTrue(
+    classNamesOf(source, "data-right-panel-surface-content").some((names) =>
+      names.includes("relative"),
+    ),
+    "the surface content no longer positions the launcher overlay",
+  );
+  const overlay = region(source, "{launcherOpen ? (", "<RightPanelEmptyState", file);
+  const overlayClasses = (/className="([^"]*)"/.exec(overlay)?.[1] ?? "").split(" ");
+  for (const name of ["absolute", "inset-0", "z-20"]) {
+    assert.include(overlayClasses, name, `the launcher overlay lost the ${name} class`);
+  }
+  // Upstream's drop-down menu behind the +, with its hover tooltips, is gone:
+  // a merge that brings it back gives the panel two menus again.
+  for (const removed of [
+    "addSurfaceActions",
+    "addSurfaceMenuOpen",
+    "SurfaceMenuItem",
+    "DisabledReasonTooltip",
+    "SURFACE_DISABLED_REASONS",
+  ]) {
+    assert.notInclude(source, removed, `upstream's ${removed} is back beside the launcher`);
+  }
+});
+
+it("modal keys seam guard round 2: ChatView registers maximize and the new-tab launcher", () => {
+  const file = "apps/web/src/components/ChatView.tsx";
+  assertRegistersCommands(file, ["rightPanel.toggleMaximized", "rightPanel.newTab"]);
+  const newTab = blockAfter(read(file), '"rightPanel.newTab": () =>', file);
+  // Opens the panel only when it is closed (a toggle would close an open one),
+  // then the launcher in it.
+  assert.match(
+    newTab,
+    /if\(!rightPanelOpen\)\{?toggleRightPanel\(\)/,
+    "rightPanel.newTab no longer opens the panel only when it is closed",
+  );
+  const launcherAt = newTab.indexOf(tokens("openPanelLauncher()"));
+  assert.isAbove(
+    launcherAt,
+    newTab.indexOf(tokens("toggleRightPanel()")),
+    "rightPanel.newTab no longer opens the launcher after the panel",
+  );
+});
+
+it("modal keys seam guard round 2: the desktop browser view hides under the panel launcher", () => {
+  const file = "apps/web/src/components/preview/PreviewPanel.tsx";
+  const source = readCanonical(file);
+  assert.isAbove(
+    callArguments(source, "usePanelLauncherOpen").length,
+    0,
+    "PreviewPanel no longer reads whether the launcher is open",
+  );
+  assert.include(
+    source.text,
+    tokens("visible={visible && !launcherOpen}"),
+    "the native browser view stays visible over the panel launcher",
+  );
+});
+
+it("modal keys seam guard round 2: the Diff panel and its file tree are pane entries", () => {
+  assert.equal(
+    countOf(read("apps/web/src/components/DiffPanel.tsx"), 'data-pane-entry="2"'),
+    1,
+    "the Diff code view is no longer the panel's second pane entry",
+  );
+  const file = "apps/web/src/components/diffs/DiffFileTree.tsx";
+  assertCallCarries(file, "usePierreTreePaneEntry", ["model"]);
+  const tree = read(file);
+  for (const fragment of [
+    "ref={bindPaneEntry}",
+    'data-pane-entry="1"',
+    "onKeyDown={onPaneEntryKeyDown}",
+  ]) {
+    assert.include(tree, tokens(fragment), `DiffFileTree lost ${fragment}`);
+  }
+});
+
+it("modal keys seam guard round 2: every panel surface keeps its pane entries", () => {
+  // File, the attribute value, and how many entries it renders.
+  const entries: ReadonlyArray<readonly [string, string, number]> = [
+    ["apps/web/src/components/AgentsPanel.tsx", 'data-pane-entry="1"', 2],
+    ["apps/web/src/components/pullRequest/ThreadPullRequestsPanel.tsx", 'data-pane-entry="1"', 2],
+    ["apps/web/src/components/pullRequest/PullRequestDetailPanel.tsx", 'data-pane-entry="1"', 1],
+    ["apps/web/src/components/pullRequest/PullRequestCodeTab.tsx", 'data-pane-entry="2"', 1],
+    ["apps/web/src/components/files/FilePreviewPanel.tsx", 'data-pane-entry="2"', 2],
+    ["apps/web/src/components/files/AttachmentFilePreview.tsx", 'data-pane-entry="2"', 2],
+  ];
+  const lost = entries.flatMap(([file, entry, expected]) => {
+    const found = countOf(read(file), entry);
+    return found === expected ? [] : [`${file}: ${found} of ${expected} ${entry}`];
+  });
+  assert.deepEqual(lost, [], "a panel surface lost a keyboard entry");
+  // An empty state has no scroll region to focus, so it is focusable itself.
+  for (const file of [
+    "apps/web/src/components/AgentsPanel.tsx",
+    "apps/web/src/components/pullRequest/ThreadPullRequestsPanel.tsx",
+  ]) {
+    const source = read(file);
+    const at = source.indexOf(tokens('data-pane-entry="1"'));
+    const element = source.slice(source.lastIndexOf("<", at), source.indexOf(">", at));
+    assert.include(
+      element,
+      tokens("tabIndex={-1}"),
+      `${file}: the empty state's entry cannot take focus`,
+    );
+    assert.include(element, "outline-none", `${file}: the focused empty state draws an outline`);
+  }
+  assert.equal(
+    countOf(
+      read("apps/web/src/components/files/FilePreviewPanel.tsx"),
+      "ref={previewFocusTargetRef}",
+    ),
+    2,
+    "a file preview entry no longer takes previewFocusTargetRef",
+  );
+});
+
+it("modal keys seam guard round 2: the Linux desktop app leaves Ctrl+Q to the page", () => {
+  assert.include(
+    read("apps/desktop/src/window/DesktopWindow.ts"),
+    tokens('if (environment.platform !== "linux") quitShortcutHandler(event, input)'),
+    "the quit guard runs on Linux again, so Ctrl+Q quits instead of closing a tab",
+  );
+  // apps/desktop/src/window/DesktopApplicationMenu.test.ts pins the menu itself.
+  const file = "apps/desktop/src/window/DesktopApplicationMenu.ts";
+  const linuxQuit = region(
+    read(file),
+    ': environment.platform === "linux"',
+    '{ role: "quit" }',
+    file,
+  );
+  // The click runs the quit through the app's Effect runtime, not a bare reference.
+  for (const fragment of ['label: "Quit"', "click:", "runPromise(electronApp.quit)"]) {
+    assert.include(linuxQuit, tokens(fragment), `the Linux Quit item lost ${fragment}`);
+  }
+  assert.notInclude(linuxQuit, tokens("accelerator"), "Linux Quit carries an accelerator again");
+  assert.notInclude(linuxQuit, tokens('role: "quit"'), "Linux Quit takes the role and its Ctrl+Q");
+});
+
+it("modal keys seam guard round 2: a terminal close confirmation opens on Confirm", () => {
+  assert.match(
+    region(
+      read("packages/contracts/src/ipc.ts"),
+      "export interface ConfirmDialogOptions",
+      "}",
+      "packages/contracts/src/ipc.ts",
+    ),
+    /readonly initialFocus\?:"confirm";/,
+    "ConfirmDialogOptions lost initialFocus",
+  );
+  assert.include(
+    read("apps/web/src/lib/terminalCloseConfirm.ts"),
+    tokens('initialFocus: "confirm"'),
+    "closing a terminal no longer asks for focus on Confirm",
+  );
+  const store = read("apps/web/src/confirmDialog.ts");
+  assert.include(
+    store,
+    tokens('focusConfirm: options?.initialFocus === "confirm"'),
+    "the confirm dialog store drops the requested initial focus",
+  );
+  assert.include(
+    store,
+    tokens("...(pending.focusConfirm ? { focusConfirm: true } : {})"),
+    "the shown confirmation no longer carries focusConfirm",
+  );
+  // Both places that show a confirmation build the state through confirmingState.
+  assert.equal(
+    countOf(store, "publish(confirmingState("),
+    2,
+    "a confirmation is shown without its focusConfirm",
+  );
+  for (const field of ["readonly focusConfirm?: boolean;", "readonly focusConfirm: boolean;"]) {
+    assert.include(store, tokens(field), `the confirm dialog store lost ${field}`);
+  }
+  const host = read("apps/web/src/components/ConfirmDialogHost.tsx");
+  for (const fragment of [
+    'state.status === "confirming" && state.focusConfirm === true',
+    "{...(focusConfirm ? { initialFocus: confirmButtonRef } : {})}",
+    "ref={confirmButtonRef}",
+  ]) {
+    assert.include(host, tokens(fragment), `ConfirmDialogHost lost ${fragment}`);
+  }
+});
+
+it("modal keys seam guard round 2: the panel commands and the Ctrl+Q defaults stay in the keybindings", () => {
+  // apps/web/src/keybindings.test.ts tests resolution; this names the seams.
+  const contractsFile = "packages/contracts/src/keybindings.ts";
+  const commands = region(
+    read(contractsFile),
+    "export const STATIC_KEYBINDING_COMMANDS",
+    "] as const;",
+    contractsFile,
+  );
+  for (const command of ["rightPanel.nextTab", "rightPanel.previousTab", "rightPanel.newTab"]) {
+    assert.include(commands, tokens(`"${command}"`), `STATIC_KEYBINDING_COMMANDS lost ${command}`);
+  }
+
+  const sharedFile = "packages/shared/src/keybindings.ts";
+  const shared = read(sharedFile);
+  const defaults = region(
+    shared,
+    "export const DEFAULT_KEYBINDINGS",
+    "export const RETIRED_KEYBINDING_DEFAULTS",
+    sharedFile,
+  );
+  for (const rule of [
+    'key: "ctrl+q", command: "terminal.close", when: "terminalFocus"',
+    'key: "ctrl+q", command: "rightPanel.close", when: "!terminalFocus"',
+    'key: "ctrl+tab", command: "rightPanel.nextTab", when: "panelFocus && !terminalFocus"',
+    'key: "ctrl+shift+tab", command: "rightPanel.previousTab", when: "panelFocus && !terminalFocus"',
+    'key: "mod+t", command: "rightPanel.newTab", when: "panelFocus && !terminalFocus"',
+  ]) {
+    assert.include(defaults, tokens(rule), `DEFAULT_KEYBINDINGS lost ${rule}`);
+  }
+  const added = region(
+    shared,
+    "export const ADDED_KEYBINDING_DEFAULTS",
+    "export const WITHDRAWN_KEYBINDING_DEFAULTS",
+    sharedFile,
+  );
+  for (const id of ["2026-10-terminal-close-ctrl-q", "2026-10-right-panel-close-ctrl-q"]) {
+    assert.include(added, tokens(`id: "${id}"`), `ADDED_KEYBINDING_DEFAULTS lost ${id}`);
+  }
 });

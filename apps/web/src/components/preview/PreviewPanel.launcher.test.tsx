@@ -14,6 +14,11 @@
  * - Criterion 6, guard: a Browser tab offers no entry of its own, so the
  *   panel's pane entry (`enterPanel`) keeps focus on its tab title.
  *
+ * Phase 5 review (P1-1): `RightPanelTabs`, the launcher over a Browser tab
+ * with two browser profiles. Choosing a profile from the Browser row's
+ * chevron opens the tab in that profile and closes the launcher, as every
+ * other row does, so the native browser view shows again.
+ *
  * Boundaries replaced, as `PreviewView.test.tsx` replaces them: the preview
  * and history stores, the environment, the RPC commands, the desktop bridge,
  * the browser defaults and recording, and the mini player.
@@ -25,6 +30,7 @@ import {
   DEFAULT_PREVIEW_ZOOM_FACTOR,
   EnvironmentId,
   FILL_PREVIEW_VIEWPORT,
+  INCOGNITO_BROWSER_PROFILE_ID,
   ThreadId,
 } from "@t3tools/contracts";
 import { act } from "react";
@@ -124,6 +130,7 @@ vi.mock("./AgentBrowserCursor", () => ({ AgentBrowserCursor: () => null }));
 
 import { closePanelLauncher, dismissPanelLauncher, openPanelLauncher } from "~/lib/panelLauncher";
 import { ACTIVE_TAB_TITLE_SELECTOR, enterPanel } from "~/lib/panelSurfaceFocus";
+import { RightPanelTabs } from "../RightPanelTabs";
 import { PreviewPanel } from "./PreviewPanel";
 
 const THREAD_REF = {
@@ -203,5 +210,72 @@ describe("browser tab focus", () => {
     const title = document.querySelector(ACTIVE_TAB_TITLE_SELECTOR);
     expect(title).not.toBeNull();
     expect(document.activeElement).toBe(title);
+  });
+});
+
+describe("browser profile choice in the panel launcher", () => {
+  it("browser launcher spec: choosing a profile from the open launcher opens it there and closes the launcher", async () => {
+    const opened: string[] = [];
+    document.body.innerHTML = `<div data-preview-panel-mode="inline" data-testid="panel"></div>`;
+    root = createRoot(document.querySelector('[data-testid="panel"]')!);
+    act(() =>
+      root!.render(
+        <RightPanelTabs
+          mode="inline"
+          surfaces={[{ id: "browser:tab-1", kind: "preview", resourceId: "tab-1" }]}
+          environmentId={null}
+          activeSurfaceId="browser:tab-1"
+          pendingSurfaceIds={new Set()}
+          previewSessions={{}}
+          desktopByTabId={{}}
+          terminalLabelsById={new Map()}
+          onActivate={() => undefined}
+          onCloseSurface={() => undefined}
+          onCloseOtherSurfaces={() => undefined}
+          onCloseSurfacesToRight={() => undefined}
+          onCloseAllSurfaces={() => undefined}
+          onCopyFilePath={() => undefined}
+          onAddBrowser={() => undefined}
+          onAddBrowserInProfile={(profileId) => opened.push(profileId)}
+          onAddTerminal={() => undefined}
+          onAddPullRequest={() => undefined}
+          onAddPullRequests={() => undefined}
+          onAddDiff={() => undefined}
+          onAddFiles={() => undefined}
+          onAddAgents={() => undefined}
+          onAddDevice={() => undefined}
+          liveAgentCount={0}
+          browserAvailable
+          terminalAvailable={false}
+          diffAvailable={false}
+          filesAvailable={false}
+          pullRequestAvailable={false}
+          pullRequestsAvailable={false}
+          agentsAvailable={false}
+          deviceAvailable={false}
+        >
+          <div>content</div>
+        </RightPanelTabs>,
+      ),
+    );
+    const launcher = () => document.querySelector('[aria-label="Open a surface"]');
+    act(() => openPanelLauncher());
+    expect(launcher()).not.toBeNull();
+
+    const chevron = document.querySelector<HTMLElement>('[aria-label="Open browser in a profile"]');
+    expect(chevron).not.toBeNull();
+    await act(async () => {
+      chevron!.click();
+    });
+    const incognito = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (item) => item.textContent === "Incognito",
+    );
+    expect(incognito).toBeDefined();
+    await act(async () => {
+      incognito!.click();
+    });
+
+    expect(opened).toEqual([INCOGNITO_BROWSER_PROFILE_ID]);
+    expect(launcher()).toBeNull();
   });
 });

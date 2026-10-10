@@ -3,29 +3,9 @@
 Customize shortcuts in **Settings → Keybindings** on web and desktop. That page
 also lists the command IDs and defaults available in your version.
 
-The same configuration lives in `~/.mesura-code/userdata/keybindings.json` on the machine running
-the server, if you prefer editing it directly. Mesura Code writes the built-in defaults into that
-file on first run, and adds any new defaults on later startups unless a rule of yours already
-claims the command or the shortcut.
-
-New defaults reach an existing file two ways, and both run once.
-
-A release that _moves_ a default onto a different key rewrites the old rule, but only when it still
-matches the retired default exactly, key and command and `when` together. A rule you changed
-yourself is never touched.
-
-A release that gives an already-bound command a _second_ default adds that rule the first time you
-start the new build. Offering it once is the whole contract: delete the shortcut afterwards and it
-stays deleted, because startup records what it has already offered in a `keybindings.applied.json`
-beside your config. An old default you removed is never resurrected — only defaults introduced
-after your file was written are offered at all.
-
-Either way, when the key involved already belongs to a rule of yours, nothing is changed: stacking
-two commands on one chord would quietly disable one of them, so the server leaves your rule alone
-and logs a warning instead.
-
 To drive the app with Vim-style modes and a Space leader instead of chords, see
-[Vim mode](./vim-mode.md).
+[Vim mode](./vim-mode.md). It also covers citing part of an answer by typing the labels at its
+sentences.
 
 ## Composer controls
 
@@ -70,7 +50,7 @@ behavior in Settings → Keyboard.
 ## Edit the configuration file
 
 Keybindings live on the environment's machine, in
-`~/.t3/userdata/keybindings.json` by default. You can edit this file directly.
+`~/.mesura-code/userdata/keybindings.json` by default. You can edit this file directly.
 It is a JSON array of rules:
 
 ```json
@@ -80,10 +60,26 @@ It is a JSON array of rules:
 ]
 ```
 
-T3 Code creates the file with its defaults and adds new defaults on later startups.
+Mesura Code creates the file with its defaults and adds new defaults on later startups.
 New defaults do not replace commands you customized. If a new default overlaps one
 of your shortcuts, [rule order](#precedence) decides which runs.
-Invalid rules are ignored; if the file cannot be parsed, T3 Code uses defaults.
+Invalid rules are ignored; if the file cannot be parsed, Mesura Code uses defaults.
+
+New defaults reach an existing file two ways, and both run once.
+
+A release that _moves_ a default onto a different key rewrites the old rule, but only when it still
+matches the retired default exactly, key and command and `when` together. A rule you changed
+yourself is never touched.
+
+A release that gives an already-bound command a _second_ default adds that rule the first time you
+start the new build. Offering it once is the whole contract: delete the shortcut afterwards and it
+stays deleted, because startup records what it has already offered in a `keybindings.applied.json`
+beside your config. An old default you removed is never resurrected — only defaults introduced
+after your file was written are offered at all.
+
+Either way, when the key involved already belongs to a rule of yours, nothing is changed: stacking
+two commands on one chord would quietly disable one of them, so the server leaves your rule alone
+and logs a warning instead.
 
 ## Rule shape
 
@@ -272,6 +268,12 @@ With the right panel focused, `Ctrl+Tab` and `Ctrl+Shift+Tab` move between its t
 the desktop app; a terminal tab keeps the pair for itself, as it does for threads. `mod+t` there
 opens the panel's launcher, the list behind its `+` button, to open a new tab by its letter.
 
+However the keyboard reaches the right panel — `mod+l`, a launcher letter, `Ctrl+Tab`, closing a
+tab — it lands in the tab's content, not on the tab's title: the file tree, the diff, the editor, a
+preview or a list. The arrow keys move there and `Ctrl+D` and `Ctrl+U` move half a page, with no
+click first. A Browser or Device tab is the exception: the keyboard stays on its title until you
+click into the page or the screen.
+
 Focus stays in the sidebar as you walk, on the row of the thread you just opened, so you can keep
 going. Clicking a thread with the mouse still puts the cursor in the composer, as before.
 
@@ -340,13 +342,14 @@ un-settle.
 ### Closing terminals and windows
 
 `terminal.close` defaults to `mod+w` while the terminal has focus, and `rightPanel.close` to `mod+w`
-elsewhere. `Ctrl+Q` does the same two things, as `Super+Q` closes the focused window in a tiling
-window manager. In the Linux desktop app `Ctrl+Q` therefore no longer quits; on macOS `Cmd+Q`
-still does. Anywhere else `mod+w` does
-nothing on Linux and Windows: the desktop window there is the whole application, so closing it
-would quit Mesura Code. Quit from **File** → **Quit**, the titlebar, or your window manager
-instead. On macOS `Cmd+W` closes a window without quitting the app, as it does everywhere else on
-that platform.
+elsewhere, which closes the right panel's active tab. `Ctrl+Q` does the same two things, as
+`Super+Q` closes the focused window in a tiling window manager, except in the Windows desktop app,
+where it stays the quit shortcut. Closing a terminal asks first, and `Enter` confirms.
+
+`mod+w` never closes the desktop window on Linux and Windows: the window there is the whole
+application, so closing it would quit Mesura Code. In the Linux desktop app `Ctrl+Q` does not quit
+either. Quit from **File** → **Quit**, the titlebar, or your window manager instead. On macOS
+`Cmd+W` closes a window without quitting the app, as it does everywhere else on that platform.
 
 ### If you upgraded from an older build
 
@@ -357,7 +360,7 @@ which is also what frees `mod+d` for the reading scroll in the same run.
 
 `Ctrl+W` used to close the desktop window, and off macOS that quit the whole application. That one
 is a change to the native menu rather than to a keybinding, so it needs nothing from your config:
-the key now closes a focused terminal and does nothing otherwise.
+the key now closes a focused terminal or the active right-panel tab, and does nothing otherwise.
 
 The command palette, open-in-favourite-editor and the preview's address bar move to `mod+o`,
 `alt+o` and `mod+alt+l`, because `mod+k` and `mod+l` are now pane chords. Those three rules are
@@ -433,7 +436,8 @@ shortcut; assign one in **Settings → Keybindings**.
 ## Reserved shortcuts
 
 In the desktop app, `mod+w` closes the focused terminal or the active right-panel
-tab. When nothing remains to close, it closes the window. In a browser, `mod+w`
+tab. When nothing remains to close, it closes the window on macOS and does nothing on Linux and
+Windows. In a browser, `mod+w`
 closes the browser tab; rebind `rightPanel.close` and `terminal.close` to an available
 shortcut such as `alt+w`.
 
@@ -442,10 +446,14 @@ Keep that condition when remapping them if you want the same behavior.
 
 ## Desktop quit shortcut
 
-Use `Cmd+Q` on macOS or `Ctrl+Q` on Windows and Linux. In the default **Hold** mode,
+Use `Cmd+Q` on macOS or `Ctrl+Q` on Windows. In the default **Hold** mode,
 hold for 1.2 seconds or press twice within 500 milliseconds. Holding requires
 keyboard repeat; if repeat is disabled, use two presses or the application menu.
 
 Change **Settings → General → Confirmations → Quit shortcut** to **Direct** for a
 single press or **Double press** for two presses only. Choosing **Quit** from the
 application menu always quits immediately.
+
+The Linux desktop app has no quit shortcut, because `Ctrl+Q` closes a tab or a terminal there (see
+[Closing terminals and windows](#closing-terminals-and-windows)). Quit from **File** → **Quit** or
+your window manager.

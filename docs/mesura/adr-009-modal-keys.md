@@ -2,14 +2,18 @@
 
 **Status:** Accepted, 2026-10-08. The production cycle (#86) hardened the
 prototype on `t3code/design-vim-keyboard-navigation`: a command registry
-replaced the chord replay, Vim mode is on by default, the six prototype bugs
-are fixed, and `tests/unit/modal-keys-wired.test.ts` guards every seam in an
-upstream file.
+replaced the chord replay, Vim mode is on by default, and the six prototype
+bugs are fixed. Round 2 (2026-10-10) hardened the second prototype the same way:
+cite by two flash picks, the sidebar keys, the panel launcher as the right
+panel's one menu, `Ctrl+Tab` and `Ctrl+Q` in the panel, and one focus per
+panel surface. `tests/unit/modal-keys-wired.test.ts` guards every seam of both
+rounds in an upstream file.
 
 **Scope:** how the web client (and the Linux desktop app, which wraps it) reads
 keys: modes, sequences, which-key, the chat timeline as a navigable buffer, Vim
-editing in the composer, cite by keyboard, flash jumps and keyboard pane
-resizing. The phone is out of scope: it has no keyboard, and the layer is
+editing in the composer, cite by keyboard, flash jumps, keyboard pane
+resizing, the sidebar's list keys and the right panel's tabs, launcher and
+focus. The phone is out of scope: it has no keyboard, and the layer is
 inert on touch screens. The user guide is `docs/user/vim-mode.md`.
 
 ## The problem
@@ -71,10 +75,12 @@ Decisions of the production cycle:
 17. A surface is navigable the moment it shows, with no click first. Every
     keyboard way into the right panel (`Ctrl+L` and the other pane moves, a
     launcher letter, `Ctrl+Tab`, a close, a file opened from a tree) puts
-    focus on the element that owns the active surface's keys, never on its
-    tab title or a toolbar button. There the arrows move and `Ctrl+D` /
-    `Ctrl+U` move half a page. A tree keeps its own keys, but `Space` stays
-    the leader in it (`lib/panelSurfaceFocus.ts`).
+    focus on the element that owns the active surface's keys, never on a
+    toolbar button. There the arrows move and `Ctrl+D` / `Ctrl+U` move half
+    a page. The Browser and Device surfaces are the exception: their content
+    is a native view or a remote screen with its own input, so focus stays on
+    their tab title (see "Landing in normal mode"). A tree keeps its own
+    keys, but `Space` stays the leader in it (`lib/panelSurfaceFocus.ts`).
 
 ## Decision
 
@@ -126,14 +132,32 @@ Decision 1 holds on every way into the chat, not only on thread open:
   normal mode, with visual mode and pending keys cleared and the cursor kept.
   With Vim mode off, ADR-004's entry at the composer applies unchanged.
 - **The right panel.** `RightPanelTabs` registers the panel's pane entry,
-  `enterPanel` (`lib/panelSurfaceFocus.ts`). A surface marks the element that
-  owns its keys with `data-pane-entry`, ranked when it shows two (the editor,
-  2, over its file tree, 1). An entry that is not focusable itself gets its
-  scroll region focused, so the browser's arrows scroll it; an entry whose
-  rows live in a shadow root (Pierre's tree, `diffs/pierreTreeKeys.ts`) names
-  its own focus. The same rule runs when the active surface changes while the
-  keyboard is in the panel, and it waits for a lazy surface's entry to render
-  (the tab title holds focus meanwhile).
+  `enterPanel` (`lib/panelSurfaceFocus.ts`). Every surface marks the element
+  that owns its keys with `data-pane-entry`, ranked when it shows two (the
+  editor or a preview, 2, over its file tree, 1): files, Diff and its file
+  list, Agents, the pull request list, a pull request's detail and its Code
+  tab, a Software Factory run, and an attachment's preview. A surface's empty
+  state is an entry too, so an empty Agents or pull request list still takes
+  the keyboard. A terminal tab takes focus in its input. Any other surface
+  without an entry, the Browser and the Device today, leaves focus on its
+  tab title, where no key reaches it.
+  - An entry that is not focusable itself gets its first visible scroll
+    region focused, so the browser's arrows scroll it. A region under
+    `visibility: hidden` is skipped: a pull request keeps its other tabs
+    mounted but hidden, and a hidden region takes no focus.
+  - An entry whose rows live in a shadow root (Pierre's tree,
+    `diffs/pierreTreeKeys.ts`) names its own focus.
+  - A file preview (rendered Markdown, an image) registers its entry as the
+    `editor` focus target while it shows (`previewFocusTargetRef`), so leaving
+    the file tree lands in the preview as it lands in the editor for source.
+  - The same rule runs when the active surface changes while the keyboard is
+    in the panel. It waits for a lazy surface's entry to render, with the tab
+    title holding focus meanwhile. Any `focusin` elsewhere ends the wait, so
+    a key the developer pressed in the meantime is never overruled when the
+    surface renders. A drop to `<body>` fires no `focusin` and keeps it.
+  - The desktop browser tab is a native view drawn above the page.
+    `PreviewPanel` hides it while the launcher is open
+    (`usePanelLauncherOpen`), or it would cover the launcher.
 - **The command palette.** The engine records the scope and the composer mode
   the palette opened from. On close, `restorePaletteOrigin()` (one fork check
   in the palette's `finalFocus`) returns to the chat in normal mode, or to
@@ -257,14 +281,22 @@ native selection and asks `AssistantSelectionToolbar` (one subscription,
   last character of every sentence from there to the end of the same message.
   A cite never spans two messages, because a citation belongs to one.
   Sentences are split per buffer line by `sentenceSpans` (`chatBuffer.ts`).
+  With no assistant text on screen, an empty thread included, `<leader>c`
+  shows the notice "no assistant text on screen to cite" instead of doing
+  nothing.
 
 In Vim mode, `ChatComposer.citeAssistantText` appends `\n<chip>: ` at the end
 of the prompt with no popover, and the composer takes focus with its caret
-after the chip, which is insert mode. Because the keys leave the chat at
-once, the cited text flashes for 900 ms (`chat/citeFlash.ts`, one opacity
-animation in `mesura.css`, removed when it ends), so the reader sees what was
-cited. With Vim mode off, upstream's cite at
+after the chip, which is insert mode. With Vim mode off, upstream's cite at
 the caret with its comment popover applies.
+
+Every cite flashes the cited text for 900 ms (`chat/citeFlash.ts`, one
+opacity animation in `mesura.css`, removed when it ends), so the reader sees
+what was cited after the keys or the eye leave it. There is one path:
+`citeAndFlash` wraps `onCite` in `AssistantSelectionToolbar`, and both the
+mouse's Cite button and the keys' cite requests go through it, so each cite
+flashes once and looks the same. The flash is drawn from the
+captured range, which outlives the native selection the toolbar clears.
 
 Focus once stayed in the chat after a cite. That needed a WORKAROUND, because
 the composer's editor takes focus whenever it moves its DOM selection, even
@@ -464,25 +496,43 @@ entry before changing the code it names.
 
 Each item has its own issue on `mesura-hq/mesura-code`, tracked by #86:
 
-- #79: feat(keys): sidebar thread list as a keyboard list in Vim mode — the
-  cursor apart from the open thread and Tab to "All projects". Its other two
-  parts are prototyped: `Ctrl+D/U` scroll the list without opening a thread,
-  and `Ctrl+1..9` number the rows on screen (`lib/sidebarThreadViewport.ts`,
-  rows marked `data-mesura-thread-key` in `Sidebar.tsx`).
-- #80: feat(keys): keyboard scopes inside the right panel.
+- #79: feat(keys): sidebar thread list as a keyboard list in Vim mode. Round
+  2 built three parts in `lib/sidebarThreadViewport.ts`, over rows marked
+  `data-mesura-thread-key` in `Sidebar.tsx`: `Ctrl+D/U` scroll the list
+  without opening a thread, `Ctrl+1..9` number the rows on screen, and
+  Up/Down move focus over the rows (the details tooltip, no open) while
+  Enter opens. Still open: a Vim-mode cursor kept apart from the open
+  thread, and Tab to "All projects". The legacy sidebar gets none of these.
+- #80: feat(keys): keyboard scopes inside the right panel: each surface's own
+  keys beyond moving and half-page moves (Diff modes, the file tree toggle,
+  Markdown preview or edit), and `j`/`k` in Pierre's trees, where the arrows
+  move today.
 - #81: feat(keys): user keymap file for the modal key layer.
 - #82: refactor(keys): extract the fm-core key engine and unify the flash
   label algorithms.
 - #83: chore(keys): remove the modifier chords and add a keyboard-first
   principle.
 - #84: feat(keys): cite your own messages and search the chat buffer (`/`).
-- #85: feat(keys): maximize the right panel from PANE mode. Prototyped as
-  `Z` in the panel launcher instead (`<leader>p z`); PANE mode itself still
-  has no key for it.
-  `rightPanel.toggleMaximized` has no default chord; the registry can run it
-  once an owner registers it.
+- #85: feat(keys): maximize the right panel from PANE mode. Built as `Z` in
+  the panel launcher instead (`<leader>p z`, `rightPanel.toggleMaximized`,
+  registered by `ChatView`); PANE mode itself still has no key for it, and
+  the command has no default chord.
 - #87: refactor(keys): one command list for the palette, the chords and the
   modal keys — the chord listeners and the palette rows reading the registry.
+
+Known limits of round 2, with no issue of their own:
+
+- An image attachment cannot be opened in a panel tab from the UI, so the
+  attachment preview's entry (`AttachmentFilePreview.tsx`) is reached only by
+  its tests.
+- A pull request's Code tab returns to Summary after `Ctrl+Tab` leaves the
+  pull request and comes back, because upstream keeps the selected tab in
+  component state (`PullRequestDetailPanel.tsx`), which resets when the
+  surface mounts again. Focus lands in Summary's entry then.
+- The panel's tab buttons stay in the Tab order. Taking them out was
+  proposed, not built.
+- Other confirmations keep Cancel as their initial focus; only closing a
+  terminal opens on Confirm (`initialFocus: "confirm"`).
 
 ## Merge cost
 
@@ -558,18 +608,123 @@ Pane resizing:
 - `useResizableWidth.ts` (3): `resizeTo` and `reset` returned from the hook.
 - `AppSidebarLayout.tsx` (35): `onResetWidth: resetSidebarWidth`.
 
-Right panel focus (decision 17):
+Round 2 — every upstream file its own commits change (`git log
+--first-parent --no-merges --name-only 30f47a5c45..HEAD -- apps packages`),
+measured against `upstream/main` at `64972461c0`. The number is the file's
+commits on `upstream/main` in the three months to 2026-10-10. A file that
+round 1 already changed is listed again for what round 2 added.
 
-- `RightPanelTabs.tsx`: the `usePanelSurfaceKeys` call, beside the round-2
-  launcher and tab cycling seams.
+Chat and cite:
+
+- `ChatView.tsx` (285): `"rightPanel.toggleMaximized"` and
+  `"rightPanel.newTab"` (which opens the panel, then `openPanelLauncher()`)
+  in its registry block.
+- `chat/ChatComposer.tsx` (142): the Vim cite branch lost the fork's
+  `focusEditor` option, so a cite focuses the composer. Lines removed and
+  one comment rewritten; nothing added.
+- `chat/AssistantSelectionToolbar.tsx` (2): `citeAndFlash` around `onCite`,
+  in the cite request subscription and in the Cite button.
+
+Sidebar:
+
+- `Sidebar.tsx` (164): `useViewportThreadKeys(showThreadJumpHints)` and the
+  jump hints numbered from it, `useThreadRowArrowKeys()`, `scrollThreadList`
+  in the page-key branch of the traversal handler, `readViewportThreadKeys()`
+  for the number jump, `data-mesura-thread-key` on the slim and the card row,
+  and the rows' `focus-visible` classes. The page-key branch stops the key
+  and returns whether or not the list scrolled, and the jump hints'
+  memo depends on `viewportThreadKeys`. The guard also pins upstream's row
+  `onKeyDown`, which opens a thread on Enter and Space only: an arrow that
+  opened a thread would undo `useThreadRowArrowKeys`.
+
+Right panel — tabs, launcher, focus:
+
+- `RightPanelTabs.tsx` (44): the largest round-2 seam in the panel.
+  - `useRightPanelTabCycling` and `usePanelSurfaceKeys` in the tab bar.
+  - The launcher: `openPanelLauncher` on the `+` in place of upstream's
+    drop-down list and its disabled-reason tooltips (`addSurfaceActions`,
+    `SurfaceMenuItem`, `DisabledReasonTooltip`, `SURFACE_DISABLED_REASONS`,
+    deleted; the guard fails if a merge brings them back), the overlay under
+    `launcherOpen` over a `relative` surface content, which takes the same
+    props as the empty panel's launcher (the guard compares the two sets), `dismissPanelLauncher`
+    on Escape, `data-key-passthrough` on the launcher so the key engine
+    leaves its letters alone, and a refocus when an already mounted launcher
+    opens again.
+  - `runAction`, which every surface row goes through (a letter, Enter on
+    the highlight, a click, a browser profile from the Browser row's
+    chevron): it closes the launcher, runs the row, then
+    `keepFocusInPanelAfterRender(panel)`.
+  - The letter handler, registered with `registerLauncherKeyHandler` and as
+    a capture-phase `keydown` listener on `window`: it skips a key the page
+    already took, answers every row's letter (available rows through
+    `runAction`, unavailable ones through `reportUnavailable`, Panel actions
+    through `runPanelLauncherAction`), and unregisters both on unmount.
+  - The Panel section (`panelLauncherActions`, handed to both launchers) and
+    `UnavailableLauncherRow`, which shows a row's reason on the row.
+- `preview/PreviewPanel.tsx` (3): `visible={visible && !launcherOpen}`, so
+  the desktop browser view does not cover the launcher.
 - `DiffPanel.tsx` (43): `data-pane-entry` on the code view's wrapper. One
   attribute; the file moves often, so a sync may meet it in a conflict.
 - `diffs/DiffFileTree.tsx` (4): the `usePierreTreePaneEntry` call and the
   wrapper's `ref`, `data-pane-entry` and `onKeyDown`.
+- `AgentsPanel.tsx` (7), `pullRequest/ThreadPullRequestsPanel.tsx` (9):
+  `data-pane-entry` on the list and on the empty state, which also gains
+  `tabIndex={-1}`.
+- `pullRequest/PullRequestDetailPanel.tsx` (75),
+  `pullRequest/PullRequestCodeTab.tsx` (34): one `data-pane-entry` each.
+- `files/FilePreviewPanel.tsx` (41): `data-pane-entry` and
+  `ref={previewFocusTargetRef}` on its two previews.
+- `files/AttachmentFilePreview.tsx` (5): `data-pane-entry` on the Markdown
+  and the image preview.
+
+`Ctrl+Q` and the terminal close confirmation:
+
+- `apps/desktop/src/window/DesktopWindow.ts` (21): `quitShortcutHandler`
+  runs only off Linux.
+- `apps/desktop/src/window/DesktopApplicationMenu.ts` (7): Linux gets its own
+  Quit item with no accelerator in place of `role: "quit"`.
+- `packages/contracts/src/keybindings.ts` (26): `rightPanel.nextTab`,
+  `rightPanel.previousTab` and `rightPanel.newTab` in
+  `STATIC_KEYBINDING_COMMANDS`.
+- `packages/shared/src/keybindings.ts` (23): the `ctrl+q`, `ctrl+tab`,
+  `ctrl+shift+tab` and `mod+t` defaults, and the
+  `ADDED_KEYBINDING_DEFAULTS` ids `2026-10-terminal-close-ctrl-q` and
+  `2026-10-right-panel-close-ctrl-q`.
+- `packages/contracts/src/ipc.ts` (51): `initialFocus?: "confirm"` in
+  `ConfirmDialogOptions`.
+- `lib/terminalCloseConfirm.ts` (1), `confirmDialog.ts` (2),
+  `ConfirmDialogHost.tsx` (5): the terminal close passes
+  `initialFocus: "confirm"`, the store carries it as `focusConfirm` (both
+  places that show a confirmation build the state with `confirmingState`),
+  and the host hands the Confirm button's ref to the dialog's `initialFocus`.
+
+Upstream tests round 2 extends (not guarded: a sync that drops a case loses
+coverage, not a seam):
+
+- `apps/web/src/keybindings.test.ts` (27): two cases, the panel's
+  `ctrl+tab` / `ctrl+shift+tab` / `mod+t` resolution, and `ctrl+q`
+  resolving to `rightPanel.close` and `terminal.close` with `mod+w` kept as
+  the label.
+- `apps/desktop/src/window/DesktopWindow.test.ts` (20): a per-platform test
+  layer and two cases, `Ctrl+Q` left to the page on Linux and still taken
+  by the quit guard on Windows.
+- `apps/desktop/src/window/DesktopApplicationMenu.test.ts` (18): the Linux
+  Quit item expected without an accelerator.
+- `apps/web/src/confirmDialog.test.ts` (2): one case, a confirmation opens
+  on Confirm only when the request asks for it.
+- `apps/web/src/lib/terminalCloseConfirm.test.ts` (1): the expected options
+  gain `initialFocus: "confirm"`.
 
 User documentation (outside `apps` and `packages`, not guarded):
 
-- `docs/user/keybindings.md` (33): one sentence linking `vim-mode.md`.
+- `docs/user/keybindings.md` (33): the sentence linking `vim-mode.md`, and
+  fork paragraphs on the sidebar keys, `Ctrl+Tab` and the launcher in the
+  panel, the panel focus, `Ctrl+Q`, and the Linux desktop app's missing quit
+  shortcut. Upstream lines edited: the "Desktop quit shortcut" section, the
+  macOS-only window close in "Reserved shortcuts", and in "Edit the
+  configuration file" the path (`~/.mesura-code/userdata`) and the product
+  name; the fork's paragraphs on how new defaults reach the file moved
+  there.
 - `docs/user/keyboard-focus.md` (1): one sentence on where the palette
   returns focus in Vim mode.
 
