@@ -81,6 +81,14 @@ Decisions of the production cycle:
     is a native view or a remote screen with its own input, so focus stays on
     their tab title (see "Landing in normal mode"). A tree keeps its own
     keys, but `Space` stays the leader in it (`lib/panelSurfaceFocus.ts`).
+18. Focus moves only by the app's keys, as in a native desktop app. A bare
+    `Tab` or `Shift+Tab` that no element claims does nothing, and no focus
+    outline or ring is drawn, with Vim mode on or off (`keys/nativeFocus.ts`,
+    `mesura.css`). An element that owns `Tab` (a terminal, the composer's
+    menus, the selection toolbar) keeps it. A confirmation's focused button
+    keeps its mark, because `Enter` acts on it. Rejected: keeping the tab walk
+    with a neutral outline, as round 2 built it; the developer reaches any
+    control with a keyboard hint tool instead.
 
 ## Decision
 
@@ -502,7 +510,7 @@ Each item has its own issue on `mesura-hq/mesura-code`, tracked by #86:
   without opening a thread, `Ctrl+1..9` number the rows on screen, and
   Up/Down move focus over the rows (the details tooltip, no open) while
   Enter opens. Still open: a Vim-mode cursor kept apart from the open
-  thread, and Tab to "All projects". The legacy sidebar gets none of these.
+  thread. The legacy sidebar gets none of these.
 - #80: feat(keys): keyboard scopes inside the right panel: each surface's own
   keys beyond moving and half-page moves (Diff modes, the file tree toggle,
   Markdown preview or edit), and `j`/`k` in Pierre's trees, where the arrows
@@ -529,10 +537,11 @@ Known limits of round 2, with no issue of their own:
   pull request and comes back, because upstream keeps the selected tab in
   component state (`PullRequestDetailPanel.tsx`), which resets when the
   surface mounts again. Focus lands in Summary's entry then.
-- The panel's tab buttons stay in the Tab order. Taking them out was
-  proposed, not built.
 - Other confirmations keep Cancel as their initial focus; only closing a
   terminal opens on Confirm (`initialFocus: "confirm"`).
+- With no tab walk, a confirmation's other button is reached only by the
+  pointer or a hint tool. `Escape` still cancels and `Enter` still answers
+  the focused button.
 
 ## Merge cost
 
@@ -549,7 +558,7 @@ Every upstream file the branch changes, measured with
 
 Engine, setting and chat buffer:
 
-- `main.tsx` (10): the `installKeyEngine()` call.
+- `main.tsx` (10): the `installKeyEngine()` and `installNativeFocus()` calls.
 - `routes/_chat.tsx` (11): `<KeyEngineHost />` in `ChatRouteLayout`, and the
   registry block (below).
 - `packages/contracts/src/settings.ts` (102): `vimMode` in

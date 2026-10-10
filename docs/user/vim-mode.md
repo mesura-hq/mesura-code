@@ -130,9 +130,6 @@ terminal's edge. PANE mode stays on, so you can press `l l l`. `Escape`, `q` or 
 it. Any other key leaves it and then runs as usual. New sizes are saved, as they are when you
 drag.
 
-You can also resize without Vim mode: press `Tab` to focus a resize handle, then use the arrow
-keys.
-
 ## Turn Vim mode off
 
 Open **Settings → Appearance** and turn off **Vim mode** in the Typography section. Every

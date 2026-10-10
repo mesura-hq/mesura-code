@@ -95,7 +95,7 @@ Join modifiers and a key with `+`, such as `mod+shift+d` or `ctrl+l`.
 `cmd` / `meta`, `ctrl` / `control`, `alt` / `option`, and `shift`.
 
 `tab` is usable as a key, but only with a modifier. The recorder in **Settings** → **Keybindings**
-passes a bare `Tab` and `Shift+Tab` through so they keep moving focus; a `Tab` held with Ctrl, Alt,
+passes a bare `Tab` and `Shift+Tab` through without recording them; a `Tab` held with Ctrl, Alt,
 or Cmd records normally.
 
 Shortcuts on `tab` reach the desktop app but not the web app. Browsers keep `Ctrl+Tab` and
@@ -288,6 +288,10 @@ The app claims these four everywhere, including inside a terminal and inside the
 each one means the same thing wherever you type it. That is the point of them: leaving the editor
 used to mean `Escape` and then the mouse. The editor's own window commands are unaffected, since
 a chord starting with `Ctrl+W` is never claimed.
+
+These chords are how focus moves. `Tab` and `Shift+Tab` do not walk from control to control as
+they do on a web page, and no focus outline is drawn: the focused pane and row show it instead. A
+place that uses `Tab` for itself keeps it, such as a terminal or the composer's suggestion menu.
 
 `mod+j` and `mod+k` keep whatever else they do in panes with no vertical neighbour. In the sidebar
 and the right panel there is nothing above or below, so the chord falls through untouched — which

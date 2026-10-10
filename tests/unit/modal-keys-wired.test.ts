@@ -271,6 +271,15 @@ it("modal keys seam guard: main.tsx installs the key engine before the router ex
   );
 });
 
+it("modal keys seam guard: main.tsx installs the Tab cancel", () => {
+  const main = readCanonical("apps/web/src/main.tsx");
+  assert.lengthOf(
+    callArguments(main, "installNativeFocus"),
+    1,
+    "main.tsx no longer calls installNativeFocus(), so Tab walks the tab order again",
+  );
+});
+
 it("modal keys seam guard: the chat route layout mounts KeyEngineHost", () => {
   const file = "apps/web/src/routes/_chat.tsx";
   const layout = region(read(file), "function ChatRouteLayout(", "</>", file);
