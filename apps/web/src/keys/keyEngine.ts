@@ -179,6 +179,7 @@ export function refreshModeIndicator(): KeyScope | null {
  */
 function markChatBufferKeys(on: boolean): void {
   const root = document.documentElement;
+  if (root.hasAttribute("data-mesura-chat-keys") === on) return;
   if (on) root.dataset.mesuraChatKeys = "";
   else delete root.dataset.mesuraChatKeys;
 }

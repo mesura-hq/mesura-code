@@ -64,6 +64,32 @@ describe("native focus: Tab does not walk the tab order", () => {
     expect(received).toEqual(["Tab"]);
   });
 
+  it("cancels a Tab whose propagation an element stopped without cancelling it", () => {
+    const field = document.createElement("input");
+    const container = document.createElement("div");
+    container.append(field);
+    document.body.append(container);
+    field.focus();
+    // A rename field's handler, as React runs it from the root container.
+    container.addEventListener("keydown", (event) => event.stopPropagation());
+    expect(pressOn(field, { key: "Tab" }).defaultPrevented).toBe(true);
+
+    const immediate = document.createElement("textarea");
+    document.body.append(immediate);
+    immediate.focus();
+    immediate.addEventListener("keydown", (event) => event.stopImmediatePropagation());
+    expect(pressOn(immediate, { key: "Tab", shiftKey: true }).defaultPrevented).toBe(true);
+  });
+
+  it("leaves a stopped key that is not a bare Tab alone", () => {
+    const field = document.createElement("input");
+    document.body.append(field);
+    field.focus();
+    field.addEventListener("keydown", (event) => event.stopPropagation());
+    expect(pressOn(field, { key: "Enter" }).defaultPrevented).toBe(false);
+    expect(pressOn(field, { key: "Tab", ctrlKey: true }).defaultPrevented).toBe(false);
+  });
+
   it("leaves every other key alone", () => {
     const button = focusedButton();
     expect(pressOn(button, { key: "Enter" }).defaultPrevented).toBe(false);

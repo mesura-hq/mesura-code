@@ -127,12 +127,35 @@ html[data-theme-id]:not([data-theme-id=""]) {
    itself: the pane's hairline, a row's highlight, the composer's ring. Both
    kinds the components draw go: the browser's `outline`, and Tailwind's
    `ring-*`, a box shadow composed from `--tw-ring-shadow` and
-   `--tw-ring-offset-shadow`. A text field keeps its focused border, drawn on
-   its wrapper and not on the focused element. */
-:focus-visible:not([data-slot="alert-dialog-popup"] button) {
-  outline: none !important;
+   `--tw-ring-offset-shadow`. */
+:focus-visible {
   --tw-ring-shadow: 0 0 #0000 !important;
   --tw-ring-offset-shadow: 0 0 #0000 !important;
+}
+:focus-visible:not([data-slot="alert-dialog-popup"] button) {
+  outline: none !important;
+}
+
+/* A text field draws its focus ring on its wrapper, not on the focused
+   element. The wrapper keeps its focused border colour and loses the halo.
+   These wrappers draw a ring only while focused, so the reset applies to
+   them always, and needs no `:has()` (see above). */
+[data-slot="input-control"],
+[data-slot="textarea-control"],
+[data-slot="input-group"],
+[data-slot="combobox-chips"] {
+  --tw-ring-shadow: 0 0 #0000 !important;
+}
+
+/* The settings sliders draw their focus ring on the thumb, with a literal
+   box shadow (index.css); this restores the thumb's resting shadow. Two
+   rules, because a browser drops a whole selector list over one vendor
+   pseudo-element it does not know. */
+.settings-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--contrast-foreground) 12%, transparent);
+}
+.settings-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--contrast-foreground) 12%, transparent);
 }
 
 /* The one exception: a confirmation answers Enter with whichever button holds

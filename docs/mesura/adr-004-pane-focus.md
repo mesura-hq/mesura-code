@@ -101,12 +101,14 @@ the keys are going, and any treatment with a texture of its own competes with
 the content for the same attention. An animated version was never on the table
 — it would repaint continuously and peg the GPU on a high-refresh display.
 
-- Rendered in `apps/web/src/mesura.css`, keyed on `:focus-within`. The
-  browser's own focus tree drives it: no React state and no re-render.
+- Rendered in `apps/web/src/mesura.css`, keyed on `:focus-within` by
+  default. The browser's own focus tree drives it: no React state and no
+  re-render. Two attributes on `<html>` cover what the focus tree cannot say,
+  each written only when its answer changes.
 - The chat column hands its mark to the terminal drawer whenever focus is
   inside the drawer, because the drawer is rendered inside the column and a
-  rule without that clause lights both at once. That clause is the one place a
-  listener is used: `lib/drawerFocusMark.ts` mirrors "focus is inside the
+  rule without that clause lights both at once. A listener answers that
+  clause: `lib/drawerFocusMark.ts` mirrors "focus is inside the
   drawer" onto `<html>` as `[data-mesura-drawer-focused]`, written to the DOM
   only when the answer changes. The first version asked it in CSS with
   `:has()` anchored on the chat column, and that made every thread switch
