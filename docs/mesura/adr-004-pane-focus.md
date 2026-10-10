@@ -37,7 +37,10 @@ to decide.
   attribute.
 - One sticky `lastFocusedPane` survives a blur to `body` (the editor's Escape
   in normal mode does exactly that today), so a chord typed with nothing
-  focused still moves from the pane the developer was last in.
+  focused still moves from the pane the developer was last in. When that
+  pane went away with focus in it (the panel after its last tab closed, a
+  collapsed sidebar), the key engine's scope falls back to the chat
+  (`keys/focusScope.ts`).
 - The keybinding `when` context gains three identifiers, `sidebarFocus`,
   `chatFocus` and `panelFocus`, filled in by `resolveContext` in
   `apps/web/src/keybindings.ts` from `getFocusedPane()`. Every existing caller

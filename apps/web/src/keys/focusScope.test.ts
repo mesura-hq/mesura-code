@@ -8,9 +8,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { resolveKeyScope } from "./focusScope";
 
 const LAYOUT = `
-  <div data-app-sidebar>
-    <button data-testid="sidebar-row">row</button>
-    <input data-testid="sidebar-search" type="search" />
+  <div data-slot="sidebar" data-state="expanded">
+    <div data-app-sidebar>
+      <button data-testid="sidebar-row">row</button>
+      <input data-testid="sidebar-search" type="search" />
+    </div>
   </div>
   <div data-chat-column-maximized-away="false">
     <div data-testid="chat-focus" tabindex="0">chat</div>
@@ -91,6 +93,19 @@ describe("resolveKeyScope after a blur to body", () => {
 
     scopeAfterFocusing("panel-button");
     expect(scopeAfterBlurToBody()).toBe("panel");
+  });
+
+  it("hands the keys to the chat when the last focused pane went away with focus in it", () => {
+    // The panel's last tab closes: the panel unmounts and focus drops to body.
+    scopeAfterFocusing("panel-button");
+    document.querySelector("[data-preview-panel-mode]")!.remove();
+    expect(document.activeElement).toBe(document.body);
+    expect(resolveKeyScope(document.body)).toBe("chat");
+
+    // The sidebar collapses while a row has focus.
+    scopeAfterFocusing("sidebar-row");
+    document.querySelector<HTMLElement>('[data-slot="sidebar"]')!.dataset.state = "collapsed";
+    expect(scopeAfterBlurToBody()).toBe("chat");
   });
 
   it("treats a blur to body after the terminal as terminal passthrough", () => {

@@ -18,7 +18,9 @@ import { readKeyEngineSnapshot, type EngineModeLabel } from "./keyEngineStore";
 import { isPaneModeActive } from "./paneMode";
 
 const LAYOUT = `
-  <div data-app-sidebar><button data-testid="sidebar-row">row</button></div>
+  <div data-slot="sidebar" data-state="expanded">
+    <div data-app-sidebar><button data-testid="sidebar-row">row</button></div>
+  </div>
   <div data-chat-column-maximized-away="false">
     <div data-testid="chat-focus" tabindex="0">chat</div>
     <div data-testid="composer-editor" contenteditable="true"></div>

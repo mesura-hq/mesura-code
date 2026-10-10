@@ -1,4 +1,4 @@
-import { getFocusedPane, getLastFocusedPane } from "~/lib/paneFocus";
+import { getFocusedPane, getLastFocusedPane, isPaneReachable } from "~/lib/paneFocus";
 import { isCommandPaletteOpen } from "~/commandPaletteBus";
 
 /**
@@ -98,9 +98,19 @@ export function resolveKeyScope(active: Element | null = deepActiveElement()): K
   if (isTextEditable(active)) return "insert";
   if (document.querySelector(OPEN_LAYER_SELECTOR)) return "passthrough";
   if (active?.closest(TREE_SELECTOR)) return "tree";
-  const pane = focusedPane ?? getLastFocusedPane();
+  const pane = focusedPane ?? reachableLastPane();
   if (pane === "terminal") return "passthrough";
   return pane;
+}
+
+/**
+ * The pane the keys go to with nothing focused. A pane that went away with
+ * focus in it (the panel after its last tab closed, a collapsed sidebar)
+ * hands the keys to the chat, where the next key has something to act on.
+ */
+function reachableLastPane() {
+  const pane = getLastFocusedPane();
+  return pane === "chat" || isPaneReachable(pane) ? pane : "chat";
 }
 
 export function composerEditorElement(): HTMLElement | null {
