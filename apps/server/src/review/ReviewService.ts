@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Stream from "effect/Stream";
 
 import {
   VcsRepositoryDetectionError,
@@ -13,11 +14,15 @@ import {
   type ReviewDiffPreviewError,
   type ReviewDiffPreviewInput,
   type ReviewDiffPreviewResult,
+  type GitWorkingTreeChangesInput,
+  type GitWorkingTreeChangesResult,
 } from "@t3tools/contracts";
 
 import * as ServerConfig from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
+import { readWorkingTreeChanges } from "./GitWorkingTreeChanges.ts";
+import * as GitWorkingTreeWatcher from "./GitWorkingTreeWatcher.ts";
 
 export class ReviewService extends Context.Service<
   ReviewService,
@@ -28,6 +33,14 @@ export class ReviewService extends Context.Service<
     readonly getDiffFileContents: (
       input: ReviewDiffFileContentsInput,
     ) => Effect.Effect<ReviewDiffFileContentsResult, ReviewDiffPreviewError>;
+    /** Fork addition: per-file status for the Git status surface. */
+    readonly getWorkingTreeChanges: (
+      input: GitWorkingTreeChangesInput,
+    ) => Effect.Effect<GitWorkingTreeChangesResult, ReviewDiffPreviewError>;
+    /** Fork addition: the same, pushed again whenever it changes. */
+    readonly subscribeWorkingTreeChanges: (
+      input: GitWorkingTreeChangesInput,
+    ) => Stream.Stream<GitWorkingTreeChangesResult, ReviewDiffPreviewError>;
   }
 >()("t3/review/ReviewService") {}
 
@@ -38,6 +51,7 @@ export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const vcsRegistry = yield* VcsDriverRegistry.VcsDriverRegistry;
   const git = yield* GitVcsDriver.GitVcsDriver;
+  const workingTreeWatcher = yield* GitWorkingTreeWatcher.GitWorkingTreeWatcher;
 
   const canonicalizePath = (value: string) => {
     const resolvedPath = path.resolve(value);
@@ -64,7 +78,11 @@ export const make = Effect.gen(function* () {
   };
 
   const assertWorkspaceBoundCwd = Effect.fn("ReviewService.assertWorkspaceBoundCwd")(function* (
-    operation: "ReviewService.getDiffPreview" | "ReviewService.getDiffFileContents",
+    operation:
+      | "ReviewService.getDiffPreview"
+      | "ReviewService.getDiffFileContents"
+      | "ReviewService.getWorkingTreeChanges"
+      | "ReviewService.subscribeWorkingTreeChanges",
     cwd: string,
   ) {
     const [candidate, workspaceRoot, worktreesRoot] = yield* Effect.all([
@@ -83,7 +101,10 @@ export const make = Effect.gen(function* () {
       detail:
         operation === "ReviewService.getDiffPreview"
           ? "Review diff preview cwd must stay within the configured workspace root."
-          : "Review diff file contents cwd must stay within the configured workspace root.",
+          : operation === "ReviewService.getWorkingTreeChanges" ||
+              operation === "ReviewService.subscribeWorkingTreeChanges"
+            ? "Working tree changes cwd must stay within the configured workspace root."
+            : "Review diff file contents cwd must stay within the configured workspace root.",
     });
   });
 
@@ -133,10 +154,34 @@ export const make = Effect.gen(function* () {
     return yield* git.getReviewDiffFileContents(input);
   });
 
+  const getWorkingTreeChanges: ReviewService["Service"]["getWorkingTreeChanges"] = Effect.fn(
+    "ReviewService.getWorkingTreeChanges",
+  )(function* (input) {
+    yield* assertWorkspaceBoundCwd("ReviewService.getWorkingTreeChanges", input.cwd);
+    return yield* readWorkingTreeChanges({ git, fileSystem, path }, input.cwd);
+  });
+
+  const subscribeWorkingTreeChanges: ReviewService["Service"]["subscribeWorkingTreeChanges"] = (
+    input,
+  ) =>
+    Stream.unwrap(
+      assertWorkspaceBoundCwd("ReviewService.subscribeWorkingTreeChanges", input.cwd).pipe(
+        Effect.as(workingTreeWatcher.watch(input.cwd)),
+      ),
+    );
+
   return ReviewService.of({
     getDiffPreview,
     getDiffFileContents,
+    getWorkingTreeChanges,
+    subscribeWorkingTreeChanges,
   });
 });
 
-export const layer = Layer.effect(ReviewService, make);
+// Fork: the working-tree watcher is built here rather than in `server.ts`, so
+// the watcher adds no requirement for upstream's callers of this layer. Layers
+// are memoized by reference, so a caller that also provides
+// `GitWorkingTreeWatcher.layer` shares this one instance.
+export const layer = Layer.effect(ReviewService, make).pipe(
+  Layer.provide(GitWorkingTreeWatcher.layer),
+);

@@ -89,6 +89,14 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // Monitor, so mod+alt+e stays as the chord a browser lets through.
   { key: "mod+alt+e", command: "fileTree.miller", when: "!terminalFocus" },
   { key: "mod+shift+e", command: "fileTree.miller", when: "!terminalFocus" },
+  // Fork addition: the Diff surface's Tree diff mode and its mode menu.
+  // Symmetria IDE used mod+shift+g, which composer.branch holds here. alt+g and
+  // alt+c are free in the app and in the developer's Hyprland config, whose G
+  // and C binds all use Super; alt+d was not taken because browsers keep it for
+  // the address bar. New commands, so the per-command startup backfill
+  // installs them.
+  { key: "alt+g", command: "treeDiff.toggle", when: "!terminalFocus" },
+  { key: "alt+c", command: "diff.modeMenu", when: "!terminalFocus" },
   { key: "alt+u", command: "usage.peek" },
   // Fork addition: the Hosts dock's held peek, on a free chord, so the
   // per-command startup backfill installs it; no RETIRED or ADDED entry. No

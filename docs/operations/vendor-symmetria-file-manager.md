@@ -102,6 +102,15 @@ Added by the tree arrow-key fix (2026-09-26):
   the 25,000 rows of a whole project listing, a held arrow key dropped frames. The standalone's
   scanner rarely yields that many rows, so the cost showed only here.
 
+Added by the public-readiness preparation (2026-10-08):
+
+- `packages/fm-core/test/zoxide.test.ts`, `packages/fm-ui/test/renderer/support.ts`,
+  `packages/fm-ui/test/renderer/zoxide.test.tsx`: the frecent-list fixture path
+  `/home/jc/work/sales/<name>` now ends in `acme`. The old last segment was a client project's
+  directory name, which `tests/unit/public-readiness.test.ts` forbids in tracked tests. The queries
+  these tests type (`sales`, `/home/jc/w`, `wo`) match the same single entry as before. Test
+  fixtures only; no product code changed.
+
 Every edit is written so that the file manager's own `App.tsx` and its existing tests need no
 change. A maintainer of the file manager should be able to accept the branch as is.
 

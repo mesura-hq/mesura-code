@@ -1,5 +1,3 @@
-// @effect-diagnostics nodeBuiltinImport:off - locates the real nvim binary before spawning it.
-import * as NodeChildProcess from "node:child_process";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -9,6 +7,7 @@ import * as Result from "effect/Result";
 
 import { NodeNvimAdapter } from "../NodeNvimAdapter.ts";
 import { NvimBridge } from "../NvimBridge.ts";
+import { nvimAvailable, reportMissingNvim } from "./nvimOnPath.ts";
 
 /**
  * The host's options, proved against a configuration that fights them.
@@ -24,15 +23,6 @@ import { NvimBridge } from "../NvimBridge.ts";
  * It uses a configuration written here rather than the developer's own, so it
  * runs wherever `nvim` is on PATH. `realConfig.test.ts` covers the real one.
  */
-
-const nvimAvailable = (() => {
-  try {
-    NodeChildProcess.execFileSync("nvim", ["--version"], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-})();
 
 const layer = NodeNvimAdapter.layer.pipe(Layer.provideMerge(NodeServices.layer));
 
@@ -91,11 +81,7 @@ const withHostileConfig = <A>(
 const lua = (bridge: NvimBridge.Session, code: string) =>
   bridge.request("nvim_exec_lua", [code, []]);
 
-if (!nvimAvailable) {
-  it("skips the host-option harness, because nvim is not on PATH", () => {
-    assert.isFalse(nvimAvailable);
-  });
-}
+if (!nvimAvailable) reportMissingNvim("host-option harness");
 
 if (nvimAvailable)
   it.layer(layer, { excludeTestServices: true })("the host owns the options it must own", (it) => {

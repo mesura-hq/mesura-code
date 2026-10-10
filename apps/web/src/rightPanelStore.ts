@@ -64,6 +64,9 @@ export type RightPanelSurface =
       /** Present when the file lives in the thread's attachment store rather
           than at a workspace or host path. */
       attachment?: ChatFileAttachment;
+      /** Fork addition: opened from Tree diff, which already lists the files,
+          so this tab starts without the explorer until the reader asks for it. */
+      explorerHidden?: boolean;
     }
   | {
       /**
@@ -152,7 +155,14 @@ interface RightPanelStoreState {
   openFactory: (ref: ScopedThreadRef, selection: FactoryPanelSelection) => void;
   renameDevice: (ref: ScopedThreadRef, surfaceId: string, title: string) => void;
   openBrowser: (ref: ScopedThreadRef, tabId: string | null) => void;
-  openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
+  openFile: (
+    ref: ScopedThreadRef,
+    relativePath: string,
+    line?: number,
+    options?: { readonly explorerHidden?: boolean },
+  ) => void;
+  /** Fork addition: brings the explorer back on a file tab opened without it. */
+  revealFileExplorer: (ref: ScopedThreadRef, surfaceId: string) => void;
   openAttachment: (ref: ScopedThreadRef, attachment: ChatFileAttachment) => void;
   openPullRequest: (
     ref: ScopedThreadRef,
@@ -232,12 +242,14 @@ const fileSurface = (
   relativePath: string,
   revealLine: number | null,
   revealRequestId: number,
+  explorerHidden = false,
 ): RightPanelSurface => ({
   id: `file:${relativePath}`,
   kind: "file",
   relativePath,
   revealLine,
   revealRequestId,
+  ...(explorerHidden ? { explorerHidden } : {}),
 });
 
 const attachmentSurface = (attachment: ChatFileAttachment): RightPanelSurface => ({
@@ -616,7 +628,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               : next;
           }),
         ),
-      openFile: (ref, relativePath, line) =>
+      openFile: (ref, relativePath, line, options) =>
         set((state) =>
           userAction(state, scopedThreadKey(ref), (current) => {
             const withoutStandaloneExplorer = current.surfaces.filter(
@@ -631,6 +643,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               relativePath,
               normalizeRevealLine(line),
               (existing?.revealRequestId ?? 0) + 1,
+              options?.explorerHidden === true,
             );
             return {
               isOpen: true,
@@ -642,6 +655,17 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
                 : [...withoutStandaloneExplorer, surface],
             };
           }),
+        ),
+      revealFileExplorer: (ref, surfaceId) =>
+        set((state) =>
+          userAction(state, scopedThreadKey(ref), (current) => ({
+            ...current,
+            surfaces: current.surfaces.map((surface) => {
+              if (surface.id !== surfaceId || surface.kind !== "file") return surface;
+              const { explorerHidden: _hidden, ...shown } = surface;
+              return shown;
+            }),
+          })),
         ),
       openAttachment: (ref, attachment) =>
         set((state) =>

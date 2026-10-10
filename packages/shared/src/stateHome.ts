@@ -46,7 +46,7 @@ export const REMOTE_DEFAULT_STATE_HOME = `$HOME/${DEFAULT_STATE_HOME_DIR_NAME}`;
  * The npm package a released server installs from, or `null` while the fork
  * publishes nothing.
  *
- * Mesura Code is a private fork whose server workspace is still named `t3`, so
+ * Mesura Code publishes no server package, and its server workspace is still named `t3`, so
  * every registry lookup it inherits from upstream resolves *upstream's*
  * package. That is not a missing feature, it is a hazard: a self-update would
  * replace this server with a different product that does not implement the

@@ -26,7 +26,7 @@ import {
   createRoute,
   createRouter,
 } from "@tanstack/react-router";
-import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vite-plus/test";
 import {
   EnvironmentId,
   factoryRunActivityId,
@@ -273,6 +273,13 @@ async function showRunAt(point: FactoryRunFixturePoint) {
     for (const listener of fixture.threadListeners) listener();
   });
 }
+
+// ChatView lazy-loads the Factory pane. On a loaded CI runner its first import
+// outlasted `vi.waitFor`'s 1 s default, and every test in the file failed behind
+// it. Load the chunk up front, under a hook timeout sized for that compile.
+beforeAll(async () => {
+  await import("./FactoryPane");
+}, 120_000);
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
