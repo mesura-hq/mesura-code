@@ -21,7 +21,9 @@ describe("KeybindingsSettings.logic", () => {
   it("lists composer, provider, and pull request commands with editable defaults", () => {
     const rows = buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS, "");
     for (const command of [
-      "composer.host",
+      "runContext.toggle",
+      "runContext.cycleMachine",
+      "runContext.toggleWorkspace",
       "composer.mode",
       "composer.workspace",
       "composer.branch",
