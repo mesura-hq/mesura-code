@@ -3,6 +3,7 @@
 import type { PreviewAnnotationPayload, ScopedThreadRef } from "@t3tools/contracts";
 
 import type { ComposerImageAttachment } from "~/composerDraftStore";
+import { usePanelLauncherOpen } from "~/lib/panelLauncher";
 import { isPreviewSupportedInRuntime } from "~/previewStateStore";
 
 import { PreviewPanelShell, type PreviewPanelMode } from "./PreviewPanelShell";
@@ -28,6 +29,9 @@ export function PreviewPanel({
   visible,
   onSendAnnotation,
 }: Props) {
+  // Mesura: the desktop browser is a native view drawn above the page, so it
+  // would cover the panel launcher shown over this tab; it hides meanwhile.
+  const launcherOpen = usePanelLauncherOpen();
   if (!isPreviewSupportedInRuntime()) {
     return (
       <PreviewPanelShell mode={mode}>
@@ -46,7 +50,7 @@ export function PreviewPanel({
         threadRef={threadRef}
         {...(tabId !== undefined ? { tabId } : {})}
         configuredUrls={configuredUrls}
-        visible={visible}
+        visible={visible && !launcherOpen}
         {...(onSendAnnotation ? { onSendAnnotation } : {})}
       />
     </PreviewPanelShell>

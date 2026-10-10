@@ -69,6 +69,16 @@ describe("panel surface focus", () => {
     expect(byTestId("scroller").tabIndex).toBe(-1);
   });
 
+  it("focuses the shown scroll region past a hidden one, as a pull request's inactive tab is", () => {
+    const panel = mountPanel(`
+      <div data-pane-entry="1">
+        <div style="visibility: hidden"><div data-testid="summary" style="overflow-y: auto"></div></div>
+        <div><div data-testid="timeline" style="overflow-y: auto"></div></div>
+      </div>`);
+    expect(focusPanelSurface(panel)).toBe(true);
+    expect(document.activeElement).toBe(byTestId("timeline"));
+  });
+
   it("reports a surface still loading its scroll region as not ready", () => {
     const panel = mountPanel(`<div data-pane-entry="2"><p>Loading…</p></div>`);
     expect(focusPanelSurface(panel)).toBe(false);

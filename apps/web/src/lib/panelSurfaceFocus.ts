@@ -16,6 +16,7 @@
 
 import { useEffect, type RefObject } from "react";
 
+import { registerFocusTarget } from "./focusTargets";
 import { getFocusedPane, getLastFocusedPane, registerPaneEntry } from "./paneFocus";
 
 export const PANE_ENTRY_ATTRIBUTE = "data-pane-entry";
@@ -56,6 +57,13 @@ function entryRank(element: Element): number {
 
 const isScrollRegion = (element: Element) =>
   /^(auto|scroll)$/.test(getComputedStyle(element).overflowY);
+/**
+ * A scroll region focus can land in. A surface may keep its other tabs mounted
+ * but `visibility: hidden` (the pull request's Summary, Timeline and Code),
+ * and a hidden region takes no focus.
+ */
+const isEntryScrollRegion = (element: Element) =>
+  isScrollRegion(element) && getComputedStyle(element).visibility !== "hidden";
 /** How deep under an entry its scroll region may sit. */
 const SCROLL_REGION_MAX_DEPTH = 4;
 
@@ -63,7 +71,7 @@ const SCROLL_REGION_MAX_DEPTH = 4;
 function scrollRegionIn(entry: HTMLElement): HTMLElement | null {
   let level: Element[] = [entry];
   for (let depth = 0; depth <= SCROLL_REGION_MAX_DEPTH && level.length > 0; depth++) {
-    const region = level.find(isScrollRegion);
+    const region = level.find(isEntryScrollRegion);
     if (region instanceof HTMLElement) return region;
     level = level.flatMap((element) => [...element.children]);
   }
@@ -80,6 +88,17 @@ function focusEntry(entry: HTMLElement): boolean {
   if (!target.hasAttribute("tabindex")) target.tabIndex = -1;
   target.focus({ preventScroll: true });
   return entry.contains(document.activeElement);
+}
+
+/**
+ * A ref for a file preview's entry (rendered Markdown, an image): while it is
+ * mounted, it is the `editor` focus target, so leaving the file tree lands in
+ * the preview's scroll region as it lands in the editor for a source file. A
+ * preview shows instead of the editor, never beside it.
+ */
+export function previewFocusTargetRef(entry: HTMLElement | null): (() => void) | undefined {
+  if (entry === null) return undefined;
+  return registerFocusTarget("editor", () => focusEntry(entry));
 }
 
 /** Puts focus on the active surface's entry in `panel`; false when it shows none. */
