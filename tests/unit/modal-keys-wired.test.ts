@@ -331,8 +331,12 @@ it("modal keys seam guard: the selection toolbar answers cite requests", () => {
   assertCallCarries(
     "apps/web/src/components/chat/AssistantSelectionToolbar.tsx",
     "subscribeChatCiteRequest",
-    ["request.cited = onCite("],
+    ["request.cited = citeAndFlash(onCite,"],
   );
+  // The Cite button cites through the same function, so it flashes the same way.
+  assertCallCarries("apps/web/src/components/chat/AssistantSelectionToolbar.tsx", "citeAndFlash", [
+    "selection.citation",
+  ]);
 });
 
 it("modal keys seam guard: the timeline minimap answers turn jump requests", () => {

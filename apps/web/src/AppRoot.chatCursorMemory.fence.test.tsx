@@ -28,272 +28,73 @@
  * Every test opens threads with ids no other test uses, because the chat
  * surface's state is module-level and lives for the whole file.
  *
- * Boundaries the fixture replaces, and nothing else: the environment and
- * thread reads (looked up by the thread ref), every RPC command and query,
- * the chords (the shipped defaults), unrelated chrome, the CSS highlight
- * registry happy-dom lacks (recorded instead of painted), the sidebar's
- * thread list, the file manager layer and the virtual list's measurement.
- * The setup follows `AppRoot.vimModeLanding.fence.test.tsx`.
+ * The boundaries the fixture replaces, and the app it mounts, are shared
+ * with the other fences in `test/appRootFenceMocks.tsx` and
+ * `test/appRootFenceApp.tsx`.
  */
-import { act, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import {
-  createMemoryHistory,
-  createRootRoute,
-  createRoute,
-  createRouter,
-  Outlet,
-} from "@tanstack/react-router";
+import { act } from "react";
+import type { Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import {
-  EnvironmentId,
-  MessageId,
-  ProjectId,
-  ProviderInstanceId,
-  ThreadId,
-} from "@t3tools/contracts";
+import { ThreadId } from "@t3tools/contracts";
 import { collectAssistantCitations } from "@t3tools/shared/assistantCitations";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { Thread } from "./types";
-import type { AppRouter } from "./router";
 
-const fixture = vi.hoisted(() => ({
-  threads: new Map<string, Thread>(),
-  openThreadId: "",
-  vimMode: false,
-  empty: [],
-  threadListeners: new Set<() => void>(),
-  /** The ranges the key surfaces last painted, by highlight name. */
-  highlights: new Map<string, ReadonlyArray<Range>>(),
-  project: {
-    id: "thread-recall-project",
-    environmentId: "thread-recall-environment",
-    title: "Cursor memory",
-    workspaceRoot: "/tmp/thread-recall",
-    scripts: [],
-    createdAt: "2026-10-08T12:00:00.000Z",
-    defaultModelSelection: { instanceId: "codex", model: "gpt-5.4" },
-  },
-  environments: [
-    {
-      environmentId: "thread-recall-environment",
-      label: "Fence environment",
-      connection: { phase: "connected" },
-      entry: {
-        target: {
-          _tag: "PrimaryConnectionTarget",
-          label: "Fence environment",
-          connectionId: "saved:thread-recall-environment",
-        },
-      },
-      displayUrl: null,
-      relayManaged: false,
-      serverConfig: {
-        settings: {},
-        environment: {
-          capabilities: { threadSettlement: true, threadPinning: true },
-          platform: { machine: "laptop" },
-        },
-        providers: [
-          {
-            instanceId: "codex",
-            driver: "codex",
-            enabled: true,
-            installed: true,
-            status: "ready",
-            version: null,
-            auth: { status: "authenticated" },
-            checkedAt: "2026-10-08T12:00:00.000Z",
-            models: [],
-            slashCommands: [],
-            skills: [],
-          },
-        ],
-      },
-    },
-  ],
-}));
+// The boundaries the fixture replaces: see `test/appRootFenceMocks.tsx`.
+const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("./state/entities", async (original) => (await fenceMocks()).mockEntities(original));
+vi.mock("./state/environments", async (original) =>
+  (await fenceMocks()).mockEnvironments(original),
+);
+vi.mock("./state/query", async () => (await fenceMocks()).mockQuery());
+vi.mock("./state/queries", async (original) => (await fenceMocks()).mockQueries(original));
+vi.mock("./state/threads", async (original) => (await fenceMocks()).mockThreads(original));
+vi.mock("./state/use-atom-command", async () => (await fenceMocks()).mockAtomCommand());
+vi.mock("./state/use-atom-query-runner", async () => (await fenceMocks()).mockAtomQueryRunner());
+vi.mock("./state/server", async (original) => (await fenceMocks()).mockServer(original));
+vi.mock("./hooks/useSettings", async (original) => (await fenceMocks()).mockSettings(original));
+vi.mock("./hooks/useHandleNewThread", async () => (await fenceMocks()).mockHandleNewThread());
+vi.mock("./hooks/useThreadActions", async () => (await fenceMocks()).mockThreadActions());
+vi.mock("./components/Sidebar", async () => (await fenceMocks()).mockSidebar());
+vi.mock("./components/LegacySidebar", async () =>
+  (await fenceMocks()).mockRendersNothing("default"),
+);
+vi.mock("./components/preview/PreviewAutomationHosts", async () =>
+  (await fenceMocks()).mockRendersNothing("PreviewAutomationHosts"),
+);
+vi.mock("./browser/ElectronBrowserHost", async () =>
+  (await fenceMocks()).mockRendersNothing("ElectronBrowserHost"),
+);
+vi.mock("./components/QuitHoldOverlay", async () =>
+  (await fenceMocks()).mockRendersNothing("QuitHoldOverlay"),
+);
+vi.mock("./components/chat/ChatHeader", async () =>
+  (await fenceMocks()).mockRendersNothing("ChatHeader"),
+);
+vi.mock("./components/BranchToolbar", async () =>
+  (await fenceMocks()).mockRendersNothing("BranchToolbar"),
+);
+vi.mock("./components/files/mesuraFileManager/MesuraFileManagerLayer", async () =>
+  (await fenceMocks()).mockFileManagerLayer(),
+);
+vi.mock("./keys/highlights", async () => (await fenceMocks()).mockHighlights());
+vi.mock("@legendapp/list/react", async () => (await fenceMocks()).mockLegendList());
 
-const success = () => Promise.resolve({ _tag: "Success" as const, value: { providers: [] } });
-
-vi.mock("./state/entities", async (importOriginal) => {
-  const { useSyncExternalStore } = await import("react");
-  const threadFor = (ref: { readonly threadId: string } | null | undefined) =>
-    (ref ? fixture.threads.get(ref.threadId) : undefined) ?? null;
-  const useFixtureThread = (ref: { readonly threadId: string } | null | undefined) =>
-    useSyncExternalStore(
-      (listener) => {
-        fixture.threadListeners.add(listener);
-        return () => {
-          fixture.threadListeners.delete(listener);
-        };
-      },
-      () => threadFor(ref),
-    );
-  return {
-    ...(await importOriginal<typeof import("./state/entities")>()),
-    useThread: useFixtureThread,
-    readThread: threadFor,
-    useThreadShell: useFixtureThread,
-    useThreadRefs: () => fixture.empty,
-    useThreadShells: () => fixture.empty,
-    useProjects: () => fixture.empty,
-    useProject: () => fixture.project,
-  };
-});
-vi.mock("./state/environments", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./state/environments")>()),
-  useEnvironments: () => ({ environments: fixture.environments, isReady: true }),
-  usePrimaryEnvironment: () => null,
-}));
-vi.mock("./state/query", () => ({
-  useEnvironmentQuery: () => ({
-    data: null,
-    error: null,
-    isPending: false,
-    isSuccess: false,
-    refresh: () => undefined,
-  }),
-}));
-vi.mock("./state/queries", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./state/queries")>()),
-  useThreadSearch: () => ({ matches: [], isPending: false }),
-  useProjectPathSearch: () => ({ entries: [], isPending: false, error: null, truncated: false }),
-}));
-vi.mock("./state/threads", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./state/threads")>();
-  const { EMPTY_ENVIRONMENT_THREAD_STATE } = await import("@t3tools/client-runtime/state/threads");
-  return { ...actual, useEnvironmentThread: () => EMPTY_ENVIRONMENT_THREAD_STATE };
-});
-vi.mock("./state/use-atom-command", () => ({ useAtomCommand: () => success }));
-vi.mock("./state/use-atom-query-runner", () => ({ useAtomQueryRunner: () => success }));
-// The chords the app ships, as a keybindings file with no user rules resolves them.
-vi.mock("./state/server", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./state/server")>();
-  const { Atom } = await import("effect/unstable/reactivity");
-  const { DEFAULT_RESOLVED_KEYBINDINGS } = await import("@t3tools/shared/keybindings");
-  return { ...actual, primaryServerKeybindingsAtom: Atom.make(() => DEFAULT_RESOLVED_KEYBINDINGS) };
-});
-vi.mock("./hooks/useSettings", async (importOriginal) => {
-  const { DEFAULT_SERVER_SETTINGS } = await import("@t3tools/contracts");
-  const { DEFAULT_CLIENT_SETTINGS } = await import("@t3tools/contracts/settings");
-  const clientSettings = () => ({ ...DEFAULT_CLIENT_SETTINGS, vimMode: fixture.vimMode });
-  return {
-    ...(await importOriginal<typeof import("./hooks/useSettings")>()),
-    useEnvironmentSettings: () => ({ ...clientSettings(), ...DEFAULT_SERVER_SETTINGS }),
-    useClientSettings: (select?: (value: typeof DEFAULT_CLIENT_SETTINGS) => unknown) =>
-      select ? select(clientSettings()) : clientSettings(),
-    useClientSettingsHydrated: () => true,
-    useLegacySidebarEnabled: () => false,
-  };
-});
-vi.mock("./hooks/useHandleNewThread", async () => {
-  const { scopeThreadRef: scope } = await import("@t3tools/client-runtime/environment");
-  const { EnvironmentId: Env, ThreadId: Thr } = await import("@t3tools/contracts");
-  return {
-    useNewThreadHandler: () => success,
-    useHandleNewThread: () => ({
-      activeDraftThread: null,
-      activeThread: fixture.threads.get(fixture.openThreadId) ?? null,
-      defaultProjectRef: null,
-      handleNewThread: success,
-      routeDraftId: null,
-      routeThreadRef: scope(Env.make("thread-recall-environment"), Thr.make(fixture.openThreadId)),
-    }),
-  };
-});
-vi.mock("./hooks/useThreadActions", () => ({
-  useThreadActions: () => ({
-    settleThread: success,
-    pinThread: success,
-    confirmAndUnpinThread: success,
-  }),
-}));
-// The sidebar's thread list, reduced to the open thread's row: the element
-// pane focus enters the sidebar through.
-vi.mock("./components/Sidebar", () => ({
-  default: () => (
-    <ul>
-      <li data-thread-item="" data-thread-key="thread-recall-row">
-        <div role="button" tabIndex={0} data-testid="sidebar-thread-row">
-          Cursor memory
-        </div>
-      </li>
-    </ul>
-  ),
-}));
-vi.mock("./components/LegacySidebar", () => ({ default: () => null }));
-vi.mock("./components/preview/PreviewAutomationHosts", () => ({
-  PreviewAutomationHosts: () => null,
-}));
-vi.mock("./browser/ElectronBrowserHost", () => ({ ElectronBrowserHost: () => null }));
-vi.mock("./components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }));
-vi.mock("./components/chat/ChatHeader", () => ({ ChatHeader: () => null }));
-vi.mock("./components/BranchToolbar", () => ({ BranchToolbar: () => null }));
-// The file manager layer: its focusable root while the store says open. No
-// focus of its own on mount, so only the palette's close can hand it the
-// keyboard here.
-vi.mock("./components/files/mesuraFileManager/MesuraFileManagerLayer", async () => {
-  const { useFileManagerStore } =
-    await import("./components/files/mesuraFileManager/fileManagerStore");
-  const { FILE_MANAGER_ROOT_ATTRIBUTE } =
-    await import("./components/files/mesuraFileManager/isFileManagerOpen");
-  return {
-    MesuraFileManagerLayer: () => {
-      const open = useFileManagerStore((state) => state.open);
-      return open ? (
-        <div {...{ [FILE_MANAGER_ROOT_ATTRIBUTE]: "" }} tabIndex={-1} data-testid="file-manager" />
-      ) : null;
-    },
-  };
-});
-// happy-dom has no CSS Custom Highlight API. Record what would be painted.
-vi.mock("./keys/highlights", () => ({
-  paintHighlight: (name: string, ranges: readonly Range[]) => {
-    fixture.highlights.set(
-      name,
-      ranges.map((range) => range.cloneRange()),
-    );
-  },
-}));
-// happy-dom has no layout. Keep routing and timeline projection real, and
-// replace only the virtual list's measurement boundary.
-vi.mock("@legendapp/list/react", () => ({
-  LegendList: ({
-    data,
-    renderItem,
-    ListHeaderComponent,
-    ListFooterComponent,
-  }: {
-    data: Array<{ id: string }>;
-    renderItem: (input: { item: { id: string } }) => ReactNode;
-    ListHeaderComponent?: ReactNode;
-    ListFooterComponent?: ReactNode;
-  }) => (
-    <div>
-      {ListHeaderComponent}
-      {data.map((item) => (
-        <div key={item.id}>{renderItem({ item })}</div>
-      ))}
-      {ListFooterComponent}
-    </div>
-  ),
-}));
-
-import { AppRoot } from "./AppRoot";
-import { AppSidebarLayout } from "./components/AppSidebarLayout";
-import { CommandPalette } from "./components/CommandPalette";
-import ChatView from "./components/ChatView";
 import { useComposerDraftStore } from "./composerDraftStore";
 import { installKeyEngine } from "./keys/keyEngine";
 import { readKeyEngineSnapshot } from "./keys/keyEngineStore";
 import { readAssistantText } from "./lib/assistantTextSelection";
-import { Route as ChatLayoutRoute } from "./routes/_chat";
+import {
+  addFenceThread,
+  fenceEnvironmentId as environmentId,
+  makeMessage,
+  renderFenceApp,
+  type FenceRouter,
+} from "./test/appRootFenceApp";
+import { appRootFence as fixture } from "./test/appRootFenceMocks";
 
-const environmentId = EnvironmentId.make("thread-recall-environment");
-const now = "2026-10-08T12:00:00.000Z";
 let root: Root | undefined;
-let router: ReturnType<typeof createFixtureRouter> | undefined;
+let router: FenceRouter | undefined;
 let container: HTMLDivElement;
 let threadSequence = 0;
 
@@ -301,50 +102,14 @@ beforeAll(() => {
   installKeyEngine();
 });
 
-function makeMessage(id: string, role: "user" | "assistant", text: string) {
-  return {
-    id: MessageId.make(id),
-    role,
-    text,
-    turnId: null,
-    streaming: false,
-    createdAt: now,
-    updatedAt: now,
-  };
-}
-
 /** Registers a thread with an id no other test uses, and returns that id. */
 function addThread(label: string, assistantText: string): ThreadId {
   threadSequence += 1;
-  const id = ThreadId.make(`thread-recall-${label}-${threadSequence}`);
-  fixture.threads.set(id, {
-    id,
-    environmentId,
-    projectId: ProjectId.make("thread-recall-project"),
-    title: `Cursor memory ${label}`,
-    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    session: null,
-    messages: [
-      makeMessage(`${id}-user`, "user", `Question for ${label}`),
-      makeMessage(`${id}-assistant`, "assistant", assistantText),
-    ],
-    proposedPlans: [],
-    checkpoints: [],
-    pullRequests: [],
-    createdAt: now,
-    updatedAt: now,
-    archivedAt: null,
-    settledOverride: null,
-    settledAt: null,
-    deletedAt: null,
-    latestTurn: null,
-    branch: null,
-    worktreePath: null,
-    activities: [],
-  } as unknown as Thread);
-  return id;
+  const id = `thread-recall-${label}-${threadSequence}`;
+  return addFenceThread(id, `Cursor memory ${label}`, [
+    makeMessage(`${id}-user`, "user", `Question for ${label}`),
+    makeMessage(`${id}-assistant`, "assistant", assistantText),
+  ]);
 }
 
 /**
@@ -397,51 +162,9 @@ async function settle(): Promise<void> {
   }
 }
 
-function createFixtureRouter(firstThreadId: ThreadId) {
-  const route = createRootRoute({
-    component: () => (
-      <CommandPalette>
-        <AppSidebarLayout>
-          <Outlet />
-        </AppSidebarLayout>
-      </CommandPalette>
-    ),
-  });
-  const chatLayout = createRoute({
-    getParentRoute: () => route,
-    id: "_chat",
-    component: ChatLayoutRoute.options.component!,
-  });
-  const thread = createRoute({
-    getParentRoute: () => chatLayout,
-    path: "/$environmentId/$threadId",
-    component: function FixtureThreadRoute() {
-      const params = thread.useParams();
-      return (
-        <ChatView
-          environmentId={EnvironmentId.make(params.environmentId)}
-          threadId={ThreadId.make(params.threadId)}
-          routeKind="server"
-        />
-      );
-    },
-  });
-  return createRouter({
-    routeTree: route.addChildren([chatLayout.addChildren([thread])]),
-    history: createMemoryHistory({ initialEntries: [`/${environmentId}/${firstThreadId}`] }),
-  });
-}
-
 /** Mounts the app on `threadId` with Vim mode on, the chat holding the keyboard. */
 async function mountApp(threadId: ThreadId) {
-  fixture.vimMode = true;
-  fixture.openThreadId = threadId;
-  router = createFixtureRouter(threadId);
-  await router.load();
-  await act(async () => {
-    root = createRoot(container);
-    root.render(<AppRoot router={router as unknown as AppRouter} />);
-  });
+  ({ root, router } = await renderFenceApp(container, threadId, { vimMode: true }));
   await settle();
   (document.activeElement as HTMLElement | null)?.blur?.();
 }

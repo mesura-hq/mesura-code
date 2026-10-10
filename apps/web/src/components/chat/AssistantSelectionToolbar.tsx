@@ -17,6 +17,7 @@ import {
   type SelectionActionPoint,
 } from "~/lib/selectionActions";
 import { subscribeChatCiteRequest } from "~/keys/chat/chatCiteBus";
+import { citeAndFlash } from "~/keys/chat/citeFlash";
 import { Button } from "../ui/button";
 
 /** The citation for the current native selection, when it is citable assistant text. */
@@ -136,7 +137,7 @@ export function AssistantSelectionToolbar({
     return subscribeChatCiteRequest((request) => {
       const captured = captureCitation(viewport, threadRef, window.getSelection());
       if (!captured || captured.citation.text.length > ASSISTANT_CITATION_MAX_TEXT_LENGTH) return;
-      request.cited = onCite(captured.citation, captured.sourceAnchor);
+      request.cited = citeAndFlash(onCite, captured.citation, captured.sourceAnchor);
     });
   }, [onCite, threadRef, viewport]);
 
@@ -147,7 +148,7 @@ export function AssistantSelectionToolbar({
     setSelection(null);
   };
   const cite = () => {
-    if (tooLong || !onCite(selection.citation, selection.sourceAnchor)) return false;
+    if (tooLong || !citeAndFlash(onCite, selection.citation, selection.sourceAnchor)) return false;
     window.getSelection()?.removeAllRanges();
     dismiss();
     return true;

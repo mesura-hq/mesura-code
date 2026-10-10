@@ -23,7 +23,7 @@ import {
   type FlashTarget,
 } from "../flashSession";
 import { requestChatCite } from "./chatCiteBus";
-import { flashCitedRange } from "./citeFlash";
+import { timelineRowOf } from "./citeFlash";
 import { requestTurnJump } from "./chatTurnBus";
 import {
   buildChatBuffer,
@@ -210,13 +210,8 @@ function paint(buffer: ChatBuffer, reveal: boolean): void {
   const range = cursorRange(buffer);
   // Reveal first: a widened cursor is measured where the glyph ends up.
   if (reveal && range) revealRange(range);
-  paintBlockCursor("mesura-chat-cursor", range, range ? rowOf(range) : null);
+  paintBlockCursor("mesura-chat-cursor", range, range ? timelineRowOf(range) : null);
   paintVisualSelection(buffer);
-}
-
-/** The timeline row a range is in: where its widened cursor is drawn. */
-function rowOf(range: Range): HTMLElement | null {
-  return range.startContainer.parentElement?.closest<HTMLElement>("[data-timeline-row-id]") ?? null;
 }
 
 /** The text the visual selection covers, or null outside visual mode. */
@@ -387,10 +382,10 @@ function jumpToUserMessage(direction: "previous" | "next"): void {
 }
 
 /**
- * Cites `range` through the selection toolbar's pipeline. The cited text
- * flashes once, and the composer takes the cite and focus with it, so the
- * keys go on in insert mode right after the citation, where its comment is
- * typed.
+ * Cites `range` through the selection toolbar's pipeline, which flashes the
+ * cited text (`citeAndFlash`). The composer takes the cite and focus with it,
+ * so the keys go on in insert mode right after the citation, where its
+ * comment is typed.
  */
 function citeRange(range: Range | null): void {
   const selection = window.getSelection();
@@ -399,8 +394,6 @@ function citeRange(range: Range | null): void {
     selection.removeAllRanges();
     selection.addRange(range);
     cited = requestChatCite();
-    const row = rowOf(range);
-    if (cited && row) flashCitedRange(range, row);
   }
   // The composer may already hold the selection, as its caret; only the
   // chat's own selection is cleared.
