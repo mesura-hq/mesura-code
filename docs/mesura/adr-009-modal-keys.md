@@ -569,6 +569,9 @@ Engine, setting and chat buffer:
 - `settingsSearch.ts` (80): the `vim-mode` search entry.
 - `apps/web/package.json` (42): the `@mesura/keys` and `@vimee/core`
   dependencies.
+- Root `package.json` (34): `--workspace packages/keys` in `knip:check`.
+- `pnpm-lock.yaml` (173): the `packages/keys` importer and `@vimee/core`.
+  A lockfile conflict is resolved by re-running `pnpm install`, not by hand.
 - `AssistantSelectionToolbar.tsx` (2): the shared `captureCitation` helper and
   the cite request subscription.
 - `MessagesTimeline.tsx` (159): one subscription in `TimelineMinimap` for

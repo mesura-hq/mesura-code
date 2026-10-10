@@ -120,14 +120,21 @@ export function focusPanelSurface(panel: Element): boolean {
   return false;
 }
 
-/** The pane entry for `focusPane("panel")`: the surface, else its tab title. */
+/**
+ * The pane entry for `focusPane("panel")`: the surface, else its tab title
+ * while the surface's entry renders (a Files tree still loading after a
+ * reload), then the entry.
+ */
 export function enterPanel(): boolean {
   const panel = document.querySelector(PANEL_ROOT_SELECTOR);
   if (panel === null) return false;
+  cancelPendingEntry?.();
   if (focusPanelSurface(panel)) return true;
   const title = panel.querySelector<HTMLElement>(ACTIVE_TAB_TITLE_SELECTOR);
-  title?.focus({ preventScroll: true });
-  return title !== null;
+  if (title === null) return false;
+  title.focus({ preventScroll: true });
+  waitForEntry(panel, title);
+  return true;
 }
 
 const isTextEntry = (element: HTMLElement) =>

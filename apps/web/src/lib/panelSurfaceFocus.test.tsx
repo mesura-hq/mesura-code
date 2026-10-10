@@ -9,7 +9,12 @@ import { act, useLayoutEffect, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { focusPanelSurface, setPaneEntryFocus, usePanelSurfaceKeys } from "./panelSurfaceFocus";
+import {
+  enterPanel,
+  focusPanelSurface,
+  setPaneEntryFocus,
+  usePanelSurfaceKeys,
+} from "./panelSurfaceFocus";
 import { useRightPanelTabCycling } from "./rightPanelTabCycling";
 
 /** A surface in a panel; happy-dom lays nothing out, so each test says what shows. */
@@ -280,6 +285,27 @@ describe("panel surface focus follows a key", () => {
     byTestId("title-diff").focus();
     await renderLateDiffEntry();
     expect(document.activeElement).toBe(byTestId("title-diff"));
+  });
+
+  it("waits for a late entry after a pane move into the panel too (Ctrl+L)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    // A Files tree still loading after a reload: its entry has no scroll region yet.
+    surfaceMarkup.files = `<div data-pane-entry="1" data-testid="files-loading"><p>Loading…</p></div>`;
+    mountHarness();
+    byTestId("chat-focus").focus();
+
+    act(() => {
+      expect(enterPanel()).toBe(true);
+    });
+    expect(document.activeElement).toBe(byTestId("title-files"));
+
+    byTestId("files-loading").insertAdjacentHTML(
+      "beforeend",
+      '<div data-testid="files-scroller" style="overflow-y: auto"></div>',
+    );
+    await flushMutations();
+    flushFrames();
+    expect(document.activeElement).toBe(byTestId("files-scroller"));
   });
 
   it("keeps waiting for a late entry when focus drops from the tab title to the body", async () => {
