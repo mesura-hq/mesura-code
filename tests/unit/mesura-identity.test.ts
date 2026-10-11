@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - reads product source from an external contract guard, not from the application runtime.
 import * as NodeFS from "node:fs";
 import { assert, it } from "vite-plus/test";
 
