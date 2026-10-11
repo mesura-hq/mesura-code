@@ -860,7 +860,7 @@ it.effect("project icon tool fence: the production MCP layer lists set_project_i
       // The search is explicit now; the agent must not be told one runs on its own.
       expect(tool?.description).not.toMatch(/automatic/i);
       expect(tool?.description).toMatch(/null/);
-      expect(tool?.description).toMatch(/no (Luna )?search/i);
+      expect(tool?.description).toMatch(/no agent search starts/i);
     }),
   ).pipe(
     Effect.provide(

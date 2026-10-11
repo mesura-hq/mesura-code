@@ -26,6 +26,7 @@ it.layer(NodeServices.layer)("project icon candidates", (it) => {
       const icon = "web/public/brand-logo.svg";
       yield* write(icon);
       yield* write("node_modules/example/logo.svg");
+      yield* write(".t3/brand-logo.svg");
       yield* write("docs/screenshot.png");
       const outside = yield* fs.makeTempDirectoryScoped({ prefix: "mesura-outside-icon-" });
       yield* fs.writeFileString(`${outside}/logo.svg`, "<svg/>");
