@@ -27,8 +27,14 @@
     },
     "scripts": {
       // Knip loads its preprocessor through a CLI option. The upstream sync runs
-      // remove-native-mobile.ts directly (ADR-008).
-      "entry": ["knip-schemas.ts", "remove-native-mobile.ts"],
+      // remove-native-mobile.ts directly (ADR-008). Agents run mesura-checks.ts
+      // (AGENTS.md's Deterministic Checks) and mesura-browser.ts directly.
+      "entry": [
+        "knip-schemas.ts",
+        "remove-native-mobile.ts",
+        "mesura-checks.ts",
+        "mesura-browser.ts",
+      ],
     },
     "apps/server": {
       // Vite+ pack entries and the launcher used by installed background services.
