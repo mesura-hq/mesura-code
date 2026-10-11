@@ -132,6 +132,7 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
         capabilities: new Set<McpInvocationContext.McpCapability>([
           "pull-requests",
           "factory",
+          ...(process.env.T3CODE_PROJECT_ICON_PROTOTYPE === "1" ? ["project-icons" as const] : []),
           ...request.capabilities,
         ]),
         issuedAt,

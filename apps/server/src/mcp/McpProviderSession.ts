@@ -7,7 +7,7 @@ export interface McpProviderSessionConfig {
   readonly providerInstanceId: ProviderInstanceId;
   readonly endpoint: string;
   readonly authorizationHeader: string;
-  /** Capabilities the credential grants ("preview", "device", "pull-requests", "factory"). */
+  /** Capabilities the credential grants ("preview", "device", "pull-requests", "factory", "project-icons"). */
   readonly capabilities: ReadonlySet<string>;
   /**
    * Set when the session may drive devices. Adapters spread this into the

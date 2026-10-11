@@ -9,10 +9,15 @@ import * as Schema from "effect/Schema";
 import { createModelSelection } from "@t3tools/shared/model";
 import { expect } from "vite-plus/test";
 
-import { CodexSettings, ProviderInstanceId, TextGenerationError } from "@t3tools/contracts";
+import {
+  CodexSettings,
+  DEFAULT_TEXT_GENERATION_MODEL,
+  ProjectId,
+  ProviderInstanceId,
+  TextGenerationError,
+} from "@t3tools/contracts";
 
 import * as ServerConfig from "../config.ts";
-import * as TextGeneration from "./TextGeneration.ts";
 import { makeCodexTextGeneration } from "./CodexTextGeneration.ts";
 import { writeFakeCli } from "../testUtils/fakeCli.ts";
 import {
@@ -177,7 +182,9 @@ function withFakeCodexEnv<A, E, R>(
     environment?: NodeJS.ProcessEnv;
     models?: ReadonlyArray<string>;
   },
-  effectFn: (textGeneration: TextGeneration.TextGeneration["Service"]) => Effect.Effect<A, E, R>,
+  effectFn: (
+    textGeneration: Effect.Success<ReturnType<typeof makeCodexTextGeneration>>,
+  ) => Effect.Effect<A, E, R>,
 ) {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -974,4 +981,64 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
         }),
     ),
   );
+  // Mesura: Luna project icon search, the Codex instance's `selectProjectIcon`.
+  it.effect("Codex reports Luna icon search unavailable without the Luna model", () =>
+    withFakeCodexEnv({ output: "{}", exitCode: 99, models: ["gpt-5.4-mini"] }, (textGeneration) =>
+      Effect.gen(function* () {
+        const error = yield* textGeneration
+          .selectProjectIcon(ProviderInstanceId.make("codex"), {
+            project: { id: ProjectId.make("icon"), title: "Icon", workspaceRoot: process.cwd() },
+            candidates: [],
+          })
+          .pipe(Effect.flip);
+        expect(error._tag).toBe("ProjectIconSelectionUnavailable");
+      }),
+    ),
+  );
+
+  const PROJECT_ICON_MODEL_OUTPUT = JSON.stringify({
+    path: "public/brand-logo.png",
+    reason: "Brand mark.",
+  });
+  for (const requiredArg of [
+    `--model ${DEFAULT_TEXT_GENERATION_MODEL}`,
+    "--ignore-user-config",
+    "--disable shell_tool",
+    "-s read-only",
+  ]) {
+    it.effect(`Codex selects a project icon with Luna and ${requiredArg}`, () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-codex-icon-" });
+        yield* fs.makeDirectory(path.join(root, "public"), { recursive: true });
+        yield* fs.writeFileString(path.join(root, "public/brand-logo.png"), "png");
+        yield* fs.writeFileString(path.join(root, "public/mark.svg"), "<svg id='brand-mark'/>");
+        return yield* withFakeCodexEnv(
+          {
+            output: PROJECT_ICON_MODEL_OUTPUT,
+            models: [DEFAULT_TEXT_GENERATION_MODEL],
+            requireArg: requiredArg,
+            requireImage: true,
+            requireReasoningEffort: "low",
+            stdinMustContain: "brand-mark",
+          },
+          (textGeneration) =>
+            Effect.gen(function* () {
+              const selection = yield* textGeneration.selectProjectIcon(
+                ProviderInstanceId.make("codex"),
+                {
+                  project: { id: ProjectId.make("icon"), title: "Icon", workspaceRoot: root },
+                  candidates: [
+                    { path: "public/brand-logo.png", bytes: 3 },
+                    { path: "public/mark.svg", bytes: 22 },
+                  ],
+                },
+              );
+              expect(selection).toEqual({ path: "public/brand-logo.png", reason: "Brand mark." });
+            }),
+        );
+      }).pipe(Effect.scoped),
+    );
+  }
 });

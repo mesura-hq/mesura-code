@@ -664,3 +664,26 @@ it.layer(TestLayer)("ProjectFaviconResolverLive", (it) => {
     );
   });
 });
+
+// Mesura: a Luna icon search must not save an image over a favicon that
+// appeared after the resolver cached a miss for the same root.
+it.layer(TestLayer)("ProjectFaviconResolver fresh resolution", (it) => {
+  it.effect(
+    "icon discovery regression: a fresh resolution sees a favicon behind a cached miss",
+    () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
+        const cwd = yield* makeTempDir;
+        expect(yield* resolver.resolvePath(cwd)).toBeNull();
+        yield* writeTextFile(cwd, "favicon.svg", "<svg/>");
+        expect(yield* resolver.resolvePath(cwd), "the miss is still cached").toBeNull();
+        expect(yield* resolver.resolvePath(cwd, undefined, { fresh: true })).toBe(
+          path.join(cwd, "favicon.svg"),
+        );
+        expect(yield* resolver.resolvePath(cwd), "the fresh walk refreshed the cache").toBe(
+          path.join(cwd, "favicon.svg"),
+        );
+      }).pipe(Effect.scoped),
+  );
+});

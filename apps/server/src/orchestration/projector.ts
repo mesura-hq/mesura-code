@@ -396,6 +396,9 @@ export function projectEvent(
                   ...(payload.projectIcon !== undefined
                     ? { projectIcon: payload.projectIcon }
                     : {}),
+                  ...(payload.iconDiscovery !== undefined
+                    ? { iconDiscovery: payload.iconDiscovery }
+                    : {}),
                   ...(payload.scripts !== undefined ? { scripts: payload.scripts } : {}),
                   updatedAt: payload.updatedAt,
                 }

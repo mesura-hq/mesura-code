@@ -352,6 +352,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         consumeResetCredit,
         adapter,
         textGeneration,
+        selectProjectIcon: (input) => textGeneration.selectProjectIcon(instanceId, input),
         readAccountLimits: () =>
           readCodexAccountLimits({
             binaryPath: effectiveConfig.binaryPath,

@@ -31,6 +31,8 @@ import {
 } from "./toolkits/preview/tools.ts";
 import { FactoryToolkitHandlersLive } from "./toolkits/factory/handlers.ts";
 import { FactoryToolkit } from "./toolkits/factory/tools.ts";
+import { ProjectIconsToolkit } from "./toolkits/projectIcons/tools.ts";
+import { ProjectIconsToolkitHandlersLive } from "./toolkits/projectIcons/handlers.ts";
 import { PullRequestsToolkitHandlersLive } from "./toolkits/pullRequests/handlers.ts";
 import { PullRequestsToolkit } from "./toolkits/pullRequests/tools.ts";
 import {
@@ -610,6 +612,10 @@ export const PullRequestsToolkitRegistrationLive = McpServer.toolkit(PullRequest
   Layer.provide(PullRequestsToolkitHandlersLive),
 );
 
+export const ProjectIconsToolkitRegistrationLive = McpServer.toolkit(ProjectIconsToolkit).pipe(
+  Layer.provide(ProjectIconsToolkitHandlersLive),
+);
+
 export const FactoryToolkitRegistrationLive = McpServer.toolkit(FactoryToolkit).pipe(
   Layer.provide(FactoryToolkitHandlersLive),
 );
@@ -638,5 +644,13 @@ export const layer = Layer.mergeAll(
   PreviewToolkitRegistrationLive,
   PullRequestsToolkitRegistrationLive,
   FactoryToolkitRegistrationLive,
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      return process.env.T3CODE_PROJECT_ICON_PROTOTYPE === "1" && config.devUrl !== undefined
+        ? ProjectIconsToolkitRegistrationLive
+        : Layer.empty;
+    }),
+  ),
   DeviceToolkitRegistrationLive,
 ).pipe(Layer.provideMerge(McpTransportLive));

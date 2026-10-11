@@ -1,3 +1,10 @@
+import { ProjectId } from "./baseSchemas.ts";
+import {
+  ProjectIconDiscoverInput,
+  ProjectIconDiscoveryAccepted,
+  ProjectIconDiscoveryError,
+  ProjectIconDiscoveryPreview,
+} from "./projectIcons.ts";
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
@@ -323,6 +330,8 @@ export const WS_METHODS = {
   projectsSearchContents: "projects.searchContents",
   projectsSearchEntries: "projects.searchEntries",
   projectsWriteFile: "projects.writeFile",
+  projectIconsPreview: "projectIcons.preview",
+  projectIconsDiscover: "projectIcons.discover",
 
   // Shell methods
   shellOpenInEditor: "shell.openInEditor",
@@ -1021,6 +1030,17 @@ const WsProjectsListEntriesRpc = Rpc.make(WS_METHODS.projectsListEntries, {
   error: Schema.Union([ProjectListEntriesError, EnvironmentAuthorizationError]),
 });
 
+const WsProjectIconsPreviewRpc = Rpc.make(WS_METHODS.projectIconsPreview, {
+  payload: Schema.Struct({ projectIds: Schema.optional(Schema.Array(ProjectId)) }),
+  success: Schema.Array(ProjectIconDiscoveryPreview),
+  error: Schema.Union([ProjectIconDiscoveryError, EnvironmentAuthorizationError]),
+});
+const WsProjectIconsDiscoverRpc = Rpc.make(WS_METHODS.projectIconsDiscover, {
+  payload: ProjectIconDiscoverInput,
+  success: ProjectIconDiscoveryAccepted,
+  error: Schema.Union([ProjectIconDiscoveryError, EnvironmentAuthorizationError]),
+});
+
 const WsProjectsReadFileRpc = Rpc.make(WS_METHODS.projectsReadFile, {
   payload: ProjectReadFileInput,
   success: ProjectReadFileResult,
@@ -1683,6 +1703,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectsSearchContentsRpc,
   WsProjectsSearchEntriesRpc,
   WsProjectsWriteFileRpc,
+  WsProjectIconsPreviewRpc,
+  WsProjectIconsDiscoverRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
   WsAgentSessionsScanRpc,

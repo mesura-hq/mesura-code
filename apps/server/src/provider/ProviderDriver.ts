@@ -29,6 +29,7 @@ import type {
   ProviderInstanceEnvironment,
   ProviderInstanceId,
   ServerProvider,
+  TextGenerationError,
 } from "@t3tools/contracts";
 import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
@@ -37,6 +38,11 @@ import type * as Scope from "effect/Scope";
 import type * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import type { ProviderAdapterError, ProviderDriverError } from "./Errors.ts";
 import type { ProviderAdapterShape } from "./Services/ProviderAdapter.ts";
+import type {
+  ProjectIconSelection,
+  ProjectIconSelectionInput,
+  ProjectIconSelectionUnavailable,
+} from "../project/ProjectIconSelection.ts";
 import type { ServerProviderShape } from "./Services/ServerProvider.ts";
 import type { ProviderAuthController } from "./Services/ProviderAuthService.ts";
 
@@ -87,6 +93,13 @@ export interface ProviderInstance {
   >;
   readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
   readonly textGeneration: TextGeneration.TextGeneration["Service"];
+  /**
+   * Mesura: pick a project icon from local candidate images with Luna. Only
+   * Codex implements it; an instance without it cannot run icon searches.
+   */
+  readonly selectProjectIcon?: (
+    input: ProjectIconSelectionInput,
+  ) => Effect.Effect<ProjectIconSelection, ProjectIconSelectionUnavailable | TextGenerationError>;
   readonly auth?: ProviderAuthController;
   /**
    * Read provider-owned account limits without starting a user turn.

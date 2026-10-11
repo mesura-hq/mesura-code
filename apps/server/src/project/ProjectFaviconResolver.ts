@@ -129,6 +129,12 @@ export class ProjectFaviconResolver extends Context.Service<
     readonly resolvePath: (
       cwd: string,
       faviconPath?: string,
+      /**
+       * `fresh` walks the files and refreshes the cache instead of trusting a
+       * cached miss, for callers that act on the answer (an icon search must
+       * not overwrite a favicon added a moment ago).
+       */
+      options?: { readonly fresh?: boolean },
     ) => Effect.Effect<string | null, ProjectFaviconResolutionError>;
   }
 >()("t3/project/ProjectFaviconResolver") {}
@@ -347,13 +353,14 @@ export const make = Effect.gen(function* () {
 
   const resolvePath: ProjectFaviconResolver["Service"]["resolvePath"] = Effect.fn(
     "ProjectFaviconResolver.resolvePath",
-  )(function* (cwd, faviconPath) {
+  )(function* (cwd, faviconPath, options) {
     const revision = yield* readRepositoryRevision(cwd);
     // Caching only by cwd previously hid edits behind the ten-minute TTL.
     // Compare the last observed revision rather than retaining historical keys:
     // deleting a config must not resurrect an earlier cached miss.
     if (revision === null) return yield* resolvePathUncached(cwd, faviconPath);
     const key = faviconCacheKey(cwd, faviconPath);
+    if (options?.fresh === true) yield* Cache.invalidate(faviconCache, key);
     let entry = yield* Cache.get(faviconCache, key);
     if (entry.revision !== revision) {
       yield* Cache.invalidate(faviconCache, key);

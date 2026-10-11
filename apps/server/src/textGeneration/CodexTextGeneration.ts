@@ -10,6 +10,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import {
   type CodexSettings,
   DEFAULT_TEXT_GENERATION_REASONING_EFFORT,
+  type ProviderInstanceId,
   type ModelSelection,
   type ServerProviderModel,
   TextGenerationError,
@@ -22,6 +23,15 @@ import * as ServerConfig from "../config.ts";
 import { expandHomePath } from "../pathExpansion.ts";
 import { codexExecLaunchArgs, resolveCodexLaunchArgs } from "../provider/Layers/codexLaunchArgs.ts";
 import * as TextGeneration from "./TextGeneration.ts";
+import {
+  makeProjectIconSelectionRequest,
+  offersProjectIconSelectionModel,
+  PROJECT_ICON_SELECTION_MODEL,
+  PROJECT_ICON_SELECTION_TIMEOUT_MS,
+  ProjectIconSelection,
+  ProjectIconSelectionUnavailable,
+  type ProjectIconSelectionInput,
+} from "../project/ProjectIconSelection.ts";
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
@@ -174,7 +184,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
-      | "generateThreadSearchStep",
+      | "generateThreadSearchStep"
+      | "selectProjectIcon",
     value: unknown,
   ): Effect.Effect<string, TextGenerationError> =>
     encodeJsonString(value).pipe(
@@ -238,7 +249,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
-      | "generateThreadSearchStep";
+      | "generateThreadSearchStep"
+      | "selectProjectIcon";
     /** Undefined runs Codex in an empty temporary directory instead of a project. */
     cwd: string | undefined;
     prompt: string;
@@ -524,11 +536,56 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       return yield* toThreadSearchStep("Codex", generated);
     });
 
+  /**
+   * Mesura: Luna picks a project icon from local candidates. Codex-only, so it
+   * stays off the provider-wide TextGeneration contract; the driver exposes it
+   * as the instance's `selectProjectIcon` capability.
+   */
+  const selectProjectIcon = Effect.fn("CodexTextGeneration.selectProjectIcon")(function* (
+    instanceId: ProviderInstanceId,
+    input: ProjectIconSelectionInput,
+  ) {
+    if (!offersProjectIconSelectionModel(yield* getModels)) {
+      return yield* new ProjectIconSelectionUnavailable({
+        detail: `${PROJECT_ICON_SELECTION_MODEL} is not available on this Codex instance.`,
+      });
+    }
+    const request = yield* makeProjectIconSelectionRequest(input).pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
+      Effect.mapError(
+        (cause) =>
+          new TextGenerationError({
+            operation: "selectProjectIcon",
+            detail: "Failed to read the candidate images.",
+            cause,
+          }),
+      ),
+    );
+    return yield* runCodexJson({
+      operation: "selectProjectIcon",
+      cwd: undefined,
+      isolateTools: true,
+      prompt: request.prompt,
+      imagePaths: request.imagePaths,
+      timeoutMs: PROJECT_ICON_SELECTION_TIMEOUT_MS,
+      outputSchemaJson: ProjectIconSelection,
+      modelSelection: {
+        instanceId,
+        model: PROJECT_ICON_SELECTION_MODEL,
+        options: [{ id: "reasoningEffort", value: "low" }],
+      },
+    });
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
     generateThreadSearchStep,
-  } satisfies TextGeneration.TextGeneration["Service"];
+    selectProjectIcon,
+  } satisfies TextGeneration.TextGeneration["Service"] & {
+    readonly selectProjectIcon: typeof selectProjectIcon;
+  };
 });
