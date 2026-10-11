@@ -166,3 +166,29 @@ the scope and merge strategy. GitHub rebases the remaining stack after merging.
 It can rewrite history and restart checks. If a layer fails, earlier updates remain; resolve that
 layer before retrying. GitHub may require manual conflict resolution after a lower layer is amended,
 even when its changes look independent. Stack actions require an environment that supports them.
+
+## Browse project issues
+
+Read a GitHub project's issues without leaving the app. Issues are read live from GitHub through
+the GitHub CLI login on the machine running the server, as described in [GitHub](#github). The
+browser never holds a GitHub token.
+
+- **In a thread:** open the surface launcher or **Add surface** launcher and choose **Issues**, or press
+  **I** while the launcher is open. The pane shows the thread's project and the
+  conversation stays open beside it.
+- **Standalone:** choose **Issues** in the sidebar, or **Browse issues** in the command palette,
+  then pick a project.
+- **From an agent message:** click an issue link of one of the server's projects, or a `#123`
+  reference to the thread's project, and the issue opens in the Issues pane beside the
+  conversation. GitHub decides whether the number is an issue or a pull request, so a pull
+  request opens in its own pane instead. Hold **Ctrl**, **Cmd**, **Shift** or **Alt** while
+  clicking to follow the link as usual. A link to another repository, or one that cannot be
+  read, opens as an ordinary link. Following a reference does not attach the issue to the thread.
+
+Filter by **Open**, **Closed** or **All**, sort by update or creation date, and search with GitHub
+qualifiers such as `label:bug` or `assignee:@me`. Select an issue to read its description and
+comments. **Back**, **Close** or **Escape** returns to the list, and **GitHub** opens the issue on
+the host.
+
+The view is read-only: it cannot comment on, close or reopen an issue. A server from before
+Issues support shows an update message instead of the list.

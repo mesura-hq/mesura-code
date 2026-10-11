@@ -28,6 +28,7 @@ const RIGHT_PANEL_KINDS = [
   "terminal",
   "pull-request",
   "pull-requests",
+  "issues",
   "agents",
   "factory",
 ] as const;
@@ -89,6 +90,12 @@ export type RightPanelSurface =
     }
   /** The thread's linked pull requests, one singleton tab beside any number of `pull-request` tabs. */
   | { id: "pull-requests"; kind: "pull-requests" }
+  /**
+   * Without a selection the pane lists the thread's project. A selection is the issue a reader
+   * chose from a reference, on a project of the thread's own environment; `requestId` grows with
+   * every choice so choosing the same issue again after going Back reopens it.
+   */
+  | { id: "issues"; kind: "issues"; selection?: IssuesPanelSelection }
   | { id: "agents"; kind: "agents" }
   /** The Software Factory's plan, run and report for this thread: one tab, whose selection moves. */
   | {
@@ -98,6 +105,14 @@ export type RightPanelSurface =
       planId: string | null;
       runId: string | null;
     };
+
+export interface IssuesPanelSelection {
+  projectId: string;
+  number: number;
+  requestId: number;
+  /** Set once the pane has opened this choice, so remounting it after Back shows the list. */
+  consumed?: boolean;
+}
 
 export type FactoryPanelTab = "plan" | "run" | "report";
 export interface FactoryPanelSelection {
@@ -164,6 +179,10 @@ interface RightPanelStoreState {
   /** Fork addition: brings the explorer back on a file tab opened without it. */
   revealFileExplorer: (ref: ScopedThreadRef, surfaceId: string) => void;
   openAttachment: (ref: ScopedThreadRef, attachment: ChatFileAttachment) => void;
+  /** Open the Issues surface on one issue. UI selection only; nothing about it is saved remotely. */
+  openIssue: (ref: ScopedThreadRef, target: { projectId: string; number: number }) => void;
+  /** The pane opened the issue chosen by `requestId`; a newer choice is left untouched. */
+  consumeIssueSelection: (ref: ScopedThreadRef, requestId: number) => void;
   openPullRequest: (
     ref: ScopedThreadRef,
     target: {
@@ -224,6 +243,8 @@ const singletonSurface = (
       return { id: "files", kind };
     case "pull-requests":
       return { id: "pull-requests", kind };
+    case "issues":
+      return { id: "issues", kind };
     case "agents":
       return { id: "agents", kind };
     case "device":
@@ -385,6 +406,36 @@ function normalizeRevealLine(line: number | undefined): number | null {
   return Math.max(1, Math.trunc(line));
 }
 
+/** A persisted selection is kept only when it still names one issue of one project. */
+function migratedIssuesSurface(surface: { selection?: unknown }): RightPanelSurface {
+  const selection = surface.selection as Partial<Record<keyof IssuesPanelSelection, unknown>>;
+  if (
+    selection !== null &&
+    typeof selection === "object" &&
+    typeof selection.projectId === "string" &&
+    selection.projectId.length > 0 &&
+    typeof selection.number === "number" &&
+    Number.isSafeInteger(selection.number) &&
+    selection.number > 0
+  ) {
+    const requestId =
+      typeof selection.requestId === "number" && Number.isSafeInteger(selection.requestId)
+        ? Math.max(0, selection.requestId)
+        : 0;
+    return {
+      id: "issues",
+      kind: "issues",
+      selection: {
+        projectId: selection.projectId,
+        number: selection.number,
+        requestId,
+        ...(selection.consumed === true ? { consumed: true } : {}),
+      },
+    };
+  }
+  return { id: "issues", kind: "issues" };
+}
+
 export function migratePersistedRightPanelState(persistedState: unknown): {
   byThreadKey: Record<string, ThreadRightPanelState>;
 } {
@@ -439,6 +490,7 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                         }),
                       ];
                     }
+                    if (surface.kind === "issues") return [migratedIssuesSurface(surface)];
                     if (surface.kind !== "terminal") return [surface];
                     if (
                       !("resourceId" in surface) ||
@@ -611,6 +663,51 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               ? current.surfaces.filter((entry) => entry.id !== "browser:new")
               : current.surfaces;
             return upsertSurface({ ...current, surfaces: withoutPlaceholder }, surface);
+          }),
+        ),
+      openIssue: (ref, target) =>
+        set((state) =>
+          userAction(state, scopedThreadKey(ref), (current) => {
+            const existing = current.surfaces.find((entry) => entry.kind === "issues");
+            const surface: RightPanelSurface = {
+              id: "issues",
+              kind: "issues",
+              selection: {
+                projectId: target.projectId,
+                number: target.number,
+                requestId:
+                  (existing?.kind === "issues" ? (existing.selection?.requestId ?? 0) : 0) + 1,
+              },
+            };
+            return upsertSurface(
+              {
+                ...current,
+                surfaces: current.surfaces.map((entry) =>
+                  entry.id === surface.id ? surface : entry,
+                ),
+              },
+              surface,
+            );
+          }),
+        ),
+      consumeIssueSelection: (ref, requestId) =>
+        set((state) =>
+          automaticUpdate(state, scopedThreadKey(ref), (current) => {
+            const surface = current.surfaces.find((entry) => entry.kind === "issues");
+            if (
+              surface?.kind !== "issues" ||
+              surface.selection?.requestId !== requestId ||
+              surface.selection.consumed
+            )
+              return current;
+            const consumed: RightPanelSurface = {
+              ...surface,
+              selection: { ...surface.selection, consumed: true },
+            };
+            return {
+              ...current,
+              surfaces: current.surfaces.map((entry) => (entry.id === "issues" ? consumed : entry)),
+            };
           }),
         ),
       openPullRequest: (ref, target) =>

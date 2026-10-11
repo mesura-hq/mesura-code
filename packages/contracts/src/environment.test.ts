@@ -27,6 +27,46 @@ describe("ExecutionEnvironmentDescriptor", () => {
     ).toBe(true);
   });
 
+  it("issues phase 3 guard: treats a missing issue reference capability as unsupported under version skew", () => {
+    expect(
+      decodeDescriptor({
+        ...descriptor,
+        capabilities: { ...descriptor.capabilities, issues: true },
+      }).capabilities.issueReferences,
+    ).toBeUndefined();
+  });
+
+  it("issues phase 3 fence: preserves an advertised issue reference capability", () => {
+    expect(
+      decodeDescriptor({
+        ...descriptor,
+        capabilities: { ...descriptor.capabilities, issues: true, issueReferences: true },
+      }).capabilities.issueReferences,
+    ).toBe(true);
+  });
+
+  it("treats a missing Issues capability as unsupported under version skew", () => {
+    expect(decodeDescriptor(descriptor).capabilities.issues).toBeUndefined();
+  });
+
+  it("preserves an advertised Issues capability", () => {
+    expect(
+      decodeDescriptor({
+        ...descriptor,
+        capabilities: { ...descriptor.capabilities, issues: true },
+      }).capabilities.issues,
+    ).toBe(true);
+  });
+
+  it("preserves an Issues capability a server explicitly disables", () => {
+    expect(
+      decodeDescriptor({
+        ...descriptor,
+        capabilities: { ...descriptor.capabilities, issues: false },
+      }).capabilities.issues,
+    ).toBe(false);
+  });
+
   it("treats a missing attachment upload capability as unsupported", () => {
     expect(decodeDescriptor(descriptor).capabilities.attachmentUploads).toBeUndefined();
   });

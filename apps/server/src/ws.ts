@@ -174,6 +174,7 @@ import * as SourceControlRepositoryService from "./sourceControl/SourceControlRe
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
 import * as BitbucketApi from "./sourceControl/BitbucketApi.ts";
 import * as GitHubCli from "./sourceControl/GitHubCli.ts";
+import { listIssues, readIssueDetail, resolveIssueReference } from "./issues/readIssues.ts";
 import * as GitLabCli from "./sourceControl/GitLabCli.ts";
 import * as ForgejoCli from "./sourceControl/ForgejoCli.ts";
 import * as SourceControlProviderRegistry from "./sourceControl/SourceControlProviderRegistry.ts";
@@ -2730,6 +2731,21 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.pullRequestsList, pullRequests.list(input), {
             "rpc.aggregate": "pull-requests",
           }),
+        [WS_METHODS.issuesList]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.issuesList,
+            listIssues(input).pipe(Effect.provide(GitHubCli.layer)),
+          ),
+        [WS_METHODS.issuesDetail]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.issuesDetail,
+            readIssueDetail(input).pipe(Effect.provide(GitHubCli.layer)),
+          ),
+        [WS_METHODS.issuesResolveReference]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.issuesResolveReference,
+            resolveIssueReference(input).pipe(Effect.provide(GitHubCli.layer)),
+          ),
         [WS_METHODS.pullRequestsListStats]: (input) =>
           observeRpcEffect(WS_METHODS.pullRequestsListStats, pullRequests.listStats(input), {
             "rpc.aggregate": "pull-requests",

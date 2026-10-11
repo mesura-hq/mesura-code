@@ -149,17 +149,27 @@ export function splitPullRequestBody(body: string): ReadonlyArray<PullRequestBod
 }
 
 const AUTOLINK_CANDIDATE_PATTERN = /#[1-9]\d*|[0-9a-f]{40}/giu;
+const AUTOLINK_REFERENCE_PATTERN = /#[1-9]\d*/gu;
 const AUTOLINK_WORD_CHARACTER_PATTERN = /[A-Za-z0-9_]/u;
 const AUTOLINK_COMMIT_PREFIX_PATTERN = /[\s([{]/u;
 const AUTOLINK_IGNORED_TYPES = new Set(["link", "linkReference"]);
 
-/** GitHub-style same-repository references for pull request prose, never code or authored links. */
-export function remarkPullRequestAutolinks(options: { readonly repositoryUrl: string }) {
+/**
+ * GitHub-style same-repository references for pull request prose, never code or authored links.
+ * Agent prose passes `commits: false`: a hash an agent writes may name a commit that exists only
+ * in the local checkout, while `#123` names something the repository's host can answer for.
+ */
+export function remarkPullRequestAutolinks(options: {
+  readonly repositoryUrl: string;
+  readonly commits?: boolean;
+}) {
   const repositoryUrl = options.repositoryUrl.replace(/\/+$/u, "");
+  const pattern =
+    options.commits === false ? AUTOLINK_REFERENCE_PATTERN : AUTOLINK_CANDIDATE_PATTERN;
   return (tree: MarkdownNode) => {
     findAndReplaceText(
       tree,
-      AUTOLINK_CANDIDATE_PATTERN,
+      pattern,
       (matched: string, match: TextMatch) => {
         const reference = matched.startsWith("#");
         const before = match.input[match.index - 1];

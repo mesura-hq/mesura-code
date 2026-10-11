@@ -91,6 +91,13 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   /** Server exposes the pull-request list, detail, activity, diff, and mutation APIs. Absent on
       servers from before the pull-request workspace shipped, so clients must not probe them. */
   pullRequests: Schema.optionalKey(Schema.Boolean),
+  /** Server exposes the read-only issues.list and issues.detail APIs. Absent on servers from
+      before the Issues pane shipped, so clients treat missing as unsupported and never send them. */
+  issues: Schema.optionalKey(Schema.Boolean),
+  /** Server exposes issues.resolve-reference, which tells an issue from a pull request behind an
+      issue number. Advertised separately from `issues` because servers that shipped the Issues
+      reads first lack it, and a client must not send it to them. */
+  issueReferences: Schema.optionalKey(Schema.Boolean),
   /** Server understands canonical inline context links plus their message context records.
       Absent on servers from before inline context shipped, which drop the records and forward
       the links as literal text -- so a client must serialize context the legacy way for them. */

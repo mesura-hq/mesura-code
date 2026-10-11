@@ -106,6 +106,7 @@ import {
 } from "../components/pullRequest/PullRequestRow";
 import { PullRequestsUnavailableState } from "../components/pullRequest/PullRequestsUnavailableState";
 import { RightPanelTabs, type PullRequestTabStatusSeed } from "../components/RightPanelTabs";
+import { parseIssueSearch, someEnvironmentHasIssues } from "../components/issues/issues.logic";
 import {
   WorkspaceBreadcrumb,
   WorkspaceBreadcrumbItem,
@@ -2004,6 +2005,12 @@ function PullRequestsRouteView() {
             onAddFiles={() => undefined}
             onAddPullRequest={() => undefined}
             onAddPullRequests={() => undefined}
+            // There is no thread here to hold a pane, so Issues opens the standalone page.
+            onAddIssues={
+              someEnvironmentHasIssues(environments)
+                ? () => void navigate({ to: "/issues", search: parseIssueSearch({}) })
+                : undefined
+            }
             onAddAgents={() => undefined}
             onAddDevice={() => undefined}
             browserAvailable={false}

@@ -64,6 +64,25 @@ describe("RPC authorization scopes", () => {
     );
   });
 
+  it("issues phase 3 fence: resolves issue references under the same read scope as issue reads", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.issuesResolveReference)).toBe(
+      AuthOrchestrationReadScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.issuesResolveReference)).toBe(
+      requiredScopeForRpcMethod(WS_METHODS.issuesDetail),
+    );
+  });
+
+  it("reads GitHub issues under the orchestration read scope that pull request lists use", () => {
+    // Issue reads run `gh` on the server's credential, so they must never be reachable with a
+    // narrower scope than the pull request list beside them.
+    expect(requiredScopeForRpcMethod(WS_METHODS.issuesList)).toBe(AuthOrchestrationReadScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.issuesDetail)).toBe(AuthOrchestrationReadScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.issuesList)).toBe(
+      requiredScopeForRpcMethod(WS_METHODS.pullRequestsList),
+    );
+  });
+
   it("streams a Software Factory run to any client that may read the thread", () => {
     // The run state is a read of what the thread already shows, like the snapshot it links to.
     expect(requiredScopeForRpcMethod(WS_METHODS.subscribeFactoryRun)).toBe(

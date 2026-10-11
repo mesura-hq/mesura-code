@@ -15,6 +15,7 @@ import type {
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import {
   Bot,
+  CircleDot,
   Smartphone,
   ChevronDown,
   ChevronLeft,
@@ -121,6 +122,7 @@ interface RightPanelTabsProps {
   onAddFiles: () => void;
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
+  onAddIssues?: (() => void) | undefined;
   onAddAgents: () => void;
   onAddDevice: () => void;
   /** Opens the Software Factory surface; absent while the thread has nothing to show there. */
@@ -156,6 +158,18 @@ export function shouldOpenDefaultBrowserProfileFromMenuClick(
 }
 
 const NOOP = () => {};
+
+function issuesSurfaceAction(onAddIssues: (() => void) | undefined) {
+  return {
+    label: "Issues",
+    icon: CircleDot,
+    shortcut: "I",
+    available: onAddIssues !== undefined,
+    disabledReason: "Issues need a GitHub project on a server that supports them.",
+    onClick: onAddIssues ?? NOOP,
+    badgeCount: 0,
+  } as const;
+}
 
 /** Overlays that must win over the launcher's letter shortcuts. */
 const LAUNCHER_SHORTCUT_BLOCKING_LAYERS = [
@@ -289,6 +303,7 @@ function RightPanelEmptyState(props: {
   onAddFiles: () => void;
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
+  onAddIssues?: (() => void) | undefined;
   onAddAgents: () => void;
   onAddDevice: () => void;
   /** Opens the Software Factory surface; absent while the thread has nothing to show there. */
@@ -363,6 +378,7 @@ function RightPanelEmptyState(props: {
       onClick: props.onAddPullRequests,
       badgeCount: 0,
     },
+    issuesSurfaceAction(props.onAddIssues),
     {
       label: "Agents",
       icon: Bot,
@@ -726,6 +742,8 @@ function surfaceTitle(
       return `#${surface.number}`;
     case "pull-requests":
       return "Pull requests";
+    case "issues":
+      return "Issues";
     case "agents":
       return "Agents";
     case "factory":
@@ -813,6 +831,8 @@ function SurfaceIcon({
       );
     case "pull-requests":
       return <GitPullRequestArrow className="size-3 shrink-0" />;
+    case "issues":
+      return <CircleDot className="size-3 shrink-0" />;
     case "agents":
       return <Bot className="size-3 shrink-0" />;
     case "factory":
@@ -1359,6 +1379,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddFiles={props.onAddFiles}
             onAddPullRequest={props.onAddPullRequest}
             onAddPullRequests={props.onAddPullRequests}
+            onAddIssues={props.onAddIssues}
             onAddAgents={props.onAddAgents}
             onAddDevice={props.onAddDevice}
             onAddFactory={props.onAddFactory}
@@ -1388,6 +1409,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                   onAddFiles={props.onAddFiles}
                   onAddPullRequest={props.onAddPullRequest}
                   onAddPullRequests={props.onAddPullRequests}
+                  onAddIssues={props.onAddIssues}
                   onAddAgents={props.onAddAgents}
                   onAddDevice={props.onAddDevice}
                   onAddFactory={props.onAddFactory}

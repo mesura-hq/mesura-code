@@ -34,6 +34,11 @@ vi.mock("../state/entities", () => ({
   useProjects: () => [],
   useServerConfigs: () => new Map(),
 }));
+// Issue references read their environment's connection; none is connected here.
+vi.mock("../state/environments", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../state/environments")>()),
+  useEnvironment: () => null,
+}));
 vi.mock("../remoteOpen", () => ({
   useRemoteOpenResolution: () => ({ state: { mode: "local-exec" }, isResolved: true }),
 }));

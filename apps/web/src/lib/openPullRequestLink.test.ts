@@ -223,6 +223,13 @@ describe("shouldOpenPullRequestExternally", () => {
   it("keeps an unmodified click in the pull request view", () => {
     expect(shouldOpenPullRequestExternally({ metaKey: false, ctrlKey: false })).toBe(false);
   });
+
+  it("issues phase 3 regression: uses the browser for shift-click and alt-click too", () => {
+    const plain = { metaKey: false, ctrlKey: false, shiftKey: false, altKey: false };
+    expect(shouldOpenPullRequestExternally({ ...plain, shiftKey: true })).toBe(true);
+    expect(shouldOpenPullRequestExternally({ ...plain, altKey: true })).toBe(true);
+    expect(shouldOpenPullRequestExternally(plain)).toBe(false);
+  });
 });
 
 describe("parseChangeRequestUrl", () => {
@@ -514,5 +521,42 @@ describe("findProjectForChangeRequest", () => {
         number: 1,
       }),
     ).toBeUndefined();
+  });
+});
+
+describe("findProjectForChangeRequest with GitHub identities (issues phase 3 repair)", () => {
+  const project = (identity: Record<string, unknown>) =>
+    ({ id: "p1", repositoryIdentity: identity }) as never;
+  const locator = { source: "git-remote", remoteName: "upstream", remoteUrl: "x" };
+
+  it("issues phase 3 repair: a canonical-only GitHub identity claims its own pull requests", () => {
+    const projects = [
+      project({ canonicalKey: "github.com/pingdotgg/t3code", provider: "github", locator }),
+    ];
+    expect(
+      findProjectForChangeRequest(projects, {
+        host: "github.com",
+        repository: "pingdotgg/t3code",
+        number: 17404,
+      }),
+    ).toBe(projects[0]);
+  });
+
+  it("issues phase 3 repair: a GitHub identity naming two repositories claims neither", () => {
+    const projects = [
+      project({
+        canonicalKey: "github.com/pingdotgg/t3code",
+        provider: "github",
+        owner: "mesura-hq",
+        name: "mesura-code",
+        locator,
+      }),
+    ];
+    for (const repository of ["pingdotgg/t3code", "mesura-hq/mesura-code"]) {
+      expect(
+        findProjectForChangeRequest(projects, { host: "github.com", repository, number: 1 }),
+        repository,
+      ).toBeUndefined();
+    }
   });
 });

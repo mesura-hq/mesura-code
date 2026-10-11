@@ -2,7 +2,11 @@ import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { type MouseEvent, useCallback } from "react";
 
-import { pullRequestHostOf, type SourceControlProviderKind } from "@t3tools/contracts";
+import {
+  issueRepositoryUrl,
+  pullRequestHostOf,
+  type SourceControlProviderKind,
+} from "@t3tools/contracts";
 import { parseChangeRequestUrl, type ChangeRequestLink } from "@t3tools/shared/changeRequestUrl";
 import {
   canonicalRepositoryKey,
@@ -81,6 +85,20 @@ export function findProjectForChangeRequest(
         canonicalRepositoryKey(`${link.host}/${link.repository}`.toLowerCase())
       );
     }
+    // Fork: a GitHub identity names its repository through every field it records, the canonical
+    // key alone included, and one whose fields disagree names none — the server refuses to read it.
+    if (kind === "github") {
+      const recorded = issueRepositoryUrl(identity);
+      if (recorded === null) return false;
+      const url = new URL(recorded);
+      return (
+        url.hostname.toLowerCase() === link.host.toLowerCase() &&
+        url.pathname
+          .replace(/^\/+|\/+$/gu, "")
+          .replace(/\.git$/u, "")
+          .toLowerCase() === link.repository.toLowerCase()
+      );
+    }
     const repository =
       identity.displayName ??
       (identity.owner && identity.name ? `${identity.owner}/${identity.name}` : null);
@@ -138,6 +156,13 @@ export function findProjectOnChangeRequestHost(
 }
 
 /**
+ * Any modifier leaves a link to the browser. Shift and Alt are optional so callers that open a
+ * link on the reader's behalf can pass the two-field unmodified event they always have.
+ */
+type LinkActivationModifiers = Pick<MouseEvent<HTMLElement>, "metaKey" | "ctrlKey"> &
+  Partial<Pick<MouseEvent<HTMLElement>, "shiftKey" | "altKey">>;
+
+/**
  * Opens a change request link on the page, and says whether it did. Anything else — another
  * organisation's repository, a host nothing here is checked out from, a link that merely looks
  * like one — is left alone for the caller to handle as the ordinary link it is.
@@ -151,20 +176,16 @@ export function findProjectOnChangeRequestHost(
  * should still be reading it afterwards. Any change request opens there, not only the thread's
  * own, since the panel is told which one to show.
  */
-export function shouldOpenPullRequestExternally(
-  event: Pick<MouseEvent<HTMLElement>, "metaKey" | "ctrlKey">,
-): boolean {
-  return event.metaKey || event.ctrlKey;
+export function shouldOpenPullRequestExternally(event: LinkActivationModifiers): boolean {
+  return event.metaKey || event.ctrlKey || event.shiftKey === true || event.altKey === true;
 }
 
 export function useOpenChangeRequestLink(
   threadRef?: ScopedThreadRef,
   panelRef?: ScopedThreadRef,
 ): (
-  event: Pick<
-    MouseEvent<HTMLElement>,
-    "preventDefault" | "stopPropagation" | "metaKey" | "ctrlKey"
-  >,
+  event: Pick<MouseEvent<HTMLElement>, "preventDefault" | "stopPropagation"> &
+    LinkActivationModifiers,
   targetUrl: string,
   targetThreadRef?: ScopedThreadRef,
   targetEnvironmentId?: EnvironmentId,
