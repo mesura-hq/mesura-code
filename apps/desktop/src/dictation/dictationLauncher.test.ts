@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 
+import { dictationSocketCommand } from "./dictationControlSocket.ts";
 import { createHyprlandSessionBinds } from "./hyprlandSessionBinds.ts";
 import { resolveDictationLauncher } from "./dictationLauncher.ts";
 
@@ -117,15 +118,21 @@ describe("dictation phase 6 regressions: bind launcher", () => {
     const batches: string[] = [];
     const binds = createHyprlandSessionBinds({
       env: { HYPRLAND_INSTANCE_SIGNATURE: "fence" },
-      launcher: development(),
+      commandFor: (command) =>
+        dictationSocketCommand({ socketPath: "/run/s.sock", launcher: development(), command }),
       execute: async (file, args) => {
         if (args[0] === "--batch") batches.push(args[1]!);
         return execute(file, args);
       },
     });
     await binds.setSessionActive(true);
-    expect(batches[0]).toContain(
-      `keyword bind ALT,S,exec,env VITE_DEV_SERVER_URL=http://127.0.0.1:6328 ${ELECTRON} --no-sandbox --t3code-dev-root=${DESKTOP} ${DESKTOP}/dist-electron/main.cjs --dictation mode clipboard`,
-    );
+    const clipboardBind = batches[0]!
+      .split(" ; ")
+      .find((line) => line.startsWith("keyword bind ALT,S,exec,"));
+    expect(
+      clipboardBind?.endsWith(
+        `|| env VITE_DEV_SERVER_URL=http://127.0.0.1:6328 ${ELECTRON} --no-sandbox --t3code-dev-root=${DESKTOP} ${DESKTOP}/dist-electron/main.cjs --dictation mode clipboard`,
+      ),
+    ).toBe(true);
   });
 });

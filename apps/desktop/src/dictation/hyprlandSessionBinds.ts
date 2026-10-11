@@ -4,12 +4,13 @@ import * as NodeUtil from "node:util";
 
 import type { DictationKeybindingCommand } from "@t3tools/contracts";
 
-import { DICTATION_FLAG, dictationCommandLineArguments } from "./dictationCommandLine.ts";
+import { DICTATION_FLAG } from "./dictationCommandLine.ts";
 
 /**
  * The dictation keys, bound in Hyprland only while a dictation session exists, so they reach
- * Mesura while another app has focus and stay free the rest of the time. Each key launches the
- * desktop binary with `--dictation …`, which the running instance takes over.
+ * Mesura while another app has focus and stay free the rest of the time. Each key runs the
+ * command `commandFor` returns: the dictation socket, with a second launch of the binary as
+ * its fallback (`dictationControlSocket.ts`).
  *
  * Every bind is preceded by its unbind: an instance that crashed mid-session leaves its binds
  * behind, and a second `bind` would add a duplicate instead of replacing it.
@@ -29,13 +30,6 @@ const SESSION_KEYS: ReadonlyArray<readonly [key: string, command: DictationKeybi
 
 /** Hyprland's modmask for Alt alone. */
 const ALT_MODMASK = 8;
-
-const SHELL_SAFE = /^[\w@%+=:,./-]+$/;
-
-/** Hyprland runs `exec` through `sh -c`. */
-function shellQuote(argument: string): string {
-  return SHELL_SAFE.test(argument) ? argument : `'${argument.replaceAll("'", `'\\''`)}'`;
-}
 
 /** A bind `hyprctl -j binds` reported on one of the session combos, as far as it can be re-added. */
 interface SavedBind {
@@ -60,7 +54,7 @@ const BIND_FLAGS: ReadonlyArray<readonly [field: string, letter: string]> = [
 
 const SESSION_KEY_NAMES = new Set(SESSION_KEYS.map(([key]) => key.toLowerCase()));
 
-/** An earlier instance's own bind, left behind by a crash; never restored. */
+/** An earlier instance's own bind, left behind by a crash; never restored. Its fallback carries the flag. */
 const isOwnBind = (arg: string) => arg.split(/\s+/).includes(DICTATION_FLAG);
 
 /** The binds on the session combos, from `hyprctl -j binds`; throws on output it cannot read. */
@@ -103,8 +97,11 @@ const generated = (keyword: string, value: string): KeywordCommand => ({
   userText: false,
 });
 
+/** The shell command a session key runs. */
+export type SessionCommandFor = (command: DictationKeybindingCommand) => string;
+
 function bindCommands(
-  launcher: ReadonlyArray<string>,
+  commandFor: SessionCommandFor,
   saved: ReadonlyArray<SavedBind>,
 ): ReadonlyArray<KeywordCommand> {
   return SESSION_KEYS.flatMap(([key, command]) => {
@@ -119,12 +116,7 @@ function bindCommands(
     return [
       generated("unbind", `ALT,${key}`),
       ...otherSpellings.map((name) => generated("unbind", `ALT,${name}`)),
-      generated(
-        "bind",
-        `ALT,${key},exec,${[...launcher, ...dictationCommandLineArguments(command)]
-          .map(shellQuote)
-          .join(" ")}`,
-      ),
+      generated("bind", `ALT,${key},exec,${commandFor(command)}`),
     ];
   });
 }
@@ -178,7 +170,7 @@ export const executeHyprctl: HyprctlExecute = (file, args) =>
 
 export function createHyprlandSessionBinds(input: {
   readonly env: Readonly<Record<string, string | undefined>>;
-  readonly launcher: ReadonlyArray<string>;
+  readonly commandFor: SessionCommandFor;
   readonly execute: HyprctlExecute;
   readonly onError?: (cause: unknown) => void;
 }): {
@@ -205,7 +197,7 @@ export function createHyprlandSessionBinds(input: {
       saved = [];
       input.onError?.(cause);
     }
-    await runKeywordCommands(input.execute, bindCommands(input.launcher, saved));
+    await runKeywordCommands(input.execute, bindCommands(input.commandFor, saved));
   };
 
   const unbind = async () => {

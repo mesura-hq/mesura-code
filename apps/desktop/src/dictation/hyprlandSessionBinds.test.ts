@@ -8,24 +8,30 @@
  */
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { dictationSocketCommand } from "./dictationControlSocket.ts";
 import { createHyprlandSessionBinds } from "./hyprlandSessionBinds.ts";
 
 const HYPRLAND = { HYPRLAND_INSTANCE_SIGNATURE: "fence_1759492800_123456" };
 const LAUNCHER = ["/usr/bin/mesura-code"];
+const SOCKET = "/run/user/1000/mesura-code/dictation.sock";
+
+/** A session key: the words to the socket, the second launch as the fallback. */
+const viaSocket = (words: string) =>
+  `printf '%s\\n' ${words.includes(" ") ? `'${words}'` : words} | socat -u - UNIX-CONNECT:${SOCKET} 2>/dev/null || /usr/bin/mesura-code --dictation ${words}`;
 
 const BIND_BATCH = [
   "keyword unbind ALT,S",
-  "keyword bind ALT,S,exec,/usr/bin/mesura-code --dictation mode clipboard",
+  `keyword bind ALT,S,exec,${viaSocket("mode clipboard")}`,
   "keyword unbind ALT,I",
-  "keyword bind ALT,I,exec,/usr/bin/mesura-code --dictation mode inject",
+  `keyword bind ALT,I,exec,${viaSocket("mode inject")}`,
   "keyword unbind ALT,Return",
-  "keyword bind ALT,Return,exec,/usr/bin/mesura-code --dictation mode submit",
+  `keyword bind ALT,Return,exec,${viaSocket("mode submit")}`,
   "keyword unbind ALT,space",
-  "keyword bind ALT,space,exec,/usr/bin/mesura-code --dictation pause",
+  `keyword bind ALT,space,exec,${viaSocket("pause")}`,
   "keyword unbind ALT,R",
-  "keyword bind ALT,R,exec,/usr/bin/mesura-code --dictation restart",
+  `keyword bind ALT,R,exec,${viaSocket("restart")}`,
   "keyword unbind ALT,X",
-  "keyword bind ALT,X,exec,/usr/bin/mesura-code --dictation cancel",
+  `keyword bind ALT,X,exec,${viaSocket("cancel")}`,
 ].join(" ; ");
 
 const UNBIND_BATCH = [
@@ -51,7 +57,12 @@ function makeBinds(
     return { stdout: JSON.stringify(existing) };
   });
   const onError = vi.fn();
-  const binds = createHyprlandSessionBinds({ env, launcher, execute, onError });
+  const binds = createHyprlandSessionBinds({
+    env,
+    commandFor: (command) => dictationSocketCommand({ socketPath: SOCKET, launcher, command }),
+    execute,
+    onError,
+  });
   const batches = () =>
     execute.mock.calls.filter(([, args]) => args[0] === "--batch").map(([, args]) => args[1]);
   /** Every write to Hyprland in order: a batch as its string, a single keyword as its vector. */
@@ -119,7 +130,7 @@ describe("dictation phase 6 fence: Hyprland session binds", () => {
     await binds.setSessionActive(true);
     const batch = batches()[0]!;
     expect(batch).toContain(
-      "keyword bind ALT,S,exec,'/opt/Mesura Code/mesura-code' --dictation mode clipboard",
+      "2>/dev/null || '/opt/Mesura Code/mesura-code' --dictation mode clipboard ; keyword unbind ALT,I",
     );
   });
 
@@ -130,9 +141,11 @@ describe("dictation phase 6 fence: Hyprland session binds", () => {
     ]);
     await binds.setSessionActive(true);
     const batch = batches()[0]!;
-    expect(batch).toContain(
-      "keyword bind ALT,X,exec,/repo/node_modules/electron/dist/electron /repo/apps/desktop --dictation cancel",
-    );
+    expect(
+      batch.endsWith(
+        "2>/dev/null || /repo/node_modules/electron/dist/electron /repo/apps/desktop --dictation cancel",
+      ),
+    ).toBe(true);
   });
 
   it("dictation phase 6 guard: outside Hyprland nothing is executed", async () => {
@@ -185,6 +198,8 @@ describe("dictation phase 6 fence: Hyprland binds that existed before the sessio
   it("dictation phase 6 AC5: a bind an earlier Mesura left behind and binds on other combos are not put back", async () => {
     const { binds, batches } = makeBinds(HYPRLAND, LAUNCHER, [
       reportedBind({ key: "S", arg: "/usr/bin/mesura-code --dictation mode clipboard" }),
+      // A crashed instance's socket-form bind is its own too: its fallback carries the flag.
+      reportedBind({ key: "I", arg: viaSocket("mode inject") }),
       reportedBind({ key: "V", arg: "qs ipc call stt paste" }),
       reportedBind({ key: "space", modmask: 9, arg: "notify-send shifted" }),
     ]);
@@ -246,7 +261,7 @@ describe("dictation phase 6 rework: restored binds that carry semicolons", () =>
     expect(second).toEqual([
       "keyword",
       "bind",
-      "ALT,S,exec,'/opt/odd;dir/mesura-code' --dictation mode clipboard",
+      `ALT,S,exec,printf '%s\\n' 'mode clipboard' | socat -u - UNIX-CONNECT:${SOCKET} 2>/dev/null || '/opt/odd;dir/mesura-code' --dictation mode clipboard`,
     ]);
     expect(third).toBe("keyword unbind ALT,I");
   });

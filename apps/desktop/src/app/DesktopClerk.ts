@@ -12,7 +12,7 @@ import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import { parseDictationCommandLine } from "../dictation/dictationCommandLine.ts";
-import { DICTATION_COMMAND_LINE_CHANNEL } from "../ipc/channels.ts";
+import { forwardDictationCommand } from "../dictation/forwardDictationCommand.ts";
 import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 
@@ -143,14 +143,9 @@ export const make = Effect.gen(function* () {
         const dictationCommand = parseDictationCommandLine(argv);
         void runPromise(
           Effect.gen(function* () {
+            if (dictationCommand !== null) return yield* forwardDictationCommand(dictationCommand);
             const mainWindow = yield* electronWindow.currentMainOrFirst;
-            if (Option.isSome(mainWindow)) {
-              if (dictationCommand !== null) {
-                mainWindow.value.webContents.send(DICTATION_COMMAND_LINE_CHANNEL, dictationCommand);
-                return;
-              }
-              yield* electronWindow.reveal(mainWindow.value);
-            }
+            if (Option.isSome(mainWindow)) yield* electronWindow.reveal(mainWindow.value);
           }),
         );
       });
