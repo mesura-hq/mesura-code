@@ -968,9 +968,9 @@ describe("searchSidebarThreads", () => {
         pullRequests: [
           {
             host: "github.com",
-            repository: "CaceresCallieri/mesura-code",
+            repository: "mesura-hq/mesura-code",
             number: 41,
-            url: "https://github.com/CaceresCallieri/mesura-code/pull/41",
+            url: "https://github.com/mesura-hq/mesura-code/pull/41",
             source: "manual" as const,
             linkedAt: "2026-09-08T00:00:00Z",
             snapshot: null,
