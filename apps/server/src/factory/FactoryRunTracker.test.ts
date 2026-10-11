@@ -954,6 +954,46 @@ it.layer(NodeServices.layer)("factory run tracker", (it) => {
       }),
     );
 
+    it.effect("a role's output replaced while no pane is open is read again from its start", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness();
+        const runDir = yield* harness.makeRunDir(RUN_ID, null);
+        const output = harness.path.join(runDir, "implementer-1.jsonl");
+        const readLine = claudeToolUseLine("Read", "2026-09-28T09:03:00.000Z");
+        const grepLine = claudeToolUseLine("Grep", "2026-09-28T09:04:00.000Z");
+        yield* harness.append(output, readLine);
+        yield* harness.append(
+          harness.path.join(runDir, "events.jsonl"),
+          runStartedLine() +
+            eventLine(1, "phase.started", { phase: 1 }) +
+            eventLine(2, "dispatch.started", {
+              phase: 1,
+              role: "implementer",
+              turn: 1,
+              harness: "claude",
+              model: "claude-opus-5-5",
+              promptFile: `${runDir}/implementer-prompt-1.md`,
+              outputFile: output,
+            }),
+        );
+        yield* harness.attachRun(runDir);
+        const roleOfFirstItem = harness.tracker.stream(THREAD_ID, RUN_ID).pipe(
+          Stream.runHead,
+          Effect.map((item) => Option.getOrThrow(item).roles[0]!),
+        );
+        expect(yield* roleOfFirstItem).toMatchObject({ toolCalls: 1, lastTool: "Read" });
+
+        // With the pane closed, another file of the same length takes the path:
+        // ext4 may give it the deleted file's inode number unless the role's
+        // tail still holds that file. Read from the old offset, nothing is new
+        // and the pane would still show `Read`.
+        yield* harness.fileSystem.remove(output);
+        yield* harness.append(output, grepLine);
+        expect(grepLine.length).toBe(readLine.length);
+        expect(yield* roleOfFirstItem).toMatchObject({ toolCalls: 1, lastTool: "Grep" });
+      }),
+    );
+
     it.effect(
       "a finished run with no subscriber is dropped from memory and rebuilt from its record for the next pane",
       () =>

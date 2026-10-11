@@ -76,8 +76,8 @@ it from automatic selection. These are preferences, not fixed traffic percentage
 Preferences are saved separately in each client.
 
 The composer checks eligible machines when choosing a draft's environment, then keeps
-that choice stable. Choose **Auto balance** again to check current resources, or choose
-a specific machine to override it. Choosing a branch or worktree also keeps the draft
+that choice stable. Choose a specific machine on the run context drawer's **Host** tab to
+override it. Choosing a branch or worktree also keeps the draft
 on that machine. Existing threads stay where they started. If resource checks are
 unavailable or all eligible machines are full, choose a machine manually to continue.
 Mobile keeps its manual environment selection.

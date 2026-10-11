@@ -2,7 +2,7 @@
 /**
  * Entry point: the real `RightPanelTabs`, as `ChatView` mounts it for a thread's right panel.
  * With no surfaces it renders the surface launcher; with one surface it renders the tab strip and
- * its Add surface menu. Keys are dispatched as the browser would deliver them, at the focused
+ * its Add surface launcher. Keys are dispatched as the browser would deliver them, at the focused
  * element.
  *
  * Issues pane, phase 2: acceptance criteria 1–2 for the contextual `I` shortcut. These are guards:
@@ -12,6 +12,8 @@ import type { ComponentProps } from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+
+import { closePanelLauncher } from "~/lib/panelLauncher";
 
 import { RightPanelTabs } from "./RightPanelTabs";
 
@@ -83,7 +85,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  act(() => root?.unmount());
+  act(() => {
+    closePanelLauncher();
+    root?.unmount();
+  });
   container?.remove();
   document.body.replaceChildren();
   root = null;
@@ -142,7 +147,7 @@ describe("Issues launcher guard: the contextual I shortcut", () => {
     expect(document.body.textContent).toContain("Issues");
   });
 
-  it("issues launcher guard: I inside the open Add surface menu opens Issues and closes the menu", async () => {
+  it("issues launcher guard: I inside the Add surface launcher opens Issues and closes the launcher", async () => {
     const callbacks = mountTabs({
       surfaces: [{ id: "pull-requests", kind: "pull-requests" }],
       activeSurfaceId: "pull-requests",
@@ -153,14 +158,12 @@ describe("Issues launcher guard: the contextual I shortcut", () => {
     await act(async () => {
       trigger.click();
     });
-    const menu = document.querySelector('[data-slot="menu-popup"]');
-    expect(menu?.textContent).toContain("Issues");
-    expect(menu?.hasAttribute("data-open")).toBe(true);
+    const launcher = container!.querySelector('[aria-label="Open a surface"]');
+    expect(launcher?.textContent).toContain("Issues");
 
-    press(menu!, "i");
+    press(launcher!, "i");
 
     expect(callbacks.onAddIssues).toHaveBeenCalledTimes(1);
-    // The popup can stay mounted through its exit transition, so read its open state.
-    expect(menu!.isConnected && menu!.hasAttribute("data-open")).toBe(false);
+    expect(container!.querySelector('[aria-label="Open a surface"]')).toBeNull();
   });
 });

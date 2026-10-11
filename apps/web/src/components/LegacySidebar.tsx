@@ -175,12 +175,14 @@ import {
   useThreadSelectionStore,
 } from "../threadSelectionStore";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
+import { useCommandHandlers } from "../commands/commandRegistry";
 import {
   archiveSelectedThreadEntries,
   buildMultiSelectThreadContextMenuItems,
   deleteSelectedThreadEntries,
   getSidebarThreadIdsToPrewarm,
   resolveAdjacentThreadId,
+  type ThreadTraversalDirection,
   isContextMenuPointerDown,
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
@@ -3558,6 +3560,28 @@ export default function LegacySidebar() {
     updateThreadJumpHintsVisibility(shouldShowThreadJumpHintsNow);
   }, [shouldShowThreadJumpHintsNow, updateThreadJumpHintsVisibility]);
 
+  // The chord handler below and the command registry run this, so a leader
+  // key and the chord walk the same ordered list.
+  const adjacentThread = useCallback(
+    (direction: ThreadTraversalDirection) => {
+      const targetThreadKey = resolveAdjacentThreadId({
+        threadIds: orderedSidebarThreadKeys,
+        currentThreadId: routeThreadKey,
+        direction,
+      });
+      return targetThreadKey ? sidebarThreadByKey.get(targetThreadKey) : undefined;
+    },
+    [orderedSidebarThreadKeys, routeThreadKey, sidebarThreadByKey],
+  );
+  const openAdjacentThread = (direction: ThreadTraversalDirection) => {
+    const targetThread = adjacentThread(direction);
+    if (targetThread) navigateToThread(scopeThreadRef(targetThread.environmentId, targetThread.id));
+  };
+  useCommandHandlers({
+    "thread.next": () => openAdjacentThread("next"),
+    "thread.previous": () => openAdjacentThread("previous"),
+  });
+
   useEffect(() => {
     const onWindowKeyDown = (event: globalThis.KeyboardEvent) => {
       const shortcutContext = getCurrentSidebarShortcutContext();
@@ -3572,15 +3596,7 @@ export default function LegacySidebar() {
       });
       const traversalDirection = threadTraversalDirectionFromCommand(command);
       if (traversalDirection !== null) {
-        const targetThreadKey = resolveAdjacentThreadId({
-          threadIds: orderedSidebarThreadKeys,
-          currentThreadId: routeThreadKey,
-          direction: traversalDirection,
-        });
-        if (!targetThreadKey) {
-          return;
-        }
-        const targetThread = sidebarThreadByKey.get(targetThreadKey);
+        const targetThread = adjacentThread(traversalDirection);
         if (!targetThread) {
           return;
         }
@@ -3624,6 +3640,7 @@ export default function LegacySidebar() {
     routeThreadKey,
     sidebarThreadByKey,
     threadJumpThreadKeys,
+    adjacentThread,
   ]);
 
   useEffect(() => {

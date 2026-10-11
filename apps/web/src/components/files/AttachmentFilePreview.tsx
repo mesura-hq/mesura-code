@@ -244,7 +244,7 @@ export function AttachmentFilePreview(props: {
     delimiter && rendered ? (
       <DelimitedTablePreview name={props.name} text={content.text} delimiter={delimiter} />
     ) : kind === "markdown" && rendered ? (
-      <ScrollArea className="min-h-0 flex-1">
+      <ScrollArea className="min-h-0 flex-1" data-pane-entry="2">
         <ChatMarkdown text={content.text} cwd={undefined} className="mx-auto max-w-4xl px-6 py-5" />
       </ScrollArea>
     ) : (
@@ -266,7 +266,10 @@ export function AttachmentFilePreview(props: {
       />
     </div>
   ) : kind === "image" ? (
-    <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4">
+    <div
+      className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4"
+      data-pane-entry="2"
+    >
       <img
         src={url}
         alt={props.name}

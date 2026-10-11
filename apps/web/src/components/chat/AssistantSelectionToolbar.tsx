@@ -16,7 +16,29 @@ import {
   resolveSelectionActionPosition,
   type SelectionActionPoint,
 } from "~/lib/selectionActions";
+import { subscribeChatCiteRequest } from "~/keys/chat/chatCiteBus";
+import { citeAndFlash } from "~/keys/chat/citeFlash";
 import { Button } from "../ui/button";
+
+/** The citation for the current native selection, when it is citable assistant text. */
+function captureCitation(
+  viewport: HTMLElement,
+  threadRef: ScopedThreadRef,
+  nativeSelection: Selection | null,
+): { citation: AssistantCitation; sourceAnchor: AssistantCitationSourceAnchor } | null {
+  const captured = captureAssistantTextSelection(viewport, nativeSelection);
+  const messageId = captured?.source.dataset.assistantCitationSource;
+  if (!captured || !messageId) return null;
+  return {
+    sourceAnchor: { source: captured.source, range: captured.range, viewport },
+    citation: {
+      version: 1,
+      ...threadRef,
+      messageId: MessageId.make(messageId),
+      ...captured.selector,
+    },
+  };
+}
 
 export function AssistantSelectionToolbar({
   viewport,
@@ -47,28 +69,21 @@ export function AssistantSelectionToolbar({
     if (!viewport) return;
     const clear = () => setSelection(null);
     const update = (pointer: SelectionActionPoint | null) => {
-      const nativeSelection = window.getSelection();
-      const captured = captureAssistantTextSelection(viewport, nativeSelection);
-      const messageId = captured?.source.dataset.assistantCitationSource;
-      if (!captured || !messageId) {
+      const captured = captureCitation(viewport, threadRef, window.getSelection());
+      if (!captured) {
         clear();
         return;
       }
-      const rect = captured.range.getBoundingClientRect();
+      const range = captured.sourceAnchor.range;
+      const rect = range.getBoundingClientRect();
       const viewportRect = viewport.getBoundingClientRect();
       if (rect.bottom < viewportRect.top || rect.top > viewportRect.bottom || rect.width === 0) {
         clear();
         return;
       }
-      const rects = captured.range.getClientRects();
+      const rects = range.getClientRects();
       setSelection({
-        sourceAnchor: { source: captured.source, range: captured.range, viewport },
-        citation: {
-          version: 1,
-          ...threadRef,
-          messageId: MessageId.make(messageId),
-          ...captured.selector,
-        },
+        ...captured,
         position: resolveSelectionActionPosition({
           bounds: viewportRect,
           selectionRect: rects.item(rects.length - 1) ?? rect,
@@ -114,6 +129,18 @@ export function AssistantSelectionToolbar({
     };
   }, [threadRef, viewport]);
 
+  // Mesura: the chat buffer's visual mode cites by key. Its selection is set
+  // by code, which the toolbar's pointer-driven observer does not track, so
+  // the request captures the current native selection itself.
+  useEffect(() => {
+    if (!viewport) return;
+    return subscribeChatCiteRequest((request) => {
+      const captured = captureCitation(viewport, threadRef, window.getSelection());
+      if (!captured || captured.citation.text.length > ASSISTANT_CITATION_MAX_TEXT_LENGTH) return;
+      request.cited = citeAndFlash(onCite, captured.citation, captured.sourceAnchor);
+    });
+  }, [onCite, threadRef, viewport]);
+
   if (!selection) return null;
   const tooLong = selection.citation.text.length > ASSISTANT_CITATION_MAX_TEXT_LENGTH;
   const dismiss = () => {
@@ -121,7 +148,7 @@ export function AssistantSelectionToolbar({
     setSelection(null);
   };
   const cite = () => {
-    if (tooLong || !onCite(selection.citation, selection.sourceAnchor)) return false;
+    if (tooLong || !citeAndFlash(onCite, selection.citation, selection.sourceAnchor)) return false;
     window.getSelection()?.removeAllRanges();
     dismiss();
     return true;

@@ -48,6 +48,7 @@ import {
 } from "./codexUsageLimits.ts";
 import { accountIdentityFromEmail } from "../accountIdentity.ts";
 import type { AccountLimitsRead } from "../ProviderDriver.ts";
+import { withProviderProbeMarker } from "../providerProbeMarker.ts";
 import packageJson from "../../../package.json" with { type: "json" };
 const isCodexAppServerSpawnError = Schema.is(CodexErrors.CodexAppServerSpawnError);
 const RATE_LIMITS_PROBE_TIMEOUT_MS = 3_000;
@@ -393,10 +394,12 @@ export const buildCodexAppServerCommand = Effect.fn("buildCodexAppServerCommand"
   // "CODEX_HOME points to '~/.codex_work', but that path does not exist".
   // Expand here for parity with `CodexTextGeneration`/`CodexSessionRuntime`.
   const resolvedHomePath = input.homePath ? expandHomePath(input.homePath) : undefined;
-  const environment = {
+  // Every caller of this command is a probe (status, skills, account limits,
+  // reset-credit); sessions build their own in `CodexSessionRuntime`.
+  const environment = withProviderProbeMarker({
     ...input.environment,
     ...(resolvedHomePath ? { CODEX_HOME: resolvedHomePath } : {}),
-  };
+  });
   const spawnCommand = yield* resolveSpawnCommand(
     input.binaryPath,
     codexAppServerArgs(input.launchArgs),

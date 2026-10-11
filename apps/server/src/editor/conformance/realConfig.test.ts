@@ -1,5 +1,4 @@
 // @effect-diagnostics nodeBuiltinImport:off - reads the developer's own config directory.
-import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -10,6 +9,7 @@ import * as Layer from "effect/Layer";
 
 import { NodeNvimAdapter } from "../NodeNvimAdapter.ts";
 import { NvimBridge } from "../NvimBridge.ts";
+import { nvimAvailable, reportMissingNvim } from "./nvimOnPath.ts";
 
 /**
  * The developer's own configuration, driven.
@@ -36,15 +36,6 @@ const configDirectory = (() => {
     return NodeFS.statSync(expanded).isDirectory() ? expanded : null;
   } catch {
     return null;
-  }
-})();
-
-const nvimAvailable = (() => {
-  try {
-    NodeChildProcess.execFileSync("nvim", ["--version"], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
   }
 })();
 
@@ -93,7 +84,9 @@ const assertMirrored = (bridge: NvimBridge.Session) =>
     assert.deepStrictEqual(bridge.lines, lines, "the mirror equals the buffer");
   });
 
-if (!enabled) {
+if (configDirectory !== null && !nvimAvailable) reportMissingNvim("real-configuration harness");
+
+if (configDirectory === null) {
   it("skips the real-configuration harness", () => {
     // Said out loud rather than silently absent: a harness that vanishes looks
     // the same as a harness that passed.

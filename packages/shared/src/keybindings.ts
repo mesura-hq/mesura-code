@@ -44,6 +44,12 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+d", command: "terminal.split", when: "terminalFocus" },
   { key: "mod+shift+d", command: "terminal.splitVertical", when: "terminalFocus" },
   { key: "mod+n", command: "terminal.new", when: "terminalFocus" },
+  // Mesura: Ctrl+Q closes what Ctrl+W closes, as Super+Q closes the focused
+  // window on Hyprland. Literal ctrl, not mod: Cmd+Q stays macOS's quit. The
+  // desktop app gives the chord up on Linux (DesktopWindow.ts). Placed first
+  // so the label each command shows stays mod+w (last wins).
+  { key: "ctrl+q", command: "terminal.close", when: "terminalFocus" },
+  { key: "ctrl+q", command: "rightPanel.close", when: "!terminalFocus" },
   { key: "mod+w", command: "terminal.close", when: "terminalFocus" },
   { key: "mod+w", command: "rightPanel.close", when: "!terminalFocus" },
   // Moved off mod+d so the reading scroll can take the vim pair mod+u/mod+d.
@@ -121,7 +127,9 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // last and alt+m stays the alternate.
   { key: "alt+m", command: "modelPicker.toggle", when: "!terminalFocus" },
   { key: "mod+shift+m", command: "modelPicker.toggle", when: "!terminalFocus" },
-  { key: "mod+shift+h", command: "composer.host", when: "!terminalFocus" },
+  // The host chord now cycles machines; composer.host stays, unbound, and its
+  // strip chip opens the run context drawer on its Host tab.
+  { key: "mod+shift+h", command: "runContext.cycleMachine", when: "!terminalFocus" },
   // Fork: upstream's `mod+shift+e` for composer.effort is withdrawn; the chord
   // is fileTree.miller's, and alt+e (traitsPicker.toggle) opens the same
   // picker. The command stays, unbound, for anyone who wants it back.
@@ -133,7 +141,14 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+arrowup", command: "modelPicker.previousProvider", when: "modelPickerOpen" },
   { key: "mod+shift+arrowdown", command: "modelPicker.nextProvider", when: "modelPickerOpen" },
   { key: "alt+e", command: "traitsPicker.toggle", when: "!terminalFocus" },
-  { key: "alt+w", command: "workspacePicker.toggle", when: "!terminalFocus" },
+  // alt+w opens the whole run context drawer. workspacePicker.toggle stays,
+  // unbound, and opens the drawer on its Workspace tab when bound.
+  { key: "alt+w", command: "runContext.toggle", when: "!terminalFocus" },
+  // Two chords, and the label shows the last. Browsers keep mod+shift+w to
+  // close the window and never deliver it to the page, so alt+shift+w is the
+  // chord a browser lets through; mod+shift+w reaches the desktop app.
+  { key: "alt+shift+w", command: "runContext.toggleWorkspace", when: "!terminalFocus" },
+  { key: "mod+shift+w", command: "runContext.toggleWorkspace", when: "!terminalFocus" },
   { key: "alt+b", command: "branchPicker.toggle", when: "!terminalFocus" },
   // A new command, so no existing config mentions it and the ordinary
   // per-command startup backfill installs it. No ADDED_KEYBINDING_DEFAULTS
@@ -196,6 +211,19 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "ctrl+tab", command: "thread.next", when: "!terminalFocus" },
   { key: "mod+shift+[", command: "thread.previous" },
   { key: "mod+shift+]", command: "thread.next" },
+  // Mesura: inside the right panel the same chords walk its tabs. After the
+  // thread rules on purpose: resolution is last-wins, so with the panel
+  // focused these answer. New commands, so the per-command backfill installs
+  // them. A terminal tab keeps ctrl+tab, as the thread rules leave it.
+  {
+    key: "ctrl+shift+tab",
+    command: "rightPanel.previousTab",
+    when: "panelFocus && !terminalFocus",
+  },
+  { key: "ctrl+tab", command: "rightPanel.nextTab", when: "panelFocus && !terminalFocus" },
+  // Mesura: a new tab is the panel launcher, as Ctrl+T is in a browser.
+  // Desktop only in practice: a browser keeps Ctrl+T for its own tabs.
+  { key: "mod+t", command: "rightPanel.newTab", when: "panelFocus && !terminalFocus" },
   { key: "mod+shift+c", command: "thread.copyReference", when: "!terminalFocus" },
   { key: "mod+shift+s", command: "thread.settle", when: "!terminalFocus" },
   { key: "mod+shift+p", command: "thread.pin", when: "!terminalFocus" },
@@ -373,6 +401,17 @@ export const ADDED_KEYBINDING_DEFAULTS: ReadonlyArray<AddedKeybindingDefault> = 
     id: "2026-09-attach-files-mod-alt-a",
     rule: { key: "mod+alt+a", command: "composer.attachFiles", when: "!terminalFocus" },
   },
+  // Before mod+w, so mod+w stays the label of both commands.
+  {
+    id: "2026-10-terminal-close-ctrl-q",
+    rule: { key: "ctrl+q", command: "terminal.close", when: "terminalFocus" },
+    insertBefore: { key: "mod+w", command: "terminal.close", when: "terminalFocus" },
+  },
+  {
+    id: "2026-10-right-panel-close-ctrl-q",
+    rule: { key: "ctrl+q", command: "rightPanel.close", when: "!terminalFocus" },
+    insertBefore: { key: "mod+w", command: "rightPanel.close", when: "!terminalFocus" },
+  },
 ];
 
 /**
@@ -398,6 +437,17 @@ export const WITHDRAWN_KEYBINDING_DEFAULTS: ReadonlyArray<WithdrawnKeybindingDef
   {
     id: "2026-09-withdraw-composer-effort-mod-shift-e",
     rule: { key: "mod+shift+e", command: "composer.effort", when: "!terminalFocus" },
+  },
+  // The run context drawer takes both chords for new commands. Withdrawing
+  // the old rules first frees them, so the per-command backfill installs
+  // runContext.cycleMachine and runContext.toggle in the same startup.
+  {
+    id: "2026-10-withdraw-composer-host-mod-shift-h",
+    rule: { key: "mod+shift+h", command: "composer.host", when: "!terminalFocus" },
+  },
+  {
+    id: "2026-10-withdraw-workspace-picker-alt-w",
+    rule: { key: "alt+w", command: "workspacePicker.toggle", when: "!terminalFocus" },
   },
 ];
 

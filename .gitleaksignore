@@ -1,0 +1,2 @@
+# Fake test key `sk-dictation-ac6-secret`, not a credential. Its commit is already in pushed history, so only an ignore entry can clear it.
+78e0f16a7e431fbd43a5bc32fb18d3603a9b3c89:apps/server/src/dictation/DictationRpc.test.ts:generic-api-key:60

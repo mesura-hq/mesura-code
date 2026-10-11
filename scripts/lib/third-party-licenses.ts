@@ -131,9 +131,10 @@ const NOTICE_TEXT_EXTENSIONS = new Set([
  * `generatedNotice` override, which means writing a copyright line for our own
  * code inside a THIRD-party manifest. `scripts/lib/third-party-licenses.ts`
  * took one upstream commit in three months, so widening the constant is the
- * cheap correct fix rather than the expensive one.
+ * cheap correct fix rather than the expensive one. `@mesura/` is the fork's
+ * other scope (`packages/keys`), on the same grounds.
  */
-const FIRST_PARTY_PACKAGE_PREFIXES = ["@t3tools/", "@symmetria/"];
+const FIRST_PARTY_PACKAGE_PREFIXES = ["@t3tools/", "@symmetria/", "@mesura/"];
 
 const isFirstPartyPackage = (name: string): boolean =>
   FIRST_PARTY_PACKAGE_PREFIXES.some((prefix) => name.startsWith(prefix));

@@ -14,6 +14,7 @@ import "@symmetria/fm-search/ui/styles.css";
 
 import { useComposerHandleContext } from "~/composerHandleContext";
 import { registerFocusTarget } from "~/lib/focusTargets";
+import { setPaneEntryFocus } from "~/lib/panelSurfaceFocus";
 
 import { showFileTreeContextMenu } from "./fileTreeContextMenu";
 import { useFileManagerStore } from "../mesuraFileManager/fileManagerStore";
@@ -115,6 +116,20 @@ export function MesuraFileTree({
     return viewport !== null && viewport !== undefined;
   }, []);
   useEffect(() => registerFocusTarget("tree", focusViewport), [focusViewport]);
+  // The panel's entry when no editor shows beside the tree; a ref callback,
+  // because the wrapper first renders after the entries load.
+  const wrapperRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      wrapper.current = element;
+      if (!element) return;
+      const clearEntry = setPaneEntryFocus(element, focusViewport);
+      return () => {
+        clearEntry();
+        wrapper.current = null;
+      };
+    },
+    [focusViewport],
+  );
   // Registered here for as long as the tree is mounted, which is the only time
   // a move out of the tree can be asked for; the composer's owner is upstream's.
   useEffect(
@@ -204,9 +219,10 @@ export function MesuraFileTree({
   return (
     // The tree viewport inside owns focus and the tree role; this wrapper only routes keys and the menu.
     <div
-      ref={wrapper}
+      ref={wrapperRef}
       role="group"
       data-mesura-file-tree={treeKey}
+      data-pane-entry="1"
       aria-label={`${projectName} files`}
       onKeyDown={onKeyDown}
       onContextMenu={onContextMenu}

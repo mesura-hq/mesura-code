@@ -239,7 +239,13 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.equal(soleKeyFor("modelPicker.jump.1"), "mod+1");
       assert.equal(soleKeyFor("modelPicker.jump.9"), "mod+9");
       assert.equal(soleKeyFor("traitsPicker.toggle"), "alt+e");
-      assert.equal(soleKeyFor("workspacePicker.toggle"), "alt+w");
+      // alt+w opens the whole run context drawer; the workspace picker
+      // command stays, unbound, and lands on the drawer's Workspace tab.
+      assert.deepEqual(keysFor("workspacePicker.toggle"), []);
+      assert.equal(soleKeyFor("runContext.toggle"), "alt+w");
+      assert.equal(soleKeyFor("runContext.cycleMachine"), "mod+shift+h");
+      assert.deepEqual(keysFor("composer.host"), []);
+      assert.deepEqual(keysFor("runContext.toggleWorkspace"), ["alt+shift+w", "mod+shift+w"]);
       assert.equal(soleKeyFor("branchPicker.toggle"), "alt+b");
       assert.equal(soleKeyFor("question.toggleCollapse"), "alt+q");
       // Upstream's thread.settle owns this chord since the 2026-W35 sync; the
@@ -413,19 +419,16 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         appliedIds: new Set(),
       });
       assert.deepEqual(exact.config, [other]);
-      assert.deepEqual(
-        exact.results.map((entry) => entry.outcome),
-        ["dropped"],
-      );
+      // Keyed by the rule, not by position: the list grows as defaults move.
+      const outcomeFor = (results: typeof exact.results) =>
+        results.find((entry) => entry.rule.command === withdrawn.command)?.outcome;
+      assert.equal(outcomeFor(exact.results), "dropped");
 
       // No `when` is a different rule, and so the user's own.
       const edited = { key: "mod+shift+e", command: "composer.effort" } as const;
       const kept = dropWithdrawnKeybindingDefaults({ config: [edited], appliedIds: new Set() });
       assert.deepEqual(kept.config, [edited]);
-      assert.deepEqual(
-        kept.results.map((entry) => entry.outcome),
-        ["absent"],
-      );
+      assert.equal(outcomeFor(kept.results), "absent");
 
       const recorded = dropWithdrawnKeybindingDefaults({
         config: [withdrawn],
@@ -978,6 +981,36 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.isTrue(
         persisted.some((entry) => entry.command === "traitsPicker.toggle" && entry.key === "alt+e"),
       );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("hands mod+shift+h and alt+w to the run context drawer in one startup", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      // An install from before the drawer: the host menu and the workspace
+      // picker hold the two chords the drawer's commands ship on.
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+shift+h", command: "composer.host", when: "!terminalFocus" },
+        { key: "alt+w", command: "workspacePicker.toggle", when: "!terminalFocus" },
+        { key: "alt+b", command: "branchPicker.toggle", when: "!terminalFocus" },
+      ]);
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      const keysFor = (command: string) =>
+        persisted.filter((entry) => entry.command === command).map((entry) => entry.key);
+      assert.deepEqual(keysFor("runContext.cycleMachine"), ["mod+shift+h"]);
+      assert.deepEqual(keysFor("runContext.toggle"), ["alt+w"]);
+      assert.deepEqual(keysFor("runContext.toggleWorkspace"), ["alt+shift+w", "mod+shift+w"]);
+      // The old commands no longer ship a default, so nothing brings them back.
+      assert.deepEqual(keysFor("composer.host"), []);
+      assert.deepEqual(keysFor("workspacePicker.toggle"), []);
+      // The branch chord is untouched; it now opens the drawer's branch tab.
+      assert.deepEqual(keysFor("branchPicker.toggle"), ["alt+b"]);
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
 

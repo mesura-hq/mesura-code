@@ -42,9 +42,10 @@
 [data-mesura-file-manager] {
   --overlay-scrim: rgb(0 0 0 / 40%);
   --search-match: rgb(0 0 0 / 6%);
-  --flash-query: rgb(0 0 0 / 14%);
-  --flash-label: var(--foreground);
-  --flash-label-ink: var(--background);
+  /* Flash takes the app-wide flash look (`mesura.css`, "Flash"). */
+  --flash-query: var(--mesura-flash-accent);
+  --flash-label: var(--mesura-flash-accent);
+  --flash-label-ink: var(--mesura-flash-ink);
   --marked: oklch(60% 0.12 25);
   --markdown-rule: rgb(0 0 0 / 14%);
   --rendered-page: rgb(255 255 255);
@@ -74,7 +75,6 @@
 .dark [data-mesura-file-manager] {
   --overlay-scrim: rgb(0 0 0 / 60%);
   --search-match: rgb(255 255 255 / 5%);
-  --flash-query: rgb(255 255 255 / 18%);
   --marked: oklch(75% 0.09 25);
   --markdown-rule: rgb(255 255 255 / 14%);
   --scrollbar-thumb: rgb(255 255 255 / 8%);

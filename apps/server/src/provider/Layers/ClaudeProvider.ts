@@ -38,6 +38,10 @@ import {
 } from "../providerSnapshot.ts";
 import { accountIdentityFromEmail } from "../accountIdentity.ts";
 import type { AccountLimitsRead } from "../ProviderDriver.ts";
+import {
+  PROVIDER_PROBE_MARKER_ENVIRONMENT,
+  withProviderProbeMarker,
+} from "../providerProbeMarker.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import { discoverClaudeSkills } from "../Drivers/ClaudeSkills.ts";
@@ -210,6 +214,7 @@ export function buildClaudeCapabilitiesProbeQueryOptions(input: {
     strictMcpConfig: true,
     env: {
       ...input.environment,
+      ...PROVIDER_PROBE_MARKER_ENVIRONMENT,
       // Connected claude.ai MCP servers are discovered outside filesystem
       // config; disable them independently for this health check.
       ENABLE_CLAUDEAI_MCP_SERVERS: "false",
@@ -518,7 +523,9 @@ const runClaudeCommand = Effect.fn("runClaudeCommand")(function* (
   args: ReadonlyArray<string>,
   environment?: NodeJS.ProcessEnv,
 ) {
-  const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
+  const claudeEnvironment = withProviderProbeMarker(
+    yield* makeClaudeEnvironment(claudeSettings, environment),
+  );
   const spawnCommand = yield* resolveSpawnCommand(claudeSettings.binaryPath, args, {
     env: claudeEnvironment,
   });

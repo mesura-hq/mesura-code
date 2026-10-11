@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import {
   ClientSettingsSchema,
+  DEFAULT_CLIENT_SETTINGS,
   ClientSettingsPatch,
   ClaudeSettings,
   DEFAULT_SERVER_SETTINGS,
@@ -388,6 +389,21 @@ describe("ClientSettings modal editing", () => {
   it("round-trips through the encoder", () => {
     const encoded = encodeClientSettings(decodeClientSettings({ modalEditing: false }));
     expect(encoded.modalEditing).toBe(false);
+  });
+});
+
+describe("ClientSettings vim mode", () => {
+  it("decodes a client with no stored vimMode as Vim mode on", () => {
+    expect(decodeClientSettings({}).vimMode).toBe(true);
+    expect(DEFAULT_CLIENT_SETTINGS.vimMode).toBe(true);
+  });
+
+  it("keeps a stored vimMode false off", () => {
+    expect(decodeClientSettings({ vimMode: false }).vimMode).toBe(false);
+  });
+
+  it("carries it in a patch, or turning it on springs back", () => {
+    expect(decodeClientSettingsPatch({ vimMode: true }).vimMode).toBe(true);
   });
 });
 

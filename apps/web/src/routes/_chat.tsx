@@ -1,6 +1,6 @@
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { useClientSettings, useLegacySidebarEnabled } from "../hooks/useSettings";
@@ -25,6 +25,8 @@ import { usePaneNavigation } from "~/lib/usePaneNavigation";
 import { MesuraFileManagerLayer } from "~/components/files/mesuraFileManager/MesuraFileManagerLayer";
 import { useFileTreeShortcut } from "~/components/files/mesuraTree/useFileTreeShortcut";
 import { primaryServerKeybindingsAtom } from "~/state/server";
+import { KeyEngineHost } from "~/keys/KeyEngineHost";
+import { useCommandHandlers } from "~/commands/commandRegistry";
 
 function ChatRouteGlobalShortcuts() {
   const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
@@ -64,6 +66,45 @@ function ChatRouteGlobalShortcuts() {
   // pane, so a pane chord means one thing wherever it is typed. The thread
   // ref is what names the open thread's row as the way into the sidebar.
   usePaneNavigation(keybindings, routeThreadRef ? scopedThreadKey(routeThreadRef) : null);
+  // The chord branches below and the command registry run these, so a
+  // leader key and the chord share one body.
+  const startContextualNewThread = useCallback(() => {
+    void startNewThreadFromContext({
+      activeDraftThread,
+      activeThread: activeThread ?? undefined,
+      defaultProjectRef,
+      handleNewThread,
+    });
+  }, [activeDraftThread, activeThread, defaultProjectRef, handleNewThread]);
+  const startNewThread = useCallback(() => {
+    // The default sidebar routes creation through the command palette
+    // whenever there is a real choice to make; the legacy sidebar (and
+    // single-project setups) keep the immediate contextual create.
+    if (!legacySidebarEnabled && projectGroupCount > 1) {
+      openCommandPalette({ open: "new-thread-in" });
+      return;
+    }
+    startContextualNewThread();
+  }, [legacySidebarEnabled, projectGroupCount, startContextualNewThread]);
+  const togglePreviewPanel = useCallback(() => {
+    if (!routeThreadRef) return;
+    if (!isPreviewSupportedInRuntime()) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "info",
+          title: "Preview is desktop-only",
+          description: "Open Mesura Code in the desktop app to use the in-app preview.",
+        }),
+      );
+      return;
+    }
+    dispatchPreviewAction("toggle-panel");
+  }, [routeThreadRef]);
+  useCommandHandlers({
+    "chat.new": startNewThread,
+    "chat.newLocal": startContextualNewThread,
+    "preview.toggle": togglePreviewPanel,
+  });
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
@@ -89,49 +130,21 @@ function ChatRouteGlobalShortcuts() {
       if (command === "chat.newLocal") {
         event.preventDefault();
         event.stopPropagation();
-        void startNewThreadFromContext({
-          activeDraftThread,
-          activeThread: activeThread ?? undefined,
-          defaultProjectRef,
-          handleNewThread,
-        });
+        startContextualNewThread();
         return;
       }
 
       if (command === "chat.new") {
         event.preventDefault();
         event.stopPropagation();
-        // The default sidebar routes creation through the command palette
-        // whenever there is a real choice to make; the legacy sidebar (and
-        // single-project setups) keep the immediate contextual create.
-        if (!legacySidebarEnabled && projectGroupCount > 1) {
-          openCommandPalette({ open: "new-thread-in" });
-          return;
-        }
-        void startNewThreadFromContext({
-          activeDraftThread,
-          activeThread: activeThread ?? undefined,
-          defaultProjectRef,
-          handleNewThread,
-        });
+        startNewThread();
         return;
       }
 
       if (command === "preview.toggle") {
         event.preventDefault();
         event.stopPropagation();
-        if (!routeThreadRef) return;
-        if (!isPreviewSupportedInRuntime()) {
-          toastManager.add(
-            stackedThreadToast({
-              type: "info",
-              title: "Preview is desktop-only",
-              description: "Open Mesura Code in the desktop app to use the in-app preview.",
-            }),
-          );
-          return;
-        }
-        dispatchPreviewAction("toggle-panel");
+        togglePreviewPanel();
         return;
       }
 
@@ -178,6 +191,9 @@ function ChatRouteGlobalShortcuts() {
     selectedThreadKeysSize,
     legacySidebarEnabled,
     terminalOpen,
+    startContextualNewThread,
+    startNewThread,
+    togglePreviewPanel,
   ]);
 
   return <MesuraFileManagerLayer routeThreadRef={routeThreadRef} activeThread={activeThread} />;
@@ -187,6 +203,7 @@ function ChatRouteLayout() {
   return (
     <>
       <ChatRouteGlobalShortcuts />
+      <KeyEngineHost />
       <Outlet />
     </>
   );

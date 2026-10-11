@@ -171,8 +171,11 @@ import {
   formatAttachmentUploadProgress,
 } from "../../lib/attachmentUploadState";
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
+import { useCommandHandlers } from "../../commands/commandRegistry";
 import { getTerminalFocusOwner } from "../../lib/terminalFocus";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
+import { getClientSettings } from "~/hooks/useSettings";
+import { registerComposerVimAdapter } from "~/keys/composer/composerSurface";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../../keybindings";
 import {
   type TerminalContextDraft,
@@ -3333,6 +3336,27 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [promptRef, setPrompt],
   );
 
+  // Mesura: Vim normal mode in the composer reads and rewrites the prompt
+  // through the same replacement path as every other edit.
+  useEffect(
+    () =>
+      registerComposerVimAdapter({
+        read: () => ({
+          prompt: promptRef.current,
+          cursor: composerEditorRef.current?.readSnapshot().cursor ?? promptRef.current.length,
+        }),
+        write: (prompt, cursor) => {
+          applyPromptReplacement(0, promptRef.current.length, prompt, {
+            focusEditorAfterReplace: false,
+          });
+          window.requestAnimationFrame(() => composerEditorRef.current?.focusAt(cursor));
+        },
+        setCursor: (cursor) => composerEditorRef.current?.focusAt(cursor),
+        draftKey: () => composerDraftTargetKeyRef.current,
+      }),
+    [applyPromptReplacement, promptRef],
+  );
+
   const readComposerSnapshot = useCallback((): {
     value: string;
     cursor: number;
@@ -4941,6 +4965,29 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setIsStashMenuOpen(false);
   }, [prompt]);
 
+  // The chord handler below and the command registry run these, so a leader
+  // key and the chord stop for the same conditions.
+  const canOpenAttachmentPicker = () =>
+    fileStagingLimit !== null &&
+    !isCommandPaletteOpen() &&
+    !isComposerApprovalState &&
+    !projectSelectionRequired;
+  const stashCurrentPromptWhenAllowed = () => {
+    if (isCommandPaletteOpen() || isRevertingCheckpoint) {
+      return;
+    }
+    if (isComposerApprovalState || projectSelectionRequired) {
+      return;
+    }
+    void stashCurrentPrompt();
+  };
+  useCommandHandlers({
+    "composer.attachFiles": () => {
+      if (canOpenAttachmentPicker()) openAttachmentPicker();
+    },
+    "composer.stash": stashCurrentPromptWhenAllowed,
+  });
+
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
       const command = resolveShortcutCommand(event, keybindings, {
@@ -4960,14 +5007,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         // dialog opens otherwise; alt+a has no browser default to suppress, so
         // claiming it while nothing opens would swallow the keystroke from
         // whatever else wanted it.
-        if (
-          fileStagingLimit === null ||
-          isCommandPaletteOpen() ||
-          isComposerApprovalState ||
-          projectSelectionRequired
-        ) {
-          return;
-        }
+        if (!canOpenAttachmentPicker()) return;
         event.preventDefault();
         event.stopPropagation();
         openAttachmentPicker();
@@ -4978,13 +5018,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       // even when the composer is in a state that can't stash.
       event.preventDefault();
       event.stopPropagation();
-      if (isCommandPaletteOpen() || isRevertingCheckpoint) {
-        return;
-      }
-      if (isComposerApprovalState || projectSelectionRequired) {
-        return;
-      }
-      void stashCurrentPrompt();
+      stashCurrentPromptWhenAllowed();
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
@@ -5574,11 +5608,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return true;
       },
       citeAssistantText: (citation, sourceAnchor) =>
-        insertComposerText(
-          formatAssistantCitationForComposer(citation, citation.comment),
-          "cursor",
-          { ensureLeadingBoundary: true, citationCommentAnchor: sourceAnchor },
-        ),
+        // Mesura: in Vim mode a cite is chat-native. It lands at the end of the
+        // prompt on its own line as `<chip>: ` and the composer takes focus in
+        // insert mode, so the comment is typed straight after it. No comment
+        // popover. See docs/mesura/adr-009-modal-keys.md, "Cite".
+        getClientSettings().vimMode
+          ? insertComposerText(
+              `${promptRef.current.length === 0 || promptRef.current.endsWith("\n") ? "" : "\n"}${formatAssistantCitationForComposer(citation, undefined).trimEnd()}: `,
+              "end",
+            )
+          : insertComposerText(
+              formatAssistantCitationForComposer(citation, citation.comment),
+              "cursor",
+              { ensureLeadingBoundary: true, citationCommentAnchor: sourceAnchor },
+            ),
       openModelPicker,
       toggleModelPicker: () => {
         if (isComposerModelPickerOpen) {

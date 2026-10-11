@@ -30,6 +30,8 @@ const workspaceFiles = [
   // fixture copies MANIFESTS ONLY, so a workspace dependency whose manifest is
   // absent makes the regenerated lockfile fail to resolve.
   "packages/symmetria-broker-contract/package.json",
+  // Same rule: `apps/web` depends on the fork's modal key engine.
+  "packages/keys/package.json",
   // Same rule, for the vendored file manager. All four are workspace members
   // and all four are depended on — `apps/web` takes every one, `apps/server`
   // takes fm-core and fm-main — so every manifest has to be here or the

@@ -270,7 +270,8 @@ function getWindowTitleBarOptions(
   // Withholding `titleBarOverlay` is what turns them off: the constants and the
   // Windows path below stay intact, and `navigator.windowControlsOverlay` then
   // reports invisible, so the web side drops its `wco` class and stops reserving
-  // the strip on the right. Ctrl+Q still quits through the application menu.
+  // the strip on the right. Quit is the File menu or the window manager: Ctrl+Q
+  // belongs to the page on Linux.
   if (platform === "linux") {
     return { titleBarStyle: "hidden" };
   }
@@ -668,7 +669,11 @@ export const make = Effect.gen(function* () {
       },
     });
     window.webContents.on("before-input-event", (event, input) => {
-      quitShortcutHandler(event, input);
+      // Mesura: on Linux Ctrl+Q is a page chord (close the focused tab or
+      // terminal, like Super+Q on Hyprland), so the quit guard stands aside
+      // and the File menu's Quit carries no accelerator. Quit is the menu or
+      // the window manager there.
+      if (environment.platform !== "linux") quitShortcutHandler(event, input);
       if (input.type !== "keyDown" || !input.isAutoRepeat) return;
       const modifier = environment.platform === "darwin" ? input.meta : input.control;
       if (modifier && !input.alt && !input.shift && input.key.toLowerCase() === "w") {

@@ -138,6 +138,14 @@
   ],
   "packageOverrides": [
     {
+      "name": "@vimee/core",
+      "sourceUrl": "https://github.com/vimeejs/vimee",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": ["Copyright (c) 2026 JJ"]
+      }
+    },
+    {
       "license": "MIT",
       "name": "@react-grab/cli",
       "sourceUrl": "https://github.com/aidenybai/react-grab/tree/main/packages/cli",

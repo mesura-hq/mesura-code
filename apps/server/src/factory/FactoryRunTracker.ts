@@ -141,6 +141,8 @@ export class FactoryRunTracker extends Context.Service<
  */
 interface RoleTail {
   readonly tail: AppendOnlyFileTail;
+  /** The tail's, open while the role is in the current phase, so its offset survives a closed pane. */
+  readonly tailScope: Scope.Closeable;
   /** The watch, open only while a pane subscribes. */
   scope: Scope.Closeable | null;
   progress: RoleOutputProgress;
@@ -360,13 +362,16 @@ const make = Effect.gen(function* () {
       return Scope.close(scope, Exit.void);
     });
 
+  const closeRoleTail = (role: RoleTail) =>
+    closeRoleWatch(role).pipe(Effect.andThen(Scope.close(role.tailScope, Exit.void)));
+
   /** Forgets a role that left the current phase, offset and counters included. */
   const dropRoleTail = (run: TrackedRun, outputFile: string) =>
     Effect.suspend(() => {
       const role = run.roleTails.get(outputFile);
       if (role === undefined) return Effect.void;
       run.roleTails.delete(outputFile);
-      return closeRoleWatch(role);
+      return closeRoleTail(role);
     });
 
   /** A finished run no pane is reading holds nothing worth keeping in memory. */
@@ -374,7 +379,7 @@ const make = Effect.gen(function* () {
     Effect.suspend(() => {
       if (!isFactoryRunFinished(run.state.status) || run.subscribers > 0) return Effect.void;
       if (runs.get(run.key) === run) runs.delete(run.key);
-      return Effect.forEach(run.roleTails.values(), closeRoleWatch, { discard: true });
+      return Effect.forEach(run.roleTails.values(), closeRoleTail, { discard: true });
     });
 
   /**
@@ -437,8 +442,12 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       let role = run.roleTails.get(outputFile);
       if (role === undefined) {
+        const tailScope = yield* Scope.fork(trackerScope);
         role = {
-          tail: makeAppendOnlyFileTail(path.resolve(run.runDir, outputFile)),
+          tail: yield* makeAppendOnlyFileTail(path.resolve(run.runDir, outputFile)).pipe(
+            Scope.provide(tailScope),
+          ),
+          tailScope,
           scope: null,
           progress: emptyRoleOutputProgress,
         };
@@ -503,8 +512,11 @@ const make = Effect.gen(function* () {
         const key = runKey(threadId, runId);
         if (runs.has(key)) return { runId };
 
-        const eventsTail = makeAppendOnlyFileTail(path.join(runDir, FACTORY_RUN_EVENTS_FILE));
         const followScope = yield* Scope.fork(trackerScope);
+        // The events file is read only while it is followed.
+        const eventsTail = yield* makeAppendOnlyFileTail(
+          path.join(runDir, FACTORY_RUN_EVENTS_FILE),
+        ).pipe(Scope.provide(followScope));
         // Watch first, then read: an append between the two is still seen.
         const triggers = yield* watchAppendOnlyFile(eventsTail).pipe(Scope.provide(followScope));
 

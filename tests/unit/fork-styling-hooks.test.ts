@@ -116,3 +116,28 @@ it("keeps :has() out of the fork's stylesheet", () => {
     "mesura.css uses :has() again; anchor the state on an attribute instead (see lib/drawerFocusMark.ts)",
   );
 });
+
+it("rings the composer for Vim normal and visual mode through an attribute on its surface", () => {
+  // The ring once used `[data-chat-composer-main-surface]:has([data-mesura-vim])`,
+  // which the guard above forbids. `composerSurface.ts` writes the mode onto the
+  // surface itself instead. The colours match the mode indicator and must stay
+  // as they are: the look of the ring is part of the baseline. That the mode
+  // changes write and clear the attribute is pinned by behaviour in
+  // `apps/web/src/keys/composer/composerSurface.test.ts`.
+  const rules = read("apps/web/src/mesura.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  const expectedRings = [
+    { mode: "normal", outline: "outline: 1.5px solid oklch(68.5% 0.169 237.323);" },
+    { mode: "visual", outline: "outline: 1.5px solid oklch(76.9% 0.188 70.08);" },
+  ];
+  for (const ring of expectedRings) {
+    const selector = `[data-chat-composer-main-surface][data-mesura-composer-vim="${ring.mode}"]`;
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const body = rules.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))?.[1];
+    assert.isDefined(
+      body,
+      `mesura.css has no rule for ${selector}, so the ${ring.mode} ring is gone`,
+    );
+    assert.include(body, ring.outline, `the ${ring.mode} ring changed colour or width`);
+    assert.include(body, "outline-offset: -1px;", `the ${ring.mode} ring changed its offset`);
+  }
+});

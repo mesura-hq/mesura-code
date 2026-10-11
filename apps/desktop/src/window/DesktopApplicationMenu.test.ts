@@ -298,7 +298,12 @@ describe("DesktopApplicationMenu", () => {
       if (!Array.isArray(fileMenu.submenu)) {
         throw new Error("Expected File menu submenu to be an array.");
       }
-      assert.isDefined(fileMenu.submenu.find((item) => item.role === "quit"));
+      // Mesura: on Linux Quit is a plain item with no accelerator, so Ctrl+Q
+      // reaches the page, where it closes the focused tab or terminal.
+      const quit = fileMenu.submenu.find((item) => item.role === "quit" || item.label === "Quit");
+      assert.isDefined(quit);
+      assert.isUndefined(quit.accelerator);
+      assert.notEqual(quit.role, "quit");
     }),
   );
 });

@@ -27,6 +27,7 @@ import {
 } from "./monacoFileTheme";
 import "./monacoFileSurface.css";
 import { registerFocusTarget } from "~/lib/focusTargets";
+import { setPaneEntryFocus } from "~/lib/panelSurfaceFocus";
 
 const REVEAL_LINE_CLASS = "mesura-file-reveal-line";
 
@@ -187,13 +188,17 @@ export function MonacoFileSurface({
     editorRef.current = editor;
     setEditor(editor);
     decorationsRef.current = editor.createDecorationsCollection();
-    const unregisterFocusTarget = registerFocusTarget("editor", () => {
+    const focusEditor = () => {
       editor.focus();
       return true;
-    });
+    };
+    const unregisterFocusTarget = registerFocusTarget("editor", focusEditor);
+    // The panel's entry, ranked over the file tree beside it.
+    const clearPaneEntry = setPaneEntryFocus(host, focusEditor);
 
     return () => {
       unregisterFocusTarget();
+      clearPaneEntry();
       decorationsRef.current = null;
       editorRef.current = null;
       setEditor(null);
@@ -481,7 +486,12 @@ export function MonacoFileSurface({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div ref={hostRef} data-monaco-file-surface className="flex min-h-0 flex-1">
+      <div
+        ref={hostRef}
+        data-monaco-file-surface
+        data-pane-entry="2"
+        className="flex min-h-0 flex-1"
+      >
         {comments.zones}
       </div>
       {nvim.active || nvim.fallback !== null ? (

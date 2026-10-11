@@ -12,6 +12,7 @@ import { useLocation, useNavigate } from "@tanstack/react-router";
 import { isElectron } from "../env";
 import { getLocalStorageItem, removeLocalStorageItem } from "../hooks/useLocalStorage";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
+import { useCommandHandlers } from "../commands/commandRegistry";
 import { cn, isMacPlatform } from "../lib/utils";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { useEnvironmentIdentificationMode, useLegacySidebarEnabled } from "../hooks/useSettings";
@@ -101,6 +102,7 @@ function SidebarControl() {
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [keybindings, toggleSidebar]);
+  useCommandHandlers({ "sidebar.toggle": toggleSidebar });
 
   return (
     // The right-side layout controls carry mr-px (border compensation inside
@@ -254,6 +256,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
               wrapper.clientWidth - nextWidth >= THREAD_MAIN_CONTENT_MIN_WIDTH,
             storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
             onResize: setSidebarWidth,
+            onResetWidth: resetSidebarWidth,
           }}
         >
           {isOnSettings ? (

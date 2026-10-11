@@ -46,6 +46,7 @@ import {
   RustRoverIcon,
   WebStormIcon,
 } from "../JetBrainsIcons";
+import { useCommandHandlers } from "~/commands/commandRegistry";
 import { cn, isMacPlatform, isWindowsPlatform } from "~/lib/utils";
 import { shellEnvironment } from "~/state/shell";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -273,6 +274,13 @@ export const OpenInPicker = memo(function OpenInPicker({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [enableShortcut, keybindings, openInCwd, openInEditor, preferredEditor]);
+  useCommandHandlers({
+    "editor.openFavorite": enableShortcut
+      ? () => {
+          if (openInCwd && preferredEditor) void openInEditor(preferredEditor);
+        }
+      : undefined,
+  });
 
   return (
     <Group aria-label="Open in editor">

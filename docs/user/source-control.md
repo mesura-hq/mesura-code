@@ -173,8 +173,8 @@ Read a GitHub project's issues without leaving the app. Issues are read live fro
 the GitHub CLI login on the machine running the server, as described in [GitHub](#github). The
 browser never holds a GitHub token.
 
-- **In a thread:** open the surface launcher or **Add surface** menu and choose **Issues**, or press
-  **I** while the launcher or menu is open. The pane shows the thread's project and the
+- **In a thread:** open the surface launcher or **Add surface** launcher and choose **Issues**, or press
+  **I** while the launcher is open. The pane shows the thread's project and the
   conversation stays open beside it.
 - **Standalone:** choose **Issues** in the sidebar, or **Browse issues** in the command palette,
   then pick a project.

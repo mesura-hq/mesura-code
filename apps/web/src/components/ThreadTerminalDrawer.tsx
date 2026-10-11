@@ -44,6 +44,7 @@ import { Button } from "~/components/ui/button";
 import { PanelTabCloseButton } from "~/components/ui/panel-tab-close-button";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { readTextFromClipboard, writeTextToClipboard } from "~/hooks/useCopyToClipboard";
+import { usePaneEdge } from "~/lib/paneEdges";
 import { cn } from "~/lib/utils";
 import { type TerminalContextSelection } from "~/lib/terminalContext";
 import {
@@ -1306,6 +1307,29 @@ export default function ThreadTerminalDrawer({
     lastSyncedHeightRef.current = controlledDrawerHeight;
   }, [controlledDrawerHeight, threadId]);
 
+  // Fork: arrow keys on the focused top edge and Vim mode's PANE mode
+  // (lib/paneEdges.ts). Commits as a drag's end does.
+  const resizeDrawerTo = (height: number): number => {
+    const clampedHeight = clampDrawerHeight(height);
+    if (clampedHeight === drawerHeightRef.current) return clampedHeight;
+    drawerHeightRef.current = clampedHeight;
+    setDrawerHeight(clampedHeight);
+    syncHeight(clampedHeight);
+    setResizeEpoch((value) => value + 1);
+    return clampedHeight;
+  };
+  const separatorProps = usePaneEdge({
+    id: "terminal-drawer",
+    side: "top",
+    enabled: !isPanel && visible,
+    size: () => drawerHeightRef.current,
+    resizeTo: resizeDrawerTo,
+    reset: () => resizeDrawerTo(DEFAULT_THREAD_TERMINAL_HEIGHT),
+    valueNow: drawerHeight,
+    valueMin: MIN_DRAWER_HEIGHT,
+    valueMax: maxDrawerHeight(),
+  });
+
   const handleResizePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     event.preventDefault();
@@ -1401,7 +1425,10 @@ export default function ThreadTerminalDrawer({
       >
         {!isPanel ? (
           <div
-            className="absolute inset-x-0 top-0 z-20 h-1.5 cursor-row-resize"
+            role="separator"
+            aria-label="Resize terminal"
+            className="absolute inset-x-0 top-0 z-20 h-1.5 cursor-row-resize outline-none focus-visible:bg-primary/60"
+            {...separatorProps}
             onPointerDown={handleResizePointerDown}
             onPointerMove={handleResizePointerMove}
             onPointerUp={handleResizePointerEnd}
@@ -1431,7 +1458,10 @@ export default function ThreadTerminalDrawer({
     >
       {!isPanel ? (
         <div
-          className="absolute inset-x-0 top-0 z-20 h-1.5 cursor-row-resize"
+          role="separator"
+          aria-label="Resize terminal"
+          className="absolute inset-x-0 top-0 z-20 h-1.5 cursor-row-resize outline-none focus-visible:bg-primary/60"
+          {...separatorProps}
           onPointerDown={handleResizePointerDown}
           onPointerMove={handleResizePointerMove}
           onPointerUp={handleResizePointerEnd}

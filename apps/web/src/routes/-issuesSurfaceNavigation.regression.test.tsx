@@ -2,7 +2,7 @@
 /**
  * Entry point: the real `/_chat/pull-requests` file route (`_chat.pull-requests.tsx`), mounted at
  * `/pull-requests` beside a stand-in `/issues` page, with the shared pull-request panel open in
- * the real right-panel store. The reader opens the real Add surface menu in the panel's tab
+ * the real right-panel store. The reader opens the real Add surface launcher in the panel's tab
  * strip and chooses Issues.
  *
  * The fixture replaces boundaries only: the environment and project hooks, the pull-request list
@@ -57,6 +57,7 @@ vi.mock("~/components/pullRequest/PullRequestDetailPanel", () => ({
   PullRequestDetailPanel: () => <div>Pull request detail</div>,
 }));
 
+import { closePanelLauncher } from "~/lib/panelLauncher";
 import { SidebarProvider } from "~/components/ui/sidebar";
 import { PULL_REQUESTS_PANEL_REF, useRightPanelStore } from "~/rightPanelStore";
 import { AppAtomRegistryProvider } from "~/rpc/atomRegistry";
@@ -154,14 +155,14 @@ async function openAddSurfaceMenu() {
   await act(async () => {
     trigger!.click();
   });
-  const menu = document.querySelector<HTMLElement>('[data-slot="menu-popup"][data-open]');
+  const menu = container!.querySelector<HTMLElement>('[aria-label="Open a surface"]');
   expect(menu?.textContent).toContain("Issues");
   return menu!;
 }
 
 function issuesMenuItem(menu: HTMLElement) {
-  const item = Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
-    (candidate) => candidate.textContent?.trim().startsWith("Issues"),
+  const item = Array.from(menu.querySelectorAll<HTMLElement>("button")).find((candidate) =>
+    candidate.textContent?.trim().startsWith("Issues"),
   );
   expect(item).toBeDefined();
   return item!;
@@ -179,7 +180,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  act(() => root?.unmount());
+  act(() => {
+    closePanelLauncher();
+    root?.unmount();
+  });
   container?.remove();
   document.body.replaceChildren();
   root = null;

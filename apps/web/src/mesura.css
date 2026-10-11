@@ -80,9 +80,11 @@
    those take a frame inset inside the pane instead.
 
    Driven by `:focus-within`, so the browser's own focus tree is the only
-   state involved: no React state and no re-render. Focus leaving for a menu
-   or the command palette drops the mark while that is open, which is honest
-   about where the keys are going.
+   state involved: no React state and no re-render. The exception is Vim
+   mode's chat buffer, which holds the keys with focus on <body>: the key
+   engine marks the root for it (`[data-mesura-chat-keys]`). Focus leaving
+   for a menu or the command palette drops the mark while that is open, which
+   is honest about where the keys are going.
 
    One question is answered by a listener instead: whether focus is inside the
    terminal drawer, which renders inside the chat column and after its header.
@@ -110,6 +112,62 @@
    See docs/mesura/adr-004-pane-focus.md for why this shape and not the eight
    that were tried before it. */
 
+/* The focus colour, app-wide: the same neutral as the pane mark instead of
+   the theme's blue. Every `ring-ring`, `outline-ring` and `border-ring` reads
+   `--ring`, so this one token recolours all of them; a text field's focused
+   border is the one that still shows. The selector matches the theme rule in
+   index.css that sets it, and wins by loading later. */
+:root,
+html[data-theme-id]:not([data-theme-id=""]) {
+  --ring: color-mix(in srgb, var(--contrast-foreground) 45%, transparent);
+}
+
+/* No focus outline. Focus moves by the app's keys, not by `Tab`
+   (`keys/nativeFocus.ts`), and the place it lands is marked by the surface
+   itself: the pane's hairline, a row's highlight, the composer's ring. Both
+   kinds the components draw go: the browser's `outline`, and Tailwind's
+   `ring-*`, a box shadow composed from `--tw-ring-shadow` and
+   `--tw-ring-offset-shadow`. */
+:focus-visible {
+  --tw-ring-shadow: 0 0 #0000 !important;
+  --tw-ring-offset-shadow: 0 0 #0000 !important;
+}
+:focus-visible:not([data-slot="alert-dialog-popup"] button) {
+  outline: none !important;
+}
+
+/* A text field draws its focus ring on its wrapper, not on the focused
+   element. The wrapper keeps its focused border colour and loses the halo.
+   These wrappers draw a ring only while focused, so the reset applies to
+   them always, and needs no `:has()` (see above). */
+[data-slot="input-control"],
+[data-slot="textarea-control"],
+[data-slot="input-group"],
+[data-slot="combobox-chips"] {
+  --tw-ring-shadow: 0 0 #0000 !important;
+}
+
+/* The settings sliders draw their focus ring on the thumb, with a literal
+   box shadow (index.css); this restores the thumb's resting shadow. Two
+   rules, because a browser drops a whole selector list over one vendor
+   pseudo-element it does not know. */
+.settings-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--contrast-foreground) 12%, transparent);
+}
+.settings-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--contrast-foreground) 12%, transparent);
+}
+
+/* The one exception: a confirmation answers Enter with whichever button holds
+   focus, so that button is always marked, however the dialog was opened (a
+   click on a close button gives no :focus-visible), and in the foreground
+   colour, which reads on the destructive red as well as on the outline
+   button. */
+[data-slot="alert-dialog-popup"] button:focus {
+  outline: 2px solid var(--foreground);
+  outline-offset: 2px;
+}
+
 :root {
   /* Neutral rather than the accent. A saturated accent reads as "important"
      and over-signals what is only a hint about where the keys are going.
@@ -123,11 +181,15 @@
   --mesura-pane-focus-ease: 150ms;
 }
 
-/* The two panes that light a row.
+/* The three panes that light a row.
 
    Hooks: `[data-chat-header]` is set on the chat column's top bar in
-   ChatView.tsx, and `[data-right-panel-tabbar]` on the right panel's tab row
-   in RightPanelTabs.tsx. The title inside the chat header is ChatHeader's
+   ChatView.tsx, `[data-right-panel-tabbar]` on the right panel's tab row
+   in RightPanelTabs.tsx, and the sidebar's is its header (the wordmark row),
+   `[data-slot="sidebar-header"]` from ui/sidebar.tsx inside
+   `[data-app-sidebar]`. All three rows are the top bar's height, so the
+   hairline sits at the same height whichever pane holds the keys. The
+   sidebar's wordmark does not recede: it is the app's name, not a title. The title inside the chat header is ChatHeader's
    `h2`, bound by tag rather than by class because that file changes often
    upstream. The panel's active tab carries `[data-active-tab="true"]`, which
    upstream's own code queries, so it cannot be renamed there unnoticed.
@@ -144,12 +206,14 @@
    was already positioned. The same holds for the sidebar and the drawer
    below. */
 [data-chat-header],
-[data-right-panel-tabbar] {
+[data-right-panel-tabbar],
+[data-app-sidebar] [data-slot="sidebar-header"] {
   position: relative;
 }
 
 [data-chat-header]::after,
-[data-right-panel-tabbar]::after {
+[data-right-panel-tabbar]::after,
+[data-app-sidebar] [data-slot="sidebar-header"]::after {
   content: "";
   position: absolute;
   right: 0;
@@ -174,8 +238,14 @@
 
 /* Unfocused: the row's title recedes. The chat column hands its mark to the
    terminal drawer whenever focus is inside the drawer, because the drawer is
-   rendered inside the column and would otherwise light both. */
-[data-chat-column-maximized-away]:not(:focus-within) [data-chat-header] h2,
+   rendered inside the column and would otherwise light both. The chat buffer
+   in Vim normal mode holds the keys with focus on <body>, outside the column,
+   so the key engine marks the root instead (`[data-mesura-chat-keys]`,
+   `keys/keyEngine.ts`). */
+:root:not([data-mesura-chat-keys])
+  [data-chat-column-maximized-away]:not(:focus-within)
+  [data-chat-header]
+  h2,
 [data-mesura-drawer-focused] [data-chat-header] h2,
 [data-preview-panel-mode]:not(:focus-within) [data-right-panel-tabbar] [data-active-tab="true"] {
   color: var(--muted-foreground);
@@ -185,21 +255,20 @@
 :root:not([data-mesura-drawer-focused])
   [data-chat-column-maximized-away]:focus-within
   [data-chat-header]::after,
-[data-preview-panel-mode]:focus-within [data-right-panel-tabbar]::after {
+:root[data-mesura-chat-keys]:not([data-mesura-drawer-focused]) [data-chat-header]::after,
+[data-preview-panel-mode]:focus-within [data-right-panel-tabbar]::after,
+[data-app-sidebar]:focus-within [data-slot="sidebar-header"]::after {
   background-color: var(--mesura-pane-focus-tint);
 }
 
-/* The two panes with no row to light take a frame instead.
+/* The terminal drawer has no row to light and takes a frame instead.
 
-   Hooks: `[data-app-sidebar]` from AppSidebarLayout.tsx and
-   `[data-terminal-owner="drawer"]` from ThreadTerminalDrawer.tsx. Inset so
-   the frame sits inside the pane's own border rather than doubling it. */
-[data-app-sidebar],
+   Hook: `[data-terminal-owner="drawer"]` from ThreadTerminalDrawer.tsx. Inset
+   so the frame sits inside the pane's own border rather than doubling it. */
 [data-terminal-owner="drawer"] {
   position: relative;
 }
 
-[data-app-sidebar]::after,
 [data-terminal-owner="drawer"]::after {
   content: "";
   position: absolute;
@@ -208,15 +277,158 @@
   border-radius: 10px;
   pointer-events: none;
   /* Above everything drawn inside the pane, and below anything rendered into
-     a portal, which leaves this stacking context entirely. Both panes top out
-     at 20 today — the sidebar's drag rail and the drawer's resize rail — so
-     this has headroom on purpose. Raise it only against something new inside
+     a portal, which leaves this stacking context entirely. The drawer tops out
+     at 20 today — the drawer's resize rail — so this has headroom on
+     purpose. Raise it only against something new inside
      a pane, never against a menu or a tooltip. */
   z-index: 60;
   transition: border-color var(--mesura-pane-focus-ease) ease;
 }
 
-[data-app-sidebar]:focus-within::after,
 [data-terminal-owner="drawer"]:focus-within::after {
   border-color: var(--mesura-pane-focus-frame);
+}
+
+/* Vim mode (apps/web/src/keys). Painted by the CSS Custom Highlight API, so
+   moving the cursor never touches the timeline's DOM. Static: no transition. */
+/* The letter under the cursor takes the page's background colour, as a
+   terminal block cursor reverses the cell. A white letter read as a stray
+   line on thin glyphs such as "l". On a glyph narrower than half an em the
+   cursor is the widened overlay instead (`keys/blockCursor.ts`), which redraws
+   the glyph and shares these colours. */
+::highlight(mesura-chat-cursor),
+::highlight(mesura-composer-cursor),
+[data-mesura-block-cursor="glyph"] {
+  background-color: oklch(68.5% 0.169 237.323);
+  color: var(--background);
+}
+::highlight(mesura-composer-visual) {
+  background-color: color-mix(in oklab, oklch(76.9% 0.188 70.08) 35%, transparent);
+}
+/* A keyboard cite flashes the cited text once (`keys/chat/citeFlash.ts`):
+   fade in, hold, fade out, then the element is removed. Opacity only, on one
+   element, so the compositor runs it. Reduced motion shows it still. */
+[data-mesura-cite-flash] {
+  position: absolute;
+  pointer-events: none;
+  animation: mesura-cite-flash 900ms ease-out forwards;
+}
+[data-mesura-cite-flash] > span {
+  position: absolute;
+  border-radius: 2px;
+  background-color: color-mix(in oklab, var(--mesura-flash-accent) 40%, transparent);
+}
+@keyframes mesura-cite-flash {
+  0% {
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  55% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-mesura-cite-flash] {
+    animation: none;
+  }
+}
+/* ── Flash: one look for every flash in the app ─────────────────────────────
+   The file editor's flash is flash.nvim inside Neovim, styled by the
+   developer's colourscheme (wine_theme): the backdrop is its `Comment`, grey
+   and italic, faded to 0.4 by the host (`nvimHighlightStyles.ts`); matches and
+   labels are its `Search`, #6d94e9 behind #131313. Every other flash takes the
+   same look from these tokens: the Vim-mode chat and composer flash
+   (`keys/flashSession.ts`), the file tree's, and the file manager's Miller and
+   overview flashes. Change the look here, once. */
+:root {
+  --mesura-flash-accent: #6d94e9;
+  --mesura-flash-ink: #131313;
+  --mesura-flash-dim-opacity: 0.4;
+  --mesura-flash-backdrop: color-mix(in oklab, var(--foreground) 40%, transparent);
+}
+
+/* Vim-mode flash. The backdrop fades by colour through a highlight, not by
+   opacity on the rows, so the match highlight above it stays at full
+   strength. Italic is not a property a highlight may set, so it comes from
+   the surface while `<html data-mesura-flash>` names it. */
+::highlight(mesura-flash-backdrop) {
+  color: var(--mesura-flash-backdrop);
+}
+::highlight(mesura-flash-match) {
+  background-color: var(--mesura-flash-accent);
+  color: var(--mesura-flash-ink);
+}
+[data-mesura-flash="chat"] [data-assistant-citation-viewport] [data-timeline-row-id],
+[data-mesura-flash="composer"] [data-testid="composer-editor"] {
+  font-style: italic;
+}
+
+/* The file tree (Symmetria's viewport flash, `tree.css`, `overview.css`):
+   rows fade and turn italic; the overlay that redraws the matched letters
+   takes the accent behind them. */
+[data-mesura-file-tree] .tree-frame[data-flash-mode="true"] .tree-row {
+  opacity: var(--mesura-flash-dim-opacity);
+  font-style: italic;
+}
+.overview-flash .overview-flash-match {
+  background: var(--mesura-flash-accent);
+  color: var(--mesura-flash-ink);
+}
+.overview-flash .overview-flash-label {
+  background: var(--mesura-flash-accent);
+  color: var(--mesura-flash-ink);
+  font-weight: 700;
+}
+
+/* The file manager's overview graph, the same viewport flash. */
+[data-mesura-file-manager] [data-flash-mode="true"] .overview-row[data-search-match="false"],
+[data-mesura-file-manager] [data-flash-mode="true"] .folder-group-name[data-search-match="false"],
+[data-mesura-file-manager] [data-flash-mode="true"] .folder-ancestors,
+[data-mesura-file-manager] [data-flash-mode="true"] .overview-links,
+[data-mesura-file-manager] [data-flash-mode="true"] [data-search-match="true"] > .overview-name {
+  opacity: var(--mesura-flash-dim-opacity);
+}
+[data-mesura-file-manager] [data-flash-mode="true"] .overview-row {
+  font-style: italic;
+}
+
+/* The file manager's Miller flash (`styles.css`): unreachable rows fade; on a
+   matching row only the matched letters and the label keep full strength. */
+[data-mesura-file-manager] .row--flash-dim {
+  opacity: var(--mesura-flash-dim-opacity);
+  font-style: italic;
+}
+[data-mesura-file-manager] [data-flash="match"] {
+  color: var(--mesura-flash-backdrop);
+  font-style: italic;
+}
+[data-mesura-file-manager] .row__flash-query {
+  color: var(--mesura-flash-ink);
+}
+/* Composer normal mode shows the block cursor above, not the caret. */
+[data-mesura-vim] {
+  caret-color: transparent;
+}
+/* The composer in Vim normal or visual mode: a ring on its box says the keys
+   are commands, not text. Colours match the mode indicator. `composerSurface.ts`
+   writes the mode onto the surface itself, so no `:has()` is needed. */
+[data-chat-composer-main-surface][data-mesura-composer-vim="normal"] {
+  outline: 1.5px solid oklch(68.5% 0.169 237.323);
+  outline-offset: -1px;
+}
+[data-chat-composer-main-surface][data-mesura-composer-vim="visual"] {
+  outline: 1.5px solid oklch(76.9% 0.188 70.08);
+  outline-offset: -1px;
+}
+/* The expanded composer (Space e): half the window, with room for the gutter
+   that `ComposerLineNumbers` draws. */
+[data-mesura-composer-expanded] [data-testid="composer-editor"] {
+  min-height: 50vh;
+  max-height: 50vh;
+  padding-left: 3.5ch;
 }

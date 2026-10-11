@@ -18,6 +18,7 @@ import {
   diffFileTreePositions,
   type DiffFileTreeEntry,
 } from "./diffFileTree.logic";
+import { usePierreTreePaneEntry } from "./pierreTreeKeys";
 
 export type { DiffFileTreeEntry } from "./diffFileTree.logic";
 
@@ -141,6 +142,8 @@ export function DiffFileTree({
     sort: ordering.sort,
     unsafeCSS: PIERRE_TREE_UNSAFE_CSS + UNTRACKED_LETTER_CSS,
   });
+  // Fork: the keyboard way into the tree, and its half-page moves.
+  const { bind: bindPaneEntry, onKeyDown: onPaneEntryKeyDown } = usePierreTreePaneEntry(model);
   const allDirectoriesExpanded = useFileTreeSelector(model, (currentModel) =>
     areAllDirectoriesExpanded(currentModel, directoryPaths),
   );
@@ -207,7 +210,12 @@ export function DiffFileTree({
   }, [model, paths, revealRequestId, selectedPath]);
 
   return (
-    <div className={cn("flex min-h-0 flex-1 flex-col bg-background", className)}>
+    <div
+      ref={bindPaneEntry}
+      data-pane-entry="1"
+      onKeyDown={onPaneEntryKeyDown}
+      className={cn("flex min-h-0 flex-1 flex-col bg-background", className)}
+    >
       {showHeader ? (
         <div
           className="flex h-10 min-h-10 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-2 text-xs text-muted-foreground in-data-[preview-panel-mode=inline]:mb-3 in-data-[preview-panel-mode=inline]:h-7 in-data-[preview-panel-mode=inline]:min-h-7 in-data-[preview-panel-mode=inline]:border-b-transparent"

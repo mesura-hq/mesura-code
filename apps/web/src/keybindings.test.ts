@@ -1194,9 +1194,25 @@ describe("shipped defaults on Linux", () => {
     );
   });
 
-  it("opens the branch-toolbar pickers", () => {
-    assert.strictEqual(resolve(press("w", { altKey: true })), "workspacePicker.toggle");
+  it("opens the run context drawer and the branch picker", () => {
+    assert.strictEqual(resolve(press("w", { altKey: true })), "runContext.toggle");
     assert.strictEqual(resolve(press("b", { altKey: true })), "branchPicker.toggle");
+  });
+
+  it("cycles machines and toggles the workspace without opening the drawer", () => {
+    assert.strictEqual(
+      resolve(press("h", { ctrlKey: true, shiftKey: true })),
+      "runContext.cycleMachine",
+    );
+    assert.strictEqual(
+      resolve(press("w", { ctrlKey: true, shiftKey: true })),
+      "runContext.toggleWorkspace",
+    );
+    // The chord a browser lets through: it keeps Ctrl+Shift+W to close the window.
+    assert.strictEqual(
+      resolve(press("w", { altKey: true, shiftKey: true })),
+      "runContext.toggleWorkspace",
+    );
   });
 
   it("toggles the open thread's settled state on mod+shift+s, and leaves the terminal alone", () => {
@@ -1273,6 +1289,43 @@ describe("shipped defaults on Linux", () => {
     assert.strictEqual(resolve(press("Tab", { ctrlKey: true, shiftKey: true })), "thread.previous");
     assert.strictEqual(resolve(press("]", { ctrlKey: true, shiftKey: true })), "thread.next");
     assert.strictEqual(resolve(press("[", { ctrlKey: true, shiftKey: true })), "thread.previous");
+  });
+
+  it("walks the right panel's tabs with the tab pair while the panel has focus", () => {
+    const panel = { panelFocus: true };
+    assert.strictEqual(
+      resolve(press("Tab", { ctrlKey: true }), false, panel),
+      "rightPanel.nextTab",
+    );
+    assert.strictEqual(
+      resolve(press("Tab", { ctrlKey: true, shiftKey: true }), false, panel),
+      "rightPanel.previousTab",
+    );
+    assert.strictEqual(resolve(press("t", { ctrlKey: true }), false, panel), "rightPanel.newTab");
+    assert.isNull(resolve(press("t", { ctrlKey: true })));
+    // A terminal tab keeps ctrl+tab, as it does for the thread pair.
+    assert.isNull(resolve(press("Tab", { ctrlKey: true }), true, panel));
+    // The bracket pair still walks the threads from the panel.
+    assert.strictEqual(
+      resolve(press("]", { ctrlKey: true, shiftKey: true }), false, panel),
+      "thread.next",
+    );
+  });
+
+  it("closes with Ctrl+Q what Ctrl+W closes, and keeps Ctrl+W as the label", () => {
+    assert.strictEqual(resolve(press("q", { ctrlKey: true })), "rightPanel.close");
+    assert.strictEqual(resolve(press("q", { ctrlKey: true }), true), "terminal.close");
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "rightPanel.close", "Linux"),
+      "Ctrl+W",
+    );
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "terminal.close", {
+        platform: "Linux",
+        context: { terminalFocus: true },
+      }),
+      "Ctrl+W",
+    );
   });
 
   it("reports the everywhere-works chord as the shortcut label", () => {

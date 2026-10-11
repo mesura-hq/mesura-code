@@ -3,7 +3,8 @@
  *
  * A pane root with a tabindex receives focus and then eats nothing, so each
  * surface registers the element that owns its key handlers: the tree its
- * viewport, the editor Monaco's `focus()`, the chat its composer. A target
+ * viewport, the editor Monaco's `focus()` (or a file preview's scroll region,
+ * which shows in the editor's place), the chat its composer. A target
  * reports whether focus actually landed, so a caller can fall back instead of
  * hiding the pane the keyboard is still in. The pane-focus design (ADR-004)
  * consumes this registry for its own moves.

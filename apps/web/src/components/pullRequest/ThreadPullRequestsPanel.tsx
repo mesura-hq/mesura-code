@@ -249,7 +249,13 @@ function EnabledThreadPullRequestsPanel({ threadRef }: { threadRef: ScopedThread
 
   if (links.length === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+      // Mesura: the panel's keyboard entry while there is nothing to list
+      // (`lib/panelSurfaceFocus.ts`).
+      <div
+        data-pane-entry="1"
+        tabIndex={-1}
+        className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center outline-none"
+      >
         <LinkIcon aria-hidden className="size-6 text-muted-foreground/60" />
         <p className="text-sm font-medium">No linked pull requests</p>
         <p className="max-w-60 text-xs text-muted-foreground">
@@ -266,7 +272,7 @@ function EnabledThreadPullRequestsPanel({ threadRef }: { threadRef: ScopedThread
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <ScrollArea className="min-h-0 flex-1">
+      <ScrollArea className="min-h-0 flex-1" data-pane-entry="1">
         <div className="flex flex-col p-1.5">
           {lines.map((line) => (
             <LinkRow

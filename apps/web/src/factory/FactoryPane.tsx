@@ -164,7 +164,7 @@ export default function FactoryPane({
           ))}
         </ToggleGroup>
       </nav>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto" data-pane-entry="1">
         {surface.tab === "report" ? (
           report === null ? (
             <PaneMessage>This run has not written its report yet.</PaneMessage>

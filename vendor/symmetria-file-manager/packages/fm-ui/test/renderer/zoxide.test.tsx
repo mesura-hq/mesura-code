@@ -96,7 +96,7 @@ describe("narrowing and choosing", () => {
     type("sales");
 
     await waitFor(() => expect(rows()).toHaveLength(1));
-    expect(rows()[0]).toContain("/home/jc/work/sales/bambin");
+    expect(rows()[0]).toContain("/home/jc/work/sales/acme");
   });
 
   it("goes to the highlighted directory on Enter, and closes", async () => {
@@ -107,7 +107,7 @@ describe("narrowing and choosing", () => {
 
     pressInPopup("Enter");
 
-    await waitFor(() => expect(log.listed).toContain("/home/jc/work/sales/bambin"));
+    await waitFor(() => expect(log.listed).toContain("/home/jc/work/sales/acme"));
     expect(screen.queryByTestId("zoxide")).toBeNull();
   });
 
@@ -119,7 +119,7 @@ describe("narrowing and choosing", () => {
 
     await waitFor(() => {
       const active = screen.getByTestId("zoxide").querySelector('[data-active="true"]');
-      expect(active?.textContent).toContain("/home/jc/work/sales/bambin");
+      expect(active?.textContent).toContain("/home/jc/work/sales/acme");
     });
   });
 });
@@ -210,7 +210,7 @@ describe("the movement keys the overlay list shares", () => {
     fireEvent.keyDown(screen.getByTestId("zoxide-query"), { key: "j", ctrlKey: true });
     await waitFor(() => {
       const active = screen.getByTestId("zoxide").querySelector('[data-active="true"]');
-      expect(active?.textContent).toContain("/home/jc/work/sales/bambin");
+      expect(active?.textContent).toContain("/home/jc/work/sales/acme");
     });
 
     // Paired with the move down, so a handler that ignored both keys could not
@@ -218,7 +218,7 @@ describe("the movement keys the overlay list shares", () => {
     fireEvent.keyDown(screen.getByTestId("zoxide-query"), { key: "k", ctrlKey: true });
     await waitFor(() => {
       const active = screen.getByTestId("zoxide").querySelector('[data-active="true"]');
-      expect(active?.textContent).not.toContain("/home/jc/work/sales/bambin");
+      expect(active?.textContent).not.toContain("/home/jc/work/sales/acme");
     });
   });
 });

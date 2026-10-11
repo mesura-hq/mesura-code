@@ -33,6 +33,7 @@ import { useClientSettings, useUpdateClientSettings } from "~/hooks/useSettings"
 import { useTheme } from "~/hooks/useTheme";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { useWorkspaceMutationRefresh } from "~/hooks/useWorkspaceMutationRefresh";
+import { previewFocusTargetRef } from "~/lib/panelSurfaceFocus";
 import { cn } from "~/lib/utils";
 import { isPreviewSupportedInRuntime } from "~/previewStateStore";
 import { isAbsolutePath, resolvePathLinkTarget } from "~/terminal-links";
@@ -146,7 +147,11 @@ function WorkspaceImagePreview(props: {
   }
 
   return assetUrl._tag === "Success" && imageUrl !== null ? (
-    <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4">
+    <div
+      className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4"
+      data-pane-entry="2"
+      ref={previewFocusTargetRef}
+    >
       <MediaActions source={actionsSource}>
         <img
           className="max-h-full max-w-full object-contain"
@@ -553,7 +558,7 @@ function RenderedMarkdownSurface({
   });
 
   return (
-    <ScrollArea className="min-h-0 flex-1">
+    <ScrollArea className="min-h-0 flex-1" data-pane-entry="2" ref={previewFocusTargetRef}>
       <FileMarkdownPreview
         text={contents}
         cwd={cwd}
