@@ -5,6 +5,10 @@ on:
   push:
     branches:
       - main
+      # Mesura: `dev` is where PRs land and are tested together, so a merge result
+      # needs a CI run of its own, and agents need a `dev` baseline to compare a
+      # red PR against.
+      - dev
 
 permissions:
   contents: read
