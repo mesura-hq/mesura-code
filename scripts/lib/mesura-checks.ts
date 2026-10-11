@@ -23,7 +23,8 @@ export function parseChangedLineRanges(unifiedDiff: string): Map<string, LineRan
   let currentFile: string | undefined;
   for (const line of unifiedDiff.split("\n")) {
     if (line.startsWith("+++ ")) {
-      const target = line.slice(4);
+      // Git appends a tab after a filename that contains a space.
+      const target = line.slice(4).replace(/\t$/u, "");
       currentFile = target === "/dev/null" ? undefined : target.replace(/^b\//u, "");
       continue;
     }
@@ -51,7 +52,8 @@ export interface LintDiagnostic {
  * Keeps every error, and a warning only where the change wrote that line. The
  * repository carries over a hundred warnings in upstream code; reporting them for
  * every touched file made agents diff warning counts by hand to find their own.
- * A file absent from `changedLines` is new, so all of its lines count as changed.
+ * Every line of a file in `newFiles` (untracked) counts as changed; a tracked file
+ * with no range in `changedLines` has no changed line to report a warning on.
  */
 export function selectReportableDiagnostics(
   diagnostics: ReadonlyArray<LintDiagnostic>,
@@ -74,18 +76,22 @@ export interface WorkspacePackage {
   readonly workspaceDependencies: ReadonlySet<string>;
 }
 
-/** Reads the `packages:` list from `pnpm-workspace.yaml`, globs unexpanded. */
+/**
+ * Reads the `packages:` list from `pnpm-workspace.yaml`, globs unexpanded; an
+ * exclusion keeps its leading `!`. Handles the block-list form this repository
+ * uses, not every YAML shape: `readWorkspacePackages` refuses an empty result.
+ */
 export function readWorkspaceGlobs(workspaceYaml: string): string[] {
   const globs: string[] = [];
   let insidePackages = false;
   for (const line of workspaceYaml.split("\n")) {
-    if (/^packages:\s*$/u.test(line)) {
+    if (/^packages:\s*(?:#.*)?$/u.test(line)) {
       insidePackages = true;
       continue;
     }
     if (!insidePackages) continue;
     if (/^\S/u.test(line) && !line.startsWith("#")) break;
-    const entry = /^\s+-\s+["']?([^"'\s#]+)/u.exec(line);
+    const entry = /^\s+-\s+["']?(!?[^"'\s#]+)/u.exec(line);
     if (entry !== null) globs.push(entry[1]!);
   }
   return globs;
@@ -96,41 +102,58 @@ export function readWorkspacePackages(repositoryRoot: string): WorkspacePackage[
   const globs = readWorkspaceGlobs(
     NodeFS.readFileSync(NodePath.join(repositoryRoot, "pnpm-workspace.yaml"), "utf8"),
   );
-  const directories = globs.flatMap((glob) => {
-    if (!glob.endsWith("/*")) return [glob];
-    const parent = glob.slice(0, -2);
-    return NodeFS.readdirSync(NodePath.join(repositoryRoot, parent)).map(
-      (entry) => `${parent}/${entry}`,
-    );
-  });
-  return directories.flatMap((directory) => {
-    const manifestPath = NodePath.join(repositoryRoot, directory, "package.json");
-    if (!NodeFS.existsSync(manifestPath)) return [];
-    const manifest = JSON.parse(NodeFS.readFileSync(manifestPath, "utf8")) as {
-      name: string;
-      scripts?: Record<string, string>;
-      dependencies?: Record<string, string>;
-      devDependencies?: Record<string, string>;
-      peerDependencies?: Record<string, string>;
-    };
-    const specifiers = {
-      ...manifest.dependencies,
-      ...manifest.devDependencies,
-      ...manifest.peerDependencies,
-    };
-    return [
-      {
-        name: manifest.name,
-        directory,
-        typecheckScript: manifest.scripts?.typecheck,
-        workspaceDependencies: new Set(
-          Object.entries(specifiers)
+  const exclusions = new Set(
+    globs.filter((glob) => glob.startsWith("!")).map((glob) => glob.slice(1)),
+  );
+  const directories = globs
+    .filter((glob) => !glob.startsWith("!"))
+    .flatMap((glob) => {
+      if (!glob.endsWith("/*")) return [glob];
+      const parent = glob.slice(0, -2);
+      return NodeFS.readdirSync(NodePath.join(repositoryRoot, parent)).map(
+        (entry) => `${parent}/${entry}`,
+      );
+    });
+  const packages = directories
+    .filter((directory) => !exclusions.has(directory))
+    .flatMap((directory) => {
+      const manifestPath = NodePath.join(repositoryRoot, directory, "package.json");
+      if (!NodeFS.existsSync(manifestPath)) return [];
+      const manifest = JSON.parse(NodeFS.readFileSync(manifestPath, "utf8")) as {
+        name: string;
+        scripts?: Record<string, string>;
+        dependencies?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+        peerDependencies?: Record<string, string>;
+        optionalDependencies?: Record<string, string>;
+      };
+      // Each section separately: spreading them together lets one section's
+      // specifier overwrite another section's `workspace:` edge.
+      const workspaceDependencies = new Set(
+        [
+          manifest.dependencies,
+          manifest.devDependencies,
+          manifest.peerDependencies,
+          manifest.optionalDependencies,
+        ].flatMap((section) =>
+          Object.entries(section ?? {})
             .filter(([, specifier]) => specifier.startsWith("workspace:"))
             .map(([name]) => name),
         ),
-      },
-    ];
-  });
+      );
+      return [
+        {
+          name: manifest.name,
+          directory,
+          typecheckScript: manifest.scripts?.typecheck,
+          workspaceDependencies,
+        },
+      ];
+    });
+  if (packages.length === 0) {
+    throw new Error("pnpm-workspace.yaml lists no workspace package this reader understands");
+  }
+  return packages;
 }
 
 /** The workspace package that owns a file: the one with the deepest matching directory. */
@@ -149,17 +172,34 @@ export function owningPackage(
 }
 
 /**
+ * Repository-root files every package's typecheck reads: compiler settings they
+ * extend, and the manifests and lockfile that decide which types resolve.
+ */
+const ROOT_TYPECHECK_INPUTS =
+  /^(?:tsconfig[^/]*\.json|package\.json|pnpm-workspace\.yaml|pnpm-lock\.yaml)$/u;
+
+/**
  * The packages a change can break the types of: each package that owns a changed
  * file, plus every package that depends on one of those, transitively. A changed
  * type in `packages/contracts` fails in `apps/web`, not in `contracts` itself.
+ *
+ * `changedFiles` includes deleted paths: removing a module breaks its importers.
+ * `importingFiles` are files that import a changed file by relative path across a
+ * package boundary, which no manifest records (`apps/*\/vite.config.ts` import
+ * `scripts/lib/public-config.ts`). A change to a root typecheck input selects
+ * every package.
  */
 export function packagesToTypecheck(
   packages: ReadonlyArray<WorkspacePackage>,
   changedFiles: ReadonlyArray<string>,
+  importingFiles: ReadonlyArray<string> = [],
 ): WorkspacePackage[] {
+  if (changedFiles.some((file) => ROOT_TYPECHECK_INPUTS.test(file))) {
+    return packages.filter((candidate) => candidate.typecheckScript !== undefined);
+  }
   const selected = new Set<string>();
   const pending: string[] = [];
-  for (const file of changedFiles) {
+  for (const file of [...changedFiles, ...importingFiles]) {
     const owner = owningPackage(packages, file);
     if (owner !== undefined && !selected.has(owner.name)) {
       selected.add(owner.name);

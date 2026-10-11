@@ -7,13 +7,15 @@
  *
  *   import { openMesuraPage } from "<repo>/scripts/lib/mesura-browser.ts";
  *   const { page, close } = await openMesuraPage({ route: "/", device: "phone" });
+ *   try { ... } finally { await close(); }
  *
  * - The profile lives in the worktree's gitignored `.t3/browser-profile`, so the
  *   pairing survives a reboot that clears `/tmp`. One process may hold it at a time.
- * - Pairing mints its own token with `apps/server/src/bin.ts pair`; it never opens
- *   a URL handed to the developer.
- * - Dark is the default theme because it is the developer's: a probe in the light
- *   theme once passed a focus ring that was plainly visible in the dark one.
+ * - Pairing mints its own token with `apps/server/src/bin.ts pair --base-dir`, against
+ *   this worktree's `.t3` unless `baseDir` names another isolated home. Without the
+ *   flag `pair` falls back to the shared home, which is the developer's live install.
+ * - `theme` sets the browser's `prefers-color-scheme`. Dark is the default because it
+ *   is the developer's; an appearance saved in the app's settings still wins over it.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
@@ -24,16 +26,22 @@ import { type BrowserContext, type Page, chromium, devices } from "playwright-co
 
 import { toolchainEnvironment } from "./mesura-toolchain.ts";
 
-export type MesuraDevice = "desktop" | "phone";
+export const MESURA_DEVICES = ["desktop", "phone"] as const;
+export type MesuraDevice = (typeof MESURA_DEVICES)[number];
+export const MESURA_THEMES = ["dark", "light"] as const;
+export type MesuraTheme = (typeof MESURA_THEMES)[number];
 
 export interface OpenMesuraPageOptions {
   /** App path to open after pairing, for example `/` or `/<environmentId>/<threadId>`. */
   readonly route?: string;
   readonly device?: MesuraDevice;
-  readonly theme?: "dark" | "light";
-  /** Dev server web origin. Defaults to the origin of the last pairing in this profile. */
+  readonly theme?: MesuraTheme;
+  /**
+   * Web origin to use, for example the tailnet one. Kept as given: pairing builds
+   * its URL on this origin. Defaults to the origin last paired for `baseDir`.
+   */
   readonly origin?: string;
-  /** Passed to `pair --base-dir` when the server was started with `--home-dir`. */
+  /** The dev server's home, when it was started with `--home-dir`. Defaults to `<repo>/.t3`. */
   readonly baseDir?: string;
 }
 
@@ -45,85 +53,157 @@ export interface MesuraPage {
 }
 
 const repositoryRoot = NodePath.resolve(import.meta.dirname, "..", "..");
+const defaultBaseDir = NodePath.join(repositoryRoot, ".t3");
 const profileDirectory = NodePath.join(repositoryRoot, ".t3", "browser-profile");
-const originFile = NodePath.join(profileDirectory, "mesura-origin");
+/** Last paired origin per base directory, so a second isolated server is not confused with the first. */
+const originsFile = NodePath.join(profileDirectory, "mesura-origins.json");
 const PAIR_TIMEOUT_MS = 30_000;
+const SETTLE_TIMEOUT_MS = 30_000;
 
 const DEVICE_OPTIONS = {
   desktop: { viewport: { width: 1440, height: 900 } },
   phone: devices["Pixel 7"],
 } as const;
 
-/**
- * The headless shell this `playwright-core` expects, or else the newest one in the
- * Playwright cache. Agents on this host install browsers with other Playwright
- * versions, so the exact revision is often missing while a newer one works.
- */
-function resolveChromiumExecutable(): string | undefined {
-  if (NodeFS.existsSync(chromium.executablePath())) return undefined;
+/** Newest usable headless shell in the Playwright cache, for when the pinned revision is absent. */
+function newestInstalledHeadlessShell(): string | undefined {
   const cache =
     process.env.PLAYWRIGHT_BROWSERS_PATH ??
     NodePath.join(NodeOS.homedir(), ".cache", "ms-playwright");
-  const newest = NodeFS.existsSync(cache)
-    ? NodeFS.readdirSync(cache)
-        .filter((entry) => entry.startsWith("chromium_headless_shell-"))
-        .sort((left, right) => left.localeCompare(right, undefined, { numeric: true }))
-        .at(-1)
-    : undefined;
-  if (newest === undefined) {
-    throw new Error(
-      "no Chromium headless shell found: run `npx playwright-core install chromium-headless-shell`",
-    );
-  }
-  return NodePath.join(cache, newest, "chrome-headless-shell-linux64", "chrome-headless-shell");
+  if (!NodeFS.existsSync(cache)) return undefined;
+  // oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone agent script has no Effect runtime.
+  const hostPlatform = NodeOS.platform();
+  const platformDirectory = hostPlatform === "linux" ? "chrome-headless-shell-linux64" : undefined;
+  if (platformDirectory === undefined) return undefined;
+  return NodeFS.readdirSync(cache)
+    .filter((entry) => entry.startsWith("chromium_headless_shell-"))
+    .sort((left, right) => right.localeCompare(left, undefined, { numeric: true }))
+    .map((entry) => NodePath.join(cache, entry, platformDirectory, "chrome-headless-shell"))
+    .find((executable) => {
+      try {
+        NodeFS.accessSync(executable, NodeFS.constants.X_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    });
 }
 
-/** Mints a standard-scope pairing URL against the running dev server. */
-function mintPairingUrl(baseDir: string | undefined): string {
+/**
+ * Launches with the browser this `playwright-core` expects, or else the newest
+ * usable headless shell: agents on this host install browsers with other Playwright
+ * versions, so the pinned revision is often missing while a newer one works.
+ */
+async function launchContext(options: OpenMesuraPageOptions): Promise<BrowserContext> {
+  const launchOptions = {
+    headless: true,
+    ...DEVICE_OPTIONS[options.device ?? "desktop"],
+    colorScheme: options.theme ?? "dark",
+  };
+  try {
+    return await chromium.launchPersistentContext(profileDirectory, launchOptions);
+  } catch (error) {
+    if (!/Executable doesn't exist/u.test(String(error))) throw error;
+    const executablePath = newestInstalledHeadlessShell();
+    if (executablePath === undefined) {
+      throw new Error(
+        "no Chromium headless shell found: run `npx playwright-core install chromium-headless-shell`",
+        { cause: error },
+      );
+    }
+    return chromium.launchPersistentContext(profileDirectory, { ...launchOptions, executablePath });
+  }
+}
+
+/** Mints a standard-scope pairing URL against the dev server whose home is `baseDir`. */
+function mintPairingUrl(baseDir: string): string {
   const result = NodeChildProcess.spawnSync(
     "node",
-    ["apps/server/src/bin.ts", "pair", ...(baseDir === undefined ? [] : ["--base-dir", baseDir])],
+    ["apps/server/src/bin.ts", "pair", "--base-dir", baseDir],
     { cwd: repositoryRoot, encoding: "utf8", env: toolchainEnvironment(repositoryRoot) },
   );
   const pairUrl = /Pair(?:ing)? URL: (\S+)/u.exec(`${result.stdout}${result.stderr}`)?.[1];
   if (pairUrl === undefined) {
     throw new Error(
-      `could not mint a pairing token (is this worktree's dev server running?):\n${result.stdout}${result.stderr}`,
+      `could not mint a pairing token: is a dev server running with home ${baseDir}?\n${result.stdout}${result.stderr}`,
     );
   }
   return pairUrl;
 }
 
-function isPairingScreen(page: Page): boolean {
-  return new URL(page.url()).pathname.startsWith("/pair");
+function readOrigins(): Record<string, string> {
+  try {
+    return JSON.parse(NodeFS.readFileSync(originsFile, "utf8")) as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+function rememberOrigin(baseDir: string, origin: string): void {
+  NodeFS.writeFileSync(
+    originsFile,
+    JSON.stringify({ ...readOrigins(), [baseDir]: origin }, null, 2),
+  );
+}
+
+/**
+ * Waits until the app decided where the session belongs. The page's load event is
+ * not that receipt: React replaces the boot splash, then the router resolves auth
+ * asynchronously and may still redirect to `/pair`. Settled means the splash is gone
+ * and the URL held still for a second.
+ */
+async function waitForAppToSettle(page: Page): Promise<void> {
+  // A string, because it runs in the page: the scripts package has no DOM types.
+  await page.waitForFunction('document.getElementById("boot-shell") === null', null, {
+    timeout: SETTLE_TIMEOUT_MS,
+  });
+  const deadline = Date.now() + SETTLE_TIMEOUT_MS;
+  let previousUrl = page.url();
+  while (Date.now() < deadline) {
+    await page.waitForTimeout(1_000);
+    if (page.url() === previousUrl) return;
+    previousUrl = page.url();
+  }
+}
+
+/** Whether the cached origin answered and the app kept the session; false means pair again. */
+async function openWithExistingSession(page: Page, url: string): Promise<boolean> {
+  try {
+    await page.goto(url);
+  } catch {
+    return false;
+  }
+  await waitForAppToSettle(page);
+  return !new URL(page.url()).pathname.startsWith("/pair");
 }
 
 export async function openMesuraPage(options: OpenMesuraPageOptions = {}): Promise<MesuraPage> {
   const route = options.route ?? "/";
+  const baseDir = NodePath.resolve(options.baseDir ?? defaultBaseDir);
   NodeFS.mkdirSync(profileDirectory, { recursive: true });
-  const executablePath = resolveChromiumExecutable();
-  const context = await chromium.launchPersistentContext(profileDirectory, {
-    headless: true,
-    ...(executablePath === undefined ? {} : { executablePath }),
-    ...DEVICE_OPTIONS[options.device ?? "desktop"],
-    colorScheme: options.theme ?? "dark",
-  });
-  const page = context.pages()[0] ?? (await context.newPage());
-  let origin =
-    options.origin ??
-    (NodeFS.existsSync(originFile) ? NodeFS.readFileSync(originFile, "utf8").trim() : undefined);
-
-  if (origin !== undefined) {
-    await page.goto(new URL(route, origin).toString());
-    await page.waitForLoadState("domcontentloaded");
+  const context = await launchContext(options);
+  try {
+    const page = context.pages()[0] ?? (await context.newPage());
+    let origin = options.origin ?? readOrigins()[baseDir];
+    const hasSession =
+      origin !== undefined &&
+      (await openWithExistingSession(page, new URL(route, origin).toString()));
+    if (!hasSession) {
+      const minted = new URL(mintPairingUrl(baseDir));
+      origin = options.origin ?? minted.origin;
+      // The token is not bound to an origin, so an explicit origin pairs on itself.
+      await page.goto(new URL(`${minted.pathname}${minted.hash}`, origin).toString());
+      await page.waitForURL((url) => !url.pathname.startsWith("/pair"), {
+        timeout: PAIR_TIMEOUT_MS,
+      });
+      rememberOrigin(baseDir, origin);
+      await page.goto(new URL(route, origin).toString());
+      await waitForAppToSettle(page);
+    }
+    return { page, context, origin: origin!, close: () => context.close() };
+  } catch (error) {
+    // The caller never receives `close` when setup fails; release the profile here.
+    await context.close().catch(() => undefined);
+    throw error;
   }
-  if (origin === undefined || isPairingScreen(page)) {
-    const pairUrl = mintPairingUrl(options.baseDir);
-    origin = new URL(pairUrl).origin;
-    await page.goto(pairUrl);
-    await page.waitForURL((url) => !url.pathname.startsWith("/pair"), { timeout: PAIR_TIMEOUT_MS });
-    NodeFS.writeFileSync(originFile, origin);
-    await page.goto(new URL(route, origin).toString());
-  }
-  return { page, context, origin, close: () => context.close() };
 }

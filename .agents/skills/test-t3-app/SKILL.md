@@ -13,8 +13,8 @@ Use this skill for the web client, including the phone-sized checks this fork re
 2. Choose a base directory that belongs only to the current worktree or test:
    - Use the repository's ignored `.t3` directory for reusable worktree-local state.
    - Use `mktemp -d /tmp/t3code-test.XXXXXX` for disposable state and retain the printed absolute path.
-3. Start the full web stack with `vp run dev`. Add `--share` when the user needs to open it from another tailnet device. In a linked worktree it defaults to that worktree's gitignored `.t3`; pass `--home-dir <base-dir>` only when the test needs a different isolated directory.
-4. Run it so it outlives your turn: under the host's workload runner (`mesura-agent-service <name> --memory 3G -- vp run dev` on vigilia hosts), never `&` or `nohup`. Read the selected server port, web port, base directory, and pairing URL from its output (`journalctl --user -u mesura-workload-<name>`).
+3. Choose the arguments for `vp run dev`: add `--share` when the user needs to open it from another tailnet device. In a linked worktree it defaults to that worktree's gitignored `.t3`; add `--home-dir <base-dir>` only when the test needs a different isolated directory.
+4. Start it once, so it outlives your turn: under the host's workload runner, never `&` or `nohup`. On vigilia hosts that is `mesura-agent-service <name> --memory 4G -- vp run dev <arguments>`; `--memory 2G` is enough for an empty base directory, and a copied database needs the 4G. Read the selected server port, web port, base directory, and pairing URL from its output (`journalctl --user -u mesura-workload-<name>`).
 
 Treat a base directory as disposable only when it was created or deliberately selected for the current test. Never delete or directly seed the shared `~/.t3` directory. Prefer starting with a new temporary base directory over clearing state of uncertain ownership.
 
@@ -36,13 +36,15 @@ Do not open the other person's complete pairing URL during this reachability che
 
 Treat the overall testing or implementation loop—not an assistant turn or one verification pass—as the environment lifecycle boundary.
 
-- Keep the dev process, base directory, selected ports, authenticated browser tab, registered projects, and seeded fixtures alive while the user may inspect the result or request follow-up changes.
+- Keep the dev process, base directory, selected ports, the harness's browser profile, registered projects, and seeded fixtures alive while the user may inspect the result or request follow-up changes. The profile keeps the pairing; a browser process does not need to stay open between probes.
 - Do not stop the server merely because one verification pass completed or because you are yielding a response to the user.
 - Before starting another environment, check whether the existing process and browser tab still serve the task. Reuse them when healthy instead of discarding useful state.
 - On a later turn, verify that the existing process is alive and reuse its printed ports and base directory. If it exited, restart with the same base directory; create a new pairing token only when the browser session is no longer valid.
 - Tell the user when a test environment remains available, including its non-secret web URL when useful. Include a pairing token only when the user still needs to pair (see below).
 
 ## Authenticate the browser on the first navigation
+
+This is the manual path. The harness below mints its own standard-scope token instead. A probe of admin-only controls (Settings → Connections) needs the startup URL's admin scopes, which the harness cannot get: authenticate that browser by this path with the unused startup URL, then restart the server so a fresh startup URL remains for the human.
 
 1. Wait for the server log that says authentication is required and includes a URL ending in `/pair#token=...`.
 2. Use the controlled in-app browser or browser-automation surface available to the agent. Do not use a system-browser launch command during automated testing.
@@ -54,10 +56,11 @@ Keep pairing URLs out of screenshots, committed files, and durable logs. When th
 
 ## Drive the app in a headless browser
 
-Use the repository's harness instead of writing a Playwright script from scratch. It resolves a Chromium headless shell, mints its own pairing token, pairs once into the worktree's `.t3/browser-profile` (it survives reboots), and opens the app in the dark theme at desktop size or as a Pixel 7.
+Use the repository's harness instead of writing a Playwright script from scratch. It resolves a Chromium headless shell, mints its own pairing token against this worktree's `.t3`, pairs once into `.t3/browser-profile` (it survives reboots), and opens the app at desktop size or as a Pixel 7. `--theme` (default dark) sets the browser's color-scheme preference; an appearance saved in the app's Settings overrides it, so check the rendered theme before you judge a visual.
 
 - Screenshot: `node scripts/mesura-browser.ts shot <route> <file.png> [--device phone] [--theme light] [--selector <css>]`. Prefer `--selector`: a crop costs a fraction of a full-page PNG in context.
-- Interactions: write a script that imports `openMesuraPage` from `<repo>/scripts/lib/mesura-browser.ts` and returns `{ page, context, origin, close }`. One process may hold the profile at a time.
+- Interactions: in your script, `import { openMesuraPage } from "<repo>/scripts/lib/mesura-browser.ts"`, then `const { page, close } = await openMesuraPage({ route, device })` and `await close()` in a `finally`. One process may hold the profile at a time, so close it before the next probe.
+- A server started with `--home-dir` needs the same directory: `--base-dir <dir>` (`baseDir`). After the origin changes, a new port or `--share`, pass `--origin <url>` (`origin`); the origin alone does not choose which server's home mints the token.
 - Open a thread by its route (`/<environmentId>/<threadId>`), not by its position in the sidebar: list order drifts.
 
 Traps that produced false verdicts before:
@@ -65,7 +68,7 @@ Traps that produced false verdicts before:
 - **Keyboard criteria:** only the entry point may be focused with `locator.focus()`. Every later move must be a real key press, or the probe skips the route it claims to test.
 - **Shifted symbols:** `page.keyboard.press("Shift+/")` sends key `/` with `shiftKey`, which no keyboard produces. Press the glyph: `press("?")`.
 - **Pixels over styles:** assert visual changes on a screenshot, in the dark theme. A computed-style check once passed a focus ring that Chromium drew in system blue.
-- **Shadow roots:** the file tree's rows are inside a shadow root, so `innerText` misses them. Use role locators (`getByRole("treeitem")`).
+- **Shadow roots:** the Tree diff panel's rows are inside a shadow root, so `innerText` misses them. Use role locators (`getByRole("treeitem")`), which pierce it.
 
 ## Recover a consumed or expired pairing token
 
@@ -90,7 +93,7 @@ Tear down when the user explicitly asks, confirms the iteration is finished, or 
 
 When teardown is appropriate:
 
-1. Stop the dev process with its terminal interrupt.
+1. Stop the dev process: `systemctl --user stop mesura-workload-<name>` for a workload, its terminal interrupt otherwise. Remove a `tailscale serve` mapping you added, by its HTTPS port.
 2. Preserve the isolated base directory when it contains useful reproduction evidence or state for a likely follow-up.
 3. Otherwise remove only a path created for this test after resolving and verifying the exact target.
 

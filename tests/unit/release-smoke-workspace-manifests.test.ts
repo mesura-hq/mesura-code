@@ -19,8 +19,11 @@ it("lists every depended-on workspace package in the release smoke's manifest fi
     NodePath.join(repositoryRoot, "scripts/release-smoke.ts"),
     "utf8",
   );
+  // Only the fixture list: the file names the same manifests again in later assertions.
+  const fixtureList =
+    /const workspaceFiles = \[([\s\S]*?)\] as const;/u.exec(smokeSource)?.[1] ?? "";
   const listedManifests = new Set(
-    [...smokeSource.matchAll(/^\s*"([^"]+\/package\.json)",/gmu)].map((match) => match[1]),
+    [...fixtureList.matchAll(/^\s*"([^"]+\/package\.json)",/gmu)].map((match) => match[1]),
   );
   const packages = readWorkspacePackages(repositoryRoot);
   const dependedOn = new Set(packages.flatMap((entry) => [...entry.workspaceDependencies]));
@@ -30,6 +33,10 @@ it("lists every depended-on workspace package in the release smoke's manifest fi
     .map((entry) => `${entry.directory}/package.json`)
     .filter((manifest) => !listedManifests.has(manifest));
 
-  assert.isAbove(listedManifests.size, 0, "found no manifest list in scripts/release-smoke.ts");
+  assert.isAbove(
+    listedManifests.size,
+    0,
+    "found no `workspaceFiles` list in scripts/release-smoke.ts",
+  );
   assert.deepStrictEqual(missing, [], "add these to `workspaceFiles` in scripts/release-smoke.ts");
 });

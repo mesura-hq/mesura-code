@@ -11,7 +11,21 @@
  */
 import * as NodeUtil from "node:util";
 
-import { type MesuraDevice, openMesuraPage } from "./lib/mesura-browser.ts";
+import {
+  MESURA_DEVICES,
+  MESURA_THEMES,
+  type MesuraDevice,
+  type MesuraTheme,
+  openMesuraPage,
+} from "./lib/mesura-browser.ts";
+
+const usage =
+  "usage: node scripts/mesura-browser.ts shot <route> <file.png> [--device desktop|phone] [--theme dark|light] [--selector <css>] [--origin <url>] [--base-dir <dir>]\n";
+
+function fail(message: string): never {
+  process.stderr.write(`${message}\n${usage}`);
+  process.exit(2);
+}
 
 const { positionals, values } = NodeUtil.parseArgs({
   allowPositionals: true,
@@ -25,26 +39,29 @@ const { positionals, values } = NodeUtil.parseArgs({
 });
 
 const [command, route, file] = positionals;
-if (command !== "shot" || route === undefined || file === undefined) {
-  process.stderr.write(
-    "usage: node scripts/mesura-browser.ts shot <route> <file.png> [--device desktop|phone] [--theme dark|light] [--selector <css>] [--origin <url>] [--base-dir <dir>]\n",
-  );
-  process.exit(2);
+if (command !== "shot" || route === undefined || file === undefined) fail("missing arguments");
+// An unknown value would silently fall back to a default and produce misleading evidence.
+if (!(MESURA_DEVICES as ReadonlyArray<string>).includes(values.device)) {
+  fail(`unknown --device ${values.device}`);
+}
+if (!(MESURA_THEMES as ReadonlyArray<string>).includes(values.theme)) {
+  fail(`unknown --theme ${values.theme}`);
 }
 
 const { page, origin, close } = await openMesuraPage({
   route,
   device: values.device as MesuraDevice,
-  theme: values.theme === "light" ? "light" : "dark",
+  theme: values.theme as MesuraTheme,
   ...(values.origin === undefined ? {} : { origin: values.origin }),
   ...(values["base-dir"] === undefined ? {} : { baseDir: values["base-dir"] }),
 });
 try {
-  await page.waitForLoadState("networkidle");
   if (values.selector === undefined) {
     await page.screenshot({ path: file });
   } else {
-    await page.locator(values.selector).first().screenshot({ path: file });
+    const target = page.locator(values.selector).first();
+    await target.waitFor({ state: "visible" });
+    await target.screenshot({ path: file });
   }
   process.stdout.write(`${file} (${origin}${route})\n`);
 } finally {

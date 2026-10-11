@@ -27,6 +27,7 @@ import * as NodePath from "node:path";
 
 import {
   type LintDiagnostic,
+  type WorkspacePackage,
   packagesToTypecheck,
   parseChangedLineRanges,
   readWorkspacePackages,
@@ -64,11 +65,18 @@ function git(args: ReadonlyArray<string>): string {
   return result.stdout;
 }
 
+interface RunResult {
+  /** `null` when a signal ended the process. */
+  readonly status: number | null;
+  readonly signal: NodeJS.Signals | null;
+  readonly output: string;
+}
+
 function run(
   command: string,
   args: ReadonlyArray<string>,
   environment: NodeJS.ProcessEnv,
-): { status: number; output: string } {
+): RunResult {
   const result = NodeChildProcess.spawnSync(command, args, {
     cwd: repositoryRoot,
     env: environment,
@@ -82,7 +90,24 @@ function run(
     .split("\n")
     .filter((line) => !VITE_PLUS_BUILTIN_NOTE.test(line))
     .join("\n");
-  return { status: result.status ?? EXIT_TOOLING_FAILURE, output };
+  return { status: result.status, signal: result.signal, output };
+}
+
+/** A tool's own exit: 0 clean, 1 its findings; anything else means it did not finish. */
+function classifyToolExit(command: string, result: RunResult): number {
+  if (result.status === 0) return EXIT_CLEAN;
+  if (result.status === 1) return EXIT_FINDINGS;
+  process.stderr.write(
+    `tooling failure: ${command} ended with ${result.signal ?? `exit ${result.status}`}\n`,
+  );
+  return EXIT_TOOLING_FAILURE;
+}
+
+/** The worse of two exit codes: a tooling failure outranks findings, findings outrank clean. */
+function worseExit(left: number, right: number): number {
+  const rank = (code: number) =>
+    code === EXIT_TOOLING_FAILURE ? 2 : code === EXIT_FINDINGS ? 1 : 0;
+  return rank(left) >= rank(right) ? left : right;
 }
 
 function hasCommand(command: string): boolean {
@@ -106,21 +131,74 @@ function isChecked(repositoryPath: string): boolean {
 
 interface ChangeSet {
   readonly base: string;
-  /** Changed or new files that still exist, repository-relative. */
+  /** Changed or new files that still exist, repository-relative: fmt and lint read these. */
   readonly files: string[];
+  /** Every changed path, deleted ones and both sides of a rename included: typecheck reads these. */
+  readonly changedPaths: string[];
   /** Untracked files: every line of them is new. */
   readonly newFiles: Set<string>;
 }
 
+/**
+ * NUL-separated, so a path with spaces, quotes or non-ASCII survives unquoted.
+ * `-z` goes right after the subcommand: after `--` Git reads it as a pathspec,
+ * matches nothing, and the whole gate passes on an empty change set.
+ */
+function gitPaths([subcommand, ...args]: ReadonlyArray<string>): string[] {
+  return git([subcommand!, "-z", ...args])
+    .split("\0")
+    .filter((file) => file.length > 0);
+}
+
 function readChangeSet(base: string): ChangeSet {
   git(["rev-parse", "--verify", "--quiet", `${base}^{commit}`]);
-  const changed = git(["diff", "--name-only", "--diff-filter=ACMR", base, "--"]).split("\n");
-  const untracked = git(["ls-files", "--others", "--exclude-standard"]).split("\n");
-  const files = [...new Set([...changed, ...untracked])]
-    .filter((file) => file.length > 0 && isChecked(file))
-    .filter((file) => NodeFS.existsSync(NodePath.join(repositoryRoot, file)))
-    .sort();
-  return { base, files, newFiles: new Set(untracked.filter((file) => file.length > 0)) };
+  // --no-renames reports a rename as a deletion plus an addition, so the old
+  // path's package is selected too.
+  const changed = gitPaths(["diff", "--name-only", "--no-renames", base, "--"]);
+  const untracked = gitPaths(["ls-files", "--others", "--exclude-standard"]);
+  const changedPaths = [...new Set([...changed, ...untracked])].filter(isChecked).sort();
+  const files = changedPaths.filter((file) =>
+    NodeFS.existsSync(NodePath.join(repositoryRoot, file)),
+  );
+  return { base, files, changedPaths, newFiles: new Set(untracked) };
+}
+
+const IMPORTABLE_SOURCE = /\.(?:[cm]?[jt]sx?)$/u;
+
+/**
+ * Files anywhere in the repository whose text names a changed source file by its
+ * repository path without the extension, which is how a relative import across a
+ * package boundary reads (`../../scripts/lib/public-config.ts`). A comment that
+ * names the path also matches; the cost is one extra package typechecked.
+ */
+function filesNamingChangedSources(changedPaths: ReadonlyArray<string>): string[] {
+  const needles = changedPaths
+    .filter((file) => IMPORTABLE_SOURCE.test(file))
+    .map((file) => file.replace(IMPORTABLE_SOURCE, ""));
+  if (needles.length === 0) return [];
+  const result = NodeChildProcess.spawnSync(
+    "git",
+    [
+      "grep",
+      "-l",
+      "-z",
+      "-F",
+      ...needles.flatMap((needle) => ["-e", needle]),
+      "--",
+      "*.ts",
+      "*.tsx",
+      "*.mts",
+      "*.cts",
+      "*.js",
+      "*.mjs",
+    ],
+    { cwd: repositoryRoot, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+  );
+  // git grep exits 1 when nothing matches.
+  if (result.status !== 0 && result.status !== 1) {
+    throw new ToolingFailure(`git grep failed: ${result.stderr.trim()}`);
+  }
+  return result.stdout.split("\0").filter((file) => file.length > 0 && isChecked(file));
 }
 
 function checkFormat(changeSet: ChangeSet | "all", environment: NodeJS.ProcessEnv): number {
@@ -135,14 +213,15 @@ function checkFormat(changeSet: ChangeSet | "all", environment: NodeJS.ProcessEn
     environment,
   );
   process.stdout.write(result.output);
-  return result.status === 0 ? EXIT_CLEAN : EXIT_FINDINGS;
+  return classifyToolExit("vp fmt", result);
 }
 
 function checkLint(changeSet: ChangeSet | "all", environment: NodeJS.ProcessEnv): number {
   if (changeSet === "all") {
+    // Errors only, as CI's `vp check` fails: the repository carries upstream warnings.
     const result = run("vp", ["lint", "--report-unused-disable-directives"], environment);
     process.stdout.write(result.output);
-    return result.status === 0 ? EXIT_CLEAN : EXIT_FINDINGS;
+    return classifyToolExit("vp lint", result);
   }
   const files = changeSet.files.filter((file) => LINTABLE_EXTENSIONS.test(file));
   if (files.length === 0) {
@@ -176,7 +255,19 @@ function checkLint(changeSet: ChangeSet | "all", environment: NodeJS.ProcessEnv)
     message: diagnostic.message,
   }));
   const changedLines = parseChangedLineRanges(
-    git(["diff", "--unified=0", "--no-color", changeSet.base, "--", ...files]),
+    git([
+      "-c",
+      "core.quotePath=false",
+      "diff",
+      "--unified=0",
+      "--no-color",
+      "--no-ext-diff",
+      "--src-prefix=a/",
+      "--dst-prefix=b/",
+      changeSet.base,
+      "--",
+      ...files,
+    ]),
   );
   const reportable = selectReportableDiagnostics(diagnostics, changedLines, changeSet.newFiles);
   for (const diagnostic of reportable) {
@@ -192,13 +283,22 @@ function checkLint(changeSet: ChangeSet | "all", environment: NodeJS.ProcessEnv)
 }
 
 function checkTypes(changeSet: ChangeSet | "all", environment: NodeJS.ProcessEnv): number {
-  const packages = readWorkspacePackages(repositoryRoot).filter((candidate) =>
-    isChecked(`${candidate.directory}/`),
-  );
+  let packages: WorkspacePackage[];
+  try {
+    packages = readWorkspacePackages(repositoryRoot).filter((candidate) =>
+      isChecked(`${candidate.directory}/`),
+    );
+  } catch (error) {
+    throw new ToolingFailure(`cannot read the workspace: ${(error as Error).message}`);
+  }
   const selected =
     changeSet === "all"
       ? packages.filter((candidate) => candidate.typecheckScript !== undefined)
-      : packagesToTypecheck(packages, changeSet.files);
+      : packagesToTypecheck(
+          packages,
+          changeSet.changedPaths,
+          filesNamingChangedSources(changeSet.changedPaths),
+        );
   if (selected.length === 0) {
     process.stdout.write("typecheck: no workspace package owns a changed file\n");
     return EXIT_CLEAN;
@@ -207,6 +307,12 @@ function checkTypes(changeSet: ChangeSet | "all", environment: NodeJS.ProcessEnv
   const timeout = hasCommand("timeout")
     ? ["timeout", "-k", "30", String(TYPECHECK_TIMEOUT_SECONDS)]
     : [];
+  // A host without them still gets a typecheck, but loudly: on a shared host the
+  // lock and the hard kill are what keep parallel agents from exhausting memory.
+  if (lock.length === 0)
+    process.stderr.write("warning: no `flock`: typechecks are not serialized across agents\n");
+  if (timeout.length === 0)
+    process.stderr.write("warning: no `timeout`: a hung typecheck is never killed\n");
   const tscVersion = run("tsc", ["--version"], environment).output;
   const isTypeScript7 = /Version 7\./u.test(tscVersion);
   let worst = EXIT_CLEAN;
@@ -227,15 +333,16 @@ function checkTypes(changeSet: ChangeSet | "all", environment: NodeJS.ProcessEnv
     const result = run(executable!, args, environment);
     const seconds = Math.round((Date.now() - startedAt) / 1000);
     const output = withoutTypecheckSuggestions(result.output).trim();
+    // 124 and 137 are `timeout`'s own exits: the check did not finish, so its
+    // silence is not a pass and its kill is not a type error.
+    const timedOut = result.status === 124 || result.status === 137 || result.signal !== null;
+    const outcome =
+      result.status === 0 ? EXIT_CLEAN : timedOut ? EXIT_TOOLING_FAILURE : EXIT_FINDINGS;
     const verdict =
-      result.status === 0
-        ? "ok"
-        : result.status === 124 || result.status === 137
-          ? "timed out"
-          : "errors";
+      outcome === EXIT_CLEAN ? "ok" : timedOut ? "timed out (tooling failure)" : "errors";
     process.stdout.write(`typecheck ${workspacePackage.directory}: ${verdict} (${seconds}s)\n`);
-    if (result.status !== 0 && output.length > 0) process.stdout.write(`${output}\n`);
-    if (result.status !== 0) worst = EXIT_FINDINGS;
+    if (outcome === EXIT_FINDINGS && output.length > 0) process.stdout.write(`${output}\n`);
+    worst = worseExit(worst, outcome);
   }
   return worst;
 }
@@ -244,7 +351,7 @@ function checkUnusedCode(environment: NodeJS.ProcessEnv): number {
   // knip's file and dependency checks are repository-wide by nature; CI runs this first.
   const result = run("vp", ["run", "knip:check"], environment);
   process.stdout.write(result.output);
-  return result.status === 0 ? EXIT_CLEAN : EXIT_FINDINGS;
+  return classifyToolExit("knip", result);
 }
 
 function main(argv: ReadonlyArray<string>): number {
