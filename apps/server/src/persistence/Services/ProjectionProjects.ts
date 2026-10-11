@@ -9,6 +9,7 @@
 import {
   IsoDateTime,
   ModelSelection,
+  ProjectIconDiscoveryState,
   ProjectIconOverride,
   ProjectId,
   ProjectScript,
@@ -30,6 +31,7 @@ export const ProjectionProject = Schema.Struct({
   autoPull: Schema.Boolean,
   faviconPath: Schema.optional(Schema.NullOr(Schema.String)),
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
+  iconDiscovery: Schema.optional(Schema.NullOr(ProjectIconDiscoveryState)),
   scripts: Schema.Array(ProjectScript),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,

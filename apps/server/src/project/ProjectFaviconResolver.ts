@@ -121,6 +121,14 @@ export class ProjectFaviconResolutionError extends Schema.TaggedError<ProjectFav
   }
 }
 
+/** The displayed image and the precedence step it came from. */
+export interface EffectiveProjectImage {
+  readonly path: string;
+  readonly source: "mesura" | "project" | "t3" | "detected";
+}
+
+type ResolveEffectiveImage = ProjectFaviconResolver["Service"]["resolveEffectiveImage"];
+
 /** Service tag for project favicon resolution. */
 export class ProjectFaviconResolver extends Context.Service<
   ProjectFaviconResolver,
@@ -133,7 +141,19 @@ export class ProjectFaviconResolver extends Context.Service<
     readonly resolvePath: (
       cwd: string,
       faviconPath?: string,
+      /**
+       * `fresh` walks the files and refreshes the cache instead of trusting a
+       * cached miss, for callers that act on the answer (an icon search must
+       * not overwrite a favicon added a moment ago).
+       */
+      options?: { readonly fresh?: boolean },
     ) => Effect.Effect<string | null, ProjectFaviconResolutionError>;
+    /** `resolvePath`, also naming which precedence step supplied the image. */
+    readonly resolveEffectiveImage: (
+      cwd: string,
+      faviconPath?: string,
+      options?: { readonly fresh?: boolean },
+    ) => Effect.Effect<EffectiveProjectImage | null, ProjectFaviconResolutionError>;
   }
 >()("t3/project/ProjectFaviconResolver") {}
 
@@ -219,7 +239,7 @@ export const make = Effect.gen(function* () {
   const resolvePathUncached = Effect.fn("ProjectFaviconResolver.resolvePathUncached")(function* (
     cwd: string,
     faviconPath?: string,
-  ): Effect.fn.Return<string | null, ProjectFaviconResolutionError> {
+  ): Effect.fn.Return<EffectiveProjectImage | null, ProjectFaviconResolutionError> {
     const projectCwd = yield* workspacePaths.normalizeWorkspaceRoot(cwd).pipe(
       Effect.mapError(
         (cause) =>
@@ -247,7 +267,7 @@ export const make = Effect.gen(function* () {
         candidate.source === "project" ? "filesystem" : "workspace",
       );
       if (existing) {
-        return existing;
+        return { path: existing, source: candidate.source };
       }
       if (candidate.source !== "project") {
         yield* Effect.logWarning(
@@ -264,7 +284,7 @@ export const make = Effect.gen(function* () {
     for (const candidate of FAVICON_CANDIDATES) {
       const existing = yield* findExistingFile(projectCwd, [candidate], "workspace");
       if (existing) {
-        return existing;
+        return { path: existing, source: "detected" };
       }
     }
 
@@ -308,7 +328,7 @@ export const make = Effect.gen(function* () {
       }
       const existing = yield* findExistingFile(projectCwd, resolveIconHref(href), "workspace");
       if (existing) {
-        return existing;
+        return { path: existing, source: "detected" };
       }
     }
 
@@ -351,34 +371,35 @@ export const make = Effect.gen(function* () {
     Effect.fn("ProjectFaviconResolver.loadCacheEntry")(function* (key: string) {
       const { cwd, faviconPath } = parseFaviconCacheKey(key);
       const revision = yield* readRepositoryRevision(cwd);
-      const resolvedPath = yield* resolvePathUncached(cwd, faviconPath);
-      return { revision, resolvedPath };
+      const resolved = yield* resolvePathUncached(cwd, faviconPath);
+      return { revision, resolved };
     }),
     {
       capacity: FAVICON_CACHE_CAPACITY,
       timeToLive: Exit.match({
         onSuccess: (value) =>
-          value.resolvedPath === null ? FAVICON_NEGATIVE_CACHE_TTL : FAVICON_POSITIVE_CACHE_TTL,
+          value.resolved === null ? FAVICON_NEGATIVE_CACHE_TTL : FAVICON_POSITIVE_CACHE_TTL,
         onFailure: () => Duration.zero,
       }),
     },
   );
 
-  const resolvePath: ProjectFaviconResolver["Service"]["resolvePath"] = Effect.fn(
-    "ProjectFaviconResolver.resolvePath",
-  )(function* (cwd, faviconPath) {
+  const resolveEffectiveImage: ResolveEffectiveImage = Effect.fn(
+    "ProjectFaviconResolver.resolveEffectiveImage",
+  )(function* (cwd, faviconPath, options) {
     const revision = yield* readRepositoryRevision(cwd);
     // Caching only by cwd previously hid edits behind the ten-minute TTL.
     // Compare the last observed revision rather than retaining historical keys:
     // deleting a config must not resurrect an earlier cached miss.
     if (revision === null) return yield* resolvePathUncached(cwd, faviconPath);
     const key = faviconCacheKey(cwd, faviconPath);
+    if (options?.fresh === true) yield* Cache.invalidate(faviconCache, key);
     let entry = yield* Cache.get(faviconCache, key);
     if (entry.revision !== revision) {
       yield* Cache.invalidate(faviconCache, key);
       entry = yield* Cache.get(faviconCache, key);
     }
-    const cached = entry.resolvedPath;
+    const cached = entry.resolved;
     if (cached === null) {
       return null;
     }
@@ -386,13 +407,13 @@ export const make = Effect.gen(function* () {
     // A hit still confirms the file with one stat rather than the ~20 probes a
     // full walk costs, so a deleted icon falls back at once instead of after
     // the TTL.
-    const stats = yield* optionOnNotFound(fileSystem.stat(cached)).pipe(
+    const stats = yield* optionOnNotFound(fileSystem.stat(cached.path)).pipe(
       Effect.mapError(
         (cause) =>
           new ProjectFaviconResolutionError({
             operation: "stat-candidate",
             workspaceRoot: cwd,
-            absolutePath: cached,
+            absolutePath: cached.path,
             cause,
           }),
       ),
@@ -402,10 +423,19 @@ export const make = Effect.gen(function* () {
     }
 
     yield* Cache.invalidate(faviconCache, key);
-    return (yield* Cache.get(faviconCache, key)).resolvedPath;
+    return (yield* Cache.get(faviconCache, key)).resolved;
   });
 
-  return ProjectFaviconResolver.of({ resolvePath });
+  const resolvePath: ProjectFaviconResolver["Service"]["resolvePath"] = (
+    cwd,
+    faviconPath,
+    options,
+  ) =>
+    resolveEffectiveImage(cwd, faviconPath, options).pipe(
+      Effect.map((resolved) => resolved?.path ?? null),
+    );
+
+  return ProjectFaviconResolver.of({ resolvePath, resolveEffectiveImage });
 });
 
 export const layer = Layer.effect(ProjectFaviconResolver, make);

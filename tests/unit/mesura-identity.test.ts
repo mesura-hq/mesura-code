@@ -1,3 +1,5 @@
+// @effect-diagnostics nodeBuiltinImport:off - reads product source from an external contract guard, not from the application runtime.
+import * as NodeFS from "node:fs";
 import { assert, it } from "vite-plus/test";
 
 import { commandOutput, run } from "./contractHarness.ts";
@@ -35,10 +37,24 @@ it("leaves no product code defaulting to T3 Code's shared home", () => {
   // git grep exits 1 when nothing matches, which is a result and not a failure.
   assert.isAtMost(found.status ?? 2, 1, commandOutput(found));
 
+  // The icon scanner mentions the worktree state directory only to exclude it.
+  // A literal used outside that exclusion set must still fail this home guard.
+  const candidateScannerPath = "apps/server/src/project/ProjectIconCandidates.ts";
+  const candidateScannerSource = NodeFS.readFileSync(
+    new URL(`../../${candidateScannerPath}`, import.meta.url),
+    "utf8",
+  );
+  const excludedDirectories = candidateScannerSource.match(
+    /const EXCLUDED_DIRECTORIES = new Set\(\[([\s\S]*?)\]\);/,
+  )?.[1];
+  const onlyExcludesWorktreeState =
+    candidateScannerSource.match(/"\.t3"/g)?.length === 1 && excludedDirectories?.includes('".t3"');
+
   const files = (found.stdout ?? "")
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
+    .filter((file) => file !== candidateScannerPath || !onlyExcludesWorktreeState)
     .sort();
 
   assert.deepEqual(files, SITES_ALLOWED_TO_KEEP_THE_T3_LITERAL);

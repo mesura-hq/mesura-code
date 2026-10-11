@@ -17,6 +17,7 @@ import {
   OrchestrationThread,
   OrchestrationThreadDetailSnapshot,
   ProjectScript,
+  ProjectIconDiscoveryState,
   ProjectIconOverride,
   THREAD_SEARCH_EVIDENCE_EXCERPT_MAX_LENGTH,
   THREAD_SEARCH_TITLE_MAX_LENGTH,
@@ -120,6 +121,7 @@ const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
     autoPull: Schema.Number,
     projectIcon: Schema.NullOr(Schema.fromJsonString(ProjectIconOverride)),
+    iconDiscovery: Schema.NullOr(Schema.fromJsonString(ProjectIconDiscoveryState)),
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
   }),
 );
@@ -306,6 +308,10 @@ const ThreadIdLookupInput = Schema.Struct({
 const TurnStartMessageLookupInput = Schema.Struct({
   threadId: ThreadId,
   messageId: MessageId,
+});
+const ThreadMessageAttachmentLookupInput = Schema.Struct({
+  threadId: ThreadId,
+  attachmentId: Schema.String,
 });
 const ThreadActivityKindsLookupInput = Schema.Struct({
   threadId: ThreadId,
@@ -550,6 +556,7 @@ function mapProjectShellRow(
     autoPull: row.autoPull === 1,
     faviconPath: row.faviconPath ?? null,
     projectIcon: row.projectIcon ?? null,
+    ...(row.iconDiscovery ? { iconDiscovery: row.iconDiscovery } : {}),
     scripts: row.scripts,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -701,6 +708,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           auto_pull AS "autoPull",
           favicon_path AS "faviconPath",
           project_icon_json AS "projectIcon",
+          icon_discovery_json AS "iconDiscovery",
           scripts_json AS "scripts",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -1466,6 +1474,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           auto_pull AS "autoPull",
           favicon_path AS "faviconPath",
           project_icon_json AS "projectIcon",
+          icon_discovery_json AS "iconDiscovery",
           scripts_json AS "scripts",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -1492,6 +1501,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           auto_pull AS "autoPull",
           favicon_path AS "faviconPath",
           project_icon_json AS "projectIcon",
+          icon_discovery_json AS "iconDiscovery",
           scripts_json AS "scripts",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -1675,6 +1685,19 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         ) AS "hasOtherUserMessages"
       FROM projection_thread_messages
       WHERE thread_id = ${threadId} AND message_id = ${messageId}
+      LIMIT 1
+    `,
+  });
+
+  const getThreadMessageAttachmentRow = SqlSchema.findOneOption({
+    Request: ThreadMessageAttachmentLookupInput,
+    Result: Schema.Struct({ attachment: Schema.fromJsonString(ChatAttachment) }),
+    execute: ({ threadId, attachmentId }) => sql`
+      SELECT attachment.value AS "attachment"
+      FROM projection_thread_messages AS message, json_each(message.attachments_json) AS attachment
+      WHERE message.thread_id = ${threadId}
+        AND message.role = 'user'
+        AND json_extract(attachment.value, '$.id') = ${attachmentId}
       LIMIT 1
     `,
   });
@@ -2652,6 +2675,7 @@ pending_approval_requests AS (
                 autoPull: row.autoPull === 1,
                 faviconPath: row.faviconPath ?? null,
                 projectIcon: row.projectIcon ?? null,
+                ...(row.iconDiscovery ? { iconDiscovery: row.iconDiscovery } : {}),
                 scripts: row.scripts,
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
@@ -2822,6 +2846,7 @@ pending_approval_requests AS (
                   autoPull: row.autoPull === 1,
                   faviconPath: row.faviconPath ?? null,
                   projectIcon: row.projectIcon ?? null,
+                  ...(row.iconDiscovery ? { iconDiscovery: row.iconDiscovery } : {}),
                   scripts: row.scripts,
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
@@ -3529,6 +3554,9 @@ pending_approval_requests AS (
                     autoPull: option.value.autoPull === 1,
                     faviconPath: option.value.faviconPath ?? null,
                     projectIcon: option.value.projectIcon ?? null,
+                    ...(option.value.iconDiscovery
+                      ? { iconDiscovery: option.value.iconDiscovery }
+                      : {}),
                     scripts: option.value.scripts,
                     createdAt: option.value.createdAt,
                     updatedAt: option.value.updatedAt,
@@ -3793,6 +3821,19 @@ pending_approval_requests AS (
         session: row.session === null ? null : mapSessionRow(row.session),
       }));
     });
+
+  const getThreadMessageAttachment: ProjectionSnapshotQueryShape["getThreadMessageAttachment"] = (
+    input,
+  ) =>
+    getThreadMessageAttachmentRow(input).pipe(
+      Effect.map(Option.map((row) => row.attachment)),
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.getThreadMessageAttachment:query",
+          "ProjectionSnapshotQuery.getThreadMessageAttachment:decodeRow",
+        ),
+      ),
+    );
 
   const getTurnStartMessage: ProjectionSnapshotQueryShape["getTurnStartMessage"] = Effect.fn(
     "ProjectionSnapshotQuery.getTurnStartMessage",
@@ -4285,6 +4326,7 @@ pending_approval_requests AS (
     getThreadShellById,
     getThreadRuntimeContext,
     getTurnStartMessage,
+    getThreadMessageAttachment,
     getThreadDetailById,
     getThreadDetailSnapshot,
   } satisfies ProjectionSnapshotQueryShape;

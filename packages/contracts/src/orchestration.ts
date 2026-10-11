@@ -485,6 +485,36 @@ export const ProjectIconOverride = Schema.Union([
 ]);
 export type ProjectIconOverride = typeof ProjectIconOverride.Type;
 
+export const ProjectIconDiscoveryStatus = Schema.Literals([
+  "pending",
+  "running",
+  "selected",
+  "none",
+  "existing",
+  "empty",
+  "superseded",
+  "failed",
+  "interrupted",
+  "unavailable",
+]);
+export type ProjectIconDiscoveryStatus = typeof ProjectIconDiscoveryStatus.Type;
+
+// The current Luna icon search for a project, and only that one. A request
+// captures the root and icon fields it starts from; any manual icon write or
+// root change advances `generation`, so an older completion cannot save.
+export const ProjectIconDiscoveryState = Schema.Struct({
+  generation: NonNegativeInt,
+  jobToken: CommandId,
+  workspaceRoot: TrimmedNonEmptyString,
+  startingFaviconPath: Schema.NullOr(ProjectFaviconPath),
+  startingProjectIcon: Schema.NullOr(ProjectIconOverride),
+  status: ProjectIconDiscoveryStatus,
+  path: Schema.NullOr(ProjectFaviconPath),
+  reason: Schema.String,
+  updatedAt: IsoDateTime,
+});
+export type ProjectIconDiscoveryState = typeof ProjectIconDiscoveryState.Type;
+
 export const OrchestrationProject = Schema.Struct({
   id: ProjectId,
   title: TrimmedNonEmptyString,
@@ -500,6 +530,8 @@ export const OrchestrationProject = Schema.Struct({
   // Optional on the wire so cached snapshots from older servers still decode.
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
+  // Optional so snapshots and events from older servers still decode.
+  iconDiscovery: Schema.optional(Schema.NullOr(ProjectIconDiscoveryState)),
   scripts: Schema.Array(ProjectScript),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -811,6 +843,8 @@ export const OrchestrationProjectShell = Schema.Struct({
   // Optional on the wire so cached snapshots from older servers still decode.
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
+  // Optional so snapshots and events from older servers still decode.
+  iconDiscovery: Schema.optional(Schema.NullOr(ProjectIconDiscoveryState)),
   scripts: Schema.Array(ProjectScript),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -1042,6 +1076,9 @@ const ProjectMetaUpdateCommand = Schema.Struct({
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
+  // Mesura: the root an icon file was inspected or prepared against. The
+  // command fails when the project moved or was deleted since.
+  expectedWorkspaceRoot: Schema.optional(TrimmedNonEmptyString),
 });
 
 const ProjectDeleteCommand = Schema.Struct({
@@ -1573,6 +1610,33 @@ const ThreadPullRequestLinkSyncCommand = Schema.Struct({
   stack: Schema.NullOr(ThreadPullRequestStack),
 });
 
+const ProjectIconDiscoveryRequestCommand = Schema.Struct({
+  type: Schema.Literal("project.icon-discovery.request"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  createdAt: IsoDateTime,
+});
+
+const ProjectIconDiscoveryStartCommand = Schema.Struct({
+  type: Schema.Literal("project.icon-discovery.start"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  jobToken: CommandId,
+  createdAt: IsoDateTime,
+});
+
+const ProjectIconDiscoveryCompleteCommand = Schema.Struct({
+  type: Schema.Literal("project.icon-discovery.complete"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  jobToken: CommandId,
+  generation: NonNegativeInt,
+  status: ProjectIconDiscoveryStatus,
+  path: Schema.NullOr(ProjectFaviconPath),
+  reason: Schema.String,
+  createdAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
   ThreadAutoSettleCommand,
   ThreadPullRequestSyncCommand,
@@ -1591,6 +1655,9 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadTitleRefineCommand,
   ThreadPullRequestSyncCommand,
   ThreadPullRequestLinkSyncCommand,
+  ProjectIconDiscoveryRequestCommand,
+  ProjectIconDiscoveryStartCommand,
+  ProjectIconDiscoveryCompleteCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
 
@@ -1665,6 +1732,8 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
   autoPull: Schema.optional(Schema.Boolean),
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
+  // Optional so snapshots and events from older servers still decode.
+  iconDiscovery: Schema.optional(Schema.NullOr(ProjectIconDiscoveryState)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
   updatedAt: IsoDateTime,
 });

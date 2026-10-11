@@ -1,15 +1,8 @@
-import {
-  isAtomCommandInterrupted,
-  mapAtomCommandResult,
-  settlePromise,
-  squashAtomCommandFailure,
-  type AtomCommandResult,
-} from "@t3tools/client-runtime/state/runtime";
+import { openProjectIconDiscoveryDialog } from "../projects/ProjectIconDiscoveryDialog";
+import { mapAtomCommandResult, settlePromise } from "@t3tools/client-runtime/state/runtime";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { AsyncResult } from "effect/unstable/reactivity";
-import { type EnvironmentId, type ProjectIconOverride } from "@t3tools/contracts";
+import { type EnvironmentId } from "@t3tools/contracts";
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import * as Cause from "effect/Cause";
 import { Trash2Icon } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -27,7 +20,12 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { stackedThreadToast, toastManager } from "../ui/toast";
+import { toastManager } from "../ui/toast";
+import {
+  captureProjectGroupWriteTargets,
+  type ProjectGroupWriteTarget,
+  useProjectGroupUpdate,
+} from "../../hooks/useProjectGroupUpdate";
 import {
   SettingResetButton,
   SettingsPageContainer,
@@ -173,7 +171,6 @@ function ProjectDetail({
       (member) => environmentById.get(member.environmentId)?.serverConfig != null,
     ) ?? group.memberProjects[0]!;
   const threads = useThreadShells();
-  const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
   const deleteProject = useAtomCommand(projectEnvironment.delete, { reportFailure: false });
   const projectNameEditedRef = useRef(false);
 
@@ -189,65 +186,7 @@ function ProjectDetail({
       ? window.desktopBridge?.pickProjectFavicon
       : undefined;
 
-  const reportFailure = useCallback((title: string, result: AtomCommandResult<void, unknown>) => {
-    if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
-    const error = squashAtomCommandFailure(result);
-    toastManager.add(
-      stackedThreadToast({
-        type: "error",
-        title,
-        description: error instanceof Error ? error.message : "An error occurred.",
-      }),
-    );
-  }, []);
-
-  // Group-shared fields live on each physical project record, so a
-  // group-level edit fans out to every member.
-  const updateAllMembers = useCallback(
-    async (
-      input: Partial<{
-        title: string;
-        faviconPath: string | null;
-        projectIcon: ProjectIconOverride | null;
-      }>,
-      failureTitle: string,
-    ): Promise<AtomCommandResult<void, unknown>> => {
-      const unavailable = group.memberProjects.find((member) => {
-        const environment = environmentById.get(member.environmentId);
-        return environment?.connection.phase !== "connected" || !environment.serverConfig;
-      });
-      if (unavailable) {
-        const error = new Error(
-          `Connect ${unavailable.environmentLabel ?? "the selected environment"} and try again.`,
-        );
-        const result: AtomCommandResult<void, unknown> = AsyncResult.failure(Cause.fail(error));
-        reportFailure(failureTitle, result);
-        return result;
-      }
-      for (const member of group.memberProjects) {
-        const result = mapAtomCommandResult(
-          await updateProject({
-            environmentId: member.environmentId,
-            input: { projectId: member.id, ...input },
-          }),
-          () => undefined,
-        );
-        if (result._tag === "Failure") {
-          // A partial fan-out is possible: earlier members already took the
-          // write. Name the environment so the user knows where it stopped.
-          reportFailure(
-            group.memberProjects.length > 1
-              ? `${failureTitle} on ${member.environmentLabel ?? "the current environment"}`
-              : failureTitle,
-            result,
-          );
-          return result;
-        }
-      }
-      return AsyncResult.success(undefined);
-    },
-    [environmentById, group.memberProjects, reportFailure, updateProject],
-  );
+  const { updateAllMembers, updateProjectImage, reportFailure } = useProjectGroupUpdate(group);
 
   const renameGroup = useCallback(
     async (nextTitle: string, wasEdited: boolean) => {
@@ -271,24 +210,28 @@ function ProjectDetail({
   );
 
   // ----- project icon -----
-  const [faviconPickerOpen, setFaviconPickerOpen] = useState(false);
+  // What the file picker browses and writes to is fixed when it opens; the
+  // group can change while the user browses.
+  const [faviconPicker, setFaviconPicker] = useState<{
+    readonly cwd: string;
+    readonly environmentId: EnvironmentId;
+    readonly targets: ReadonlyArray<ProjectGroupWriteTarget>;
+  } | null>(null);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [isSavingFavicon, setIsSavingFavicon] = useState(false);
   const savingFaviconRef = useRef(false);
-  const setProjectIcon = useCallback(
-    async (input: { faviconPath: string | null; projectIcon: ProjectIconOverride | null }) => {
-      if (savingFaviconRef.current) return;
-      savingFaviconRef.current = true;
-      setIsSavingFavicon(true);
-      try {
-        await updateAllMembers(input, "Failed to update project icon");
-      } finally {
-        savingFaviconRef.current = false;
-        setIsSavingFavicon(false);
-      }
-    },
-    [updateAllMembers],
-  );
+  // One icon write at a time; an image save or reset also reports which icon displays.
+  const runIconUpdate = async (update: () => Promise<unknown>) => {
+    if (savingFaviconRef.current) return;
+    savingFaviconRef.current = true;
+    setIsSavingFavicon(true);
+    try {
+      await update();
+    } finally {
+      savingFaviconRef.current = false;
+      setIsSavingFavicon(false);
+    }
+  };
 
   const hasMultipleCheckouts = group.memberProjects.length > 1;
 
@@ -447,12 +390,12 @@ function ProjectDetail({
                 <SettingResetButton
                   label="project icon"
                   disabled={isSavingFavicon}
-                  onClick={() => void setProjectIcon({ faviconPath: null, projectIcon: null })}
+                  onClick={() => void runIconUpdate(() => updateProjectImage(null))}
                 />
               ) : null
             }
             control={
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <ProjectFavicon project={representative} className="size-6" />
                 <Button
                   size="sm"
@@ -470,9 +413,29 @@ function ProjectDetail({
                   type="button"
                   aria-label="Choose a project icon file"
                   disabled={isSavingFavicon}
-                  onClick={() => setFaviconPickerOpen(true)}
+                  onClick={() =>
+                    setFaviconPicker({
+                      cwd: representative.workspaceRoot,
+                      environmentId: representative.environmentId,
+                      targets: captureProjectGroupWriteTargets(group),
+                    })
+                  }
                 >
                   Choose file
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  type="button"
+                  onClick={() =>
+                    openProjectIconDiscoveryDialog({
+                      environmentId: representative.environmentId,
+                      projectId: representative.id,
+                      title: group.displayName,
+                    })
+                  }
+                >
+                  Find with agent
                 </Button>
               </div>
             }
@@ -514,18 +477,24 @@ function ProjectDetail({
         </SettingsSection>
       </SettingsPageContainer>
 
-      <ProjectFaviconPickerDialog
-        key={`${representative.environmentId}:${representative.workspaceRoot}:${faviconPickerOpen}`}
-        cwd={representative.workspaceRoot}
-        environmentId={representative.environmentId}
-        onOpenChange={setFaviconPickerOpen}
-        {...(pickProjectFavicon
-          ? { onPickExternal: () => pickProjectFavicon(representative.workspaceRoot) }
-          : {})}
-        onSelect={(path) => void setProjectIcon({ faviconPath: path, projectIcon: null })}
-        open={faviconPickerOpen}
-        projectName={group.displayName}
-      />
+      {faviconPicker ? (
+        <ProjectFaviconPickerDialog
+          key={`${faviconPicker.environmentId}:${faviconPicker.cwd}`}
+          cwd={faviconPicker.cwd}
+          environmentId={faviconPicker.environmentId}
+          onOpenChange={(open) => {
+            if (!open) setFaviconPicker(null);
+          }}
+          {...(pickProjectFavicon
+            ? { onPickExternal: () => pickProjectFavicon(faviconPicker.cwd) }
+            : {})}
+          onSelect={(path) =>
+            void runIconUpdate(() => updateProjectImage(path, faviconPicker.targets))
+          }
+          open
+          projectName={group.displayName}
+        />
+      ) : null}
       {iconPickerOpen ? (
         <Suspense fallback={null}>
           <ProjectIconPickerDialog
@@ -533,7 +502,14 @@ function ProjectDetail({
             projectName={representative.title}
             open
             onOpenChange={setIconPickerOpen}
-            onSelect={(icon) => void setProjectIcon({ faviconPath: null, projectIcon: icon })}
+            onSelect={(icon) =>
+              void runIconUpdate(() =>
+                updateAllMembers(
+                  { faviconPath: null, projectIcon: icon },
+                  "Failed to update project icon",
+                ),
+              )
+            }
           />
         </Suspense>
       ) : null}

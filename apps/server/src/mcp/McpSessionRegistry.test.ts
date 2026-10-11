@@ -78,9 +78,23 @@ it.effect("always grants pull-requests and gates browser and device access indep
         .resolve(issued.config.authorizationHeader.replace(/^Bearer\s+/, ""))
         .pipe(Effect.map((scope) => [...(scope?.capabilities ?? [])].sort()));
 
-    expect(yield* capabilitiesOf(withPreview)).toEqual(["factory", "preview", "pull-requests"]);
-    expect(yield* capabilitiesOf(withoutPreview)).toEqual(["factory", "pull-requests"]);
-    expect(yield* capabilitiesOf(withDevice)).toEqual(["device", "factory", "pull-requests"]);
+    expect(yield* capabilitiesOf(withPreview)).toEqual([
+      "factory",
+      "preview",
+      "project-icons",
+      "pull-requests",
+    ]);
+    expect(yield* capabilitiesOf(withoutPreview)).toEqual([
+      "factory",
+      "project-icons",
+      "pull-requests",
+    ]);
+    expect(yield* capabilitiesOf(withDevice)).toEqual([
+      "device",
+      "factory",
+      "project-icons",
+      "pull-requests",
+    ]);
   }),
 );
 
@@ -160,4 +174,29 @@ it.effect("does not keep credentials of other threads alive", () =>
 
     expect(yield* registry.resolve(token)).toBeUndefined();
   }),
+);
+
+// Project icons phase 2, acceptance criterion 3: the manual icon tool is a
+// production capability, independent of the prototype flag and of Luna.
+it.effect("project icon tool fence: every credential grants project-icons without a flag", () =>
+  Effect.gen(function* () {
+    const previousFlag = process.env.T3CODE_PROJECT_ICON_PROTOTYPE;
+    delete process.env.T3CODE_PROJECT_ICON_PROTOTYPE;
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        if (previousFlag !== undefined) process.env.T3CODE_PROJECT_ICON_PROTOTYPE = previousFlag;
+      }),
+    );
+    const registry = yield* makeRegistry(() => 1_000);
+    const issued = yield* registry.issue({
+      threadId: ThreadId.make("thread-project-icons"),
+      providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+      capabilities: new Set(),
+    });
+    const scope = yield* registry.resolve(
+      issued.config.authorizationHeader.replace(/^Bearer\s+/, ""),
+    );
+    expect(scope?.capabilities.has("project-icons")).toBe(true);
+    expect(scope?.threadId).toBe("thread-project-icons");
+  }).pipe(Effect.scoped),
 );

@@ -31,6 +31,7 @@ import {
   ORCHESTRATION_WS_METHODS,
   type PreviewEvent,
   ProjectId,
+  type ProjectIconDiscoverInput,
   type ProviderAuthState,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -170,6 +171,10 @@ import * as PortScanner from "./preview/PortScanner.ts";
 import * as BrowserTraceCollector from "./observability/BrowserTraceCollector.ts";
 import * as NativeAppIconResolver from "./assets/NativeAppIconResolver.ts";
 import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
+import {
+  ProjectIconDiscovery,
+  type ProjectIconDiscoveryShape,
+} from "./project/ProjectIconDiscovery.ts";
 import * as T3ProjectFileLoader from "./project/T3ProjectFileLoader.ts";
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
@@ -13160,6 +13165,86 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assertFailure(result, terminalError);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
+
+  // Mesura: Luna project icon search. The two RPCs reach the discovery
+  // service, and only a client that may operate can start a search.
+  it.effect("routes project icon search RPCs and keeps Start behind operate scope", () => {
+    const projectId = ProjectId.make("icon-rpc-project");
+    const discoverInputs: Array<ProjectIconDiscoverInput> = [];
+    const discovery: ProjectIconDiscoveryShape = {
+      preview: () =>
+        Effect.succeed([
+          {
+            projectId,
+            title: "Icons",
+            candidateCount: 2,
+            status: "ready" as const,
+            reason: "2 local image candidates",
+          },
+        ]),
+      discover: (input) =>
+        Effect.sync(() => {
+          discoverInputs.push(input);
+          return { projectId: input.projectId, jobToken: input.requestId, generation: 1 };
+        }),
+    };
+    return Effect.gen(function* () {
+      yield* buildAppUnderTest();
+      const ownerUrl = yield* getWsServerUrl("/ws");
+      const owner = yield* Effect.scoped(
+        withWsRpcClient(ownerUrl, (client) =>
+          Effect.all([
+            client[WS_METHODS.projectIconsPreview]({}),
+            client[WS_METHODS.projectIconsDiscover]({
+              projectId,
+              requestId: CommandId.make("icon-rpc-request"),
+            }),
+          ]),
+        ),
+      );
+      assert.deepEqual(
+        owner[0].map((preview) => preview.status),
+        ["ready"],
+      );
+      assert.deepEqual(owner[1], {
+        projectId,
+        jobToken: CommandId.make("icon-rpc-request"),
+        generation: 1,
+      });
+
+      const token = yield* exchangeAccessToken(defaultDesktopBootstrapToken, {
+        scope: "orchestration:read",
+      });
+      const ticketResponse = yield* HttpClient.post("/api/auth/websocket-ticket", {
+        headers: { authorization: `Bearer ${token.body.access_token ?? ""}` },
+      });
+      const { ticket } = yield* responseJsonEffect<{ readonly ticket: string }>(ticketResponse);
+      const readerUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?wsTicket=${encodeURIComponent(ticket)}`;
+      const reader = yield* Effect.scoped(
+        withWsRpcClient(readerUrl, (client) =>
+          Effect.all([
+            client[WS_METHODS.projectIconsPreview]({ projectIds: [projectId] }),
+            client[WS_METHODS.projectIconsDiscover]({
+              projectId,
+              requestId: CommandId.make("icon-rpc-reader-request"),
+            }).pipe(Effect.flip),
+          ]),
+        ),
+      );
+      assert.equal(reader[0].length, 1);
+      assert.equal(reader[1]._tag, "EnvironmentAuthorizationError");
+      if (reader[1]._tag === "EnvironmentAuthorizationError") {
+        assert.equal(reader[1].requiredScope, "orchestration:operate");
+      }
+      assert.deepEqual(
+        discoverInputs.map((input) => input.requestId),
+        ["icon-rpc-request"],
+      );
+    }).pipe(
+      Effect.provideService(ProjectIconDiscovery, discovery),
+      Effect.provide(NodeHttpServer.layerTest),
+    );
+  });
 });
 
 it.live(

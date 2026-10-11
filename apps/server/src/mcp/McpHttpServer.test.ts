@@ -18,6 +18,12 @@ import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSna
 import * as ServerConfig from "../config.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
+import * as McpSessionRegistry from "./McpSessionRegistry.ts";
+import * as DeviceService from "../device/DeviceService.ts";
+import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import * as FactoryRunTracker from "../factory/FactoryRunTracker.ts";
+import * as FactorySnapshotStore from "../factory/FactorySnapshotStore.ts";
+import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
 
 const environmentId = EnvironmentId.make("environment-mcp-test");
@@ -765,4 +771,112 @@ it.effect("registers annotated tools and preserves authenticated request context
       }
     }),
   ).pipe(Effect.provide(TestLayer)),
+);
+
+// Phase 2 of project icons, acceptance criterion 3: the production MCP layer,
+// served over HTTP with a credential the session registry issued, lists
+// `set_project_icon` with no prototype flag and no dev URL.
+it.effect("project icon tool fence: the production MCP layer lists set_project_icon", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const previousFlag = process.env.T3CODE_PROJECT_ICON_PROTOTYPE;
+      delete process.env.T3CODE_PROJECT_ICON_PROTOTYPE;
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          if (previousFlag !== undefined) process.env.T3CODE_PROJECT_ICON_PROTOTYPE = previousFlag;
+        }),
+      );
+      const registry = yield* McpSessionRegistry.McpSessionRegistry;
+      const issued = yield* registry.issue({
+        threadId,
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        capabilities: new Set(),
+      });
+      const mocked = Layer.mergeAll(
+        Layer.mock(ProjectionSnapshotQuery)({}),
+        Layer.mock(OrchestrationEngineService)({}),
+        Layer.mock(DeviceService.DeviceService)({}),
+        Layer.mock(FactorySnapshotStore.FactorySnapshotStore)({}),
+        Layer.mock(FactoryRunTracker.FactoryRunTracker)({}),
+        Layer.mock(ProjectFaviconResolver.ProjectFaviconResolver)({}),
+        PreviewAutomationBroker.layer,
+        ServerConfig.layerTest(process.cwd(), { prefix: "t3-mcp-icon-registration-test-" }),
+      );
+      yield* HttpRouter.serve(
+        McpHttpServer.layer.pipe(
+          Layer.provide(mocked),
+          Layer.provide(Layer.succeed(McpSessionRegistry.McpSessionRegistry, registry)),
+        ),
+        { disableListenLog: true, disableLogger: true },
+      ).pipe(Layer.build);
+      const httpClient = yield* HttpClient.HttpClient;
+      const headers = {
+        accept: "application/json, text/event-stream",
+        authorization: issued.config.authorizationHeader,
+      };
+      const initialized = yield* httpClient.post("/mcp", {
+        headers,
+        body: HttpBody.text(
+          `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"mcp-test","version":"1.0.0"}}}`,
+          "application/json",
+        ),
+      });
+      expect(initialized.status).toBe(200);
+      const sessionHeaders = {
+        ...headers,
+        "mcp-session-id": initialized.headers["mcp-session-id"]!,
+        "mcp-protocol-version": "2025-06-18",
+      };
+      yield* httpClient.post("/mcp", {
+        headers: sessionHeaders,
+        body: HttpBody.text(
+          `{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+          "application/json",
+        ),
+      });
+      const listed = yield* httpClient.post("/mcp", {
+        headers: sessionHeaders,
+        body: HttpBody.text(
+          `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
+          "application/json",
+        ),
+      });
+      const text = yield* listed.text;
+      expect(listed.status, text).toBe(200);
+      const payload = text.includes("data:")
+        ? text
+            .split("\n")
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => line.slice("data:".length).trim())
+            .join("")
+        : text;
+      const tools = (
+        decodeJsonText(payload) as {
+          result: { tools: Array<{ name: string; description?: string }> };
+        }
+      ).result.tools;
+      const tool = tools.find((candidate) => candidate.name === "set_project_icon");
+      expect(tool, `listed: ${tools.map((candidate) => candidate.name).join(", ")}`).toBeDefined();
+      // The search is explicit now; the agent must not be told one runs on its own.
+      expect(tool?.description).not.toMatch(/automatic/i);
+      expect(tool?.description).toMatch(/null/);
+      expect(tool?.description).toMatch(/no agent search starts/i);
+    }),
+  ).pipe(
+    Effect.provide(
+      McpSessionRegistry.layer.pipe(
+        Layer.provide(
+          Layer.succeed(
+            ServerEnvironment.ServerEnvironment,
+            ServerEnvironment.ServerEnvironment.of({
+              getEnvironmentId: Effect.succeed(environmentId),
+              getDescriptor: Effect.die("unused"),
+            }),
+          ),
+        ),
+        Layer.provideMerge(NodeHttpServer.layerTest),
+        Layer.provideMerge(NodeServices.layer),
+      ),
+    ),
+  ),
 );

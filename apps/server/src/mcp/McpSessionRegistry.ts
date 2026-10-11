@@ -132,6 +132,8 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
         capabilities: new Set<McpInvocationContext.McpCapability>([
           "pull-requests",
           "factory",
+          // Mesura: the manual project icon tool, scoped to this thread's project.
+          "project-icons",
           ...request.capabilities,
         ]),
         issuedAt,

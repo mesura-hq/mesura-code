@@ -149,6 +149,7 @@ import * as FactorySnapshotStore from "./factory/FactorySnapshotStore.ts";
 import * as FactoryRunTracker from "./factory/FactoryRunTracker.ts";
 import * as AgentSessionScanner from "./project/AgentSessionScanner.ts";
 import { importRecentAgentThreads } from "./project/AgentSessionImporter.ts";
+import { ProjectIconDiscovery } from "./project/ProjectIconDiscovery.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
@@ -509,6 +510,7 @@ const makeWsRpcLayer = (
 ) =>
   WsRpcGroup.toLayer(
     Effect.gen(function* () {
+      const projectIconDiscovery = yield* ProjectIconDiscovery;
       const currentSessionId = currentSession.sessionId;
       const crypto = yield* Crypto.Crypto;
       const sql = yield* SqlClient.SqlClient;
@@ -3096,6 +3098,16 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "workspace" },
           ),
+        [WS_METHODS.projectIconsPreview]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectIconsPreview,
+            projectIconDiscovery.preview(input.projectIds),
+            { "rpc.aggregate": "project" },
+          ),
+        [WS_METHODS.projectIconsDiscover]: (input) =>
+          observeRpcEffect(WS_METHODS.projectIconsDiscover, projectIconDiscovery.discover(input), {
+            "rpc.aggregate": "project",
+          }),
         [WS_METHODS.projectsReadFile]: (input) =>
           observeRpcEffect(
             WS_METHODS.projectsReadFile,

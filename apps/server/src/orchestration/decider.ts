@@ -45,6 +45,12 @@ import {
   requireThreadNotArchived,
 } from "./commandInvariants.ts";
 import { projectEvent } from "./projector.ts";
+import {
+  completeProjectIconDiscovery,
+  invalidateProjectIconDiscovery,
+  requestProjectIconDiscovery,
+  startProjectIconDiscovery,
+} from "./projectIconDiscovery.ts";
 import { threadHasQueuedTurnStart } from "./ThreadSettlementPolicy.ts";
 
 const isScriptRunCommand = Schema.is(SCRIPT_RUN_COMMAND_PATTERN);
@@ -264,6 +270,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         projectId: command.projectId,
       });
+      if (
+        command.expectedWorkspaceRoot !== undefined &&
+        (project.deletedAt !== null || project.workspaceRoot !== command.expectedWorkspaceRoot)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Project '${command.projectId}' moved or was deleted before its icon was saved.`,
+        });
+      }
       if (command.scripts !== undefined) {
         // Persisted IDs predate shortcut validation. Let users edit or remove them
         // without allowing another invalid ID to enter the project.
@@ -286,6 +301,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         });
       }
       const occurredAt = yield* nowIso;
+      const iconDiscovery = invalidateProjectIconDiscovery(
+        project,
+        {
+          suppliesIcon: command.faviconPath !== undefined || command.projectIcon !== undefined,
+          workspaceRoot: command.workspaceRoot,
+        },
+        occurredAt,
+      );
       return {
         ...(yield* withEventBase({
           aggregateKind: "project",
@@ -296,6 +319,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         type: "project.meta-updated",
         payload: {
           projectId: command.projectId,
+          ...(iconDiscovery !== undefined ? { iconDiscovery } : {}),
           ...(command.title !== undefined ? { title: command.title } : {}),
           ...(command.workspaceRoot !== undefined ? { workspaceRoot: command.workspaceRoot } : {}),
           ...(command.defaultModelSelection !== undefined
@@ -309,6 +333,50 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.projectIcon !== undefined ? { projectIcon: command.projectIcon } : {}),
           ...(command.scripts !== undefined ? { scripts: command.scripts } : {}),
           updatedAt: occurredAt,
+        },
+      };
+    }
+
+    // Mesura: Luna icon search. Each stage is one `project.meta-updated`, so the
+    // shell stream already carries it; a stage that no longer applies emits an
+    // event that changes nothing.
+    case "project.icon-discovery.request":
+    case "project.icon-discovery.start":
+    case "project.icon-discovery.complete": {
+      const project = yield* requireProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      if (command.type === "project.icon-discovery.request" && project.deletedAt !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Project '${command.projectId}' was deleted.`,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      const change =
+        command.type === "project.icon-discovery.request"
+          ? { iconDiscovery: requestProjectIconDiscovery(project, command.commandId, occurredAt) }
+          : command.type === "project.icon-discovery.start"
+            ? { iconDiscovery: startProjectIconDiscovery(project, command.jobToken, occurredAt) }
+            : completeProjectIconDiscovery(project, command, occurredAt);
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "project.meta-updated",
+        payload: {
+          projectId: command.projectId,
+          ...(change?.iconDiscovery !== undefined ? { iconDiscovery: change.iconDiscovery } : {}),
+          ...(change !== undefined && "faviconPath" in change
+            ? { faviconPath: change.faviconPath }
+            : {}),
+          // A search is not an edit: the project keeps its place in recency order.
+          updatedAt: project.updatedAt,
         },
       };
     }

@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  openProjectIconDiscoveryDialog,
+  ProjectIconDiscoveryDialogHost,
+} from "./projects/ProjectIconDiscoveryDialog";
+
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 
@@ -51,6 +56,7 @@ import {
   GitCompareArrowsIcon,
   GitPullRequestArrowIcon,
   LinkIcon,
+  ImageIcon,
   MessagesSquareIcon,
   MicIcon,
   PaletteIcon,
@@ -168,6 +174,10 @@ import {
   keepFocusInFileManager,
   openFileManager,
 } from "./files/mesuraFileManager/fileManagerToggle";
+import {
+  openProjectIconFileDialog,
+  ProjectIconFileDialogHost,
+} from "./projects/ProjectIconFileDialog";
 import { ProjectScopePicker } from "./projects/ProjectScopePicker";
 import { requestSidebarDockPin } from "./sidebar/sidebarDockController";
 import { useIsMobile } from "../hooks/useMediaQuery";
@@ -604,6 +614,8 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     <AgentThreadSearchSessionProvider reopen={reopenThreadSearch}>
       {palette}
       <TranscriptionsListHost />
+      <ProjectIconFileDialogHost />
+      <ProjectIconDiscoveryDialogHost />
     </AgentThreadSearchSessionProvider>
   );
 }
@@ -1688,6 +1700,101 @@ function OpenCommandPaletteDialog(props: {
       icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
       addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
       groups: [{ value: "projects", label: "Projects", items: projectThreadItems }],
+    });
+  }
+
+  if (pickerProjects.length > 0) {
+    actionItems.push({
+      kind: "submenu",
+      value: "action:update-project-icon",
+      searchTerms: [
+        "update project icon",
+        "manual",
+        "photo",
+        "image",
+        "logo",
+        "change icon",
+        "picture",
+      ],
+      title: "Update project icon…",
+      icon: <ImageIcon className={ITEM_ICON_CLASS} />,
+      addonIcon: <ImageIcon className={ADDON_ICON_CLASS} />,
+      groups: [
+        {
+          value: "project-icons",
+          label: "Choose a project",
+          items: buildProjectActionItems({
+            projects: pickerProjects,
+            valuePrefix: "update-project-icon",
+            icon: projectFavicon,
+            runProject: async (project) => {
+              const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);
+              if (group) openProjectIconFileDialog(group.projectKey);
+            },
+          }),
+        },
+      ],
+    });
+  }
+
+  if (pickerProjects.length > 0) {
+    actionItems.push({
+      kind: "submenu",
+      value: "action:find-project-icon",
+      searchTerms: ["find project icon", "quick model", "agent", "detect", "logo", "image"],
+      title: "Find project icon with agent…",
+      icon: <ImageIcon className={ITEM_ICON_CLASS} />,
+      addonIcon: <ImageIcon className={ADDON_ICON_CLASS} />,
+      groups: [
+        {
+          value: "find-project-icon",
+          label: "Choose a project",
+          items: buildProjectActionItems({
+            projects: pickerProjects,
+            valuePrefix: "find-project-icon",
+            icon: projectFavicon,
+            runProject: async (project) =>
+              openProjectIconDiscoveryDialog({
+                environmentId: project.environmentId,
+                projectId: project.id,
+                title: project.title,
+              }),
+          }),
+        },
+      ],
+    });
+    actionItems.push({
+      kind: "submenu",
+      value: "action:find-missing-project-icons",
+      searchTerms: [
+        "find missing project icons",
+        "all projects",
+        "batch",
+        "agent",
+        "quick model",
+        "detect",
+        "logos",
+      ],
+      title: "Find missing project icons with agent…",
+      icon: <ImageIcon className={ITEM_ICON_CLASS} />,
+      addonIcon: <ImageIcon className={ADDON_ICON_CLASS} />,
+      groups: [
+        {
+          value: "icon-environments",
+          label: "Choose an environment",
+          items: environments
+            .filter((environment) => environment.connection.phase === "connected")
+            .map((environment) => ({
+              kind: "action" as const,
+              value: `find-missing-project-icons:${environment.environmentId}`,
+              title: environment.label,
+              searchTerms: [environment.label],
+              icon: <ImageIcon className={ITEM_ICON_CLASS} />,
+              run: async () =>
+                openProjectIconDiscoveryDialog({ environmentId: environment.environmentId }),
+            })),
+        },
+      ],
     });
   }
 

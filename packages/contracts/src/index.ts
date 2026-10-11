@@ -52,3 +52,4 @@ export * from "./issues.ts";
 export * from "./rpc.ts";
 export * from "./worktreeSetup.ts";
 export * from "./factory.ts";
+export * from "./projectIcons.ts";

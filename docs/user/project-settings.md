@@ -91,9 +91,38 @@ An invalid value in any field makes Mesura Code ignore the whole file, including
 ## Project icons
 
 Select the project and open Project to choose an icon, emoji, monogram, or image for the project group.
+To choose a project image directly, open the command palette and run **Update project icon…**.
+Choose the project, search its image files, and select a file. This saves the choice for the project group.
+Use **Find project icon with agent…** to search one developed project for an existing image.
+Use **Find missing project icons with agent…** to search projects without icons on one selected environment.
+The search uses the shared quick-model default. Both commands inspect local files first and show
+a preview before the agent runs. Projects with icons or no candidate images are skipped.
+Searches run only when you start them. Adding a project, starting a thread, restarting the server, or resetting an icon does not start the agent. A batch can stop after its
+current project. Run the command again to retry a search that found no match.
+
 For images, each checkout uses the first available file: `iconPath` in `.mesura.json`, the saved image,
 `iconPath` in `t3.json`, then automatic detection. Thus, a valid repository image overrides an image
-chosen in Settings. Choose **Automatic** to clear the saved choice and use repository images or detection.
+chosen in Settings. After you save an image, the confirmation says when a repository image still
+displays instead. Use **Reset to default** beside Project icon to clear the saved choice and use
+repository images or detection. Reset never starts an agent search. A search never replaces an icon
+that already displays, so a search after a reset runs only when no repository image or detected
+favicon displays either. To show a different image while a repository image displays, change
+`iconPath` in `.mesura.json`.
+
+Choosing or resetting an image does not need an agent. If a project moves to another folder
+or is removed while you choose an image, the save fails instead of applying a path chosen for the
+old folder. When the checkouts of a project group show different icons after a save, the
+confirmation names each environment with the icon it shows.
+
+You can also ask the agent in a thread to set the icon of that thread's project. Give it a path to
+an image in the project or the thread's worktree, or attach the image to a message in the same
+thread. Images from a worktree or an attachment are copied into the project's
+`.mesura/project-icons` folder; Mesura Code does not commit that copy. The agent can only change the
+project its thread belongs to, and cannot use images attached to other threads. It reports which
+icon actually displays. Codex, Claude, Cursor, Grok and Antigravity threads receive this tool when
+their session starts. OpenCode threads receive it when Mesura Code starts the OpenCode server. A
+thread on an external OpenCode server you configured does not receive it; set the icon from the
+command palette or Settings instead.
 
 On web and desktop, an explicit icon, emoji, or monogram choice takes priority over these images.
 
