@@ -592,6 +592,6 @@ it("icon manual regression: a reset confirms the fallback and starts no search",
   await click(button("Reset project icon to default"));
   const text = document.body.textContent ?? "";
   expect(text).toContain("Saved project icon cleared");
-  expect(text).toContain("No Luna search was started.");
+  expect(text).toContain("No agent search was started.");
   expect(fixture.discoverRequests).toEqual([]);
 });

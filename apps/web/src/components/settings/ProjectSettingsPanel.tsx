@@ -435,7 +435,7 @@ function ProjectDetail({
                     })
                   }
                 >
-                  Find with Luna
+                  Find with agent
                 </Button>
               </div>
             }

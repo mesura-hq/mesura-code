@@ -83,7 +83,7 @@ describe("describeProjectIconChange", () => {
     for (const source of ProjectIconEffectiveSource.literals) {
       const reset = describeProjectIconChange("reset", source);
       expect(reset).toMatch(/^Saved project icon cleared; /);
-      expect(reset).toContain("No Luna search was started.");
+      expect(reset).toContain("No agent search was started.");
     }
     expect(describeProjectIconChange("reset", "mesura")).toContain(".mesura.json now displays");
     expect(describeProjectIconChange("reset", "initials")).toContain("initials now displays");

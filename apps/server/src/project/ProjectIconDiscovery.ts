@@ -190,7 +190,10 @@ export const makeProjectIconDiscovery = Effect.fn("ProjectIconDiscovery.make")(f
       );
       return candidates.length > 0
         ? ({ status: "ready", candidates } as const)
-        : ({ status: "empty", reason: "No local image candidates. Luna will not run." } as const);
+        : ({
+            status: "empty",
+            reason: "No local image candidates. The agent will not run.",
+          } as const);
     }).pipe(
       Effect.catch(() =>
         Effect.succeed({
@@ -270,7 +273,7 @@ export const makeProjectIconDiscovery = Effect.fn("ProjectIconDiscovery.make")(f
         projectId: job.projectId,
         failure,
       });
-      return yield* finish(job, "failed", null, "Luna could not finish the search.");
+      return yield* finish(job, "failed", null, "The agent could not finish the search.");
     }
     const selected = selection.success;
     if (selected.path === null) {
@@ -289,7 +292,7 @@ export const makeProjectIconDiscovery = Effect.fn("ProjectIconDiscovery.make")(f
         job,
         "failed",
         null,
-        "Luna chose a file that is not a local image candidate.",
+        "The agent chose a file that is not a local image candidate.",
       );
     }
     // An icon may have appeared while Luna ran, such as a new built-in
@@ -449,7 +452,7 @@ const resolveConfiguredSelector = Effect.gen(function* () {
       return yield* new ProjectIconSelectionUnavailable({
         detail:
           candidates.length === 0
-            ? "No enabled Codex instance can run Luna icon searches."
+            ? "No enabled Codex instance can run icon searches with the quick model."
             : `No Codex instance is ready and signed in with ${PROJECT_ICON_SELECTION_MODEL}.`,
       });
     }

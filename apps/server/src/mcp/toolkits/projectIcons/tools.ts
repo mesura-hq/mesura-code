@@ -25,7 +25,7 @@ export class ProjectIconUpdateError extends Schema.TaggedError<ProjectIconUpdate
 export const ProjectIconsToolkit = Toolkit.make(
   Tool.make("set_project_icon", {
     description:
-      "Set this thread's project icon when the user asks. Pass an image path relative to the thread's working directory, or an absolute path. An image already inside the project is saved in place. An image from this thread's worktree, or one attached to this thread's own messages, is copied into the project's .mesura/project-icons directory. Supports SVG, PNG, JPEG, WebP, GIF, AVIF, and ICO up to 2 MiB. Pass null to clear the saved icon: the project returns to its repository or default icon, and no Luna search starts. The result names the icon that actually displays; a repository icon set in .mesura.json takes precedence over a saved image. Do not call without a user request.",
+      "Set this thread's project icon when the user asks. Pass an image path relative to the thread's working directory, or an absolute path. An image already inside the project is saved in place. An image from this thread's worktree, or one attached to this thread's own messages, is copied into the project's .mesura/project-icons directory. Supports SVG, PNG, JPEG, WebP, GIF, AVIF, and ICO up to 2 MiB. Pass null to clear the saved icon: the project returns to its repository or default icon, and no agent search starts. The result names the icon that actually displays; a repository icon set in .mesura.json takes precedence over a saved image. Do not call without a user request.",
     parameters: Schema.Struct({ imagePath: Schema.NullOr(TrimmedNonEmptyString) }),
     success: Schema.Struct({
       projectId: Schema.String,

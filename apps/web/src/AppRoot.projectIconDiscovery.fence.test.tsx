@@ -4,7 +4,7 @@
  * the page, as `routes/__root.tsx` does. The palette mounts the global
  * `ProjectIconDiscoveryDialogHost`; each spec opens the dialog through
  * `openProjectIconDiscoveryDialog`, the call the palette's "Find project icon
- * with Luna…" and "Find missing project icons with Luna…" actions make.
+ * with agent…" and "Find missing project icons with agent…" actions make.
  *
  * Project icon discovery phase 1, acceptance criteria 2 (preview before Start),
  * 4 (only the confirmed projects, one at a time), 6 (Stop after this project and
@@ -367,7 +367,7 @@ it("icon discovery dialog fence: the batch submits the next project only after t
     "alpha",
     "charlie",
   ]);
-  expect(document.body.textContent).not.toContain("Luna is checking");
+  expect(document.body.textContent).not.toContain("The agent is checking");
   expect(document.body.textContent).toContain("public/alpha-logo.svg");
 });
 
@@ -398,7 +398,7 @@ it("icon discovery dialog fence: Stop after this project submits nothing further
   expect(submitted()).toEqual(["alpha"]);
   await pushDiscovery("alpha", { jobToken: tokenFor("alpha"), status: "selected" });
   expect(submitted()).toEqual(["alpha"]);
-  expect(document.body.textContent).not.toContain("Luna is checking");
+  expect(document.body.textContent).not.toContain("The agent is checking");
   expect(button("Close").disabled).toBe(false);
 });
 
@@ -425,7 +425,7 @@ it("icon discovery dialog fence: an unavailable outcome is shown and the batch e
     reason: "No enabled Codex instance supports Luna.",
   });
   expect(document.body.textContent).toContain("No enabled Codex instance supports Luna.");
-  expect(document.body.textContent).not.toContain("Luna is checking");
+  expect(document.body.textContent).not.toContain("The agent is checking");
   expect(button("Close").disabled).toBe(false);
 });
 
@@ -437,7 +437,7 @@ it("icon discovery dialog fence: a dropped connection never submits the remainin
   fixture.environments[0]!.connection.phase = "connected";
   await pushDiscovery("alpha", { jobToken: tokenFor("alpha"), status: "none" });
   expect(submitted(), "the reconnect delivers the outcome but resumes nothing").toEqual(["alpha"]);
-  expect(document.body.textContent).not.toContain("Luna is checking");
+  expect(document.body.textContent).not.toContain("The agent is checking");
   expect(document.body.textContent).toContain("Projects not yet started will not run.");
 });
 
@@ -453,7 +453,7 @@ it("icon discovery dialog fence: a newer job on the project ends the replaced se
     // The dialog's job held generation 1; the reset and the newer request came after it.
     generation: 3,
   });
-  expect(document.body.textContent).not.toContain("Luna is checking Alpha");
+  expect(document.body.textContent).not.toContain("The agent is checking Alpha");
   expect(document.body.textContent).not.toContain("public/newer.svg");
   expect(submitted()).toEqual(["alpha", "charlie"]);
 });

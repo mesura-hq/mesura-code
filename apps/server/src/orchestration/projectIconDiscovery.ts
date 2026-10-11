@@ -79,7 +79,7 @@ export function startProjectIconDiscovery(
 ): ProjectIconDiscoveryState | undefined {
   const state = project.iconDiscovery;
   if (!state || state.jobToken !== jobToken || state.status !== "pending") return undefined;
-  return { ...state, status: "running", reason: "Luna is checking local images.", updatedAt };
+  return { ...state, status: "running", reason: "The agent is checking local images.", updatedAt };
 }
 
 export interface ProjectIconDiscoveryCompletion {

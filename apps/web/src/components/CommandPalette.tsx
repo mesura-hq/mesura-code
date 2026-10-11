@@ -1712,8 +1712,8 @@ function OpenCommandPaletteDialog(props: {
     actionItems.push({
       kind: "submenu",
       value: "action:find-project-icon",
-      searchTerms: ["find project icon", "Luna", "agent", "detect", "logo", "image"],
-      title: "Find project icon with Luna…",
+      searchTerms: ["find project icon", "quick model", "agent", "detect", "logo", "image"],
+      title: "Find project icon with agent…",
       icon: <ImageIcon className={ITEM_ICON_CLASS} />,
       addonIcon: <ImageIcon className={ADDON_ICON_CLASS} />,
       groups: [
@@ -1741,11 +1741,12 @@ function OpenCommandPaletteDialog(props: {
         "find missing project icons",
         "all projects",
         "batch",
-        "Luna",
+        "agent",
+        "quick model",
         "detect",
         "logos",
       ],
-      title: "Find missing project icons with Luna…",
+      title: "Find missing project icons with agent…",
       icon: <ImageIcon className={ITEM_ICON_CLASS} />,
       addonIcon: <ImageIcon className={ADDON_ICON_CLASS} />,
       groups: [

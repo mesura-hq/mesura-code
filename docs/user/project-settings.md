@@ -93,23 +93,23 @@ An invalid value in any field makes Mesura Code ignore the whole file, including
 Select the project and open Project to choose an icon, emoji, monogram, or image for the project group.
 To choose a project image directly, open the command palette and run **Update project icon…**.
 Choose the project, search its image files, and select a file. This saves the choice for the project group.
-Use **Find project icon with Luna…** to search one developed project for an existing image.
-Use **Find missing project icons with Luna…** to search projects without icons on one selected environment.
-Both commands inspect local files first and show a preview before Luna runs. Projects with icons or no
-candidate images are skipped. Searches run only when you start them. Adding a project, starting a
-thread, restarting the server, or resetting an icon does not start Luna. A batch can stop after its
+Use **Find project icon with agent…** to search one developed project for an existing image.
+Use **Find missing project icons with agent…** to search projects without icons on one selected environment.
+The search uses the shared quick-model default. Both commands inspect local files first and show
+a preview before the agent runs. Projects with icons or no candidate images are skipped.
+Searches run only when you start them. Adding a project, starting a thread, restarting the server, or resetting an icon does not start the agent. A batch can stop after its
 current project. Run the command again to retry a search that found no match.
 
 For images, each checkout uses the first available file: `iconPath` in `.mesura.json`, the saved image,
 `iconPath` in `t3.json`, then automatic detection. Thus, a valid repository image overrides an image
 chosen in Settings. After you save an image, the confirmation says when a repository image still
 displays instead. Use **Reset to default** beside Project icon to clear the saved choice and use
-repository images or detection. Reset never starts a Luna search. A search never replaces an icon
+repository images or detection. Reset never starts an agent search. A search never replaces an icon
 that already displays, so a search after a reset runs only when no repository image or detected
 favicon displays either. To show a different image while a repository image displays, change
 `iconPath` in `.mesura.json`.
 
-Choosing or resetting an image does not need Codex or Luna. If a project moves to another folder
+Choosing or resetting an image does not need an agent. If a project moves to another folder
 or is removed while you choose an image, the save fails instead of applying a path chosen for the
 old folder. When the checkouts of a project group show different icons after a save, the
 confirmation names each environment with the icon it shows.

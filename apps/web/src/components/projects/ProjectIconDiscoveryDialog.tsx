@@ -255,8 +255,8 @@ function ProjectIconDiscoveryDialog({ target }: { target: DiscoveryTarget }) {
             {target.projectId ? "Find project icon" : "Find missing project icons"}
           </DialogTitle>
           <DialogDescription>
-            {target.title ?? environment?.label ?? "Selected environment"}. Luna chooses an existing
-            local image. It never downloads or creates images.
+            {target.title ?? environment?.label ?? "Selected environment"}. The agent chooses an
+            existing local image. It never downloads or creates images.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="max-h-[min(55vh,28rem)] space-y-4 overflow-y-auto">
@@ -265,11 +265,11 @@ function ProjectIconDiscoveryDialog({ target }: { target: DiscoveryTarget }) {
               ? "Checking local images…"
               : finished
                 ? `${saved} ${saved === 1 ? "icon" : "icons"} saved. ${outcomes.size} ${outcomes.size === 1 ? "search" : "searches"} completed.`
-                : `${ready.length} ${ready.length === 1 ? "project has" : "projects have"} images to check. Projects with icons or no candidates need no Luna call.`}
+                : `${ready.length} ${ready.length === 1 ? "project has" : "projects have"} images to check. Projects with icons or no candidates need no agent call.`}
           </p>
           {running && currentTitle ? (
             <p role="status" className="text-sm">
-              Luna is checking {currentTitle}…
+              The agent is checking {currentTitle}…
             </p>
           ) : null}
           {error ? (
@@ -324,7 +324,7 @@ function ProjectIconDiscoveryDialog({ target }: { target: DiscoveryTarget }) {
               onClick={start}
             >
               {target.projectId
-                ? "Find with Luna"
+                ? "Find with agent"
                 : previews === null
                   ? "Checking images…"
                   : `Find icons for ${ready.length} ${ready.length === 1 ? "project" : "projects"}`}

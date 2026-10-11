@@ -43,7 +43,7 @@ export function describeProjectIconChange(
   effectiveSource: ProjectIconEffectiveSource,
 ): string {
   if (change === "reset") {
-    return `Saved project icon cleared; ${EFFECTIVE_SOURCE_LABELS[effectiveSource]} now displays. No Luna search was started.`;
+    return `Saved project icon cleared; ${EFFECTIVE_SOURCE_LABELS[effectiveSource]} now displays. No agent search was started.`;
   }
   if (effectiveSource === "project") return "Project icon saved.";
   if (effectiveSource === "mesura" || effectiveSource === "custom") {
