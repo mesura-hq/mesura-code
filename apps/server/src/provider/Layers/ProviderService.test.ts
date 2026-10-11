@@ -4964,6 +4964,7 @@ describe("agent browser access", () => {
       );
       const projectionLayer = Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
         getTurnStartMessage: () => Effect.die("unused"),
+        getThreadMessageAttachment: () => Effect.die("unused"),
         getImportedAgentSessionSources: () => Effect.die("unused"),
         getUserInputActivity: () => Effect.die("unused"),
         listActivitiesByKind: () => Effect.die("unused"),

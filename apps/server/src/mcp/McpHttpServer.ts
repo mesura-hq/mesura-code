@@ -644,13 +644,6 @@ export const layer = Layer.mergeAll(
   PreviewToolkitRegistrationLive,
   PullRequestsToolkitRegistrationLive,
   FactoryToolkitRegistrationLive,
-  Layer.unwrap(
-    Effect.gen(function* () {
-      const config = yield* ServerConfig.ServerConfig;
-      return process.env.T3CODE_PROJECT_ICON_PROTOTYPE === "1" && config.devUrl !== undefined
-        ? ProjectIconsToolkitRegistrationLive
-        : Layer.empty;
-    }),
-  ),
+  ProjectIconsToolkitRegistrationLive,
   DeviceToolkitRegistrationLive,
 ).pipe(Layer.provideMerge(McpTransportLive));

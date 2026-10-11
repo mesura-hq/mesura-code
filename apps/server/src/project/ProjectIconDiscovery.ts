@@ -19,6 +19,7 @@ import {
   type ProjectIconDiscoverInput,
   type ProjectIconDiscoveryAccepted,
   type ProjectIconDiscoveryPreview,
+  type ProjectIconEffectiveSource,
   type ProjectIconDiscoveryStatus,
   type ProjectId,
   type ProviderInstanceId,
@@ -116,7 +117,12 @@ export function selectProjectIconInstance(
 
 type Inspection =
   | { readonly status: "ready"; readonly candidates: ReadonlyArray<ProjectIconCandidate> }
-  | { readonly status: "existing" | "empty" | "failed"; readonly reason: string };
+  | {
+      readonly status: "existing";
+      readonly reason: string;
+      readonly effectiveSource: ProjectIconEffectiveSource;
+    }
+  | { readonly status: "empty" | "failed"; readonly reason: string };
 
 type WorkerItem =
   | { readonly kind: "interrupt-unfinished" }
@@ -149,25 +155,36 @@ export const makeProjectIconDiscovery = Effect.fn("ProjectIconDiscovery.make")(f
   // resolves, repository configuration, or a built-in favicon).
   // The preview may trust the resolver's cache; the worker acts on the answer,
   // so it asks for a fresh walk (`fresh`).
-  const effectiveIconReason = Effect.fn("ProjectIconDiscovery.effectiveIconReason")(function* (
+  const effectiveIcon = Effect.fn("ProjectIconDiscovery.effectiveIcon")(function* (
     project: OrchestrationProjectShell,
     fresh: boolean,
   ) {
-    if (project.projectIcon != null) return "The project uses a custom icon.";
-    const effective = yield* resolver.resolvePath(
+    if (project.projectIcon != null) {
+      return { source: "custom", reason: "The project uses a custom icon." } as const;
+    }
+    const effective = yield* resolver.resolveEffectiveImage(
       project.workspaceRoot,
       project.faviconPath ?? undefined,
       { fresh },
     );
     return effective === null
       ? null
-      : "An icon is already shown. Use Update project icon… to replace it.";
+      : ({
+          source: effective.source,
+          reason: "An icon is already shown. Use Update project icon… to replace it.",
+        } as const);
   });
 
   const inspect = (project: OrchestrationProjectShell, fresh: boolean): Effect.Effect<Inspection> =>
     Effect.gen(function* () {
-      const existing = yield* effectiveIconReason(project, fresh);
-      if (existing !== null) return { status: "existing", reason: existing } as const;
+      const existing = yield* effectiveIcon(project, fresh);
+      if (existing !== null) {
+        return {
+          status: "existing",
+          reason: existing.reason,
+          effectiveSource: existing.source,
+        } as const;
+      }
       const candidates = yield* Effect.tryPromise(() =>
         collectProjectIconCandidates(project.workspaceRoot),
       );
@@ -279,7 +296,8 @@ export const makeProjectIconDiscovery = Effect.fn("ProjectIconDiscovery.make")(f
     // favicon. A saved path would outrank it, so the search keeps it instead.
     const current = yield* readCurrentJobProject(job);
     if (current === null) return;
-    const appeared = yield* effectiveIconReason(current, true).pipe(
+    const appeared = yield* effectiveIcon(current, true).pipe(
+      Effect.map((icon) => icon?.reason ?? null),
       Effect.orElseSucceed(() => "Could not check the project's current icon."),
     );
     if (appeared !== null) return yield* finish(job, "existing", null, appeared);
@@ -338,6 +356,7 @@ export const makeProjectIconDiscovery = Effect.fn("ProjectIconDiscovery.make")(f
                   candidateCount: inspection.candidates.length,
                   status: "ready",
                   reason: `${inspection.candidates.length} local image candidates`,
+                  effectiveSource: "initials",
                 }
               : {
                   projectId: project.id,
@@ -345,6 +364,12 @@ export const makeProjectIconDiscovery = Effect.fn("ProjectIconDiscovery.make")(f
                   candidateCount: 0,
                   status: inspection.status,
                   reason: inspection.reason,
+                  // A project that could not be inspected has no known icon.
+                  ...(inspection.status === "existing"
+                    ? { effectiveSource: inspection.effectiveSource }
+                    : inspection.status === "empty"
+                      ? { effectiveSource: "initials" as const }
+                      : {}),
                 },
           ),
         ),

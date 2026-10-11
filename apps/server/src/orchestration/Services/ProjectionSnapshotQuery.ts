@@ -7,6 +7,7 @@
  * @module ProjectionSnapshotQuery
  */
 import type {
+  ChatAttachment,
   AgentSessionImportSource,
   ApprovalRequestId,
   CheckpointRef,
@@ -264,6 +265,15 @@ export interface ProjectionSnapshotQueryShape {
     }>,
     ProjectionRepositoryError
   >;
+
+  /**
+   * Mesura: the attachment with this id on one of the thread's user messages.
+   * Reads only the matching record, never the rest of the thread's history.
+   */
+  readonly getThreadMessageAttachment: (input: {
+    readonly threadId: ThreadId;
+    readonly attachmentId: string;
+  }) => Effect.Effect<Option.Option<ChatAttachment>, ProjectionRepositoryError>;
 
   /**
    * Read a single active thread detail snapshot by id.

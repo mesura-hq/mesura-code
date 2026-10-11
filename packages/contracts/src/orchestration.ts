@@ -1076,6 +1076,9 @@ const ProjectMetaUpdateCommand = Schema.Struct({
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
+  // Mesura: the root an icon file was inspected or prepared against. The
+  // command fails when the project moved or was deleted since.
+  expectedWorkspaceRoot: Schema.optional(TrimmedNonEmptyString),
 });
 
 const ProjectDeleteCommand = Schema.Struct({

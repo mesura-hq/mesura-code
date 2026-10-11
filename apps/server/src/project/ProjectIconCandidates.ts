@@ -20,7 +20,9 @@ const EXCLUDED_DIRECTORIES = new Set([
   "target",
   ".venv",
 ]);
-const isProjectImagePath = Schema.is(ProjectFaviconPath);
+export const isProjectImagePath = Schema.is(ProjectFaviconPath);
+/** The largest image a project icon may be. */
+export const PROJECT_ICON_MAX_BYTES = 2 * 1024 * 1024;
 const ICON_NAME =
   /favicon|apple[-_]touch|isotipo|imagotipo|(?:^|[-_.])(?:logo|icon|brand|mark)(?:[-_.]|$)/i;
 
@@ -50,7 +52,8 @@ export async function collectProjectIconCandidates(
         directories.push({ relative, depth: directory.depth + 1 });
       } else if (entry.isFile() && isProjectImagePath(entry.name) && ICON_NAME.test(entry.name)) {
         const bytes = (await NodeFSP.stat(NodePath.join(root, relative))).size;
-        if (bytes > 0 && bytes <= 2 * 1024 * 1024) candidates.push({ path: relative, bytes });
+        if (bytes > 0 && bytes <= PROJECT_ICON_MAX_BYTES)
+          candidates.push({ path: relative, bytes });
       }
     }
   }
@@ -83,6 +86,9 @@ export async function validateProjectIconCandidate(
     return false;
   const stat = await NodeFSP.stat(absolute);
   return (
-    stat.isFile() && stat.size > 0 && stat.size <= 2 * 1024 * 1024 && isProjectImagePath(absolute)
+    stat.isFile() &&
+    stat.size > 0 &&
+    stat.size <= PROJECT_ICON_MAX_BYTES &&
+    isProjectImagePath(absolute)
   );
 }

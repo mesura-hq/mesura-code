@@ -945,4 +945,48 @@ it.layer(NodeServices.layer)("project icon discovery service fence", (it) => {
         }).pipe(Effect.scoped),
     );
   });
+
+  // Project icons phase 2, acceptance criterion 7: the read-only preview the
+  // manual picker reads after a save names the source of the displayed icon, so
+  // the client can say when repository configuration masks the saved image.
+  describe("phase 2: the effective icon source", () => {
+    it.effect(
+      "icon manual fence: preview names the repository configuration that masks a saved image",
+      () =>
+        Effect.gen(function* () {
+          const server = yield* startServer(yield* newDatabase());
+          const fs = yield* FileSystem.FileSystem;
+          const masked = yield* addProject(server, "masked-by-mesura", [
+            "brand/portable.svg",
+            "logo.svg",
+          ]);
+          yield* fs.writeFileString(
+            NodePath.join(masked.root, ".mesura.json"),
+            '{ "version": 1, "iconPath": "brand/portable.svg" }',
+          );
+          const shown = yield* addProject(server, "saved-shown", ["logo.svg"]);
+          for (const project of [masked, shown]) {
+            yield* server.dispatch({
+              type: "project.meta.update",
+              commandId: CommandId.make(`cmd-effective-${project.projectId}`),
+              projectId: project.projectId,
+              faviconPath: "logo.svg",
+              projectIcon: null,
+            });
+          }
+          const previews = yield* server.preview([masked.projectId, shown.projectId]);
+          const byId = new Map(previews.map((preview) => [preview.projectId, preview]));
+          expect(byId.get(masked.projectId)).toMatchObject({
+            status: "existing",
+            effectiveSource: "mesura",
+          });
+          expect(byId.get(shown.projectId)).toMatchObject({
+            status: "existing",
+            effectiveSource: "project",
+          });
+          yield* server.drain();
+          expect(server.calls).toHaveLength(0);
+        }).pipe(Effect.scoped),
+    );
+  });
 });

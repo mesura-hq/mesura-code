@@ -270,6 +270,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         projectId: command.projectId,
       });
+      if (
+        command.expectedWorkspaceRoot !== undefined &&
+        (project.deletedAt !== null || project.workspaceRoot !== command.expectedWorkspaceRoot)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Project '${command.projectId}' moved or was deleted before its icon was saved.`,
+        });
+      }
       if (command.scripts !== undefined) {
         // Persisted IDs predate shortcut validation. Let users edit or remove them
         // without allowing another invalid ID to enter the project.

@@ -309,6 +309,10 @@ const TurnStartMessageLookupInput = Schema.Struct({
   threadId: ThreadId,
   messageId: MessageId,
 });
+const ThreadMessageAttachmentLookupInput = Schema.Struct({
+  threadId: ThreadId,
+  attachmentId: Schema.String,
+});
 const ThreadActivityKindsLookupInput = Schema.Struct({
   threadId: ThreadId,
   activityKinds: Schema.Array(Schema.String),
@@ -1681,6 +1685,19 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         ) AS "hasOtherUserMessages"
       FROM projection_thread_messages
       WHERE thread_id = ${threadId} AND message_id = ${messageId}
+      LIMIT 1
+    `,
+  });
+
+  const getThreadMessageAttachmentRow = SqlSchema.findOneOption({
+    Request: ThreadMessageAttachmentLookupInput,
+    Result: Schema.Struct({ attachment: Schema.fromJsonString(ChatAttachment) }),
+    execute: ({ threadId, attachmentId }) => sql`
+      SELECT attachment.value AS "attachment"
+      FROM projection_thread_messages AS message, json_each(message.attachments_json) AS attachment
+      WHERE message.thread_id = ${threadId}
+        AND message.role = 'user'
+        AND json_extract(attachment.value, '$.id') = ${attachmentId}
       LIMIT 1
     `,
   });
@@ -3805,6 +3822,19 @@ pending_approval_requests AS (
       }));
     });
 
+  const getThreadMessageAttachment: ProjectionSnapshotQueryShape["getThreadMessageAttachment"] = (
+    input,
+  ) =>
+    getThreadMessageAttachmentRow(input).pipe(
+      Effect.map(Option.map((row) => row.attachment)),
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.getThreadMessageAttachment:query",
+          "ProjectionSnapshotQuery.getThreadMessageAttachment:decodeRow",
+        ),
+      ),
+    );
+
   const getTurnStartMessage: ProjectionSnapshotQueryShape["getTurnStartMessage"] = Effect.fn(
     "ProjectionSnapshotQuery.getTurnStartMessage",
   )(function* (input) {
@@ -4296,6 +4326,7 @@ pending_approval_requests AS (
     getThreadShellById,
     getThreadRuntimeContext,
     getTurnStartMessage,
+    getThreadMessageAttachment,
     getThreadDetailById,
     getThreadDetailSnapshot,
   } satisfies ProjectionSnapshotQueryShape;

@@ -391,4 +391,119 @@ it.layer(NodeServices.layer)("project icon discovery decider fence", (it) => {
       }).pipe(Effect.scoped),
     );
   });
+
+  // Phase 2, acceptance criterion 5: a file-based icon write names the root it
+  // inspected; the decider refuses it once the project has moved.
+  describe("expected workspace root", () => {
+    it.effect("icon manual fence: an icon write for the old root is rejected after a move", () =>
+      Effect.gen(function* () {
+        const { state, root, movedRoot } = yield* fixture;
+        yield* apply(state, {
+          type: "project.meta.update",
+          commandId: CommandId.make("cmd-icon-root-move"),
+          projectId,
+          workspaceRoot: movedRoot,
+        });
+        const generation = discoveryOf(project(state))?.generation ?? 0;
+        const stale = yield* apply(state, {
+          type: "project.meta.update",
+          commandId: CommandId.make("cmd-icon-root-stale-write"),
+          projectId,
+          faviconPath: ".mesura/project-icons/old-root.svg",
+          projectIcon: null,
+          expectedWorkspaceRoot: root,
+        });
+        expect(stale.rejected, "a write prepared against the old root must fail").toBe(true);
+        expect(project(state)?.faviconPath ?? null).toBeNull();
+        expect(project(state)?.workspaceRoot).toBe(movedRoot);
+        expect(discoveryOf(project(state))?.generation ?? 0).toBe(generation);
+      }).pipe(Effect.scoped),
+    );
+
+    it.effect("icon manual fence: a reset for the old root is rejected after a move", () =>
+      Effect.gen(function* () {
+        const { state, root, movedRoot } = yield* fixture;
+        yield* apply(state, {
+          type: "project.meta.update",
+          commandId: CommandId.make("cmd-icon-root-reset-before"),
+          projectId,
+          faviconPath: "assets/logo.svg",
+        });
+        yield* apply(state, {
+          type: "project.meta.update",
+          commandId: CommandId.make("cmd-icon-root-reset-move"),
+          projectId,
+          workspaceRoot: movedRoot,
+        });
+        const stale = yield* apply(state, {
+          type: "project.meta.update",
+          commandId: CommandId.make("cmd-icon-root-reset-stale"),
+          projectId,
+          faviconPath: null,
+          projectIcon: null,
+          expectedWorkspaceRoot: root,
+        });
+        expect(stale.rejected).toBe(true);
+        expect(project(state)?.faviconPath).toBe("assets/logo.svg");
+      }).pipe(Effect.scoped),
+    );
+
+    it.effect("icon manual guard: a write naming the current root saves the image", () =>
+      Effect.gen(function* () {
+        const { state, root } = yield* fixture;
+        const updated = yield* apply(state, {
+          type: "project.meta.update",
+          commandId: CommandId.make("cmd-icon-root-current"),
+          projectId,
+          faviconPath: ".mesura/project-icons/current.svg",
+          projectIcon: null,
+          expectedWorkspaceRoot: root,
+        });
+        expect(updated.rejected).toBe(false);
+        expect(project(state)?.faviconPath).toBe(".mesura/project-icons/current.svg");
+      }).pipe(Effect.scoped),
+    );
+
+    it.effect(
+      "icon manual guard: a guarded null-to-null reset still supersedes a running search",
+      () =>
+        Effect.gen(function* () {
+          const { state, root } = yield* fixture;
+          const job = yield* claim(state, "cmd-icon-root-guarded-reset");
+          const reset = yield* apply(state, {
+            type: "project.meta.update",
+            commandId: CommandId.make("cmd-icon-root-guarded-reset-update"),
+            projectId,
+            faviconPath: null,
+            projectIcon: null,
+            expectedWorkspaceRoot: root,
+          });
+          expect(reset.rejected).toBe(false);
+          expect(discoveryOf(project(state))?.generation).toBeGreaterThan(job.generation);
+          yield* apply(state, complete(job, SELECTED));
+          expect(project(state)?.faviconPath ?? null).toBeNull();
+          expect(discoveryOf(project(state))?.status).toBe("superseded");
+        }).pipe(Effect.scoped),
+    );
+
+    it.effect("icon manual fence: an icon write for a deleted project is rejected", () =>
+      Effect.gen(function* () {
+        const { state, root } = yield* fixture;
+        yield* apply(state, {
+          type: "project.delete",
+          commandId: CommandId.make("cmd-icon-root-delete"),
+          projectId,
+        });
+        const write = yield* apply(state, {
+          type: "project.meta.update",
+          commandId: CommandId.make("cmd-icon-root-deleted-write"),
+          projectId,
+          faviconPath: ".mesura/project-icons/deleted.svg",
+          projectIcon: null,
+          expectedWorkspaceRoot: root,
+        });
+        expect(write.rejected).toBe(true);
+      }).pipe(Effect.scoped),
+    );
+  });
 });

@@ -1,12 +1,15 @@
 import { useAtomValue } from "@effect/atom-react";
 import { Atom } from "effect/unstable/reactivity";
+import { useState } from "react";
 
-import { useProjectGroupUpdate } from "../../hooks/useProjectGroupUpdate";
+import {
+  captureProjectGroupWriteTargets,
+  useProjectGroupUpdate,
+} from "../../hooks/useProjectGroupUpdate";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import type { SidebarProjectSnapshot } from "../../sidebarProjectGrouping";
 import { useSettingsProjectGroups } from "../settings/useSettingsProjectGroups";
 import { ProjectFaviconPickerDialog } from "../settings/ProjectFaviconPickerDialog";
-import { toastManager } from "../ui/toast";
 
 // The picker outlives the command palette that closes when its action runs.
 const projectIconDialogAtom = Atom.make<string | null>(null).pipe(Atom.keepAlive);
@@ -23,29 +26,24 @@ export function ProjectIconFileDialogHost() {
 }
 
 function ProjectIconFileDialog({ group }: { group: SidebarProjectSnapshot }) {
-  const { updateAllMembers } = useProjectGroupUpdate(group);
+  const { updateProjectImage } = useProjectGroupUpdate(group);
+  // What the picker browses and what the choice is written to are fixed when
+  // it opens; the group can change while the user browses.
+  const [opened] = useState(() => ({
+    cwd: group.workspaceRoot,
+    environmentId: group.environmentId,
+    targets: captureProjectGroupWriteTargets(group),
+  }));
   return (
     <ProjectFaviconPickerDialog
-      cwd={group.workspaceRoot}
-      environmentId={group.environmentId}
+      cwd={opened.cwd}
+      environmentId={opened.environmentId}
       projectName={group.displayName}
       open
       onOpenChange={(open) => {
         if (!open) appAtomRegistry.set(projectIconDialogAtom, null);
       }}
-      onSelect={(path) => {
-        void updateAllMembers(
-          { faviconPath: path, projectIcon: null },
-          "Failed to update project icon",
-        ).then((result) => {
-          if (result._tag === "Success")
-            toastManager.add({
-              type: "success",
-              title: "Project icon updated",
-              description: group.displayName,
-            });
-        });
-      }}
+      onSelect={(path) => void updateProjectImage(path, opened.targets)}
     />
   );
 }

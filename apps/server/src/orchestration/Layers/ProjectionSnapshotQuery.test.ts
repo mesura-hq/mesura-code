@@ -945,6 +945,125 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
     ),
   );
 
+  // Project icons phase 2: the thread tool imports an attachment only when this
+  // thread recorded it on one of its own user messages.
+  it.effect(
+    "project icon ownership: reads one attachment from this thread's user messages only",
+    () =>
+      Effect.gen(function* () {
+        const query = yield* ProjectionSnapshotQuery;
+        const sql = yield* SqlClient.SqlClient;
+        const threadId = ThreadId.make("thread-icon-owner");
+        const otherThreadId = ThreadId.make("thread-icon-other");
+        const createdAt = "2026-10-11T00:00:00.000Z";
+        const image = (id: string) => ({
+          type: "image" as const,
+          id,
+          name: `${id}.svg`,
+          mimeType: "image/svg+xml",
+          sizeBytes: 40,
+        });
+        const ownImage = image("thread-icon-owner-own");
+        const notes = {
+          type: "file" as const,
+          id: "thread-icon-owner-notes",
+          name: "notes.txt",
+          mimeType: "text/plain",
+          sizeBytes: 8,
+        };
+        const insert = (
+          messageId: string,
+          thread: ThreadId,
+          role: "user" | "assistant",
+          attachmentsJson: string,
+        ) => sql`
+        INSERT INTO projection_thread_messages (
+          message_id, thread_id, role, text, attachments_json, is_streaming, created_at, updated_at
+        ) VALUES (${messageId}, ${thread}, ${role}, 'icon', ${attachmentsJson}, 0, ${createdAt}, ${createdAt})
+      `;
+        // Unrelated assistant history the query must not decode.
+        yield* sql`
+        WITH RECURSIVE history(n) AS (
+          VALUES (1) UNION ALL SELECT n + 1 FROM history WHERE n < 2000
+        )
+        INSERT INTO projection_thread_messages (
+          message_id, thread_id, role, text, attachments_json, is_streaming, created_at, updated_at
+        )
+        SELECT 'icon-owner-history:' || n, ${threadId}, 'assistant', 'Unrelated output',
+          'not-json', 0, ${createdAt}, ${createdAt}
+        FROM history
+      `;
+        yield* insert(
+          "icon-owner-user",
+          threadId,
+          "user",
+          yield* encodeChatAttachments([notes, ownImage]),
+        );
+        yield* insert(
+          "icon-owner-assistant",
+          threadId,
+          "assistant",
+          yield* encodeChatAttachments([image("thread-icon-owner-assistant")]),
+        );
+        yield* insert(
+          "icon-other-user",
+          otherThreadId,
+          "user",
+          yield* encodeChatAttachments([image("thread-icon-other-foreign")]),
+        );
+
+        const counter = makeSqlStatementCounter();
+        const own = yield* query
+          .getThreadMessageAttachment({ threadId, attachmentId: ownImage.id })
+          .pipe(Effect.withTracer(counter.tracer));
+        assert.equal(counter.count(), 1);
+        assert.deepEqual(own, Option.some(ownImage));
+        assert.deepEqual(
+          yield* query.getThreadMessageAttachment({ threadId, attachmentId: notes.id }),
+          Option.some(notes),
+        );
+        // Another thread's attachment, and an assistant message's, do not belong to this thread.
+        assert.equal(
+          (yield* query.getThreadMessageAttachment({
+            threadId,
+            attachmentId: "thread-icon-other-foreign",
+          }))._tag,
+          "None",
+        );
+        assert.equal(
+          (yield* query.getThreadMessageAttachment({
+            threadId,
+            attachmentId: "thread-icon-owner-assistant",
+          }))._tag,
+          "None",
+        );
+        assert.deepEqual(
+          yield* query.getThreadMessageAttachment({
+            threadId: otherThreadId,
+            attachmentId: "thread-icon-other-foreign",
+          }),
+          Option.some(image("thread-icon-other-foreign")),
+        );
+        assert.equal(
+          (yield* query.getThreadMessageAttachment({
+            threadId: otherThreadId,
+            attachmentId: ownImage.id,
+          }))._tag,
+          "None",
+        );
+      }).pipe(
+        Effect.ensuring(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient;
+            yield* sql`
+            DELETE FROM projection_thread_messages
+            WHERE thread_id IN ('thread-icon-owner', 'thread-icon-other')
+          `;
+          }).pipe(Effect.orDie),
+        ),
+      ),
+  );
+
   it.effect("keeps compaction and queued-message eligibility in the turn-start query", () =>
     Effect.gen(function* () {
       const query = yield* ProjectionSnapshotQuery;

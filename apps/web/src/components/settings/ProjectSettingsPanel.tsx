@@ -1,7 +1,7 @@
 import { openProjectIconDiscoveryDialog } from "../projects/ProjectIconDiscoveryDialog";
 import { mapAtomCommandResult, settlePromise } from "@t3tools/client-runtime/state/runtime";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { type EnvironmentId, type ProjectIconOverride } from "@t3tools/contracts";
+import { type EnvironmentId } from "@t3tools/contracts";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { Trash2Icon } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -21,7 +21,11 @@ import { ProjectFavicon } from "../ProjectFavicon";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { toastManager } from "../ui/toast";
-import { useProjectGroupUpdate } from "../../hooks/useProjectGroupUpdate";
+import {
+  captureProjectGroupWriteTargets,
+  type ProjectGroupWriteTarget,
+  useProjectGroupUpdate,
+} from "../../hooks/useProjectGroupUpdate";
 import {
   SettingResetButton,
   SettingsPageContainer,
@@ -182,7 +186,7 @@ function ProjectDetail({
       ? window.desktopBridge?.pickProjectFavicon
       : undefined;
 
-  const { updateAllMembers, reportFailure } = useProjectGroupUpdate(group);
+  const { updateAllMembers, updateProjectImage, reportFailure } = useProjectGroupUpdate(group);
 
   const renameGroup = useCallback(
     async (nextTitle: string, wasEdited: boolean) => {
@@ -206,19 +210,23 @@ function ProjectDetail({
   );
 
   // ----- project icon -----
-  const [faviconPickerOpen, setFaviconPickerOpen] = useState(false);
+  // What the file picker browses and writes to is fixed when it opens; the
+  // group can change while the user browses.
+  const [faviconPicker, setFaviconPicker] = useState<{
+    readonly cwd: string;
+    readonly environmentId: EnvironmentId;
+    readonly targets: ReadonlyArray<ProjectGroupWriteTarget>;
+  } | null>(null);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [isSavingFavicon, setIsSavingFavicon] = useState(false);
   const savingFaviconRef = useRef(false);
-  const setProjectIcon = async (input: {
-    faviconPath: string | null;
-    projectIcon: ProjectIconOverride | null;
-  }) => {
+  // One icon write at a time; an image save or reset also reports which icon displays.
+  const runIconUpdate = async (update: () => Promise<unknown>) => {
     if (savingFaviconRef.current) return;
     savingFaviconRef.current = true;
     setIsSavingFavicon(true);
     try {
-      await updateAllMembers(input, "Failed to update project icon");
+      await update();
     } finally {
       savingFaviconRef.current = false;
       setIsSavingFavicon(false);
@@ -382,7 +390,7 @@ function ProjectDetail({
                 <SettingResetButton
                   label="project icon"
                   disabled={isSavingFavicon}
-                  onClick={() => void setProjectIcon({ faviconPath: null, projectIcon: null })}
+                  onClick={() => void runIconUpdate(() => updateProjectImage(null))}
                 />
               ) : null
             }
@@ -405,7 +413,13 @@ function ProjectDetail({
                   type="button"
                   aria-label="Choose a project icon file"
                   disabled={isSavingFavicon}
-                  onClick={() => setFaviconPickerOpen(true)}
+                  onClick={() =>
+                    setFaviconPicker({
+                      cwd: representative.workspaceRoot,
+                      environmentId: representative.environmentId,
+                      targets: captureProjectGroupWriteTargets(group),
+                    })
+                  }
                 >
                   Choose file
                 </Button>
@@ -463,18 +477,24 @@ function ProjectDetail({
         </SettingsSection>
       </SettingsPageContainer>
 
-      <ProjectFaviconPickerDialog
-        key={`${representative.environmentId}:${representative.workspaceRoot}:${faviconPickerOpen}`}
-        cwd={representative.workspaceRoot}
-        environmentId={representative.environmentId}
-        onOpenChange={setFaviconPickerOpen}
-        {...(pickProjectFavicon
-          ? { onPickExternal: () => pickProjectFavicon(representative.workspaceRoot) }
-          : {})}
-        onSelect={(path) => void setProjectIcon({ faviconPath: path, projectIcon: null })}
-        open={faviconPickerOpen}
-        projectName={group.displayName}
-      />
+      {faviconPicker ? (
+        <ProjectFaviconPickerDialog
+          key={`${faviconPicker.environmentId}:${faviconPicker.cwd}`}
+          cwd={faviconPicker.cwd}
+          environmentId={faviconPicker.environmentId}
+          onOpenChange={(open) => {
+            if (!open) setFaviconPicker(null);
+          }}
+          {...(pickProjectFavicon
+            ? { onPickExternal: () => pickProjectFavicon(faviconPicker.cwd) }
+            : {})}
+          onSelect={(path) =>
+            void runIconUpdate(() => updateProjectImage(path, faviconPicker.targets))
+          }
+          open
+          projectName={group.displayName}
+        />
+      ) : null}
       {iconPickerOpen ? (
         <Suspense fallback={null}>
           <ProjectIconPickerDialog
@@ -482,7 +502,14 @@ function ProjectDetail({
             projectName={representative.title}
             open
             onOpenChange={setIconPickerOpen}
-            onSelect={(icon) => void setProjectIcon({ faviconPath: null, projectIcon: icon })}
+            onSelect={(icon) =>
+              void runIconUpdate(() =>
+                updateAllMembers(
+                  { faviconPath: null, projectIcon: icon },
+                  "Failed to update project icon",
+                ),
+              )
+            }
           />
         </Suspense>
       ) : null}

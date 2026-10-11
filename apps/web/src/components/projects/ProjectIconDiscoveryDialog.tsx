@@ -1,10 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
-  createEnvironmentRpcCommand,
-  squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import {
-  WS_METHODS,
   type CommandId,
   type EnvironmentId,
   type ProjectId,
@@ -15,11 +11,11 @@ import {
 import { Atom } from "effect/unstable/reactivity";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { connectionAtomRuntime } from "../../connection/runtime";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { newCommandId } from "../../lib/utils";
 import { useProjects } from "../../state/entities";
 import { useEnvironment } from "../../state/environments";
+import { projectIconDiscoverCommand, projectIconPreviewCommand } from "../../state/projectIcons";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import {
@@ -38,14 +34,6 @@ interface DiscoveryTarget {
   title?: string;
 }
 const dialogAtom = Atom.make<DiscoveryTarget | null>(null).pipe(Atom.keepAlive);
-const previewCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
-  label: "project-icons:preview",
-  tag: WS_METHODS.projectIconsPreview,
-});
-const discoverCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
-  label: "project-icons:discover",
-  tag: WS_METHODS.projectIconsDiscover,
-});
 
 export function openProjectIconDiscoveryDialog(target: DiscoveryTarget): void {
   appAtomRegistry.set(dialogAtom, target);
@@ -127,8 +115,8 @@ function outcomeForJob(
 function ProjectIconDiscoveryDialog({ target }: { target: DiscoveryTarget }) {
   const environment = useEnvironment(target.environmentId);
   const projects = useProjects();
-  const preview = useAtomCommand(previewCommand, { reportFailure: false });
-  const discover = useAtomCommand(discoverCommand, { reportFailure: false });
+  const preview = useAtomCommand(projectIconPreviewCommand, { reportFailure: false });
+  const discover = useAtomCommand(projectIconDiscoverCommand, { reportFailure: false });
   const [previews, setPreviews] = useState<ReadonlyArray<ProjectIconDiscoveryPreview> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [phase, setPhase] = useState<"preview" | "running" | "finished">("preview");
