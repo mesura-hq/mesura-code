@@ -130,7 +130,7 @@ We need to be on the same page with terminology. When communicating, use this la
 
 The most common defect in this repo is a change that works on the path you tested and is missing everywhere else. Before calling frontend work done, walk this list and say which entries applied:
 
-- **Entry points.** A behavior reachable from the chat view is usually also reachable from Settings, the command palette, and a keybinding. Fixing one is not fixing the feature.
+- **Entry points.** A behavior reachable from the chat view is usually also reachable from Settings, the command palette, a keybinding, and the right panel's surface launcher. Fixing one is not fixing the feature.
 - **Clients.** Web, desktop (wraps web, adds Electron shell/IPC), and the web app at a phone's width. Shared logic lives in `packages/client-runtime`. There is no native mobile client: never write a native version of a feature.
 - **Providers.** Codex, Claude, Cursor, Grok, OpenCode, and Antigravity each have an adapter. Provider-shaped features need a decision per adapter, even if the decision is "not supported here".
 - **Contracts.** Anything crossing the wire is typed in `packages/contracts`. Change the schema and the server, web, and desktop all follow.
@@ -140,12 +140,13 @@ The most common defect in this repo is a change that works on the path you teste
 
 ## Dev servers
 
-- `vp i` installs. Worktrees get this from the t3.json setup script; if module resolution looks broken, it probably did not run.
+- `vp i` installs, under Node 24 (`.nvmrc`). Worktrees get this from the t3.json setup script; if module resolution looks broken, it probably did not run. Where `vp` is not on PATH, the setup fails silently: install with the main checkout's copy (`$(git worktree list | head -1 | cut -d' ' -f1)/node_modules/.bin/vp i`), then use this worktree's `node_modules/.bin/vp`.
 - `vp run dev` starts server and web. In a worktree, state defaults to that worktree's gitignored `.t3`, which deliberately outranks an ambient `T3CODE_HOME` so you cannot land on shared state by accident. An explicit `--home-dir` still wins.
 - Ports derive from the worktree path and are stable across restarts, but read the real ones from the `[dev-runner]` line since occupied ports shift.
-- Sharing over the tailnet is three steps: run `vp run dev --share` in the background, wait for the `pairingUrl:` line in its output, then give that full URL to an unpaired browser. Do not wire up `tailscale serve` by hand, open the URL yourself, or consume the user's pairing link. A browser with the reusable dev cookie can use the bare origin. If a normal one-time token was consumed, mint a fresh one with `node apps/server/src/bin.ts pair`. It carries standard scopes, while the startup URL carries admin scopes needed for Connections settings.
+- A dev server you hand over must outlive your turn: a `&`, `nohup` or harness-background child dies with the session. Start it under the host's workload runner (`mesura-agent-service` on vigilia hosts, `--memory 4G` with a copied database).
+- Sharing over the tailnet is three steps: run `vp run dev --share`, wait for the `pairingUrl:` line in its output, then give that full URL to an unpaired browser. Never open the URL yourself or consume the user's pairing link. Where `--share` fails with `permission denied` (vigilia-home: a non-root `tailscale serve` gets `401 Unauthorized`), publish the web port yourself with `sudo tailscale serve --bg --https=<webPort> http://localhost:<webPort>` — `localhost`, because Vite binds `::1`; never port 443, which Caddy owns — then mint a token with `node apps/server/src/bin.ts pair`, and remove the mapping with `sudo tailscale serve --https=<webPort> off` when you stop the server. A browser with the reusable dev cookie can use the bare origin. If a normal one-time token was consumed, mint a fresh one with `node apps/server/src/bin.ts pair`. It carries standard scopes, while the startup URL carries admin scopes needed for Connections settings.
 - To reuse web dev auth across worktrees, configure one fixed `T3CODE_DEV_AUTH_TOKEN` in the main checkout's gitignored `.env`. The `t3.json` setup links that file into worktrees. Never commit or publish the token or a startup URL. See [Reusable dev credential](docs/operations/development.md#reusable-dev-credential).
-- Stop what you started, by the PID you tracked. See rule 1.
+- Stop what you started, by the unit name or the PID you tracked. See rule 1.
 
 ## Test data
 
@@ -157,25 +158,49 @@ An empty database is a bad test. Seed your worktree's `.t3` with a copy of real 
   ```bash
   mkdir -p .t3/userdata
   rm -f .t3/userdata/state.sqlite*  # VACUUM INTO refuses to overwrite
-  bun -e "new (require('bun:sqlite').Database)(process.env.HOME + '/.mesura-code/userdata/state.sqlite', { readonly: true }).run(\"VACUUM INTO '.t3/userdata/state.sqlite'\")"
+  node -e "new (require('node:sqlite').DatabaseSync)(process.env.HOME + '/.mesura-code/userdata/state.sqlite', { readOnly: true }).exec(\"VACUUM INTO '.t3/userdata/state.sqlite'\")"
   ```
 
-  A plain `cp` is only safe when no server has the source open, and must bring the `-wal` and `-shm` siblings along. A live file copy is a corrupt copy.
+  A plain `cp` is only safe when no server has the source open, and must bring the `-wal` and `-shm` siblings along. A live file copy is a corrupt copy. The copy is several gigabytes: make it once per worktree, never while a typecheck or test run is going.
 
-- Bring `secrets` and `settings.json` only if the flow under test needs them.
+- Bring `secrets`, `settings.json` and `attachments/` only if the flow under test needs them.
 - Copy in, never symlink. Data flows one way: into your sandbox, never back out.
 
 ## Verifying
 
-- Smallest proof that the change works. `vp test run <files>` for the tests you touched, targeted lint and typecheck for the scope you changed.
+- Smallest proof that the change works. `vp test run <files>` for the tests you touched, then the [Deterministic Checks](#deterministic-checks) for the change.
 - Test meaningful logic or observable behavior. Do not render components to static markup to assert props or attributes, or add tests that merely assert callback wiring or mirror the implementation.
 - **Do not run repo-wide checks.** No `vp check`, no `vp run -r test`, no `vp run -r typecheck` unless I ask. CI owns the full suite.
-- **`pnpm test` can take the machine down, and this is measured, not theoretical.** The root config's `test.maxWorkers` reaches only `apps/server`, because it is the one package that composes the root config; `apps/web`, `apps/desktop` and `infra/relay` each open their own default-sized pool. A full run reached load 38 with swap fully exhausted and had to be killed. If a full run is genuinely asked for, run it package by package with an explicit bound — `vp test run --max-workers=3` from inside each package — and never in parallel with another. Tracked as issue #3.
+- **`pnpm test` can take the machine down, and this is measured, not theoretical.** The root config's `test.maxWorkers` reaches only `apps/server`, because it is the one package that composes the root config; `apps/web`, `apps/desktop` and `infra/relay` each open their own default-sized pool. A full run reached load 38 with swap fully exhausted and had to be killed. If a full run is genuinely asked for, a skill's Harden step included, run it package by package with an explicit bound — `vp test run --max-workers=3` from inside each package — and never in parallel with another, `pnpm -r test` included. Tracked as issue #3.
 - Backend behavior changes ship with focused tests for that behavior.
 - The server is event-sourced and its async flows emit typed receipts. Wait on receipts and worker drains, never on sleeps or polling. A test that needs a timeout to pass is wrong.
 - **Verify a user-visible frontend change before reporting it done**, so what reaches the developer differs on taste rather than on whether it works. The preview tool needs no permission and shows nothing on screen with `open: false`. Its automation channel does not reach Mesura Code's own web app today (issue #36); until it does, this app's own UI is proved by targeted tests plus the instance below. `test-t3-app` sets the client up. Anything a phone shows gets one more look at a phone's viewport in the headless browser (Playwright's `devices['Pixel 7']`), because the phone is a primary surface.
-- **Then leave that instance running.** `vp run dev` in the background, handing over the pairing URL with its token — the developer tests from a browser, so that is the default. When only the desktop shell shows the change, do every step up to the window and hand over the exact command; opening a window is theirs to run. Stop only what you started, by the PID you captured.
+- **Then leave that instance running** under the workload runner (see Dev servers), handing over the pairing URL with its token — the developer tests from a browser, so that is the default. When only the desktop shell shows the change, do every step up to the window and hand over the exact command; opening a window is theirs to run. Stop only what you started, by the unit name or the PID you captured.
 - Subagents do not launch their own dev servers. A headed browser still needs asking — Playwright `--headed` and headed chrome-devtools put windows on the developer's desktop, which the preview tool never does.
+
+## Deterministic Checks
+
+The change gate for `/seal`, `/code-review`, sf-team Checks nodes and ad-hoc review. Substitute `<base>` with the commit the change diffs against: the parent of one reviewed commit, or `<oldest>^` for a range. Without it the script compares against the merge base with `origin/dev`, untracked files included.
+
+```bash
+node scripts/mesura-checks.ts fmt <base>
+node scripts/mesura-checks.ts lint <base>
+node scripts/mesura-checks.ts typecheck <base>
+node scripts/mesura-checks.ts knip
+```
+
+Each line runs alone in a fresh shell, finds `vp` and Node 24 itself, and writes nothing. Exit 0 is clean, 1 is a finding, 2 is a tooling failure: report it and continue. Lint reports errors anywhere in a changed file and warnings only on changed lines. Typecheck covers each package that owns a changed file plus its workspace dependents, one package at a time under the host-wide `/tmp/mesura-typecheck.lock`. `knip` is repository-wide by nature and is the first step of CI's `Check` job. No rule is advisory. Tests are not part of this gate.
+
+## Full-Project Checks
+
+The repository gate for `/tech-debt` and audits, mirroring CI's `Check` job. Run every line even when one fails.
+
+```bash
+node scripts/mesura-checks.ts knip
+node scripts/mesura-checks.ts fmt --all
+node scripts/mesura-checks.ts lint --all
+node scripts/mesura-checks.ts typecheck --all
+```
 
 ## Pull requests
 

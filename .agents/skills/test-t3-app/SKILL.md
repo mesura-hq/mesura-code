@@ -1,6 +1,6 @@
 ---
 name: test-t3-app
-description: Launch, retain, and test the Mesura Code web app in isolated development environments, including first-try browser authentication with one-time pairing URLs, pairing-token recovery, worktree-safe state directories, cross-turn dev server lifecycle, and direct SQLite inspection or fixture seeding. Use when an agent needs to run T3 locally, iteratively test UI behavior with a human, recover from an expired or consumed pairing token, isolate dev state, or prepare test data in state.sqlite.
+description: Launch, retain, and test the Mesura Code web app in isolated development environments, including a paired headless browser for desktop and phone checks, first-try browser authentication with one-time pairing URLs, pairing-token recovery, worktree-safe state directories, cross-turn dev server lifecycle, and direct SQLite inspection or fixture seeding. Use when an agent needs to run T3 locally, screenshot or drive its UI headless, iteratively test UI behavior with a human, recover from an expired or consumed pairing token, isolate dev state, or prepare test data in state.sqlite.
 ---
 
 # Test T3 App
@@ -14,7 +14,7 @@ Use this skill for the web client, including the phone-sized checks this fork re
    - Use the repository's ignored `.t3` directory for reusable worktree-local state.
    - Use `mktemp -d /tmp/t3code-test.XXXXXX` for disposable state and retain the printed absolute path.
 3. Start the full web stack with `vp run dev`. Add `--share` when the user needs to open it from another tailnet device. In a linked worktree it defaults to that worktree's gitignored `.t3`; pass `--home-dir <base-dir>` only when the test needs a different isolated directory.
-4. Keep the terminal session alive and read the selected server port, web port, base directory, and pairing URL from its output.
+4. Run it so it outlives your turn: under the host's workload runner (`mesura-agent-service <name> --memory 3G -- vp run dev` on vigilia hosts), never `&` or `nohup`. Read the selected server port, web port, base directory, and pairing URL from its output (`journalctl --user -u mesura-workload-<name>`).
 
 Treat a base directory as disposable only when it was created or deliberately selected for the current test. Never delete or directly seed the shared `~/.t3` directory. Prefer starting with a new temporary base directory over clearing state of uncertain ownership.
 
@@ -52,9 +52,24 @@ Treat the overall testing or implementation loop—not an assistant turn or one 
 
 Keep pairing URLs out of screenshots, committed files, and durable logs. When the user asked for a shared environment, the deliverable IS the full pairing URL — paste it in your reply, token and all; a bare origin is useless to them. A pairing token is short-lived and single-use; opening the URL in another browser or opening it twice can consume it, so never open a URL you handed to the user.
 
+## Drive the app in a headless browser
+
+Use the repository's harness instead of writing a Playwright script from scratch. It resolves a Chromium headless shell, mints its own pairing token, pairs once into the worktree's `.t3/browser-profile` (it survives reboots), and opens the app in the dark theme at desktop size or as a Pixel 7.
+
+- Screenshot: `node scripts/mesura-browser.ts shot <route> <file.png> [--device phone] [--theme light] [--selector <css>]`. Prefer `--selector`: a crop costs a fraction of a full-page PNG in context.
+- Interactions: write a script that imports `openMesuraPage` from `<repo>/scripts/lib/mesura-browser.ts` and returns `{ page, context, origin, close }`. One process may hold the profile at a time.
+- Open a thread by its route (`/<environmentId>/<threadId>`), not by its position in the sidebar: list order drifts.
+
+Traps that produced false verdicts before:
+
+- **Keyboard criteria:** only the entry point may be focused with `locator.focus()`. Every later move must be a real key press, or the probe skips the route it claims to test.
+- **Shifted symbols:** `page.keyboard.press("Shift+/")` sends key `/` with `shiftKey`, which no keyboard produces. Press the glyph: `press("?")`.
+- **Pixels over styles:** assert visual changes on a screenshot, in the dark theme. A computed-style check once passed a focus ring that Chromium drew in system blue.
+- **Shadow roots:** the file tree's rows are inside a shadow root, so `innerText` misses them. Use role locators (`getByRole("treeitem")`).
+
 ## Recover a consumed or expired pairing token
 
-Run `node apps/server/src/bin.ts pair` from the repository root. It discovers the running dev server (worktree `.t3` first, same precedence as the dev runner) and prints a fresh `Pair URL` against the server's current web origin, including a `--share` tailnet origin. Pass `--base-dir <base-dir>` only when the server was started with `--home-dir`, using the identical path.
+Run `node apps/server/src/bin.ts pair` from the repository root. It discovers the running dev server (worktree `.t3` first, same precedence as the dev runner) and prints a fresh `Pairing URL` against the server's current web origin, including a `--share` tailnet origin. Pass `--base-dir <base-dir>` only when the server was started with `--home-dir`, using the identical path.
 
 Tokens from `pair` carry standard client scopes. The startup pairing URL carries admin scopes; if the user needs Settings → Connections management (`access:write`), restart the server and hand over the new startup URL instead.
 
