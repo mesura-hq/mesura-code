@@ -9,10 +9,10 @@
  *   const { page, close } = await openMesuraPage({ route: "/", device: "phone" });
  *   try { ... } finally { await close(); }
  *
- * - The profile lives in the worktree's gitignored `.t3/browser-profile`, so the
+ * - The profile lives in the worktree's gitignored home (`browser-profile`), so the
  *   pairing survives a reboot that clears `/tmp`. One process may hold it at a time.
  * - Pairing mints its own token with `apps/server/src/bin.ts pair --base-dir`, against
- *   this worktree's `.t3` unless `baseDir` names another isolated home. Without the
+ *   this worktree's home unless `baseDir` names another isolated home. Without the
  *   flag `pair` falls back to the shared home, which is the developer's live install.
  * - `theme` sets the browser's `prefers-color-scheme`. Dark is the default because it
  *   is the developer's; an appearance saved in the app's settings still wins over it.
@@ -22,6 +22,9 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { resolveWorktreeT3Home } from "@t3tools/shared/devHome";
+import * as Effect from "effect/Effect";
 import { type BrowserContext, type Page, chromium, devices } from "playwright-core";
 
 import { toolchainEnvironment } from "./mesura-toolchain.ts";
@@ -41,7 +44,10 @@ export interface OpenMesuraPageOptions {
    * its URL on this origin. Defaults to the origin last paired for `baseDir`.
    */
   readonly origin?: string;
-  /** The dev server's home, when it was started with `--home-dir`. Defaults to `<repo>/.t3`. */
+  /**
+   * The dev server's home, when it was started with `--home-dir`. Defaults to the
+   * linked worktree's own home; the main checkout has none, so it needs this.
+   */
   readonly baseDir?: string;
 }
 
@@ -53,8 +59,18 @@ export interface MesuraPage {
 }
 
 const repositoryRoot = NodePath.resolve(import.meta.dirname, "..", "..");
-const defaultBaseDir = NodePath.join(repositoryRoot, ".t3");
-const profileDirectory = NodePath.join(repositoryRoot, ".t3", "browser-profile");
+/**
+ * The linked worktree's own home, resolved by the same helper as the dev runner
+ * and `pair`, so the three cannot disagree. `undefined` in the main checkout.
+ */
+const worktreeHome = await Effect.runPromise(
+  resolveWorktreeT3Home(repositoryRoot).pipe(Effect.provide(NodeServices.layer)),
+);
+/** Browser state lives beside the worktree home, or in `/tmp` for the main checkout. */
+const profileDirectory = NodePath.join(
+  worktreeHome ?? NodeOS.tmpdir(),
+  worktreeHome === undefined ? "mesura-browser-profile" : "browser-profile",
+);
 /** Last paired origin per base directory, so a second isolated server is not confused with the first. */
 const originsFile = NodePath.join(profileDirectory, "mesura-origins.json");
 const PAIR_TIMEOUT_MS = 30_000;
@@ -179,7 +195,13 @@ async function openWithExistingSession(page: Page, url: string): Promise<boolean
 
 export async function openMesuraPage(options: OpenMesuraPageOptions = {}): Promise<MesuraPage> {
   const route = options.route ?? "/";
-  const baseDir = NodePath.resolve(options.baseDir ?? defaultBaseDir);
+  const chosenBaseDir = options.baseDir ?? worktreeHome;
+  if (chosenBaseDir === undefined) {
+    throw new Error(
+      "outside a linked worktree there is no isolated home to pair with: pass baseDir (--base-dir)",
+    );
+  }
+  const baseDir = NodePath.resolve(chosenBaseDir);
   NodeFS.mkdirSync(profileDirectory, { recursive: true });
   const context = await launchContext(options);
   try {
