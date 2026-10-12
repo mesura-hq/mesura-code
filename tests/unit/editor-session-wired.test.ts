@@ -99,7 +99,7 @@ it("provides the editor session manager to the server", () => {
   );
   assert.match(
     server,
-    /Layer\.mergeAll\([^)]*EditorSessionLayerLive/s,
+    /Layer\.mergeAll\([^)]*layerEditorSession/s,
     "the editor session layer is built and not merged into the server's layer: every editor call then fails at runtime on a server that started cleanly",
   );
 });

@@ -174,7 +174,7 @@ vi.mock("./state/query", () => ({
 vi.mock("./state/threads", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./state/threads")>();
   const { EMPTY_ENVIRONMENT_THREAD_STATE } = await import("@t3tools/client-runtime/state/threads");
-  const { Atom } = await import("effect/unstable/reactivity");
+  const { Atom } = await import("effect/reactivity");
   return {
     ...actual,
     useEnvironmentThread: () => EMPTY_ENVIRONMENT_THREAD_STATE,
@@ -187,7 +187,7 @@ vi.mock("./state/threads", async (importOriginal) => {
 });
 vi.mock("./state/projects", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./state/projects")>();
-  const { Atom } = await import("effect/unstable/reactivity");
+  const { Atom } = await import("effect/reactivity");
   return {
     ...actual,
     environmentProjects: {
@@ -247,7 +247,7 @@ vi.mock("@t3tools/client-runtime/state/attachments", async (importOriginal) => (
 // The toggle ships unbound; this fixture binds it the way a user's keybindings file would.
 vi.mock("./state/server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./state/server")>();
-  const { Atom } = await import("effect/unstable/reactivity");
+  const { Atom } = await import("effect/reactivity");
   const { compileResolvedKeybindingsConfig, mergeWithDefaultKeybindings } =
     await import("@t3tools/shared/keybindings");
   return {

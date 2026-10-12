@@ -1,5 +1,5 @@
 import type { HostStatsMesuraServers } from "@t3tools/contracts";
-import { HostProcessPlatform, HostProcessUserId } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { DEFAULT_STATE_HOME_DIR_NAME } from "@t3tools/shared/stateHome";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -140,7 +140,7 @@ export const make = Effect.fn("makeMesuraServerDiscovery")(function* (
 ) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const platform = yield* HostProcessPlatform;
+  const platform = yield* HostProcess.Platform;
 
   const selfCount: HostStatsMesuraServers = options.self.dev
     ? { installed: 0, dev: 1 }
@@ -277,7 +277,7 @@ export const layer = Layer.effect(
   MesuraServerDiscovery,
   Effect.gen(function* () {
     const config = yield* ServerConfig;
-    const uid = yield* HostProcessUserId;
+    const uid = yield* HostProcess.UserId;
     return yield* make({
       procRoot: "/proc",
       registryDirectories:

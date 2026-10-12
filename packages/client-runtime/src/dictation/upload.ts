@@ -1,5 +1,5 @@
 import type { DictationJobId, EnvironmentId } from "@t3tools/contracts";
-import type { AtomRegistry } from "effect/unstable/reactivity";
+import type { AtomRegistry } from "effect/reactivity";
 
 import {
   deletePendingAttachmentUpload,

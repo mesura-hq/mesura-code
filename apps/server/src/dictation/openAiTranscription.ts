@@ -2,7 +2,7 @@ import * as Config from "effect/Config";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Schedule from "effect/Schedule";
-import { HttpClient, HttpClientError, HttpClientRequest } from "effect/unstable/http";
+import { HttpClient, HttpClientError, HttpClientRequest } from "effect/http";
 
 export const OPENAI_TRANSCRIPTION_URL = "https://api.openai.com/v1/audio/transcriptions";
 
@@ -90,7 +90,7 @@ export const makeOpenAiTranscription: Effect.Effect<
   HttpClient.HttpClient
 > = Effect.gen(function* () {
   const client = yield* HttpClient.HttpClient;
-  const transcriptionUrl = yield* Config.string(OPENAI_TRANSCRIPTION_URL_ENV).pipe(
+  const transcriptionUrl = yield* Config.String(OPENAI_TRANSCRIPTION_URL_ENV).pipe(
     Config.withDefault(OPENAI_TRANSCRIPTION_URL),
     Effect.orElseSucceed(() => OPENAI_TRANSCRIPTION_URL),
   );

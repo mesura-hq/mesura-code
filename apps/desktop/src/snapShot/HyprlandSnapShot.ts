@@ -29,7 +29,8 @@ function hyprlandCaptureBinding(appId: string, lua: boolean): string {
 /** Omarchy owns its defaults; instructions always point at a user-owned config. */
 export async function hyprlandCaptureShortcut(
   appId: string,
-  configHome = process.env.XDG_CONFIG_HOME || NodePath.join(NodeOS.homedir(), ".config"),
+  home: string,
+  configHome = process.env.XDG_CONFIG_HOME || NodePath.join(home, ".config"),
 ) {
   const directory = NodePath.join(configHome, "hypr");
   const exists = async (name: string) =>
@@ -95,7 +96,7 @@ export class HyprlandCaptureSetup {
       const bundle = await regularFile(this.paths.bundle);
       if (!bundle)
         throw new Error(
-          "The Hyprland capture helper is missing from this build. Update or reinstall T3 Code.",
+          "The Hyprland capture helper is missing from this build. Update or reinstall Mesura Code.",
         );
       if (!installed.equals(bundle))
         return {

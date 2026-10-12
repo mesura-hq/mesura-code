@@ -6,7 +6,7 @@ import type {
 } from "@t3tools/client-runtime/state/agent-thread-search";
 import { composeAgentSearchDescription } from "@t3tools/client-runtime/state/agent-thread-search-presentation";
 import { THREAD_SEARCH_DESCRIPTION_MAX_LENGTH, type EnvironmentId } from "@t3tools/contracts";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import {
   createContext,
   type ReactNode,

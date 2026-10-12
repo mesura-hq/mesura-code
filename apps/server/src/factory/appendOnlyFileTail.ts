@@ -25,7 +25,7 @@ import type * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
-import { isHostWindows } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 
 /** The most bytes one read takes; a caller loops while `more` is set. */
 export const TAIL_READ_MAX_BYTES = 1024 * 1024;
@@ -107,7 +107,7 @@ export const makeAppendOnlyFileTail = Effect.fn("makeAppendOnlyFileTail")(functi
 ): Effect.fn.Return<AppendOnlyFileTail, never, Scope.Scope> {
   // Not on Windows, where an open file can hold up its replacement and NTFS
   // does not reuse file IDs promptly. Off too once the scope has closed.
-  let holdsFile = !(yield* isHostWindows);
+  let holdsFile = !(yield* HostProcess.isWindows);
   let held: OpenFile | null = null;
   let offset = 0;
   // Bytes after the last newline, kept as bytes so a character split across
@@ -235,7 +235,7 @@ export const watchAppendOnlyFile = Effect.fn("watchAppendOnlyFile")(function* (
   // Keeps the watched directory's inode number from passing to its successor.
   // Not on Windows, where an open directory can hold up its deletion and NTFS
   // does not reuse file IDs promptly.
-  const holdsDirectory = !(yield* isHostWindows);
+  const holdsDirectory = !(yield* HostProcess.isWindows);
   let heldDirectory: number | null = null;
 
   const directoryInode = () => {

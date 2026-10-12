@@ -3,10 +3,11 @@ import { ProjectId, type OrchestrationProjectShell } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import * as GitHubCli from "../sourceControl/GitHubCli.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
+import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import * as GitHubIssueCli from "./GitHubIssueCli.ts";
 import { listIssues, readIssueDetail, resolveIssueReference } from "./readIssues.ts";
 
 const projectId = ProjectId.make("issue-project");
@@ -46,15 +47,38 @@ function summaryNumbered(number: number) {
   return { ...summary, number, url: `https://github.com/acme/app/issues/${number}` };
 }
 
+/**
+ * The V2 project store returns shells without enrichment; the repository
+ * identity comes from the resolver, so the fixture's identity is served there.
+ */
+function mockProject(
+  getShell: (id: ProjectId) => Effect.Effect<Option.Option<OrchestrationProjectShell>>,
+) {
+  let identity: OrchestrationProjectShell["repositoryIdentity"] = null;
+  return Layer.mergeAll(
+    Layer.mock(ProjectStore.ProjectStoreV2)({
+      getShell: (id) =>
+        getShell(id).pipe(
+          Effect.tap((shell) =>
+            Effect.sync(() => {
+              identity = Option.isSome(shell) ? (shell.value.repositoryIdentity ?? null) : null;
+            }),
+          ),
+        ),
+    }),
+    Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({
+      resolve: () => Effect.sync(() => identity ?? null),
+    }),
+  );
+}
+
 function mockReads(input: {
   project?: Option.Option<OrchestrationProjectShell>;
-  execute: GitHubCli.GitHubCli["Service"]["execute"];
+  execute: GitHubIssueCli.GitHubIssueCli["Service"]["execute"];
 }) {
   return Layer.mergeAll(
-    Layer.mock(ProjectionSnapshotQuery)({
-      getProjectShellById: () => Effect.succeed(input.project ?? Option.some(project)),
-    }),
-    Layer.mock(GitHubCli.GitHubCli)({ execute: input.execute }),
+    mockProject(() => Effect.succeed(input.project ?? Option.some(project))),
+    Layer.mock(GitHubIssueCli.GitHubIssueCli)({ execute: input.execute }),
   );
 }
 
@@ -208,9 +232,8 @@ it.effect("preserves GitHub authentication errors", () =>
         mockReads({
           execute: () =>
             Effect.fail(
-              new GitHubCli.GitHubCliAuthenticationError({
-                cwd: "/repo",
-                command: "gh",
+              new GitHubIssueCli.GitHubIssueCliError({
+                failure: "authentication",
                 cause: new Error("auth"),
               }),
             ),
@@ -222,12 +245,12 @@ it.effect("preserves GitHub authentication errors", () =>
   }),
 );
 
-type ExecuteInput = Parameters<GitHubCli.GitHubCli["Service"]["execute"]>[0];
+type ExecuteInput = Parameters<GitHubIssueCli.GitHubIssueCli["Service"]["execute"]>[0];
 
 const repositoryOutput = () =>
   output({ nameWithOwner: "acme/app", url: "https://github.com/acme/app" });
 
-const forbidGitHub: GitHubCli.GitHubCli["Service"]["execute"] = () => {
+const forbidGitHub: GitHubIssueCli.GitHubIssueCli["Service"]["execute"] = () => {
   throw new Error("Must not call GitHub");
 };
 
@@ -270,14 +293,13 @@ it.effect("reads issue detail from the requested project's trusted repository", 
     yield* readIssueDetail({ projectId, number: 42 }).pipe(
       Effect.provide(
         Layer.mergeAll(
-          Layer.mock(ProjectionSnapshotQuery)({
-            getProjectShellById: (id) =>
-              Effect.sync(() => {
-                requestedProjects.push(id);
-                return Option.some(project);
-              }),
-          }),
-          Layer.mock(GitHubCli.GitHubCli)({
+          mockProject((id) =>
+            Effect.sync(() => {
+              requestedProjects.push(id);
+              return Option.some(project);
+            }),
+          ),
+          Layer.mock(GitHubIssueCli.GitHubIssueCli)({
             execute: (input) => {
               calls.push(input);
               return input.args[0] === "repo"
@@ -456,22 +478,22 @@ it.effect("returns a readable error for a malformed GitHub repository lookup", (
 const gitHubCliFailures = [
   {
     name: "an unavailable GitHub CLI",
-    error: new GitHubCli.GitHubCliUnavailableError({ cwd: "/repo", command: "gh", cause: null }),
+    error: new GitHubIssueCli.GitHubIssueCliError({ failure: "unavailable", cause: null }),
     remedy: /not available on PATH/,
   },
   {
     name: "a GitHub rate limit",
-    error: new GitHubCli.GitHubCliRateLimitError({ cwd: "/repo", command: "gh", cause: null }),
+    error: new GitHubIssueCli.GitHubIssueCliError({ failure: "rate-limited", cause: null }),
     remedy: /rate limit/,
   },
   {
     name: "missing GitHub authentication",
-    error: new GitHubCli.GitHubCliAuthenticationError({ cwd: "/repo", command: "gh", cause: null }),
+    error: new GitHubIssueCli.GitHubIssueCliError({ failure: "authentication", cause: null }),
     remedy: /gh auth login/,
   },
   {
     name: "a failed GitHub command",
-    error: new GitHubCli.GitHubCliCommandError({ cwd: "/repo", command: "gh", cause: null }),
+    error: new GitHubIssueCli.GitHubIssueCliError({ failure: "command-failed", cause: null }),
     remedy: /GitHub CLI command failed/,
   },
 ] as const;

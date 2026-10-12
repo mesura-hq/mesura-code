@@ -91,11 +91,10 @@ export function resolveDesktopLinuxIdentity(isDevelopment: boolean) {
  * upstream's older `T3 Code (Alpha)`, would hand both applications the same
  * directory again and restore the collision this exists to remove.
  *
- * Equal names leave `resolveUserDataPath` probing a directory it returns
- * either way. The probe cannot change the result, but it can still fail: an
- * unreadable userData directory surfaces as a boot-time
- * `DesktopUserDataPathResolutionError` rather than a window. That trade keeps
- * the upstream resolver untouched, and the error names the real problem.
+ * Equal names leave `resolveUserDataPath` (apps/desktop/src/app/DesktopUserData.ts)
+ * probing a directory it returns either way. The probe cannot change the
+ * result, but it can still fail: an unreadable userData directory surfaces as
+ * a boot-time `DesktopUserDataInitializationError` rather than a window.
  */
 export const DESKTOP_USER_DATA_IDENTITY = {
   development: {

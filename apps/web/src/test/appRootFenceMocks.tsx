@@ -171,7 +171,7 @@ export function mockAtomQueryRunner() {
 
 /** The chords the app ships, as a keybindings file with no user rules resolves them. */
 export async function mockServer(importOriginal: ImportOriginal<typeof import("../state/server")>) {
-  const { Atom } = await import("effect/unstable/reactivity");
+  const { Atom } = await import("effect/reactivity");
   const { DEFAULT_RESOLVED_KEYBINDINGS } = await import("@t3tools/shared/keybindings");
   return {
     ...(await importOriginal()),

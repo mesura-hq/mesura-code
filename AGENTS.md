@@ -8,7 +8,7 @@ The product is a minimal GUI for coding agents. A Node WebSocket server wraps pr
 
 Be accurate about the difference, because most of this repository's engineering judgement follows from it.
 
-**T3 Code** is a large open source project: Theo, Julius and a substantial community build it, it has over 200,000 users, its roadmap and code are public, and many of those users run forks of their own.
+**T3 Code** is a large open source project: Theo, Julius and a substantial community build it, it has over 400,000 users, its roadmap and code are public, and many of those users run forks of their own.
 
 **Mesura Code** has none of that. It is a single person's fork, with no users but its author. Whether its code is public changes nothing here: nobody else builds it, uses it or steers it. It exists to fit one specific workflow, not to compete with upstream and not to diverge from it. Nothing in this repository should claim otherwise — no user counts, no community, no public roadmap, no contribution process.
 
@@ -39,7 +39,7 @@ Where this fork already differs from upstream is listed in `.factory/` and in th
 - **Never run bare `pnpm test`** — it exhausts the machine's RAM. Run per package, serially, with `--max-workers`. Watch the path depth: `apps/*` and `packages/*` need `../../node_modules`, but `tests/` and `scripts/` need `../node_modules`. With the wrong depth the command prints nothing and reads as a pass.
 - **gitleaks does not scan merge commits.** Pointing it at one reports `0 commits scanned` and `no leaks found`, which reads as a pass. Scan the upstream range instead, which is where the content came from.
 
-**Pin upstream's facts, do not delete them.** Where our own text has to restate something upstream asserts — a user count, a supported platform, a version — attribute it to T3 rather than dropping it. Then upstream changing that fact is a one-line conflict that shows up, instead of a stale claim that never does. This is how the first sync caught the user count moving from 100,000 to 200,000.
+**Pin upstream's facts, do not delete them.** Where our own text has to restate something upstream asserts — a user count, a supported platform, a version — attribute it to T3 rather than dropping it. Then upstream changing that fact is a one-line conflict that shows up, instead of a stale claim that never does. This is how the first sync caught the user count moving from 100,000 to 200,000; the next one caught it at 400,000.
 
 **A guard may not pin a number that is upstream's to change.** Assert a floor and assert that the suite is green; never an exact count. The first sync broke a guard that pinned upstream's contract-test total at 257 when upstream added one test — everything was green and the guard still failed. See `tests/unit/symmetria-phase-one.test.ts`.
 
@@ -133,6 +133,7 @@ The most common defect in this repo is a change that works on the path you teste
 - **Entry points.** A behavior reachable from the chat view is usually also reachable from Settings, the command palette, a keybinding, and the right panel's surface launcher. Fixing one is not fixing the feature.
 - **Clients.** Web, desktop (wraps web, adds Electron shell/IPC), and the web app at a phone's width. Shared logic lives in `packages/client-runtime`. There is no native mobile client: never write a native version of a feature.
 - **Providers.** Codex, Claude, Cursor, Grok, OpenCode, and Antigravity each have an adapter. Provider-shaped features need a decision per adapter, even if the decision is "not supported here".
+- **Agents.** A capability a user can trigger is usually one an agent should reach through MCP tools, and scheduled tasks run the same paths. That only works when it is a service method, not handler code.
 - **Contracts.** Anything crossing the wire is typed in `packages/contracts`. Change the schema and the server, web, and desktop all follow.
 - **Reverse states.** If you added a way in, add the way out and the way to see it. Snooze needs unsnooze. Close needs reopen. A one-way door is a bug.
 - **Connection modes.** Local, remote/relay, and tunnel behave differently. Multi-device and multi-environment cases are real.
@@ -164,6 +165,7 @@ An empty database is a bad test. Seed your worktree's `.t3` with a copy of real 
   A plain `cp` is only safe when no server has the source open, and must bring the `-wal` and `-shm` siblings along. A live file copy is a corrupt copy. The copy is several gigabytes: make it once per worktree, never while a typecheck or test run is going.
 
 - Bring `secrets`, `settings.json` and `attachments/` only if the flow under test needs them.
+- The orchestrator database is `statev2.sqlite`. The server builds it from `state.sqlite` only when `statev2.sqlite` is missing, so once the source home has a `statev2.sqlite`, snapshot that file instead, the same way. `vp run migrate-dev-db` does this for you with your dev server stopped; never point its source at `~/.t3`.
 - Copy in, never symlink. Data flows one way: into your sandbox, never back out.
 
 ## Verifying
@@ -173,7 +175,7 @@ An empty database is a bad test. Seed your worktree's `.t3` with a copy of real 
 - **Do not run repo-wide checks.** No `vp check`, no `vp run -r test`, no `vp run -r typecheck` unless I ask. CI owns the full suite. The exceptions are the gates below: `knip` in [Deterministic Checks](#deterministic-checks), and [Full-Project Checks](#full-project-checks) when `/tech-debt` or an audit runs them.
 - **`pnpm test` can take the machine down, and this is measured, not theoretical.** The root config's `test.maxWorkers` reaches only `apps/server`, because it is the one package that composes the root config; `apps/web`, `apps/desktop` and `infra/relay` each open their own default-sized pool. A full run reached load 38 with swap fully exhausted and had to be killed. If a full run is genuinely asked for, a skill's Harden step included, run it package by package with an explicit bound — `vp test run --max-workers=3` from inside each package — and never in parallel with another, `pnpm -r test` included. Tracked as issue #3.
 - Backend behavior changes ship with focused tests for that behavior.
-- The server is event-sourced and its async flows emit typed receipts. Wait on receipts and worker drains, never on sleeps or polling. A test that needs a timeout to pass is wrong.
+- The server is event-sourced, and side effects run after the command commits. In tests, drain the effect worker (`OrchestrationEffectWorkerV2.drain`) or await the specific persisted event or `Deferred` that marks the milestone. Never wait on sleeps or polling. A test that needs a timeout to pass is wrong.
 - **Verify a user-visible frontend change before reporting it done**, so what reaches the developer differs on taste rather than on whether it works. The preview tool needs no permission and shows nothing on screen with `open: false`. Its automation channel does not reach Mesura Code's own web app today (issue #36); until it does, this app's own UI is proved by targeted tests plus the instance below. `test-t3-app` sets the client up. Anything a phone shows gets one more look at a phone's viewport in the headless browser (Playwright's `devices['Pixel 7']`), because the phone is a primary surface.
 - **Then leave that instance running** under the workload runner (see Dev servers), handing over the pairing URL with its token — the developer tests from a browser, so that is the default. When only the desktop shell shows the change, do every step up to the window and hand over the exact command; opening a window is theirs to run. Stop only what you started, by the unit name or the PID you captured.
 - Subagents do not launch their own dev servers. A headed browser still needs asking — Playwright `--headed` and headed chrome-devtools put windows on the developer's desktop, which the preview tool never does.
@@ -210,7 +212,7 @@ node scripts/mesura-checks.ts typecheck --all
 - Body: the problem in a sentence or two, then how you fixed it. End with the model and harness that did the work.
 - UI changes need before/after images. Motion or timing needs a short video.
 - Upload PR evidence to GitHub. Never commit PR-only screenshots or assets such as `.github/pr-assets/`.
-- One concern per PR. If the description says "also", split it.
+- One request is one PR. Split it only when the maintainer asks. Outside contributions follow the stricter [one problem per PR](CONTRIBUTING.md#one-problem) rule.
 - When babysitting: poll checks and comments newer than the last push, verify each bot finding against the source, fix real ones, dismiss false positives with a written reason. Stay quiet when nothing is new. Stop when the bots are green on the latest commit.
 
 ## Documentation
@@ -234,13 +236,13 @@ Most code changes do not need an internal documentation change. Agents can read 
 
 ## How it works
 
-Clients send typed WebSocket requests. The server turns them into _commands_, a pure _decider_ turns commands into persisted _events_, and a _projector_ derives the read model the UI renders. Provider CLIs run as subprocesses; per-provider _adapters_ translate their native protocols into orchestration events. Side effects run in queue-backed _reactors_ that emit _receipts_ when milestones land. Each turn ends with a _checkpoint_, a hidden git ref, so the app can diff and restore.
+Clients send typed WebSocket requests. The server turns them into _commands_. The _orchestrator_ (`apps/server/src/orchestration-v2/Orchestrator.ts`) serializes commands and decides _events_ without doing any I/O. The _event sink_ commits those events, the _projections_ the UI reads, the _command receipt_, and _outbox_ effects in one transaction. The _effect worker_ then runs the effects, such as starting a provider turn or capturing a checkpoint, and feeds results back as commands. Provider CLIs run as subprocesses; per-provider _adapters_ translate their native protocols into orchestration events. Each turn ends with a _checkpoint_, a hidden git ref, so the app can diff and restore.
 
-Full glossary with file links: `docs/internals/glossary.md`
+Architecture and its constraints: `docs/internals/overview.md`. Glossary: `docs/internals/glossary.md`
 
 ## Where code lives
 
-- `apps/server` - WebSocket, orchestration, providers, checkpointing. Effect-heavy: read `.repos/effect-smol/LLMS.md` before writing Effect code.
+- `apps/server` - WebSocket, orchestration, providers, checkpointing. Effect-heavy: read [Effect services](docs/internals/effect-services.md) before adding server code, and `.repos/effect-smol/LLMS.md` for the Effect library itself.
 - `apps/web` - React/Vite UI, also the phone client. `apps/desktop` wraps it.
 - `apps/marketing` - **upstream's** public site, including the Terms of Service, Privacy Policy and Security Policy of T3 Tools, Inc. This fork does not publish any of it. Never rebrand these pages: a privacy policy carrying our name would be a legal document we never wrote, describing services we do not operate.
 - `infra/relay` - **upstream's** T3 Connect relay, which T3 operates and we do not. Same rule as above.
@@ -253,6 +255,9 @@ Full glossary with file links: `docs/internals/glossary.md`
 ## Taste
 
 - Complexity belongs at the adapter boundary. Orchestration stays pure, UI stays dumb.
+- Client mutations use `createEnvironmentRpcCommand`. Add protected methods to `CLIENT_GUARDED_RPC_SCOPES` in contracts and use the command's `permissionAtom` for UI availability. Grants are checked at execution against the destination environment; the server remains authoritative. Keep raw RPC clients inside `rpc/`, and extend the permission behavior tests when adding a protected method.
+- Server features are services; transports stay thin. A `ws.ts` RPC handler, HTTP route, or MCP tool decodes input, calls one service method, and maps errors. See [Effect services](docs/internals/effect-services.md).
+- `apps/web/src/components/ui` exports own their look. Pick a `variant` or `size`; do not restyle one with `className`. If none fits and the look is a generic concept, add a variant to the component; a look that belongs to one feature stays in that feature's own component, not in `components/ui`. Layout classes (width, flex, margin, position) belong on the parent. `shadcn/no-restyle` fails lint on violations. See [Web UI](docs/internals/web-ui.md).
 - Inferred types over annotations. `any` is the enemy.
 - Comments describe how a thing is used, and move when the code moves. To be used mostly to describe functions, not to annotate every line of behavior.
 - This is driven all day, and a dropped frame, a lying spinner and a stale label all get noticed. One user rather than a hundred thousand does not lower the bar — it removes the excuse that someone else would have reported it. No continuously repainting animations; they peg the GPU on high-refresh displays.

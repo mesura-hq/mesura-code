@@ -28,7 +28,7 @@ import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import type { ConnectionCatalogEntry } from "../connection/catalog.ts";

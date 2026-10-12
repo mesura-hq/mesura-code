@@ -123,7 +123,7 @@ vi.mock("~/state/environments", async (importOriginal) => {
 // test keeps the subscription stable while it reports the fixture's capabilities.
 vi.mock("~/state/server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("~/state/server")>();
-  const { Atom } = await import("effect/unstable/reactivity");
+  const { Atom } = await import("effect/reactivity");
   const atoms = new Map<string, unknown>();
   return {
     ...actual,

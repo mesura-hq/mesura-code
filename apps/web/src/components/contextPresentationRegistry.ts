@@ -45,6 +45,14 @@ const DEFINITIONS = [
     capabilities: { details: "tooltip", expanded: "none", defaultDraftView: "compact" },
   },
   {
+    kind: "thread",
+    capabilities: { details: "tooltip", expanded: "none", defaultDraftView: "compact" },
+  },
+  {
+    kind: "environment",
+    capabilities: { details: "tooltip", expanded: "none", defaultDraftView: "compact" },
+  },
+  {
     kind: "dictation",
     capabilities: { details: "none", expanded: "none", defaultDraftView: "compact" },
   },

@@ -6,6 +6,7 @@ import "./index.css";
 // This fork's overrides, after upstream's so a tie on specificity goes to ours.
 import "./mesura.css";
 
+import { prepareProviderAuthDelivery } from "./providerAuthDelivery";
 import { isElectron } from "./env";
 import { hasCloudPublicConfig } from "./cloud/publicConfig";
 import { getRouter } from "./router";
@@ -23,6 +24,8 @@ import { installNativeFocus } from "./keys/nativeFocus";
 installKeyEngine();
 // Mesura: `Tab` no longer walks the tab order (`keys/nativeFocus.ts`).
 installNativeFocus();
+
+prepareProviderAuthDelivery();
 
 // Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
 const history = isElectron ? createHashHistory() : createBrowserHistory();

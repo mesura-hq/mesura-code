@@ -159,7 +159,9 @@ function ExactThreadSearch(props: {
   const items = useThreadCommandItems({
     activeThreadId,
     contentMatchByKey,
-    contentQuery: contentToken ?? "",
+    // The settled query the matches came from, as upstream's palette does, so a
+    // snippet never highlights a token typed after its results.
+    contentQuery: threadSearch.query,
   });
 
   const groups = useMemo(
@@ -223,7 +225,7 @@ function ExactThreadSearch(props: {
         },
       }}
       mode="none"
-      panelClassName="max-h-[min(34rem,76vh)]"
+      panelSize="tall-list"
       testId="thread-search-picker"
       value={query}
       onItemHighlighted={(value) => {

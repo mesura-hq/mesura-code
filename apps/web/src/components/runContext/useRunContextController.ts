@@ -188,7 +188,7 @@ export function useRunContextController(input: RunContextControllerInput) {
       onEnvironmentChange,
       workspaceOptions,
       selectedWorkspace: effectiveEnvMode as string,
-      lockedWorkspaceLabel: resolveLockedWorkspaceLabel(activeWorktreePath),
+      lockedWorkspaceLabel: resolveLockedWorkspaceLabel(activeWorktreePath, effectiveEnvMode),
       onWorkspaceSelect,
       cycleMachineShortcut: shortcutLabelForCommand(keybindings, "runContext.cycleMachine"),
       toggleWorkspaceShortcut: shortcutLabelForCommand(keybindings, "runContext.toggleWorkspace"),

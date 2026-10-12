@@ -14,7 +14,7 @@ import type { FactoryRoutes } from "@t3tools/client-runtime/factory/routes";
 import { useCallback, useMemo, useRef, useState } from "react";
 
 import { newCommandId, newMessageId } from "../lib/utils";
-import { readThread, useThread } from "../state/entities";
+import { readThreadShell, useThreadProjection } from "../state/entities";
 import { useEnvironments } from "../state/environments";
 import { threadEnvironment } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -31,8 +31,8 @@ export function useFactoryPlanApproval(
   threadRef: ScopedThreadRef,
   plan: FactoryPlanActivityPayload,
 ) {
-  const thread = useThread(threadRef);
-  const messages = thread?.messages;
+  const thread = useThreadProjection(threadRef);
+  const messages = thread?.projection.messages;
   const approvals = useMemo(() => findPlanApprovals(messages ?? []), [messages]);
   // The thread changes with every streamed token; keep the state's identity
   // until what it says changes, so the rows below do not re-render.
@@ -51,7 +51,8 @@ export function useFactoryPlanApproval(
   const inFlight = useRef(false);
   const approve = useCallback(
     async (routes: FactoryRoutes) => {
-      const current = readThread(threadRef);
+      // On orchestrator v2, title, model and runtime mode live on the thread shell.
+      const current = readThreadShell(threadRef);
       if (current === null || inFlight.current) return;
       inFlight.current = true;
       setSentDigest(plan.digest);

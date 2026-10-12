@@ -7,10 +7,10 @@ import {
   buildKeybindingCommandOptions,
   buildWhenVariableOptions,
   commandLabel,
+  groupKeybindingRows,
   keybindingConflictLabels,
   keybindingFromKeyboardEvent,
   parseWhenExpressionDraft,
-  resolveKeybindingCapture,
   shortcutToKeybindingInput,
   unknownWhenVariables,
   whenAstToExpression,
@@ -24,6 +24,10 @@ describe("KeybindingsSettings.logic", () => {
       "runContext.toggle",
       "runContext.cycleMachine",
       "runContext.toggleWorkspace",
+      "composer.sendAlternate",
+      "composer.sendBackground",
+      "thread.steerQueuedMessage",
+      "thread.editQueuedMessage",
       "composer.mode",
       "composer.workspace",
       "composer.branch",
@@ -39,6 +43,14 @@ describe("KeybindingsSettings.logic", () => {
       });
     }
   });
+  it("finds the editable shortcut for sending the first queued message", () => {
+    expect(buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS, "first queued")).toContainEqual(
+      expect.objectContaining({
+        command: "thread.steerQueuedMessage",
+        key: "mod+shift+enter",
+      }),
+    );
+  });
   it.each(["pu", "pull request", "copy link", "thread id"])(
     "finds the copy link shortcut with %s",
     (query) => {
@@ -48,6 +60,49 @@ describe("KeybindingsSettings.logic", () => {
       );
     },
   );
+  it("groups rows by command area in page order and drops empty groups", () => {
+    const groups = groupKeybindingRows(buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS, ""));
+    expect(groups.map((group) => group.title)).toEqual([
+      "Navigation",
+      "Threads",
+      "Composer",
+      "Terminal",
+      "Preview & diff",
+      "Appearance",
+      "Other",
+    ]);
+    const composer = groups.find((group) => group.id === "composer");
+    expect(composer?.rows.map((row) => row.command)).toEqual(
+      // Mesura: composer.host ships unbound here, and runContext joins Composer.
+      expect.arrayContaining(["composer.mode", "modelPicker.toggle", "runContext.toggle"]),
+    );
+    expect(groupKeybindingRows(buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS, "split"))).toEqual(
+      [expect.objectContaining({ id: "terminal" })],
+    );
+  });
+  it("orders Usage bindings and command choices like the page", () => {
+    const expected = [
+      "usage.open",
+      "usage.cost",
+      "usage.tokens",
+      "usage.limits",
+      "usage.period.day",
+      "usage.period.week",
+      "usage.period.month",
+      "usage.period.quarter",
+    ];
+    // The order must not depend on the order of the configured bindings.
+    for (const bindings of [
+      DEFAULT_RESOLVED_KEYBINDINGS,
+      DEFAULT_RESOLVED_KEYBINDINGS.toReversed(),
+    ]) {
+      expect(buildKeybindingRows(bindings, "usage").map((row) => row.command)).toEqual(expected);
+      expect(
+        buildKeybindingCommandOptions(bindings).filter((command) => command.startsWith("usage.")),
+      ).toEqual(expected);
+    }
+  });
+
   it("builds searchable rows with readable key and when values", () => {
     const rows = buildKeybindingRows(
       [
@@ -95,6 +150,31 @@ describe("KeybindingsSettings.logic", () => {
         "Win32",
       ),
     ).toBe("mod+shift+k");
+  });
+
+  it.each([
+    ["k", "KeyK", "k"],
+    ["Tab", "Tab", "tab"],
+    ["F5", "F5", "f5"],
+  ])("captures %s without a modifier", (key, code, expected) => {
+    const noModifiers = { metaKey: false, ctrlKey: false, altKey: false, shiftKey: false };
+    expect(keybindingFromKeyboardEvent({ key, code, ...noModifiers }, "MacIntel")).toBe(expected);
+  });
+
+  it("waits for a key when only a modifier is pressed", () => {
+    expect(
+      keybindingFromKeyboardEvent(
+        {
+          key: "Meta",
+          code: "MetaLeft",
+          metaKey: true,
+          ctrlKey: false,
+          altKey: false,
+          shiftKey: false,
+        },
+        "MacIntel",
+      ),
+    ).toBeNull();
   });
 
   it.each([
@@ -205,6 +285,7 @@ describe("KeybindingsSettings.logic", () => {
   it("formats static and project script command labels", () => {
     expect(commandLabel("commandPalette.toggle")).toBe("Command Palette: Toggle");
     expect(commandLabel("themeEditor.toggle")).toBe("Theme Editor: Toggle");
+    expect(commandLabel("view.reopenClosed")).toBe("Reopen Closed Tab");
     expect(commandLabel("script.setup-db.run")).toBe("Run Script: Setup Db");
   });
 
@@ -212,7 +293,15 @@ describe("KeybindingsSettings.logic", () => {
     const options = buildWhenVariableOptions();
 
     expect(options).toEqual(
-      expect.arrayContaining(["terminalFocus", "terminalOpen", "modelPickerOpen", "true", "false"]),
+      expect.arrayContaining([
+        "terminalFocus",
+        "terminalOpen",
+        "isWeb",
+        "isDesktop",
+        "modelPickerOpen",
+        "true",
+        "false",
+      ]),
     );
     expect(options).not.toContain("customModeActive");
   });
@@ -235,14 +324,19 @@ describe("KeybindingsSettings.logic", () => {
     expect(options).toEqual(
       expect.arrayContaining([
         "chat.new",
+        "threadPanel.toggle",
         "rightPanel.toggleMaximized",
+        "composer.cycleHost",
         "thread.stop",
+        "usage.open",
         "script.setup-db.run",
       ]),
     );
-    expect(DEFAULT_RESOLVED_KEYBINDINGS.some((binding) => binding.command === "thread.stop")).toBe(
-      false,
-    );
+    for (const command of ["thread.stop", "composer.cycleHost"]) {
+      expect(DEFAULT_RESOLVED_KEYBINDINGS.some((binding) => binding.command === command)).toBe(
+        false,
+      );
+    }
   });
 
   it("reports unknown when variables without rejecting parseable expressions", () => {
@@ -340,7 +434,10 @@ describe("KeybindingsSettings.logic", () => {
   });
 });
 
-describe("resolveKeybindingCapture", () => {
+// Mesura: the fork's own capture wrapper (bare Tab passed through, plain
+// letters ignored) was superseded by upstream #14548, which records plain keys
+// and Tab while recording. These keep the chords this fork relies on covered.
+describe("keybindingFromKeyboardEvent for the fork's chords", () => {
   const event = (
     key: string,
     modifiers: Partial<
@@ -358,50 +455,17 @@ describe("resolveKeybindingCapture", () => {
     ...modifiers,
   });
 
-  it("lets a bare Tab move focus out of the recording field", () => {
-    expect(resolveKeybindingCapture(event("Tab"), "Linux")).toEqual({ kind: "passthrough" });
-  });
-
-  it("lets Shift+Tab move focus backwards", () => {
-    expect(resolveKeybindingCapture(event("Tab", { shiftKey: true }), "Linux")).toEqual({
-      kind: "passthrough",
-    });
-  });
-
   it("records a Tab held with a modifier", () => {
     // Thread traversal on Ctrl+Tab was unreachable while every Tab was
     // discarded: the only way to set it was to hand-edit keybindings.json.
-    expect(resolveKeybindingCapture(event("Tab", { ctrlKey: true }), "Linux")).toEqual({
-      kind: "record",
-      key: "mod+tab",
-    });
+    expect(keybindingFromKeyboardEvent(event("Tab", { ctrlKey: true }), "Linux")).toBe("mod+tab");
     expect(
-      resolveKeybindingCapture(event("Tab", { ctrlKey: true, shiftKey: true }), "Linux"),
-    ).toEqual({ kind: "record", key: "mod+shift+tab" });
-  });
-
-  it("cancels on Escape", () => {
-    expect(resolveKeybindingCapture(event("Escape"), "Linux")).toEqual({ kind: "cancel" });
-  });
-
-  it("ignores a modifier pressed on its own", () => {
-    expect(resolveKeybindingCapture(event("Control", { ctrlKey: true }), "Linux")).toEqual({
-      kind: "ignore",
-    });
-  });
-
-  it("ignores a plain letter, which is not a shortcut", () => {
-    expect(resolveKeybindingCapture(event("e"), "Linux")).toEqual({ kind: "ignore" });
+      keybindingFromKeyboardEvent(event("Tab", { ctrlKey: true, shiftKey: true }), "Linux"),
+    ).toBe("mod+shift+tab");
   });
 
   it("records the Alt shortcuts this fork uses for the composer pickers", () => {
-    expect(resolveKeybindingCapture(event("e", { altKey: true }), "Linux")).toEqual({
-      kind: "record",
-      key: "alt+e",
-    });
-    expect(resolveKeybindingCapture(event("m", { altKey: true }), "Linux")).toEqual({
-      kind: "record",
-      key: "alt+m",
-    });
+    expect(keybindingFromKeyboardEvent(event("e", { altKey: true }), "Linux")).toBe("alt+e");
+    expect(keybindingFromKeyboardEvent(event("m", { altKey: true }), "Linux")).toBe("alt+m");
   });
 });

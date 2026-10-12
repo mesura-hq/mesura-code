@@ -8,7 +8,7 @@ import {
   type ProjectIconDiscoveryState,
   type ProjectIconDiscoveryStatus,
 } from "@t3tools/contracts";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { appAtomRegistry } from "../../rpc/atomRegistry";

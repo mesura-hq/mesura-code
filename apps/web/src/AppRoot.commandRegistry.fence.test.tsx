@@ -132,7 +132,7 @@ vi.mock("./state/use-atom-query-runner", () => ({ useAtomQueryRunner: () => succ
 // The chords the app ships, as a keybindings file with no user rules resolves them.
 vi.mock("./state/server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./state/server")>();
-  const { Atom } = await import("effect/unstable/reactivity");
+  const { Atom } = await import("effect/reactivity");
   const { DEFAULT_RESOLVED_KEYBINDINGS } = await import("@t3tools/shared/keybindings");
   return { ...actual, primaryServerKeybindingsAtom: Atom.make(() => DEFAULT_RESOLVED_KEYBINDINGS) };
 });

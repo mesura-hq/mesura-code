@@ -2,7 +2,7 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 
-import { expandHomePathIn } from "../pathExpansion.ts";
+import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 
 /**
  * Deciding how to start the developer's own Neovim, before anything spawns.
@@ -143,7 +143,7 @@ export const resolveNvimLaunch = Effect.fn("NvimLaunch.resolve")(function* (
 ) {
   const fs = yield* FileSystem.FileSystem;
   const configDirectory = withoutTrailingSeparator(
-    expandHomePathIn(withoutTrailingSeparator(input.configDirectory), input.homeDir),
+    expandHomePath(withoutTrailingSeparator(input.configDirectory), input.homeDir),
   );
 
   if (!(yield* fs.exists(configDirectory).pipe(Effect.orElseSucceed(() => false)))) {

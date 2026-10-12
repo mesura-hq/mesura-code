@@ -3,11 +3,17 @@ import {
   FACTORY_REPORT_ACTIVITY_KIND,
   FactoryPlanActivityPayload,
   FactoryReportActivityPayload,
-  type OrchestrationThreadActivity,
+  type OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
-import { deriveFactoryRunItemsById, type FactoryRunTimelineItem } from "./runActivities.ts";
+import {
+  deriveFactoryRunItemsById,
+  deriveFactoryRunItemsByIdFromTurnItems,
+  factoryCardCreatedAt,
+  type FactoryCardActivity,
+  type FactoryRunTimelineItem,
+} from "./runActivities.ts";
 
 /** One presented plan file, as a thread's timeline or feed places it: its latest activity. */
 export interface FactoryPlanTimelineItem {
@@ -38,15 +44,15 @@ const isFactoryReportActivityPayload = Schema.is(FactoryReportActivityPayload);
 // Activities are immutable, so one item per activity object keeps the item's
 // reference stable across derivations; timeline rows compare it by reference.
 // A report item also depends on its run's item, so it is cached per pair.
-const itemByActivity = new WeakMap<OrchestrationThreadActivity, FactoryPlanTimelineItem | null>();
+const itemByActivity = new WeakMap<FactoryCardActivity, FactoryPlanTimelineItem | null>();
 const NO_RUN = {};
 const reportItemByActivity = new WeakMap<
-  OrchestrationThreadActivity,
+  FactoryCardActivity,
   WeakMap<object, FactoryReportTimelineItem | null>
 >();
 
 function factoryTimelineItem(
-  activity: OrchestrationThreadActivity,
+  activity: FactoryCardActivity,
   runsById: () => ReadonlyMap<string, FactoryRunTimelineItem>,
 ): FactoryTimelineItem | null {
   const { id, createdAt, payload } = activity;
@@ -80,9 +86,9 @@ function factoryTimelineItem(
  * and mobile in its feed.
  */
 export function deriveFactoryTimelineItems(
-  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  activities: ReadonlyArray<FactoryCardActivity>,
 ): ReadonlyArray<FactoryTimelineItem> {
-  const latestById = new Map<string, OrchestrationThreadActivity>();
+  const latestById = new Map<string, FactoryCardActivity>();
   for (const activity of activities) {
     if (
       activity.kind !== FACTORY_PLAN_ACTIVITY_KIND &&
@@ -108,7 +114,7 @@ export function deriveFactoryTimelineItems(
 
 /** The plan cards of a thread alone, for the Factory pane's and screen's Plan tab. */
 export function deriveFactoryPlanTimelineItems(
-  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  activities: ReadonlyArray<FactoryCardActivity>,
 ): ReadonlyArray<FactoryPlanTimelineItem> {
   return deriveFactoryTimelineItems(activities).filter(
     (item): item is FactoryPlanTimelineItem => item.kind === "plan",
@@ -125,4 +131,71 @@ export function findFactoryReportItem(
     if (item.kind === "report" && item.report.runId === runId) found = item;
   }
   return found;
+}
+
+// ---------------------------------------------------------------------------
+// Orchestrator v2: plan and report cards are `factory_card` turn items.
+// ---------------------------------------------------------------------------
+
+type FactoryCardTurnItem = Extract<OrchestrationV2TurnItem, { readonly type: "factory_card" }>;
+
+const planItemByTurnItem = new WeakMap<FactoryCardTurnItem, FactoryPlanTimelineItem>();
+const reportItemByTurnItem = new WeakMap<
+  FactoryCardTurnItem,
+  WeakMap<object, FactoryReportTimelineItem>
+>();
+
+/**
+ * The timeline item of one plan or report card, or null for a run card (the run card is a
+ * side input, placed by the client). A report reads its run's card from `runsById`.
+ */
+export function factoryTimelineItemFromCard(
+  item: FactoryCardTurnItem,
+  runsById: ReadonlyMap<string, FactoryRunTimelineItem>,
+): FactoryTimelineItem | null {
+  const { card } = item;
+  if (card.kind === "run") return null;
+  if (card.kind === "plan") {
+    const cached = planItemByTurnItem.get(item);
+    if (cached !== undefined) return cached;
+    const planItem: FactoryPlanTimelineItem = {
+      kind: "plan",
+      id: item.id,
+      createdAt: factoryCardCreatedAt(item),
+      plan: card.payload,
+    };
+    planItemByTurnItem.set(item, planItem);
+    return planItem;
+  }
+  const run = runsById.get(card.payload.runId) ?? null;
+  let byRun = reportItemByTurnItem.get(item);
+  if (byRun === undefined) {
+    byRun = new WeakMap();
+    reportItemByTurnItem.set(item, byRun);
+  }
+  const cached = byRun.get(run ?? NO_RUN);
+  if (cached !== undefined) return cached;
+  const reportItem: FactoryReportTimelineItem = {
+    kind: "report",
+    id: item.id,
+    createdAt: factoryCardCreatedAt(item),
+    report: card.payload,
+    run,
+  };
+  byRun.set(run ?? NO_RUN, reportItem);
+  return reportItem;
+}
+
+/** The plan and report cards of a thread's turn items, in turn item order. */
+export function deriveFactoryTimelineItemsFromTurnItems(
+  entries: ReadonlyArray<{ readonly item: OrchestrationV2TurnItem }>,
+): ReadonlyArray<FactoryTimelineItem> {
+  const runsById = deriveFactoryRunItemsByIdFromTurnItems(entries);
+  const items: FactoryTimelineItem[] = [];
+  for (const { item } of entries) {
+    if (item.type !== "factory_card") continue;
+    const timelineItem = factoryTimelineItemFromCard(item, runsById);
+    if (timelineItem !== null) items.push(timelineItem);
+  }
+  return items;
 }

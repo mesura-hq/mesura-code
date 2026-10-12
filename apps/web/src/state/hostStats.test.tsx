@@ -16,7 +16,7 @@ import {
   withNoAccessHost,
 } from "@t3tools/client-runtime/host-stats/fixtures";
 import type { EnvironmentId } from "@t3tools/contracts";
-import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -40,7 +40,7 @@ vi.mock("./presentation", () => ({
   },
 }));
 vi.mock("./server", async () => {
-  const { AsyncResult, Atom } = await import("effect/unstable/reactivity");
+  const { AsyncResult, Atom } = await import("effect/reactivity");
   const hostStats = (key: { readonly environmentId: string }) => {
     let atom = transport.family.get(key.environmentId);
     if (atom === undefined) {

@@ -48,6 +48,9 @@ const compileAgainstUpstream = (
       const members = replacement?.name === name ? replacement.literals : literals;
       return `export type ${name} = ${members.map((value) => JSON.stringify(value)).join(" | ")};`;
     })
+    // Mesura: upstreamLock.ts reads the event types through the event union's
+    // `type` field, so the stand-in exports that union too.
+    .concat("export type ProviderRuntimeEvent = { readonly type: ProviderRuntimeEventType };")
     .join("\n");
   const shimPath = NodePath.join(directory, "contracts-shim.ts");
   NodeFS.writeFileSync(shimPath, `${shimSource}\n`);

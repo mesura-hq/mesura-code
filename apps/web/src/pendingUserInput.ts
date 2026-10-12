@@ -1,4 +1,5 @@
-import type { ApprovalRequestId, EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { PendingUserInput } from "./session-logic";
 export {
   type PendingUserInputDraftAnswer,
   resolvePendingUserInputAnswer,
@@ -7,17 +8,20 @@ export {
   buildPendingUserInputAnswers,
 } from "@t3tools/client-runtime/user-input-answers";
 
+// Mesura: questions are answered in the chat feed (`InlinePendingUserInputCard`), and the
+// answer rules are shared through `@t3tools/client-runtime/user-input-answers`. Upstream's
+// composer-panel helpers (question stepping, displaced-answer carry) have no caller here:
+// a choice and a note coexist instead of replacing each other.
+
 export const pendingUserInputRequestKey = (
   environmentId: EnvironmentId,
   threadId: ThreadId,
-  requestId: ApprovalRequestId,
+  requestId: string,
 ) => JSON.stringify([environmentId, threadId, requestId]);
 
-const EMPTY_PENDING_USER_INPUTS: ReadonlyArray<
-  import("@t3tools/client-runtime/pending-requests").PendingUserInput
-> = [];
+const EMPTY_PENDING_USER_INPUTS: ReadonlyArray<PendingUserInput> = [];
 
-/** Retain request identities across unrelated thread activities. */
+/** Retain request identities across unrelated thread updates. */
 export function createPendingUserInputProjection() {
   let previous = EMPTY_PENDING_USER_INPUTS;
   return (next: typeof previous): typeof previous => {

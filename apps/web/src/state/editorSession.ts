@@ -8,7 +8,11 @@ import { WS_METHODS } from "@t3tools/contracts";
 import * as Stream from "effect/Stream";
 
 import { connectionAtomRuntime } from "../connection/runtime";
-import { applyEditorSessionEvent, EMPTY_EDITOR_SESSION_STATE } from "./editorSessionFold.ts";
+import {
+  applyEditorSessionEvent,
+  EMPTY_EDITOR_SESSION_STATE,
+  type EditorSessionState,
+} from "./editorSessionFold.ts";
 
 /**
  * The thread's embedded Neovim, as the web client sees it.
@@ -49,7 +53,7 @@ export const editorSessionAttach = createEnvironmentSubscriptionAtomFamily(conne
   label: "environment-data:editor-session:attach",
   subscribe: (input: EnvironmentRpcInput<typeof WS_METHODS.editorSessionAttach>) =>
     subscribe(WS_METHODS.editorSessionAttach, input).pipe(
-      Stream.scan(EMPTY_EDITOR_SESSION_STATE, applyEditorSessionEvent),
+      Stream.scan((): EditorSessionState => EMPTY_EDITOR_SESSION_STATE, applyEditorSessionEvent),
     ),
   // Long enough to survive the panel's per-file remount, short enough that a
   // closed file does not hold a Neovim's attention for minutes. The default of

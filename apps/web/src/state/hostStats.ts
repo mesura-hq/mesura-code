@@ -10,7 +10,7 @@ import {
   type HostStatsSubscription,
 } from "@t3tools/client-runtime/host-stats";
 import type { EnvironmentId } from "@t3tools/contracts";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import { useContext, useEffect, useMemo, useState } from "react";
 
 import { environmentPresentations } from "./presentation";

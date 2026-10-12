@@ -25,14 +25,15 @@
  */
 
 // WORKAROUND: portado de pingdotgg/t3code#15662 — quitar al sincronizar con upstream si se mergea.
-// Upstream's pattern opens with `\p{Sc}`; the fork keeps `\$` until that commit is synced.
+// Any currency symbol (`\p{Sc}`, upstream #12098) opens a mention; the second
+// alternative is the namespaced `plugin:skill` name this port adds.
 /**
  * Composer tokens plus namespaced plugin names, checked against the discovered
  * catalog below. Native plugin names can contain punctuation; whitespace ends
  * the command name and starts its arguments.
  */
 const SKILL_MENTION_PATTERN =
-  /(^|\s)\$((?![0-9][0-9_]*(?:[kKmMbBtT]|[eE][0-9]+)?(?:\s|$))(?=[a-zA-Z0-9:_-]*[a-zA-Z])[a-zA-Z0-9][a-zA-Z0-9:_-]*|[^\s:]+:[^\s]+)(?=\s|$)/g;
+  /(^|\s)\p{Sc}((?![0-9][0-9_]*(?:[kKmMbBtT]|[eE][0-9]+)?(?:\s|$))(?=[a-zA-Z0-9:_-]*[a-zA-Z])[a-zA-Z0-9][a-zA-Z0-9:_-]*|[^\s:]+:[^\s]+)(?=\s|$)/gu;
 
 export interface ClaudeSkillDispatch {
   /** Text before the dispatched mention, or `undefined` when it opens the prompt. */
@@ -56,7 +57,7 @@ export function planClaudeSkillDispatch(
     const name = match[2] ?? "";
     if (!skillNames.has(name)) return [];
     const start = (match.index ?? 0) + (match[1]?.length ?? 0);
-    return [{ name, start, end: start + name.length + 1 }];
+    return [{ name, start, end: (match.index ?? 0) + match[0].length }];
   });
   const last = mentions.at(-1);
   if (!last) {
@@ -68,7 +69,8 @@ export function planClaudeSkillDispatch(
   const leadingWithInlineSlashes = mentions
     .slice(0, -1)
     .reduceRight(
-      (text, mention) => `${text.slice(0, mention.start)}/${text.slice(mention.start + 1)}`,
+      (text, mention) =>
+        `${text.slice(0, mention.start)}/${mention.name}${text.slice(mention.end)}`,
       leading,
     )
     .trimEnd();

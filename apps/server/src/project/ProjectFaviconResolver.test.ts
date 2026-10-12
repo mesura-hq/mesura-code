@@ -14,7 +14,7 @@ import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as ProjectFaviconResolver from "./ProjectFaviconResolver.ts";
 import * as T3ProjectFileLoader from "./T3ProjectFileLoader.ts";
 
-const TestLayer = Layer.empty.pipe(
+const layerTest = Layer.empty.pipe(
   Layer.provideMerge(
     ProjectFaviconResolver.layer.pipe(
       Layer.provide(WorkspacePaths.layer),
@@ -56,7 +56,7 @@ const makeResolverWithFileSystem = (fileSystem: FileSystem.FileSystem) =>
     Effect.provideService(FileSystem.FileSystem, fileSystem),
   );
 
-it.layer(TestLayer)("ProjectFaviconResolverLive", (it) => {
+it.layer(layerTest)("ProjectFaviconResolverLive", (it) => {
   describe("resolvePath", () => {
     it.effect(
       "logs a stale Mesura icon and falls through saved and legacy icons to discovery",
@@ -632,6 +632,75 @@ it.layer(TestLayer)("ProjectFaviconResolverLive", (it) => {
       }),
     );
 
+    it.effect("probes well-known candidates concurrently", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const cwd = yield* makeTempDir;
+        let inFlight = 0;
+        let peakInFlight = 0;
+        const resolver = yield* makeResolverWithFileSystem(
+          FileSystem.FileSystem.of({
+            ...fileSystem,
+            stat: (filePath) =>
+              Effect.suspend(() => {
+                inFlight += 1;
+                peakInFlight = Math.max(peakInFlight, inFlight);
+                return Effect.yieldNow.pipe(Effect.andThen(fileSystem.stat(filePath)));
+              }).pipe(Effect.ensuring(Effect.sync(() => (inFlight -= 1)))),
+          }),
+        );
+
+        expect(yield* resolver.resolvePath(cwd)).toBeNull();
+        expect(peakInFlight).toBeGreaterThan(1);
+      }),
+    );
+
+    it.effect("returns a found favicon without waiting for lower-ranked probes", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "favicon.svg", "<svg>root</svg>");
+        const stuckPath = path.join(cwd, "favicon.ico");
+        const resolver = yield* makeResolverWithFileSystem(
+          FileSystem.FileSystem.of({
+            ...fileSystem,
+            stat: (filePath) => (filePath === stuckPath ? Effect.never : fileSystem.stat(filePath)),
+          }),
+        );
+
+        expect(yield* resolver.resolvePath(cwd)).toBe(path.join(cwd, "favicon.svg"));
+      }),
+    );
+
+    it.effect("ignores a failing candidate that ranks below a found favicon", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "favicon.svg", "<svg>root</svg>");
+        const failingPath = path.join(cwd, "favicon.ico");
+        const resolver = yield* makeResolverWithFileSystem(
+          FileSystem.FileSystem.of({
+            ...fileSystem,
+            stat: (filePath) =>
+              filePath === failingPath
+                ? Effect.fail(
+                    PlatformError.systemError({
+                      _tag: "PermissionDenied",
+                      module: "FileSystem",
+                      method: "stat",
+                      pathOrDescriptor: failingPath,
+                    }),
+                  )
+                : fileSystem.stat(filePath),
+          }),
+        );
+
+        expect(yield* resolver.resolvePath(cwd)).toBe(path.join(cwd, "favicon.svg"));
+      }),
+    );
+
     it.effect("preserves icon source read failures", () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
@@ -699,7 +768,7 @@ it.layer(TestLayer)("ProjectFaviconResolverLive", (it) => {
 
 // Mesura: a Luna icon search must not save an image over a favicon that
 // appeared after the resolver cached a miss for the same root.
-it.layer(TestLayer)("ProjectFaviconResolver fresh resolution", (it) => {
+it.layer(layerTest)("ProjectFaviconResolver fresh resolution", (it) => {
   it.effect(
     "icon discovery regression: a fresh resolution sees a favicon behind a cached miss",
     () =>

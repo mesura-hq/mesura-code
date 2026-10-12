@@ -6,7 +6,6 @@
  * differently.
  */
 import {
-  EventId,
   FACTORY_PLAN_ACTIVITY_KIND,
   FACTORY_REPORT_ACTIVITY_KIND,
   FACTORY_RUN_ACTIVITY_KIND,
@@ -18,7 +17,6 @@ import {
   type FactoryReportActivityPayload,
   type FactoryRunState,
   type FactoryRunSummary,
-  type OrchestrationThreadActivity,
   type ServerProvider,
   type ServerProviderModel,
   type TurnId,
@@ -30,6 +28,10 @@ import {
 } from "@t3tools/shared/factoryRun";
 
 import type { FactoryRoutes } from "./routes.ts";
+import type { FactoryCardActivity } from "./runActivities.ts";
+
+/** A card activity as the v1 tests built it, with the turn it was recorded in. */
+type FactoryTestActivity = FactoryCardActivity & { readonly turnId: TurnId | null };
 
 export const FACTORY_PLAN_DIGEST = "a".repeat(64);
 export const FACTORY_INTENT_DIGEST = "b".repeat(64);
@@ -61,12 +63,10 @@ export function makeFactoryPlanActivity(input: {
   readonly createdAt: string;
   readonly turnId?: TurnId | null;
   readonly payload?: unknown;
-}): OrchestrationThreadActivity {
+}): FactoryTestActivity {
   return {
-    id: EventId.make(input.id ?? "factory-plan:plan-md"),
-    tone: "info",
+    id: input.id ?? "factory-plan:plan-md",
     kind: FACTORY_PLAN_ACTIVITY_KIND,
-    summary: "Presented a plan",
     payload: input.payload ?? makeFactoryPlanPayload({ presentedAt: input.createdAt }),
     turnId: input.turnId ?? null,
     createdAt: input.createdAt,
@@ -352,12 +352,10 @@ export function makeFactoryRunActivity(input: {
   /** Defaults to the tracker's choice: the run's start, else the attach time. */
   readonly createdAt?: string;
   readonly turnId?: TurnId | null;
-}): OrchestrationThreadActivity {
+}): FactoryTestActivity {
   return {
-    id: EventId.make(factoryRunActivityId(input.threadId, input.summary.runId)),
-    tone: "info",
+    id: factoryRunActivityId(input.threadId, input.summary.runId),
     kind: FACTORY_RUN_ACTIVITY_KIND,
-    summary: "Software Factory run",
     payload: { threadId: input.threadId, ...input.summary },
     turnId: input.turnId ?? null,
     createdAt: input.createdAt ?? input.summary.startedAt ?? "2026-09-28T08:59:00.000Z",
@@ -402,13 +400,11 @@ export function makeFactoryReportActivity(input: {
   readonly payload?: FactoryReportActivityPayload;
   readonly createdAt?: string;
   readonly turnId?: TurnId | null;
-}): OrchestrationThreadActivity {
+}): FactoryTestActivity {
   const payload = input.payload ?? makeFactoryReportPayload();
   return {
-    id: EventId.make(factoryReportActivityId(input.threadId, payload.runId)),
-    tone: "info",
+    id: factoryReportActivityId(input.threadId, payload.runId),
     kind: FACTORY_REPORT_ACTIVITY_KIND,
-    summary: "Report: Export the invoice list as CSV",
     payload,
     turnId: input.turnId ?? null,
     createdAt: input.createdAt ?? payload.writtenAt,

@@ -1,4 +1,9 @@
-import type { EnvironmentId, ServerConfig, ServerSelfUpdateCapability } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ServerConfig,
+  ServerInstallation,
+  ServerSelfUpdateCapability,
+} from "@t3tools/contracts";
 import type { ServerUpdateState } from "@t3tools/client-runtime/state/server";
 import { compareSemverVersions, parseSemver } from "@t3tools/shared/semver";
 import { PUBLISHED_SERVER_PACKAGE_NAME } from "@t3tools/shared/stateHome";
@@ -125,10 +130,32 @@ export function supportsServerUpdateThreadContinuation(
  * replaces their server is worse than telling them there is no command, so
  * return null and let the caller say so.
  */
-export function manualServerUpdateCommand(targetVersion: string): string | null {
+export function manualServerUpdateCommand(
+  targetVersion: string,
+  installation?: ServerInstallation,
+): string | null {
   return PUBLISHED_SERVER_PACKAGE_NAME === null
     ? null
-    : `npx ${PUBLISHED_SERVER_PACKAGE_NAME}@${targetVersion}`;
+    : manualServerUpdateCommandForPackage(
+        PUBLISHED_SERVER_PACKAGE_NAME,
+        targetVersion,
+        installation,
+      );
+}
+
+/** Upstream's installation-aware command, for a named server package. */
+export function manualServerUpdateCommandForPackage(
+  packageName: string,
+  targetVersion: string,
+  installation?: ServerInstallation,
+): string {
+  if (installation?.kind === "npm-global") {
+    const prefix = `'${installation.prefix.replaceAll("'", "'\\''")}'`;
+    return `npm install --global --prefix ${prefix} ${packageName}@${targetVersion}`;
+  }
+  const runner =
+    installation?.kind === "pnpm-dlx" ? "pnpm dlx" : installation?.kind === "bunx" ? "bunx" : "npx";
+  return `${runner} ${packageName}@${targetVersion}`;
 }
 
 /** One sentence telling the user how to resolve version skew for a server,
@@ -201,4 +228,18 @@ export function dismissVersionMismatch(dismissalKey: string | null | undefined):
   writeVersionMismatchDismissals({
     keys: [...document.keys, dismissalKey],
   });
+}
+
+export function appendVersionMismatchHint(
+  message: string | null | undefined,
+  mismatch: VersionMismatch | null | undefined,
+): string | null {
+  const normalizedMessage = normalizeVersion(message);
+  if (!normalizedMessage) {
+    return mismatch?.hint ?? null;
+  }
+  if (!mismatch) {
+    return normalizedMessage;
+  }
+  return `${normalizedMessage} Hint: ${mismatch.hint}`;
 }

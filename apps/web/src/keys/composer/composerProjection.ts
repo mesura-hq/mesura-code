@@ -62,18 +62,21 @@ export function positionOf(text: string, offset: number): { line: number; col: n
 }
 
 /**
- * Lexical writes a line break as a plain `<br>`, and ends a paragraph whose
- * last line is empty with one more `<br>` that holds the line open but is not
- * a character. That trailing one is skipped.
+ * The composer (Tiptap/ProseMirror) writes a hard break as a plain `<br>`, and
+ * ends a paragraph whose last line is empty with one more `<br>` that holds the
+ * line open but is not a character. ProseMirror marks that one with
+ * `ProseMirror-trailingBreak`, and may put a separator `<img>` before it after
+ * an inline chip, so the class decides first. That trailing one is skipped.
  */
 function isPlaceholderBreak(br: HTMLBRElement): boolean {
+  if (br.classList.contains("ProseMirror-trailingBreak")) return true;
   if (br.nextSibling !== null) return false;
   const previous = br.previousSibling;
   return previous === null || previous.nodeName === "BR";
 }
 
 /**
- * The DOM point for a collapsed offset inside the Lexical editor. Text nodes
+ * The DOM point for a collapsed offset inside the composer editor. Text nodes
  * count their length, a non-editable chip counts one, a line-break `<br>`
  * counts one, and each paragraph after the first starts after one line break.
  */

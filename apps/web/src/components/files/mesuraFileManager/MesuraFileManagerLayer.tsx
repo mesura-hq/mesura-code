@@ -1,6 +1,6 @@
 import { openPath } from "@symmetria/fm-ui/bridge";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import type { EnvironmentThread } from "@t3tools/client-runtime/state/models";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
@@ -32,7 +32,7 @@ const FileManagerApp = lazy(() =>
 
 interface MesuraFileManagerLayerProps {
   readonly routeThreadRef: ScopedThreadRef | null;
-  readonly activeThread: EnvironmentThread | null;
+  readonly activeThread: EnvironmentThreadShell | null;
 }
 
 /**

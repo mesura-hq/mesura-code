@@ -13,6 +13,37 @@ import {
 
 import { shortcutKeyFromEvent } from "../../keybindings";
 import { isMacPlatform } from "../../lib/utils";
+import { METRIC_OPTIONS, WINDOW_OPTIONS } from "../usage/usageShortcuts";
+
+// Every usage.* command needs a rank. An unranked one falls back to the
+// alphabetical compare, which makes the comparator inconsistent and the order
+// depend on the input order.
+const usageCommandOrder = new Map<KeybindingCommand, number>(
+  [
+    "usage.open" as const,
+    ...[...METRIC_OPTIONS, ...WINDOW_OPTIONS].map((option) => option.command),
+  ].map((command, index) => [command, index]),
+);
+
+const firstUsageCommand = METRIC_OPTIONS[0].command;
+
+/**
+ * Orders commands by `key`, except Usage page commands, which sort as one
+ * block in page order where the first of them would sort. A total order, so
+ * adding a binding elsewhere cannot reshuffle the Usage rows.
+ */
+function compareCommands(
+  left: KeybindingCommand,
+  right: KeybindingCommand,
+  key: (command: KeybindingCommand) => string,
+): number {
+  const leftRank = usageCommandOrder.get(left);
+  const rightRank = usageCommandOrder.get(right);
+  if (leftRank !== undefined && rightRank !== undefined) return leftRank - rightRank;
+  return key(leftRank === undefined ? left : firstUsageCommand).localeCompare(
+    key(rightRank === undefined ? right : firstUsageCommand),
+  );
+}
 
 export type KeybindingSource = "Default" | "Custom" | "Project";
 
@@ -31,7 +62,14 @@ export interface KeybindingRow {
 export type WhenVariableOption = string;
 export type KeybindingCommandOption = KeybindingCommand;
 
-const CORE_WHEN_VARIABLES = ["terminalFocus", "terminalOpen", "true", "false"] as const;
+const CORE_WHEN_VARIABLES = [
+  "terminalFocus",
+  "terminalOpen",
+  "isWeb",
+  "isDesktop",
+  "true",
+  "false",
+] as const;
 
 const DEFAULT_WHEN_VARIABLES = new Set<string>(CORE_WHEN_VARIABLES);
 for (const binding of DEFAULT_RESOLVED_KEYBINDINGS) {
@@ -183,6 +221,88 @@ export function keybindingConflictLabels(
   return [...new Set(conflicts)].toSorted();
 }
 
+export interface KeybindingGroup {
+  readonly id: string;
+  readonly title: string;
+  readonly rows: ReadonlyArray<KeybindingRow>;
+}
+
+/**
+ * Page sections in display order; a command joins the first group listing its prefix.
+ *
+ * Mesura: the prefixes after each `Mesura:` marker are this fork's own
+ * commands, listed so they land in a named section instead of "Other".
+ */
+const KEYBINDING_GROUPS = [
+  {
+    id: "navigation",
+    title: "Navigation",
+    prefixes: [
+      "sidebar",
+      "rightPanel",
+      "commandPalette",
+      "filePicker",
+      "projectSearch",
+      "editor",
+      // Mesura:
+      "pane",
+      "projectScope",
+      "fileTree",
+      "hosts",
+    ],
+  },
+  {
+    id: "threads",
+    title: "Threads",
+    // Mesura: threadSearch, question.
+    prefixes: ["thread", "chat", "pullRequest", "threadSearch", "question"],
+  },
+  {
+    id: "composer",
+    title: "Composer",
+    prefixes: [
+      "composer",
+      "modelPicker",
+      // Mesura:
+      "traitsPicker",
+      "workspacePicker",
+      "branchPicker",
+      "runContext",
+    ],
+  },
+  { id: "terminal", title: "Terminal", prefixes: ["terminal"] },
+  // Mesura: treeDiff.
+  { id: "preview", title: "Preview & diff", prefixes: ["preview", "diff", "treeDiff"] },
+  { id: "appearance", title: "Appearance", prefixes: ["theme", "appearance", "themeEditor"] },
+  { id: "scripts", title: "Project scripts", prefixes: ["script"] },
+] as const;
+const OTHER_KEYBINDING_GROUP = { id: "other", title: "Other" } as const;
+
+function keybindingGroupFor(command: KeybindingCommand): { id: string; title: string } {
+  const prefix = String(command).split(".")[0] ?? "";
+  return (
+    KEYBINDING_GROUPS.find((group) => (group.prefixes as ReadonlyArray<string>).includes(prefix)) ??
+    OTHER_KEYBINDING_GROUP
+  );
+}
+
+/** Splits sorted rows into the page's sections, dropping sections with no rows. */
+export function groupKeybindingRows(
+  rows: ReadonlyArray<KeybindingRow>,
+): ReadonlyArray<KeybindingGroup> {
+  const rowsByGroup = new Map<string, Array<KeybindingRow>>();
+  for (const row of rows) {
+    const group = keybindingGroupFor(row.command);
+    const bucket = rowsByGroup.get(group.id);
+    if (bucket) bucket.push(row);
+    else rowsByGroup.set(group.id, [row]);
+  }
+  return [...KEYBINDING_GROUPS, OTHER_KEYBINDING_GROUP].flatMap((group) => {
+    const groupRows = rowsByGroup.get(group.id);
+    return groupRows ? [{ id: group.id, title: group.title, rows: groupRows }] : [];
+  });
+}
+
 export function buildKeybindingRows(
   keybindings: ResolvedKeybindingsConfig,
   query: string,
@@ -217,7 +337,7 @@ export function buildKeybindingRows(
   });
 
   rowsWithConflicts.sort((left, right) => {
-    const commandCompare = left.command.localeCompare(right.command);
+    const commandCompare = compareCommands(left.command, right.command, (command) => command);
     if (commandCompare !== 0) return commandCompare;
     return left.key.localeCompare(right.key);
   });
@@ -290,13 +410,21 @@ export function buildKeybindingCommandOptions(
   for (const binding of keybindings) {
     commands.add(binding.command);
   }
-  return [...commands].toSorted((left, right) =>
-    commandLabel(left).localeCompare(commandLabel(right)),
-  );
+  return [...commands].toSorted((left, right) => compareCommands(left, right, commandLabel));
 }
 
 export function commandLabel(command: KeybindingCommand): string {
+  if (command === "composer.sendAlternate") return "Composer: Opposite Queue or Steer Action";
+  if (command === "composer.sendBackground") return "Composer: Start in Background";
+  if (command === "composer.sendAndNewThread") return "Composer: Send and Start New Thread";
+  if (command === "thread.steerQueuedMessage") return "Queue: Send First Queued Message as Steer";
+  if (command === "thread.editQueuedMessage") return "Queue: Edit Last Queued Message";
   if (command === "thread.copyReference") return "Pull Request: Copy Link or Thread ID";
+  const usageMetric = METRIC_OPTIONS.find((option) => option.command === command);
+  if (usageMetric) return `Usage: ${usageMetric.label}`;
+  const usagePeriod = WINDOW_OPTIONS.find((option) => option.command === command);
+  if (usagePeriod) return `Usage: Period: ${usagePeriod.label}`;
+  if (command === "view.reopenClosed") return "Reopen Closed Tab";
   const raw = String(command);
   if (raw.startsWith("script.") && raw.endsWith(".run")) {
     return `Run Script: ${titleCaseCommandSegment(raw.slice("script.".length, -".run".length))}`;
@@ -344,40 +472,7 @@ function normalizeShortcutKeyToken(key: string): string | null {
   return null;
 }
 
-export type KeybindingCaptureOutcome =
-  /** Let the browser handle the key. Bare Tab still has to move focus. */
-  | { readonly kind: "passthrough" }
-  /** Stop recording and restore whatever the field held before. */
-  | { readonly kind: "cancel" }
-  /** Nothing recordable, such as a lone modifier being held down. */
-  | { readonly kind: "ignore" }
-  | { readonly kind: "record"; readonly key: string };
-
-/**
- * Decide what one keydown means while a shortcut field is recording.
- *
- * Tab is the awkward case. The field is an input, so a bare Tab has to keep
- * moving focus or the recorder traps the keyboard. A Tab pressed with a
- * modifier is a shortcut a user may legitimately want, so only the bare one
- * passes through.
- */
-export function resolveKeybindingCapture(
-  // `code` came in with v0.0.42: the recorded chord is read off the physical
-  // key now, so a non-US layout records what the user pressed.
-  event: Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">,
-  platform: string,
-): KeybindingCaptureOutcome {
-  const hasModifier = event.metaKey || event.ctrlKey || event.altKey;
-  if (event.key === "Tab" && !hasModifier) {
-    return { kind: "passthrough" };
-  }
-  if (event.key === "Escape") {
-    return { kind: "cancel" };
-  }
-  const key = keybindingFromKeyboardEvent(event, platform);
-  return key ? { kind: "record", key } : { kind: "ignore" };
-}
-
+/** Turns a keydown into a binding such as `mod+shift+k` or `tab`. Null for modifier-only presses. */
 export function keybindingFromKeyboardEvent(
   event: Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">,
   platform: string,
@@ -395,9 +490,6 @@ export function keybindingFromKeyboardEvent(
   }
   if (event.altKey) parts.push("alt");
   if (event.shiftKey) parts.push("shift");
-  if (parts.length === 0) {
-    return null;
-  }
   parts.push(keyToken);
   return parts.join("+");
 }

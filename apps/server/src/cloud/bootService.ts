@@ -1,9 +1,4 @@
-import {
-  HostProcessArchitecture,
-  HostProcessExecutablePath,
-  HostProcessPlatform,
-  HostProcessUserId,
-} from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { PUBLISHED_RELEASE_BASE_URL } from "@t3tools/shared/stateHome";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
@@ -14,7 +9,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
-import { HttpClient } from "effect/unstable/http";
+import { HttpClient } from "effect/http";
 import * as Schema from "effect/Schema";
 
 import { CLI_RELEASE_BASE_URL_ENV } from "@t3tools/shared/cliRelease";
@@ -44,6 +39,8 @@ const BOOT_SERVICE_UNIT_FILE = `${BOOT_SERVICE_NAME}.service`;
 const BOOT_SERVICE_LAUNCHD_LABEL = "com.t3tools.t3code.service";
 const BOOT_SERVICE_PLIST_FILE = `${BOOT_SERVICE_LAUNCHD_LABEL}.plist`;
 const BOOT_SERVICE_UNIT_ENV = "T3_BOOT_SERVICE_UNIT";
+/** File in the logs dir that receives the service's stdout and stderr. `t3 triage` points agents at it. */
+export const BOOT_SERVICE_LOG_FILE = "boot-service.log";
 
 /** systemd expands `%` specifiers, including in unquoted append-log paths. */
 function escapeSystemdSpecifiers(value: string): string {
@@ -458,7 +455,7 @@ export function formatBootServiceProblem(problem: BootServiceProblem): string {
     case "linger-unavailable":
       return 'Cannot check whether this user can run services after logout. Run `loginctl show-user "$(id -un)" --property=Linger` and check that systemd-logind is available.';
     case "linger-disabled":
-      return 'Lingering is disabled. T3 Code will stop when your last login session ends and will not start at boot. Run `sudo loginctl enable-linger "$(id -un)"` on this machine, then retry the service command as your normal user.';
+      return 'Lingering is disabled. Mesura Code will stop when your last login session ends and will not start at boot. Run `sudo loginctl enable-linger "$(id -un)"` on this machine, then retry the service command as your normal user.';
     case "service-disabled":
       return "The service is not enabled to start automatically. Run `t3 service install` to repair it.";
     case "service-stopped":
@@ -568,20 +565,20 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     input.publishedReleaseBaseUrl === undefined
       ? PUBLISHED_RELEASE_BASE_URL
       : input.publishedReleaseBaseUrl;
-  const hostExecPath = yield* HostProcessExecutablePath;
-  const platform = yield* HostProcessPlatform;
-  const arch = yield* HostProcessArchitecture;
-  const uid = yield* HostProcessUserId;
+  const hostExecPath = yield* HostProcess.ExecutablePath;
+  const platform = yield* HostProcess.Platform;
+  const arch = yield* HostProcess.Architecture;
+  const uid = yield* HostProcess.UserId;
   const httpClient = yield* HttpClient.HttpClient;
   const releaseBaseUrl = Option.getOrUndefined(
-    yield* Config.string(CLI_RELEASE_BASE_URL_ENV).pipe(Config.option),
+    yield* Config.String(CLI_RELEASE_BASE_URL_ENV).pipe(Config.option),
   );
   // A configured mirror is a real origin to install from; without one the fork
   // publishes nothing and the install below refuses. Same gate as the
   // self-update path, which reaches the same installer.
   const installOrigin = releaseBaseUrl ?? publishedReleaseBaseUrl;
-  const homeDir = yield* Config.string("HOME").pipe(Config.withDefault(""));
-  const installerPath = yield* Config.string("PATH").pipe(Config.withDefault(""));
+  const homeDir = yield* Config.String("HOME").pipe(Config.withDefault(""));
+  const installerPath = yield* Config.String("PATH").pipe(Config.withDefault(""));
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const runner = yield* ProcessRunner.ProcessRunner;
@@ -615,7 +612,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     environmentPath,
   });
   const unitPath = detectedManager?.unitPath ?? "";
-  const logPath = path.join(input.logsDir, "boot-service.log");
+  const logPath = path.join(input.logsDir, BOOT_SERVICE_LOG_FILE);
   const statePath = path.join(input.baseDir, "runtime", SERVICE_STATE_FILE);
   const restartPendingPath = path.join(input.baseDir, "runtime", SERVICE_RESTART_PENDING_FILE);
   const runtimePaths = pinnedRuntimePaths(path, input.baseDir, input.cliVersion, platform);

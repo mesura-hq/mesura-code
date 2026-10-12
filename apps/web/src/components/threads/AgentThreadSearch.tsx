@@ -19,7 +19,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { useNavigate } from "@tanstack/react-router";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { RotateCcwIcon, SparklesIcon } from "lucide-react";
 import {
   type KeyboardEvent,
@@ -308,7 +308,7 @@ export function AgentThreadSearch(props: {
           },
         }}
         mode="none"
-        panelClassName="max-h-[min(34rem,76vh)]"
+        panelSize="tall-list"
         testId="thread-search-picker"
         value={draft}
         onItemHighlighted={(value) => {

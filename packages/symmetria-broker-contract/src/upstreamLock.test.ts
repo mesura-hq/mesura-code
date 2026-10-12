@@ -1,11 +1,14 @@
 import type {
-  ProviderRuntimeEventType,
+  ProviderRuntimeEvent,
   RuntimeErrorClass,
   RuntimeSessionExitKind,
   RuntimeSessionState,
   RuntimeThreadState,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
+
+// Mesura: upstream no longer exports the vocabulary as its own type (#9917).
+type ProviderRuntimeEventType = ProviderRuntimeEvent["type"];
 
 import {
   BORROWED_RUNTIME_VOCABULARIES,

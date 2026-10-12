@@ -1,5 +1,5 @@
 import type {
-  ApprovalRequestId,
+  RuntimeRequestId,
   EnvironmentId,
   ThreadId,
   UserInputAttachments,
@@ -73,7 +73,7 @@ export function completeQuestionDraftAnswers(input: {
 export function readQuestionAttachments(input: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
-  readonly requestId: ApprovalRequestId;
+  readonly requestId: RuntimeRequestId;
   readonly questions: ReadonlyArray<UserInputQuestion>;
 }): Array<{ readonly preparing: number; readonly attachments: QuestionAttachment[] }> {
   return input.questions.map((question) => {
@@ -95,7 +95,7 @@ export function readQuestionAttachments(input: {
 export function collectQuestionAttachments(input: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
-  readonly requestId: ApprovalRequestId;
+  readonly requestId: RuntimeRequestId;
   readonly questions: ReadonlyArray<UserInputQuestion>;
 }):
   | { readonly status: "preparing" }

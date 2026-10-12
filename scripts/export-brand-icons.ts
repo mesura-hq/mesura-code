@@ -10,8 +10,9 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import { Command, Flag } from "effect/unstable/cli";
+import { Command, Flag } from "effect/cli";
 import sharp from "sharp";
+import type { PngOptions } from "sharp";
 
 import { BRAND_ASSET_PATHS, DEVELOPMENT_PUBLIC_ICON_OVERRIDES } from "./lib/brand-assets.ts";
 import { encodePngIco, readPngDimensions, WINDOWS_ICON_SIZES } from "./lib/icon-export.ts";
@@ -189,7 +190,7 @@ const RepositoryRoot = Effect.service(Path.Path).pipe(
 export async function renderRasterIcon(
   sourcePath: string,
   size: number,
-  pngOptions: sharp.PngOptions = { adaptiveFiltering: true, compressionLevel: 9 },
+  pngOptions: PngOptions = { adaptiveFiltering: true, compressionLevel: 9 },
 ): Promise<Buffer> {
   const image = sharp(sourcePath, { failOn: "error" });
   // `fit: "fill"` stretches rather than letterboxes, so a non-square source
@@ -451,7 +452,7 @@ export const exportBrandIcons = Effect.fn("exportBrandIcons")(function* (checkOn
 export const exportBrandIconsCommand = Command.make(
   "export-brand-icons",
   {
-    check: Flag.boolean("check").pipe(
+    check: Flag.Boolean("check").pipe(
       Flag.withDescription("Verify generated icon assets without modifying files."),
       Flag.withDefault(false),
     ),

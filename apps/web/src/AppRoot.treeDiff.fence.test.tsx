@@ -48,7 +48,7 @@ import {
   type GitWorkingTreeChangesResult,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import type { Thread } from "./types";
 import type { AppRouter } from "./router";
 
@@ -116,7 +116,7 @@ const fixture = vi.hoisted(() => ({
 
 vi.mock("@t3tools/client-runtime/state/runtime", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@t3tools/client-runtime/state/runtime")>();
-  const { Atom, AsyncResult } = await import("effect/unstable/reactivity");
+  const { Atom, AsyncResult } = await import("effect/reactivity");
   const Cause = await import("effect/Cause");
   const { WS_METHODS: methods } = await import("@t3tools/contracts");
 

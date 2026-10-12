@@ -1,11 +1,13 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
 import { createModelSelection } from "@t3tools/shared/model";
 import { expect } from "vite-plus/test";
 
@@ -19,7 +21,7 @@ import {
 
 import * as ServerConfig from "../config.ts";
 import { makeCodexTextGeneration } from "./CodexTextGeneration.ts";
-import { writeFakeCli } from "../testUtils/fakeCli.ts";
+import { writeFakeCli } from "@t3tools/provider-testing/fakeCli";
 import {
   THREAD_SEARCH_BROADEN_MODEL_OUTPUT,
   THREAD_SEARCH_BROADEN_STEP,
@@ -30,7 +32,8 @@ import {
   THREAD_SEARCH_STEP_REQUEST,
   THREAD_SEARCH_QUOTED_EXCERPT,
   THREAD_SEARCH_STEP_EXCERPT,
-} from "./ThreadSearchStep.testFixtures.ts";
+  THREAD_SEARCH_STEP_CWD,
+} from "@t3tools/provider-testing/threadSearchStep";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
 const DEFAULT_TEST_MODEL_SELECTION = createModelSelection(
@@ -38,7 +41,7 @@ const DEFAULT_TEST_MODEL_SELECTION = createModelSelection(
   "gpt-5.4-mini",
 );
 
-const CodexTextGenerationTestLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
+const layerCodexTextGenerationTest = ServerConfig.ServerConfig.layerTest(process.cwd(), {
   prefix: "t3code-codex-text-generation-test-",
 }).pipe(Layer.provideMerge(NodeServices.layer));
 
@@ -181,6 +184,7 @@ function withFakeCodexEnv<A, E, R>(
     launchArgs?: string;
     environment?: NodeJS.ProcessEnv;
     models?: ReadonlyArray<string>;
+    managedRuntime?: boolean;
   },
   effectFn: (
     textGeneration: Effect.Success<ReturnType<typeof makeCodexTextGeneration>>,
@@ -193,7 +197,7 @@ function withFakeCodexEnv<A, E, R>(
     const config = decodeCodexSettings({ binaryPath: codexPath, launchArgs: input.launchArgs });
     const textGeneration = yield* makeCodexTextGeneration(
       config,
-      input.environment,
+      input.environment === undefined ? undefined : { ...process.env, ...input.environment },
       Effect.succeed(
         (input.models ?? []).map((slug) => ({
           slug,
@@ -202,14 +206,22 @@ function withFakeCodexEnv<A, E, R>(
           capabilities: null,
         })),
       ),
+      input.managedRuntime
+        ? Effect.succeed({
+            config,
+            environment: input.environment ?? process.env,
+            revision: "test",
+          })
+        : undefined,
     );
     return yield* effectFn(textGeneration);
   }).pipe(Effect.scoped);
 }
 
-it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
-  for (const selectedModel of ["gpt-5.6-luna", "openai.gpt-5.6-luna"]) {
-    it.effect(`dispatches the qualified live model for ${selectedModel}`, () =>
+it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
+  it.effect.each(["gpt-5.6-luna", "openai.gpt-5.6-luna"])(
+    "dispatches the qualified live model for %s",
+    (selectedModel) =>
       withFakeCodexEnv(
         {
           output: JSON.stringify({ title: "Bedrock title" }),
@@ -227,8 +239,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
             expect(result.title).toBe("Bedrock title");
           }),
       ),
-    );
-  }
+  );
   it.effect("generates and sanitizes commit messages without branch by default", () =>
     withFakeCodexEnv(
       {
@@ -282,6 +293,26 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
             ]),
           }),
       ),
+  );
+
+  it.effect("omits a persisted service tier for managed ChatGPT text generation", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({ subject: "Update project", body: "" }),
+        managedRuntime: true,
+        forbidArg: 'service_tier="priority"',
+      },
+      (textGeneration) =>
+        textGeneration.generateCommitMessage({
+          cwd: process.cwd(),
+          branch: "feature/chatgpt",
+          stagedSummary: "M README.md",
+          stagedPatch: "diff --git a/README.md b/README.md",
+          modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.4", [
+            { id: "serviceTier", value: "priority" },
+          ]),
+        }),
+    ),
   );
 
   it.effect("passes exec-safe launch args into codex exec", () =>
@@ -420,6 +451,76 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
           });
 
           expect(generated.branch).toBe("feat/session");
+        }),
+    ),
+  );
+
+  it.effect.each([
+    {
+      mode: "static",
+      output: "Add Search",
+      expected: "team/add-search",
+      instruction: "without a prefix or namespace",
+    },
+    {
+      mode: "semantic",
+      output: "feat/add-search",
+      expected: "feat/add-search",
+      instruction: "semantic prefix",
+    },
+    {
+      mode: "custom",
+      output: "Julius/ABC-123.v2",
+      expected: "Julius/ABC-123.v2",
+      instruction: "Preserve the issue ID and capitalization.",
+    },
+  ] as const)("generates a branch using $mode naming", (example) =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({ branch: example.output }),
+        stdinMustContain: example.instruction,
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const generated = yield* textGeneration.generateBranchName({
+            cwd: process.cwd(),
+            message: "Add search",
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            naming: {
+              mode: example.mode,
+              prefix: "team/",
+              instructions: "Preserve the issue ID and capitalization.",
+            },
+          });
+          expect(generated.branch).toBe(example.expected);
+        }),
+    ),
+  );
+
+  it.effect("generates branch names even when the ambient scope is already closed", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({
+          branch: "feat/background-generation",
+        }),
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          // Background fibers (e.g. the worktree branch rename fork) can run
+          // after their launching request's scope has closed; temp files must
+          // not be tied to that ambient scope or they are reaped on creation.
+          const closedScope = yield* Scope.make();
+          yield* Scope.close(closedScope, Exit.void);
+
+          const generated = yield* textGeneration
+            .generateBranchName({
+              cwd: process.cwd(),
+              message: "Please update session handling.",
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            })
+            .pipe(Effect.provideService(Scope.Scope, closedScope));
+
+          expect(generated.branch).toBe("feat/background-generation");
         }),
     ),
   );
@@ -604,7 +705,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
                   }),
                 ),
               ),
-              Effect.ensuring(fs.remove(imagePath).pipe(Effect.catch(() => Effect.void))),
+              Effect.ensuring(fs.remove(imagePath).pipe(Effect.ignore)),
             );
 
           expect(generated.branch).toBe("fix/ui-regression");
@@ -627,7 +728,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
           const { attachmentsDir } = yield* ServerConfig.ServerConfig;
           const missingAttachmentId = "thread-missing-attachment";
           const missingPath = path.join(attachmentsDir, `${missingAttachmentId}.png`);
-          yield* fs.remove(missingPath).pipe(Effect.catch(() => Effect.void));
+          yield* fs.remove(missingPath).pipe(Effect.ignore);
 
           const result = yield* textGeneration
             .generateBranchName({
@@ -747,6 +848,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
           Effect.gen(function* () {
             const step = yield* textGeneration.generateThreadSearchStep({
               ...THREAD_SEARCH_STEP_REQUEST,
+              cwd: THREAD_SEARCH_STEP_CWD,
               modelSelection: DEFAULT_TEST_MODEL_SELECTION,
             });
             expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
@@ -760,6 +862,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
       Effect.gen(function* () {
         const step = yield* textGeneration.generateThreadSearchStep({
           ...THREAD_SEARCH_STEP_REQUEST,
+          cwd: THREAD_SEARCH_STEP_CWD,
           modelSelection: DEFAULT_TEST_MODEL_SELECTION,
         });
         expect(step).toEqual(THREAD_SEARCH_BROADEN_STEP);
@@ -778,6 +881,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
           const error = yield* textGeneration
             .generateThreadSearchStep({
               ...THREAD_SEARCH_STEP_REQUEST,
+              cwd: THREAD_SEARCH_STEP_CWD,
               modelSelection: DEFAULT_TEST_MODEL_SELECTION,
             })
             .pipe(Effect.flip);
@@ -821,6 +925,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
           Effect.gen(function* () {
             const step = yield* textGeneration.generateThreadSearchStep({
               ...THREAD_SEARCH_STEP_REQUEST,
+              cwd: THREAD_SEARCH_STEP_CWD,
               modelSelection: DEFAULT_TEST_MODEL_SELECTION,
             });
             expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
@@ -840,6 +945,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
         Effect.gen(function* () {
           const step = yield* textGeneration.generateThreadSearchStep({
             ...THREAD_SEARCH_STEP_REQUEST,
+            cwd: THREAD_SEARCH_STEP_CWD,
             modelSelection: DEFAULT_TEST_MODEL_SELECTION,
           });
           expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
@@ -858,6 +964,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
         Effect.gen(function* () {
           const step = yield* textGeneration.generateThreadSearchStep({
             ...THREAD_SEARCH_STEP_REQUEST,
+            cwd: THREAD_SEARCH_STEP_CWD,
             modelSelection: DEFAULT_TEST_MODEL_SELECTION,
           });
           expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
@@ -904,6 +1011,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
             Effect.gen(function* () {
               const step = yield* textGeneration.generateThreadSearchStep({
                 ...THREAD_SEARCH_STEP_REQUEST,
+                cwd: THREAD_SEARCH_STEP_CWD,
                 modelSelection: DEFAULT_TEST_MODEL_SELECTION,
               });
               expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
@@ -921,6 +1029,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
         Effect.gen(function* () {
           const step = yield* textGeneration.generateThreadSearchStep({
             ...THREAD_SEARCH_STEP_REQUEST,
+            cwd: THREAD_SEARCH_STEP_CWD,
             modelSelection: DEFAULT_TEST_MODEL_SELECTION,
           });
           expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
@@ -953,6 +1062,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
           Effect.gen(function* () {
             const step = yield* textGeneration.generateThreadSearchStep({
               ...THREAD_SEARCH_STEP_REQUEST,
+              cwd: THREAD_SEARCH_STEP_CWD,
               modelSelection: DEFAULT_TEST_MODEL_SELECTION,
             });
             expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);

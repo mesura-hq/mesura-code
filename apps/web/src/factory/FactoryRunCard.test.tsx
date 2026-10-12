@@ -139,7 +139,7 @@ vi.mock("../state/use-atom-query-runner", () => ({
 // The plan body a `factory.plan` activity names by digest, as the server's
 // factoryReadSnapshot RPC would answer it; an unknown digest stays loading.
 vi.mock("../state/factory", async () => {
-  const { AsyncResult, Atom } = await import("effect/unstable/reactivity");
+  const { AsyncResult, Atom } = await import("effect/reactivity");
   return {
     factoryEnvironment: {
       factorySnapshot: ({ input }: { input: { digest: string } }) => {

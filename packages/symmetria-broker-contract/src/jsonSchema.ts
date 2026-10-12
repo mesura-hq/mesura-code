@@ -184,7 +184,9 @@ export const buildSymmetriaJsonSchemaDocument = (
   // default of `false` would make a QML consumer reject the very payload a
   // TypeScript consumer accepts, so the two consumer kinds would disagree on
   // the first additive field this contract ever ships. Do not tighten it.
-  const document = Schema.toJsonSchemaDocument(root.schema, { additionalProperties: true });
+  // Effect 4.0.2 renamed the option: `onExcessProperty: "ignore"` is the old
+  // `additionalProperties: true`.
+  const document = Schema.toJsonSchemaDocument(root.schema, { onExcessProperty: "ignore" });
   const jsonSchema: Record<string, unknown> = {
     $schema: SYMMETRIA_JSON_SCHEMA_DIALECT,
     $id: root.file,

@@ -1,15 +1,18 @@
-// Entry point: the `present_plan` tool, driven through `FactoryToolkit.handle` with the real
-// snapshot store and, for registration, through the MCP server that `McpHttpServer` serves.
+// @effect-diagnostics nodeBuiltinImport:off - expected digests are computed independently of the handlers' Effect Crypto.
+// Entry point: the `present_plan` tool, driven through `FactoryToolkit.handle` with the
+// production handlers behind the MCP access gate and the real snapshot store, and, for
+// registration, through the MCP server that `McpHttpServer.toolkitRegistration` builds.
+// The orchestrator is a fake that records the `factory_card.record` commands; what the
+// orchestrator does with them is tested in `orchestration-v2/FactoryCards.test.ts`.
 import * as NodeCrypto from "node:crypto";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   EnvironmentId,
-  ProjectId,
   ProviderInstanceId,
   ThreadId,
-  type OrchestrationCommand,
-  type OrchestrationThreadShell,
+  type FactoryThreadCard,
+  type OrchestrationV2ServerCommand,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -21,22 +24,18 @@ import * as PlatformError from "effect/PlatformError";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import * as TestClock from "effect/testing/TestClock";
-import { McpSchema, McpServer } from "effect/unstable/ai";
-import type { Tool } from "effect/unstable/ai";
+import { McpSchema, McpServer } from "effect/ai";
+import type { Tool } from "effect/ai";
 
 import * as ServerConfig from "../../../config.ts";
-import * as FactoryRunShellSummaries from "../../../factory/FactoryRunShellSummaries.ts";
 import * as FactoryRunTracker from "../../../factory/FactoryRunTracker.ts";
 import * as FactorySnapshotStore from "../../../factory/FactorySnapshotStore.ts";
-import {
-  OrchestrationEngineService,
-  type OrchestrationEngineShape,
-} from "../../../orchestration/Services/OrchestrationEngine.ts";
-import { ProjectionSnapshotQuery } from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import * as McpHttpServer from "../../McpHttpServer.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
-import { FactoryToolkitHandlersLive } from "./handlers.ts";
+import * as McpToolAccess from "../../McpToolAccess.ts";
+import * as McpToolAccessTestkit from "../../McpToolAccess.testkit.ts";
+import * as FactoryHandlers from "./handlers.ts";
 import { FactoryToolkit } from "./tools.ts";
 
 const THREAD_ID = ThreadId.make("thread-1");
@@ -48,39 +47,30 @@ const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const sha256Hex = (data: string | Uint8Array) =>
   NodeCrypto.createHash("sha256").update(data).digest("hex");
 
+/** A thread caller on the `codex` instance, the one `McpToolAccessTestkit` keeps live. */
 const invocation = (
   capabilities: ReadonlyArray<McpInvocationContext.McpCapability>,
+  options: { readonly thread?: boolean } = {},
 ): McpInvocationContext.McpInvocationScope => ({
   environmentId: EnvironmentId.make("environment-1"),
-  threadId: THREAD_ID,
-  providerSessionId: "provider-session-1",
-  providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+  requestNamespace: "provider-session-1",
+  thread:
+    options.thread === false
+      ? undefined
+      : {
+          threadId: THREAD_ID,
+          providerSessionId: "provider-session-1",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+        },
+  client: undefined,
   capabilities: new Set(capabilities),
   issuedAt: 1,
 });
 
-const thread: OrchestrationThreadShell = {
-  id: THREAD_ID,
-  projectId: ProjectId.make("project-1"),
-  title: "Thread",
-  modelSelection: { instanceId: ProviderInstanceId.make("claudeAgent"), model: "claude-opus-5-5" },
-  runtimeMode: "full-access",
-  interactionMode: "default",
-  branch: null,
-  worktreePath: null,
-  pullRequests: [],
-  latestTurn: null,
-  createdAt: "2026-09-28T00:00:00.000Z",
-  updatedAt: "2026-09-28T00:00:00.000Z",
-  archivedAt: null,
-  settledOverride: null,
-  settledAt: null,
-  session: null,
-  latestUserMessageAt: null,
-  hasPendingApprovals: false,
-  hasPendingUserInput: false,
-  hasActionableProposedPlan: false,
-};
+type FactoryCardRecordCommand = Extract<
+  OrchestrationV2ServerCommand,
+  { readonly type: "factory_card.record" }
+>;
 
 /** A plan in the heading contract; `acceptance` sets how many criteria each phase has. */
 function planMarkdown(acceptance: ReadonlyArray<number> = [3, 1]): string {
@@ -134,26 +124,38 @@ const FACTORY_IN_CHAT_PLAN_PATH = new URL(
 
 const PLAN_HEADINGS = ["Context", "A heading no contract knows", "The phases", "Decisions"];
 
-const makeHarness = Effect.fn("makeFactoryToolkitHarness")(function* () {
-  const commands = yield* Ref.make<ReadonlyArray<OrchestrationCommand>>([]);
-  const dispatch: OrchestrationEngineShape["dispatch"] = (command) =>
-    Ref.update(commands, (recorded) => [...recorded, command]).pipe(Effect.as({ sequence: 1 }));
-  const dependencies = FactoryRunTracker.layer.pipe(
-    Layer.provideMerge(
-      Layer.mergeAll(
-        Layer.mock(ProjectionSnapshotQuery)({
-          getThreadShellById: (threadId) =>
-            Effect.succeed(threadId === THREAD_ID ? Option.some(thread) : Option.none()),
-        }),
-        Layer.mock(OrchestrationEngineService)({
-          readEvents: () => Stream.empty,
-          dispatch,
-          streamDomainEvents: Stream.empty,
-          latestSequence: Effect.succeed(0),
-        }),
-        FactoryRunShellSummaries.layer,
-      ),
-    ),
+const makeHarness = Effect.fn("makeFactoryToolkitHarness")(function* (
+  options: {
+    /** A rejection the orchestrator reports as the dispatch error's cause. */
+    readonly reject?: (command: OrchestrationV2ServerCommand) => string | null;
+  } = {},
+) {
+  const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
+  const attached = yield* Ref.make<ReadonlyArray<{ threadId: ThreadId; runDir: string }>>([]);
+  const dispatch: Orchestrator.OrchestratorV2Shape["dispatch"] = (command) =>
+    Effect.gen(function* () {
+      const rejection = options.reject?.(command) ?? null;
+      if (rejection !== null) {
+        return yield* new Orchestrator.OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: rejection,
+        });
+      }
+      yield* Ref.update(commands, (recorded) => [...recorded, command]);
+      return { sequence: 1, storedEvents: [] };
+    });
+  const dependencies = Layer.mergeAll(
+    Layer.mock(Orchestrator.OrchestratorV2)({ dispatch }),
+    McpToolAccessTestkit.liveThreadsLayer,
+    // The run tracker has its own tests; here it only has to be reached with the caller's thread.
+    Layer.mock(FactoryRunTracker.FactoryRunTracker)({
+      attach: (threadId, runDir) =>
+        Ref.update(attached, (recorded) => [...recorded, { threadId, runDir }]).pipe(
+          Effect.as({ runId: runDir.split("/").at(-1) ?? runDir }),
+        ),
+    }),
+  ).pipe(
     Layer.provideMerge(FactorySnapshotStore.layer),
     Layer.provideMerge(
       ServerConfig.layerTest(process.cwd(), { prefix: "t3-factory-toolkit-test-" }),
@@ -163,7 +165,7 @@ const makeHarness = Effect.fn("makeFactoryToolkitHarness")(function* () {
   // Built once, so the handlers and the assertions share one snapshots directory.
   const context = yield* Layer.build(dependencies);
   const toolkit = yield* FactoryToolkit.pipe(
-    Effect.provide(FactoryToolkitHandlersLive),
+    Effect.provide(McpToolAccess.HandlersLayer.layer(FactoryHandlers.layer)),
     Effect.provide(context),
   );
   const config = yield* ServerConfig.ServerConfig.pipe(Effect.provide(context));
@@ -198,6 +200,21 @@ const makeHarness = Effect.fn("makeFactoryToolkitHarness")(function* () {
       Effect.provide(context),
     );
 
+  const attachRun = (
+    runDir: string,
+    scope: McpInvocationContext.McpInvocationScope = invocation(["factory"]),
+  ) =>
+    toolkit.handle("attach_factory_run", { runDir }).pipe(
+      Stream.unwrap,
+      Stream.runCollect,
+      Effect.map(
+        (chunk) =>
+          chunk.at(-1)!.result as Tool.Success<(typeof FactoryToolkit.tools)["attach_factory_run"]>,
+      ),
+      Effect.provideService(McpInvocationContext.McpInvocationContext, scope),
+      Effect.provide(context),
+    );
+
   /** Every snapshot on disk with its inode and modification time, so a rewrite shows. */
   const listSnapshots = Effect.gen(function* () {
     const exists = yield* fileSystem.exists(config.factorySnapshotsDir);
@@ -215,25 +232,34 @@ const makeHarness = Effect.fn("makeFactoryToolkitHarness")(function* () {
     return entries;
   });
 
-  const appendedActivities = Ref.get(commands).pipe(
+  const recordedCards = Ref.get(commands).pipe(
     Effect.map((recorded) =>
       recorded.flatMap((command) =>
-        command.type === "thread.activity.append" ? [command.activity] : [],
+        command.type === "factory_card.record" ? [command as FactoryCardRecordCommand] : [],
       ),
     ),
   );
 
   return {
+    attached,
+    attachRun,
     commands,
     config,
     context,
     documentsDir,
-    appendedActivities,
+    recordedCards,
     listSnapshots,
     presentPlan,
     writeDocument,
   };
 });
+
+/** The plan payload of a recorded card. */
+const planPayloadOf = (command: FactoryCardRecordCommand | undefined) => {
+  const card: FactoryThreadCard | undefined = command?.card;
+  if (card?.kind !== "plan") throw new Error(`expected a plan card, got ${card?.kind}`);
+  return card.payload;
+};
 
 it.layer(NodeServices.layer)("factory toolkit present_plan", (it) => {
   it.effect("present_plan returns the plan's sha256 digest, its title and its phase count", () =>
@@ -285,7 +311,7 @@ it.layer(NodeServices.layer)("factory toolkit present_plan", (it) => {
     }),
   );
 
-  it.effect("present_plan appends one factory.plan activity that carries no document body", () =>
+  it.effect("present_plan records one plan card that carries no document body", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness();
       const plan = planMarkdown([3, 1]);
@@ -296,30 +322,29 @@ it.layer(NodeServices.layer)("factory toolkit present_plan", (it) => {
 
       const commands = yield* Ref.get(harness.commands);
       expect(commands).toHaveLength(1);
-      const [command] = commands;
-      expect(command).toMatchObject({ type: "thread.activity.append", threadId: THREAD_ID });
+      const [command] = yield* harness.recordedCards;
       expect(command?.commandId).toMatch(new RegExp(`^server:factory-plan:${THREAD_ID}:.+`));
-      const [activity] = yield* harness.appendedActivities;
-      expect(activity).toEqual({
-        id: `factory-plan:${THREAD_ID}:${sha256Hex(planPath).slice(0, 16)}`,
-        tone: "info",
-        kind: "factory.plan",
-        summary: "Plan: A synthetic plan for the toolkit",
-        payload: {
-          digest: sha256Hex(plan),
-          intentDigest: sha256Hex(INTENT_MARKDOWN),
-          planPath,
-          intentPath,
-          title: "A synthetic plan for the toolkit",
-          phases: [
-            { title: "Phase 1", acceptanceCount: 3 },
-            { title: "Phase 2", acceptanceCount: 1 },
-          ],
-          headings: PLAN_HEADINGS,
-          presentedAt: expect.any(String),
+      expect(command).toEqual({
+        type: "factory_card.record",
+        commandId: expect.any(String),
+        threadId: THREAD_ID,
+        turnItemId: `factory-plan:${THREAD_ID}:${sha256Hex(planPath).slice(0, 16)}`,
+        card: {
+          kind: "plan",
+          payload: {
+            digest: sha256Hex(plan),
+            intentDigest: sha256Hex(INTENT_MARKDOWN),
+            planPath,
+            intentPath,
+            title: "A synthetic plan for the toolkit",
+            phases: [
+              { title: "Phase 1", acceptanceCount: 3 },
+              { title: "Phase 2", acceptanceCount: 1 },
+            ],
+            headings: PLAN_HEADINGS,
+            presentedAt: expect.any(String),
+          },
         },
-        turnId: null,
-        createdAt: expect.any(String),
       });
       const commandJson = encodeJson(command);
       expect(commandJson).not.toContain(BODY_SENTENCE);
@@ -327,7 +352,7 @@ it.layer(NodeServices.layer)("factory toolkit present_plan", (it) => {
     }),
   );
 
-  it.effect("present_plan strips one leading Plan: from the title in the activity summary", () =>
+  it.effect("present_plan keeps a title that starts with Plan: as the plan wrote it", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness();
       const plan = planMarkdown().replace(
@@ -339,36 +364,51 @@ it.layer(NodeServices.layer)("factory toolkit present_plan", (it) => {
 
       const result = yield* harness.presentPlan({ planPath, intentPath });
 
-      const [activity] = yield* harness.appendedActivities;
+      const [command] = yield* harness.recordedCards;
       expect(result.title).toBe("Plan: something worth building");
-      expect(activity?.summary).toBe("Plan: something worth building");
-      expect(activity?.payload).toMatchObject({ title: "Plan: something worth building" });
+      expect(planPayloadOf(command)).toMatchObject({ title: "Plan: something worth building" });
     }),
   );
 
-  it.effect("present_plan replaces the activity of an edited plan in place and moves it", () =>
+  it.effect(
+    "present_plan records an edited plan under the same card id, a new plan under its own",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness();
+        const planPath = yield* harness.writeDocument("plan.md", planMarkdown([3, 1]));
+        const intentPath = yield* harness.writeDocument("intent.md", INTENT_MARKDOWN);
+        yield* harness.presentPlan({ planPath, intentPath });
+
+        const edited = planMarkdown([3, 2, 4]);
+        yield* harness.writeDocument("plan.md", edited);
+        const result = yield* harness.presentPlan({ planPath, intentPath });
+
+        const [first, second] = yield* harness.recordedCards;
+        expect(result).toMatchObject({ digest: sha256Hex(edited), phaseCount: 3 });
+        expect(second?.turnItemId).toBe(first?.turnItemId);
+        expect(second?.commandId).not.toBe(first?.commandId);
+        expect(planPayloadOf(second)).toMatchObject({ digest: sha256Hex(edited) });
+        expect(planPayloadOf(first)).not.toMatchObject({ digest: sha256Hex(edited) });
+
+        const otherPlanPath = yield* harness.writeDocument("other-plan.md", planMarkdown([1]));
+        yield* harness.presentPlan({ planPath: otherPlanPath, intentPath });
+        const cards = yield* harness.recordedCards;
+        expect(new Set(cards.map((card) => card.turnItemId)).size).toBe(2);
+      }),
+  );
+
+  it.effect("present_plan fails, without a card, when the orchestrator refuses the card", () =>
     Effect.gen(function* () {
-      const harness = yield* makeHarness();
-      const planPath = yield* harness.writeDocument("plan.md", planMarkdown([3, 1]));
+      const harness = yield* makeHarness({
+        reject: () => "Thread thread-1 has no run to anchor a Software Factory card to.",
+      });
+      const planPath = yield* harness.writeDocument("plan.md", planMarkdown());
       const intentPath = yield* harness.writeDocument("intent.md", INTENT_MARKDOWN);
-      yield* harness.presentPlan({ planPath, intentPath });
 
-      const edited = planMarkdown([3, 2, 4]);
-      yield* harness.writeDocument("plan.md", edited);
-      yield* TestClock.adjust("1 minute");
-      const result = yield* harness.presentPlan({ planPath, intentPath });
+      const error = yield* harness.presentPlan({ planPath, intentPath }).pipe(Effect.flip);
 
-      const [first, second] = yield* harness.appendedActivities;
-      expect(result).toMatchObject({ digest: sha256Hex(edited), phaseCount: 3 });
-      expect(second?.id).toBe(first?.id);
-      expect(second?.payload).toMatchObject({ digest: sha256Hex(edited) });
-      expect(first?.payload).not.toMatchObject({ digest: sha256Hex(edited) });
-      expect(Date.parse(second!.createdAt)).toBeGreaterThan(Date.parse(first!.createdAt));
-
-      const otherPlanPath = yield* harness.writeDocument("other-plan.md", planMarkdown([1]));
-      yield* harness.presentPlan({ planPath: otherPlanPath, intentPath });
-      const activities = yield* harness.appendedActivities;
-      expect(new Set(activities.map((activity) => activity.id)).size).toBe(2);
+      expect(error).toMatchObject({ _tag: "FactoryPresentPlanFailedError" });
+      expect(yield* harness.recordedCards).toEqual([]);
     }),
   );
 
@@ -400,7 +440,7 @@ it.layer(NodeServices.layer)("factory toolkit present_plan", (it) => {
         }),
       );
 
-    refuses("present_plan refuses a relative plan path and records no activity", (harness) =>
+    refuses("present_plan refuses a relative plan path and records no card", (harness) =>
       Effect.gen(function* () {
         const intentPath = yield* harness.writeDocument("intent.md", INTENT_MARKDOWN);
         yield* harness.writeDocument("plan.md", planMarkdown());
@@ -413,7 +453,7 @@ it.layer(NodeServices.layer)("factory toolkit present_plan", (it) => {
       }),
     );
 
-    refuses("present_plan refuses a relative intent path and records no activity", (harness) =>
+    refuses("present_plan refuses a relative intent path and records no card", (harness) =>
       Effect.gen(function* () {
         const planPath = yield* harness.writeDocument("plan.md", planMarkdown());
         return {
@@ -425,7 +465,7 @@ it.layer(NodeServices.layer)("factory toolkit present_plan", (it) => {
       }),
     );
 
-    refuses("present_plan refuses a missing plan file and records no activity", (harness) =>
+    refuses("present_plan refuses a missing plan file and records no card", (harness) =>
       Effect.gen(function* () {
         const path = yield* Path.Path;
         const intentPath = yield* harness.writeDocument("intent.md", INTENT_MARKDOWN);
@@ -439,7 +479,7 @@ it.layer(NodeServices.layer)("factory toolkit present_plan", (it) => {
       }),
     );
 
-    refuses("present_plan refuses a missing intent file and records no activity", (harness) =>
+    refuses("present_plan refuses a missing intent file and records no card", (harness) =>
       Effect.gen(function* () {
         const path = yield* Path.Path;
         const planPath = yield* harness.writeDocument("plan.md", planMarkdown());
@@ -453,7 +493,7 @@ it.layer(NodeServices.layer)("factory toolkit present_plan", (it) => {
       }),
     );
 
-    refuses("present_plan refuses a file over 1 MiB and records no activity", (harness) =>
+    refuses("present_plan refuses a file over 1 MiB and records no card", (harness) =>
       Effect.gen(function* () {
         const planPath = yield* harness.writeDocument("plan.md", planMarkdown());
         const intentPath = yield* harness.writeDocument(
@@ -485,7 +525,7 @@ it.layer(NodeServices.layer)("factory toolkit present_plan", (it) => {
       }),
     );
 
-    it.effect("present_plan refuses a directory in place of a file and records no activity", () =>
+    it.effect("present_plan refuses a directory in place of a file and records no card", () =>
       Effect.gen(function* () {
         const harness = yield* makeHarness();
         const planPath = yield* harness.writeDocument("plan.md", planMarkdown());
@@ -528,8 +568,8 @@ it.layer(NodeServices.layer)("factory toolkit present_plan", (it) => {
 
         yield* harness.presentPlan({ planPath, intentPath });
 
-        const [activity] = yield* harness.appendedActivities;
-        const payload = activity?.payload as { readonly headings: ReadonlyArray<string> };
+        const [command] = yield* harness.recordedCards;
+        const payload = planPayloadOf(command);
         expect(payload.headings).toHaveLength(PLAN_HEADINGS.length + 150);
         expect(payload.headings[0]).toBe("Context");
         expect(payload.headings.at(-1)).toBe("Decisions");
@@ -547,7 +587,7 @@ it.layer(NodeServices.layer)("factory toolkit present_plan", (it) => {
 
         yield* harness.presentPlan({ planPath, intentPath });
 
-        expect(yield* harness.appendedActivities).toHaveLength(1);
+        expect(yield* harness.recordedCards).toHaveLength(1);
       }),
     );
   });
@@ -564,14 +604,14 @@ it.layer(NodeServices.layer)("factory toolkit present_plan", (it) => {
 
         const result = yield* harness.presentPlan({ planPath, intentPath });
 
-        const [activity] = yield* harness.appendedActivities;
+        const [command] = yield* harness.recordedCards;
+        const payload = planPayloadOf(command);
         expect(result).toMatchObject({
           digest: sha256Hex(plan),
           title: "Plan: the Software Factory inside Mesura Code",
           phaseCount: 11,
         });
-        expect(activity?.summary).toBe("Plan: the Software Factory inside Mesura Code");
-        expect(activity?.payload).toMatchObject({
+        expect(payload).toMatchObject({
           headings: [
             "Context",
             "Current state",
@@ -588,9 +628,7 @@ it.layer(NodeServices.layer)("factory toolkit present_plan", (it) => {
             "What I read before planning",
           ],
         });
-        const phases = (
-          activity?.payload as { readonly phases: ReadonlyArray<unknown> } | undefined
-        )?.phases;
+        const phases = payload.phases;
         expect(phases).toHaveLength(11);
         expect(phases?.[0]).toEqual({
           title: "Snapshot a plan and present it to the thread",
@@ -618,49 +656,135 @@ it.layer(NodeServices.layer)("factory toolkit present_plan", (it) => {
       expect(yield* harness.listSnapshots).toEqual([]);
     }),
   );
+
+  it.effect("both tools refuse a caller outside a thread before reading any file", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      const planPath = yield* harness.writeDocument("plan.md", planMarkdown());
+      const intentPath = yield* harness.writeDocument("intent.md", INTENT_MARKDOWN);
+
+      const error = yield* harness
+        .attachRun(harness.documentsDir, invocation(["factory"], { thread: false }))
+        .pipe(Effect.flip);
+      expect(error).toMatchObject({
+        _tag: "OrchestratorMcpFailure",
+        code: "thread_credential_required",
+      });
+
+      const planError = yield* toolkitCall(harness, "present_plan", {
+        planPath,
+        intentPath,
+      }).pipe(Effect.flip);
+      expect(planError).toMatchObject({
+        _tag: "OrchestratorMcpFailure",
+        code: "thread_credential_required",
+      });
+      expect(yield* Ref.get(harness.commands)).toEqual([]);
+      expect(yield* harness.listSnapshots).toEqual([]);
+    }),
+  );
+});
+
+/** Calls a tool as an MCP client signed in from outside any thread. */
+const toolkitCall = (
+  harness: Effect.Success<ReturnType<typeof makeHarness>>,
+  name: "present_plan",
+  params: { readonly planPath: string; readonly intentPath: string },
+) =>
+  FactoryToolkit.pipe(
+    Effect.provide(McpToolAccess.HandlersLayer.layer(FactoryHandlers.layer)),
+    Effect.provide(harness.context),
+    Effect.flatMap((toolkit) => toolkit.handle(name, params)),
+    Stream.unwrap,
+    Stream.runCollect,
+    Effect.provideService(
+      McpInvocationContext.McpInvocationContext,
+      invocation(["factory"], { thread: false }),
+    ),
+    Effect.provide(harness.context),
+  );
+
+it.layer(NodeServices.layer)("factory toolkit attach_factory_run", (it) => {
+  it.effect("attach_factory_run follows the run for the calling thread and returns its id", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      const path = yield* Path.Path;
+      const runDir = path.join(harness.documentsDir, "run-2026-10-11");
+
+      const result = yield* harness.attachRun(runDir);
+
+      expect(result).toEqual({ runId: "run-2026-10-11" });
+      expect(yield* Ref.get(harness.attached)).toEqual([{ threadId: THREAD_ID, runDir }]);
+    }),
+  );
+
+  it.effect("attach_factory_run refuses a credential without the factory capability", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+
+      const error = yield* harness
+        .attachRun(harness.documentsDir, invocation(["pull-requests"]))
+        .pipe(Effect.flip);
+
+      expect(error).toMatchObject({
+        _tag: "McpCapabilityUnavailableError",
+        capability: "factory",
+        threadId: THREAD_ID,
+      });
+      expect(yield* Ref.get(harness.attached)).toEqual([]);
+    }),
+  );
 });
 
 it.layer(NodeServices.layer)("factory toolkit registration", (it) => {
-  it.effect("McpHttpServer registers present_plan and surfaces a missing factory capability", () =>
-    Effect.gen(function* () {
-      const harness = yield* makeHarness();
-      const registration = McpHttpServer.FactoryToolkitRegistrationLive.pipe(
-        Layer.provideMerge(McpServer.McpServer.layer),
-        Layer.provide(Layer.succeedContext(harness.context)),
-      );
-      const server = yield* McpServer.McpServer.pipe(Effect.provide(registration));
-
-      const presentPlan = server.tools.find(({ tool }) => tool.name === "present_plan");
-      expect(presentPlan?.tool.annotations?.readOnlyHint).toBe(false);
-      expect(presentPlan?.tool.annotations?.idempotentHint).toBe(true);
-
-      const denied = yield* server
-        .callTool({
-          name: "present_plan",
-          arguments: { planPath: "/tmp/plan.md", intentPath: "/tmp/intent.md" },
-        })
-        .pipe(
-          Effect.provideService(McpInvocationContext.McpInvocationContext, invocation(["preview"])),
-          Effect.provideService(
-            McpSchema.McpServerClient,
-            McpSchema.McpServerClient.of({
-              clientId: 1,
-              clientCapabilities: {},
-              clientInfo: { name: "factory-test", version: "1.0.0" },
-              protocolVersion: "2025-06-18",
-              initializePayload: {
-                protocolVersion: "2025-06-18",
-                capabilities: {},
-                clientInfo: { name: "factory-test", version: "1.0.0" },
-              },
-              getClient: Effect.die("unused"),
-            }),
-          ),
+  it.effect(
+    "toolkitRegistration registers present_plan and surfaces a missing factory capability",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness();
+        const registration = McpHttpServer.toolkitRegistration(
+          FactoryToolkit,
+          FactoryHandlers.layer,
+        ).pipe(
+          Layer.provideMerge(McpServer.McpServer.layer),
+          Layer.provide(Layer.succeedContext(harness.context)),
         );
-      expect(denied.isError).toBe(true);
-      expect(denied.content).toEqual([
-        { type: "text", text: "MCP credential does not grant the factory capability." },
-      ]);
-    }),
+        const server = yield* McpServer.McpServer.pipe(Effect.provide(registration));
+
+        const presentPlan = server.tools.find(({ tool }) => tool.name === "present_plan");
+        expect(presentPlan?.tool.annotations?.readOnlyHint).toBe(false);
+        expect(presentPlan?.tool.annotations?.idempotentHint).toBe(true);
+
+        const denied = yield* server
+          .callTool({
+            name: "present_plan",
+            arguments: { planPath: "/tmp/plan.md", intentPath: "/tmp/intent.md" },
+          })
+          .pipe(
+            Effect.provideService(
+              McpInvocationContext.McpInvocationContext,
+              invocation(["preview"]),
+            ),
+            Effect.provideService(
+              McpSchema.McpServerClient,
+              McpSchema.McpServerClient.of({
+                clientId: 1,
+                clientCapabilities: {},
+                clientInfo: { name: "factory-test", version: "1.0.0" },
+                protocolVersion: "2025-06-18",
+                initializePayload: {
+                  protocolVersion: "2025-06-18",
+                  capabilities: {},
+                  clientInfo: { name: "factory-test", version: "1.0.0" },
+                },
+                getClient: Effect.die("unused"),
+              }),
+            ),
+          );
+        expect(denied.isError).toBe(true);
+        expect(denied.content).toEqual([
+          { type: "text", text: "MCP credential does not grant the factory capability." },
+        ]);
+      }),
   );
 });

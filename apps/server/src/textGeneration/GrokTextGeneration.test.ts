@@ -13,25 +13,27 @@ import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 import { createModelSelection } from "@t3tools/shared/model";
 import { expect } from "vite-plus/test";
-import { GrokSettings, ProviderInstanceId } from "@t3tools/contracts";
+import { ProviderInstanceId } from "@t3tools/contracts";
+import { GrokSettings } from "@t3tools/provider-grok/settings";
 
 import * as ServerConfig from "../config.ts";
 import * as TextGeneration from "./TextGeneration.ts";
-import { makeGrokTextGeneration } from "./GrokTextGeneration.ts";
-import { execScriptSource, writeFakeCli } from "../testUtils/fakeCli.ts";
+import { makeGrokTextGeneration } from "@t3tools/provider-grok/testing";
+import { execScriptSource, writeFakeCli } from "@t3tools/provider-testing/fakeCli";
 import {
   THREAD_SEARCH_FINISH_MODEL_OUTPUT,
   THREAD_SEARCH_FINISH_STEP,
   THREAD_SEARCH_FORBIDDEN_MODEL_OUTPUT,
+  THREAD_SEARCH_STEP_CWD,
   THREAD_SEARCH_STEP_REQUEST,
   THREAD_SEARCH_QUOTED_EXCERPT,
-} from "./ThreadSearchStep.testFixtures.ts";
+} from "@t3tools/provider-testing/threadSearchStep";
 const decodeGrokSettings = Schema.decodeSync(GrokSettings);
 
 const __dirname = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
-const mockAgentPath = NodePath.join(__dirname, "../../scripts/acp-mock-agent.ts");
+const mockAgentPath = NodePath.join(__dirname, "../provider/testFixtures/grok-text-mock-agent.mjs");
 
-const GrokTextGenerationTestLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
+const layerGrokTextGenerationTest = ServerConfig.ServerConfig.layerTest(process.cwd(), {
   prefix: "t3code-grok-text-generation-test-",
 }).pipe(Layer.provideMerge(NodeServices.layer));
 
@@ -76,7 +78,7 @@ function readJsonRpcRequests(
     .map((line) => JSON.parse(line) as { method?: string; params?: Record<string, unknown> });
 }
 
-it.layer(GrokTextGenerationTestLayer)("GrokTextGeneration", (it) => {
+it.layer(layerGrokTextGenerationTest)("GrokTextGeneration", (it) => {
   it.effect("uses ACP with disabled tool capabilities and forwards the requested model id", () => {
     const requestLogDir = NodeFS.mkdtempSync(
       NodePath.join(NodeOS.tmpdir(), "t3code-grok-text-log-"),
@@ -251,6 +253,7 @@ it.layer(GrokTextGenerationTestLayer)("GrokTextGeneration", (it) => {
           Effect.gen(function* () {
             const step = yield* textGeneration.generateThreadSearchStep({
               ...THREAD_SEARCH_STEP_REQUEST,
+              cwd: THREAD_SEARCH_STEP_CWD,
               modelSelection: createModelSelection(ProviderInstanceId.make("grok"), "grok-build"),
             });
             expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
@@ -290,6 +293,7 @@ it.layer(GrokTextGenerationTestLayer)("GrokTextGeneration", (it) => {
           const error = yield* textGeneration
             .generateThreadSearchStep({
               ...THREAD_SEARCH_STEP_REQUEST,
+              cwd: THREAD_SEARCH_STEP_CWD,
               modelSelection: createModelSelection(ProviderInstanceId.make("grok"), "grok-build"),
             })
             .pipe(Effect.flip);
@@ -336,6 +340,7 @@ it.layer(GrokTextGenerationTestLayer)("GrokTextGeneration", (it) => {
   const grokSearchStep = (textGeneration: TextGeneration.TextGeneration["Service"]) =>
     textGeneration.generateThreadSearchStep({
       ...THREAD_SEARCH_STEP_REQUEST,
+      cwd: THREAD_SEARCH_STEP_CWD,
       modelSelection: createModelSelection(ProviderInstanceId.make("grok"), "grok-build"),
     });
 

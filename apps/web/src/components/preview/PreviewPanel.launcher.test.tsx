@@ -128,6 +128,7 @@ vi.mock("./previewBridge", () => ({
 vi.mock("./usePreviewSession", () => ({ usePreviewSession: vi.fn() }));
 vi.mock("./AgentBrowserCursor", () => ({ AgentBrowserCursor: () => null }));
 
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { closePanelLauncher, dismissPanelLauncher, openPanelLauncher } from "~/lib/panelLauncher";
 import { ACTIVE_TAB_TITLE_SELECTOR, enterPanel } from "~/lib/panelSurfaceFocus";
 import { RightPanelTabs } from "../RightPanelTabs";
@@ -222,6 +223,15 @@ describe("browser profile choice in the panel launcher", () => {
       root!.render(
         <RightPanelTabs
           mode="inline"
+          keybindings={DEFAULT_RESOLVED_KEYBINDINGS}
+          getShortcutContext={() => ({
+            terminalFocus: false,
+            terminalOpen: false,
+            previewFocus: false,
+            previewOpen: false,
+            isWeb: false,
+            isDesktop: true,
+          })}
           surfaces={[{ id: "browser:tab-1", kind: "preview", resourceId: "tab-1" }]}
           environmentId={null}
           activeSurfaceId="browser:tab-1"
@@ -242,16 +252,13 @@ describe("browser profile choice in the panel launcher", () => {
           onAddPullRequests={() => undefined}
           onAddDiff={() => undefined}
           onAddFiles={() => undefined}
-          onAddAgents={() => undefined}
           onAddDevice={() => undefined}
-          liveAgentCount={0}
           browserAvailable
           terminalAvailable={false}
           diffAvailable={false}
           filesAvailable={false}
           pullRequestAvailable={false}
           pullRequestsAvailable={false}
-          agentsAvailable={false}
           deviceAvailable={false}
         >
           <div>content</div>

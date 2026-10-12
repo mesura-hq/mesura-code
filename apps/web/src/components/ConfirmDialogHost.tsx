@@ -78,10 +78,7 @@ export function ConfirmDialogHost() {
       }}
     >
       {/* Mesura: a routine confirmation opens on Confirm, so Enter answers it. */}
-      <AlertDialogPopup
-        className="max-w-lg"
-        {...(focusConfirm ? { initialFocus: confirmButtonRef } : {})}
-      >
+      <AlertDialogPopup {...(focusConfirm ? { initialFocus: confirmButtonRef } : {})}>
         <AlertDialogHeader>
           <AlertDialogTitle>{copy.title}</AlertDialogTitle>
           {copy.description ? (

@@ -71,7 +71,10 @@ export const NonNegativeInteger = Schema.Int.check(Schema.isGreaterThanOrEqualTo
  * and re-encodes to a different document, which is exactly what a golden
  * fixture exists to catch. What crosses the wire is what the producer wrote.
  */
-export const NonEmptyText = Schema.String.check(Schema.isMinLength(1), Schema.isPattern(/\S/));
+// Mesura: the `u` flag is load-bearing. Effect 4.0.2 emits a JSON Schema
+// `pattern` only for a unicode-mode regex, and without it the artifact lost
+// the whitespace-only check Symmetria Shell relies on.
+export const NonEmptyText = Schema.String.check(Schema.isMinLength(1), Schema.isPattern(/\S/u));
 
 /**
  * The version of a thread's composer draft. Monotonic, and the value a

@@ -54,6 +54,68 @@ export type FeedThread = {
   readonly deletedAt?: string | null | undefined;
 };
 
+/** The parts of the v2 thread shell the feed reads (`EnvironmentThreadShell`). */
+export interface FeedThreadShellSource {
+  readonly id: string;
+  readonly projectId: string;
+  readonly title: string;
+  readonly branch: string | null;
+  readonly worktreePath: string | null;
+  readonly latestRun: {
+    readonly runId: string;
+    readonly status: string;
+    readonly requestedAt: string | null;
+    readonly startedAt: string | null;
+    readonly completedAt: string | null;
+  } | null;
+  readonly runtime: { readonly status: string; readonly activeRunId: string | null } | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly archivedAt: string | null;
+  readonly settledAt: string | null;
+  readonly snoozedUntil?: string | null | undefined;
+  readonly pinnedAt?: string | null | undefined;
+  readonly deletedAt?: string | null | undefined;
+}
+
+/**
+ * Maps the v2 thread shell onto the feed's wire shape, which keeps its v1
+ * names (`latestTurn`, `session`) because Symmetria Shell's bar reads them.
+ * A run is the v2 name for a turn; its status string passes through as the
+ * turn state, and the runtime status as the session status.
+ */
+export function feedThreadFromShell(thread: FeedThreadShellSource): FeedThread {
+  const run = thread.latestRun;
+  return {
+    id: thread.id,
+    projectId: thread.projectId,
+    title: thread.title,
+    branch: thread.branch,
+    worktreePath: thread.worktreePath,
+    latestTurn:
+      run === null
+        ? null
+        : {
+            turnId: run.runId,
+            state: run.status,
+            requestedAt: run.requestedAt ?? thread.updatedAt,
+            startedAt: run.startedAt,
+            completedAt: run.completedAt,
+          },
+    session:
+      thread.runtime === null
+        ? null
+        : { status: thread.runtime.status, activeTurnId: thread.runtime.activeRunId },
+    createdAt: thread.createdAt,
+    updatedAt: thread.updatedAt,
+    archivedAt: thread.archivedAt,
+    settledAt: thread.settledAt,
+    snoozedUntil: thread.snoozedUntil ?? null,
+    pinnedAt: thread.pinnedAt ?? null,
+    deletedAt: thread.deletedAt ?? null,
+  };
+}
+
 export type FeedPayload = {
   readonly generation: string;
   readonly readModel: {

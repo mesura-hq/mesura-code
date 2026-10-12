@@ -53,6 +53,7 @@ export const REMOVED_NATIVE_MOBILE_PATCHED_PACKAGES = [
   "react-native-reanimated",
   "react-native-screens",
   "react-native-shiki-engine",
+  "react-native-webview",
   "uniwind",
 ] as const;
 
