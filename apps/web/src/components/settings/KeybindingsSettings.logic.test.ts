@@ -85,11 +85,11 @@ describe("KeybindingsSettings.logic", () => {
       "usage.open",
       "usage.cost",
       "usage.tokens",
-      "usage.limits",
       "usage.period.day",
       "usage.period.week",
       "usage.period.month",
       "usage.period.quarter",
+      // Mesura: no Limits tab, and the fork's sidebar limits dock peek (alt+u).
       "usage.peek",
     ];
     // The order must not depend on the order of the configured bindings.
@@ -98,9 +98,11 @@ describe("KeybindingsSettings.logic", () => {
       DEFAULT_RESOLVED_KEYBINDINGS.toReversed(),
     ]) {
       expect(buildKeybindingRows(bindings, "usage").map((row) => row.command)).toEqual(expected);
+      // Mesura: usage.limits stays a contract command, so it is still offered
+      // for a custom binding, after the page's own commands.
       expect(
         buildKeybindingCommandOptions(bindings).filter((command) => command.startsWith("usage.")),
-      ).toEqual(expected);
+      ).toEqual([...expected.slice(0, -1), "usage.limits", "usage.peek"]);
     }
   });
 

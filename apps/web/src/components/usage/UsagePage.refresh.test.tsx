@@ -182,58 +182,8 @@ it.each([0, 1])(
   },
 );
 
-it("uses the current time when returning to limits from tokens", async () => {
-  await act(() => {
-    renderer = create(<UsagePage />);
-  });
-  const selectMetric = (metric: string) => {
-    renderer.root
-      .findAll((node) => node.type === "div" && node.props["aria-label"] === "Usage metric")[0]!
-      .props.onValueChange([metric]);
-  };
-  await act(() => selectMetric("tokens"));
-  vi.mocked(Date.now).mockReturnValue(Date.parse("2026-09-11T13:00:00Z"));
-  await act(() => selectMetric("limits"));
-  expect(
-    JSON.stringify(renderer.toJSON(), (key, value) => (key === "props" ? undefined : value)),
-  ).toContain("in 1h 0m");
-  expect(state.refreshProviders).toHaveBeenCalledTimes(2);
-});
-
-it("refreshes once on opening Limits and suppresses rapid returns and remounts", async () => {
-  state.metric = "tokens";
-  await act(() => {
-    renderer = create(
-      <StrictMode>
-        <UsagePage />
-      </StrictMode>,
-    );
-  });
-  expect(state.refreshProviders).not.toHaveBeenCalled();
-  const selectMetric = (metric: string) =>
-    renderer.root
-      .findAll((node) => node.type === "div" && node.props["aria-label"] === "Usage metric")[0]!
-      .props.onValueChange([metric]);
-  await act(() => selectMetric("limits"));
-  expect(state.refreshProviders).toHaveBeenCalledTimes(1);
-  await act(() => selectMetric("tokens"));
-  await act(() => selectMetric("limits"));
-  await act(() => renderer.unmount());
-  state.metric = "limits";
-  await act(() => {
-    renderer = create(
-      <StrictMode>
-        <UsagePage />
-      </StrictMode>,
-    );
-  });
-  expect(state.refreshProviders).toHaveBeenCalledTimes(1);
-  await act(() => selectMetric("tokens"));
-  vi.mocked(Date.now).mockReturnValue(Date.parse("2026-09-11T12:05:00Z"));
-  await act(() => selectMetric("limits"));
-  expect(state.refreshProviders).toHaveBeenCalledTimes(2);
-});
-
+// Mesura: the Limits tab is off (usageShortcuts.ts), so its refresh-on-open
+// tests went with it.
 it("waits for connection and refreshes new environments during a slow refresh", async () => {
   const [id, presentation] = [...state.presentations][0]!;
   state.presentations = new Map([[id, { ...presentation, connection: { phase: "disconnected" } }]]);
