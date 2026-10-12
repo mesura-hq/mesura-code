@@ -1068,10 +1068,10 @@ describe("ServerSettings.neovimConfigDirectory", () => {
 });
 
 describe("branch naming settings", () => {
-  it("defaults existing settings to the t3 static prefix", () => {
+  it("defaults existing settings to the mesura static prefix", () => {
     expect(decodeServerSettings({})).toMatchObject({
       branchNamingMode: "static",
-      branchNamePrefix: "t3",
+      branchNamePrefix: "mesura",
       branchNameInstructions: "",
     });
   });

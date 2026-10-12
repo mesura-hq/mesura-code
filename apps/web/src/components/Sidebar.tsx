@@ -243,6 +243,7 @@ import {
   type SidebarListMarker,
   type SidebarSection,
 } from "./Sidebar.logic";
+import { threadBranchCardLabel } from "./sidebar/threadBranchLabel";
 import { sortActiveThreadsForSidebar } from "./sidebar/activeThreadOrder";
 import { resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
 import {
@@ -2168,7 +2169,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 <>
                   <ThreadWorktreeIndicator thread={thread} />
                   <span className="flex min-w-0 flex-1 text-muted-foreground/40">
-                    <MiddleTruncate value={thread.branch} showTitle={false} />
+                    <MiddleTruncate
+                      value={threadBranchCardLabel(thread.branch)}
+                      showTitle={false}
+                    />
                   </span>
                 </>
               ) : showsScratchMachine ? (
