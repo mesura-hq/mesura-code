@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { threadBranchCardLabel } from "./threadBranchLabel";
 
@@ -14,8 +14,11 @@ describe("threadBranchCardLabel", () => {
     expect(threadBranchCardLabel("main")).toBe("main");
   });
 
-  it("keeps a name that is only the namespace or merely starts like it", () => {
-    expect(threadBranchCardLabel("t3code/")).toBe("t3code/");
+  it.each(["mesura/", "t3/", "t3code/"])("keeps the empty namespace %s", (branch) => {
+    expect(threadBranchCardLabel(branch)).toBe(branch);
+  });
+
+  it("keeps a name that merely starts like an app namespace", () => {
     expect(threadBranchCardLabel("t3codex/thing")).toBe("t3codex/thing");
   });
 });
