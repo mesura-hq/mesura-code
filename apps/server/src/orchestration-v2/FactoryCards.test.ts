@@ -8,7 +8,7 @@ import {
   type FactoryRunShellSummary,
   type OrchestrationV2Run,
   type OrchestrationV2ThreadProjection,
-  type OrchestrationV2TurnItem,
+  OrchestrationV2TurnItem,
   ThreadId,
   TurnItemId,
   factoryPlanCardId,
@@ -18,6 +18,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 
 import * as FactoryRunShellSummaries from "../factory/FactoryRunShellSummaries.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
@@ -58,6 +59,19 @@ const runCardCommand = (
   card: { kind: "run", payload: fixtureRunPayload(THREAD_ID, "run-a", status) },
 });
 
+const decodeTurnItem = Schema.decodeUnknownSync(OrchestrationV2TurnItem);
+
+const importedRunCard = () => {
+  const item = decodeTurnItem({
+    ...fixtureCardItem({ id: RUN_CARD_ID, threadId: THREAD_ID, card: runCardCommand().card }),
+    runId: null,
+    nodeId: null,
+    providerThreadId: null,
+  });
+  assert(item.type === "factory_card");
+  return item;
+};
+
 const projectionOf = (
   runs: ReadonlyArray<OrchestrationV2Run>,
   turnItems: ReadonlyArray<OrchestrationV2TurnItem> = [],
@@ -76,6 +90,96 @@ const plan = (
 ) => planFactoryCardRecord({ command, projection, nextOrdinal: 42, now });
 
 describe("planFactoryCardRecord", () => {
+  it("Mesura P1-3 permits a first report only for a matching imported run and keeps ordinary provider anchors", () => {
+    const command: FactoryCardRecordCommand = {
+      type: "factory_card.record",
+      commandId: CommandId.make("command:first-report:planner"),
+      threadId: THREAD_ID,
+      turnItemId: TurnItemId.make(factoryReportActivityId(THREAD_ID, REPORT_PAYLOAD.runId)),
+      card: { kind: "report", payload: REPORT_PAYLOAD },
+    };
+    const imported = importedRunCard();
+    for (const invalid of [
+      [],
+      [{ ...imported, threadId: ThreadId.make("thread:unrelated") }],
+      [
+        {
+          ...imported,
+          card: {
+            kind: "run" as const,
+            payload: fixtureRunPayload(THREAD_ID, "different", "running"),
+          },
+        },
+      ],
+      [
+        {
+          ...imported,
+          card: {
+            kind: "run" as const,
+            payload: fixtureRunPayload(ThreadId.make("thread:unrelated"), "run-a", "running"),
+          },
+        },
+      ],
+      [{ ...imported, runId: fixtureRun(THREAD_ID, 1).id }],
+    ]) {
+      expect(plan(command, projectionOf([], invalid))).toMatchObject({ _tag: "reject" });
+    }
+    expect(
+      plan(
+        runCardCommand("running", TurnItemId.make("unrelated:new-run")),
+        projectionOf([], [imported]),
+      ),
+    ).toMatchObject({ _tag: "reject" });
+    const ordinary = plan(command, projectionOf([fixtureRun(THREAD_ID, 2, "running")], [imported]));
+    assert(ordinary._tag === "record");
+    expect(ordinary.turnItem.runId).toBe(fixtureRun(THREAD_ID, 2).id);
+    const legacy = plan(command, projectionOf([], [imported]), LATER);
+    assert(legacy._tag === "record");
+    expect(legacy.run).toBeNull();
+    expect(legacy.turnItem).toMatchObject({
+      ordinal: 42,
+      runId: null,
+      nodeId: null,
+      startedAt: LATER,
+    });
+  });
+  it("Mesura v046 updates imported Factory cards without adopting a provider run or changing their history anchor", () => {
+    for (const runs of [[], [fixtureRun(THREAD_ID, 2, "running")]]) {
+      for (const startedAt of [FIXTURE_EPOCH, null]) {
+        const imported = {
+          ...importedRunCard(),
+          ordinal: 7,
+          startedAt,
+        };
+        const decision = plan(runCardCommand("done"), projectionOf(runs, [imported]), LATER);
+        assert(decision._tag === "record");
+        expect(decision.run).toBeNull();
+        expect(decision.turnItem).toMatchObject({
+          id: RUN_CARD_ID,
+          runId: null,
+          nodeId: null,
+          providerThreadId: null,
+          ordinal: 7,
+          startedAt,
+          updatedAt: LATER,
+          completedAt: LATER,
+          card: runCardCommand("done").card,
+        });
+      }
+    }
+  });
+
+  it("Mesura v046 rejects a Factory card whose non-null anchor disappeared even when another run exists", () => {
+    const anchored = fixtureCardItem({
+      id: RUN_CARD_ID,
+      threadId: THREAD_ID,
+      card: runCardCommand().card,
+    });
+    expect(
+      plan(runCardCommand("done"), projectionOf([fixtureRun(THREAD_ID, 2, "running")], [anchored])),
+    ).toMatchObject({ _tag: "reject", reason: expect.stringContaining("is gone") });
+  });
+
   it("anchors a new card to the newest active run, completed, at the next ordinal", () => {
     const decision = plan(
       runCardCommand(),
@@ -87,6 +191,7 @@ describe("planFactoryCardRecord", () => {
     );
 
     assert(decision._tag === "record");
+    assert(decision.run !== null);
     expect(decision.run.ordinal).toBe(2);
     expect(decision.turnItem).toMatchObject({
       id: RUN_CARD_ID,
@@ -115,6 +220,7 @@ describe("planFactoryCardRecord", () => {
     );
 
     assert(decision._tag === "record");
+    assert(decision.run !== null);
     expect(decision.run.ordinal).toBe(2);
   });
 
@@ -141,6 +247,7 @@ describe("planFactoryCardRecord", () => {
     );
 
     assert(second._tag === "record");
+    assert(second.run !== null);
     expect(second.run.ordinal).toBe(1);
     expect(second.turnItem).toMatchObject({
       runId: recorded.runId,

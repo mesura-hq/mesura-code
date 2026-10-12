@@ -29,6 +29,8 @@ import * as Effect from "effect/Effect";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { useSyncExternalStore } from "react";
 
+import { appRootFence, makeFenceSession } from "../../test/appRootFenceMocks";
+
 export const LAPTOP_ENVIRONMENT_ID = EnvironmentId.make("thread-search-laptop");
 export const VIGILIA_ENVIRONMENT_ID = EnvironmentId.make("thread-search-vigilia");
 export const MESURA_PROJECT_ID = ProjectId.make("thread-search-mesura");
@@ -235,6 +237,10 @@ function findThreadShell(ref: {
 }
 
 export function resetThreadSearchFixture(): void {
+  appRootFence.sessions.clear();
+  for (const environmentId of [LAPTOP_ENVIRONMENT_ID, VIGILIA_ENVIRONMENT_ID]) {
+    appRootFence.sessions.set(environmentId, makeFenceSession());
+  }
   threadSearchFixture.environments = [
     connectedEnvironment(LAPTOP_ENVIRONMENT_ID, "Laptop", "PrimaryConnectionTarget"),
     connectedEnvironment(VIGILIA_ENVIRONMENT_ID, "Vigilia", "BearerConnectionTarget"),

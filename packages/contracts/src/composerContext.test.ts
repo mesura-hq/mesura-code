@@ -16,6 +16,8 @@ import {
 
 const decodeRecord = Schema.decodeUnknownOption(ComposerContextRecord);
 const decodeContext = Schema.decodeUnknownSync(OrchestrationMessageContext);
+const encodeContextJson = Schema.encodeUnknownSync(Schema.toCodecJson(OrchestrationMessageContext));
+const decodeContextType = Schema.decodeUnknownExit(Schema.toType(OrchestrationMessageContext));
 const decodeMessage = Schema.decodeUnknownSync(OrchestrationV2ConversationMessageJson);
 const decodeCommand = Schema.decodeUnknownSync(OrchestrationV2Command);
 
@@ -220,7 +222,7 @@ describe("OrchestrationMessageContext", () => {
   });
 
   it("sends a message without a record it cannot encode", () => {
-    const wire = Schema.encodeUnknownSync(Schema.toCodecJson(OrchestrationMessageContext))({
+    const wire = encodeContextJson({
       version: 1,
       records: [
         decodeContext({ version: 1, records: [knownRecords.terminal] }).records[0],
@@ -231,7 +233,7 @@ describe("OrchestrationMessageContext", () => {
   });
 
   it("sends a message without the records the wire cannot carry", () => {
-    const wire = Schema.encodeUnknownSync(Schema.toCodecJson(OrchestrationMessageContext))({
+    const wire = encodeContextJson({
       version: 1,
       records: [
         decodeContext({ version: 1, records: [knownRecords.terminal] }).records[0],
@@ -251,10 +253,7 @@ describe("OrchestrationMessageContext", () => {
   });
 
   it("reports a hole as a schema issue, even when collecting every issue", () => {
-    const result = Schema.decodeUnknownExit(Schema.toType(OrchestrationMessageContext))(
-      { version: 1, records: [undefined] },
-      { errors: "all" },
-    );
+    const result = decodeContextType({ version: 1, records: [undefined] }, { errors: "all" });
     expect(Exit.isFailure(result) && Cause.hasFails(result.cause)).toBe(true);
   });
 

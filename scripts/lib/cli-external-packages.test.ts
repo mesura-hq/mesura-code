@@ -51,6 +51,9 @@ describe("shouldBundleCliDependency", () => {
       "@ff-labs/fff-node",
       "@napi-rs/keyring",
       "@clerk/electron-passkeys",
+      "msgpackr",
+      "msgpackr-extract",
+      "@msgpackr-extract/msgpackr-extract-win32-x64",
       "node-addon-api",
     ]) {
       assert.strictEqual(shouldBundleCliDependency(id), false, id);
@@ -83,7 +86,14 @@ describe("selectCliRuntimeExternalDependencies", () => {
   it("selects every external root declared by the server", () => {
     assert.deepStrictEqual(
       Object.keys(selectCliRuntimeExternalDependencies(serverPackageJson.dependencies)).sort(),
-      ["@cursor/sdk", "@ff-labs/fff-node", "@napi-rs/keyring", "node-pty", "playwright-core"],
+      [
+        "@cursor/sdk",
+        "@ff-labs/fff-node",
+        "@napi-rs/keyring",
+        "msgpackr",
+        "node-pty",
+        "playwright-core",
+      ],
     );
   });
 });

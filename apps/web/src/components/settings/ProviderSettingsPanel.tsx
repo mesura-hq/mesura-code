@@ -31,10 +31,9 @@ import {
 } from "@t3tools/shared/backgroundActivitySettings";
 import * as Arr from "effect/Array";
 import * as Duration from "effect/Duration";
-import * as Equal from "effect/Equal";
 import * as Result from "effect/Result";
 import { PlusIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { isDesktopLocalConnectionTarget } from "../../connection/desktopLocal";
 import {
@@ -344,34 +343,24 @@ function ProviderSettingsPanelContent(target: ProviderSettingsTarget) {
         hasServerConfig: true,
       }),
   )?.environmentId;
-  useEffect(() => {
-    if (
-      !target.scoped &&
-      searchTargetId === searchableSetting("cursor-keychain-usage").id &&
-      (!selectedEnvironmentCanRenderSettings ||
-        selectedEnvironment?.serverConfig?.environment.platform.os !== "darwin") &&
-      searchableCursorEnvironmentId !== undefined
-    ) {
-      setSelectedEnvironmentId(searchableCursorEnvironmentId);
-      return;
-    }
-    if (
-      !target.scoped &&
-      (searchTargetId === searchableSetting("provider-health-check-interval").id ||
-        searchTargetId === searchableSetting("usage-providers").id) &&
-      !selectedEnvironmentCanRenderSettings &&
-      searchableEnvironmentId !== undefined
-    ) {
-      setSelectedEnvironmentId(searchableEnvironmentId);
-    }
-  }, [
-    searchTargetId,
-    searchableCursorEnvironmentId,
-    searchableEnvironmentId,
-    selectedEnvironment,
-    selectedEnvironmentCanRenderSettings,
-    target.scoped,
-  ]);
+  // Adjust search navigation before committing a frame for an unavailable device.
+  if (
+    !target.scoped &&
+    searchTargetId === searchableSetting("cursor-keychain-usage").id &&
+    (!selectedEnvironmentCanRenderSettings ||
+      selectedEnvironment?.serverConfig?.environment.platform.os !== "darwin") &&
+    searchableCursorEnvironmentId !== undefined
+  ) {
+    setSelectedEnvironmentId(searchableCursorEnvironmentId);
+  } else if (
+    !target.scoped &&
+    (searchTargetId === searchableSetting("provider-health-check-interval").id ||
+      searchTargetId === searchableSetting("usage-providers").id) &&
+    !selectedEnvironmentCanRenderSettings &&
+    searchableEnvironmentId !== undefined
+  ) {
+    setSelectedEnvironmentId(searchableEnvironmentId);
+  }
   const onlyPrimaryDevice =
     options.length === 1 && options[0]?.entry.target._tag === "PrimaryConnectionTarget";
   const deviceTabs =

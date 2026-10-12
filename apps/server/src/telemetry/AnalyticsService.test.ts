@@ -56,6 +56,8 @@ const SentBatch = Schema.fromJsonString(
   }),
 );
 
+const decodeSentBatch = Schema.decodeEffect(SentBatch);
+
 /**
  * HTTP client that reads each batch, then fails as if the connection dropped
  * before the response arrived. PostHog stores these batches, so the server
@@ -67,9 +69,9 @@ const layerAcceptThenFailClient = (batches: Array<ReadonlyArray<{ readonly uuid:
     HttpClient.make((request) =>
       Effect.gen(function* () {
         if (request.body._tag === "Uint8Array") {
-          const body = yield* Schema.decodeEffect(SentBatch)(
-            new TextDecoder().decode(request.body.body),
-          ).pipe(Effect.orDie);
+          const body = yield* decodeSentBatch(new TextDecoder().decode(request.body.body)).pipe(
+            Effect.orDie,
+          );
           batches.push(body.batch);
         }
         return yield* new HttpClientError.HttpClientError({

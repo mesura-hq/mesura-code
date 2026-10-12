@@ -140,7 +140,7 @@ export const refusedAtCompileTime = () => {
   // @ts-expect-error a declaration built outside McpToolAccess
   McpToolAccess.Declaration.make(unchecked);
   // @ts-expect-error a declaration constructed directly
-  new McpToolAccess.Declaration(unchecked);
+  void new McpToolAccess.Declaration(unchecked);
   // @ts-expect-error a handlers layer built outside McpToolAccess
   McpToolAccess.HandlersLayer.make(Layer.empty);
   // The refused layer below types its error and services as unknown, which is fine here.

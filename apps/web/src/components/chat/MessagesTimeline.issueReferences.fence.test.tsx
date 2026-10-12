@@ -250,7 +250,7 @@ function assistantEntry(text: string, options: { streaming?: boolean; id?: strin
       id: MessageId.make(id),
       role: "assistant" as const,
       text,
-      turnId: null,
+      runId: null,
       createdAt,
       updatedAt: createdAt,
       streaming: options.streaming ?? false,
@@ -263,11 +263,17 @@ function timelineProps(ref: typeof threadRef, entries: Array<ReturnType<typeof a
     isWorking: false,
     activeTurnStartedAt: null,
     listRef: createRef<never>(),
-    latestTurn: null,
-    runningTurnId: null,
+    activeTurnInProgress: false,
+    latestRun: null,
+    runningRunId: null,
+    providerStatuses: [],
+    runs: [],
     turnDiffSummaries: [],
     routeThreadKey: scopedThreadKey(ref),
     onOpenTurnDiff: () => {},
+    onOpenThread: () => {},
+    onForkFromRun: async () => {},
+    onRollbackCheckpoint: () => {},
     supportsConversationRollback: false,
     onRevertToTurnCount: () => {},
     isRevertingCheckpoint: false,
@@ -279,12 +285,13 @@ function timelineProps(ref: typeof threadRef, entries: Array<ReturnType<typeof a
     workspaceRoot: undefined,
     anchorMessageId: null,
     onAnchorReady: () => {},
+    onAnchorSizeChanged: () => {},
     contentInsetEndAdjustment: 0,
     liveFollowEnabled: true,
     onIsAtEndChange: () => {},
     onManualNavigation: () => {},
     timelineEntries: entries,
-  } as unknown as Parameters<typeof MessagesTimeline>[0];
+  } satisfies Parameters<typeof MessagesTimeline>[0];
 }
 
 let root: Root | null = null;
@@ -378,8 +385,8 @@ function referenceRuns() {
   return fixture.runs.filter((run) => run.family === issueReference);
 }
 
-function pullRequestDetailRuns() {
-  return fixture.runs.filter((run) => run.family === pullRequestEnvironment.detail);
+function pullRequestPreviewRuns() {
+  return fixture.runs.filter((run) => run.family === pullRequestEnvironment.preview);
 }
 
 function success(value: unknown) {
@@ -577,8 +584,8 @@ describe("Issue references in agent messages: authoritative issue and pull reque
     await activate(anchorTo("https://github.com/acme/alpha/issues/9"));
 
     expect(referenceRuns()).toEqual([]);
-    expect(pullRequestDetailRuns()).toHaveLength(1);
-    await settle(pullRequestDetailRuns()[0], failure("Not a pull request"));
+    expect(pullRequestPreviewRuns()).toHaveLength(1);
+    await settle(pullRequestPreviewRuns()[0], failure("Not a pull request"));
 
     expect(issuesSurface()).toBeUndefined();
     expect(fixture.openedExternally).toEqual(["https://github.com/acme/alpha/issues/9"]);
@@ -690,14 +697,15 @@ describe("Issue references in agent messages: newer panel choices win (rework)",
 });
 
 describe("Issue references in agent messages: unavailable environments keep shorthand ordinary (rework)", () => {
-  for (const [label, capabilities] of [
+  it.each([
     ["a current server", FULL_CAPABILITIES],
     [
       "an older server without reference resolution",
       { repositoryIdentity: true, pullRequests: true, issues: true },
     ],
-  ] as const) {
-    it(`issues phase 3 regression: a short reference on a disconnected environment with ${label} stays an ordinary link`, async () => {
+  ] as const)(
+    "issues phase 3 regression: a short reference on a disconnected environment with %s stays an ordinary link",
+    async (_label, capabilities) => {
       fixture.capabilitiesByEnvironment.set(environmentId, capabilities);
       fixture.connectionPhaseByEnvironment.set(environmentId, "reconnecting");
       await mountTimeline([assistantEntry("This regressed in #7.")]);
@@ -706,13 +714,14 @@ describe("Issue references in agent messages: unavailable environments keep shor
       expect(followedAsLink).toBe(true);
       expect(fixture.runs).toEqual([]);
       expect(panelState().surfaces).toEqual([]);
-    });
-  }
+    },
+  );
 });
 
 describe("Direct pull request links keep every modifier ordinary (rework)", () => {
-  for (const modifier of ["metaKey", "ctrlKey", "shiftKey", "altKey"] as const) {
-    it(`issues phase 3 regression: a ${modifier} click on a direct pull request link stays an ordinary link`, async () => {
+  it.each(["metaKey", "ctrlKey", "shiftKey", "altKey"] as const)(
+    "issues phase 3 regression: a %s click on a direct pull request link stays an ordinary link",
+    async (modifier) => {
       await mountTimeline([assistantEntry("Review https://github.com/acme/alpha/pull/9 please.")]);
       const { followedAsLink } = await activate(anchorTo("https://github.com/acme/alpha/pull/9"), {
         [modifier]: true,
@@ -721,8 +730,8 @@ describe("Direct pull request links keep every modifier ordinary (rework)", () =
       expect(followedAsLink).toBe(true);
       expect(fixture.runs).toEqual([]);
       expect(panelState().surfaces).toEqual([]);
-    });
-  }
+    },
+  );
 });
 
 describe("Issue references in agent messages: modifiers and rapid activation", () => {

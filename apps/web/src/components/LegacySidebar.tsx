@@ -197,7 +197,6 @@ import {
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
   resolveProjectStatusIndicator,
-  resolveThreadRowClassName,
   resolveThreadLastVisitedAt,
   resolveThreadStatusPill,
   orderItemsByPreferredIds,
@@ -687,6 +686,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         confirmArchiveButtonRefs.current.delete(threadKey);
       }
     },
+    // WORKAROUND: the memoization heuristic infers .current instead of the RefObject lifetime.
+    // Reading .current during render changes the callback's ownership semantics. Remove when the compiler recognizes RefObject dependencies.
+    // oxlint-disable-next-line react/preserve-manual-memoization -- the callback registers against the stable ref object and reads its registry at commit
     [confirmArchiveButtonRefs, threadKey],
   );
   const stopPropagationOnPointerDown = useCallback(
@@ -714,6 +716,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         confirmArchiveButtonRefs.current.get(threadKey)?.focus();
       });
     },
+    // WORKAROUND: the memoization heuristic infers .current instead of the RefObject lifetime.
+    // A render-time registry dependency cannot track the button mounted before this frame. Remove when the compiler recognizes deferred ref lookup.
+    // oxlint-disable-next-line react/preserve-manual-memoization -- the frame reads the current registry through its stable ref object
     [confirmArchiveButtonRefs, setConfirmingArchiveThreadKey, threadKey, thread.environmentId],
   );
   const handleArchiveImmediateClick = useCallback(

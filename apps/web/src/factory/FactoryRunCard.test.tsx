@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 /**
  * Phase 8 fence on the web: acceptance criteria 1, 3 and 6, through the run
- * card a `factory.run` activity renders in the timeline. Phase 9 fence on the
+ * card a `factory_card` turn item renders in the timeline. Phase 9 fence on the
  * web: acceptance criteria 1 (Open lands on the Run tab, maximized), 5 (every
  * turn's file opens in the files panel), 6 (the run stream is subscribed only
  * while the Run tab is visible) and 7 (the floor on screen), through the same
@@ -9,8 +9,8 @@
  *
  * Entry point: AppRoot with its memory router and the real ChatView,
  * MessagesTimeline and FactoryRunCard, mounted as `FactoryPlanApproval.test.tsx`
- * mounts them. The thread and its activities are fixtures; a new activity with
- * the run's id replaces the old one, as the server's run tracker does. The
+ * mounts them. The thread shell and its projected turn items are fixtures.
+ * A new turn item with the run card's id replaces the old one. The
  * `subscribeFactoryRun` stream is the `factoryEnvironment.factoryRun` atom
  * family, replaced by one atom per run that records when the registry builds
  * it (a subscription opened) and finalizes it (the subscription ended). What
@@ -30,26 +30,30 @@ import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vite-plus/test
 import {
   EnvironmentId,
   factoryRunActivityId,
-  MessageId,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
 import {
   makeFactoryRouteProviders,
-  makeFactoryRunActivity,
+  makeFactoryCardTurnItem,
   makeFactoryRunState,
   makeFactoryRunSummary,
   withoutFactoryRunMarks,
   type FactoryRunFixturePoint,
 } from "@t3tools/client-runtime/factory/testing";
-import type { Thread } from "../types";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+import type { OrchestrationV2TurnItem } from "@t3tools/contracts";
+import { makeFenceThreadShell } from "../test/fenceThreadShell";
+import { appRootFence, installFenceFontEvents, makeFenceSession } from "../test/appRootFenceMocks";
+import { makeFactoryMessageItem } from "./factoryTestFixtures";
 import type { AppRouter } from "../router";
 
 const fixture = vi.hoisted(() => ({
-  thread: null as Thread | null,
+  thread: null as EnvironmentThreadShell | null,
+  turnItems: [] as OrchestrationV2TurnItem[],
   commands: new Map<unknown, unknown>(),
-  noopCommand: vi.fn(async () => ({ _tag: "Success", value: undefined })),
+  noopCommand: vi.fn(async () => ({ _tag: "Success", value: { providers: [] } })),
   refresh: vi.fn(),
   empty: [],
   threadListeners: new Set<() => void>(),
@@ -81,23 +85,14 @@ const fixture = vi.hoisted(() => ({
   ],
 }));
 
+vi.mock("@t3tools/client-runtime/state/session", async (importOriginal) =>
+  (await import("../test/appRootFenceMocks")).mockRuntimeSession(importOriginal),
+);
 vi.mock("../state/entities", async (importOriginal) => {
-  const { useSyncExternalStore } = await import("react");
-  const useFixtureThread = () =>
-    useSyncExternalStore(
-      (listener) => {
-        fixture.threadListeners.add(listener);
-        return () => {
-          fixture.threadListeners.delete(listener);
-        };
-      },
-      () => fixture.thread,
-    );
+  const { factoryThreadFixtureReads } = await import("./factoryTestFixtures");
   return {
     ...(await importOriginal<typeof import("../state/entities")>()),
-    useThread: useFixtureThread,
-    readThread: () => fixture.thread,
-    useThreadShell: useFixtureThread,
+    ...factoryThreadFixtureReads(fixture),
     useThreadRefs: () => fixture.empty,
     useProjects: () => fixture.empty,
     useProject: () => ({
@@ -136,7 +131,7 @@ vi.mock("../state/use-atom-command", () => ({
 vi.mock("../state/use-atom-query-runner", () => ({
   useAtomQueryRunner: () => fixture.noopCommand,
 }));
-// The plan body a `factory.plan` activity names by digest, as the server's
+// The plan body a `factory_card` turn item names by digest, as the server's
 // factoryReadSnapshot RPC would answer it; an unknown digest stays loading.
 vi.mock("../state/factory", async () => {
   const { AsyncResult, Atom } = await import("effect/reactivity");
@@ -202,14 +197,12 @@ vi.mock("../hooks/useSettings", async (importOriginal) => {
 });
 vi.mock("../hooks/useHandleNewThread", () => ({ useNewThreadHandler: () => fixture.noopCommand }));
 vi.mock("../hooks/useThreadActions", () => ({
+  useAcknowledgeThreadWoke: () => fixture.noopCommand,
   useThreadActions: () => ({
     settleThread: fixture.noopCommand,
     pinThread: fixture.noopCommand,
     confirmAndUnpinThread: fixture.noopCommand,
   }),
-}));
-vi.mock("../components/preview/PreviewAutomationHosts", () => ({
-  PreviewAutomationHosts: () => null,
 }));
 vi.mock("../browser/ElectronBrowserHost", () => ({ ElectronBrowserHost: () => null }));
 vi.mock("../components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }));
@@ -256,19 +249,19 @@ const runRowId = factoryRunActivityId(threadId, "invoice-csv-export");
 const REQUEST = "Let accountants export the invoice list as a CSV file";
 let root: Root | undefined;
 let container: HTMLDivElement;
+let restoreDocumentFonts: () => void;
 
-const runActivity = (point: FactoryRunFixturePoint) =>
-  makeFactoryRunActivity({ threadId, summary: makeFactoryRunSummary(eventsJsonl, point) });
+const runCard = (point: FactoryRunFixturePoint) =>
+  makeFactoryCardTurnItem({
+    id: runRowId,
+    threadId,
+    createdAt: makeFactoryRunSummary(eventsJsonl, point).startedAt ?? "2026-09-28T08:59:00.000Z",
+    card: { kind: "run", payload: { threadId, ...makeFactoryRunSummary(eventsJsonl, point) } },
+  });
 
-/** Delivers a new thread object, as the thread store does on every event. */
+/** Delivers an immutable turn item update through the thread projection hooks. */
 async function showRunAt(point: FactoryRunFixturePoint) {
-  fixture.thread = {
-    ...fixture.thread!,
-    activities: [
-      ...fixture.thread!.activities.filter((activity) => activity.id !== runRowId),
-      runActivity(point),
-    ],
-  };
+  fixture.turnItems = [...fixture.turnItems.filter((item) => item.id !== runRowId), runCard(point)];
   await act(async () => {
     for (const listener of fixture.threadListeners) listener();
   });
@@ -283,6 +276,8 @@ beforeAll(async () => {
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  restoreDocumentFonts = installFenceFontEvents();
+  appRootFence.sessions.set(environmentId, makeFenceSession());
   fixture.factorySnapshots = {};
   fixture.factorySnapshotAtoms.clear();
   fixture.factoryRunItem = null;
@@ -302,7 +297,7 @@ beforeEach(() => {
           workspaceSnapshots: [
             {
               cwd: "/tmp/factory-run",
-              checkedAt: "2026-09-28T08:58:00.000Z",
+              checkedAt: new Date().toISOString(),
               skills: [],
               slashCommands: [],
             },
@@ -311,7 +306,7 @@ beforeEach(() => {
       },
     },
   ];
-  fixture.thread = {
+  fixture.thread = makeFenceThreadShell({
     id: threadId,
     environmentId,
     projectId: ProjectId.make("factory-run-project"),
@@ -320,34 +315,17 @@ beforeEach(() => {
       instanceId: ProviderInstanceId.make("claudeAgent"),
       model: "claude-fable-5-1",
     },
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    session: null,
-    messages: [
-      {
-        id: MessageId.make("factory-run-approve"),
-        role: "user" as const,
-        text: "Build the approved plan",
-        turnId: null,
-        streaming: false,
-        createdAt: "2026-09-28T08:58:00.000Z",
-        updatedAt: "2026-09-28T08:58:00.000Z",
-      },
-    ],
-    proposedPlans: [],
-    checkpoints: [],
-    pullRequests: [],
     createdAt: "2026-09-28T08:58:00.000Z",
-    updatedAt: "2026-09-28T08:58:00.000Z",
-    archivedAt: null,
-    settledOverride: null,
-    settledAt: null,
-    deletedAt: null,
-    latestTurn: null,
-    branch: null,
-    worktreePath: null,
-    activities: [],
-  } as Thread;
+  });
+  fixture.turnItems = [
+    makeFactoryMessageItem({
+      id: "factory-run-approve",
+      role: "user",
+      text: "Build the approved plan",
+      threadId,
+      createdAt: "2026-09-28T08:58:00.000Z",
+    }),
+  ];
   container = document.createElement("div");
   document.body.append(container);
 });
@@ -357,6 +335,8 @@ afterEach(async () => {
   root = undefined;
   container.remove();
   useComposerDraftStore.getState().clearComposerContent(scopeThreadRef(environmentId, threadId));
+  restoreDocumentFonts();
+  appRootFence.sessions.delete(environmentId);
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -394,8 +374,8 @@ function markLabels(row: HTMLElement): string[] {
   );
 }
 
-it("phase8 web AC1 renders a factory.run activity as a run card with its request, status, phase, node, marks, returns, cost and last event", async () => {
-  fixture.thread = { ...fixture.thread!, activities: [runActivity("verify")] };
+it("phase8 web AC1 renders a factory.run turn item as a run card with its request, status, phase, node, marks, returns, cost and last event", async () => {
+  fixture.turnItems = [runCard("verify")];
   await mountApp();
   const text = runRow().textContent ?? "";
 
@@ -411,7 +391,7 @@ it("phase8 web AC1 renders a factory.run activity as a run card with its request
 });
 
 it("phase8 web AC1 marks a finished run's phases clean and degraded", async () => {
-  fixture.thread = { ...fixture.thread!, activities: [runActivity("degraded")] };
+  fixture.turnItems = [runCard("degraded")];
   await mountApp();
 
   expect(runRow().textContent).toContain("degraded");
@@ -419,7 +399,7 @@ it("phase8 web AC1 marks a finished run's phases clean and degraded", async () =
 });
 
 it("phase8 web AC3 shows the stop question on the run card and reads waiting", async () => {
-  fixture.thread = { ...fixture.thread!, activities: [runActivity("waiting")] };
+  fixture.turnItems = [runCard("waiting")];
   await mountApp();
   const text = runRow().textContent ?? "";
 
@@ -428,7 +408,7 @@ it("phase8 web AC3 shows the stop question on the run card and reads waiting", a
 });
 
 it("phase8 web AC6 updates the run card in place as events arrive without remounting its row", async () => {
-  fixture.thread = { ...fixture.thread!, activities: [runActivity("verify")] };
+  fixture.turnItems = [runCard("verify")];
   await mountApp();
   const row = runRow();
   const card = row.firstElementChild;
@@ -449,15 +429,21 @@ it("phase8 web AC6 updates the run card in place as events arrive without remoun
 });
 
 it("phase8 web run card of a summary without phase marks renders without marks", async () => {
-  fixture.thread = {
-    ...fixture.thread!,
-    activities: [
-      makeFactoryRunActivity({
-        threadId,
-        summary: withoutFactoryRunMarks(makeFactoryRunSummary(eventsJsonl, "verify")),
-      }),
-    ],
-  };
+  fixture.turnItems = [
+    makeFactoryCardTurnItem({
+      id: runRowId,
+      threadId,
+      createdAt:
+        makeFactoryRunSummary(eventsJsonl, "verify").startedAt ?? "2026-09-28T08:59:00.000Z",
+      card: {
+        kind: "run",
+        payload: {
+          threadId,
+          ...withoutFactoryRunMarks(makeFactoryRunSummary(eventsJsonl, "verify")),
+        },
+      },
+    }),
+  ];
   await mountApp();
 
   expect(markLabels(runRow())).toEqual([]);
@@ -529,7 +515,7 @@ const panelState = () =>
   selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef);
 
 it("phase9 web AC1 opens the run card's run on the Run tab of the Factory pane, maximized, with one rail entry per phase", async () => {
-  fixture.thread = { ...fixture.thread!, activities: [runActivity("verify")] };
+  fixture.turnItems = [runCard("verify")];
   streamRunAt("verify");
   await mountApp();
   await openRunFromCard();
@@ -557,7 +543,7 @@ it("phase9 web AC1 opens the run card's run on the Run tab of the Factory pane, 
 });
 
 it("phase9 web AC7 shows the run totals with the dollar figure marked as a floor", async () => {
-  fixture.thread = { ...fixture.thread!, activities: [runActivity("review")] };
+  fixture.turnItems = [runCard("review")];
   streamRunAt("review");
   await mountApp();
   await openRunFromCard();
@@ -568,7 +554,7 @@ it("phase9 web AC7 shows the run totals with the dollar figure marked as a floor
 });
 
 it("phase9 web AC5 opens every turn's prompt and report file of the shown phase in the files panel", async () => {
-  fixture.thread = { ...fixture.thread!, activities: [runActivity("degraded")] };
+  fixture.turnItems = [runCard("degraded")];
   streamRunAt("degraded");
   await mountApp();
   await openRunFromCard();
@@ -599,7 +585,7 @@ it("phase9 web AC5 opens every turn's prompt and report file of the shown phase 
 });
 
 it("phase9 web AC6 subscribes to the run stream only while the Run tab is visible and ends it when the pane closes", async () => {
-  fixture.thread = { ...fixture.thread!, activities: [runActivity("verify")] };
+  fixture.turnItems = [runCard("verify")];
   streamRunAt("verify");
   await mountApp();
   await settle();
@@ -667,7 +653,7 @@ function stubViewportWidth(initialWidth: number) {
 
 it("phase9 web AC1 keeps the run opened maximized when a narrow window that opened it as a sheet widens", async () => {
   const resizeTo = stubViewportWidth(800);
-  fixture.thread = { ...fixture.thread!, activities: [runActivity("verify")] };
+  fixture.turnItems = [runCard("verify")];
   streamRunAt("verify");
   await mountApp();
   await openRunFromCard();
@@ -698,7 +684,7 @@ it("phase9 web P2-1 opens a turn file whose path holds spaces, parentheses, brac
     },
     roles: [],
   };
-  fixture.thread = { ...fixture.thread!, activities: [runActivity("degraded")] };
+  fixture.turnItems = [runCard("degraded")];
   await mountApp();
   await openRunFromCard();
 
@@ -717,7 +703,7 @@ it("phase9 web P2-1 opens a turn file whose path holds spaces, parentheses, brac
 
 // ---------------------------------------------------------------------------
 // Phase 11: the report card in the timeline and the Report tab of the pane.
-// The report body is the `factoryReadSnapshot` answer for the activity's
+// The report body is the `factoryReadSnapshot` answer for the turn item's
 // digest; the frame comes from the `subscribeFactoryRun` item for the run.
 // What only a browser shows: the error tone of a degraded phase and a failed
 // result, and the drawn diagram.
@@ -725,7 +711,7 @@ it("phase9 web P2-1 opens a turn file whose path holds spaces, parentheses, brac
 
 import {
   FACTORY_REPORT_DIGEST,
-  makeFactoryReportActivity,
+  makeFactoryReportPayload,
 } from "@t3tools/client-runtime/factory/testing";
 import { factoryReportActivityId } from "@t3tools/contracts";
 import reportMarkdown from "../../../../packages/shared/src/fixtures/invoice-csv-export.report.md?raw";
@@ -738,15 +724,20 @@ const STEP_LINE = "pnpm lint failed on an unused import in the CSV serializer";
 /**
  * The thread after `report.written`: its run card and its report card, the
  * body stored by digest. The stream answers only the Report tab; the card
- * reads the run's `factory.run` activity.
+ * reads the run's `factory_card` turn item.
  */
 function showReport(point: FactoryRunFixturePoint = "degraded", markdown: string = reportMarkdown) {
   fixture.factorySnapshots[FACTORY_REPORT_DIGEST] = markdown;
   streamRunAt(point);
-  fixture.thread = {
-    ...fixture.thread!,
-    activities: [runActivity(point), makeFactoryReportActivity({ threadId })],
-  };
+  fixture.turnItems = [
+    runCard(point),
+    makeFactoryCardTurnItem({
+      id: reportRowId,
+      threadId,
+      createdAt: makeFactoryReportPayload().writtenAt,
+      card: { kind: "report", payload: makeFactoryReportPayload() },
+    }),
+  ];
 }
 
 /** The report card's own timeline row, once its body and its run state arrived. */
@@ -799,7 +790,7 @@ function paneElementWithText(text: string): HTMLElement {
 const precedes = (left: Node, right: Node) =>
   (left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
 
-it("phase11 web AC1 renders a factory.report activity as a report card with its Context, What was built bullets, coverage and degraded count", async () => {
+it("phase11 web AC1 renders a factory.report turn item as a report card with its Context, What was built bullets, coverage and degraded count", async () => {
   showReport();
   await mountApp();
   const text = (await reportRow()).textContent ?? "";

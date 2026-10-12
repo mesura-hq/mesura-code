@@ -125,7 +125,8 @@ const portableIconPath = trimmedNonEmpty(
   },
   T3_PROJECT_FILE_PATH_MAX_LENGTH,
 ).check(
-  Schema.isPattern(/^(?![A-Za-z]:)(?!\/)[^\\]+$/),
+  // Effect 4 exports regex constraints to JSON Schema only with the Unicode flag.
+  Schema.isPattern(/^(?![A-Za-z]:)(?!\/)[^\\]+$/u),
   Schema.makeFilter(
     (value) => {
       if (value.includes("\0")) return false;

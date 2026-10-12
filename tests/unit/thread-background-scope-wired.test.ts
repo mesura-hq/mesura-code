@@ -15,19 +15,32 @@ import { repositoryRoot } from "./contractHarness.ts";
  * anything, and every suite still passes.
  *
  * Asserted at the call site because that is where it breaks. Upstream rewrites
- * both route files, and a sync that drops one hook call leaves the scope silently
- * unemitted again — the hooks keep their unit tests, and the feature is gone.
+ * the chat layout and ThreadRouteView. A sync that drops one hook call leaves
+ * the scope silently unemitted — the hooks keep their unit tests, and the
+ * feature is gone.
  */
 
 const read = (relativePath: string) =>
   NodeFS.readFileSync(NodePath.join(repositoryRoot, relativePath), "utf8");
 
 it("retains the thread scope from the web thread route", () => {
-  const route = read("apps/web/src/routes/_chat.$environmentId.$threadId.tsx");
+  const layout = read("apps/web/src/routes/_chat.tsx");
+  const view = read("apps/web/src/components/ThreadRouteView.tsx");
 
   assert.include(
-    route,
-    "useThreadBackgroundScope(threadRef)",
+    layout,
+    "<ThreadRouteView target={threadTarget}",
+    "the chat layout no longer mounts the view that retains the visible thread scope",
+  );
+  assert.include(
+    view,
+    'target.kind === "server" ? target.threadRef : (draftSession?.promotedTo ?? inferredThreadRef)',
+    "the shared view no longer selects the server thread or a promoted draft thread",
+  );
+
+  assert.include(
+    view,
+    "useThreadBackgroundScope(serverThreadRef)",
     "the web thread route no longer retains a thread background scope, so the server cannot tell a browser is looking at a thread",
   );
 });

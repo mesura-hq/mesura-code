@@ -70,7 +70,7 @@ it("keeps upstream's attachment store, which image attachments need", () => {
 });
 
 it("drops the fork's file ceiling and keeps upstream's image ceiling", () => {
-  const contracts = read("packages/contracts/src/orchestration.ts");
+  const contracts = read("packages/contracts/src/chatAttachment.ts");
   // Upstream owns this constant now, at 50 MB. What must not come back is the
   // fork's own 2 GB ceiling, which only made sense with the resumable
   // transport ADR-003 retired.

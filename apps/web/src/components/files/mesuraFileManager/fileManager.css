@@ -92,7 +92,7 @@
 
 /* Shown in place of the columns while the host's home directory is still
    being asked for, or when that ask failed. */
-[data-mesura-file-manager] .mesura-file-manager-notice {
+[data-mesura-file-manager] [data-mesura-file-manager-notice] {
   margin: auto;
   color: var(--muted-foreground);
   font-size: 13px;

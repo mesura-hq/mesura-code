@@ -258,7 +258,7 @@ export function ServerBrowserSurface(props: {
   // Coalesce moves and wheel deltas to one message each per animation frame.
   const scheduleFlush = useCallback(() => {
     inputFrameRef.current ??= requestAnimationFrame(flushInput);
-  }, [flushInput]);
+  }, []);
 
   const queueWheel = useCallback(
     (point: PagePoint, deltaX: number, deltaY: number, modifiers: number) => {

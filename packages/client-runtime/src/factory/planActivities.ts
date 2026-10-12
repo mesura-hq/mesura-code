@@ -156,6 +156,7 @@ export function factoryTimelineItemFromCard(
   const { card } = item;
   if (card.kind === "run") return null;
   if (card.kind === "plan") {
+    if (!isFactoryPlanActivityPayload(card.payload)) return null;
     const cached = planItemByTurnItem.get(item);
     if (cached !== undefined) return cached;
     const planItem: FactoryPlanTimelineItem = {
@@ -167,6 +168,7 @@ export function factoryTimelineItemFromCard(
     planItemByTurnItem.set(item, planItem);
     return planItem;
   }
+  if (!isFactoryReportActivityPayload(card.payload)) return null;
   const run = runsById.get(card.payload.runId) ?? null;
   let byRun = reportItemByTurnItem.get(item);
   if (byRun === undefined) {

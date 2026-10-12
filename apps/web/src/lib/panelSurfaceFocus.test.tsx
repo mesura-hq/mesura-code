@@ -33,12 +33,12 @@ const byTestId = (id: string) => document.querySelector<HTMLElement>(`[data-test
 const hidden = new Set<Element>();
 
 beforeEach(() => {
-  vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(
-    function (this: HTMLElement) {
-      const shown = !hidden.has(this);
-      return { length: shown ? 1 : 0 } as DOMRectList;
-    },
-  );
+  vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    const shown = !hidden.has(this);
+    return { length: shown ? 1 : 0 } as DOMRectList;
+  });
 });
 
 afterEach(() => {
@@ -221,6 +221,15 @@ describe("panel surface focus follows a key", () => {
     expect(document.activeElement).toBe(byTestId("diff-view"));
   });
 
+  it("preserves a user focus move before the pending surface handoff's first frame", () => {
+    mountHarness();
+    byTestId("files-tree").focus();
+    pressCtrlTab();
+    byTestId("chat-focus").focus();
+    flushFrames();
+    expect(document.activeElement).toBe(byTestId("chat-focus"));
+  });
+
   it("leaves focus where it was when a pointer changes the active surface", () => {
     mountHarness();
     byTestId("title-files").focus();
@@ -277,6 +286,13 @@ describe("panel surface focus follows a key", () => {
     byTestId("chat-focus").focus();
     await renderLateDiffEntry();
     expect(document.activeElement).toBe(byTestId("chat-focus"));
+  });
+
+  it("cancels lazy keyboard entry focus on pointer input that keeps the current focus", async () => {
+    parkOnLoadingDiff();
+    byTestId("title-diff").dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    await renderLateDiffEntry();
+    expect(document.activeElement).toBe(byTestId("title-diff"));
   });
 
   it("stops waiting for a late entry when focus leaves the tab title and comes back before it renders", async () => {
@@ -370,8 +386,9 @@ describe("panel surface half-page keys", () => {
     ],
   ];
 
-  for (const [name, inner] of leftAlone) {
-    it(`leaves Ctrl+D and Ctrl+U to ${name} inside a panel scroll region`, () => {
+  it.each(leftAlone)(
+    "leaves Ctrl+D and Ctrl+U to %s inside a panel scroll region",
+    (_name, inner) => {
       mountScrollingSurface(inner);
       const target = byTestId("target");
       target.focus();
@@ -380,8 +397,8 @@ describe("panel surface half-page keys", () => {
       expect(scrollBy).not.toHaveBeenCalled();
       expect(down.defaultPrevented).toBe(false);
       expect(up.defaultPrevented).toBe(false);
-    });
-  }
+    },
+  );
 
   it("leaves Ctrl+D to a panel surface that took it first", () => {
     const region = mountScrollingSurface("");

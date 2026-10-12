@@ -403,6 +403,29 @@ export function TerminalViewport({
   const openPreview = useAtomCommand(previewEnvironment.open, {
     reportFailure: false,
   });
+  const openTerminalPreviewLink = useEffectEvent(
+    (url: string, forceBrowser: boolean, fallbackToBrowser: () => void) => {
+      if (!readEnvironmentScope(threadRef.environmentId, AuthPreviewOperateScope)) {
+        fallbackToBrowser();
+        return;
+      }
+      void openTerminalLinkInPreview({
+        url,
+        threadRef,
+        openPreview,
+        fallbackToBrowser,
+        forceBrowser,
+      }).catch((error: unknown) => {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Unable to open link",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
+      });
+    },
+  );
   const runTerminalWrite = useAtomCommand(terminalEnvironment.write, {
     reportFailure: false,
   });
@@ -517,6 +540,10 @@ export function TerminalViewport({
   // A grant can change while the pointer remains over a link.
   useEffect(() => {
     terminalRef.current?.refreshLinkActivation();
+    // WORKAROUND: compiler treats the external link-authorization trigger as unused.
+    // Keep grant changes refreshing the link under a stationary pointer.
+    // Remove when effect dependency inference recognizes terminal refresh triggers.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies
   }, [canOpenHostEditor]);
 
   useEffect(() => {
@@ -876,25 +903,7 @@ export function TerminalViewport({
               );
             });
           };
-          if (!readEnvironmentScope(environmentId, AuthPreviewOperateScope)) {
-            fallbackToBrowser();
-            return;
-          }
-          void openTerminalLinkInPreview({
-            url: text,
-            threadRef,
-            openPreview,
-            fallbackToBrowser,
-            forceBrowser: event.metaKey || event.ctrlKey,
-          }).catch((error: unknown) => {
-            toastManager.add(
-              stackedThreadToast({
-                type: "error",
-                title: "Unable to open link",
-                description: error instanceof Error ? error.message : "An error occurred.",
-              }),
-            );
-          });
+          openTerminalPreviewLink(text, event.metaKey || event.ctrlKey, fallbackToBrowser);
           return;
         }
         const target = resolvePathLinkTarget(text, cwd);
@@ -1006,6 +1015,10 @@ export function TerminalViewport({
         mount.focus({ preventScroll: true });
       }
     };
+    // WORKAROUND: compiler treats external terminal owner/context keys as unused.
+    // Keep session changes cancelling async setup and disposing the old surface.
+    // Remove when effect dependency inference recognizes terminal-session lifetimes.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies
   }, [cwd, environmentId, runtimeEnvKey, terminalId, threadId, worktreePath]);
 
   useEffect(() => {
@@ -1041,6 +1054,10 @@ export function TerminalViewport({
     // Claim focus when requested, then hand it to the terminal once ready only
     // if the user has not focused something else in the meantime.
     (terminalRef.current ?? containerRef.current)?.focus();
+    // WORKAROUND: compiler treats the explicit focus request epoch as unused.
+    // Keep repeated requests focusing the current mounted terminal after commit.
+    // Remove when effect dependency inference recognizes request epochs.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies
   }, [autoFocus, canOperateTerminal, focusRequestId, visible]);
 
   useEffect(() => {
@@ -1059,6 +1076,10 @@ export function TerminalViewport({
     return () => {
       window.cancelAnimationFrame(frame);
     };
+    // WORKAROUND: compiler treats terminal layout/session refit triggers as unused.
+    // Keep sizing/reopening and replacement sessions scheduling fit on the live surface.
+    // Remove when effect dependency inference recognizes external refit lifetimes.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies
   }, [drawerHeight, environmentId, resizeEpoch, terminalId, threadId]);
   return (
     <div
@@ -1418,6 +1439,10 @@ export default function ThreadTerminalDrawer({
 
   useEffect(() => {
     lastSyncedHeightRef.current = controlledDrawerHeight;
+    // WORKAROUND: compiler treats the height synchronization owner key as unused.
+    // Keep same-height thread changes discarding the previous owner's last drag value.
+    // Remove when effect dependency inference recognizes owner reset lifetimes.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies
   }, [controlledDrawerHeight, threadId]);
 
   // Fork: arrow keys on the focused top edge and Vim mode's PANE mode
@@ -1524,6 +1549,10 @@ export default function ThreadTerminalDrawer({
     if (!visible) {
       return;
     }
+    // WORKAROUND: compiler flags state synchronized from the external viewport.
+    // Keep opening resampling hidden-window resizes before requesting terminal refit.
+    // Remove when effect inference recognizes external viewport synchronization.
+    // oxlint-disable-next-line react/set-state-in-effect
     setWindowMaxDrawerHeight(maxDrawerHeight());
     setResizeEpoch((value) => value + 1);
   }, [visible]);

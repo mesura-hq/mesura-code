@@ -6,6 +6,9 @@ import type {
   ProviderReplayTranscript,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Cause from "effect/Cause";
+import * as Exit from "effect/Exit";
+import * as Predicate from "effect/Predicate";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
@@ -38,6 +41,7 @@ import {
 } from "./ProviderReplayHarness.ts";
 import { checkpointWorkspace } from "@t3tools/provider-testing/replayWorkspace";
 import { materializeReplayTranscriptRuntimeInstructions } from "./ReplayRuntimeInstructions.ts";
+import { materializeMuseReplayApplicationMetadata } from "./MesuraReplayMuseMetadata.ts";
 import {
   materializeReplayTranscriptWorkspace,
   readProviderReplayTranscript,
@@ -95,9 +99,11 @@ const runFixtureProvider = Effect.fn("runOrchestratorReplayFixture")(function* <
 }) {
   const recordedTranscript = yield* readTranscript(input.driver.transcriptFile);
   const rawTranscript = input.transformTranscript?.(recordedTranscript) ?? recordedTranscript;
-  const replayTranscript = materializeReplayTranscriptRuntimeInstructions(
-    transcriptEntriesThroughLabel(rawTranscript, input.driver.transcriptEntriesThroughLabel),
-    { driver: input.driver.driver, model: input.driver.modelSelection.model },
+  const replayTranscript = materializeMuseReplayApplicationMetadata(
+    materializeReplayTranscriptRuntimeInstructions(
+      transcriptEntriesThroughLabel(rawTranscript, input.driver.transcriptEntriesThroughLabel),
+      { driver: input.driver.driver, model: input.driver.modelSelection.model },
+    ),
   );
   const fixtureInput = input.buildInput();
   const workspace = yield* checkpointWorkspace(input.fixtureName, fixtureInput.workspaceFiles);
@@ -248,6 +254,40 @@ describe("orchestrator replay fixtures", () => {
       fixtureName: fixture.name,
       buildInput: fixture.buildInput,
       driver: provider,
+    }),
+  );
+
+  it.effect("rejects Muse reasoning-effort drift after display metadata materialization", () =>
+    Effect.gen(function* () {
+      const fixture = ORCHESTRATOR_REPLAY_FIXTURES.find((entry) => entry.name === "simple");
+      const provider = fixture?.providers.find((entry) => entry.driver === "muse");
+      if (fixture === undefined || provider === undefined) {
+        return assert.fail("Expected the simple Muse replay fixture");
+      }
+      const result = yield* runFixtureProviderWithRegisteredHarness({
+        fixtureName: fixture.name,
+        buildInput: fixture.buildInput,
+        driver: provider,
+        transformTranscript: (transcript) => ({
+          ...transcript,
+          entries: transcript.entries.map((entry) => {
+            if (entry.type !== "expect_outbound") return entry;
+            const frame = entry.frame;
+            if (!Predicate.isObject(frame) || frame.method !== "turn/start") return entry;
+            if (!Predicate.isObject(frame.params)) return entry;
+            return {
+              ...entry,
+              frame: {
+                ...frame,
+                params: { ...frame.params, reasoningEffort: "unexpected-effort" },
+              },
+            };
+          }),
+        }),
+      }).pipe(Effect.exit);
+      if (Exit.isSuccess(result)) return assert.fail("Muse protocol drift must fail replay");
+      assert.include(Cause.pretty(result.cause), "MuseReplayMismatchError");
+      assert.include(Cause.pretty(result.cause), "cursor 8");
     }),
   );
 

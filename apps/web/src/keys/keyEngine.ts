@@ -21,7 +21,7 @@ import { toggleComposerExpanded } from "./composer/composerExpanded";
 import {
   cancelComposerNormalResume,
   composerNormalOffset,
-  resumeComposerNormalOnFocus,
+  restoreComposerNormalFocus,
 } from "./composer/composerSurface";
 import { isCommandPaletteOpen } from "~/commandPaletteBus";
 import { focusPane, getFocusedPane, notePointerPane } from "~/lib/paneFocus";
@@ -212,10 +212,7 @@ export function restorePaletteOrigin(): boolean {
   if (scope === "chat") {
     focusPane("chat");
   } else if (scope === "composer" && composerOffset !== null) {
-    const editor = composerEditorElement();
-    if (editor === null) return false;
-    resumeComposerNormalOnFocus(composerOffset);
-    editor.focus({ preventScroll: true });
+    if (!restoreComposerNormalFocus(composerOffset)) return false;
   } else {
     return false;
   }

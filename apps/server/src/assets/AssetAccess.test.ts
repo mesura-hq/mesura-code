@@ -38,6 +38,8 @@ import * as GitHubCredentials from "@t3tools/source-control-github/server/GitHub
 import { githubMediaResponse } from "./GitHubMediaFetch.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
+const encodeAssetAccessError = Schema.encodeEffect(Schema.fromJsonString(AssetAccessError));
+
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof NodeFSP>();
   return { ...actual, open: vi.fn(actual.open), realpath: vi.fn(actual.realpath) };
@@ -1354,7 +1356,7 @@ describe("AssetAccess", () => {
       ]) {
         const error = yield* issue(url).pipe(Effect.flip);
         expect(error._tag).toBe("AssetGitHubMediaUrlValidationError");
-        const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(AssetAccessError))(error);
+        const encoded = yield* encodeAssetAccessError(error);
         expect(encoded).not.toContain(url);
       }
     }).pipe(Effect.provide(layerTest)),

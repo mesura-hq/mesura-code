@@ -4,6 +4,7 @@ import {
   type OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 /**
@@ -100,7 +101,20 @@ const runItemByTurnItem = new WeakMap<FactoryCardTurnItem, FactoryRunTimelineIte
 export function factoryRunItemFromCard(item: FactoryRunCardTurnItem): FactoryRunTimelineItem {
   const cached = runItemByTurnItem.get(item);
   if (cached !== undefined) return cached;
-  const runItem = { id: item.id, createdAt: factoryCardCreatedAt(item), run: item.card.payload };
+  const startedAt =
+    item.card.payload.startedAt === null
+      ? Option.none()
+      : DateTime.make(item.card.payload.startedAt);
+  const runItem = {
+    id: item.id,
+    // A run can attach after it starts. Normalize its start to UTC so string
+    // ordering handles offsets and absent fractions. Unparseable or missing
+    // starts retain the card timestamp fallback without throwing in rendering.
+    createdAt: Option.isSome(startedAt)
+      ? DateTime.formatIso(startedAt.value)
+      : factoryCardCreatedAt(item),
+    run: item.card.payload,
+  };
   runItemByTurnItem.set(item, runItem);
   return runItem;
 }
@@ -108,7 +122,11 @@ export function factoryRunItemFromCard(item: FactoryRunCardTurnItem): FactoryRun
 export function isFactoryRunCardItem(
   item: OrchestrationV2TurnItem,
 ): item is FactoryRunCardTurnItem {
-  return item.type === "factory_card" && item.card.kind === "run";
+  return (
+    item.type === "factory_card" &&
+    item.card.kind === "run" &&
+    isFactoryRunActivityPayload(item.card.payload)
+  );
 }
 
 /** Each run's card by run id, from a thread's turn items: a report card reads its own run's. */

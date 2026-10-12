@@ -6,7 +6,6 @@ import * as FileSystem from "effect/FileSystem";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientError from "effect/http/HttpClientError";
-import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as Path from "effect/Path";
 
@@ -328,7 +327,7 @@ describe("readCursorAccountUsage", () => {
         accountKey: null,
         records: [],
         missing: false,
-        error: "Allow Keychain access on the Mac running T3 Code, then refresh.",
+        error: "Allow Keychain access on the Mac running Mesura Code, then refresh.",
       });
     }).pipe(Effect.provide(NodeServices.layer)),
   );

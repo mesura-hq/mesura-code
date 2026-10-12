@@ -35,6 +35,7 @@ import {
   useCallback,
   useEffect,
   useEffectEvent,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -66,18 +67,22 @@ import {
 } from "~/state/pullRequests";
 import { useEnvironmentQuery } from "~/state/query";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
-import { usePanelSurfaceKeys } from "~/lib/panelSurfaceFocus";
+import {
+  activatePanelSurfaceFromLauncher,
+  isPanelSurfaceKeyboardActivation,
+  usePanelSurfaceKeys,
+} from "~/lib/panelSurfaceFocus";
 import { useRightPanelTabCycling } from "~/lib/rightPanelTabCycling";
 import {
   closePanelLauncher,
   dismissPanelLauncher,
-  keepFocusInPanelAfterRender,
+  isPanelLauncherKeyboardAvailable,
   openPanelLauncher,
   panelLauncherActions,
   registerLauncherKeyHandler,
   reportUnavailable,
   runPanelLauncherAction,
-  usePanelLauncherOpen,
+  usePanelLauncherOwner,
   type PanelLauncherAction,
 } from "~/lib/panelLauncher";
 
@@ -177,20 +182,6 @@ function issuesSurfaceAction(onAddIssues: (() => void) | undefined) {
     onClick: onAddIssues ?? NOOP,
   } as const;
 }
-
-/** Overlays that must win over the launcher's letter shortcuts. */
-const LAUNCHER_SHORTCUT_BLOCKING_LAYERS = [
-  '[data-slot="dialog-popup"]',
-  '[data-slot="alert-dialog-popup"]',
-  '[data-slot="command-dialog-popup"]',
-  '[data-slot="menu-popup"]',
-  '[data-slot="select-popup"]',
-  '[data-slot="popover-popup"]',
-  '[data-slot="combobox-popup"]',
-  '[data-slot="autocomplete-popup"]',
-  // Fork addition: the file manager over the window (`MesuraFileManagerLayer`).
-  "[data-mesura-file-manager]",
-].join(",");
 
 /** One-line unavailability hints for the empty-state rows. */
 const SURFACE_UNAVAILABLE_HINTS = {
@@ -301,6 +292,8 @@ export function surfaceShortcutTargetsTypingContext(
  * surfaces stay visible with a one-line reason.
  */
 function RightPanelEmptyState(props: {
+  panelOpen: boolean;
+  launcherOpen: boolean;
   onAddBrowser: () => void;
   onAddBrowserInProfile: (profileId: string) => void;
   browserProfiles: ReadonlyArray<{ readonly id: string; readonly name: string }>;
@@ -401,14 +394,17 @@ function RightPanelEmptyState(props: {
   const rootRef = useRef<HTMLDivElement | null>(null);
   // Mesura: every row runs through here, so a launcher shown over the panel's
   // tabs closes once a row is chosen.
-  const runAction = (action: SurfaceAction) => {
+  const runAction = (action: SurfaceAction, keyboard: boolean) => {
     const panel = rootRef.current?.closest("[data-preview-panel-mode]");
-    closePanelLauncher();
-    action.onClick();
-    if (panel) keepFocusInPanelAfterRender(panel);
+    const activate = () => {
+      closePanelLauncher();
+      action.onClick();
+    };
+    if (panel) activatePanelSurfaceFromLauncher(panel, activate, keyboard);
+    else activate();
   };
   const panelActions = props.panelActions ?? [];
-  const launcherOpen = usePanelLauncherOpen();
+  const launcherOpen = props.launcherOpen;
   const highlightIndex =
     availableActions.length === 0 ? -1 : Math.min(highlight, availableActions.length - 1);
 
@@ -418,9 +414,14 @@ function RightPanelEmptyState(props: {
   // typing contexts and already-handled events are left alone.
   // Mesura: unavailable rows and the panel actions answer their letters too,
   // the first with the reason they cannot run (`lib/panelLauncher.ts`).
-  const shortcutActionsRef = useRef({ actions, runAction, panelActions });
-  useEffect(() => {
-    shortcutActionsRef.current = { actions, runAction, panelActions };
+  const shortcutActionsRef = useRef({
+    actions,
+    runAction,
+    panelActions,
+    panelOpen: props.panelOpen,
+  });
+  useLayoutEffect(() => {
+    shortcutActionsRef.current = { actions, runAction, panelActions, panelOpen: props.panelOpen };
   });
   useEffect(() => {
     const handler = (event: KeyboardEvent): boolean => {
@@ -437,7 +438,13 @@ function RightPanelEmptyState(props: {
             event,
           );
       if (!action && !panelAction) return false;
-      if (document.querySelector(LAUNCHER_SHORTCUT_BLOCKING_LAYERS)) return false;
+      if (
+        !isPanelLauncherKeyboardAvailable(
+          current.panelOpen,
+          rootRef.current?.closest("[data-preview-panel-mode]"),
+        )
+      )
+        return false;
       // The composed path starts at the real target, which may sit inside a shadow root.
       const target = event.composedPath()[0] ?? event.target;
       if (target instanceof Element && surfaceShortcutTargetsTypingContext(target)) return false;
@@ -457,7 +464,7 @@ function RightPanelEmptyState(props: {
         reportUnavailable(chosen.label, chosen.disabledReason);
         return true;
       }
-      current.runAction(chosen);
+      current.runAction(chosen, true);
       return true;
     };
     const unregister = registerLauncherKeyHandler(handler);
@@ -470,6 +477,13 @@ function RightPanelEmptyState(props: {
   }, []);
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (
+      !isPanelLauncherKeyboardAvailable(
+        props.panelOpen,
+        rootRef.current?.closest("[data-preview-panel-mode]"),
+      )
+    )
+      return;
     if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
     if (availableActions.length === 0) return;
     if (event.key === "ArrowDown" || event.key === "ArrowRight") {
@@ -492,7 +506,7 @@ function RightPanelEmptyState(props: {
       const action = availableActions[highlightIndex];
       if (!action) return;
       event.preventDefault();
-      runAction(action);
+      runAction(action, true);
       return;
     }
     if (event.key === "Escape" && launcherOpen) {
@@ -562,7 +576,7 @@ function RightPanelEmptyState(props: {
               >
                 <button
                   type="button"
-                  onClick={() => runAction(action)}
+                  onClick={(event) => runAction(action, isPanelSurfaceKeyboardActivation(event))}
                   className={cn(
                     "flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-(--control-radius) px-2.5 text-left text-sm transition-colors group-hover:bg-accent/60",
                     isHighlighted(action) && "bg-accent/60",
@@ -602,13 +616,16 @@ function RightPanelEmptyState(props: {
                       {props.browserProfiles.map((profile) => (
                         <MenuItem
                           key={profile.id}
-                          onClick={() =>
+                          onClick={(event) =>
                             // Mesura: a profile is the Browser row with another target,
                             // so it closes the launcher the same way.
-                            runAction({
-                              ...action,
-                              onClick: () => props.onAddBrowserInProfile(profile.id),
-                            })
+                            runAction(
+                              {
+                                ...action,
+                                onClick: () => props.onAddBrowserInProfile(profile.id),
+                              },
+                              isPanelSurfaceKeyboardActivation(event),
+                            )
                           }
                         >
                           <span className="min-w-0 truncate">{profile.name}</span>
@@ -641,7 +658,7 @@ function RightPanelEmptyState(props: {
                     key={action.shortcut}
                     type="button"
                     onClick={() => runPanelLauncherAction(action)}
-                    className="flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-[var(--control-radius)] px-2.5 text-left text-sm transition-colors hover:bg-accent/60"
+                    className="flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-(--control-radius) px-2.5 text-left text-sm transition-colors hover:bg-accent/60"
                   >
                     <action.icon className="size-4 shrink-0" />
                     <span className="min-w-0 flex-1 truncate">{action.label}</span>
@@ -679,7 +696,7 @@ function UnavailableLauncherRow(props: {
       type="button"
       aria-disabled="true"
       onClick={props.onClick}
-      className="flex w-full cursor-default items-center gap-2.5 rounded-[var(--control-radius)] px-2.5 py-1 text-left text-sm"
+      className="flex w-full cursor-default items-center gap-2.5 rounded-(--control-radius) px-2.5 py-1 text-left text-sm"
     >
       <span className="opacity-50">{props.icon}</span>
       <span className="flex min-w-0 flex-1 flex-col">
@@ -921,7 +938,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   const browserProfiles = useBrowserDefaults().profiles;
   const { resolvedTheme } = useTheme();
   const tabListRef = useRef<HTMLDivElement>(null);
-  const launcherOpen = usePanelLauncherOpen();
+  const launcherOpen = usePanelLauncherOwner(tabListRef, props.open !== false);
   const panelActions = panelLauncherActions({
     hasActiveTab: props.activeSurfaceId !== null,
     maximized: props.maximized === true,
@@ -929,6 +946,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   // Mesura: Ctrl+Tab / Ctrl+Shift+Tab walk these tabs while the panel has focus.
   useRightPanelTabCycling({
     tabBarRef: tabListRef,
+    panelOpen: props.open !== false,
     surfaces: props.surfaces,
     activeSurfaceId: props.activeSurfaceId,
     onActivate: props.onActivate,
@@ -952,10 +970,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       }) !== "rightPanel.new"
     )
       return;
-    if (!launcherOpen && document.querySelector(LAUNCHER_SHORTCUT_BLOCKING_LAYERS)) return;
+    if (!isPanelLauncherKeyboardAvailable(props.open !== false)) return;
     event.preventDefault();
     event.stopPropagation();
-    if (!event.repeat) openPanelLauncher();
+    if (!event.repeat) openPanelLauncher(tabListRef.current?.closest("[data-preview-panel-mode]"));
   });
   useEffect(() => {
     if (props.open === false) return;
@@ -1317,7 +1335,9 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                 className="shrink-0"
                 size="icon-xs"
                 variant="ghost-muted"
-                onClick={openPanelLauncher}
+                onClick={() =>
+                  openPanelLauncher(tabListRef.current?.closest("[data-preview-panel-mode]"))
+                }
               >
                 <Plus className="size-3.5" />
               </Button>
@@ -1383,6 +1403,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       <div className="relative flex min-h-0 flex-1 flex-col" data-right-panel-surface-content>
         {props.activeSurfaceId === null ? (
           <RightPanelEmptyState
+            panelOpen={props.open !== false}
+            launcherOpen={launcherOpen}
             onAddBrowser={props.onAddBrowser}
             onAddBrowserInProfile={props.onAddBrowserInProfile}
             browserProfiles={browserProfiles}
@@ -1410,6 +1432,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             {launcherOpen ? (
               <div className="absolute inset-0 z-20 flex flex-col bg-background">
                 <RightPanelEmptyState
+                  panelOpen={props.open !== false}
+                  launcherOpen={launcherOpen}
                   onAddBrowser={props.onAddBrowser}
                   onAddBrowserInProfile={props.onAddBrowserInProfile}
                   browserProfiles={browserProfiles}

@@ -1019,6 +1019,9 @@ describe("UsageService", () => {
           assert.strictEqual(healthy.sources[0]?.status, "ok");
           assert.isNull(healthy.sources[0]?.message);
         }).pipe(
+          // Without an inner scope, userdata cleanup races pending scan-cache writes.
+          // Drain service persistence before the provided layer removes userdata.
+          Effect.scoped,
           Effect.provide(layerService({ prefix: "usage-service-unreadable", home, settings })),
         );
       }).pipe(Effect.scoped),

@@ -1,4 +1,5 @@
 import {
+  AuthOrchestrationOperateScope,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   type FactoryPlanActivityPayload,
   type ScopedThreadRef,
@@ -17,6 +18,7 @@ import { newCommandId, newMessageId } from "../lib/utils";
 import { readThreadShell, useThreadProjection } from "../state/entities";
 import { useEnvironments } from "../state/environments";
 import { threadEnvironment } from "../state/threads";
+import { readEnvironmentScope, useEnvironmentScope } from "../state/session";
 import { useAtomCommand } from "../state/use-atom-command";
 import { buildDirectedTurnStartInput } from "../dictation/directedComposerSubmission";
 
@@ -44,6 +46,7 @@ export function useFactoryPlanApproval(
     environments.find((environment) => environment.environmentId === threadRef.environmentId)
       ?.serverConfig?.providers ?? EMPTY_PROVIDERS;
 
+  const canApprove = useEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope);
   const startTurn = useAtomCommand(threadEnvironment.startTurn);
   // The digest a sent or sending approval names: Approve stays disabled until
   // the message comes back as an approval, and a failed send clears it.
@@ -53,7 +56,12 @@ export function useFactoryPlanApproval(
     async (routes: FactoryRoutes) => {
       // On orchestrator v2, title, model and runtime mode live on the thread shell.
       const current = readThreadShell(threadRef);
-      if (current === null || inFlight.current) return;
+      if (
+        current === null ||
+        inFlight.current ||
+        !readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope)
+      )
+        return;
       inFlight.current = true;
       setSentDigest(plan.digest);
       const result = await startTurn({
@@ -87,5 +95,5 @@ export function useFactoryPlanApproval(
     [plan.digest, plan.intentPath, plan.planPath, startTurn, threadRef],
   );
 
-  return { state, providers, approve, sending: sentDigest === plan.digest };
+  return { state, providers, approve, canApprove, sending: sentDigest === plan.digest };
 }

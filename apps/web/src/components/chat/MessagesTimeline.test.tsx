@@ -7,12 +7,13 @@ import {
   MessageId,
   ProjectId,
   RunId,
-  ThreadId,
 } from "@t3tools/contracts";
 import {
   act,
   createRef,
   useLayoutEffect,
+  useCallback,
+  useState,
   type ReactNode,
   type Ref,
   type ReactElement,
@@ -219,9 +220,9 @@ function matchMedia() {
 }
 
 let MessagesTimeline: typeof import("./MessagesTimeline").MessagesTimeline;
-let resolvePreviewAnnotationImage: typeof import("./MessagesTimeline").resolvePreviewAnnotationImage;
 
-const ElementStub = class ElementStub {};
+// Renderer fixtures use this constructor for instanceof checks.
+function ElementStub() {}
 function stubDomGlobals() {
   const classList = {
     add: () => {},
@@ -262,7 +263,7 @@ function stubDomGlobals() {
 beforeEach(stubDomGlobals);
 beforeAll(async () => {
   Object.defineProperty(window, "matchMedia", { value: matchMedia, configurable: true });
-  ({ MessagesTimeline, resolvePreviewAnnotationImage } = await import("./MessagesTimeline"));
+  ({ MessagesTimeline } = await import("./MessagesTimeline"));
 }, 30_000);
 
 const ACTIVE_THREAD_ENVIRONMENT_ID = EnvironmentId.make("environment-local");
@@ -482,6 +483,59 @@ function buildSnapShotTimelineEntry(previewUrl?: string) {
 }
 
 describe("MessagesTimeline", () => {
+  it("retains historical follow cancellation after opening and closing timeline Find", async () => {
+    const ownedGlobals = [
+      "IS_REACT_ACT_ENVIRONMENT",
+      "requestAnimationFrame",
+      "cancelAnimationFrame",
+    ];
+    const previousGlobals = ownedGlobals.map((name) =>
+      Object.getOwnPropertyDescriptor(globalThis, name),
+    );
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    vi.stubGlobal("requestAnimationFrame", () => 0);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    let followEnabled: boolean | undefined;
+    function Thread({ findOpen }: { findOpen: boolean }) {
+      const [follow, setFollow] = useState(true);
+      const cancelFollow = useCallback(() => setFollow(false), []);
+      useLayoutEffect(() => {
+        followEnabled = follow;
+      }, [follow]);
+      return (
+        <MessagesTimeline
+          {...buildProps()}
+          liveFollowEnabled={follow}
+          findOpen={findOpen}
+          findExpanded={findOpen}
+          timelineEntries={[buildUserTimelineEntry("Historical reading position.")]}
+          onManualNavigation={cancelFollow}
+        />
+      );
+    }
+    let renderer: ReactTestRenderer | undefined;
+    try {
+      await act(() => {
+        renderer = create(<Thread findOpen={false} />);
+      });
+      expect(followEnabled).toBe(true);
+      await act(() => renderer?.update(<Thread findOpen />));
+      expect(followEnabled).toBe(false);
+      await act(() => renderer?.update(<Thread findOpen={false} />));
+      expect(followEnabled).toBe(false);
+    } finally {
+      try {
+        await act(() => renderer?.unmount());
+      } finally {
+        ownedGlobals.forEach((name, index) => {
+          const previous = previousGlobals[index];
+          if (previous) Object.defineProperty(globalThis, name, previous);
+          else Reflect.deleteProperty(globalThis, name);
+        });
+      }
+    }
+  });
+
   it("shows dynamic tool input without cached output when the row is expanded", async () => {
     activityTestState.expanded = true;
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -2047,7 +2101,7 @@ describe("MessagesTimeline", () => {
       activityTestState.expandedRuns = true;
       activityTestState.subagentTooltips = true;
       vi.stubGlobal("HTMLElement", ElementStub);
-      window.HTMLElement = ElementStub as typeof HTMLElement;
+      Object.assign(window, { HTMLElement: ElementStub });
       vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
       vi.stubGlobal("requestAnimationFrame", () => 0);
       vi.stubGlobal("cancelAnimationFrame", () => {});

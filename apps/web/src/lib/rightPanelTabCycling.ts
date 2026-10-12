@@ -1,9 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 
 import { resolveShortcutCommand } from "../keybindings";
 import { primaryServerKeybindingsAtom } from "../state/server";
-import { openPanelLauncher } from "./panelLauncher";
+import { isPanelLauncherKeyboardAvailable, openPanelLauncher } from "./panelLauncher";
 import { isTerminalFocused } from "./terminalFocus";
 
 /**
@@ -21,13 +21,14 @@ import { isTerminalFocused } from "./terminalFocus";
  */
 export function useRightPanelTabCycling<const Surface extends { readonly id: string }>(input: {
   readonly tabBarRef: RefObject<HTMLElement | null>;
+  readonly panelOpen?: boolean;
   readonly surfaces: readonly Surface[];
   readonly activeSurfaceId: string | null;
   readonly onActivate: (surface: Surface) => void;
 }): void {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const latest = useRef(input);
-  useEffect(() => {
+  useLayoutEffect(() => {
     latest.current = input;
   });
 
@@ -39,10 +40,16 @@ export function useRightPanelTabCycling<const Surface extends { readonly id: str
       });
       if (command === "rightPanel.newTab") {
         const panel = latest.current.tabBarRef.current?.closest("[data-preview-panel-mode]");
-        if (event.defaultPrevented || !panel?.contains(document.activeElement)) return;
+        // A closed panel keeps its surfaces mounted and can still contain focus.
+        if (
+          event.defaultPrevented ||
+          !isPanelLauncherKeyboardAvailable(latest.current.panelOpen !== false) ||
+          !panel?.contains(document.activeElement)
+        )
+          return;
         event.preventDefault();
         event.stopPropagation();
-        openPanelLauncher();
+        openPanelLauncher(panel);
         return;
       }
       if (command !== "rightPanel.nextTab" && command !== "rightPanel.previousTab") return;

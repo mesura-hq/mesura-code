@@ -10,6 +10,7 @@ import {
   createThreadEnvironmentAtoms,
 } from "@t3tools/client-runtime/state/threads";
 import type { EnvironmentId, OrchestrationV2ThreadShell, ThreadId } from "@t3tools/contracts";
+import type * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 
@@ -17,10 +18,14 @@ import { environmentCatalog } from "../connection/catalog";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { environmentSnapshotAtom } from "./shell";
 
-export const threadEnvironment = createThreadEnvironmentAtoms(
-  connectionAtomRuntime,
-  environmentSnapshotAtom,
-);
+type ConnectionRuntimeLayer = Atom.Type<typeof connectionAtomRuntime.layer>;
+
+export const threadEnvironment: ReturnType<
+  typeof createThreadEnvironmentAtoms<
+    Layer.Success<ConnectionRuntimeLayer>,
+    Layer.Error<ConnectionRuntimeLayer>
+  >
+> = createThreadEnvironmentAtoms(connectionAtomRuntime, environmentSnapshotAtom);
 const environmentThreads = createEnvironmentThreadStateAtoms(connectionAtomRuntime);
 export const environmentThreadDetails = createEnvironmentThreadDetailAtoms(
   environmentThreads.stateAtom,

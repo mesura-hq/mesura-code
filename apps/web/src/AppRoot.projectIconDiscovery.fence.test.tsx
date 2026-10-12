@@ -34,6 +34,12 @@ import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 import { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import type { AppRouter } from "./router";
 
+import { appRootFence, makeFenceSession } from "./test/appRootFenceMocks";
+const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("@t3tools/client-runtime/state/session", async (original) =>
+  (await fenceMocks()).mockRuntimeSession(original),
+);
+
 interface FixtureProject {
   id: string;
   environmentId: string;
@@ -251,6 +257,9 @@ const submitted = () => fixture.discoverRequests.map((request) => request.input.
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  for (const environment of fixture.environments) {
+    appRootFence.sessions.set(environment.environmentId, makeFenceSession());
+  }
   localStorage.clear();
   fixture.previewRequests.length = 0;
   fixture.environments[0]!.connection.phase = "connected";

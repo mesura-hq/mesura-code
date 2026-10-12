@@ -31,6 +31,8 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as EventSink from "../EventSink.ts";
+import { importLegacyFactoryCards, writeLegacyFactoryEvents } from "./MesuraFactoryCardImport.ts";
+import { restoreMesuraFactoryMessagePositions } from "../../persistence/mesuraFactoryCardImport.ts";
 import { randomUuidV4 } from "@t3tools/provider-core/server/randomUuid";
 
 const IMPORT_EVENT_PREFIX = "migration:v1";
@@ -119,6 +121,7 @@ export class LegacyV1ThreadImporter extends Context.Service<
   LegacyV1ThreadImporterShape
 >()("t3/orchestration-v2/legacy/LegacyV1ThreadImporter") {}
 
+const decodeMessageContext = Schema.decodeUnknownSync(OrchestrationMessageContext);
 const decodeModelSelection = Schema.decodeUnknownOption(ModelSelection);
 const decodeAttachments = Schema.decodeUnknownOption(Schema.Array(ChatAttachment));
 const decodePullRequests = Schema.decodeUnknownOption(Schema.Array(ThreadPullRequestLink));
@@ -259,9 +262,7 @@ function messageEvents(row: LegacyMessageRow): ReadonlyArray<OrchestrationV2Doma
     text: row.text,
     ...(row.context_json
       ? {
-          context: Schema.decodeUnknownSync(OrchestrationMessageContext)(
-            parseJson(row.context_json),
-          ),
+          context: decodeMessageContext(parseJson(row.context_json)),
         }
       : {}),
     attachments,
@@ -297,9 +298,7 @@ function messageEvents(row: LegacyMessageRow): ReadonlyArray<OrchestrationV2Doma
           text: row.text,
           ...(row.context_json
             ? {
-                context: Schema.decodeUnknownSync(OrchestrationMessageContext)(
-                  parseJson(row.context_json),
-                ),
+                context: decodeMessageContext(parseJson(row.context_json)),
               }
             : {}),
           attachments,
@@ -311,9 +310,7 @@ function messageEvents(row: LegacyMessageRow): ReadonlyArray<OrchestrationV2Doma
           text: row.text,
           ...(row.context_json
             ? {
-                context: Schema.decodeUnknownSync(OrchestrationMessageContext)(
-                  parseJson(row.context_json),
-                ),
+                context: decodeMessageContext(parseJson(row.context_json)),
               }
             : {}),
           streaming: false,
@@ -347,6 +344,11 @@ function chunks<A>(items: ReadonlyArray<A>, size: number): Array<ReadonlyArray<A
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const eventSink = yield* EventSink.EventSinkV2;
+  // Bind fork import helpers to construction dependencies. Public methods must
+  // also work when callers receive only LegacyV1ThreadImporter from the layer.
+  const factoryImportServices = Context.make(SqlClient.SqlClient, sql).pipe(
+    Context.add(EventSink.EventSinkV2, eventSink),
+  );
   const transcriptImports = yield* KeyedLock.make<ThreadId>();
 
   const listMessages = (threadId: ThreadId) =>
@@ -652,6 +654,7 @@ const make = Effect.gen(function* () {
       importedThreadCount += 1;
       importedMessageCount += previews.length;
     }
+    yield* importLegacyFactoryCards().pipe(Effect.provide(factoryImportServices));
     return { importedThreadCount, importedMessageCount };
   });
 
@@ -708,7 +711,15 @@ const make = Effect.gen(function* () {
           }
           return { importedThreadCount: 0, importedMessageCount: 0 };
         }
-        const messages = yield* listMessages(threadId);
+        const reservations = yield* restoreMesuraFactoryMessagePositions(threadId).pipe(
+          Effect.provide(factoryImportServices),
+        );
+        const messages = (yield* listMessages(threadId)).map((message) => ({
+          ...message,
+          ordinal:
+            reservations.get(`${IMPORT_EVENT_PREFIX}:turn-item:${message.message_id}`) ??
+            message.ordinal,
+        }));
         const existingRows = yield* sql<{ readonly event_id: string }>`
           SELECT event_id
           FROM orchestration_events
@@ -740,7 +751,18 @@ const make = Effect.gen(function* () {
               `,
             { discard: true },
           );
-          yield* eventSink.write({ events: batch.flatMap(messageEvents) });
+          const events = batch.flatMap(messageEvents);
+          if (reservations.size === 0) {
+            yield* eventSink.write({ events });
+          } else {
+            yield* writeLegacyFactoryEvents(
+              threadId,
+              events,
+              EventId.make(
+                `mesura:migration:v1:factory-transcript-metadata:${batch[batch.length - 1]!.message_id}`,
+              ),
+            ).pipe(Effect.provide(factoryImportServices));
+          }
           yield* Effect.yieldNow;
         }
         const now = DateTime.formatIso(yield* DateTime.now);

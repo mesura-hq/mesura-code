@@ -58,7 +58,6 @@ const state = vi.hoisted(() => ({
   navigate: vi.fn(),
 }));
 
-vi.mock("~/connection/runtime", () => ({ connectionAtomRuntime: undefined }));
 vi.mock("@t3tools/client-runtime/state/session", () => ({
   createEnvironmentSessionAtoms: () => ({
     sessionStateAtom: (id: EnvironmentId) => state.sessions.get(id)!,
@@ -330,14 +329,18 @@ async function grant(id: EnvironmentId, result: SessionResult) {
 
 describe("project settings permissions", () => {
   it("preflights every member before any shared field update", async () => {
-    await grant(remoteId, AsyncResult.success(session([AuthSettingsWriteScope])));
     const root = await mountPanel();
+    await act(async () =>
+      root.findByProps({ "aria-label": "Choose a project icon file" }).props.onClick(),
+    );
+    const selectIcon = root.findByType(ProjectFaviconPickerDialog).props.onSelect;
+    await grant(remoteId, AsyncResult.success(session([AuthSettingsWriteScope])));
     const name = root.findByProps({ "aria-label": "Project name" });
 
     await act(async () => {
       name.props.onChange();
       name.props.onBlur({ currentTarget: { value: "Renamed" } });
-      root.findByType(ProjectFaviconPickerDialog).props.onSelect("/work/icon.png");
+      selectIcon("/work/icon.png");
     });
 
     expect(state.update).not.toHaveBeenCalled();

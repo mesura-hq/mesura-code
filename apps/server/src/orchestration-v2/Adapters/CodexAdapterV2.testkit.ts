@@ -19,6 +19,7 @@ import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter"
 import { ProviderAdapterDriverCreateError } from "@t3tools/provider-core/server/adapterDriver";
 import * as ProviderAdapterRegistry from "../ProviderAdapterRegistry.ts";
 import type { OrchestratorV2ProviderReplayHarness } from "../testkit/ProviderReplayHarness.ts";
+import { materializeCodexReplayClientMetadata } from "../testkit/MesuraReplayCodexMetadata.ts";
 import type { ProviderReplayGate } from "@t3tools/provider-testing/replayGate";
 import * as CodexAdapterV2 from "./CodexAdapterV2.ts";
 
@@ -247,7 +248,7 @@ export const CodexOrchestratorReplayHarness: OrchestratorV2ProviderReplayHarness
 > = {
   driver: CodexAdapterV2.CODEX_DRIVER_KIND,
   decodeTranscript: (transcript) =>
-    decodeCodexAppServerReplayTranscript(transcript).pipe(
+    decodeCodexAppServerReplayTranscript(materializeCodexReplayClientMetadata(transcript)).pipe(
       Effect.mapError(
         (cause) =>
           new CodexReplayTranscriptDecodeError({

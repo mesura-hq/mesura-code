@@ -1,6 +1,6 @@
 import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId, PullRequestRef } from "@t3tools/contracts";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { pullRequestEnvironment } from "~/state/pullRequests";
 import { useEnvironmentQuery } from "~/state/query";
@@ -98,7 +98,9 @@ export function usePullRequestFilesViewed(options: {
   // retires the press rather than the host happening to agree with it.
   const answeredFrom = useRef<Map<string, FileViewedStates | null>>(new Map());
   const statesRef = useRef(states);
-  statesRef.current = states;
+  useLayoutEffect(() => {
+    statesRef.current = states;
+  }, [states]);
 
   useEffect(() => {
     const pending = new Set([...queued.current.keys(), ...sentBy.current.keys()]);
@@ -150,7 +152,9 @@ export function usePullRequestFilesViewed(options: {
   // Read through a ref rather than closed over: `setViewed` is handed to every file header the
   // viewer draws, and a new identity per render would rebuild all of them.
   const flushRef = useRef(flush);
-  flushRef.current = flush;
+  useLayoutEffect(() => {
+    flushRef.current = flush;
+  }, [flush]);
 
   // Leaving a change request, the environment it lives on, or the page itself records what was
   // pressed and then drops the rest. The flush kept here is the one bound to the scope being
@@ -171,7 +175,9 @@ export function usePullRequestFilesViewed(options: {
   }, [scopeKey]);
 
   const refreshRef = useRef(refresh);
-  refreshRef.current = refresh;
+  useLayoutEffect(() => {
+    refreshRef.current = refresh;
+  }, [refresh]);
   const refreshFromHost = useCallback(() => refreshRef.current(), []);
 
   const setViewed = useCallback((path: string, viewed: boolean) => {

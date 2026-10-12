@@ -11,6 +11,11 @@ import {
   FACTORY_RUN_ACTIVITY_KIND,
   factoryReportActivityId,
   factoryRunActivityId,
+  RunId,
+  ThreadId,
+  TurnItemId,
+  type FactoryThreadCard,
+  type OrchestrationV2TurnItem,
   ProviderDriverKind,
   ProviderInstanceId,
   type FactoryPlanActivityPayload,
@@ -26,6 +31,8 @@ import {
   foldFactoryRunLine,
   summarizeFactoryRun,
 } from "@t3tools/shared/factoryRun";
+
+import * as DateTime from "effect/DateTime";
 
 import type { FactoryRoutes } from "./routes.ts";
 import type { FactoryCardActivity } from "./runActivities.ts";
@@ -408,5 +415,37 @@ export function makeFactoryReportActivity(input: {
     payload,
     turnId: input.turnId ?? null,
     createdAt: input.createdAt ?? payload.writtenAt,
+  };
+}
+
+/** A Factory card at the v2 transport boundary, with an immutable item identity. */
+export function makeFactoryCardTurnItem(input: {
+  readonly id: string;
+  readonly card: FactoryThreadCard;
+  readonly createdAt: string;
+  readonly updatedAt?: string;
+  readonly threadId?: ThreadId;
+  readonly runId?: RunId;
+  readonly ordinal?: number;
+}): Extract<OrchestrationV2TurnItem, { readonly type: "factory_card" }> {
+  const at = DateTime.makeUnsafe(input.createdAt);
+  const updatedAt = DateTime.makeUnsafe(input.updatedAt ?? input.createdAt);
+  return {
+    id: TurnItemId.make(input.id),
+    threadId: input.threadId ?? ThreadId.make("factory-thread"),
+    runId: input.runId ?? RunId.make("factory-coordinator-run"),
+    nodeId: null,
+    providerThreadId: null,
+    providerTurnId: null,
+    nativeItemRef: null,
+    parentItemId: null,
+    ordinal: input.ordinal ?? 0,
+    status: "completed",
+    title: null,
+    startedAt: at,
+    completedAt: updatedAt,
+    updatedAt,
+    type: "factory_card",
+    card: input.card,
   };
 }

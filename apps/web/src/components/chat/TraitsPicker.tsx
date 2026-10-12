@@ -627,7 +627,7 @@ export const TraitsPicker = memo(function TraitsPicker({
     return subscribePickerAction("traits", () => {
       setIsMenuOpen((open) => !open);
     });
-  }, [respondsToShortcut, canRenderTraits, disabled]);
+  }, [respondsToShortcut, canRenderTraits, disabled, setIsMenuOpen]);
   if (!canRenderTraits) {
     return null;
   }

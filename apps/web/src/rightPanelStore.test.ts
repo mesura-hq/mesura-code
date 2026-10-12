@@ -1245,7 +1245,7 @@ describe("right panel state persisted before the Factory surface (phase 2 guards
     ],
   };
 
-  it("loads right panel state persisted under storage version 13 unchanged", async () => {
+  it("loads retained version 13 surfaces and replaces the removed Agents surface", async () => {
     const storage = useRightPanelStore.persist.getOptions().storage!;
     await storage.setItem(storageKey, {
       state: { byThreadKey: { "env-1:thread-A": v13ThreadState } },
@@ -1254,9 +1254,12 @@ describe("right panel state persisted before the Factory surface (phase 2 guards
 
     await useRightPanelStore.persist.rehydrate();
 
-    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual(
-      v13ThreadState,
-    );
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      ...v13ThreadState,
+      // Upstream removed the Agents surface; the migration keeps every retained surface.
+      activeSurfaceId: "browser:tab-a",
+      surfaces: v13ThreadState.surfaces.filter((surface) => surface.kind !== "agents"),
+    });
     await storage.removeItem(storageKey);
   });
 
@@ -1278,7 +1281,10 @@ describe("right panel state persisted before the Factory surface (phase 2 guards
 
     expect(
       migratePersistedRightPanelState({ byThreadKey: { "env-1:thread-A": threadState } }),
-    ).toEqual({ byThreadKey: { "env-1:thread-A": threadState } });
+    ).toEqual({
+      byThreadKey: { "env-1:thread-A": threadState },
+      threadPanelVisibilityByThreadKey: {},
+    });
   });
 });
 

@@ -68,18 +68,25 @@ it("defines exactly the editor session methods the rest of this file assumes", (
   assert.deepStrictEqual(
     declared,
     [...EDITOR_SESSION_METHODS],
-    "the editor session contract changed: add the new method to this guard, then to ws.ts and RpcAuthorization.ts",
+    "the editor session contract changed: add the new method to this guard, then to wsMesura.ts and RpcAuthorization.ts",
   );
 });
 
 it("answers every editor session method on the socket", () => {
-  const ws = read("apps/server/src/ws.ts");
+  const ws = read("apps/server/src/wsMesura.ts");
+  const transport = read("apps/server/src/ws.ts");
+
+  assert.match(
+    transport,
+    /Layer\.merge\(\s*layerWsRpc\([\s\S]*?layerWsRpcMesura,/,
+    "ws.ts no longer merges the fork handler layer into the socket transport",
+  );
 
   for (const method of EDITOR_SESSION_METHODS) {
     assert.include(
       ws,
       `[WS_METHODS.${method}]:`,
-      `ws.ts has no handler for ${method}: the group still type-checks and the socket answers the call with method-not-found`,
+      `wsMesura.ts has no handler for ${method}: the group still type-checks and the socket answers the call with method-not-found`,
     );
   }
 });

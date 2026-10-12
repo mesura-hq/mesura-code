@@ -12,6 +12,10 @@ import {
   resolveVisibleWorktreeSetup,
   resolveWorktreeSetupProgress,
 } from "./ChatView.logic";
+import {
+  advanceChatViewWorktreeSetupHistory,
+  type ChatViewWorktreeSetupHistory,
+} from "./chatViewWorktreeSetupHistory";
 import * as DateTime from "effect/DateTime";
 import { restorePlanFollowUpComposer } from "./ChatView.logic";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
@@ -85,10 +89,8 @@ import {
   resolveEnvironmentMachineKind,
   RuntimeMode,
   TerminalOpenInput,
-  type WorktreeSetupSnapshot,
 } from "@t3tools/contracts";
 import { type EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
-import { deriveThreadTitleSeed } from "@t3tools/client-runtime/operations";
 import {
   wasBootstrapThreadDeleted,
   wasBootstrapThreadNotCreated,
@@ -225,7 +227,6 @@ import {
   DEFAULT_THREAD_TERMINAL_ID,
   MAX_TERMINALS_PER_GROUP,
   type ChatMessage,
-  isBrowserPreviewAttachment,
   type SessionPhase,
   type Thread,
 } from "../types";
@@ -1900,7 +1901,8 @@ export default function ChatView(props: ChatViewProps) {
     threadId: ThreadId;
     ownerKey: string;
   } | null>(null);
-  const [heldWorktreeSetup, setHeldWorktreeSetup] = useState<WorktreeSetupSnapshot | null>(null);
+  const [worktreeSetupHistory, setWorktreeSetupHistory] =
+    useState<ChatViewWorktreeSetupHistory | null>(null);
   // Set by "Work locally": the draft whose restored message should be resent
   // once the cancelled dispatch has settled and the draft is in local mode.
   // Keyed by draft id so a bootstrap rotating the thread id keeps it, while
@@ -2022,8 +2024,18 @@ export default function ChatView(props: ChatViewProps) {
     },
     [fanoutStateAtom],
   );
+  // WORKAROUND: compiler taints the plain selections array from its sibling ref cells.
+  // Keep reactive fanout data separate from invocation-time current-value access.
+  // Remove when refs inference distinguishes selections from sibling ref cells.
+  // oxlint-disable-next-line react/refs
   const multipleModelSelectionsRef = useRef(multipleModelSelections);
-  multipleModelSelectionsRef.current = multipleModelSelections;
+  useLayoutEffect(() => {
+    multipleModelSelectionsRef.current = multipleModelSelections;
+    // WORKAROUND: compiler taints the plain selections dependency array as a ref read.
+    // Keep the real ref assignment after commit and its reactive input dependency.
+    // Remove when refs inference distinguishes selections from sibling ref cells.
+    // oxlint-disable-next-line react/refs
+  }, [multipleModelSelections]);
   const uncertainMultipleSubmissionsRef = fanoutState.uncertainSubmissions;
   const environmentUnavailableSendToastSlotRef = useRef(0);
   const feedbackUploadsInFlightRef = useRef(new Set<string>());
@@ -2410,10 +2422,9 @@ export default function ChatView(props: ChatViewProps) {
       anchorRun.status !== "waiting"
     );
   }, [serverProjection, timelineAnchorMessageId]);
-  useEffect(() => {
-    if (!anchorRunSettled) return;
+  if (anchorRunSettled) {
     setTimelineAnchor({ threadKey: activeThreadKey, messageId: null });
-  }, [anchorRunSettled, activeThreadKey]);
+  }
   const activeRightPanelKind = useRightPanelStore((state) =>
     selectActiveRightPanel(state.byThreadKey, activeThreadRef),
   );
@@ -2422,10 +2433,16 @@ export default function ChatView(props: ChatViewProps) {
   useLayoutEffect(() => {
     const explicitThreadRef = explicitDiffOpenRef.current;
     explicitDiffOpenRef.current = null;
-    // Generic openings always show Changes, including tab fallbacks and thread changes.
-    // A timeline click instead opens the specific turn/file the user requested.
+    // Reset only old turn selections on generic openings, including tab fallbacks and
+    // thread changes. Resetting every mode here overwrites stored Git modes and the
+    // dirty-tree default. A timeline click preserves its explicit turn/file selection.
     if (diffOpen && activeThreadRef && explicitThreadRef !== activeThreadRef) {
-      useDiffPanelStore.getState().selectGitScope(activeThreadRef, "branch");
+      const diffPanelState = useDiffPanelStore.getState();
+      if (
+        selectThreadDiffPanelSelection(diffPanelState.byThreadKey, activeThreadRef).kind === "turn"
+      ) {
+        diffPanelState.selectGitScope(activeThreadRef, "branch");
+      }
     }
   }, [activeThreadRef, diffOpen]);
   const rightPanelState = useRightPanelStore((state) =>
@@ -4009,24 +4026,20 @@ export default function ChatView(props: ChatViewProps) {
       : null,
   );
   const latestWorktreeSetup = worktreeSetupQuery.data;
-  useEffect(() => {
-    if (!latestWorktreeSetup) return;
-    setHeldWorktreeSetup((current) =>
-      current?.threadId === latestWorktreeSetup.threadId &&
-      current.sequence > latestWorktreeSetup.sequence
-        ? current
-        : latestWorktreeSetup,
-    );
-  }, [latestWorktreeSetup]);
-  useEffect(() => {
-    setHeldWorktreeSetup(null);
-  }, [routeThreadKey]);
+  const nextWorktreeSetupHistory = advanceChatViewWorktreeSetupHistory(
+    worktreeSetupHistory,
+    routeThreadKey,
+    latestWorktreeSetup,
+  );
+  if (nextWorktreeSetupHistory !== worktreeSetupHistory) {
+    setWorktreeSetupHistory(nextWorktreeSetupHistory);
+  }
   const { snapshot: liveWorktreeSetup, isPreparingWorktree } = resolveWorktreeSetupProgress({
     threadId: setupTarget.threadId,
     localPreparing: isLocallyPreparingWorktree,
     runStatus: activeActivityRun?.status,
     latest: latestWorktreeSetup,
-    held: heldWorktreeSetup,
+    held: nextWorktreeSetupHistory.heldSnapshot,
   });
   const worktreeSetup = resolveVisibleWorktreeSetup({
     live: liveWorktreeSetup,
@@ -4081,6 +4094,11 @@ export default function ChatView(props: ChatViewProps) {
       environmentId: setupTarget.environmentId,
       input: { threadId: worktreeSetup.threadId },
     });
+    // WORKAROUND: compiler assumes later mutation of a readonly query snapshot.
+    // Keep phase and threadId inputs. Resolvers select snapshots without mutation.
+    // Cancellation receives fresh command inputs.
+    // Remove when memo inference recognizes the query snapshot and resolver immutability.
+    // oxlint-disable-next-line react/preserve-manual-memoization
   }, [cancelWorktreeSetup, setupTarget.environmentId, worktreeSetup]);
   // The setup terminal belongs to the thread that was set up. A failed
   // bootstrap deletes that thread and closes its terminals, so only offer the
@@ -4469,6 +4487,10 @@ export default function ChatView(props: ChatViewProps) {
       environmentChangeRef.current = null;
       setIsEnvironmentChanging(false);
     };
+    // WORKAROUND: compiler treats owner keys used only for cleanup as unused.
+    // Keep draft/project changes cancelling the pending retarget before passive work.
+    // Remove when effect dependency inference recognizes cleanup lifetimes.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies
   }, [draftId, activeProjectKey]);
 
   const onEnvironmentChange = useCallback(
@@ -4597,6 +4619,10 @@ export default function ChatView(props: ChatViewProps) {
 
   const focusComposer = useCallback(() => {
     composerRef.current?.focusAtEnd();
+    // WORKAROUND: compiler infers current rather than the owned RefObject.
+    // Keep the callback reading the current composer at invocation, not during render.
+    // Remove when memo inference recognizes invocation-time RefObject reads.
+    // oxlint-disable-next-line react/preserve-manual-memoization
   }, [composerRef]);
   const canInterruptRunningThread =
     canOperateThread && deriveCanInterruptRunningThread(activeThread !== undefined, activeRuntime);
@@ -4753,6 +4779,10 @@ export default function ChatView(props: ChatViewProps) {
   useEffect(() => {
     if (editingQueuedRun === null) return;
     if (activeThread?.id !== editingQueuedRun.threadId) {
+      // WORKAROUND: compiler flags synchronous setters in external queue synchronization.
+      // Keep thread mismatch clearing and recovery/toast/reset order at the passive boundary.
+      // Remove when effect inference recognizes external queue/draft synchronization.
+      // oxlint-disable-next-line react/set-state-in-effect
       setEditingQueuedRun(null);
       return;
     }
@@ -5782,7 +5812,6 @@ export default function ChatView(props: ChatViewProps) {
         linkedThreadPullRequest.number,
       ])
     : null;
-  const threadRepository = linkedThreadPullRequest?.repository ?? activeProjectRepository;
   const threadPrRelinkKeysRef = useRef(new Map<string, string>());
   const threadPrRelinkWriteRef = useRef(Promise.resolve());
   useEffect(() => {
@@ -6199,6 +6228,10 @@ export default function ChatView(props: ChatViewProps) {
   useEffect(() => {
     if (!canMaximizeRightPanel) return;
     if (useRightPanelStore.getState().consumeMaximizeRequest(routeThreadRef)) {
+      // WORKAROUND: compiler flags synchronous state after external request consumption.
+      // Keep the store one-time consume before updating local panel presentation.
+      // Remove when effect inference recognizes external request synchronization.
+      // oxlint-disable-next-line react/set-state-in-effect
       setMaximizedRightPanelThreadKey(routeThreadKey);
     }
   }, [canMaximizeRightPanel, routeThreadKey, routeThreadRef]);
@@ -6918,6 +6951,10 @@ export default function ChatView(props: ChatViewProps) {
 
   const onToolOutputCollapsedAtEnd = useCallback(() => {
     composerRef.current?.restoreAfterTimelineReachedEnd();
+    // WORKAROUND: compiler infers current rather than the owned RefObject.
+    // Keep disclosure completion resolving the current composer at invocation.
+    // Remove when memo inference recognizes invocation-time RefObject reads.
+    // oxlint-disable-next-line react/preserve-manual-memoization
   }, [composerRef]);
 
   const onIsAtEndChange = useCallback((isAtEnd: boolean) => {
@@ -6952,6 +6989,7 @@ export default function ChatView(props: ChatViewProps) {
     }
   }, []);
 
+  const releaseToolActivityAnchor = useEffectEvent((release: typeof scrollToEnd) => release());
   useLayoutEffect(() => {
     if (timelineScrollModeRef.current !== "anchoring-new-turn") return;
     if (
@@ -6962,7 +7000,7 @@ export default function ChatView(props: ChatViewProps) {
         timelineEntries,
       })
     ) {
-      scrollToEnd();
+      releaseToolActivityAnchor(scrollToEnd);
     }
   }, [
     activeRunningTurnId,
@@ -6989,7 +7027,11 @@ export default function ChatView(props: ChatViewProps) {
     showScrollDebouncer.current.cancel();
     setShowScrollToBottom(!followEnd);
     // Environment identity is part of the scroll session too.
-  }, [activeThreadKey]);
+    // WORKAROUND: compiler treats the active scroll-session key as unused.
+    // Keep active-thread resets and the real routeThreadKey cache read as separate inputs.
+    // Remove when effect dependency inference recognizes active scroll-session lifetimes.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies
+  }, [activeThreadKey, routeThreadKey]);
 
   useEffect(() => {
     if (!activeThread?.id || terminalUiState.terminalOpen) return;
@@ -7077,6 +7119,10 @@ export default function ChatView(props: ChatViewProps) {
     });
     resetLocalDispatch();
     setExpandedImage(null);
+    // WORKAROUND: compiler treats the optimistic-message lifetime key as unused.
+    // Keep thread changes clearing previews while draft promotion retains dispatch.
+    // Remove when effect dependency inference recognizes this thread lifetime.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies
   }, [resetLocalDispatch, threadId]);
 
   const closeExpandedImage = useCallback(() => {
@@ -7271,6 +7317,11 @@ export default function ChatView(props: ChatViewProps) {
     if (!supportsPullRequests || activeThreadRef === null || pullRequestPanelTarget === null)
       return;
     useRightPanelStore.getState().openPullRequest(activeThreadRef, pullRequestPanelTarget);
+    // WORKAROUND: compiler assumes mutation of the resolver-selected panel target.
+    // Keep target and thread dependencies.
+    // The resolver selects the target. The store copies its fields.
+    // Remove when memo inference recognizes resolver selection and store-copy immutability.
+    // oxlint-disable-next-line react/preserve-manual-memoization
   }, [activeThreadRef, pullRequestPanelTarget, supportsPullRequests]);
   const pullRequestSurfaceAvailable = supportsPullRequests && pullRequestPanelTarget !== null;
   const supportsSettlement = serverConfig?.environment.capabilities.threadSettlement === true;
@@ -7433,6 +7484,10 @@ export default function ChatView(props: ChatViewProps) {
     } finally {
       setUnsnoozingThreadKey((current) => (current === threadKey ? null : current));
     }
+    // WORKAROUND: compiler misses the conditional async snooze dependency reads.
+    // Keep new invocations using current recovery metadata and both command branches.
+    // Remove when memo dependency inference recognizes these async reads.
+    // oxlint-disable-next-line react/memo-dependencies
   }, [activeThreadRef, activeThreadShell, unsnoozeThreadMutation, updateThreadMetadata]);
   const [isRestoringThreadBranch, setIsRestoringThreadBranch] = useState(false);
   const [branchRestoreConfirmOpen, setBranchRestoreConfirmOpen] = useState(false);
@@ -7654,6 +7709,10 @@ export default function ChatView(props: ChatViewProps) {
       beginLocalDispatch,
       clientSettingsHydrated,
       composerRef,
+      // WORKAROUND: compiler misses inputs read in settings/dispatch and after await.
+      // Keep later invocations using current branch, runtime, commands and thread key.
+      // Remove when memo dependency inference recognizes these async reads.
+      // oxlint-disable-next-line react/memo-dependencies
       environmentId,
       localCheckoutBranchMismatch,
       persistThreadSettingsForNextTurn,
@@ -7822,6 +7881,10 @@ export default function ChatView(props: ChatViewProps) {
     handleUnsnoozeActiveThread,
     isUnsettling,
     isUnsnoozing,
+    // WORKAROUND: compiler ignores the minute trigger for helpers that read Date.now().
+    // Keep relative labels refreshing even when their source timestamps do not change.
+    // Remove when clock dependency inference recognizes this invalidation trigger.
+    // oxlint-disable-next-line react/memo-dependencies
     nowMinute,
   ]);
   const activeThreadHasCompactableConversation = serverVisibleTurnItems.some(
@@ -7868,6 +7931,10 @@ export default function ChatView(props: ChatViewProps) {
     !nativeResumeCompactionDismissed &&
     !compactDisabled &&
     !hasHeldQueuedRuns &&
+    // WORKAROUND: compiler taints the plain selections array from its sibling ref cells.
+    // Keep this reactive fanout comparison controlling the compaction offer.
+    // Remove when refs inference distinguishes selections from sibling ref cells.
+    // oxlint-disable-next-line react/refs
     multipleModelSelections === null &&
     shouldOfferResumeCompaction({
       provider: selectedProvider,
@@ -7907,6 +7974,7 @@ export default function ChatView(props: ChatViewProps) {
     canWriteSourceControl,
     gitStatusQuery.data?.hasWorkingTreeChanges,
     handleSwitchCheckoutToThread,
+    setBranchRestoreConfirmOpen,
   ]);
   const feedbackBannerItems = useMemo(
     () =>
@@ -8009,8 +8077,6 @@ export default function ChatView(props: ChatViewProps) {
     ];
   }, [
     activeBranchMismatchKey,
-    activeThreadShell,
-    serverRuntime?.usageLimitResetAt,
     canWriteSourceControl,
     feedbackBannerItems,
     limitRecoveryBanner,
@@ -8117,6 +8183,10 @@ export default function ChatView(props: ChatViewProps) {
       isWeb: !isElectron,
       isDesktop: isElectron,
     }),
+    // WORKAROUND: compiler infers current rather than the owned RefObject.
+    // Keep keyboard queries reading the current composer and all actual state inputs.
+    // Remove when memo inference recognizes invocation-time RefObject reads.
+    // oxlint-disable-next-line react/preserve-manual-memoization
     [composerRef, previewPanelOpen, terminalUiState.terminalOpen, routeKind, phase],
   );
   const timelineSkills = activeProviderStatus
@@ -8590,9 +8660,6 @@ export default function ChatView(props: ChatViewProps) {
     canReadTerminal,
     canOperateTerminal,
     addTerminalSurface,
-    activeThreadRef,
-    activeThreadPinned,
-    activeThreadSettled,
     canInterruptRunningThread,
     terminalUiState.terminalOpen,
     terminalUiState.activeTerminalId,
@@ -8607,23 +8674,19 @@ export default function ChatView(props: ChatViewProps) {
     splitPanelTerminal,
     keybindings,
     scriptKeybindings,
-    handleUnsettleActiveThread,
     isServerThread,
     serverConfig?.threadFind,
     onInterrupt,
     onToggleDiff,
     toggleTreeDiffMode,
     openDiffModeMenu,
-    pinThread,
-    settleThread,
-    supportsPinning,
-    supportsSettlement,
-    confirmAndUnpinThread,
     copyActiveThreadReference,
     getShortcutContext,
     openThreadFind,
     closeThreadFind,
     isThreadFindActive,
+    focusComposer,
+    routeKind,
     toggleRightPanel,
     toggleRightPanelMaximized,
     toggleThreadPanel,
@@ -8907,6 +8970,7 @@ export default function ChatView(props: ChatViewProps) {
       isSendBusy,
       phase,
       revertThreadCheckpoint,
+      routeThreadKey,
       setThreadError,
     ],
   );
@@ -11153,6 +11217,10 @@ export default function ChatView(props: ChatViewProps) {
       if (result._tag !== "Success" || !result.value.cancelled) return;
       setWorkLocallyResendDraftId(draftId);
     })();
+    // WORKAROUND: compiler assumes later mutation of a readonly query snapshot.
+    // Keep cancellation success preceding the resend draft update with captured phase/thread inputs.
+    // Remove when memo inference recognizes the query snapshot and resolver immutability.
+    // oxlint-disable-next-line react/preserve-manual-memoization
   }, [cancelWorktreeSetup, draftId, setupTarget.environmentId, worktreeSetup]);
   const onSendRef = useRef(onSend);
   onSendRef.current = onSend;
@@ -11463,6 +11531,10 @@ export default function ChatView(props: ChatViewProps) {
     anchor: threadPanelPopoverAnchorRef,
     handle: threadPanelPopoverHandle,
     onPresentationChange: setThreadPanelPresentation,
+    // WORKAROUND: compiler taints the plain selections array from its sibling ref cells.
+    // Keep this reactive fanout comparison selecting the worktree behavior.
+    // Remove when refs inference distinguishes selections from sibling ref cells.
+    // oxlint-disable-next-line react/refs
     forceNewWorktree: multipleModelSelections !== null,
     environmentId: activeThread.environmentId,
     threadId: activeThread.id,
@@ -11863,6 +11935,10 @@ export default function ChatView(props: ChatViewProps) {
               }
             >
               <div
+                // WORKAROUND: compiler treats a callback ref prop as a render ref read.
+                // Keep React invoking this transition attachment callback during commit.
+                // Remove when refs inference recognizes callback ref props without reading current.
+                // oxlint-disable-next-line react/refs
                 ref={draftHeroTransition.transitionGroupRef}
                 className="chat-composer-lane w-full"
               >
@@ -11889,6 +11965,10 @@ export default function ChatView(props: ChatViewProps) {
                     </div>
                   ) : null}
                   <div
+                    // WORKAROUND: compiler treats a callback ref prop as a render ref read.
+                    // Keep React invoking this composer attachment callback during commit.
+                    // Remove when refs inference recognizes callback ref props without reading current.
+                    // oxlint-disable-next-line react/refs
                     ref={draftHeroTransition.composerAnchorRef}
                     className="relative z-10"
                     style={
@@ -11938,6 +12018,10 @@ export default function ChatView(props: ChatViewProps) {
                             <ChatComposer
                               canOperateThread={canOperateThread}
                               reportedModelSelection={reportedModelSelection}
+                              // WORKAROUND: compiler taints the plain selections array from its sibling ref cells.
+                              // Keep passing reactive selections to the composer rather than capturing ref contents.
+                              // Remove when refs inference distinguishes selections from sibling ref cells.
+                              // oxlint-disable-next-line react/refs
                               multipleModelSelections={multipleModelSelections}
                               supportsMultipleModels={
                                 serverConfig?.environment.capabilities.requiredWorktreeBootstrap ===
@@ -12135,6 +12219,10 @@ export default function ChatView(props: ChatViewProps) {
                           {mountComposerContextStrip && (
                             <div className="pointer-events-auto">
                               <BranchToolbar
+                                // WORKAROUND: compiler taints the plain selections array from its sibling ref cells.
+                                // Keep this reactive fanout condition controlling the environment toggle.
+                                // Remove when refs inference distinguishes selections from sibling ref cells.
+                                // oxlint-disable-next-line react/refs
                                 forceNewWorktree={multipleModelSelections !== null}
                                 ref={branchToolbarRef}
                                 environmentId={activeThread.environmentId}

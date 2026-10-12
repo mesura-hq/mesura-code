@@ -184,7 +184,11 @@ import { useCommandHandlers } from "../../commands/commandRegistry";
 import { getTerminalFocusOwner } from "../../lib/terminalFocus";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
 import { getClientSettings } from "~/hooks/useSettings";
-import { registerComposerVimAdapter } from "~/keys/composer/composerSurface";
+import {
+  cancelComposerNormalResume,
+  registerComposerVimAdapter,
+} from "~/keys/composer/composerSurface";
+import { useFileManagerStore } from "../files/mesuraFileManager/fileManagerStore";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../../keybindings";
 import {
   type TerminalContextDraft,
@@ -1806,9 +1810,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onFocus: onTypingGuardFocus,
     onBlur: onTypingGuardBlur,
     onSend: onTypingGuardSend,
-  } = useComposerTypingGuard(composerDraftTargetKey, [
-    ...pendingApprovals.map((request) => request.requestId),
-  ]);
+  } = useComposerTypingGuard(
+    composerDraftTargetKey,
+    pendingApprovals.map((request) => request.requestId),
+  );
   // Hold composer takeover while the user finishes their thread draft.
   const activePendingApproval =
     incomingPendingApproval && !heldRequestIds.has(incomingPendingApproval.requestId)
@@ -1827,15 +1832,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerDraft = useComposerThreadDraft(composerDraftTarget);
   // Live target key, for async flows that must notice a thread switch that
   // happened while they awaited.
-  const composerDraftTargetKeyRef = useRef("");
-  composerDraftTargetKeyRef.current = composerDraftTargetKey;
+  const composerDraftTargetKeyRef = useRef(composerDraftTargetKey);
+  useLayoutEffect(() => {
+    composerDraftTargetKeyRef.current = composerDraftTargetKey;
+  }, [composerDraftTargetKey]);
   const attachmentDraftTarget = composerDraftTarget;
   const attachmentDraft = useComposerThreadDraft(attachmentDraftTarget);
   const attachmentTargetKey = composerTargetKey(attachmentDraftTarget);
   // An import that finishes after a draft change must compare against the draft open *now*, not
   // the one captured in the closure that started it.
   const attachmentTargetKeyRef = useRef(attachmentTargetKey);
-  attachmentTargetKeyRef.current = attachmentTargetKey;
+  useLayoutEffect(() => {
+    attachmentTargetKeyRef.current = attachmentTargetKey;
+  }, [attachmentTargetKey]);
   const prompt = composerDraft.prompt;
   const composerImages = attachmentDraft.images;
   const composerFiles = attachmentDraft.files;
@@ -2257,6 +2266,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     )
       return;
     if (hasCurrentProviderWorkspaceSnapshot(selectedProviderStatus, gitCwd, now)) {
+      // WORKAROUND: compiler flags the external workspace retry protocol reset.
+      // Keep the TTL guard before snapshot freshness resets retry state.
+      // Remove when effect inference recognizes this bounded external retry protocol.
+      // oxlint-disable-next-line react/set-state-in-effect
       setWorkspaceRefreshRetry(null);
       return;
     }
@@ -2289,9 +2302,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   }, [
     environmentId,
     gitCwd,
+    // WORKAROUND: compiler treats typing-triggered workspace refresh as unused.
+    // Keep typing after TTL expiry requesting a scan with the snapshot/cooldown guards.
+    // Remove when effect dependency inference recognizes interaction triggers.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies
     prompt,
     refreshProviders,
     selectedProviderEntry,
+    selectedProviderStatus,
     workspaceRefreshRetry,
   ]);
   const selectedProviderModels = useMemo<ReadonlyArray<ServerProvider["models"][number]>>(
@@ -3451,6 +3469,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     resetComposerTrigger(trigger);
     setIsDragOverComposer(false);
     setIsComposerScrollCollapsed(false);
+    // WORKAROUND: compiler treats composer target reset keys as unused.
+    // Keep target changes clearing transient state and reading the committed prompt.
+    // Remove when effect dependency inference recognizes target reset lifetimes.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies
   }, [draftId, activeThreadId, promptRef, resetComposerTrigger, setIsComposerScrollCollapsed]);
 
   // ------------------------------------------------------------------
@@ -3842,10 +3864,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           });
           window.requestAnimationFrame(() => composerEditorRef.current?.focusAt(cursor));
         },
-        setCursor: (cursor) => composerEditorRef.current?.focusAt(cursor),
+        setCursor: (cursor) => composerRef.current?.focusAt(cursor),
         draftKey: () => composerDraftTargetKeyRef.current,
       }),
-    [applyPromptReplacement, promptRef],
+    [applyPromptReplacement, composerRef, promptRef],
   );
 
   const readComposerSnapshot = useCallback((): {
@@ -4264,7 +4286,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activePendingApproval,
     activeThreadId,
     compactDisabled,
-    composerDraftTarget,
     environmentId,
     isConnecting,
     isSendBusy,
@@ -4273,28 +4294,77 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
     phase,
   ]);
-  const expandMobileComposer = useCallback(() => {
-    if (composerBlurFrameRef.current !== null) {
-      window.cancelAnimationFrame(composerBlurFrameRef.current);
-      composerBlurFrameRef.current = null;
-    }
-    if (mobileComposerExpandFrameRef.current !== null) {
-      window.cancelAnimationFrame(mobileComposerExpandFrameRef.current);
-    }
-    if (mobileComposerExpandReleaseFrameRef.current !== null) {
-      window.cancelAnimationFrame(mobileComposerExpandReleaseFrameRef.current);
-    }
-    mobileComposerExpandInFlightRef.current = true;
-    setIsComposerFocused(true);
-    mobileComposerExpandFrameRef.current = window.requestAnimationFrame(() => {
-      mobileComposerExpandFrameRef.current = null;
-      composerEditorRef.current?.focusAtEnd();
-      mobileComposerExpandReleaseFrameRef.current = window.requestAnimationFrame(() => {
-        mobileComposerExpandReleaseFrameRef.current = null;
-        mobileComposerExpandInFlightRef.current = false;
+  const expandMobileComposerAt = useCallback(
+    (cursor?: number) => {
+      const previousFocus = document.activeElement;
+      const draftKey = composerDraftTargetKeyRef.current;
+      if (composerBlurFrameRef.current !== null) {
+        window.cancelAnimationFrame(composerBlurFrameRef.current);
+        composerBlurFrameRef.current = null;
+      }
+      if (mobileComposerExpandFrameRef.current !== null) {
+        window.cancelAnimationFrame(mobileComposerExpandFrameRef.current);
+      }
+      if (mobileComposerExpandReleaseFrameRef.current !== null) {
+        window.cancelAnimationFrame(mobileComposerExpandReleaseFrameRef.current);
+      }
+      mobileComposerExpandInFlightRef.current = true;
+      setIsComposerFocused(true);
+      mobileComposerExpandFrameRef.current = window.requestAnimationFrame(() => {
+        mobileComposerExpandFrameRef.current = null;
+        const active = document.activeElement;
+        const editor = composerSurfaceRef.current?.querySelector('[data-testid="composer-editor"]');
+        // Expansion commits before this frame. A new owner in that gap cancels
+        // the focus request and its NORMAL receipt instead of losing the keyboard.
+        // The editor also survives route changes; an old request must not enter
+        // the next draft after the reveal commit.
+        if (
+          composerDraftTargetKeyRef.current !== draftKey ||
+          isCommandPaletteOpen() ||
+          useFileManagerStore.getState().open ||
+          document.querySelector(
+            '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]',
+          ) ||
+          (active !== previousFocus && active !== document.body && !editor?.contains(active))
+        ) {
+          mobileComposerExpandInFlightRef.current = false;
+          cancelComposerNormalResume();
+          // Keep the existing blur policy: a composer control keeps its body
+          // expanded. Collapsing here would remove the new owner's focused node.
+          if (
+            !isInsideRestingComposerControlScope(active) &&
+            !composerSurfaceRef.current?.contains(active) &&
+            !composerFormRef.current?.contains(active)
+          ) {
+            setIsComposerFocused(false);
+          }
+          return;
+        }
+        if (cursor === undefined) composerEditorRef.current?.focusAtEnd();
+        else composerEditorRef.current?.focusAt(cursor);
+        mobileComposerExpandReleaseFrameRef.current = window.requestAnimationFrame(() => {
+          mobileComposerExpandReleaseFrameRef.current = null;
+          mobileComposerExpandInFlightRef.current = false;
+        });
       });
-    });
-  }, [setIsComposerFocused]);
+    },
+    [setIsComposerFocused],
+  );
+  const expandMobileComposer = useCallback(
+    () => expandMobileComposerAt(),
+    [expandMobileComposerAt],
+  );
+  const focusComposerEditor = useCallback(
+    (cursor?: number) => {
+      // Palette blur collapses the phone composer. A hidden editor cannot take
+      // focus, so reveal it through the existing expansion before placing the
+      // requested caret. NORMAL keeps its offset; INSERT returns to the end.
+      if (isComposerCollapsedMobile) expandMobileComposerAt(cursor);
+      else if (cursor === undefined) composerEditorRef.current?.focusAtEnd();
+      else composerEditorRef.current?.focusAt(cursor);
+    },
+    [expandMobileComposerAt, isComposerCollapsedMobile],
+  );
 
   // ------------------------------------------------------------------
   // Prompt history (ArrowUp / ArrowDown)
@@ -6247,11 +6317,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerRef,
     () => ({
       focusAtEnd: () => {
-        composerEditorRef.current?.focusAtEnd();
+        focusComposerEditor();
       },
-      focusAt: (cursor: number) => {
-        composerEditorRef.current?.focusAt(cursor);
-      },
+      focusAt: focusComposerEditor,
       restoreAfterTimelineReachedEnd,
       collapseForTimelineScrollKey: (key) => {
         const scrollNode = getTimelineScrollableNode();
@@ -6496,6 +6564,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       composerThreadContexts,
       composerEnvironmentContexts,
       focusComposer,
+      focusComposerEditor,
       environmentId,
       primaryEnvironmentId,
       isConnecting,

@@ -19,6 +19,7 @@ import {
 } from "@t3tools/contracts";
 
 import * as ServerConfig from "../config.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import { readWorkingTreeChanges } from "./GitWorkingTreeChanges.ts";
@@ -56,13 +57,14 @@ export const make = Effect.gen(function* () {
   const git = yield* GitVcsDriver.GitVcsDriver;
   const workingTreeWatcher = yield* GitWorkingTreeWatcher.GitWorkingTreeWatcher;
   const settings = yield* ServerSettings.ServerSettingsService;
+  const projectStore = yield* ProjectStore.ProjectStoreV2;
 
-  const canonicalizePath = (value: string) => {
+  const canonicalizePath = (value: string, allowMissing = true) => {
     const resolvedPath = path.resolve(value);
     return fileSystem.realPath(resolvedPath).pipe(
       Effect.catchTags({
         PlatformError: (cause) =>
-          cause.reason._tag === "NotFound"
+          cause.reason._tag === "NotFound" && allowMissing
             ? Effect.succeed(resolvedPath)
             : Effect.fail(
                 new VcsRepositoryDetectionError({
@@ -113,6 +115,18 @@ export const make = Effect.gen(function* () {
       worktreesRoots.some((root) => isWithinRoot(candidate, root))
     ) {
       return;
+    }
+
+    // Registered projects can live outside the server cwd. Unreadable or
+    // unresolvable project roots grant nothing, including missing roots.
+    const projects = yield* projectStore.listShells().pipe(Effect.orElseSucceed(() => []));
+    for (const project of projects) {
+      const root = yield* canonicalizePath(project.workspaceRoot, false).pipe(
+        Effect.orElseSucceed(() => null),
+      );
+      if (root !== null && isWithinRoot(candidate, root)) {
+        return;
+      }
     }
 
     return yield* new VcsRepositoryDetectionError({

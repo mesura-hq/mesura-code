@@ -1,7 +1,10 @@
+// @vitest-environment happy-dom
+// Entry point: DiffFileTree for model guards. AppRoot.treeDiff.fence.test.tsx covers app wiring.
 import type { CodeViewScrollTarget } from "@pierre/diffs";
-import type { FileTree as FileTreeModel } from "@pierre/trees";
+import { FileTree as FileTreeModel } from "@pierre/trees";
 import { FileTree } from "@pierre/trees/react";
 import { act, type MouseEvent, type ReactNode } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -10,6 +13,8 @@ import type { FileDiffMetadata } from "@pierre/diffs";
 import { DiffFileTree, type DiffFileTreeEntry } from "./DiffFileTree";
 import { diffFileTreeEntries } from "./diffFileTree.logic";
 import { useCodeViewFileReveal } from "./useCodeViewFileReveal";
+import { focusPanelSurface } from "../../lib/panelSurfaceFocus";
+import { makeFenceClientRects } from "../../test/appRootFenceMocks";
 
 vi.mock("../../hooks/useTheme", () => ({ useTheme: () => ({ resolvedTheme: "dark" }) }));
 // Tooltip positioning is unrelated to the tree's actual model and activation path.
@@ -225,5 +230,105 @@ describe("diff tree file activation", () => {
     });
     expect(model().getSelectedPaths()).toEqual(["03-medium.ts"]);
     expect(targets).toHaveLength(1);
+  });
+});
+
+describe("diff tree decoration refresh guards", () => {
+  let root: Root;
+  let container: HTMLDivElement;
+  const files: DiffFileTreeEntry[] = [
+    { path: "src/app.ts", status: "modified" },
+    { path: "docs/README.md", status: "modified" },
+  ];
+  const onSelectFile = () => {};
+
+  beforeEach(() => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return makeFenceClientRects([this.getBoundingClientRect()]);
+    });
+    container = document.createElement("div");
+    container.setAttribute("data-right-panel-surface-content", "");
+    document.body.append(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  async function renderDecoration(renderFileDecoration: (path: string) => { text: string } | null) {
+    await act(async () => {
+      root.render(
+        <DiffFileTree
+          entries={files}
+          ariaLabel="Decoration refresh files"
+          onSelectFile={onSelectFile}
+          renderFileDecoration={renderFileDecoration}
+        />,
+      );
+    });
+  }
+
+  it("DiffFileTree decoration guard: count-only updates preserve the model, selection, collapsed folders and keyboard entry", async () => {
+    const render = vi.spyOn(FileTreeModel.prototype, "render");
+    await renderDecoration(() => ({ text: "+9 −2" }));
+    const model = render.mock.contexts[0];
+    if (!(model instanceof FileTreeModel)) throw new Error("Expected the mounted Pierre model");
+    const host = model.getFileTreeContainer()!;
+    const shadow = host.shadowRoot!;
+    const scroller = shadow.querySelector<HTMLElement>("[data-file-tree-virtualized-scroll]")!;
+    const directory = model.getItem("docs/")!;
+    if (!("collapse" in directory)) throw new Error("Expected the directory handle");
+    await act(async () => {
+      directory.collapse();
+      model.getItem("src/app.ts")!.select();
+      model.getItem("src/app.ts")!.focus();
+    });
+    const row = shadow.querySelector<HTMLElement>('[data-item-path="src/app.ts"]')!;
+    expect(row.querySelector('[data-item-section="decoration"]')?.textContent).toBe("+9 −2");
+    scroller.scrollTop = 20;
+
+    await renderDecoration(() => ({ text: "+10 −2" }));
+
+    expect(render.mock.contexts.every((current) => current === model)).toBe(true);
+    expect(model.getFileTreeContainer()).toBe(host);
+    expect(shadow.querySelector("[data-file-tree-virtualized-scroll]")).toBe(scroller);
+    expect(scroller.scrollTop).toBe(20);
+    expect(shadow.querySelector('[data-item-path="src/app.ts"]')).toBe(row);
+    expect(row.querySelector('[data-item-section="decoration"]')?.textContent).toBe("+10 −2");
+    expect(model.getSelectedPaths()).toEqual(["src/app.ts"]);
+    expect(model.getFocusedPath()).toBe("src/app.ts");
+    expect(directory.isExpanded()).toBe(false);
+    expect(shadow.querySelector('[data-item-path="docs/README.md"]')).toBeNull();
+    expect(focusPanelSurface(document.body)).toBe(true);
+    expect(shadow.activeElement).toBe(row);
+  });
+
+  it("DiffFileTree decoration guard: unchanged renderers do not redraw and removing a renderer clears counts", async () => {
+    const decoration = vi.fn(() => ({ text: "+9 −2" }));
+    await renderDecoration(decoration);
+    const calls = decoration.mock.calls.length;
+    await renderDecoration(decoration);
+    expect(decoration.mock.calls.length).toBe(calls);
+
+    await act(async () => {
+      root.render(
+        <DiffFileTree
+          entries={files}
+          ariaLabel="Decoration refresh files"
+          onSelectFile={onSelectFile}
+        />,
+      );
+    });
+    const shadow = container.querySelector("file-tree-container")!.shadowRoot!;
+    expect(shadow.querySelector('[data-item-path="src/app.ts"]')?.textContent).not.toContain(
+      "+9 −2",
+    );
   });
 });

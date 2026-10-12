@@ -291,7 +291,7 @@ export function getNewProjectGitHubRepository(
   target: { readonly account: string | null },
   workspaceRoot: string,
 ): string {
-  const folderName = workspaceRoot.split(/[\\/]/).filter(Boolean).at(-1) ?? "";
+  const folderName = workspaceRoot.split(/[\\/]/).findLast(Boolean) ?? "";
   return target.account ? `${target.account}/${folderName}` : folderName;
 }
 

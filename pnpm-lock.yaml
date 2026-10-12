@@ -369,9 +369,6 @@ importers:
       msgpackr:
         specifier: ^2.0.4
         version: 2.1.0
-      msgpackr-extract:
-        specifier: 3.0.4
-        version: 3.0.4
       node-pty:
         specifier: ^1.2.0-beta.15
         version: 1.2.0-beta.15(patch_hash=f2fe901c61cde17986240002d05c172d5d0272d83ffaab8d0ebeb922763be414)
@@ -824,9 +821,6 @@ importers:
       effect:
         specifier: 4.0.2
         version: 4.0.2(patch_hash=ec61ee307eaec3e17f757e0e6a16296ea4b7a8c3188df0c6ec5e66301fd78688)
-      unicode-segmenter:
-        specifier: 0.17.3
-        version: 0.17.3
     devDependencies:
       '@effect/vitest':
         specifier: 4.0.2
@@ -11331,9 +11325,6 @@ packages:
   unicode-property-aliases-ecmascript@2.2.0:
     resolution: {integrity: sha512-hpbDzxUY9BFwX+UeBnxv3Sh1q7HFxj48DTmXchNgRa46lO8uj3/1iEn3MiNUYTg1g9ctIqXCCERn8gYZhHC5lQ==}
     engines: {node: '>=4'}
-
-  unicode-segmenter@0.17.3:
-    resolution: {integrity: sha512-hKZwqBjJDmqNrq1+LjDxck1qLzJFcLLJM2Xq92ORRHOuau6GSHeELmn+uyk6zNH1CK9mogrUJGP9WJCJUQXMAw==}
 
   unified@11.0.5:
     resolution: {integrity: sha512-xKvGhPWw3k84Qjh8bI3ZeJjqnyadK+GEFtazSfZv/rKeTkTjOJho6mFqh2SM96iIcZokxiOpg78GazTSg8+KHA==}
@@ -22724,8 +22715,6 @@ snapshots:
 
   unicode-property-aliases-ecmascript@2.2.0:
     optional: true
-
-  unicode-segmenter@0.17.3: {}
 
   unified@11.0.5:
     dependencies:

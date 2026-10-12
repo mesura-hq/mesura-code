@@ -106,7 +106,6 @@ import { parseComposerContextHref } from "@t3tools/shared/composerContextReferen
 import { parseThreadLinkHref } from "@t3tools/shared/threadLinks";
 import { AssistantCitationChip } from "./chat/AssistantCitationChip";
 import { MarkdownThreadLink } from "./chat/MarkdownThreadLink";
-import { isWindowsAbsolutePath } from "@t3tools/shared/path";
 import {
   artifactTemplateFromHastProperties,
   renderCodexFileCitationsAsMarkdown,
@@ -494,16 +493,6 @@ function isClosedCodeFence(node: ReactMarkdownExtraProps["node"], text: string):
     closing.length >= opening.length
   );
 }
-
-type MarkdownAstNode = {
-  type?: string;
-  meta?: unknown;
-  url?: string;
-  data?: {
-    hProperties?: Record<string, unknown>;
-  };
-  children?: MarkdownAstNode[];
-};
 
 function nodeToPlainText(node: ReactNode): string {
   if (typeof node === "string" || typeof node === "number") {

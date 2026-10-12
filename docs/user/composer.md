@@ -3,6 +3,9 @@
 Give the agent a task in the composer. Add files, quote a previous response, or
 include a skill when the task needs more context.
 
+On a phone, open Mesura Code in your browser. The phone uses the same web app
+as a desktop browser. This fork does not ship a native Android or iOS app.
+
 Messages can contain up to 120,000 characters. Longer drafts stay in the composer
 so you can shorten them or split them into several messages.
 
@@ -42,10 +45,10 @@ Uploads begin when you add an attachment. All uploads must finish before the
 message can send. Retry or remove a failed upload. On web and desktop, reloading
 before an upload finishes requires you to attach that file again.
 
-You can drag or paste images into the web or desktop composer. HEIC and HEIF
-photos are converted to JPEG there and when selected from the mobile photo
-library; photos over the image limit are also resized to fit. On mobile, you can
-also send files to T3 Code through another app's system share sheet.
+Use the attachment control to choose files from your device. On a phone, the
+browser opens the device's file picker. You can also drag or paste images into
+the composer when your browser supports it. HEIC and HEIF photos are converted
+to JPEG before upload; photos over the image limit are also resized to fit.
 
 See [images and videos](#images-and-videos-in-messages) for previewing and saving media.
 
@@ -57,6 +60,7 @@ applies to this client; already queued messages keep their place. Queued message
 are saved on the server and can be edited, reordered, or removed above the composer.
 `Cmd+Enter` on macOS or `Ctrl+Enter` on Windows and Linux uses the opposite action:
 it steers when your default is Queue and queues when your default is Steer.
+Holding `Cmd` or `Ctrl` while clicking the send button also uses the opposite action.
 
 Use `Cmd+Shift+Enter` on macOS or `Ctrl+Shift+Enter` on Windows and Linux to send
 the oldest queued message as a steer. This leaves the current draft intact and
@@ -67,17 +71,8 @@ Press `Option+Up` on macOS or `Alt+Up` on Windows and Linux with the cursor at t
 start of the composer to edit the most recently queued message. Change
 `thread.editQueuedMessage` to use another shortcut.
 
-Mobile has the same choice under **Settings → Follow-ups**. While a turn is
-running the send button shows which action it will take. Long-press it to use the
-other action for a single message, or hold `Cmd` while sending from a hardware
-keyboard. The button only offers Steer when the running agent supports it.
-
-## Queue messages offline on mobile
-
-Mobile keeps local copies of draft attachments, so you can preview them and queue
-messages while disconnected. Uploads resume when you reconnect. Drafts and queued
-messages survive app restarts. Signing out of T3 Connect keeps that work on your
-device until you sign back into the same account.
+On a phone, use the same **Settings → General → Follow-up behavior** setting.
+Sending and uploading attachments require a connection to the environment.
 
 ## Custom models
 
@@ -87,7 +82,7 @@ uses its account catalog and does not support custom models.
 
 ## Model defaults
 
-T3 Code remembers your provider, model, and model options for new threads. A
+Mesura Code remembers your provider, model, and model options for new threads. A
 project's configured model takes precedence; resetting that project setting
 returns to the remembered selection.
 
@@ -108,9 +103,6 @@ delete it like other inline context. Copying, reloading, and restoring a
 [stashed prompt](#prompt-stash) keep each comment
 with its quote, and sending tells the agent which words were quoted and which comment you wrote.
 The quoted text and comment count toward the message limit.
-
-Mobile displays saved quotes and comments, but does not create citations or
-navigate to their sources.
 
 ## Recall a sent prompt
 
@@ -155,10 +147,6 @@ Use the microphone beside a question's text field to dictate into that answer. T
 the field's caret. In Send mode, the request is submitted once the text lands; otherwise use
 **Submit** when the complete request is ready. Files belong to their own question; wait for uploads
 to finish or retry or remove a failed upload.
-
-On mobile, pending requests appear as cards in the conversation, with all questions in each request
-together. Dictation fills an answer but never submits it. Submit sends the complete request. The regular message composer stays separate. The web
-and desktop keyboard shortcuts do not apply to mobile.
 
 ## Prompt stash
 
@@ -236,19 +224,16 @@ windowrule = no_focus on, match:title ^(mesura-dictation-overlay)$
 
 ## Queued messages
 
-On web and desktop, the composer shows **Interrupt** while the agent is working and the draft is
-empty. Adding text or attachments replaces it with a steer arrow. Click it to send a message into
-the active turn, or press `Enter` on desktop. Hold `Cmd` on macOS or `Ctrl` on Windows and Linux to
-switch the button to a queue icon. Click while holding that key, or press `Cmd+Enter` or
-`Ctrl+Enter` on desktop, to queue the message for after the active turn.
+To queue a message during an active turn, follow
+[Send while the agent is working](#send-while-the-agent-is-working).
 
 Queued messages appear above the composer. Rows show a thumbnail of any attached image alongside
 the text. Drag a row by its handle to reorder it, use the handle's arrow keys, promote the message
 to a steer, or remove it.
 
 If the server restarts, saved queued messages keep their order and are held. Press
-**Resume** in an empty composer on web or desktop, or **Resume queue** in the queue
-sheet on mobile, to continue. You can edit, reorder, or remove held messages without starting them.
+**Resume** in an empty composer to continue. You can edit, reorder, or remove held
+messages without starting them.
 
 The pencil on a queued row opens that message in the composer for editing. The original message
 stays in the queue until you save, and its row is highlighted while you edit. The message's
@@ -261,8 +246,7 @@ composer when it is empty, and is discarded otherwise.
 ## Commands and skills
 
 Type `/` for commands or `$` to add a skill from the selected environment and
-provider. On mobile, both are also available before starting a thread on
-**New task**.
+provider, including in the browser on a phone.
 
 The slash menu also includes skills unless you turn off **Settings → General →
 Show skills in slash menu**. Only skills enabled for the provider are listed.
@@ -271,7 +255,7 @@ After you add or change skills, plugins, or MCP servers, use **Restart agent
 session** in the command palette on web and desktop. The conversation continues,
 and your next message starts the agent again with the new setup.
 
-Provider commands must start the message to run. T3 Code commands such as
+Provider commands must start the message to run. Mesura Code commands such as
 `/model` and `/plan`, and skill mentions, work on any line.
 
 Send `/compact` in an existing conversation to reduce context usage when the
@@ -322,7 +306,7 @@ exist only as chips: deleting a file's last chip removes the file from the messa
 Copy text that holds chips and paste it into another draft, in the same thread or another one,
 and the chips come along with what they point to. Images and files are fetched again from the
 environment they came from; while that happens the chip shows a dashed outline, and if it cannot
-complete T3 Code tells you and leaves the chip for you to remove or replace. A chip whose
+complete Mesura Code tells you and leaves the chip for you to remove or replace. A chip whose
 context is no longer available shows the same dashed outline; hover it for what to do.
 
 Copying a message with the copy button, or copying text out of it, gives other apps readable
@@ -330,7 +314,7 @@ Markdown with a link in place of each chip. Older messages that were sent before
 show their context. Stashing a prompt keeps its chips and what they point to; restoring brings
 them back.
 
-On mobile, tap a chip to inspect its content. File references open the current file; attached
+On a phone, tap a chip to inspect its content. File references open the current file; attached
 files show the copy that was attached to the message.
 
 ## Attached files
@@ -339,21 +323,19 @@ Select a file chip in your draft or a sent message to preview it. Code and JSON 
 highlighting; Markdown, HTML, CSV, and TSV offer rendered and raw views. Audio files have
 playback controls. Large text files show a limited preview; save the file to read it in full.
 
-On web and desktop, files open beside the conversation with the same controls as a workspace
-file: a header row with the view toggle, **Copy contents** and **Save file**. On mobile, documents
-open in the same file screen as workspace files; its menu holds **Copy contents**, **Save or
-share** and **Open in file viewer**. Pictures, videos and PDFs keep their native viewers, and
-other document formats such as Word or Pages open in the device's own viewer when it has one.
-If nothing on the device can show a format, save or share it to open it elsewhere.
+Files open in the file viewer with the same controls as a workspace file:
+the view toggle, **Copy contents** for text, and **Save file**. The browser on a
+phone uses the same viewer. Save a file that the viewer cannot preview, then
+open it in another app on your device.
 
 ## Images and videos in messages
 
 Select an image or video attachment or link to preview it. Playback support depends
 on your browser or device; save an unsupported video to open it in another app.
 
-On web and desktop, right-click media to save it or copy its path or URL. On mobile,
-touch and hold an image or video thumbnail and choose **Save or share**. On iOS,
-return to the thumbnail to open this menu after watching a full-screen video.
+Open the media context menu to save an image or video, or copy its path or URL.
+Use a right-click with a mouse. On a phone, touch and hold the media to open the
+menu when your browser supports it. The save action downloads to your device.
 
 File links refer to the environment's machine, including when you connect remotely.
 Previews use the original file, even outside the workspace. Moving or deleting it
@@ -367,12 +349,9 @@ styles, or images from neighboring files.
 
 ## HTML and PDF files in the file viewer
 
-On web and desktop, HTML and PDF files open as rendered pages. Switch an HTML
+HTML and PDF files open as rendered pages, including in the browser on a phone. Switch an HTML
 file to source view to read its markup; a link to a specific line opens source
-automatically. HTML previews cannot access your T3 Code session.
+automatically. HTML previews cannot access your Mesura Code session.
 
 The file viewer recognizes images, HTML, and PDF files by their filename extension,
 including filenames or folders containing `#` or `?`.
-
-On mobile, select a PDF attachment or link to open it. iOS uses the native viewer;
-Android opens a compatible installed file viewer.

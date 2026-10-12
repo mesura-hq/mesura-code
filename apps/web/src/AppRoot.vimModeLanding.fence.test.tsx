@@ -30,260 +30,66 @@
  * app needs a live server). The setup follows
  * `AppRoot.commandRegistry.fence.test.tsx`.
  */
-import { act, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import {
-  createMemoryHistory,
-  createRootRoute,
-  createRoute,
-  createRouter,
-  Outlet,
-} from "@tanstack/react-router";
+import { act } from "react";
+import { flushSync } from "react-dom";
+import type { Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import {
-  EnvironmentId,
-  MessageId,
-  ProjectId,
-  ProviderInstanceId,
-  ThreadId,
-} from "@t3tools/contracts";
-import type { Thread } from "./types";
-import type { AppRouter } from "./router";
+import { ThreadId } from "@t3tools/contracts";
 
-const fixture = vi.hoisted(() => ({
-  thread: null as Thread | null,
-  vimMode: false,
-  empty: [],
-  threadListeners: new Set<() => void>(),
-  /** The ranges the key surfaces last painted, by highlight name. */
-  highlights: new Map<string, ReadonlyArray<Range>>(),
-  project: {
-    id: "vim-landing-project",
-    environmentId: "vim-landing-environment",
-    title: "Vim landing",
-    workspaceRoot: "/tmp/vim-landing",
-    scripts: [],
-    createdAt: "2026-10-08T12:00:00.000Z",
-    defaultModelSelection: { instanceId: "codex", model: "gpt-5.4" },
-  },
-  environments: [
-    {
-      environmentId: "vim-landing-environment",
-      label: "Fence environment",
-      connection: { phase: "connected" },
-      entry: {
-        target: {
-          _tag: "PrimaryConnectionTarget",
-          label: "Fence environment",
-          connectionId: "saved:vim-landing-environment",
-        },
-      },
-      displayUrl: null,
-      relayManaged: false,
-      serverConfig: {
-        settings: {},
-        environment: {
-          capabilities: { threadSettlement: true, threadPinning: true },
-          platform: { machine: "laptop" },
-        },
-        providers: [
-          {
-            instanceId: "codex",
-            driver: "codex",
-            enabled: true,
-            installed: true,
-            status: "ready",
-            version: null,
-            auth: { status: "authenticated" },
-            checkedAt: "2026-10-08T12:00:00.000Z",
-            models: [],
-            slashCommands: [],
-            skills: [],
-          },
-        ],
-      },
-    },
-  ],
-}));
+// The boundaries the fixture replaces: see `test/appRootFenceMocks.tsx`.
+const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("./state/entities", async (original) => (await fenceMocks()).mockEntities(original));
+vi.mock("./state/environments", async (original) =>
+  (await fenceMocks()).mockEnvironments(original),
+);
+vi.mock("./state/query", async () => (await fenceMocks()).mockQuery());
+vi.mock("./state/queries", async (original) => (await fenceMocks()).mockQueries(original));
+vi.mock("./state/threads", async (original) => (await fenceMocks()).mockThreads(original));
+vi.mock("./state/use-atom-command", async () => (await fenceMocks()).mockAtomCommand());
+vi.mock("./state/use-atom-query-runner", async () => (await fenceMocks()).mockAtomQueryRunner());
+vi.mock("./state/server", async (original) => (await fenceMocks()).mockServer(original));
+vi.mock("./hooks/useSettings", async (original) => (await fenceMocks()).mockSettings(original));
+vi.mock("./hooks/useHandleNewThread", async () => (await fenceMocks()).mockHandleNewThread());
+vi.mock("./hooks/useThreadActions", async () => (await fenceMocks()).mockThreadActions());
+vi.mock("./components/Sidebar", async () => (await fenceMocks()).mockSidebar());
+vi.mock("./components/LegacySidebar", async () =>
+  (await fenceMocks()).mockRendersNothing("default"),
+);
+vi.mock("./components/preview/PreviewAutomationHosts", async () =>
+  (await fenceMocks()).mockRendersNothing("PreviewAutomationHosts"),
+);
+vi.mock("./browser/ElectronBrowserHost", async () =>
+  (await fenceMocks()).mockRendersNothing("ElectronBrowserHost"),
+);
+vi.mock("./components/QuitHoldOverlay", async () =>
+  (await fenceMocks()).mockRendersNothing("QuitHoldOverlay"),
+);
+vi.mock("./components/chat/ChatHeader", async () =>
+  (await fenceMocks()).mockRendersNothing("ChatHeader"),
+);
+vi.mock("./components/BranchToolbar", async () =>
+  (await fenceMocks()).mockRendersNothing("BranchToolbar"),
+);
+vi.mock("./components/files/mesuraFileManager/MesuraFileManagerLayer", async () =>
+  (await fenceMocks()).mockFileManagerLayer(),
+);
+vi.mock("./keys/highlights", async () => (await fenceMocks()).mockHighlights());
+vi.mock("@legendapp/list/react", async () => (await fenceMocks()).mockLegendList());
 
-const success = () => Promise.resolve({ _tag: "Success" as const, value: { providers: [] } });
+vi.mock("@t3tools/client-runtime/state/session", async (original) =>
+  (await fenceMocks()).mockRuntimeSession(original),
+);
 
-vi.mock("./state/entities", async (importOriginal) => {
-  const { useSyncExternalStore } = await import("react");
-  const useFixtureThread = () =>
-    useSyncExternalStore(
-      (listener) => {
-        fixture.threadListeners.add(listener);
-        return () => {
-          fixture.threadListeners.delete(listener);
-        };
-      },
-      () => fixture.thread,
-    );
-  return {
-    ...(await importOriginal<typeof import("./state/entities")>()),
-    useThread: useFixtureThread,
-    readThread: () => fixture.thread,
-    useThreadShell: useFixtureThread,
-    useThreadRefs: () => fixture.empty,
-    useThreadShells: () => fixture.empty,
-    useProjects: () => fixture.empty,
-    useProject: () => fixture.project,
-  };
-});
-vi.mock("./state/environments", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./state/environments")>()),
-  useEnvironments: () => ({ environments: fixture.environments, isReady: true }),
-  usePrimaryEnvironment: () => null,
-}));
-vi.mock("./state/query", () => ({
-  useEnvironmentQuery: () => ({
-    data: null,
-    error: null,
-    isPending: false,
-    isSuccess: false,
-    refresh: () => undefined,
-  }),
-}));
-vi.mock("./state/queries", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./state/queries")>()),
-  useThreadSearch: () => ({ matches: [], isPending: false }),
-  useProjectPathSearch: () => ({ entries: [], isPending: false, error: null, truncated: false }),
-}));
-vi.mock("./state/threads", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./state/threads")>();
-  const { EMPTY_ENVIRONMENT_THREAD_STATE } = await import("@t3tools/client-runtime/state/threads");
-  return { ...actual, useEnvironmentThread: () => EMPTY_ENVIRONMENT_THREAD_STATE };
-});
-vi.mock("./state/use-atom-command", () => ({ useAtomCommand: () => success }));
-vi.mock("./state/use-atom-query-runner", () => ({ useAtomQueryRunner: () => success }));
-// The chords the app ships, as a keybindings file with no user rules resolves them.
-vi.mock("./state/server", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./state/server")>();
-  const { Atom } = await import("effect/reactivity");
-  const { DEFAULT_RESOLVED_KEYBINDINGS } = await import("@t3tools/shared/keybindings");
-  return { ...actual, primaryServerKeybindingsAtom: Atom.make(() => DEFAULT_RESOLVED_KEYBINDINGS) };
-});
-vi.mock("./hooks/useSettings", async (importOriginal) => {
-  const { DEFAULT_SERVER_SETTINGS } = await import("@t3tools/contracts");
-  const { DEFAULT_CLIENT_SETTINGS } = await import("@t3tools/contracts/settings");
-  const clientSettings = () => ({ ...DEFAULT_CLIENT_SETTINGS, vimMode: fixture.vimMode });
-  return {
-    ...(await importOriginal<typeof import("./hooks/useSettings")>()),
-    useEnvironmentSettings: () => ({ ...clientSettings(), ...DEFAULT_SERVER_SETTINGS }),
-    useClientSettings: (select?: (value: typeof DEFAULT_CLIENT_SETTINGS) => unknown) =>
-      select ? select(clientSettings()) : clientSettings(),
-    useClientSettingsHydrated: () => true,
-    useLegacySidebarEnabled: () => false,
-  };
-});
-vi.mock("./hooks/useHandleNewThread", async () => {
-  const { scopeThreadRef: scope } = await import("@t3tools/client-runtime/environment");
-  const { EnvironmentId: Env, ThreadId: Thr } = await import("@t3tools/contracts");
-  const routeThreadRef = scope(Env.make("vim-landing-environment"), Thr.make("vim-landing-thread"));
-  return {
-    useNewThreadHandler: () => success,
-    useHandleNewThread: () => ({
-      activeDraftThread: null,
-      activeThread: fixture.thread,
-      defaultProjectRef: null,
-      handleNewThread: success,
-      routeDraftId: null,
-      routeThreadRef,
-    }),
-  };
-});
-vi.mock("./hooks/useThreadActions", () => ({
-  useThreadActions: () => ({
-    settleThread: success,
-    pinThread: success,
-    confirmAndUnpinThread: success,
-  }),
-}));
-// The sidebar's thread list, reduced to the open thread's row: the element
-// pane focus enters the sidebar through.
-vi.mock("./components/Sidebar", () => ({
-  default: () => (
-    <ul>
-      <li data-thread-item="" data-thread-key="vim-landing-row">
-        <div role="button" tabIndex={0} data-testid="sidebar-thread-row">
-          Vim landing
-        </div>
-      </li>
-    </ul>
-  ),
-}));
-vi.mock("./components/LegacySidebar", () => ({ default: () => null }));
-vi.mock("./components/preview/PreviewAutomationHosts", () => ({
-  PreviewAutomationHosts: () => null,
-}));
-vi.mock("./browser/ElectronBrowserHost", () => ({ ElectronBrowserHost: () => null }));
-vi.mock("./components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }));
-vi.mock("./components/chat/ChatHeader", () => ({ ChatHeader: () => null }));
-vi.mock("./components/BranchToolbar", () => ({ BranchToolbar: () => null }));
-// The file manager layer: its focusable root while the store says open. No
-// focus of its own on mount, so only the palette's close can hand it the
-// keyboard here.
-vi.mock("./components/files/mesuraFileManager/MesuraFileManagerLayer", async () => {
-  const { useFileManagerStore } =
-    await import("./components/files/mesuraFileManager/fileManagerStore");
-  const { FILE_MANAGER_ROOT_ATTRIBUTE } =
-    await import("./components/files/mesuraFileManager/isFileManagerOpen");
-  return {
-    MesuraFileManagerLayer: () => {
-      const open = useFileManagerStore((state) => state.open);
-      return open ? (
-        <div {...{ [FILE_MANAGER_ROOT_ATTRIBUTE]: "" }} tabIndex={-1} data-testid="file-manager" />
-      ) : null;
-    },
-  };
-});
-// happy-dom has no CSS Custom Highlight API. Record what would be painted.
-vi.mock("./keys/highlights", () => ({
-  paintHighlight: (name: string, ranges: readonly Range[]) => {
-    fixture.highlights.set(
-      name,
-      ranges.map((range) => range.cloneRange()),
-    );
-  },
-}));
-// happy-dom has no layout. Keep routing and timeline projection real, and
-// replace only the virtual list's measurement boundary.
-vi.mock("@legendapp/list/react", () => ({
-  LegendList: ({
-    data,
-    renderItem,
-    ListHeaderComponent,
-    ListFooterComponent,
-  }: {
-    data: Array<{ id: string }>;
-    renderItem: (input: { item: { id: string } }) => ReactNode;
-    ListHeaderComponent?: ReactNode;
-    ListFooterComponent?: ReactNode;
-  }) => (
-    <div>
-      {ListHeaderComponent}
-      {data.map((item) => (
-        <div key={item.id}>{renderItem({ item })}</div>
-      ))}
-      {ListFooterComponent}
-    </div>
-  ),
-}));
-
-import { AppRoot } from "./AppRoot";
-import { AppSidebarLayout } from "./components/AppSidebarLayout";
-import { CommandPalette } from "./components/CommandPalette";
-import ChatView from "./components/ChatView";
 import { useFileManagerStore } from "./components/files/mesuraFileManager/fileManagerStore";
 import { installKeyEngine } from "./keys/keyEngine";
+import { openCommandPalette } from "./commandPaletteBus";
 import { composerEditorElement } from "./keys/focusScope";
 import { readKeyEngineSnapshot } from "./keys/keyEngineStore";
-import { Route as ChatLayoutRoute } from "./routes/_chat";
 
-const environmentId = EnvironmentId.make("vim-landing-environment");
 const threadId = ThreadId.make("vim-landing-thread");
-const now = "2026-10-08T12:00:00.000Z";
+import { addFenceThread, makeMessage, renderFenceApp } from "./test/appRootFenceApp";
+import { appRootFence as fixture } from "./test/appRootFenceMocks";
+
 let root: Root | undefined;
 let container: HTMLDivElement;
 
@@ -291,58 +97,20 @@ beforeAll(() => {
   installKeyEngine();
 });
 
-function makeMessage(id: string, role: "user" | "assistant", text: string) {
-  return {
-    id: MessageId.make(id),
-    role,
-    text,
-    turnId: null,
-    streaming: false,
-    createdAt: now,
-    updatedAt: now,
-  };
-}
-
-function makeThread(): Thread {
-  return {
-    id: threadId,
-    environmentId,
-    projectId: ProjectId.make("vim-landing-project"),
-    title: "Vim landing",
-    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    session: null,
-    // Enough lines that a cursor moved up from the last line is told apart
-    // from a fresh cursor, which starts on the last line here: happy-dom
-    // reports every line at the top of the screen.
-    messages: [
-      makeMessage("vim-landing-user", "user", "Fix the build"),
-      makeMessage(
-        "vim-landing-assistant",
-        "assistant",
-        "The first paragraph of the answer.\n\nThe second paragraph.\n\nThe third paragraph.\n\nThe last paragraph.",
-      ),
-    ],
-    proposedPlans: [],
-    checkpoints: [],
-    pullRequests: [],
-    createdAt: now,
-    updatedAt: now,
-    archivedAt: null,
-    settledOverride: null,
-    settledAt: null,
-    deletedAt: null,
-    latestTurn: null,
-    branch: null,
-    worktreePath: null,
-    activities: [],
-  } as unknown as Thread;
+function seedThread() {
+  addFenceThread(threadId, "Vim landing", [
+    makeMessage("vim-landing-user", "user", "Fix the build"),
+    makeMessage(
+      "vim-landing-assistant",
+      "assistant",
+      "The first paragraph of the answer.\n\nThe second paragraph.\n\nThe third paragraph.\n\nThe last paragraph.",
+    ),
+  ]);
 }
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  fixture.thread = makeThread();
+  seedThread();
   fixture.vimMode = false;
   fixture.highlights.clear();
   container = document.createElement("div");
@@ -366,41 +134,9 @@ async function settle(): Promise<void> {
   }
 }
 
-async function mountApp(options: { readonly vimMode: boolean }) {
-  fixture.vimMode = options.vimMode;
-  const route = createRootRoute({
-    component: () => (
-      <CommandPalette>
-        <AppSidebarLayout>
-          <Outlet />
-        </AppSidebarLayout>
-      </CommandPalette>
-    ),
-  });
-  // The real chat layout: its global shortcuts and the key engine's host.
-  const chatLayout = createRoute({
-    getParentRoute: () => route,
-    id: "_chat",
-    component: ChatLayoutRoute.options.component!,
-  });
-  const thread = createRoute({
-    getParentRoute: () => chatLayout,
-    path: "/$environmentId/$threadId",
-    component: () => (
-      <ChatView environmentId={environmentId} threadId={threadId} routeKind="server" />
-    ),
-  });
-  const router = createRouter({
-    routeTree: route.addChildren([chatLayout.addChildren([thread])]),
-    history: createMemoryHistory({ initialEntries: [`/${environmentId}/${threadId}`] }),
-  });
-  await router.load();
-  await act(async () => {
-    root = createRoot(container);
-    root.render(<AppRoot router={router as unknown as AppRouter} />);
-  });
+async function mountApp(options: { readonly vimMode: boolean }, selectedThreadId = threadId) {
+  ({ root } = await renderFenceApp(container, selectedThreadId, options));
   await settle();
-  // The chat holds the keyboard: nothing text-editable is focused.
   (document.activeElement as HTMLElement | null)?.blur?.();
 }
 
@@ -530,11 +266,256 @@ describe("vim landing fence: the palette returns where it was opened", () => {
   });
 });
 
-describe("vim landing fence: a file manager row keeps the keyboard", () => {
-  for (const vimMode of [true, false]) {
-    const label = vimMode ? "Vim mode on" : "Vim mode off";
+describe("phone palette restoration through the real collapsed composer", () => {
+  function setViewportWidth(width: number) {
+    if (
+      !("happyDOM" in window) ||
+      typeof window.happyDOM !== "object" ||
+      window.happyDOM === null ||
+      !("setWindowSize" in window.happyDOM) ||
+      typeof window.happyDOM.setWindowSize !== "function"
+    )
+      throw new Error("This fence requires Happy DOM's public viewport API.");
+    window.happyDOM.setWindowSize({ width });
+  }
 
-    it(`vim landing fence guard: the Open file manager row hands the file manager the keyboard with ${label}`, async () => {
+  interface PaletteComposer {
+    editor: HTMLElement;
+    surface: Element;
+    prompt: string;
+  }
+
+  async function withPaletteComposer(
+    width: number,
+    mode: string,
+    label: string,
+    check: (composer: PaletteComposer) => Promise<void>,
+  ) {
+    const previousWidth = window.innerWidth;
+    let restoreFocus: (() => void) | undefined;
+    const prompt = "hello world";
+    try {
+      const selectedThreadId = addFenceThread(
+        `phone-palette-${label}-${mode}-${width}`,
+        "Phone palette",
+        [
+          makeMessage(
+            `phone-palette-message-${label}-${mode}-${width}`,
+            "assistant",
+            "Synthetic reply",
+          ),
+        ],
+      );
+      await act(async () => setViewportWidth(width));
+      await mountApp({ vimMode: true }, selectedThreadId);
+      const editor = composer();
+      const nativeFocus = editor.focus.bind(editor);
+      // Happy DOM ignores CSS when focusing. Model only the browser's refusal
+      // to focus this editor inside the real composer's hidden body. The app
+      // still owns collapse, expansion, selection, palette cleanup and Vim mode.
+      const visibleFocus = vi.spyOn(editor, "focus").mockImplementation((options) => {
+        if (editor.closest("[data-chat-composer-body]")?.classList.contains("hidden")) return;
+        nativeFocus(options);
+      });
+      restoreFocus = () => visibleFocus.mockRestore();
+      const surface = editor.closest("[data-chat-composer-surface]")!;
+      const mobile = width < 640;
+      expect(window.matchMedia("(max-width: 639px)").matches).toBe(mobile);
+      await focusComposer();
+      await act(async () => editor.blur());
+      await settle();
+      if (mobile) {
+        expect(surface.getAttribute("data-chat-composer-mobile-collapsed")).toBe("true");
+        const expand = surface.querySelector<HTMLButtonElement>('[aria-label="Expand composer"]')!;
+        await act(async () => expand.click());
+      } else await focusComposer();
+      await settle();
+      expect(focusIsInComposer()).toBe(true);
+      const clipboardData = new DataTransfer();
+      clipboardData.setData("text/plain", prompt);
+      await act(async () =>
+        editor.dispatchEvent(
+          new ClipboardEvent("paste", {
+            bubbles: true,
+            cancelable: true,
+            clipboardData,
+          }),
+        ),
+      );
+      await settle();
+      expect(editor.textContent).toBe(prompt);
+      if (mode === "NORMAL") {
+        await press(ESCAPE);
+        await press({ key: "0", code: "Digit0" });
+        await press(key("l"));
+        await press(key("l"));
+        expect(window.getSelection()?.anchorOffset).toBe(2);
+      }
+      expect(readKeyEngineSnapshot()).toMatchObject({ scope: "composer", mode });
+      await openPalette();
+      expect(surface.getAttribute("data-chat-composer-mobile-collapsed")).toBe(String(mobile));
+      expect(editor.closest("[data-chat-composer-body]")?.classList.contains("hidden")).toBe(
+        mobile,
+      );
+      await check({ editor, surface, prompt });
+    } finally {
+      restoreFocus?.();
+      await act(async () => setViewportWidth(previousWidth));
+      await settle();
+    }
+  }
+
+  async function expectRestoredComposer(
+    { editor, surface, prompt }: PaletteComposer,
+    mode: string,
+  ) {
+    await closePalette();
+    expect(focusIsInComposer()).toBe(true);
+    expect(surface.getAttribute("data-chat-composer-mobile-collapsed")).toBe("false");
+    expect(readKeyEngineSnapshot()).toMatchObject({ scope: "composer", mode });
+    expect(editor.textContent).toBe(prompt);
+    if (mode === "NORMAL") {
+      expect(window.getSelection()?.anchorOffset).toBe(2);
+      await press(key("x"));
+      expect(editor.textContent).toBe("helo world");
+      await press(key("u"));
+      expect(editor.textContent).toBe(prompt);
+      await press({ key: "r", code: "KeyR", ctrlKey: true });
+      expect(editor.textContent).toBe("helo world");
+    } else {
+      expect(window.getSelection()?.anchorNode?.textContent).toBe(prompt);
+      expect(window.getSelection()?.anchorOffset).toBe(prompt.length);
+    }
+  }
+
+  it.each([
+    { width: 393, mode: "NORMAL" },
+    { width: 412, mode: "NORMAL" },
+    { width: 393, mode: "INSERT" },
+    { width: 412, mode: "INSERT" },
+  ])(
+    "phone palette restore regression: $mode survives hidden editor at $width pixels",
+    async ({ width, mode }) => {
+      await withPaletteComposer(width, mode, "return", (composer) =>
+        expectRestoredComposer(composer, mode),
+      );
+    },
+  );
+
+  it.each(["NORMAL", "INSERT"])(
+    "desktop palette restore guard: %s keeps nonempty draft and caret",
+    async (mode) => {
+      await withPaletteComposer(1184, mode, "return", (composer) =>
+        expectRestoredComposer(composer, mode),
+      );
+    },
+  );
+
+  it.each([
+    { mode: "NORMAL", owner: "modal" },
+    { mode: "INSERT", owner: "modal" },
+    { mode: "NORMAL", owner: "file manager" },
+    { mode: "INSERT", owner: "file manager" },
+    { mode: "NORMAL", owner: "composer control" },
+    { mode: "INSERT", owner: "composer control" },
+  ])(
+    "phone palette restore ownership: $owner cancels deferred $mode focus",
+    async ({ mode, owner }) => {
+      await withPaletteComposer(412, mode, owner, async ({ editor, surface, prompt }) => {
+        let activated = false;
+        let managerFocused = false;
+        let modal: HTMLDivElement | undefined;
+        let control: HTMLButtonElement | undefined;
+        // Observe the real reveal commit before the existing focus frame. This
+        // models another public owner arriving after the palette's close callback.
+        const observer = new MutationObserver(() => {
+          if (
+            !activated &&
+            surface.getAttribute("data-chat-composer-mobile-collapsed") === "false"
+          ) {
+            activated = true;
+            if (owner === "file manager") useFileManagerStore.getState().setOpen(true);
+            else if (owner === "composer control") {
+              control = [
+                ...surface.querySelectorAll<HTMLButtonElement>("[data-chat-provider-model-picker]"),
+              ].find((element) => element.closest("[inert]") === null);
+              act(() => control?.focus());
+            } else {
+              modal = document.createElement("div");
+              modal.setAttribute("role", "dialog");
+              modal.setAttribute("aria-modal", "true");
+              modal.tabIndex = -1;
+              document.body.append(modal);
+              modal.focus();
+            }
+          }
+          if (activated && owner === "file manager" && !managerFocused) {
+            // The shared fixture renders only the vendor layer's root. Model
+            // its real focus-on-mount boundary without changing that fixture.
+            const layer = document.querySelector<HTMLElement>('[data-testid="file-manager"]');
+            if (layer) {
+              managerFocused = true;
+              layer.focus({ preventScroll: true });
+            }
+          }
+        });
+        observer.observe(surface, {
+          attributes: true,
+          attributeFilter: ["data-chat-composer-mobile-collapsed"],
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+        try {
+          await closePalette();
+          expect(activated, "the later owner arrived between reveal and deferred focus").toBe(true);
+          const currentOwner =
+            control ?? modal ?? document.querySelector('[data-testid="file-manager"]');
+          expect(currentOwner).not.toBeNull();
+          expect(document.activeElement).toBe(currentOwner);
+          expect(focusIsInComposer()).toBe(false);
+          expect(surface.getAttribute("data-chat-composer-mobile-collapsed")).toBe(
+            String(owner !== "composer control"),
+          );
+          expect(editor.textContent).toBe(prompt);
+          await settle();
+          expect(document.activeElement).toBe(currentOwner);
+          await act(async () => {
+            modal?.remove();
+            useFileManagerStore.getState().setOpen(false);
+          });
+          await settle();
+          // A later independent expansion must not inherit an aborted NORMAL receipt.
+          if (owner === "composer control") await focusComposer();
+          else {
+            const expand = surface.querySelector<HTMLButtonElement>(
+              '[aria-label="Expand composer"]',
+            )!;
+            await act(async () => expand.click());
+          }
+          await settle();
+          expect(focusIsInComposer()).toBe(true);
+          expect(readKeyEngineSnapshot()).toMatchObject({ scope: "composer", mode: "INSERT" });
+          expect(editor.textContent).toBe(prompt);
+        } finally {
+          observer.disconnect();
+          await act(async () => {
+            modal?.remove();
+            useFileManagerStore.getState().setOpen(false);
+          });
+        }
+      });
+    },
+  );
+});
+
+describe("vim landing fence: a file manager row keeps the keyboard", () => {
+  const vimModeCases = [true, false].map((vimMode) => ({
+    vimMode,
+    label: vimMode ? "Vim mode on" : "Vim mode off",
+  }));
+
+  it.each(vimModeCases)(
+    "vim landing fence guard: the Open file manager row hands the file manager the keyboard with $label",
+    async ({ vimMode }) => {
       await mountApp({ vimMode });
       await openPalette();
       const row = [...palette()!.querySelectorAll<HTMLElement>('[role="option"]')].find((option) =>
@@ -548,8 +529,8 @@ describe("vim landing fence: a file manager row keeps the keyboard", () => {
       const fileManager = document.querySelector('[data-testid="file-manager"]');
       expect(fileManager).not.toBeNull();
       expect(document.activeElement).toBe(fileManager);
-    });
-  }
+    },
+  );
 });
 
 describe("vim landing fence: pane chords into the chat land in normal mode", () => {
@@ -648,5 +629,60 @@ describe("vim landing fence: Vim mode off behaves as upstream", () => {
     const event = await press(PANE_RIGHT_CHORD);
     expect(event.defaultPrevented).toBe(true);
     expect(focusIsInComposer()).toBe(true);
+  });
+});
+
+// The close callback waits for React to clear inert. Later owners must retain focus.
+describe("vim landing fence: deferred focus guards", () => {
+  it("vim landing fence guard: reopening the palette before close focus runs keeps focus in the reopened palette", async () => {
+    await mountApp({ vimMode: true });
+    await focusComposer();
+    await press(ESCAPE);
+    await openPalette();
+    await act(async () => {
+      flushSync(() => {
+        (document.activeElement ?? document.body).dispatchEvent(
+          new KeyboardEvent("keydown", {
+            ...ESCAPE,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+      flushSync(() => openCommandPalette());
+    });
+    await settle();
+    expect(palette(), "the palette reopened").not.toBeNull();
+    expect(palette()!.contains(document.activeElement), "the reopened palette owns focus").toBe(
+      true,
+    );
+    expect(focusIsInComposer()).toBe(false);
+  });
+
+  it("vim landing fence guard: unmounting the app after close preserves focus in another owner", async () => {
+    await mountApp({ vimMode: true });
+    await openPalette();
+    const nextOwner = document.createElement("input");
+    document.body.append(nextOwner);
+    try {
+      await act(async () => {
+        flushSync(() => {
+          (document.activeElement ?? document.body).dispatchEvent(
+            new KeyboardEvent("keydown", {
+              ...ESCAPE,
+              bubbles: true,
+              cancelable: true,
+            }),
+          );
+        });
+        root!.unmount();
+        root = undefined;
+        nextOwner.focus();
+      });
+      await settle();
+      expect(document.activeElement).toBe(nextOwner);
+    } finally {
+      nextOwner.remove();
+    }
   });
 });

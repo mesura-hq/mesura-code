@@ -40,6 +40,9 @@
         "mesura-checks.ts",
         "mesura-browser.ts",
         "setup-worktree.ts",
+        // Chromium fixture builders load these Vite library entries by path.
+        "lib/mesura-panel.launcher.fixture.mjs",
+        "lib/mesura-timeline.find.fixture.mjs",
       ],
     },
     "apps/server": {

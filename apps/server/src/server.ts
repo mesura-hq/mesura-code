@@ -422,6 +422,7 @@ const layerProjectCloneTracker = ProjectCloneTracker.layer.pipe(
 const layerDictationJobs = DictationJobs.layer.pipe(Layer.provide(layerServerSettings));
 
 const layerReview = ReviewService.layer.pipe(
+  Layer.provide(ProjectStore.layer),
   Layer.provideMerge(GitVcsDriver.layer),
   Layer.provideMerge(layerVcsDriverRegistry),
 );

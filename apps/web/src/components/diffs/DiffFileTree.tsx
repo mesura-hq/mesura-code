@@ -114,7 +114,6 @@ export function DiffFileTree({
   const onSelectFileRef = useRef(onSelectFile);
   // Pierre takes the renderer once, at creation; the ref keeps it current.
   const renderFileDecorationRef = useRef(renderFileDecoration);
-  renderFileDecorationRef.current = renderFileDecoration;
   // Selection driven by `selectedPath` below is an echo of a file already on screen, not a
   // request to scroll to it again.
   const syncingSelectionRef = useRef(false);
@@ -175,6 +174,15 @@ export function DiffFileTree({
     }
     model.setGitStatus(gitStatus);
   }, [directoryPaths, gitStatus, model, ordering, paths, positions]);
+
+  useEffect(() => {
+    // Updating the renderer ref alone leaves counts stale when paths and Git statuses
+    // stay unchanged. Pierre's public render API updates the mounted view without
+    // replacing its model, selection, expansion or virtualized viewport.
+    renderFileDecorationRef.current = renderFileDecoration;
+    const fileTreeContainer = model.getFileTreeContainer();
+    if (fileTreeContainer !== undefined) model.render({ fileTreeContainer });
+  }, [model, renderFileDecoration]);
 
   useEffect(() => {
     if (selectedPath === null) {

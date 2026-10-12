@@ -8,7 +8,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { useSyncExternalStore } from "react";
+import { useLayoutEffect, useSyncExternalStore, type RefObject } from "react";
 
 import { runRegisteredCommand } from "~/commands/commandRegistry";
 import { toastManager } from "~/components/ui/toast";
@@ -26,24 +26,104 @@ import { ACTIVE_TAB_TITLE_SELECTOR, focusPanelSurfaceAfterRender } from "~/lib/p
  * keyboard-first app, so a reason must never need a hover.
  */
 
+/** Overlays that must win over the launcher's letter shortcuts. */
+const LAUNCHER_SHORTCUT_BLOCKING_LAYERS = [
+  '[data-slot="dialog-popup"]',
+  '[data-slot="alert-dialog-popup"]',
+  '[data-slot="command-dialog-popup"]',
+  '[data-slot="menu-popup"]',
+  '[data-slot="select-popup"]',
+  '[data-slot="popover-popup"]',
+  '[data-slot="combobox-popup"]',
+  '[data-slot="autocomplete-popup"]',
+  // Fork addition: the file manager over the window (`MesuraFileManagerLayer`).
+  "[data-mesura-file-manager]",
+].join(",");
+
+/** Keyboard launchers defer to closed panels, blocking overlays and another panel's launcher. */
+export function isPanelLauncherKeyboardAvailable(
+  panelOpen: boolean,
+  panel?: Element | null,
+): boolean {
+  return (
+    panelOpen &&
+    (!panel || !launcherOpen || launcherOwner === null || launcherOwner === panel) &&
+    document.querySelector(LAUNCHER_SHORTCUT_BLOCKING_LAYERS) === null
+  );
+}
+
 let launcherOpen = false;
+let launcherOwner: Element | null = null;
+const panels = new Map<Element, boolean>();
 const listeners = new Set<() => void>();
 
-function setLauncherOpen(open: boolean): void {
-  if (launcherOpen === open) return;
+function subscribeToPanelLauncher(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+function setLauncherOpen(open: boolean, owner: Element | null = null): void {
+  if (launcherOpen === open && launcherOwner === owner) return;
   launcherOpen = open;
+  launcherOwner = owner;
   for (const listener of listeners) listener();
+}
+
+function panelRoot(ref: RefObject<HTMLElement | null>): Element | null {
+  return ref.current?.closest("[data-preview-panel-mode]") ?? null;
+}
+
+/** Registers the panel's lifetime, including its retained closing content. */
+export function usePanelLauncherOwner(
+  ref: RefObject<HTMLElement | null>,
+  panelOpen: boolean,
+): boolean {
+  useLayoutEffect(() => {
+    const panel = panelRoot(ref);
+    if (panel === null) return;
+    panels.set(panel, panelOpen);
+    if (!panelOpen && launcherOwner === panel) closePanelLauncher();
+    else if (panelOpen && launcherOpen && (launcherOwner === null || !launcherOwner.isConnected)) {
+      setLauncherOpen(true, panel);
+    }
+    return () => {
+      panels.delete(panel);
+      // ChatView replaces the inline panel with the phone sheet in one commit.
+      // An open replacement can claim the launcher before disposal; an existing
+      // unrelated panel does not claim it just because the owner disappeared.
+      queueMicrotask(() => {
+        if (launcherOwner === panel && !panels.has(panel)) closePanelLauncher();
+      });
+    };
+  }, [ref, panelOpen]);
+  return useSyncExternalStore(
+    subscribeToPanelLauncher,
+    () => launcherOpen && launcherOwner === panelRoot(ref),
+    () => false,
+  );
+}
+
+function focusedOrLatestOpenPanel(): Element | null {
+  let latest: Element | null = null;
+  for (const [panel, open] of panels) {
+    if (!open) continue;
+    if (panel.contains(document.activeElement)) return panel;
+    latest = panel;
+  }
+  return latest;
 }
 
 /** Where focus was when the launcher opened, for `dismissPanelLauncher`. */
 let returnFocus: HTMLElement | null = null;
 
-export function openPanelLauncher(): void {
-  if (!launcherOpen) {
+export function openPanelLauncher(panel?: Element | null): void {
+  if (panel && panels.get(panel) === false) return;
+  const owner = panel ?? focusedOrLatestOpenPanel();
+  if (!launcherOpen || launcherOwner !== owner) {
     const active = document.activeElement;
     returnFocus = active instanceof HTMLElement && active !== document.body ? active : null;
   }
-  setLauncherOpen(true);
+  setLauncherOpen(true, owner);
 }
 
 /** Closes the launcher because a row ran; that row decides where focus goes. */
@@ -61,10 +141,7 @@ export function dismissPanelLauncher(): void {
 
 export function usePanelLauncherOpen(): boolean {
   return useSyncExternalStore(
-    (listener) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
+    subscribeToPanelLauncher,
     () => launcherOpen,
     () => false,
   );
@@ -81,12 +158,15 @@ export function usePanelLauncherOpen(): boolean {
  * added once when the module loads and therefore ahead of every surface,
  * answers first.
  */
-let launcherKeyHandler: ((event: KeyboardEvent) => boolean) | null = null;
+// Like commandRegistry, keep each registration so disposal restores the previous owner.
+const launcherKeyHandlers: Array<(event: KeyboardEvent) => boolean> = [];
 
 export function registerLauncherKeyHandler(handler: (event: KeyboardEvent) => boolean): () => void {
-  launcherKeyHandler = handler;
+  const entry = (event: KeyboardEvent) => handler(event);
+  launcherKeyHandlers.push(entry);
   return () => {
-    if (launcherKeyHandler === handler) launcherKeyHandler = null;
+    const index = launcherKeyHandlers.lastIndexOf(entry);
+    if (index !== -1) launcherKeyHandlers.splice(index, 1);
   };
 }
 
@@ -96,10 +176,15 @@ if (typeof window !== "undefined") {
   window.addEventListener(
     "keydown",
     (event) => {
-      if (launcherKeyHandler === null) return;
+      if (launcherKeyHandlers.length === 0) return;
       const focused = document.activeElement?.closest(LAUNCHER_ROOT_SELECTOR) != null;
       if (!launcherOpen && !focused) return;
-      if (launcherKeyHandler(event)) event.stopImmediatePropagation();
+      for (let index = launcherKeyHandlers.length - 1; index >= 0; index--) {
+        if (launcherKeyHandlers[index]?.(event)) {
+          event.stopImmediatePropagation();
+          return;
+        }
+      }
     },
     true,
   );
@@ -165,9 +250,9 @@ export function panelLauncherActions(input: {
 
 /** Runs a panel action through its owner; an action with no owner here says so. */
 export function runPanelLauncherAction(action: PanelLauncherAction): void {
-  const panel = document
-    .querySelector(LAUNCHER_ROOT_SELECTOR)
-    ?.closest("[data-preview-panel-mode]");
+  const panel =
+    launcherOwner ??
+    document.querySelector(LAUNCHER_ROOT_SELECTOR)?.closest("[data-preview-panel-mode]");
   closePanelLauncher();
   // Hiding the panel hands the keys to the chat; anything else keeps them in
   // the panel. The panel animates closed, so its box cannot tell which.

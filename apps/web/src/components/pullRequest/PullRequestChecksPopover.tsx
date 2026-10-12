@@ -7,6 +7,7 @@ import type {
   ScopedThreadRef,
 } from "@t3tools/contracts";
 import { useState } from "react";
+import { occurrenceKeys } from "@t3tools/client-runtime/factory/occurrence-keys";
 
 import { useOpenLink } from "~/browser/useOpenLink";
 import { cn } from "~/lib/utils";
@@ -68,6 +69,9 @@ function ChecksBody({
   const { attention, running, completed } = groupPullRequestChecks(checks);
   const canCollapse = attention.length + running.length > 0 && completed.length > 0;
   const visibleChecks = [...attention, ...running, ...(showAll || !canCollapse ? completed : [])];
+  const checkKeys = occurrenceKeys(
+    visibleChecks.map((check) => JSON.stringify([check.name, check.url])),
+  );
   if (checks.length === 0) {
     return <p className="text-muted-foreground text-xs">No checks reported</p>;
   }
@@ -75,10 +79,10 @@ function ChecksBody({
     <>
       <ScrollArea className="max-h-64">
         <ul className="flex flex-col gap-1">
-          {/* Keyed by position as well as by name: the host is the one that decides how many runs
-          share a name, and a repeated key is a rendering fault rather than a wrong list. */}
+          {/* Run URLs distinguish checks with the same name. Hosts can also report identical
+              runs without URLs, so occurrence keys retain every row without duplicate keys. */}
           {visibleChecks.map((check, index) => (
-            <li key={`${index}:${check.name}`} className="flex items-center gap-2 text-xs">
+            <li key={checkKeys[index]} className="flex items-center gap-2 text-xs">
               <PullRequestCheckStatusIcon status={check.status} />
               <Tooltip>
                 <TooltipTrigger

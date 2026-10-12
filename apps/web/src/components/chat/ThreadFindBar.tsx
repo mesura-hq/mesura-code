@@ -34,6 +34,9 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
     if (!props.open) return;
     inputRef.current?.focus();
     inputRef.current?.select();
+    // WORKAROUND: the dependency heuristic misses a repeated DOM focus request.
+    // Removing focusRequestId breaks refocusing an open bar. Remove when the compiler recognizes DOM trigger dependencies.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- focusRequestId triggers focus and selection even while open stays true
   }, [props.focusRequestId, props.open]);
 
   if (!props.open) return null;

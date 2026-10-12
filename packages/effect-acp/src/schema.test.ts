@@ -4,6 +4,9 @@ import * as Schema from "effect/Schema";
 import * as V1 from "./_generated/schema-v1.gen.ts";
 import * as V2 from "./schema.ts";
 
+const isV1AvailableCommand = Schema.is(V1.AvailableCommand);
+const isV2AvailableCommand = Schema.is(V2.AvailableCommand);
+
 describe("pinned ACP wire schemas", () => {
   it("validates known content variants without accepting malformed ones as future content", () => {
     const accepts = Schema.is(V2.ContentBlock);
@@ -29,9 +32,7 @@ describe("pinned ACP wire schemas", () => {
 
   it("keeps v1 command inputs compatible with native agents", () => {
     const command = { name: "plan", description: "Make a plan", input: { hint: "Task" } };
-    expect(Schema.is(V1.AvailableCommand)(command)).toBe(true);
-    expect(
-      Schema.is(V2.AvailableCommand)({ ...command, input: { type: "text", hint: "Task" } }),
-    ).toBe(true);
+    expect(isV1AvailableCommand(command)).toBe(true);
+    expect(isV2AvailableCommand({ ...command, input: { type: "text", hint: "Task" } })).toBe(true);
   });
 });

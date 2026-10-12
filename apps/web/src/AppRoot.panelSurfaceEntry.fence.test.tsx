@@ -11,9 +11,8 @@
  *
  * Phase 4 of the Vim keys round 2 cycle (land the keyboard in every panel
  * surface):
- * - Criterion 1: `Space p a` leaves focus inside the Agents surface's
- *   content, with and without live agents, never in the composer and never
- *   on the tab title.
+ * - Criterion 1 was retired: upstream removed the Agents surface in v2.
+ *   The launcher now guards its absence.
  * - Criterion 2: `Space p l` and `Space p p` leave focus inside the pull
  *   request list's and the pull request's content.
  * - Criterion 3: `Space p s` leaves focus inside Software Factory's scrolling
@@ -46,8 +45,7 @@
  *   request page resolves project settings from it).
  * - The thread links one pull request and has it as its linked pull request,
  *   and the pull request's detail read answers with that pull request.
- * - The thread's activities hold a presented Software Factory plan and, where
- *   a spec asks for live agents, one running subagent.
+ * - The thread's v2 turn items hold a presented Software Factory plan.
  * - The device host finished onboarding (`useDeviceState`).
  * - The project's listing (`useProjectEntriesQuery`) holds three files, so the
  *   Files tree has rows to open.
@@ -62,14 +60,43 @@
 import { act, type ReactNode } from "react";
 import type { Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import type { ChatFileAttachment, OrchestrationThreadActivity, ThreadId } from "@t3tools/contracts";
+import type { ChatFileAttachment, ThreadId } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { makeFactoryPlanActivity } from "@t3tools/client-runtime/factory/testing";
+import {
+  makeFactoryCardTurnItem,
+  makeFactoryPlanPayload,
+} from "@t3tools/client-runtime/factory/testing";
+import { makeFenceThreadShell } from "./test/fenceThreadShell";
+import * as Option from "effect/Option";
+import { ProjectId } from "@t3tools/contracts";
+import { makeFenceClientRects } from "./test/appRootFenceMocks";
 
 // The boundaries the fixture replaces: see `test/appRootFenceMocks.tsx`, plus
 // the server configs, the file read, the device state and the asset URL named
 // above, and the diff highlighting worker pool.
+// happy-dom has no canvas. Stub only DecorationsOverviewRuler's painting seam;
+// the real editor's layout, focus, model and keyboard behavior stay real.
+// We tried mocking OverviewRuler, but DecorationsOverviewRuler._render still painted and failed at clearRect on a null canvas.
+// Mock the actual renderer's painting seam to prevent that failure while preserving real editor layout, focus and keyboard behavior.
+vi.mock(
+  "monaco-editor/editor/browser/viewParts/overviewRuler/decorationsOverviewRuler.js",
+  async (original) => {
+    const actual = await original<{
+      DecorationsOverviewRuler: new (...args: unknown[]) => { _render(): void };
+    }>();
+    return {
+      ...actual,
+      DecorationsOverviewRuler: class extends actual.DecorationsOverviewRuler {
+        override _render(): void {}
+      },
+    };
+  },
+);
+
 const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("@t3tools/client-runtime/state/session", async (original) =>
+  (await fenceMocks()).mockRuntimeSession(original),
+);
 vi.mock("./state/entities", async (original) => {
   const mocks = await fenceMocks();
   const { DEFAULT_SERVER_SETTINGS } = await import("@t3tools/contracts");
@@ -162,9 +189,9 @@ const pullRequestDetail = vi.hoisted(() => ({
   },
 }));
 vi.mock("./state/query", async () => {
-  const { useEnvironmentQuery } = (await fenceMocks()).mockQuery();
+  const { useEnvironmentQuery } = await (await fenceMocks()).mockQuery();
   return {
-    useEnvironmentQuery: (query: unknown) => {
+    useEnvironmentQuery: (query?: object | null) => {
       const data = !(query instanceof Object)
         ? null
         : pullRequestDetail.detailQueries.has(query)
@@ -172,8 +199,11 @@ vi.mock("./state/query", async () => {
           : pullRequestDetail.diffQueries.has(query)
             ? pullRequestDetail.diff
             : null;
+      // Always call the fallback hook. A PR result can replace an empty result on the next render.
+      // Skipping this subscription when data arrives changes React's hook order.
+      const fallback = useEnvironmentQuery(query);
       return data === null
-        ? useEnvironmentQuery()
+        ? fallback
         : { data, error: null, isPending: false, isSuccess: true, refresh: () => undefined };
     },
   };
@@ -308,8 +338,13 @@ import {
   fenceEnvironmentId as environmentId,
   makeMessage,
   renderFenceApp,
+  publishFenceThreadProjection,
 } from "./test/appRootFenceApp";
-import { appRootFence as fixture, FENCE_PROJECT_ID } from "./test/appRootFenceMocks";
+import {
+  appRootFence as fixture,
+  FENCE_PROJECT_ID,
+  makeFenceSession,
+} from "./test/appRootFenceMocks";
 
 const MARKDOWN_DOCUMENT = "# Guide\n\nThe build runs in three steps.\n";
 const ATTACHMENT_MARKDOWN = "# Notes\n\nThe release ships on Friday.\n";
@@ -339,6 +374,16 @@ beforeAll(async () => {
 beforeEach(() => {
   // Every timer and animation frame runs on test time: `settle` moves it.
   vi.useFakeTimers();
+  // The source-file guards exercise the editable Monaco surface, which requires a write grant.
+  fixture.sessions.set(
+    environmentId,
+    makeFenceSession([
+      "orchestration:read",
+      "orchestration:operate",
+      "filesystem:read",
+      "filesystem:write",
+    ]),
+  );
   // An attachment's text: what a Markdown attachment preview reads.
   vi.stubGlobal("fetch", async () => new Response(ATTACHMENT_MARKDOWN));
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -354,19 +399,6 @@ beforeEach(() => {
       }
     },
   );
-  // happy-dom has no canvas. Monaco's overview ruler paints on one each
-  // frame; it gets a 2D context that draws nothing.
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
-    () =>
-      new Proxy(
-        {},
-        {
-          get: (_target, property) =>
-            property === "measureText" ? () => ({ width: 0 }) : () => undefined,
-          set: () => true,
-        },
-      ) as unknown as RenderingContext,
-  );
   const capabilities = fixture.environments[0]!.serverConfig.environment.capabilities as Record<
     string,
     boolean
@@ -378,9 +410,11 @@ beforeEach(() => {
   useFileTreeStore.setState({ explorerOpen: true });
   container = document.createElement("div");
   document.body.append(container);
-  vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(
-    () => ({ length: 1 }) as DOMRectList,
-  );
+  vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    return makeFenceClientRects([this.getBoundingClientRect()]);
+  });
   const computedStyle = window.getComputedStyle.bind(window);
   vi.spyOn(window, "getComputedStyle").mockImplementation((element, pseudo) => {
     const style = computedStyle(element, pseudo);
@@ -401,6 +435,7 @@ afterEach(async () => {
     useRightPanelStore.getState().removeThread(scopeThreadRef(environmentId, threadId));
   }
   fixture.threads.clear();
+  fixture.threadStates.clear();
   window.localStorage.clear();
   setViewport(DEFAULT_VIEWPORT);
   vi.useRealTimers();
@@ -450,61 +485,90 @@ function withStubbedStyle(
   });
 }
 
-/** A subagent the Agents surface lists as running. */
-function runningAgentActivity(): OrchestrationThreadActivity {
-  return {
-    id: "fence-agent-started",
-    tone: "info",
-    kind: "task.started",
-    summary: "task.started",
-    payload: { taskId: "fence-agent", title: "Explore the build", agentKind: "agent" },
-    turnId: null,
-    createdAt: at(2),
-  } as unknown as OrchestrationThreadActivity;
-}
-
-/**
- * Registers a thread with one assistant reply, one linked pull request and a
- * presented Software Factory plan; `liveAgent` adds a running subagent.
- */
-function addSurfaceThread({ liveAgent }: { readonly liveAgent: boolean }): ThreadId {
+/** Registers v2 links and a Factory card at the same boundaries as the live client. */
+function addSurfaceThread(): ThreadId {
   threadSequence += 1;
   const id = `panel-entry-${threadSequence}`;
   const threadId = addFenceThread(id, "Panel entry fence", [
     makeMessage(`${id}-assistant`, "assistant", "The build is green."),
   ]);
-  const thread = fixture.threads.get(threadId)! as unknown as Record<string, unknown>;
-  thread.pullRequests = [
-    {
-      host: "github.com",
-      repository: "acme/app",
-      number: 7,
-      url: PULL_REQUEST_URL,
-      source: "manual",
-      linkedAt: at(0),
-      snapshot: null,
-      stack: null,
+  const previous = fixture.threads.get(threadId)!;
+  const shell = makeFenceThreadShell({
+    id: threadId,
+    environmentId,
+    projectId: ProjectId.make(FENCE_PROJECT_ID),
+    overrides: {
+      ...previous.source,
+      itemCount: previous.source.itemCount + 1,
+      visibleItemCount: previous.source.visibleItemCount + 1,
+      pullRequests: [
+        {
+          host: "github.com",
+          repository: "acme/app",
+          number: 7,
+          url: PULL_REQUEST_URL,
+          source: "manual",
+          linkedAt: at(0),
+          snapshot: null,
+          stack: null,
+        },
+      ],
+      linkedPullRequest: {
+        projectId: ProjectId.make(FENCE_PROJECT_ID),
+        repository: "acme/app",
+        number: 7,
+        url: PULL_REQUEST_URL,
+      },
     },
-  ];
-  thread.linkedPullRequest = {
-    projectId: FENCE_PROJECT_ID,
-    repository: "acme/app",
-    number: 7,
-    url: PULL_REQUEST_URL,
-  };
-  thread.activities = [
-    makeFactoryPlanActivity({ createdAt: at(1) }),
-    ...(liveAgent ? [runningAgentActivity()] : []),
-  ];
+  });
+  const state = fixture.threadStates.get(threadId)!;
+  const projection = Option.getOrThrow(state.data);
+  const card = makeFactoryCardTurnItem({
+    id: `${id}-plan`,
+    threadId,
+    createdAt: at(1),
+    ordinal: projection.turnItems.length,
+    card: { kind: "plan", payload: makeFactoryPlanPayload() },
+  });
+  publishFenceThreadProjection(
+    {
+      ...projection,
+      thread: { ...shell.source, lastVisitedAt: shell.source.lastVisitedAt ?? null },
+      turnItems: [...projection.turnItems, card],
+      visibleTurnItems: [
+        ...projection.visibleTurnItems,
+        {
+          item: card,
+          position: projection.visibleTurnItems.length,
+          visibility: "local",
+          sourceThreadId: threadId,
+          sourceItemId: card.id,
+        },
+      ],
+    },
+    environmentId,
+  );
   openedThreads.push(threadId);
   return threadId;
 }
 
-/** The thread's links go, as an unlink or a host sync takes the last one away. */
+/** An unlink updates both the shell and detail streams. */
 function unlinkEveryPullRequest(threadId: ThreadId): void {
-  const thread = fixture.threads.get(threadId)!;
-  fixture.threads.set(threadId, { ...thread, pullRequests: [] } as typeof thread);
-  for (const listener of fixture.threadListeners) listener();
+  const previous = fixture.threads.get(threadId)!;
+  const shell = makeFenceThreadShell({
+    id: threadId,
+    environmentId,
+    projectId: previous.projectId,
+    overrides: { ...previous.source, pullRequests: [], linkedPullRequest: null },
+  });
+  const projection = Option.getOrThrow(fixture.threadStates.get(threadId)!.data);
+  publishFenceThreadProjection(
+    {
+      ...projection,
+      thread: { ...shell.source, lastVisitedAt: shell.source.lastVisitedAt ?? null },
+    },
+    environmentId,
+  );
 }
 
 /** One display frame on the fake clock. */
@@ -610,37 +674,36 @@ async function expectHalfPageScroll(region: HTMLElement): Promise<void> {
 }
 
 describe("panel surface entry fence: a launcher letter lands in the surface", () => {
-  it("panel entry fence spec: Space p a lands in the Agents list with a live agent", async () => {
-    await mountApp(addSurfaceThread({ liveAgent: true }));
-    await openFromLauncher("a");
-    expect(surfaceContent().textContent).toContain("Explore the build");
-    const active = expectFocusInSurfaceContent();
-    expect(active.closest('[data-slot="composer-shell"]')).toBeNull();
-  });
-
-  it("panel entry fence spec: Space p a lands in the Agents surface with no agents yet", async () => {
-    await mountApp(addSurfaceThread({ liveAgent: false }));
-    await openFromLauncher("a");
-    expect(surfaceContent().textContent).toContain("No agents yet");
-    expectFocusInSurfaceContent();
+  // Upstream removed the Agents surface in v2. The launcher must not offer its obsolete route.
+  it("panel entry fence guard: the v2 launcher omits the removed Agents surface", async () => {
+    await mountApp(addSurfaceThread());
+    await press({ key: " ", code: "Space" });
+    await press({ key: "p", code: "KeyP" });
+    const launcher = document.querySelector(LAUNCHER_SELECTOR);
+    expect(launcher).not.toBeNull();
+    expect(
+      [...launcher!.querySelectorAll("button")].some((button) =>
+        button.textContent?.startsWith("Agents"),
+      ),
+    ).toBe(false);
   });
 
   it("panel entry fence spec: Space p l lands in the linked pull request list", async () => {
-    await mountApp(addSurfaceThread({ liveAgent: false }));
+    await mountApp(addSurfaceThread());
     await openFromLauncher("l");
     expect(surfaceContent().querySelector(`a[href="${PULL_REQUEST_URL}"]`)).not.toBeNull();
     expectFocusInSurfaceContent();
   });
 
   it("panel entry fence spec: Space p p lands in the pull request's content", async () => {
-    await mountApp(addSurfaceThread({ liveAgent: false }));
+    await mountApp(addSurfaceThread());
     await openFromLauncher("p");
     expect(surfaceContent().textContent).toContain("The build runs in three steps.");
     expectFocusInSurfaceContent();
   });
 
   it("panel entry fence spec: Space p s lands in Software Factory's scrolling content", async () => {
-    await mountApp(addSurfaceThread({ liveAgent: false }));
+    await mountApp(addSurfaceThread());
     await openFromLauncher("s");
     const tabs = surfaceContent().querySelector('nav[aria-label="Factory tabs"]');
     expect(tabs, "the Factory surface shows").not.toBeNull();
@@ -658,7 +721,7 @@ describe("panel surface entry fence: returning to a pull request surface", () =>
   // The Code tab is the page's own state, so a remount (`Ctrl+Tab` away and
   // back) shows Summary again: the way back into Code is a pane move.
   it("panel entry fence spec: Ctrl+L back into a pull request on its Code tab lands in its diff", async () => {
-    await mountApp(addSurfaceThread({ liveAgent: false }));
+    await mountApp(addSurfaceThread());
     await openFromLauncher("p");
     const codeTab = [
       ...surfaceContent().querySelectorAll<HTMLElement>('[aria-label="Pull request tabs"] button'),
@@ -681,11 +744,11 @@ describe("panel surface entry fence: returning to a pull request surface", () =>
   });
 
   it("panel entry fence spec: Ctrl+Tab back to the pull request list lands in it after its last link goes", async () => {
-    const threadId = addSurfaceThread({ liveAgent: false });
+    const threadId = addSurfaceThread();
     await mountApp(threadId);
     await openFromLauncher("l");
-    await openFromLauncher("a");
-    // The last link goes while the keyboard is on Agents.
+    await openFromLauncher("s");
+    // The last link goes while the keyboard is on Software Factory.
     await act(async () => unlinkEveryPullRequest(threadId));
     await settle();
 
@@ -701,17 +764,17 @@ describe("panel surface entry fence: returning to a pull request surface", () =>
 describe("panel surface entry fence: a previewed file takes focus in its scroll region", () => {
   /**
    * Opens a surface with `open`, then moves the keyboard there the way the
-   * developer does: `Space p a` puts it in the panel on Agents, and `Ctrl+Tab`
+   * developer does: `Space p s` puts it in the panel on Software Factory, and `Ctrl+Tab`
    * brings the surface's tab, titled `title`, back.
    */
   async function openThenCycleBack(
     open: (threadRef: ReturnType<typeof scopeThreadRef>) => void,
     title: string,
   ): Promise<void> {
-    const threadId = addSurfaceThread({ liveAgent: false });
+    const threadId = addSurfaceThread();
     await act(async () => open(scopeThreadRef(environmentId, threadId)));
     await mountApp(threadId);
-    await openFromLauncher("a");
+    await openFromLauncher("s");
     await press({ key: "Tab", code: "Tab", ctrlKey: true });
     expect(
       document.querySelector(ACTIVE_TAB_TITLE_SELECTOR)?.textContent,
@@ -784,7 +847,7 @@ describe("panel surface entry fence: a previewed file takes focus in its scroll 
 
 describe("panel surface entry fence: native surfaces keep their tab title", () => {
   it("panel entry fence guard: Space p m keeps focus on the Device tab title", async () => {
-    await mountApp(addSurfaceThread({ liveAgent: false }));
+    await mountApp(addSurfaceThread());
     await openFromLauncher("m");
     const title = document.querySelector(ACTIVE_TAB_TITLE_SELECTOR);
     expect(title, "the Device tab is active").not.toBeNull();
@@ -816,9 +879,9 @@ describe("panel surface entry fence: the phone's +", () => {
 
   it("panel entry fence guard: at a phone's width, tapping + then a row opens it with no text entry focused", async () => {
     setViewport(PIXEL_7_VIEWPORT);
-    const threadId = addSurfaceThread({ liveAgent: true });
+    const threadId = addSurfaceThread();
     await act(async () =>
-      useRightPanelStore.getState().open(scopeThreadRef(environmentId, threadId), "agents"),
+      useRightPanelStore.getState().open(scopeThreadRef(environmentId, threadId), "factory"),
     );
     await mountApp(threadId);
     expect(
@@ -830,7 +893,7 @@ describe("panel surface entry fence: the phone's +", () => {
     await tap(plus!);
     expect(isTextEntry(document.activeElement), `focus is on ${describeFocus()}`).toBe(false);
 
-    for (const label of ["Software Factory", "Linked pull requests", "Agents"]) {
+    for (const label of ["Software Factory", "Linked pull requests", "Files"]) {
       await tap(launcherRow(label));
       expect(document.querySelector(LAUNCHER_SELECTOR), `${label} closed the launcher`).toBeNull();
       expect(document.querySelector(ACTIVE_TAB_TITLE_SELECTOR)?.textContent).toContain(
@@ -852,7 +915,7 @@ describe("panel surface entry fence: leaving the Files tree lands in the open fi
    * keeps the keyboard in the tree: leaving it is a separate key.
    */
   async function openFromTree(name: string): Promise<void> {
-    await mountApp(addSurfaceThread({ liveAgent: false }));
+    await mountApp(addSurfaceThread());
     await openFromLauncher("f");
     expect(isFileTreeFocused(), `focus is on ${describeFocus()}`).toBe(true);
     // The tree keeps its cursor per project across mounts: start at the root.
@@ -870,8 +933,9 @@ describe("panel surface entry fence: leaving the Files tree lands in the open fi
     ["Ctrl+E", { key: "e", code: "KeyE", ctrlKey: true }],
   ];
 
-  for (const [label, chord] of LEAVE_KEYS) {
-    it(`panel entry fence spec: ${label} from the tree lands in a rendered Markdown file's scroll region`, async () => {
+  it.each(LEAVE_KEYS)(
+    "panel entry fence spec: %s from the tree lands in a rendered Markdown file's scroll region",
+    async (_label, chord) => {
       await openFromTree("guide.md");
       await press(chord);
       const heading = [...surfaceContent().querySelectorAll("h1")].find(
@@ -882,9 +946,12 @@ describe("panel surface entry fence: leaving the Files tree lands in the open fi
       expect(active.contains(heading!), `focus is on ${describeFocus()}`).toBe(true);
       expect(isFileTreeFocused()).toBe(false);
       await expectHalfPageScroll(active);
-    });
+    },
+  );
 
-    it(`panel entry fence spec: ${label} from the tree lands in an image's scroll region`, async () => {
+  it.each(LEAVE_KEYS)(
+    "panel entry fence spec: %s from the tree lands in an image's scroll region",
+    async (_label, chord) => {
       await openFromTree("diagram.png");
       await press(chord);
       const image = surfaceContent().querySelector('img[alt="diagram.png"]');
@@ -892,15 +959,18 @@ describe("panel surface entry fence: leaving the Files tree lands in the open fi
       const active = expectFocusInSurfaceContent();
       expect(active.contains(image), `focus is on ${describeFocus()}`).toBe(true);
       await expectHalfPageScroll(active);
-    });
+    },
+  );
 
-    it(`panel entry fence guard: ${label} from the tree lands in the editor`, async () => {
+  it.each(LEAVE_KEYS)(
+    "panel entry fence guard: %s from the tree lands in the editor",
+    async (_label, chord) => {
       await openFromTree("index.ts");
       await press(chord);
       expect(
         document.activeElement?.closest("[data-monaco-file-surface]"),
         `focus is on ${describeFocus()}`,
       ).not.toBeNull();
-    });
-  }
+    },
+  );
 });

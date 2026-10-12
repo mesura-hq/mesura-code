@@ -244,6 +244,7 @@ import {
 } from "./MessagesTimeline.logic";
 import { type ThreadFindMatch } from "./threadFind";
 import { useThreadFindNavigation } from "./useThreadFindNavigation";
+import { TIMELINE_FIND_VISIBLE_CONTENT_POSITION } from "./timelineFindScrollPolicy";
 import { readThreadFindPosition } from "./threadFindPosition";
 import type { ThreadFindPositionReader } from "./threadFind";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
@@ -687,18 +688,17 @@ const ConversationTimeline = memo(function ConversationTimeline({
   );
   const restoringThreadPosition = positionedThreadKey !== listIdentityKey;
   const prefersReducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
-  const listIdentityRef = useRef(listIdentityKey);
-  const previousLatestRunRef = useRef(latestRun);
+  const [previousListIdentity, setPreviousListIdentity] = useState(listIdentityKey);
+  const previousLatestRunRef = useRef({ threadKey: listIdentityKey, run: latestRun });
   // The list stays mounted across thread switches. Its first end pins on the
   // new thread must snap, not glide, even if that thread is mid-turn.
   const [settlingListIdentity, setSettlingListIdentity] = useState<string | null>(null);
   let paintedExpandedRunIds = expandedRunIds;
   let paintedExpandedWorkGroupIds = expandedWorkGroupIds;
   let paintedExpandedAttemptIds = expandedAttemptIds;
-  if (listIdentityRef.current !== listIdentityKey) {
-    listIdentityRef.current = listIdentityKey;
+  if (previousListIdentity !== listIdentityKey) {
+    setPreviousListIdentity(listIdentityKey);
     setPositionedThreadKey(null);
-    previousLatestRunRef.current = latestRun;
     setSettlingListIdentity(listIdentityKey);
     paintedExpandedRunIds = rememberedPosition?.disclosures?.runs ?? new Set();
     paintedExpandedWorkGroupIds = rememberedPosition?.disclosures?.workGroups ?? new Set();
@@ -715,11 +715,11 @@ const ConversationTimeline = memo(function ConversationTimeline({
   // Nested tool state shares the bounded thread-position cache.
   const workGroupViewState = useMemo<WorkGroupViewState>(
     () =>
-      rememberedPosition?.disclosures?.workGroupState ?? {
+      readTimelinePosition(listIdentityKey)?.disclosures?.workGroupState ?? {
         scrollPositions: new Map(),
         expandedEntries: new Set(),
       },
-    [listIdentityKey, rememberedPosition],
+    [listIdentityKey],
   );
   const [minimapStripMap] = useState(() => new Map<string, HTMLSpanElement>());
   const [disclosureToggleSettling, setDisclosureToggleSettling] = useState(false);
@@ -837,8 +837,11 @@ const ConversationTimeline = memo(function ConversationTimeline({
   // place; the next turn (or a reload, since this is local state) folds it.
 
   useEffect(() => {
-    const previous = previousLatestRunRef.current;
-    previousLatestRunRef.current = latestRun;
+    const previous =
+      previousLatestRunRef.current.threadKey === listIdentityKey
+        ? previousLatestRunRef.current.run
+        : latestRun;
+    previousLatestRunRef.current = { threadKey: listIdentityKey, run: latestRun };
     if (!latestRun || previous?.runId === undefined) {
       return;
     }
@@ -860,7 +863,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
       next.delete(previous.runId);
       return next;
     });
-  }, [latestRun]);
+  }, [latestRun, listIdentityKey]);
 
   // Find the fold that hides the match: imported turns have no run id but still
   // fold under a synthetic key, so the match's own run id cannot open them.
@@ -880,12 +883,15 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const activeFindRunId = activeFindMatch
     ? findFoldRunIds?.get(activeFindMatch.entryId)
     : undefined;
-  useEffect(() => {
-    if (!activeFindRunId) return;
-    setExpandedRunIds((previous) =>
-      previous.has(activeFindRunId) ? previous : new Set(previous).add(activeFindRunId),
-    );
-  }, [activeFindRunId]);
+  const [previousFindRunId, setPreviousFindRunId] = useState<RunId>();
+  if (previousFindRunId !== activeFindRunId) {
+    setPreviousFindRunId(activeFindRunId);
+    if (activeFindRunId) {
+      setExpandedRunIds((previous) =>
+        previous.has(activeFindRunId) ? previous : new Set(previous).add(activeFindRunId),
+      );
+    }
+  }
   const visibleExpandedRunIds = useMemo(() => {
     if (!activeFindRunId || paintedExpandedRunIds.has(activeFindRunId)) {
       return paintedExpandedRunIds;
@@ -896,12 +902,15 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const activeFindAttemptId = activeFindMatch
     ? timelineEntries.find((entry) => entry.id === activeFindMatch.entryId)?.attempt?.id
     : undefined;
-  useEffect(() => {
-    if (!activeFindAttemptId) return;
-    setExpandedAttemptIds((previous) =>
-      previous.has(activeFindAttemptId) ? previous : new Set(previous).add(activeFindAttemptId),
-    );
-  }, [activeFindAttemptId]);
+  const [previousFindAttemptId, setPreviousFindAttemptId] = useState<RunAttemptId>();
+  if (previousFindAttemptId !== activeFindAttemptId) {
+    setPreviousFindAttemptId(activeFindAttemptId);
+    if (activeFindAttemptId) {
+      setExpandedAttemptIds((previous) =>
+        previous.has(activeFindAttemptId) ? previous : new Set(previous).add(activeFindAttemptId),
+      );
+    }
+  }
   const visibleExpandedAttemptIds = useMemo(
     () =>
       activeFindAttemptId && !paintedExpandedAttemptIds.has(activeFindAttemptId)
@@ -1008,6 +1017,10 @@ const ConversationTimeline = memo(function ConversationTimeline({
     const list = listRef.current;
     if (!list) return;
     if (citationRequest !== null) {
+      // WORKAROUND: compiler flags citation takeover of external list restoration.
+      // Keep takeover after the mounted-list check at the layout boundary.
+      // Remove when effect inference recognizes external restoration ownership.
+      // oxlint-disable-next-line react/set-state-in-effect
       setPositionedThreadKey(listIdentityKey);
       return;
     }
@@ -1365,6 +1378,10 @@ const ConversationTimeline = memo(function ConversationTimeline({
       cancelAnimationFrame(frame);
       stopObserving();
     };
+    // WORKAROUND: compiler treats external content measurement triggers as unused.
+    // Keep row/column changes measuring overflow when the viewport box stays unchanged.
+    // Remove when effect dependency inference recognizes content layout triggers.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies
   }, [timelineViewportElement, rows.length, reportContentOverflow, chatWidth]);
 
   const sharedState = useMemo<TimelineRowSharedState>(
@@ -1690,11 +1707,16 @@ const ConversationTimeline = memo(function ConversationTimeline({
                       : TIMELINE_MAINTAIN_SCROLL_AT_END
                 }
                 maintainVisibleContentPosition={
-                  findActive ||
+                  // Disabling size compensation during Find leaves an index request's
+                  // pixel offset behind shrinking estimates. Fresh row measurements
+                  // can then exceed React's nested-update limit. Data anchoring stays
+                  // off because Find owns the result across history insertion.
                   citationPositioning ||
                   (restoringThreadPosition && rememberedPosition?.atEnd === false)
                     ? false
-                    : maintainVisibleContentPosition
+                    : findActive
+                      ? TIMELINE_FIND_VISIBLE_CONTENT_POSITION
+                      : maintainVisibleContentPosition
                 }
                 maintainScrollAtEndThreshold={1}
                 onScroll={handleScroll}
@@ -5071,29 +5093,33 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
 function useStableHandoffRuns(
   runs: ReadonlyArray<HandoffTimelineRun>,
 ): ReadonlyArray<HandoffTimelineRun> {
-  const prev = useRef<{
+  const [previous, setPrevious] = useState<{
     signature: string;
     value: ReadonlyArray<HandoffTimelineRun>;
   }>({ signature: "", value: EMPTY_TIMELINE_RUNS });
-  return useMemo(() => {
-    const signature = runs
-      .map(
-        (run) =>
-          `${run.id}\0${run.providerInstanceId}\0${run.ordinal}\0${run.modelSelection.instanceId}\0${run.modelSelection.model}`,
-      )
-      .join("\n");
-    if (signature === prev.current.signature) {
-      return prev.current.value;
-    }
+  const signature = useMemo(
+    () =>
+      runs
+        .map(
+          (run) =>
+            `${run.id}\0${run.providerInstanceId}\0${run.ordinal}\0${run.modelSelection.instanceId}\0${run.modelSelection.model}`,
+        )
+        .join("\n"),
+    [runs],
+  );
+  // Retain content-stable identities in React state. A speculative render
+  // must not overwrite the cache used by the last committed timeline.
+  if (signature !== previous.signature) {
     const value = runs.map((run) => ({
       id: run.id,
       ordinal: run.ordinal,
       providerInstanceId: run.providerInstanceId,
       modelSelection: run.modelSelection,
     }));
-    prev.current = { signature, value };
+    setPrevious({ signature, value });
     return value;
-  }, [runs]);
+  }
+  return previous.value;
 }
 
 /** Returns a structurally-shared copy of `rows`: for each row whose content

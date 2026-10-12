@@ -49,13 +49,17 @@ function ThreadSearchModeSwitch(props: {
         if (next === "exact" || next === "agent") props.onModeChange(next);
       }}
     >
-      <Toggle className="gap-1" value="exact">
-        <TextSearchIcon className="size-3.5" />
-        Exact
+      <Toggle value="exact">
+        <span className="inline-flex items-center gap-1">
+          <TextSearchIcon className="size-3.5" />
+          Exact
+        </span>
       </Toggle>
-      <Toggle className="gap-1" value="agent">
-        <SparklesIcon className="size-3.5" />
-        Agent
+      <Toggle value="agent">
+        <span className="inline-flex items-center gap-1">
+          <SparklesIcon className="size-3.5" />
+          Agent
+        </span>
       </Toggle>
     </ToggleGroup>
   );

@@ -282,6 +282,9 @@ export function wrapCommandForLinuxCgroup(
         "done < /proc/self/cgroup || exit 125",
         '[ "$actual" = "$expected" ] || exit 126',
         "unset ELECTRON_RUN_AS_NODE T3_ACP_CGROUP_WRAPPER",
+        // Bash bypasses the EXIT trap on failed exec unless execfail is set.
+        // Keep exec and its PID; other shells retain their existing trap behavior.
+        'if [ -n "${BASH_VERSION-}" ]; then shopt -s execfail || exit 125; fi',
         "trap 'exit 125' 0",
         'exec "$@"',
       ].join("\n"),

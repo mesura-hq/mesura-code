@@ -13,6 +13,7 @@ import {
 } from "@t3tools/client-runtime/work-log/item-detail";
 import { ExternalLinkIcon, GitBranchIcon, RotateCcwIcon } from "lucide-react";
 import { memo, Suspense, use, useMemo } from "react";
+import { occurrenceKeys } from "@t3tools/client-runtime/factory/occurrence-keys";
 
 import { useTheme } from "../../hooks/useTheme";
 import { cn } from "../../lib/utils";
@@ -222,6 +223,11 @@ function ToolCallBody(
 export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspectorProps) {
   const fetched = useFetchedTurnItem(props.projectedItem, props.environmentId);
   const item = fetched.item;
+  const fileChangeKeys = occurrenceKeys(
+    item.type === "file_change"
+      ? (item.changes?.map((change) => JSON.stringify(change)) ?? [])
+      : [],
+  );
   const outputState = fetched.output;
   const support = useV2ItemSupport({
     environmentId: props.environmentId,
@@ -281,7 +287,7 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
           {item.changes !== undefined && item.changes.length > 0 ? (
             <ul className="space-y-1 font-mono text-muted-foreground">
               {item.changes.map((change, index) => (
-                <li key={`${change.operation}:${change.path}:${index}`}>
+                <li key={fileChangeKeys[index]}>
                   {change.operation} {change.oldPath ? `${change.oldPath} → ` : ""}
                   {formatWorkspaceRelativePath(change.path, props.workspaceRoot)}
                   {change.fileType || change.mimeType

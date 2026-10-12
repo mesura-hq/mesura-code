@@ -56,7 +56,10 @@ export function parseMesuraProjectFile(contents: string): MesuraProjectFile | nu
 
 /** Build the local editor schema without claiming an upstream or published schema URL. */
 export function buildMesuraProjectFileJsonSchema(): Record<string, unknown> {
-  const document = Schema.toJsonSchemaDocument(Schema.toType(MesuraProjectFile));
+  // Editors flag unknown fields; runtime decoding still strips them for compatibility.
+  const document = Schema.toJsonSchemaDocument(Schema.toType(MesuraProjectFile), {
+    onExcessProperty: "error",
+  });
   return {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     $comment:

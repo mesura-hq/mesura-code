@@ -16,7 +16,16 @@ import { codexAuthHandoffUrl } from "@t3tools/shared/codexAuthHandoff";
 import { providerAuthReturnUrl } from "@t3tools/shared/providerAuthReturnUrl";
 import { isLoopbackHost } from "@t3tools/shared/preview";
 import { CheckIcon, ChevronRightIcon, ExternalLinkIcon } from "lucide-react";
-import { Children, useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import {
+  Children,
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { ensureLocalApi } from "../../localApi";
 import {
@@ -292,6 +301,9 @@ function ManagedCodexSetup({
     (auth?.phase === "succeeded" || awaitingProvider === "handoff");
   useEffect(() => {
     if (authenticated || auth?.phase === "failed" || auth?.phase === "cancelled") {
+      // WORKAROUND: the setter heuristic misses synchronization with external receipt transitions.
+      // A render reset clears a new request against the previous terminal receipt. Remove when the compiler recognizes external receipt synchronization.
+      // oxlint-disable-next-line react/set-state-in-effect -- reset only when the external auth receipt or authenticated snapshot changes
       setAwaitingProvider(null);
     }
   }, [authenticated, auth?.phase]);
@@ -381,6 +393,9 @@ function ManagedCodexSetup({
       (handoffQuery.data?.phase === "auth" &&
         ["failed", "cancelled"].includes(handoffQuery.data.state.phase))
     ) {
+      // WORKAROUND: the setter heuristic misses ordered external handoff synchronization.
+      // A render reset prevents the preceding effect from importing retained finished data on a query error. Remove when the compiler recognizes ordered receipt effects.
+      // oxlint-disable-next-line react/set-state-in-effect -- preserve import-before-disposal ordering when finished data and a query error coexist
       setError(
         handoffQuery.data?.phase === "auth"
           ? (handoffQuery.data.state.message ?? "ChatGPT sign-in could not finish. Try again.")
@@ -492,6 +507,9 @@ function ManagedCodexSetup({
       !provider?.setup?.canInstall
     )
       return;
+    // WORKAROUND: the setter heuristic misses consumption of an external auto-start command.
+    // A ref alone does not update startingAutomatically UI state; pendingRef guards dispatch. Remove when the compiler recognizes external command synchronization.
+    // oxlint-disable-next-line react/set-state-in-effect -- consuming auto-start updates the rendered state while setup's pendingRef guards provider dispatch
     setAutoStartHandled(true);
     onAutoStartConsumed();
     void setup();
@@ -547,6 +565,11 @@ function ManagedCodexSetup({
     [clientCallback, flowId, run, completeAuth, environmentId, instanceId],
   );
 
+  // Keep the original callback for clicks and the effect's callback-identity trigger.
+  const openPageFromEffect = useEffectEvent((authorizationUrl: string, open: typeof openPage) =>
+    open(authorizationUrl),
+  );
+
   useEffect(() => {
     if (!clientCallback || !url || !window.desktopBridge?.cancelProviderAuthCallback) return;
     return () => {
@@ -566,7 +589,7 @@ function ManagedCodexSetup({
       return;
     openedFlow.current = auth.flowId;
     openRequested.current = false;
-    if (!remoteWeb) void openPage(url);
+    if (!remoteWeb) void openPageFromEffect(url, openPage);
   }, [auth?.phase, auth?.flowId, url, openPage, remoteWeb]);
 
   const runtimeDescription =

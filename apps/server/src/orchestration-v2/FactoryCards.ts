@@ -44,8 +44,8 @@ export type FactoryCardTurnItem = Extract<
 export type FactoryCardRecordDecision =
   | {
       readonly _tag: "record";
-      /** The run the card is anchored to: the event carries its provider instance. */
-      readonly run: OrchestrationV2Run;
+      /** Null for imported history, which has no v2 provider run. */
+      readonly run: OrchestrationV2Run | null;
       readonly turnItem: FactoryCardTurnItem;
     }
   | { readonly _tag: "reject"; readonly reason: string };
@@ -121,10 +121,26 @@ export function planFactoryCardRecord(input: {
     };
   }
 
+  // A reattached v1 run can produce its first report without any v2 provider run.
+  // The imported run card proves the relationship; unrelated new cards still need a run.
+  const reportRunId = command.card.kind === "report" ? command.card.payload.runId : undefined;
+  const hasImportedReportRun =
+    reportRunId !== undefined &&
+    projection.turnItems.some(
+      (item) =>
+        item.type === "factory_card" &&
+        item.threadId === command.threadId &&
+        item.runId === null &&
+        item.card.kind === "run" &&
+        item.card.payload.threadId === command.threadId &&
+        item.card.payload.runId === reportRunId,
+    );
   const run =
     existing === undefined
-      ? factoryCardAnchorRun(projection.runs)
-      : projection.runs.find((candidate) => candidate.id === existing.runId);
+      ? (factoryCardAnchorRun(projection.runs) ?? (hasImportedReportRun ? null : undefined))
+      : existing.runId === null
+        ? null
+        : projection.runs.find((candidate) => candidate.id === existing.runId);
   if (run === undefined) {
     return {
       _tag: "reject",
@@ -138,16 +154,19 @@ export function planFactoryCardRecord(input: {
   const turnItem: FactoryCardTurnItem = {
     id: command.turnItemId,
     threadId: command.threadId,
-    runId: run.id,
-    nodeId: existing === undefined ? run.rootNodeId : existing.nodeId,
-    providerThreadId: existing === undefined ? run.providerThreadId : existing.providerThreadId,
+    // Imported cards keep their null anchor even after a provider run starts.
+    // Adopting that run would move historical cards into its execution history.
+    runId: run?.id ?? null,
+    nodeId: existing === undefined ? (run?.rootNodeId ?? null) : existing.nodeId,
+    providerThreadId:
+      existing === undefined ? (run?.providerThreadId ?? null) : existing.providerThreadId,
     providerTurnId: existing === undefined ? null : existing.providerTurnId,
     nativeItemRef: null,
     parentItemId: null,
     ordinal: existing?.ordinal ?? input.nextOrdinal,
     status: "completed",
     title: factoryCardTitle(command.card),
-    startedAt: existing?.startedAt ?? now,
+    startedAt: existing === undefined ? now : existing.startedAt,
     completedAt: now,
     updatedAt: now,
     type: "factory_card",

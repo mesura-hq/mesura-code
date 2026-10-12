@@ -62,6 +62,9 @@ const JsonRpcErrorResponse = Schema.Struct({
   id: Schema.Number,
   error: Schema.Struct({ code: Schema.Number, message: Schema.String }),
 });
+const decodeJsonRpcErrorResponse = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(JsonRpcErrorResponse),
+);
 const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 const encoder = new TextEncoder();
 const mockPeerPath = Effect.map(Effect.service(Path.Path), (path) =>
@@ -561,9 +564,7 @@ it.layer(NodeServices.layer)("effect-acp protocol", (it) => {
         }),
       );
 
-      const response = yield* Schema.decodeUnknownEffect(
-        Schema.fromJsonString(JsonRpcErrorResponse),
-      )(yield* Queue.take(output));
+      const response = yield* decodeJsonRpcErrorResponse(yield* Queue.take(output));
       assert.equal(response.id, 9);
       assert.equal(response.error.code, -32603);
     }),

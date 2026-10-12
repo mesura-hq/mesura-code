@@ -197,6 +197,7 @@ afterEach(async () => {
   document.querySelectorAll(FLASH_SELECTOR).forEach((anchor) => anchor.remove());
   window.getSelection()?.removeAllRanges();
   fixture.threads.clear();
+  fixture.threadStates.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });

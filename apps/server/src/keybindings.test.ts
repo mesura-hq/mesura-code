@@ -824,9 +824,16 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       });
 
       const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      // Upstream prepends backfilled defaults so persisted custom rules keep
+      // last-wins priority. The introduced j and ctrl+tab rules are already
+      // persisted here; backfilling mod+shift+] must precede those rules.
       assert.deepEqual(
-        persisted.filter((entry) => entry.command === "thread.next").map((entry) => entry.key),
-        ["j", "ctrl+tab", "mod+shift+]"],
+        persisted.filter((entry) => entry.command === "thread.next"),
+        [
+          { key: "mod+shift+]", command: "thread.next" },
+          { key: "j", command: "thread.next", when: "sidebarFocus && !sidebarSearchFocus" },
+          { key: "ctrl+tab", command: "thread.next", when: "!terminalFocus" },
+        ],
       );
     }).pipe(Effect.provide(layerKeybindings())),
   );

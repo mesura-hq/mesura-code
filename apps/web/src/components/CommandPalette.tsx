@@ -144,7 +144,7 @@ import {
   isUnsupportedWindowsProjectPath,
   resolveProjectPathForDispatch,
 } from "../lib/projectPaths";
-import { onOpenCommandPalette } from "../commandPaletteBus";
+import { isCommandPaletteOpen, onOpenCommandPalette } from "../commandPaletteBus";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import {
@@ -702,6 +702,13 @@ function CommandPaletteDialog(props: {
   readonly overlayBackHandlerRef: RefObject<ThreadSearchBackHandler | null>;
 }) {
   const composerHandleRef = useComposerHandleContext();
+  const mountedRef = useRef(false);
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   return (
     <CommandDialogPopup
@@ -725,11 +732,23 @@ function CommandPaletteDialog(props: {
       data-palette-mode={props.mode}
       data-testid="command-palette"
       finalFocus={() => {
-        // Fork: a row that opened the file manager hands it the keyboard.
-        if (keepFocusInFileManager()) return false;
-        // Fork: Vim mode returns to the chat, or to the composer's mode, it left.
-        if (restorePaletteOrigin()) return false;
-        composerHandleRef?.current?.focusAtEnd();
+        // Base UI calls finalFocus during cleanup, before React clears the
+        // chat subtree's inert attribute. Restore focus after that commit.
+        queueMicrotask(() => {
+          if (
+            !mountedRef.current ||
+            isCommandPaletteOpen() ||
+            document.querySelector(
+              '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]',
+            )
+          )
+            return;
+          // Fork: a row that opened the file manager hands it the keyboard.
+          if (keepFocusInFileManager()) return;
+          // Fork: Vim mode returns to the chat, or to the composer's mode, it left.
+          if (restorePaletteOrigin()) return;
+          composerHandleRef?.current?.focusAtEnd();
+        });
         return false;
       }}
       onBackdropPointerDown={() => {
@@ -906,13 +925,7 @@ function OpenCommandPaletteDialog(props: {
     [threadSearch.matches],
   );
   const [browseGeneration, setBrowseGeneration] = useState(0);
-  const browseNavigationRef = useRef<ReturnType<typeof createBrowseNavigationCoordinator> | null>(
-    null,
-  );
-  if (browseNavigationRef.current === null) {
-    browseNavigationRef.current = createBrowseNavigationCoordinator();
-  }
-  const browseNavigation = browseNavigationRef.current;
+  const [browseNavigation] = useState(createBrowseNavigationCoordinator);
   const [addProjectEnvironmentId, setAddProjectEnvironmentId] = useState<EnvironmentId | null>(
     null,
   );
@@ -1780,6 +1793,10 @@ function OpenCommandPaletteDialog(props: {
       run(option.environmentId);
     },
   });
+  // WORKAROUND: compiler treats a stored environment action callback as a render ref read.
+  // Keep action construction separate from invocation; render does not run the callback.
+  // Remove when refs inference distinguishes captured action callbacks from ref reads.
+  // oxlint-disable-next-line react/refs
   const addProjectEnvironmentItems = addProjectEnvironmentOptions.map((option) =>
     buildEnvironmentItem(
       option,
@@ -2247,6 +2264,10 @@ function OpenCommandPaletteDialog(props: {
   }
 
   if (newProjectEnvironmentOptions.length > 0) {
+    // WORKAROUND: compiler treats the stored new-project action as a render ref read.
+    // Keep this action invoking its live callback only when the user runs it.
+    // Remove when refs inference distinguishes action construction from invocation.
+    // oxlint-disable-next-line react/refs
     actionItems.push({
       kind: "action",
       value: "action:new-project",
@@ -2390,6 +2411,10 @@ function OpenCommandPaletteDialog(props: {
     clearOpenIntent();
     browseNavigation.invalidate();
     cloneLookupGeneration.current += 1;
+    // WORKAROUND: compiler flags synchronous setters consuming an external theme intent.
+    // Keep cancellation and theme-view state changes together at the layout boundary.
+    // Remove when effect inference recognizes external intent synchronization.
+    // oxlint-disable-next-line react/set-state-in-effect
     setIsRemoteProjectLookingUp(false);
     setAddProjectCloneFlow(null);
     setNewProjectFlow(null);
@@ -3181,6 +3206,10 @@ function OpenCommandPaletteDialog(props: {
     displayedGroups = [
       ...(newProjectMachineGroup ? [newProjectMachineGroup] : []),
       ...newProjectOptionGroups,
+      // WORKAROUND: compiler treats the existing-project action group as a ref.
+      // Keep spreading group data without invoking its captured event callback.
+      // Remove when refs inference distinguishes action groups from ref values.
+      // oxlint-disable-next-line react/refs
       ...(newProjectExistingGroup ? [newProjectExistingGroup] : []),
     ];
   } else if (addProjectCloneFlow?.step === "repository") {
@@ -3190,6 +3219,10 @@ function OpenCommandPaletteDialog(props: {
   } else if (isBrowsing) {
     displayedGroups = relativePathNeedsActiveProject ? [] : browseGroups;
   }
+  // WORKAROUND: compiler treats groups containing event callbacks as ref values.
+  // Keep the row builder reading item data without invoking those callbacks.
+  // Remove when refs inference distinguishes stored action callbacks from ref reads.
+  // oxlint-disable-next-line react/refs
   const resultRows = buildCommandPaletteRows(displayedGroups);
   const autoHighlightsFirstRow =
     !isBrowsing && !isRemoteProjectCloneFlow && newProjectFlow === null;

@@ -12,11 +12,14 @@ import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environ
 import { type EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { deriveTimelineEntriesWithState, deriveWorkLogEntries } from "../session-logic";
+import { deriveTimelineEntriesFromVisibleTurnItems } from "../session-logic";
+import { projectFactoryTurnItems } from "./factoryTestFixtures";
 import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
-import { makeFactoryPlanActivity } from "@t3tools/client-runtime/factory/testing";
+import {
+  makeFactoryCardTurnItem,
+  makeFactoryPlanPayload,
+} from "@t3tools/client-runtime/factory/testing";
 import { openFactoryPlanInRightPanel } from "./factoryRightPanel";
-import { deriveFactoryPlanTimelineItems } from "@t3tools/client-runtime/factory/plan-activities";
 
 const ref = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("factory-thread"));
 const planId = "factory-plan:plan-md";
@@ -74,14 +77,18 @@ describe("factory surface in the right panel (phase 2 fence)", () => {
   });
 
   it("never opens the Factory surface when a plan is presented, and counts Open as the user's choice", () => {
-    const activities = [makeFactoryPlanActivity({ createdAt: "2026-09-28T10:00:05.000Z" })];
-    deriveTimelineEntriesWithState(
-      [],
-      [],
-      deriveWorkLogEntries(activities),
-      null,
-      deriveFactoryPlanTimelineItems(activities),
-    );
+    const items = [
+      makeFactoryCardTurnItem({
+        id: planId,
+        threadId: ref.threadId,
+        createdAt: "2026-09-28T10:00:05.000Z",
+        card: { kind: "plan", payload: makeFactoryPlanPayload() },
+      }),
+    ];
+    deriveTimelineEntriesFromVisibleTurnItems({
+      visibleTurnItems: projectFactoryTurnItems(items),
+      optimisticMessages: [],
+    });
     expect(panelState().isOpen).toBe(false);
     expect(panelState().surfaces).toEqual([]);
 

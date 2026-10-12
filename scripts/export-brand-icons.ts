@@ -17,7 +17,9 @@ import type { PngOptions } from "sharp";
 import { BRAND_ASSET_PATHS, DEVELOPMENT_PUBLIC_ICON_OVERRIDES } from "./lib/brand-assets.ts";
 import { encodePngIco, readPngDimensions, WINDOWS_ICON_SIZES } from "./lib/icon-export.ts";
 
-export const PINNED_LIBVIPS_VERSION = "8.18.3";
+// Sharp 0.35.4 locks bundled libvips 8.18.6. Advance this pin only after
+// confirming that every committed generated asset keeps its exact bytes.
+export const PINNED_LIBVIPS_VERSION = "8.18.6";
 
 /**
  * The boot splash blocks first paint on this file, so it ships at 3x the 64px

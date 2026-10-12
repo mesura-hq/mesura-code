@@ -847,7 +847,7 @@ describe("AcpAdapterV2", () => {
       assert.isTrue(command.prompt.startsWith("/compact"));
       assert.notInclude(command.prompt, "<t3_code_instructions>");
       const firstDefault = yield* runTurn(1, defaultPolicy, "First default request.");
-      assert.include(firstDefault.prompt, "T3 Code interaction mode: Default");
+      assert.include(firstDefault.prompt, "Mesura Code interaction mode: Default");
       assert.include(firstDefault.prompt, "Mesura Code collaborative browser");
       assert.include(firstDefault.prompt, "T3 Code orchestration");
       assert.notInclude(
@@ -862,14 +862,14 @@ describe("AcpAdapterV2", () => {
 
       const planPolicy = policy("plan");
       const firstPlan = yield* runTurn(3, planPolicy, "Plan this change.");
-      assert.include(firstPlan.prompt, "T3 Code interaction mode: Plan");
+      assert.include(firstPlan.prompt, "Mesura Code interaction mode: Plan");
       assert.include(firstPlan.methods, "session/set_config_option");
       assert.include(
         (yield* runTurn(4, planPolicy, "Continue planning.")).prompt,
         "Continue planning.",
       );
       const restoredBuild = yield* runTurn(5, defaultPolicy, "Implement the change.");
-      assert.include(restoredBuild.prompt, "T3 Code interaction mode: Default");
+      assert.include(restoredBuild.prompt, "Mesura Code interaction mode: Default");
       assert.include(
         restoredBuild.methods,
         "session/set_config_option",
@@ -1548,7 +1548,7 @@ describe("AcpAdapterV2", () => {
       );
       assert.isTrue(items.some((item) => item.type === "user_message" && item.text.length === 0));
       assert.equal(
-        items.filter((item) => item.type === "assistant_message").at(-1)?.text,
+        items.findLast((item) => item.type === "assistant_message")?.text,
         "authoritative answer",
       );
       assert.isTrue(
@@ -3101,7 +3101,7 @@ describe("AcpAdapterV2", () => {
           settings: DEFAULT_GROK_SETTINGS,
           environment: {},
           hostPlatform: yield* HostProcess.Platform,
-          selfInvocation: yield* resolveSelfInvocation(),
+          selfInvocation,
           // Production Grok runtimes are wrapped by the x.ai prompt runtime.
           makeRuntime: (input) =>
             makeMockRuntime({ childProcessSpawner, mockAgentPath, protocolEvents })(input).pipe(
@@ -3148,7 +3148,7 @@ describe("AcpAdapterV2", () => {
         settings: DEFAULT_GROK_SETTINGS,
         environment: {},
         hostPlatform: yield* HostProcess.Platform,
-        selfInvocation: yield* resolveSelfInvocation(),
+        selfInvocation,
         // Production Grok runtimes are wrapped by the x.ai prompt runtime.
         makeRuntime: (input) =>
           makeMockRuntime({ childProcessSpawner, mockAgentPath, protocolEvents })(input).pipe(

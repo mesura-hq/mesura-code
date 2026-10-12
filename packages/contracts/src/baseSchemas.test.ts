@@ -25,6 +25,13 @@ const members = Shape.members;
 const fromWire = <S extends Schema.Top>(schema: S) =>
   Schema.decodeUnknownSync(Schema.toCodecJson(schema) as never) as (value: unknown) => S["Type"];
 
+const Named = ForwardCompatibleArray(Schema.Struct({ name: TrimmedNonEmptyString }));
+const encodeNamedJson = Schema.encodeUnknownSync(Schema.toCodecJson(Named));
+const isNamed = Schema.is(Named);
+// How context records are bounded before forward-compatible decoding.
+const Wrapped = Schema.Array(Schema.Unknown).pipe(Schema.decodeTo(Named));
+const encodeWrappedJson = Schema.encodeUnknownSync(Schema.toCodecJson(Wrapped));
+
 describe("ForwardCompatibleArray", () => {
   it("decodes elements through their own codec and drops ones it cannot read", () => {
     const decoded = fromWire(ForwardCompatibleArray(Shape))([
@@ -48,28 +55,16 @@ describe("ForwardCompatibleArray", () => {
     ]);
   });
 
-  const Named = ForwardCompatibleArray(Schema.Struct({ name: TrimmedNonEmptyString }));
-
   it("drops an element it cannot encode instead of failing the array", () => {
     const wire = JSON.parse(
-      JSON.stringify(
-        Schema.encodeUnknownSync(Schema.toCodecJson(Named))([
-          { name: "a" },
-          { name: " " },
-          { name: "b" },
-        ]),
-      ),
+      JSON.stringify(encodeNamedJson([{ name: "a" }, { name: " " }, { name: "b" }])),
     );
     expect(wire).toEqual([{ name: "a" }, { name: "b" }]);
     expect(fromWire(Named)(wire)).toEqual([{ name: "a" }, { name: "b" }]);
   });
 
   it("drops it too when a wrapper reads the encoded array as JSON values", () => {
-    // How context records are bounded before forward-compatible decoding.
-    const Wrapped = Schema.Array(Schema.Unknown).pipe(Schema.decodeTo(Named));
-    expect(
-      Schema.encodeUnknownSync(Schema.toCodecJson(Wrapped))([{ name: "a" }, { name: " " }]),
-    ).toEqual([{ name: "a" }]);
+    expect(encodeWrappedJson([{ name: "a" }, { name: " " }])).toEqual([{ name: "a" }]);
   });
 
   it("still drops the null holes a server on an earlier build sends", () => {
@@ -80,13 +75,13 @@ describe("ForwardCompatibleArray", () => {
   });
 
   it("does not accept holes as a decoded value", () => {
-    expect(Schema.is(Named)([undefined])).toBe(false);
+    expect(isNamed([undefined])).toBe(false);
     // A sparse array's missing index is a hole too.
     const sparse: Array<{ name: string }> = [{ name: "a" }];
     sparse.length = 2;
-    expect(Schema.is(Named)(sparse)).toBe(false);
+    expect(isNamed(sparse)).toBe(false);
     expect(() => Named.make(sparse)).toThrow();
-    expect(Schema.is(Named)([{ name: "a" }])).toBe(true);
+    expect(isNamed([{ name: "a" }])).toBe(true);
   });
 });
 

@@ -168,10 +168,11 @@ const endpoint = (name: string) =>
   readOrWarn(name, parseHttpUrl, `${name} is not an http or https URL, ${NOT_EXPORTED}`);
 
 // The specification reads enum values case-insensitively.
+const decodeOtlpProtocol = Schema.decodeUnknownOption(OtlpProtocol);
 const protocol = (name: string) =>
   readOrWarn(
     name,
-    (raw) => Schema.decodeUnknownOption(OtlpProtocol)(raw.toLowerCase()),
+    (raw) => decodeOtlpProtocol(raw.toLowerCase()),
     `${name} is not http/protobuf or http/json, ${NOT_EXPORTED}`,
   );
 

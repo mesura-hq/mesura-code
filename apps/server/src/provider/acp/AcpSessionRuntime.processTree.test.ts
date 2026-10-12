@@ -72,6 +72,27 @@ function processExists(pid: number): boolean {
   }
 }
 
+/** Models cgroup enrollment without requiring delegation from the test runner's scope. */
+function makeFakeLinuxCgroupLease(scratch: string): AcpSessionRuntime.AcpLinuxCgroupLease {
+  const leasePath = NodePath.join(scratch, "lease with spaces");
+  NodeFS.mkdirSync(leasePath);
+  NodeFS.writeFileSync(NodePath.join(leasePath, "cgroup.procs"), "");
+  const relativePath = AcpSessionRuntime.parseUnifiedCgroupPath(
+    NodeFS.readFileSync("/proc/self/cgroup", "utf8"),
+  );
+  expect(relativePath).toBeDefined();
+  if (relativePath === undefined) throw new Error("Expected a unified cgroup path for the test");
+  return {
+    contains: () => false,
+    exists: () => true,
+    path: leasePath,
+    relativePath,
+    kill: () => undefined,
+    populated: () => false,
+    remove: () => undefined,
+  };
+}
+
 describe("terminatePosixOwnedProcessTree", () => {
   it("parses unified cgroup paths and escaped cgroup2 mountinfo", () => {
     expect(AcpSessionRuntime.parseUnifiedCgroupPath("0::/user.slice/app.scope\n")).toBe(
@@ -239,23 +260,8 @@ describe("terminatePosixOwnedProcessTree", () => {
     const scratchRoot = NodePath.join(process.cwd(), "tmp");
     NodeFS.mkdirSync(scratchRoot, { recursive: true });
     const scratch = NodeFS.mkdtempSync(NodePath.join(scratchRoot, "acp-cgroup-wrapper-fake-"));
-    const leasePath = NodePath.join(scratch, "lease with spaces");
     const outputPath = NodePath.join(scratch, "argv output");
-    NodeFS.mkdirSync(leasePath);
-    NodeFS.writeFileSync(NodePath.join(leasePath, "cgroup.procs"), "");
-    const relativePath = AcpSessionRuntime.parseUnifiedCgroupPath(
-      NodeFS.readFileSync("/proc/self/cgroup", "utf8"),
-    );
-    expect(relativePath).toBeDefined();
-    const lease: AcpSessionRuntime.AcpLinuxCgroupLease = {
-      contains: () => false,
-      exists: () => true,
-      path: leasePath,
-      relativePath: relativePath!,
-      kill: () => undefined,
-      populated: () => false,
-      remove: () => undefined,
-    };
+    const lease = makeFakeLinuxCgroupLease(scratch);
     const packagedExecPath = vi.spyOn(process, "execPath", "get").mockReturnValue("/bin/sh");
     try {
       const wrapped = AcpSessionRuntime.wrapCommandForLinuxCgroup(lease, "/bin/sh", [
@@ -279,7 +285,7 @@ describe("terminatePosixOwnedProcessTree", () => {
       expect(NodeFS.readFileSync(outputPath, "utf8")).toBe(
         "packaged-target\nspace value\nsingle'quote\ndouble\"quote\n\n\n",
       );
-      expect(NodeFS.readFileSync(NodePath.join(leasePath, "cgroup.procs"), "utf8")).toMatch(
+      expect(NodeFS.readFileSync(NodePath.join(lease.path, "cgroup.procs"), "utf8")).toMatch(
         /^\d+\n$/,
       );
 
@@ -310,6 +316,59 @@ describe("terminatePosixOwnedProcessTree", () => {
       expect(missingTargetResult.status, missingTargetResult.stderr).toBe(125);
     } finally {
       packagedExecPath.mockRestore();
+      NodeFS.rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    { failure: "missing interpreter", shebang: "#!/nonexistent-t3-acp-interpreter", mode: 0o755 },
+    { failure: "execute permission denied", shebang: "#!/bin/sh", mode: 0o644 },
+  ])("normalizes ACP kernel exec failure for $failure to exact status 125", ({ shebang, mode }) => {
+    if (HostProcess.Platform.defaultValue() !== "linux") return;
+    const scratchRoot = NodePath.join(process.cwd(), "tmp");
+    NodeFS.mkdirSync(scratchRoot, { recursive: true });
+    const scratch = NodeFS.mkdtempSync(NodePath.join(scratchRoot, "acp-exec-failure-"));
+    try {
+      const lease = makeFakeLinuxCgroupLease(scratch);
+      const target = NodePath.join(scratch, "target with spaces");
+      const sentinel = NodePath.join(scratch, "target executed");
+      // A missing interpreter fails after executable lookup succeeds. This
+      // catches repairs that only check whether the target exists or is executable.
+      NodeFS.writeFileSync(target, `${shebang}\nprintf executed > "$1"\n`, { mode });
+      const wrapped = AcpSessionRuntime.wrapCommandForLinuxCgroup(lease, target, [sentinel]);
+      const result = NodeChildProcess.spawnSync(wrapped.command, wrapped.args, {
+        encoding: "utf8",
+      });
+      expect(result.status, result.stderr).toBe(125);
+      expect(NodeFS.existsSync(sentinel)).toBe(false);
+      expect(NodeFS.readFileSync(NodePath.join(lease.path, "cgroup.procs"), "utf8")).toBe(
+        `${result.pid}\n`,
+      );
+    } finally {
+      NodeFS.rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves the ACP enrolled PID and target exit status through successful exec", () => {
+    if (HostProcess.Platform.defaultValue() !== "linux") return;
+    const scratchRoot = NodePath.join(process.cwd(), "tmp");
+    NodeFS.mkdirSync(scratchRoot, { recursive: true });
+    const scratch = NodeFS.mkdtempSync(NodePath.join(scratchRoot, "acp-exec-pid-"));
+    try {
+      const lease = makeFakeLinuxCgroupLease(scratch);
+      const wrapped = AcpSessionRuntime.wrapCommandForLinuxCgroup(lease, "/bin/sh", [
+        "-c",
+        'printf "%s\\n" "$$"; exit 42',
+      ]);
+      const result = NodeChildProcess.spawnSync(wrapped.command, wrapped.args, {
+        encoding: "utf8",
+      });
+      expect(result.status, result.stderr).toBe(42);
+      expect(result.stdout).toBe(`${result.pid}\n`);
+      expect(NodeFS.readFileSync(NodePath.join(lease.path, "cgroup.procs"), "utf8")).toBe(
+        `${result.pid}\n`,
+      );
+    } finally {
       NodeFS.rmSync(scratch, { recursive: true, force: true });
     }
   });

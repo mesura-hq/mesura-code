@@ -54,267 +54,82 @@
  */
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
-import { act, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import {
-  createMemoryHistory,
-  createRootRoute,
-  createRoute,
-  createRouter,
-  Outlet,
-} from "@tanstack/react-router";
+import { act } from "react";
+import type { Root } from "react-dom/client";
+import type { Editor } from "@tiptap/core";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import {
-  EnvironmentId,
-  MessageId,
-  ProjectId,
-  ProviderInstanceId,
-  ThreadId,
-} from "@t3tools/contracts";
+import { ThreadId } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { Thread } from "./types";
-import type { AppRouter } from "./router";
 
-const fixture = vi.hoisted(() => ({
-  threads: new Map<string, Thread>(),
-  openThreadId: "",
-  vimMode: false,
-  empty: [],
-  threadListeners: new Set<() => void>(),
-  /** The ranges the key surfaces last painted, by highlight name. */
-  highlights: new Map<string, ReadonlyArray<Range>>(),
-  /** The stubbed viewport top of `GLYPH_LINE`; a scroll moves it. */
-  glyphTop: 200,
-  /** A horizontal shift of `GLYPH_LINE`, as a pane resize reflows the column. */
-  glyphShift: 0,
-  /** The composer editor's stubbed box: the whole window unless a spec scrolls it. */
-  editorBox: null as { left: number; top: number; width: number; height: number } | null,
-  /** Every live `ResizeObserver` and the elements it observes. */
-  resizeObservers: new Map<ResizeObserverCallback, Set<Element>>(),
-  project: {
-    id: "narrow-cursor-project",
-    environmentId: "narrow-cursor-environment",
-    title: "Narrow cursor",
-    workspaceRoot: "/tmp/narrow-cursor",
-    scripts: [],
-    createdAt: "2026-10-08T12:00:00.000Z",
-    defaultModelSelection: { instanceId: "codex", model: "gpt-5.4" },
-  },
-  environments: [
-    {
-      environmentId: "narrow-cursor-environment",
-      label: "Fence environment",
-      connection: { phase: "connected" },
-      entry: {
-        target: {
-          _tag: "PrimaryConnectionTarget",
-          label: "Fence environment",
-          connectionId: "saved:narrow-cursor-environment",
-        },
-      },
-      displayUrl: null,
-      relayManaged: false,
-      serverConfig: {
-        settings: {},
-        environment: {
-          capabilities: { threadSettlement: true, threadPinning: true },
-          platform: { machine: "laptop" },
-        },
-        providers: [
-          {
-            instanceId: "codex",
-            driver: "codex",
-            enabled: true,
-            installed: true,
-            status: "ready",
-            version: null,
-            auth: { status: "authenticated" },
-            checkedAt: "2026-10-08T12:00:00.000Z",
-            models: [],
-            slashCommands: [],
-            skills: [],
-          },
-        ],
-      },
-    },
-  ],
-}));
+// The boundaries the fixture replaces: see `test/appRootFenceMocks.tsx`.
+const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("./state/entities", async (original) => (await fenceMocks()).mockEntities(original));
+vi.mock("./state/environments", async (original) =>
+  (await fenceMocks()).mockEnvironments(original),
+);
+vi.mock("./state/query", async () => (await fenceMocks()).mockQuery());
+vi.mock("./state/queries", async (original) => (await fenceMocks()).mockQueries(original));
+vi.mock("./state/threads", async (original) => (await fenceMocks()).mockThreads(original));
+vi.mock("./state/use-atom-command", async () => (await fenceMocks()).mockAtomCommand());
+vi.mock("./state/use-atom-query-runner", async () => (await fenceMocks()).mockAtomQueryRunner());
+vi.mock("./state/server", async (original) => (await fenceMocks()).mockServer(original));
+vi.mock("./hooks/useSettings", async (original) => (await fenceMocks()).mockSettings(original));
+vi.mock("./hooks/useHandleNewThread", async () => (await fenceMocks()).mockHandleNewThread());
+vi.mock("./hooks/useThreadActions", async () => (await fenceMocks()).mockThreadActions());
+vi.mock("./components/Sidebar", async () => (await fenceMocks()).mockSidebar());
+vi.mock("./components/LegacySidebar", async () =>
+  (await fenceMocks()).mockRendersNothing("default"),
+);
+vi.mock("./components/preview/PreviewAutomationHosts", async () =>
+  (await fenceMocks()).mockRendersNothing("PreviewAutomationHosts"),
+);
+vi.mock("./browser/ElectronBrowserHost", async () =>
+  (await fenceMocks()).mockRendersNothing("ElectronBrowserHost"),
+);
+vi.mock("./components/QuitHoldOverlay", async () =>
+  (await fenceMocks()).mockRendersNothing("QuitHoldOverlay"),
+);
+vi.mock("./components/chat/ChatHeader", async () =>
+  (await fenceMocks()).mockRendersNothing("ChatHeader"),
+);
+vi.mock("./components/BranchToolbar", async () =>
+  (await fenceMocks()).mockRendersNothing("BranchToolbar"),
+);
+vi.mock("./components/files/mesuraFileManager/MesuraFileManagerLayer", async () =>
+  (await fenceMocks()).mockFileManagerLayer(),
+);
+vi.mock("./keys/highlights", async () => (await fenceMocks()).mockHighlights());
+vi.mock("@legendapp/list/react", async () => (await fenceMocks()).mockLegendList());
 
-const success = () => Promise.resolve({ _tag: "Success" as const, value: { providers: [] } });
+vi.mock("@t3tools/client-runtime/state/session", async (original) =>
+  (await fenceMocks()).mockRuntimeSession(original),
+);
 
-vi.mock("./state/entities", async (importOriginal) => {
-  const { useSyncExternalStore } = await import("react");
-  const threadFor = (ref: { readonly threadId: string } | null | undefined) =>
-    (ref ? fixture.threads.get(ref.threadId) : undefined) ?? null;
-  const useFixtureThread = (ref: { readonly threadId: string } | null | undefined) =>
-    useSyncExternalStore(
-      (listener) => {
-        fixture.threadListeners.add(listener);
-        return () => {
-          fixture.threadListeners.delete(listener);
-        };
-      },
-      () => threadFor(ref),
-    );
-  return {
-    ...(await importOriginal<typeof import("./state/entities")>()),
-    useThread: useFixtureThread,
-    readThread: threadFor,
-    useThreadShell: useFixtureThread,
-    useThreadRefs: () => fixture.empty,
-    useThreadShells: () => fixture.empty,
-    useProjects: () => fixture.empty,
-    useProject: () => fixture.project,
-  };
-});
-vi.mock("./state/environments", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./state/environments")>()),
-  useEnvironments: () => ({ environments: fixture.environments, isReady: true }),
-  usePrimaryEnvironment: () => null,
-}));
-vi.mock("./state/query", () => ({
-  useEnvironmentQuery: () => ({
-    data: null,
-    error: null,
-    isPending: false,
-    isSuccess: false,
-    refresh: () => undefined,
-  }),
-}));
-vi.mock("./state/queries", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./state/queries")>()),
-  useThreadSearch: () => ({ matches: [], isPending: false }),
-  useProjectPathSearch: () => ({ entries: [], isPending: false, error: null, truncated: false }),
-}));
-vi.mock("./state/threads", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./state/threads")>();
-  const { EMPTY_ENVIRONMENT_THREAD_STATE } = await import("@t3tools/client-runtime/state/threads");
-  return { ...actual, useEnvironmentThread: () => EMPTY_ENVIRONMENT_THREAD_STATE };
-});
-vi.mock("./state/use-atom-command", () => ({ useAtomCommand: () => success }));
-vi.mock("./state/use-atom-query-runner", () => ({ useAtomQueryRunner: () => success }));
-// The chords the app ships, as a keybindings file with no user rules resolves them.
-vi.mock("./state/server", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./state/server")>();
-  const { Atom } = await import("effect/reactivity");
-  const { DEFAULT_RESOLVED_KEYBINDINGS } = await import("@t3tools/shared/keybindings");
-  return { ...actual, primaryServerKeybindingsAtom: Atom.make(() => DEFAULT_RESOLVED_KEYBINDINGS) };
-});
-vi.mock("./hooks/useSettings", async (importOriginal) => {
-  const { DEFAULT_SERVER_SETTINGS } = await import("@t3tools/contracts");
-  const { DEFAULT_CLIENT_SETTINGS } = await import("@t3tools/contracts/settings");
-  const clientSettings = () => ({ ...DEFAULT_CLIENT_SETTINGS, vimMode: fixture.vimMode });
-  return {
-    ...(await importOriginal<typeof import("./hooks/useSettings")>()),
-    useEnvironmentSettings: () => ({ ...clientSettings(), ...DEFAULT_SERVER_SETTINGS }),
-    useClientSettings: (select?: (value: typeof DEFAULT_CLIENT_SETTINGS) => unknown) =>
-      select ? select(clientSettings()) : clientSettings(),
-    useClientSettingsHydrated: () => true,
-    useLegacySidebarEnabled: () => false,
-  };
-});
-vi.mock("./hooks/useHandleNewThread", async () => {
-  const { scopeThreadRef: scope } = await import("@t3tools/client-runtime/environment");
-  const { EnvironmentId: Env, ThreadId: Thr } = await import("@t3tools/contracts");
-  return {
-    useNewThreadHandler: () => success,
-    useHandleNewThread: () => ({
-      activeDraftThread: null,
-      activeThread: fixture.threads.get(fixture.openThreadId) ?? null,
-      defaultProjectRef: null,
-      handleNewThread: success,
-      routeDraftId: null,
-      routeThreadRef: scope(Env.make("narrow-cursor-environment"), Thr.make(fixture.openThreadId)),
-    }),
-  };
-});
-vi.mock("./hooks/useThreadActions", () => ({
-  useThreadActions: () => ({
-    settleThread: success,
-    pinThread: success,
-    confirmAndUnpinThread: success,
-  }),
-}));
-// The sidebar's thread list, reduced to the open thread's row.
-vi.mock("./components/Sidebar", () => ({
-  default: () => (
-    <ul>
-      <li data-thread-item="" data-thread-key="narrow-cursor-row">
-        <div role="button" tabIndex={0} data-testid="sidebar-thread-row">
-          Narrow cursor
-        </div>
-      </li>
-    </ul>
-  ),
-}));
-vi.mock("./components/LegacySidebar", () => ({ default: () => null }));
-vi.mock("./components/preview/PreviewAutomationHosts", () => ({
-  PreviewAutomationHosts: () => null,
-}));
-vi.mock("./browser/ElectronBrowserHost", () => ({ ElectronBrowserHost: () => null }));
-vi.mock("./components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }));
-vi.mock("./components/chat/ChatHeader", () => ({ ChatHeader: () => null }));
-vi.mock("./components/BranchToolbar", () => ({ BranchToolbar: () => null }));
-vi.mock("./components/files/mesuraFileManager/MesuraFileManagerLayer", () => ({
-  MesuraFileManagerLayer: () => null,
-}));
-// happy-dom has no CSS Custom Highlight API. Record what would be painted.
-vi.mock("./keys/highlights", () => ({
-  paintHighlight: (name: string, ranges: readonly Range[]) => {
-    fixture.highlights.set(
-      name,
-      ranges.map((range) => range.cloneRange()),
-    );
-  },
-}));
-// happy-dom has no layout. Keep routing and timeline projection real, and
-// replace only the virtual list's measurement boundary. Its wrapper is the
-// timeline's scroll container: taller content than its own height, and
-// `overflow-y: auto` through the stubbed computed style.
-vi.mock("@legendapp/list/react", () => ({
-  LegendList: ({
-    data,
-    renderItem,
-    ListHeaderComponent,
-    ListFooterComponent,
-  }: {
-    data: Array<{ id: string }>;
-    renderItem: (input: { item: { id: string } }) => ReactNode;
-    ListHeaderComponent?: ReactNode;
-    ListFooterComponent?: ReactNode;
-  }) => (
-    <div
-      data-fence-scroller=""
-      ref={(element) => {
-        if (!element) return;
-        Object.defineProperty(element, "scrollHeight", { configurable: true, value: 2000 });
-        Object.defineProperty(element, "clientHeight", { configurable: true, value: 500 });
-      }}
-    >
-      {ListHeaderComponent}
-      {data.map((item) => (
-        <div key={item.id}>{renderItem({ item })}</div>
-      ))}
-      {ListFooterComponent}
-    </div>
-  ),
-}));
-
-import { AppRoot } from "./AppRoot";
-import { AppSidebarLayout } from "./components/AppSidebarLayout";
-import { CommandPalette } from "./components/CommandPalette";
-import ChatView from "./components/ChatView";
 import { useComposerDraftStore } from "./composerDraftStore";
 import { composerEditorElement } from "./keys/focusScope";
 import { installKeyEngine } from "./keys/keyEngine";
 import { readKeyEngineSnapshot } from "./keys/keyEngineStore";
 import { readAssistantText } from "./lib/assistantTextSelection";
-import { Route as ChatLayoutRoute } from "./routes/_chat";
+import { caretRectAt, domPointAt } from "./keys/composer/composerProjection";
 
-const environmentId = EnvironmentId.make("narrow-cursor-environment");
-const now = "2026-10-08T12:00:00.000Z";
+import {
+  addFenceThread,
+  fenceEnvironmentId as environmentId,
+  makeMessage,
+  renderFenceApp,
+  type FenceRouter,
+} from "./test/appRootFenceApp";
+import { appRootFence, FENCE_SCROLLER_TESTID } from "./test/appRootFenceMocks";
+const fixture = Object.assign(appRootFence, {
+  glyphTop: 200,
+  glyphShift: 0,
+  editorBox: null as { left: number; top: number; width: number; height: number } | null,
+  paragraphBoxes: new Map<Element, DOMRect>(),
+  resizeObservers: new Map<ResizeObserverCallback, Set<Element>>(),
+});
+
 let root: Root | undefined;
-let router: ReturnType<typeof createFixtureRouter> | undefined;
+let router: FenceRouter | undefined;
 let container: HTMLDivElement;
 let threadSequence = 0;
 
@@ -417,7 +232,7 @@ function stubLayout() {
     // The timeline's scroll container, and the composer editor, which
     // scrolls inside its host (`overflow-y-auto`).
     if (
-      element.hasAttribute("data-fence-scroller") ||
+      element.getAttribute("data-testid") === FENCE_SCROLLER_TESTID ||
       element.getAttribute("data-testid") === "composer-editor"
     ) {
       return overriddenStyle(style, { "overflow-y": "auto" });
@@ -428,6 +243,8 @@ function stubLayout() {
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
     this: HTMLElement,
   ) {
+    const paragraphBox = fixture.paragraphBoxes.get(this);
+    if (paragraphBox) return paragraphBox;
     const box = fixture.editorBox;
     if (box && this.getAttribute("data-testid") === "composer-editor") {
       return new DOMRect(box.left, box.top, box.width, box.height);
@@ -458,7 +275,16 @@ class FixtureResizeObserver {
 /** Reports a size change of every observed element, as a pane resize does. */
 function resizeObservedElements() {
   for (const [callback, targets] of fixture.resizeObservers) {
-    const entries = [...targets].map((target) => ({ target }) as ResizeObserverEntry);
+    const entries = [...targets].map(
+      (target) =>
+        ({
+          target,
+          borderBoxSize: [{ inlineSize: 1000, blockSize: 800 }],
+          contentBoxSize: [{ inlineSize: 1000, blockSize: 800 }],
+          devicePixelContentBoxSize: [],
+          contentRect: target.getBoundingClientRect(),
+        }) as ResizeObserverEntry,
+    );
     if (entries.length > 0) callback(entries, {} as ResizeObserver);
   }
 }
@@ -480,50 +306,14 @@ beforeAll(() => {
   installKeyEngine();
 });
 
-function makeMessage(id: string, role: "user" | "assistant", text: string) {
-  return {
-    id: MessageId.make(id),
-    role,
-    text,
-    turnId: null,
-    streaming: false,
-    createdAt: now,
-    updatedAt: now,
-  };
-}
-
 /** Registers a thread whose reply is `GLYPH_LINE`, with an id no other test uses. */
 function addGlyphThread(label: string): ThreadId {
   threadSequence += 1;
-  const id = ThreadId.make(`narrow-cursor-${label}-${threadSequence}`);
-  fixture.threads.set(id, {
-    id,
-    environmentId,
-    projectId: ProjectId.make("narrow-cursor-project"),
-    title: `Narrow cursor ${label}`,
-    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    session: null,
-    messages: [
-      makeMessage(`${id}-user`, "user", `Question for ${label}`),
-      makeMessage(`${id}-assistant`, "assistant", GLYPH_LINE),
-    ],
-    proposedPlans: [],
-    checkpoints: [],
-    pullRequests: [],
-    createdAt: now,
-    updatedAt: now,
-    archivedAt: null,
-    settledOverride: null,
-    settledAt: null,
-    deletedAt: null,
-    latestTurn: null,
-    branch: null,
-    worktreePath: null,
-    activities: [],
-  } as unknown as Thread);
-  return id;
+  const id = `narrow-cursor-${label}-${threadSequence}`;
+  return addFenceThread(id, `narrow-cursor ${label}`, [
+    makeMessage(`${id}-user`, "user", `Question for ${label}`),
+    makeMessage(`${id}-assistant`, "assistant", GLYPH_LINE),
+  ]);
 }
 
 beforeEach(() => {
@@ -532,6 +322,7 @@ beforeEach(() => {
   fixture.glyphTop = 200;
   fixture.glyphShift = 0;
   fixture.editorBox = { left: 0, top: 0, width: 10000, height: 10000 };
+  fixture.paragraphBoxes.clear();
   fixture.resizeObservers.clear();
   fixture.highlights.clear();
   stubLayout();
@@ -545,6 +336,7 @@ afterEach(async () => {
   router = undefined;
   container.remove();
   fixture.threads.clear();
+  fixture.threadStates.clear();
   document.documentElement.classList.remove("dark");
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -558,51 +350,12 @@ async function settle(): Promise<void> {
   }
 }
 
-function createFixtureRouter(firstThreadId: ThreadId) {
-  const route = createRootRoute({
-    component: () => (
-      <CommandPalette>
-        <AppSidebarLayout>
-          <Outlet />
-        </AppSidebarLayout>
-      </CommandPalette>
-    ),
-  });
-  const chatLayout = createRoute({
-    getParentRoute: () => route,
-    id: "_chat",
-    component: ChatLayoutRoute.options.component!,
-  });
-  const thread = createRoute({
-    getParentRoute: () => chatLayout,
-    path: "/$environmentId/$threadId",
-    component: function FixtureThreadRoute() {
-      const params = thread.useParams();
-      return (
-        <ChatView
-          environmentId={EnvironmentId.make(params.environmentId)}
-          threadId={ThreadId.make(params.threadId)}
-          routeKind="server"
-        />
-      );
-    },
-  });
-  return createRouter({
-    routeTree: route.addChildren([chatLayout.addChildren([thread])]),
-    history: createMemoryHistory({ initialEntries: [`/${environmentId}/${firstThreadId}`] }),
-  });
-}
-
-/** Mounts the app on `threadId` with Vim mode on, the chat holding the keyboard. */
+/** Mounts the real app on a v2 thread with the chat holding the keyboard. */
 async function mountApp(threadId: ThreadId) {
-  fixture.vimMode = true;
-  fixture.openThreadId = threadId;
-  router = createFixtureRouter(threadId);
-  await router.load();
-  await act(async () => {
-    root = createRoot(container);
-    root.render(<AppRoot router={router as unknown as AppRouter} />);
-  });
+  ({ root, router } = await renderFenceApp(container, threadId, { vimMode: true }));
+  const scroller = chatScroller();
+  Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 2000 });
+  Object.defineProperty(scroller, "clientHeight", { configurable: true, value: 500 });
   await settle();
   (document.activeElement as HTMLElement | null)?.blur?.();
 }
@@ -681,7 +434,7 @@ async function chatCursorOnGlyphLine(label: string) {
 }
 
 function chatScroller(): HTMLElement {
-  const scroller = document.querySelector<HTMLElement>("[data-fence-scroller]");
+  const scroller = document.querySelector<HTMLElement>(`[data-testid="${FENCE_SCROLLER_TESTID}"]`);
   expect(scroller, "the timeline's scroll container is mounted").not.toBeNull();
   return scroller!;
 }
@@ -1327,4 +1080,121 @@ describe("narrow glyph cursor fence: the composer", () => {
     expect(overlay!.classList.contains("bg-sky-500/80"), "its colour class").toBe(true);
     expect(overlay!.textContent).toBe("");
   });
+});
+
+// Tiptap can leave an empty Text child before the trailing placeholder break.
+// The caret fallback must use the paragraph's box rather than calling an Element API on Text.
+// Two empty paragraphs project to "\n": offset zero is the first paragraph,
+// and offset one is the second. The old offset-zero assertion pinned the wrong line.
+it("narrow glyph cursor fence regression: an empty Tiptap paragraph uses its box when the caret precedes an empty Text child", async () => {
+  await mountApp(addGlyphThread("empty-text-child"));
+  const editor = (composer() as HTMLElement & { editor: Editor }).editor;
+  await act(async () => {
+    editor.commands.setContent({
+      type: "doc",
+      content: [{ type: "paragraph" }, { type: "paragraph" }],
+    });
+  });
+  const paragraphs = stubComposerParagraphBoxes();
+  const first = paragraphs[0]!;
+  const paragraph = paragraphs[1]!;
+  expect(paragraph, "the real Tiptap editor renders an empty paragraph").not.toBeNull();
+  paragraph.prepend(document.createTextNode(""));
+  expect(domPointAt(composer(), 0)).toEqual({ node: first, offset: 0 });
+  expect(caretRectAt(composer(), 0)).toMatchObject({ left: 51, top: 72, width: 0 });
+  expect(domPointAt(composer(), 1)).toEqual({ node: paragraph, offset: 0 });
+  const caret = caretRectAt(composer(), 1);
+  expect(caret).toMatchObject({ left: 51, top: 96, width: 0 });
+  expect(caret!.height).toBeGreaterThan(0);
+});
+
+/** Supply only layout measurements; Tiptap owns the paragraph and placeholder DOM. */
+function stubComposerParagraphBoxes() {
+  fixture.editorBox = { left: 51, top: 72, width: 100, height: 200 };
+  const paragraphs = [...composer().querySelectorAll("p")];
+  paragraphs.forEach((paragraph, index) => {
+    const box = new DOMRect(51, 72 + index * 24, 100, 24);
+    fixture.paragraphBoxes.set(paragraph, box);
+    for (const placeholder of paragraph.querySelectorAll("br.ProseMirror-trailingBreak")) {
+      fixture.paragraphBoxes.set(placeholder, box);
+    }
+  });
+  return paragraphs;
+}
+
+async function expectEmptyCursorAndGutter(top: number, gutterTops: number[]) {
+  expect(readKeyEngineSnapshot()).toMatchObject({ scope: "composer", mode: "NORMAL" });
+  const overlays = blockCursorOverlays();
+  expect(overlays, "the NORMAL cursor remains visible on the empty paragraph").toHaveLength(1);
+  expect(overlays[0]!.textContent).toBe("");
+  expect(inlinePx(overlays[0]!, "top")).toBe(top);
+  await press(SPACE);
+  await press(key("e"));
+  expect(composerExpanded()).toBe(true);
+  const hostTop = composer().parentElement!.getBoundingClientRect().top;
+  const gutter = [...composer().parentElement!.querySelectorAll<HTMLElement>("span.tabular-nums")];
+  expect(gutter.map((line) => Number.parseFloat(line.style.top) + hostTop)).toEqual(gutterTops);
+}
+
+it("narrow glyph cursor fence regression: NORMAL cursor and gutter start on the first empty paragraph", async () => {
+  await composerNormalWith("first-empty-paragraph", "\n\n");
+  const paragraphs = stubComposerParagraphBoxes();
+  expect(paragraphs).toHaveLength(3);
+  await press(key("g"));
+  await press(key("g"));
+  await expectEmptyCursorAndGutter(72, [72, 96, 120]);
+});
+
+it("narrow glyph cursor fence regression: NORMAL cursor and gutter remain visible in a single empty paragraph", async () => {
+  await composerNormalWith("single-empty-paragraph", "");
+  expect(stubComposerParagraphBoxes()).toHaveLength(1);
+  await press(key("h"));
+  await expectEmptyCursorAndGutter(72, [72]);
+});
+
+it("narrow glyph cursor fence guard: collapsed DOM offsets preserve text, inline tokens, hard breaks and paragraph separators", async () => {
+  await mountApp(addGlyphThread("collapsed-dom-offsets"));
+  const editor = (composer() as HTMLElement & { editor: Editor }).editor;
+  await act(async () => {
+    editor.commands.setContent(
+      {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: "A" },
+              { type: "composer-mention", attrs: { path: "AGENTS.md", source: "@AGENTS.md" } },
+              { type: "hardBreak" },
+              { type: "text", text: "B" },
+            ],
+          },
+          { type: "paragraph" },
+          { type: "paragraph", content: [{ type: "text", text: "C" }] },
+        ],
+      },
+      { emitUpdate: false },
+    );
+  });
+  const [first, empty, last] = [...composer().querySelectorAll("p")];
+  const chip = first!.querySelector('[contenteditable="false"]')!;
+  const hardBreak = first!.querySelector("br")!;
+  expect(chip).not.toBeNull();
+  expect(hardBreak.classList.contains("ProseMirror-trailingBreak")).toBe(false);
+  // The collapsed text is A + token + hard break + B + separator + separator + C.
+  const points = [
+    { node: first!.firstChild!, offset: 0 },
+    { node: first!.firstChild!, offset: 1 },
+    { node: first!, offset: [...first!.childNodes].indexOf(hardBreak) },
+    { node: hardBreak.nextSibling!, offset: 0 },
+    { node: hardBreak.nextSibling!, offset: 1 },
+    { node: empty!, offset: 0 },
+    { node: last!.firstChild!, offset: 0 },
+    { node: last!.firstChild!, offset: 1 },
+  ];
+  for (const [offset, point] of points.entries()) {
+    const actual = domPointAt(composer(), offset);
+    expect(actual?.node, `collapsed offset ${offset} keeps its DOM node`).toBe(point.node);
+    expect(actual?.offset, `collapsed offset ${offset} keeps its DOM offset`).toBe(point.offset);
+  }
 });

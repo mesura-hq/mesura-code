@@ -30,7 +30,6 @@ import { useAtomValue } from "@effect/atom-react";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { readLocalApi } from "~/localApi";
 import { threadEnvironment } from "../../state/threads";
-import { useAtomCommand } from "../../state/use-atom-command";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { ProjectFavicon } from "../ProjectFavicon";
@@ -168,6 +167,9 @@ export const ChatHeader = memo(function ChatHeader({
       document.fonts.removeEventListener("loadingdone", measure);
       stopObserving();
     };
+    // WORKAROUND: the dependency heuristic misses changes to rendered text, font and rename layout.
+    // Removing these triggers leaves stale DOM measurements. Remove when the compiler recognizes layout trigger dependencies.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- rendered titles, font and rename state require a new DOM measurement
   }, [activeProjectName, activeThreadTitle, parentThreadLink, interfaceFont, isRenamingTitle]);
   const renameCommittedRef = useRef(false);
   const startRename = useCallback(() => {
@@ -234,6 +236,9 @@ export const ChatHeader = memo(function ChatHeader({
     () => () => {
       cancelPendingTitleMenu();
     },
+    // WORKAROUND: the dependency heuristic misses the timer's thread ownership.
+    // Removing thread identity lets a departed thread's menu open. Remove when the compiler recognizes cleanup lifetime dependencies.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- changing the thread must run cleanup even when the cancellation callback stays stable
     [activeThreadEnvironmentId, activeThreadId, cancelPendingTitleMenu],
   );
   const openTitleMenuNow = useCallback(() => {

@@ -1,5 +1,13 @@
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
-import { createContext, use, useEffect, useRef, type ComponentProps, type RefObject } from "react";
+import {
+  createContext,
+  use,
+  useEffect,
+  useMemo,
+  useRef,
+  type ComponentProps,
+  type RefObject,
+} from "react";
 
 import { cn } from "~/lib/utils";
 
@@ -7,16 +15,31 @@ const TooltipProvider = TooltipPrimitive.Provider;
 
 type TooltipActionsRef = RefObject<TooltipPrimitive.Root.Actions | null>;
 const TooltipHoverContext = createContext<TooltipActionsRef | null>(null);
-const TooltipScrollContext = createContext<RefObject<{
+type HoveredTooltip = {
   trigger: HTMLElement;
   actionsRef: TooltipActionsRef;
-} | null> | null>(null);
+};
+const TooltipScrollContext = createContext<{
+  register: (tooltip: HoveredTooltip) => void;
+  clear: (actionsRef: TooltipActionsRef) => void;
+} | null>(null);
 
 /** Dismisses hovered descendants on real scroll events without rerendering the timeline. */
 function TooltipScrollDismissArea({ onScrollCapture, ...props }: ComponentProps<"div">) {
-  const hovered = useRef<{ trigger: HTMLElement; actionsRef: TooltipActionsRef } | null>(null);
+  const hovered = useRef<HoveredTooltip | null>(null);
+  const hoverActions = useMemo(
+    () => ({
+      register(tooltip: HoveredTooltip) {
+        hovered.current = tooltip;
+      },
+      clear(actionsRef: TooltipActionsRef) {
+        if (hovered.current?.actionsRef === actionsRef) hovered.current = null;
+      },
+    }),
+    [],
+  );
   return (
-    <TooltipScrollContext value={hovered}>
+    <TooltipScrollContext value={hoverActions}>
       <div
         {...props}
         onScrollCapture={(event) => {
@@ -40,7 +63,7 @@ function Tooltip<Payload>(props: TooltipPrimitive.Root.Props<Payload>) {
   const actionsRef = props.actionsRef ?? localActionsRef;
   useEffect(
     () => () => {
-      if (hovered?.current?.actionsRef === actionsRef) hovered.current = null;
+      hovered?.clear(actionsRef);
     },
     [actionsRef, hovered],
   );
@@ -53,8 +76,8 @@ function Tooltip<Payload>(props: TooltipPrimitive.Root.Props<Payload>) {
         actionsRef={actionsRef}
         onOpenChange={(open, details) => {
           props.onOpenChange?.(open, details);
-          if (!open && !details.isCanceled && hovered.current?.actionsRef === actionsRef) {
-            hovered.current = null;
+          if (!open && !details.isCanceled) {
+            hovered.clear(actionsRef);
           }
         }}
       />
@@ -74,7 +97,7 @@ function TooltipTrigger(props: TooltipPrimitive.Trigger.Props) {
       {...props}
       onMouseEnter={(event) => {
         props.onMouseEnter?.(event);
-        hovered.current = { trigger: event.currentTarget, actionsRef };
+        hovered.register({ trigger: event.currentTarget, actionsRef });
       }}
     />
   );

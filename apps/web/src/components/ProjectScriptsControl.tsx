@@ -4,7 +4,6 @@ import {
   type EnvironmentId,
   type ProjectScript,
   type T3ProjectFileScript,
-  type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";

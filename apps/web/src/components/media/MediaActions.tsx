@@ -8,7 +8,6 @@ import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime"
 import {
   AuthFilesystemReadScope,
   type AssetResource,
-  type AuthSessionState,
   type ContextMenuItem,
   type EnvironmentId,
   sessionGrantsScope,

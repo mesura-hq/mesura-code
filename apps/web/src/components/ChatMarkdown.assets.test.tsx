@@ -37,6 +37,10 @@ vi.mock("../state/session", async (importOriginal) => ({
   useEnvironmentScope: () => false,
   usePreparedConnection: () => ({ _tag: "Some", value: { httpBaseUrl: "https://host.test" } }),
 }));
+vi.mock("../state/environments", () => ({
+  useEnvironment: () => ({ connection: { phase: "connected" }, serverConfig: null }),
+  useEnvironmentHttpBaseUrl: () => "https://host.test",
+}));
 vi.mock("../state/entities", () => ({
   readEnvironmentSupportsServerBrowser: () => false,
   readThreadShell: () => null,

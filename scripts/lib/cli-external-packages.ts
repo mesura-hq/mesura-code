@@ -36,8 +36,15 @@ export const CLI_RUNTIME_EXTERNAL_PREFIXES = [
   "@ff-labs/",
   "@napi-rs/keyring",
   "@clerk/electron-passkeys",
+  // Neovim uses msgpackr's disk-backed optional extractor. Keep the root
+  // external so its native dependency closure follows it into the sidecar.
+  "msgpackr",
+  "@msgpackr-extract/",
   "node-gyp-build",
   "node-addon-api",
+  // node-gyp-build-optional-packages requires this from disk. Removing it
+  // breaks the runtime closure even though detect-libc has no native binding.
+  "detect-libc",
   // ws's optional accelerators. Nothing in this repo declares them, so they are
   // not in the staged production install and the packaged app does not ship
   // them either way -- ws wraps the require in try/catch and falls back to its
@@ -107,7 +114,7 @@ export function selectCliRuntimeExternalDependencies(
  * `alwaysBundle` predicate only forces packages IN; returning false from it
  * means "no opinion", so a transitive dependency still gets bundled by default.
  * A native loader and its helper (node-gyp-build-optional-packages and
- * detect-libc, when msgpackr-extract was still a dependency) were inlined that
+ * detect-libc, required by msgpackr-extract) were inlined that
  * way while every list-based test passed, which is why this reads the artifact
  * instead.
  *

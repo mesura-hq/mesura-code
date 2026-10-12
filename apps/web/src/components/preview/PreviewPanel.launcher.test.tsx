@@ -24,6 +24,8 @@
  * the browser defaults and recording, and the mini player.
  */
 import {
+  AuthPreviewOperateScope,
+  AuthOrchestrationOperateScope,
   BUILT_IN_BROWSER_PROFILES,
   DEFAULT_BROWSER_PROFILE_ID,
   DEFAULT_PREVIEW_APPEARANCE,
@@ -93,9 +95,17 @@ vi.mock("~/previewStateStore", () => ({
     },
   }),
 }));
+vi.mock("@t3tools/client-runtime/state/session", async (original) =>
+  (await import("../../test/appRootFenceMocks")).mockRuntimeSession(original),
+);
 vi.mock("~/state/environments", () => ({
   useEnvironment: () => ({ label: "Fence" }),
   useEnvironmentHttpBaseUrl: () => "http://fence.invalid:3773",
+  usePrimaryEnvironmentId: () => THREAD_REF.environmentId,
+}));
+vi.mock("~/state/entities", async (original) => ({
+  ...(await original<typeof import("~/state/entities")>()),
+  useEnvironmentSupportsServerBrowser: () => false,
 }));
 vi.mock("~/state/preview", () => ({ previewEnvironment: { open: {}, resize: {} } }));
 vi.mock("~/state/use-atom-command", () => ({ useAtomCommand: () => vi.fn() }));
@@ -128,6 +138,8 @@ vi.mock("./previewBridge", () => ({
 vi.mock("./usePreviewSession", () => ({ usePreviewSession: vi.fn() }));
 vi.mock("./AgentBrowserCursor", () => ({ AgentBrowserCursor: () => null }));
 
+import { appRootFence, makeFenceSession } from "../../test/appRootFenceMocks";
+
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { closePanelLauncher, dismissPanelLauncher, openPanelLauncher } from "~/lib/panelLauncher";
 import { ACTIVE_TAB_TITLE_SELECTOR, enterPanel } from "~/lib/panelSurfaceFocus";
@@ -142,6 +154,10 @@ const THREAD_REF = {
 let root: Root | undefined;
 
 beforeEach(() => {
+  appRootFence.sessions.set(
+    THREAD_REF.environmentId,
+    makeFenceSession([AuthPreviewOperateScope, AuthOrchestrationOperateScope]),
+  );
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   recorded.slotVisible.length = 0;
   vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(
@@ -214,57 +230,63 @@ describe("browser tab focus", () => {
   });
 });
 
+function renderBrowserPanel(
+  onAddBrowserInProfile: (profileId: string) => void = () => undefined,
+): void {
+  act(() =>
+    root!.render(
+      <RightPanelTabs
+        mode="inline"
+        keybindings={DEFAULT_RESOLVED_KEYBINDINGS}
+        getShortcutContext={() => ({
+          terminalFocus: false,
+          terminalOpen: false,
+          previewFocus: false,
+          previewOpen: false,
+          isWeb: false,
+          isDesktop: true,
+        })}
+        surfaces={[{ id: "browser:tab-1", kind: "preview", resourceId: "tab-1" }]}
+        environmentId={null}
+        activeSurfaceId="browser:tab-1"
+        pendingSurfaceIds={new Set()}
+        previewSessions={{}}
+        desktopByTabId={{}}
+        terminalLabelsById={new Map()}
+        onActivate={() => undefined}
+        onCloseSurface={() => undefined}
+        onCloseOtherSurfaces={() => undefined}
+        onCloseSurfacesToRight={() => undefined}
+        onCloseAllSurfaces={() => undefined}
+        onCopyFilePath={() => undefined}
+        onAddBrowser={() => undefined}
+        onAddBrowserInProfile={onAddBrowserInProfile}
+        onAddTerminal={() => undefined}
+        onAddPullRequest={() => undefined}
+        onAddPullRequests={() => undefined}
+        onAddDiff={() => undefined}
+        onAddFiles={() => undefined}
+        onAddDevice={() => undefined}
+        browserAvailable
+        terminalAvailable={false}
+        diffAvailable={false}
+        filesAvailable={false}
+        pullRequestAvailable={false}
+        pullRequestsAvailable={false}
+        deviceAvailable={false}
+      >
+        <PreviewPanel mode="embedded" threadRef={THREAD_REF} visible />
+      </RightPanelTabs>,
+    ),
+  );
+}
+
 describe("browser profile choice in the panel launcher", () => {
   it("browser launcher spec: choosing a profile from the open launcher opens it there and closes the launcher", async () => {
     const opened: string[] = [];
     document.body.innerHTML = `<div data-preview-panel-mode="inline" data-testid="panel"></div>`;
     root = createRoot(document.querySelector('[data-testid="panel"]')!);
-    act(() =>
-      root!.render(
-        <RightPanelTabs
-          mode="inline"
-          keybindings={DEFAULT_RESOLVED_KEYBINDINGS}
-          getShortcutContext={() => ({
-            terminalFocus: false,
-            terminalOpen: false,
-            previewFocus: false,
-            previewOpen: false,
-            isWeb: false,
-            isDesktop: true,
-          })}
-          surfaces={[{ id: "browser:tab-1", kind: "preview", resourceId: "tab-1" }]}
-          environmentId={null}
-          activeSurfaceId="browser:tab-1"
-          pendingSurfaceIds={new Set()}
-          previewSessions={{}}
-          desktopByTabId={{}}
-          terminalLabelsById={new Map()}
-          onActivate={() => undefined}
-          onCloseSurface={() => undefined}
-          onCloseOtherSurfaces={() => undefined}
-          onCloseSurfacesToRight={() => undefined}
-          onCloseAllSurfaces={() => undefined}
-          onCopyFilePath={() => undefined}
-          onAddBrowser={() => undefined}
-          onAddBrowserInProfile={(profileId) => opened.push(profileId)}
-          onAddTerminal={() => undefined}
-          onAddPullRequest={() => undefined}
-          onAddPullRequests={() => undefined}
-          onAddDiff={() => undefined}
-          onAddFiles={() => undefined}
-          onAddDevice={() => undefined}
-          browserAvailable
-          terminalAvailable={false}
-          diffAvailable={false}
-          filesAvailable={false}
-          pullRequestAvailable={false}
-          pullRequestsAvailable={false}
-          deviceAvailable={false}
-        >
-          <div>content</div>
-        </RightPanelTabs>,
-      ),
-    );
+    renderBrowserPanel((profileId) => opened.push(profileId));
     const launcher = () => document.querySelector('[aria-label="Open a surface"]');
     act(() => openPanelLauncher());
     expect(launcher()).not.toBeNull();
@@ -284,5 +306,21 @@ describe("browser profile choice in the panel launcher", () => {
 
     expect(opened).toEqual([INCOGNITO_BROWSER_PROFILE_ID]);
     expect(launcher()).toBeNull();
+  });
+});
+
+describe("browser panel launcher route disposal", () => {
+  it("browser launcher P1-2: route unmount clears the overlay so a fresh Browser panel restores its native slot", async () => {
+    document.body.innerHTML = '<div data-testid="panel"></div>';
+    root = createRoot(document.querySelector('[data-testid="panel"]')!);
+    renderBrowserPanel();
+    expect(lastSlotVisible()).toBe(true);
+    act(() => openPanelLauncher());
+    expect(lastSlotVisible()).toBe(false);
+    expect(document.querySelector('[aria-label="Open a surface"]')).not.toBeNull();
+    await act(() => root!.render(null));
+    renderBrowserPanel();
+    expect(document.querySelector('[aria-label="Open a surface"]')).toBeNull();
+    expect(lastSlotVisible()).toBe(true);
   });
 });

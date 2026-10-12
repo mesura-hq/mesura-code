@@ -42,6 +42,7 @@ import {
   useCallback,
   useEffect,
   useEffectEvent,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -968,10 +969,12 @@ function PullRequestsRouteView() {
   /** The detail panel's own writes, by row, so its failure takes back its own note. */
   const detailOverrideTokens = useRef(new Map<string, number | null>());
   const speedActionRef = useRef<(result: PullRequestSpeedActionResult) => void>(() => {});
-  speedActionRef.current = ({ entry, action }) => {
-    // Some hosts accept a merge before it completes. Let the next host read declare it merged.
-    if (action !== "merge") overrideEntry(entry, action);
-  };
+  useLayoutEffect(() => {
+    speedActionRef.current = ({ entry, action }) => {
+      // Some hosts accept a merge before it completes. Let the next host read declare it merged.
+      if (action !== "merge") overrideEntry(entry, action);
+    };
+  }, [overrideEntry]);
   const onSpeedAction = useCallback((result: PullRequestSpeedActionResult) => {
     speedActionRef.current(result);
   }, []);
@@ -1608,7 +1611,13 @@ function PullRequestsRouteView() {
     [displayGroups],
   );
   const closeSweepRef = useRef({ displayGroups, closeSweepRows, closingKeys, closeBatch });
-  closeSweepRef.current = { displayGroups, closeSweepRows, closingKeys, closeBatch };
+  useLayoutEffect(() => {
+    closeSweepRef.current = { displayGroups, closeSweepRows, closingKeys, closeBatch };
+  }, [displayGroups, closeSweepRows, closingKeys, closeBatch]);
+  // WORKAROUND: compiler treats pointer-sweep cleanup keys as unused.
+  // Keep passive cleanup cancelling a gesture when its filter/query/order changes.
+  // Remove when effect dependency inference recognizes gesture lifetimes.
+  // oxlint-disable-next-line react/exhaustive-effect-dependencies
   useEffect(() => () => closeSensorRef.current?.cancel(), [filterKey, search.q, sort]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

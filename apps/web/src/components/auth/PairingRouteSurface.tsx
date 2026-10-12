@@ -145,12 +145,12 @@ export function HostedPairingRouteSurface() {
   const connectPairingEnvironment = useAtomCommand(connectPairing, {
     reportFailure: false,
   });
-  const hostedPairingRequestRef = useRef(readHostedPairingRequest());
+  const [hostedPairingRequest] = useState(readHostedPairingRequest);
   const [status, setStatus] = useState<"pairing" | "paired" | "error">(() =>
-    hostedPairingRequestRef.current ? "pairing" : "error",
+    hostedPairingRequest ? "pairing" : "error",
   );
   const [message, setMessage] = useState(() =>
-    hostedPairingRequestRef.current
+    hostedPairingRequest
       ? "Connecting to this backend."
       : "This pairing link is missing its backend host or token.",
   );
@@ -159,7 +159,7 @@ export function HostedPairingRouteSurface() {
   const tokenSubmittedRef = useRef(false);
 
   const submitHostedPairingRequest = useCallback(async () => {
-    const request = hostedPairingRequestRef.current;
+    const request = hostedPairingRequest;
 
     if (!request) {
       setStatus("error");
@@ -196,7 +196,7 @@ export function HostedPairingRouteSurface() {
     setMessage(
       `${errorMessageFromUnknown(squashAtomCommandFailure(result))} If the backend accepted this one-time token, request a new pairing link before retrying.`,
     );
-  }, [connectPairingEnvironment]);
+  }, [connectPairingEnvironment, hostedPairingRequest]);
 
   useEffect(() => {
     if (submitAttemptedRef.current) {
@@ -208,7 +208,7 @@ export function HostedPairingRouteSurface() {
     void submitHostedPairingRequest();
   }, [submitHostedPairingRequest]);
 
-  const request = hostedPairingRequestRef.current;
+  const request = hostedPairingRequest;
 
   return (
     <StandalonePage tone="pairing">

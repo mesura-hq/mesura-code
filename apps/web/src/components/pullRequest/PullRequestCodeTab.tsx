@@ -26,7 +26,16 @@ import {
 import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown } from "lucide";
 import { useAtomRefresh } from "@effect/atom-react";
 import * as Schema from "effect/Schema";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  use,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { useClientSettings, useUpdateClientSettings } from "~/hooks/useSettings";
@@ -89,7 +98,10 @@ import {
   type DiffFoldOverride,
 } from "./pullRequestDiff.logic";
 import { PullRequestDiffStat, PullRequestMetaLine } from "./pullRequestPresentation";
-import { usePullRequestFilesViewed } from "./usePullRequestFilesViewed";
+import {
+  usePullRequestFilesViewed,
+  type PullRequestFilesViewedView,
+} from "./usePullRequestFilesViewed";
 import {
   nextPendingReviewCommentId,
   pullRequestReviewKey,
@@ -106,6 +118,55 @@ interface ReviewAnnotationGroup {
 }
 
 type ReviewAnnotation = DiffLineAnnotation<ReviewAnnotationGroup>;
+
+const PullRequestViewedFilesContext = createContext<{
+  filesViewed: PullRequestFilesViewedView;
+  setFileViewed: (fileKey: string, path: string, viewed: boolean) => void;
+} | null>(null);
+
+function PullRequestViewedFileControl({
+  fileKey,
+  path,
+  children,
+}: {
+  readonly fileKey: string;
+  readonly path: string;
+  readonly children: ReactNode;
+}) {
+  const controls = use(PullRequestViewedFilesContext);
+  if (!controls?.filesViewed.enabled) return children;
+  const viewed = controls.filesViewed.isViewed(path);
+  const stale = controls.filesViewed.isStale(path);
+  return (
+    <span className="flex items-center gap-3">
+      {children}
+      {/* The header folds the file. Its capture listener leaves this label's press alone. */}
+      <label
+        data-viewed-toggle=""
+        className="flex cursor-pointer select-none items-center gap-1.5 text-2xs text-muted-foreground"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <Checkbox
+          aria-label={stale ? "Changed" : "Viewed"}
+          checked={viewed}
+          onCheckedChange={(next) => controls.setFileViewed(fileKey, path, next === true)}
+        />
+        {stale ? (
+          <Tooltip>
+            <TooltipTrigger render={<span className="text-warning-foreground" />}>
+              Changed
+            </TooltipTrigger>
+            <TooltipPopup side="bottom">
+              This file has been pushed to since you marked it viewed.
+            </TooltipPopup>
+          </Tooltip>
+        ) : (
+          <span className="@max-xs:hidden">Viewed</span>
+        )}
+      </label>
+    </span>
+  );
+}
 
 /** Commits per press of "Show more" in the scope menu. */
 const COMMIT_PAGE_SIZE = 10;
@@ -821,13 +882,12 @@ function PullRequestCodeTab({
     [toggleFile],
   );
 
-  // Read through refs rather than closed over. The viewer memoizes each visible file's header
-  // portal on the callback below, so a fresh identity on every tick, and on every refresh of the
-  // host's answer, would rebuild every header on screen.
-  const filesViewedRef = useRef(filesViewed);
-  filesViewedRef.current = filesViewed;
-  const setFileViewedRef = useRef(setFileViewed);
-  setFileViewedRef.current = setFileViewed;
+  // Context updates the viewed controls inside retained header portals. Updating refs
+  // during render leaked uncommitted state; changing the render callback rebuilt every portal.
+  const viewedControls = useMemo(
+    () => ({ filesViewed, setFileViewed }),
+    [filesViewed, setFileViewed],
+  );
 
   const renderHeaderMetadata = useCallback(
     (item: CodeViewItem<ReviewAnnotationGroup>) => {
@@ -846,39 +906,10 @@ function PullRequestCodeTab({
           className="font-mono text-2xs"
         />
       );
-      const viewedFiles = filesViewedRef.current;
-      if (!viewedFiles.enabled) return stat;
-      const viewed = viewedFiles.isViewed(path);
-      const stale = viewedFiles.isStale(path);
       return (
-        <span className="flex items-center gap-3">
+        <PullRequestViewedFileControl fileKey={item.id} path={path}>
           {stat}
-          {/* The header itself folds the file, so the tick keeps its press to itself. The
-              attribute is what the header's capture listener looks for. */}
-          <label
-            data-viewed-toggle=""
-            className="flex cursor-pointer select-none items-center gap-1.5 text-2xs text-muted-foreground"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <Checkbox
-              aria-label={stale ? "Changed" : "Viewed"}
-              checked={viewed}
-              onCheckedChange={(next) => setFileViewedRef.current(item.id, path, next === true)}
-            />
-            {stale ? (
-              <Tooltip>
-                <TooltipTrigger render={<span className="text-warning-foreground" />}>
-                  Changed
-                </TooltipTrigger>
-                <TooltipPopup side="bottom">
-                  This file has been pushed to since you marked it viewed.
-                </TooltipPopup>
-              </Tooltip>
-            ) : (
-              <span className="@max-xs:hidden">Viewed</span>
-            )}
-          </label>
-        </span>
+        </PullRequestViewedFileControl>
       );
     },
     [omittedFileStats, sourceFileStats],
@@ -1565,32 +1596,34 @@ function PullRequestCodeTab({
           {/* The viewer virtualizes against the element it is told is scrolling and places its
               rows absolutely, so it has to own that element — the thread diff panel hands it the
               same one. Scrolling from a parent instead leaves it painting over its neighbours. */}
-          <StyledDiffCodeView<ReviewAnnotationGroup>
-            // Keep scrollbar space stable so file metadata and line numbers do not shift as a
-            // diff crosses the overflow boundary. The viewer is itself focusable for keyboard
-            // interaction, but its native host outline clips and competes with the focus
-            // indicators on its actual controls.
-            className="@container h-full overflow-auto [scrollbar-gutter:stable]"
-            viewerRef={setViewer}
-            items={items}
-            selectedLines={selectedLines}
-            onSelectedLinesChange={setSelectedLines}
-            options={diffViewOptions}
-            // The viewer owns the scroll container, so the sentinel that asks for the next slice
-            // has to live inside it — at the end of the files, where reaching it means the reader
-            // is running out of diff.
-            renderCodeViewFooter={renderCodeViewFooter}
-            renderHeaderPrefix={renderHeaderPrefix}
-            renderHeaderMetadata={renderHeaderMetadata}
-            renderAnnotation={renderAnnotation}
-            // Find can ask again before the unfolded file arrives, so this unfolds and never folds.
-            onRevealSearchMatch={(item) =>
-              setToggledFiles((current) =>
-                toggleFileDiffFoldForViewed(item.id, false, effectiveFoldOverride, current),
-              )
-            }
-            unsafeCSSExtra={REPLACE_FILE_COUNTS_CSS}
-          />
+          <PullRequestViewedFilesContext value={viewedControls}>
+            <StyledDiffCodeView<ReviewAnnotationGroup>
+              // Keep scrollbar space stable so file metadata and line numbers do not shift as a
+              // diff crosses the overflow boundary. The viewer is itself focusable for keyboard
+              // interaction, but its native host outline clips and competes with the focus
+              // indicators on its actual controls.
+              className="@container h-full overflow-auto [scrollbar-gutter:stable]"
+              viewerRef={setViewer}
+              items={items}
+              selectedLines={selectedLines}
+              onSelectedLinesChange={setSelectedLines}
+              options={diffViewOptions}
+              // The viewer owns the scroll container, so the sentinel that asks for the next slice
+              // has to live inside it — at the end of the files, where reaching it means the reader
+              // is running out of diff.
+              renderCodeViewFooter={renderCodeViewFooter}
+              renderHeaderPrefix={renderHeaderPrefix}
+              renderHeaderMetadata={renderHeaderMetadata}
+              renderAnnotation={renderAnnotation}
+              // Find can ask again before the unfolded file arrives, so this unfolds and never folds.
+              onRevealSearchMatch={(item) =>
+                setToggledFiles((current) =>
+                  toggleFileDiffFoldForViewed(item.id, false, effectiveFoldOverride, current),
+                )
+              }
+              unsafeCSSExtra={REPLACE_FILE_COUNTS_CSS}
+            />
+          </PullRequestViewedFilesContext>
         </div>
         {fileTreeOpen ? (
           <aside className="flex w-[min(20rem,40%)] min-w-48 shrink-0 border-l border-border/60">

@@ -38,6 +38,7 @@ const decodeSingleAnswer = Schema.decodeUnknownOption(
   Schema.Union([Schema.String, Schema.Tuple([Schema.String])]),
 );
 const decodeToolCallContent = Schema.decodeUnknownOption(AcpWireSchema.ToolCallContent);
+const isToolCallMetadata = Schema.is(Schema.Record(Schema.String, Schema.Json));
 
 /** Native questions share the permission method, but their choices are not approvals. */
 export function isAntigravityUserInputRequest(
@@ -263,9 +264,7 @@ export function normalizeAntigravitySessionUpdate(
         ? { rawOutput: sanitizeAntigravityToolPayload(update.rawOutput) }
         : {}),
       ...(update.content !== undefined ? { content: content ?? [] } : {}),
-      ...(update._meta !== undefined
-        ? { _meta: Schema.is(Schema.Record(Schema.String, Schema.Json))(meta) ? meta : null }
-        : {}),
+      ...(update._meta !== undefined ? { _meta: isToolCallMetadata(meta) ? meta : null } : {}),
     },
   };
 }

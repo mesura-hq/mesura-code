@@ -10,7 +10,10 @@ import {
 describe("T3 orchestration provider instructions", () => {
   it("distinguishes delegated subagents from ordinary top-level threads", () => {
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "Use `delegate_task`");
-    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "ordinary top-level T3 conversations");
+    assert.include(
+      T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+      "ordinary top-level Mesura Code conversations",
+    );
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "Never use them merely");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "cross-provider");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "call `delegate_task` again");
@@ -57,7 +60,7 @@ describe("T3 orchestration provider instructions", () => {
       state: { interactionMode: "default", hasT3Mcp: true },
     });
 
-    assert.include(injected, "T3 Code interaction mode: Default");
+    assert.include(injected, "Mesura Code interaction mode: Default");
     assert.include(injected, "Mesura Code collaborative browser");
     assert.include(injected, "T3 Code orchestration");
     assert.include(injected, "<user_request>\nInspect the repository.\n</user_request>");
@@ -77,13 +80,13 @@ describe("T3 orchestration provider instructions", () => {
         state: { ...defaultState, interactionMode: "plan" },
         previousState: defaultState,
       }),
-      "T3 Code interaction mode: Plan",
+      "Mesura Code interaction mode: Plan",
     );
     const withoutMcp = t3AcpPromptWithInstructions({
       prompt,
       state: { interactionMode: "default", hasT3Mcp: false },
     });
-    assert.include(withoutMcp, "T3 Code interaction mode: Default");
+    assert.include(withoutMcp, "Mesura Code interaction mode: Default");
     assert.notInclude(withoutMcp, "Mesura Code collaborative browser");
     assert.notInclude(withoutMcp, "T3 Code orchestration");
   });

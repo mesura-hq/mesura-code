@@ -1,11 +1,6 @@
 import { useAuth } from "@clerk/react";
 import { useAtomValue } from "@effect/atom-react";
-import {
-  AuthAdministrativeScopes,
-  AuthRelayReadScope,
-  AuthRelayWriteScope,
-  type AuthSessionState,
-} from "@t3tools/contracts";
+import { AuthRelayReadScope, AuthRelayWriteScope, type AuthSessionState } from "@t3tools/contracts";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { useEffect, useRef, useState } from "react";
 
@@ -93,11 +88,9 @@ function ConfiguredConnectOnboardingDialog() {
   const prefilledFromLinkStateRef = useRef(false);
   const observedAccountRef = useRef<string | null | undefined>(undefined);
 
-  useEffect(() => {
-    if (step === "publish" && sessionScopesKnown && !showPublishStep && !isApplying) {
-      setStep("devices");
-    }
-  }, [isApplying, sessionScopesKnown, showPublishStep, step]);
+  if (step === "publish" && sessionScopesKnown && !showPublishStep && !isApplying) {
+    setStep("devices");
+  }
 
   const optOutAccounts = optOutState.optOutAccounts;
 

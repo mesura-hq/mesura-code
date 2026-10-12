@@ -1,8 +1,17 @@
+// Entry point: LegacyV1ThreadImporter.reconcileShells, awaited by server startup
+// before FactoryRunTracker.reattachRecordedRuns. Only synthetic v1 rows are used.
 import { assert, it } from "@effect/vitest";
-import { EventId, ThreadId } from "@t3tools/contracts";
+import {
+  EventId,
+  ThreadId,
+  factoryPlanCardId,
+  factoryRunActivityId,
+  factoryReportActivityId,
+} from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Tracer from "effect/Tracer";
 import * as SqlClient from "effect/sql/SqlClient";
 
@@ -13,6 +22,8 @@ import * as EventStore from "../EventStore.ts";
 import * as LegacyV1ThreadImporter from "./LegacyV1ThreadImporter.ts";
 import * as ProjectionMaintenance from "../ProjectionMaintenance.ts";
 import * as ProjectionStore from "../ProjectionStore.ts";
+import * as FactoryCardQuery from "../FactoryCardQuery.ts";
+import { fixtureRunPayload } from "../testkit/factoryCardFixtures.ts";
 
 const layerDatabase = SqlitePersistence.layerMemory;
 const layerEventStoreProvided = EventStore.layer.pipe(Layer.provideMerge(layerDatabase));
@@ -34,7 +45,105 @@ const layerTest = Layer.mergeAll(
   layerEventSinkProvided,
   layerImporterProvided,
   layerProjectionMaintenanceProvided,
+  FactoryCardQuery.layer.pipe(Layer.provide(layerDatabase)),
 );
+
+const publicLayerThreadIds = [
+  ThreadId.make("thread:factory-public-direct"),
+  ThreadId.make("thread:factory-public-background"),
+] as const;
+const layerPublicFixture = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    for (const threadId of publicLayerThreadIds) {
+      yield* sql`
+      INSERT INTO projection_threads (
+        thread_id, project_id, title, model_selection_json, runtime_mode,
+        interaction_mode, created_at, updated_at
+      ) VALUES (${threadId}, 'project:factory-public', 'Public importer',
+        '{"instanceId":"codex","model":"gpt-5.4"}', 'full-access', 'default',
+        '2026-01-01T00:00:00.000Z', '2026-01-05T00:00:00.000Z')
+    `;
+      for (const [suffix, role, day] of [
+        ["first", "user", 1],
+        ["answer", "assistant", 3],
+        ["latest", "user", 5],
+      ] as const) {
+        const at = `2026-01-0${day}T00:00:00.000Z`;
+        yield* sql`
+        INSERT INTO projection_thread_messages (
+          message_id, thread_id, role, text, is_streaming, created_at, updated_at
+        ) VALUES (${`${threadId}:${suffix}`}, ${threadId}, ${role}, ${suffix}, 0, ${at}, ${at})
+      `;
+      }
+      yield* sql`
+      INSERT INTO projection_thread_activities (
+        activity_id, thread_id, tone, kind, summary, payload_json, created_at, sequence
+      ) VALUES (${factoryRunActivityId(threadId, "unfinished")}, ${threadId}, 'info',
+        'factory.run', 'Factory', ${JSON.stringify(fixtureRunPayload(threadId, "unfinished", "running"))},
+        '2026-01-02T00:00:00.000Z', 1)
+    `;
+    }
+  }),
+).pipe(Layer.provide(layerDatabase));
+
+// Export only the public services. SqlClient and EventSink are construction dependencies.
+const layerPublicImporterTest = Layer.mergeAll(
+  layerImporterProvided,
+  ProjectionStore.layer.pipe(Layer.provide(layerDatabase)),
+  FactoryCardQuery.layer.pipe(Layer.provide(layerDatabase)),
+  layerProjectionMaintenanceProvided,
+).pipe(Layer.provide(layerPublicFixture));
+
+it.layer(layerPublicImporterTest)("Mesura importer public service boundary", (it) => {
+  it.effect(
+    "Mesura gate repair imports, rebuilds and hydrates through the public layer without caller persistence services",
+    () =>
+      Effect.gen(function* () {
+        assert(Option.isNone(yield* Effect.serviceOption(SqlClient.SqlClient)));
+        assert(Option.isNone(yield* Effect.serviceOption(EventSink.EventSinkV2)));
+        const importer = yield* LegacyV1ThreadImporter.LegacyV1ThreadImporter;
+        const projections = yield* ProjectionStore.ProjectionStoreV2;
+        const cards = yield* FactoryCardQuery.FactoryCardQuery;
+        const maintenance = yield* ProjectionMaintenance.ProjectionMaintenanceV2;
+        assert.equal(yield* importer.pendingThreadCount, 2);
+        yield* importer.reconcileShells;
+        for (const threadId of publicLayerThreadIds) {
+          assert.lengthOf((yield* projections.getThreadProjection(threadId)).messages, 1);
+        }
+        assert.lengthOf(yield* cards.listByKind("run"), 2);
+        yield* maintenance.rebuild;
+        yield* importer.reconcileShells;
+        assert.deepStrictEqual(yield* importer.ensureTranscript(publicLayerThreadIds[0]), {
+          importedThreadCount: 1,
+          importedMessageCount: 2,
+        });
+        assert.deepStrictEqual(yield* importer.importPendingTranscripts, {
+          importedThreadCount: 1,
+          importedMessageCount: 2,
+        });
+        assert.equal(yield* importer.pendingThreadCount, 0);
+        yield* maintenance.rebuild;
+        for (const threadId of publicLayerThreadIds) {
+          const projection = yield* projections.getThreadProjection(threadId);
+          assert.lengthOf(projection.runs, 0);
+          assert.deepStrictEqual(
+            projection.thread.updatedAt,
+            DateTime.makeUnsafe("2026-01-05T00:00:00.000Z"),
+          );
+          assert.deepStrictEqual(
+            projection.turnItems.map((item) => [item.id, item.ordinal]),
+            [
+              [`migration:v1:turn-item:${threadId}:first`, 1],
+              [factoryRunActivityId(threadId, "unfinished"), 2],
+              [`migration:v1:turn-item:${threadId}:answer`, 3],
+              [`migration:v1:turn-item:${threadId}:latest`, 4],
+            ],
+          );
+        }
+      }),
+  );
+});
 
 it.layer(layerTest)("LegacyV1ThreadImporter", (it) => {
   it.effect("uses the created-thread index for startup migration checks", () =>
@@ -534,3 +643,168 @@ it.layer(layerTest)("LegacyV1ThreadImporter", (it) => {
     }),
   );
 });
+
+for (const [previouslyHydrated, rebuildBeforeHydration] of [
+  [false, false],
+  [true, false],
+  [false, true],
+] as const) {
+  it.layer(layerTest)(
+    `Mesura historical Factory migration ${rebuildBeforeHydration ? "rebuild before hydration" : previouslyHydrated ? "upgrade" : "first boot"}`,
+    (it) => {
+      it.effect(
+        `Mesura v046 imports all Factory card kinds ${rebuildBeforeHydration ? "with durable reservations through rebuild before lazy hydration" : previouslyHydrated ? "after an earlier message-only migration" : "before lazy transcripts"} and preserves them across restart and replay`,
+        () =>
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient;
+            const importer = yield* LegacyV1ThreadImporter.LegacyV1ThreadImporter;
+            const projections = yield* ProjectionStore.ProjectionStoreV2;
+            const cards = yield* FactoryCardQuery.FactoryCardQuery;
+            const threadId = ThreadId.make("thread:historical-factory");
+            const planId = factoryPlanCardId(threadId, "a".repeat(64));
+            const runId = factoryRunActivityId(threadId, "unfinished");
+            const reportId = factoryReportActivityId(threadId, "unfinished");
+            yield* sql`
+        INSERT INTO projection_threads (
+          thread_id, project_id, title, model_selection_json, runtime_mode,
+          interaction_mode, created_at, updated_at
+        ) VALUES (
+          ${threadId}, 'project:historical-factory', 'Historical Factory',
+          '{"instanceId":"codex","model":"gpt-5.4"}', 'full-access', 'default',
+          '2026-01-01T00:00:00.000Z', '2026-01-05T00:00:00.000Z'
+        )
+      `;
+            for (const [id, role, day] of [
+              ["old", "user", 1],
+              ["answer", "assistant", 3],
+              ["latest", "user", 5],
+            ] as const) {
+              const at = `2026-01-0${day}T00:00:00.000Z`;
+              yield* sql`
+          INSERT INTO projection_thread_messages (
+            message_id, thread_id, role, text, is_streaming, created_at, updated_at
+          ) VALUES (${`historical:${id}`}, ${threadId}, ${role}, ${id}, 0, ${at}, ${at})
+        `;
+            }
+            if (previouslyHydrated) {
+              yield* importer.reconcileShells;
+              yield* importer.ensureTranscript(threadId);
+            }
+            const plan = {
+              digest: "a".repeat(64),
+              intentDigest: "b".repeat(64),
+              planPath: "/plans/plan.md",
+              intentPath: "/plans/intent.md",
+              title: "Plan: Keep history",
+              phases: [],
+              headings: [],
+              presentedAt: "2026-01-02T00:00:00.000Z",
+            };
+            const run = fixtureRunPayload(threadId, "unfinished", "running");
+            const report = {
+              runId: "unfinished",
+              digest: "c".repeat(64),
+              path: "/runs/unfinished/report.md",
+              title: "Report: Partial progress",
+              headings: [],
+              writtenAt: "2026-01-04T00:00:00.000Z",
+            };
+            for (const [id, kind, payload, day, sequence] of [
+              [planId, "factory.plan", plan, 2, 10],
+              [runId, "factory.run", run, 4, 11],
+              [reportId, "factory.report", report, 4, 12],
+            ] as const) {
+              yield* sql`
+          INSERT INTO projection_thread_activities (
+            activity_id, thread_id, tone, kind, summary, payload_json, created_at, sequence
+          ) VALUES (${id}, ${threadId}, 'info', ${kind}, 'Factory', ${JSON.stringify(payload)},
+            ${`2026-01-0${day}T00:00:00.000Z`}, ${sequence})
+        `;
+            }
+            yield* importer.reconcileShells;
+            const shell = yield* projections.getThreadProjection(threadId);
+            if (!previouslyHydrated && !rebuildBeforeHydration) {
+              assert.deepStrictEqual(
+                shell.thread.updatedAt,
+                DateTime.makeUnsafe("2026-01-05T00:00:00.000Z"),
+                "Historical card import must preserve the shell activity timestamp",
+              );
+            }
+            assert.deepStrictEqual(
+              shell.turnItems.filter((item) => item.type === "factory_card").map((item) => item.id),
+              [planId, runId, reportId],
+            );
+            assert.equal(
+              shell.messages.length,
+              previouslyHydrated ? 3 : 1,
+              "Factory import must not hydrate the full transcript",
+            );
+            assert.deepStrictEqual(
+              (yield* cards.listByKind("run")).map((record) => record.card.payload),
+              [run],
+            );
+            assert.deepStrictEqual(
+              (yield* cards.listByKind("plan")).map((record) => record.card.payload),
+              [plan],
+            );
+            assert.deepStrictEqual(
+              (yield* cards.listByKind("report")).map((record) => record.card.payload),
+              [report],
+            );
+            if (rebuildBeforeHydration) {
+              yield* (yield* ProjectionMaintenance.ProjectionMaintenanceV2).rebuild;
+              yield* Effect.gen(function* () {
+                const restarted = yield* LegacyV1ThreadImporter.LegacyV1ThreadImporter;
+                yield* restarted.reconcileShells;
+                assert.lengthOf((yield* projections.getThreadProjection(threadId)).messages, 1);
+                yield* restarted.ensureTranscript(threadId);
+              }).pipe(Effect.provide(LegacyV1ThreadImporter.layer));
+            } else {
+              yield* importer.ensureTranscript(threadId);
+            }
+            const imported = yield* projections.getThreadProjection(threadId);
+            if (!previouslyHydrated && !rebuildBeforeHydration) {
+              assert.deepStrictEqual(imported.thread.updatedAt, shell.thread.updatedAt);
+            }
+            assert.deepStrictEqual(
+              imported.turnItems.map((item) => [item.id, item.ordinal]),
+              [
+                ["migration:v1:turn-item:historical:old", 1],
+                [planId, 2],
+                ["migration:v1:turn-item:historical:answer", 3],
+                [runId, 4],
+                [reportId, 5],
+                ["migration:v1:turn-item:historical:latest", 6],
+              ],
+            );
+            for (const item of imported.turnItems.filter((item) => item.type === "factory_card")) {
+              assert.equal(item.runId, null);
+              assert.equal(item.status, "completed");
+            }
+            const eventsBefore =
+              yield* sql`SELECT event_id FROM orchestration_events WHERE stream_id = ${threadId} ORDER BY sequence`;
+            // A fresh importer instance must use persisted import state, not an in-memory flag.
+            yield* Effect.gen(function* () {
+              const restarted = yield* LegacyV1ThreadImporter.LegacyV1ThreadImporter;
+              yield* restarted.reconcileShells;
+              yield* restarted.ensureTranscript(threadId);
+            }).pipe(Effect.provide(LegacyV1ThreadImporter.layer));
+            assert.deepStrictEqual(
+              yield* sql`SELECT event_id FROM orchestration_events WHERE stream_id = ${threadId} ORDER BY sequence`,
+              eventsBefore,
+            );
+            yield* (yield* ProjectionMaintenance.ProjectionMaintenanceV2).rebuild;
+            assert.deepStrictEqual(
+              (yield* projections.getThreadProjection(threadId)).turnItems,
+              imported.turnItems,
+            );
+            assert.deepStrictEqual(
+              (yield* projections.getThreadProjection(threadId)).thread.updatedAt,
+              imported.thread.updatedAt,
+            );
+            assert.equal((yield* cards.listByKind("run"))[0]?.turnItemId, runId);
+          }),
+      );
+    },
+  );
+}

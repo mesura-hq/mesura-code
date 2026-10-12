@@ -7,6 +7,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { BORROWED_RUNTIME_VOCABULARIES } from "../../packages/symmetria-broker-contract/src/upstreamLock.ts";
 import {
+  compileVocabularyLock,
+  expectVocabularyLockRejection,
+} from "../../packages/symmetria-broker-contract/test/compilerGuard.ts";
+import {
   commandOutput,
   contractPackageRoot,
   expectSuccessfulCommand,
@@ -29,54 +33,9 @@ import {
 // paquete del workspace; la salida correcta es darle a tests/ su propio
 // package.json y declararlo en pnpm-workspace.yaml, no mudar el archivo.
 const acceptanceTestsRoot = NodePath.join(repositoryRoot, "tests");
+const PACKAGE_REPAIR_SUITE_PROCESS_TIMEOUT_MS = 45_000;
+const PACKAGE_REPAIR_SUITE_TEST_TIMEOUT_MS = 60_000;
 type RuntimeVocabularyName = keyof typeof BORROWED_RUNTIME_VOCABULARIES;
-
-const writeContractTypeShim = (
-  directory: string,
-  changedVocabulary?: {
-    readonly name: RuntimeVocabularyName;
-    readonly values: ReadonlyArray<string>;
-  },
-) => {
-  const source = Object.entries(BORROWED_RUNTIME_VOCABULARIES)
-    .map(([name, canonicalValues]) => {
-      const values = changedVocabulary?.name === name ? changedVocabulary.values : canonicalValues;
-      return `export type ${name} = ${values.map((value) => JSON.stringify(value)).join(" | ")};`;
-    })
-    .join("\n");
-  const shimPath = NodePath.join(directory, "contracts-shim.ts");
-  NodeFS.writeFileSync(shimPath, `${source}\n`);
-  return shimPath;
-};
-
-const compileUpstreamLock = (
-  directory: string,
-  changedVocabulary?: {
-    readonly name: RuntimeVocabularyName;
-    readonly values: ReadonlyArray<string>;
-  },
-) => {
-  const shimPath = writeContractTypeShim(directory, changedVocabulary);
-  const configPath = NodePath.join(directory, "tsconfig.json");
-  NodeFS.writeFileSync(
-    configPath,
-    `${JSON.stringify(
-      {
-        extends: NodePath.join(repositoryRoot, "tsconfig.base.json"),
-        compilerOptions: {
-          noEmit: true,
-          paths: {
-            "@t3tools/contracts": [shimPath],
-          },
-        },
-        files: [NodePath.join(contractPackageRoot, "src/upstreamLock.ts")],
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  return run(typecheckerPath, ["-p", configPath]);
-};
 
 // The phase implementation is present in this working tree. These checks are
 // post-implementation regression guards, so each one must pass in this tree.
@@ -105,16 +64,27 @@ describe("Symmetria broker contract phase-one regression guards", () => {
     expectSuccessfulCommand(run(typecheckerPath, ["--noEmit"], contractPackageRoot));
   });
 
-  it("keeps the package repair guards in its normal test suite", () => {
-    expect(NodeFS.existsSync(contractPackageRoot)).toBe(true);
-    const result = run(vitePlusPath, ["test", "run", "--reporter=verbose"], contractPackageRoot);
-    expectSuccessfulCommand(result);
-    const output = commandOutput(result);
-    expect(output).toContain("src/upstreamLockFiring.test.ts");
-    expect(output).toContain("fails when upstream adds or removes a literal");
-    expect(output).toContain("src/primitives.test.ts");
-    expect(output).toContain("refuses a fractional value");
-  });
+  // This guard runs a whole package, including compiler guards. The five-second
+  // unit-test budget rejected a successful 5305 ms run after the upstream sync.
+  it(
+    "keeps the package repair guards in its normal test suite",
+    () => {
+      expect(NodeFS.existsSync(contractPackageRoot)).toBe(true);
+      const result = run(
+        vitePlusPath,
+        ["test", "run", "--reporter=verbose", "--max-workers=1"],
+        contractPackageRoot,
+        PACKAGE_REPAIR_SUITE_PROCESS_TIMEOUT_MS,
+      );
+      expectSuccessfulCommand(result);
+      const output = commandOutput(result);
+      expect(output).toContain("src/upstreamLockFiring.test.ts");
+      expect(output).toContain("fails when upstream adds or removes a literal");
+      expect(output).toContain("src/primitives.test.ts");
+      expect(output).toContain("refuses a fractional value");
+    },
+    PACKAGE_REPAIR_SUITE_TEST_TIMEOUT_MS,
+  );
 
   // Este guard comprueba que el paquete que agregamos no rompe la suite de
   // contracts de UPSTREAM. Eso es lo que afirma, y nada más.
@@ -160,7 +130,7 @@ describe("Symmetria broker contract phase-one regression guards", () => {
 
     const result = run(
       vitePlusPath,
-      ["test", "run", "--reporter=json", `--outputFile=${reportPath}`],
+      ["test", "run", "--reporter=json", `--outputFile=${reportPath}`, "--max-workers=1"],
       NodePath.join(repositoryRoot, "packages/contracts"),
     );
     expectSuccessfulCommand(result);
@@ -190,23 +160,23 @@ describe("Symmetria broker contract phase-one regression guards", () => {
       NodePath.join(NodeOS.tmpdir(), "symmetria-upstream-lock-"),
     );
     try {
-      const matchingResult = compileUpstreamLock(temporaryDirectory);
+      const matchingResult = compileVocabularyLock(temporaryDirectory);
       expectSuccessfulCommand(matchingResult);
 
       for (const [name, canonicalValues] of Object.entries(BORROWED_RUNTIME_VOCABULARIES) as Array<
         [RuntimeVocabularyName, ReadonlyArray<string>]
       >) {
-        const expandedResult = compileUpstreamLock(temporaryDirectory, {
+        const expandedResult = compileVocabularyLock(temporaryDirectory, {
           name,
           values: [...canonicalValues, "future_upstream_literal"],
         });
-        expect(expandedResult.status, `${name} accepted an upstream addition`).not.toBe(0);
+        expectVocabularyLockRejection(expandedResult, name);
 
-        const reducedResult = compileUpstreamLock(temporaryDirectory, {
+        const reducedResult = compileVocabularyLock(temporaryDirectory, {
           name,
           values: canonicalValues.slice(1),
         });
-        expect(reducedResult.status, `${name} accepted an upstream removal`).not.toBe(0);
+        expectVocabularyLockRejection(reducedResult, name);
       }
     } finally {
       NodeFS.rmSync(temporaryDirectory, { force: true, recursive: true });

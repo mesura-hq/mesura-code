@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
+
+// Default mod+number bindings belong to Electron; web browsers own these chords.
+vi.mock("../../env", () => ({ isElectron: true }));
 
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { findJumpTargetItem } from "../CommandPalette.logic";

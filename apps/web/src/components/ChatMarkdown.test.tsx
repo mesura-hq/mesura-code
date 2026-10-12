@@ -1213,7 +1213,7 @@ it.each([
   { text: ARTIFACT_TEMPLATE_DIRECTIVE, query: "Use template", count: 0, useTemplate: true },
 ])(
   "highlights the indexed occurrences of $query in $text",
-  async ({ text, query, count, lineBreaks, user, useTemplate }) => {
+  async ({ text, query, count, lineBreaks, user, useTemplate: templateEnabled }) => {
     const skills = [{ name: "test-t3-app", displayName: "T3 App Testing" }];
     const highlights = new Map<string, Set<Range>>();
     vi.stubGlobal(
@@ -1247,7 +1247,7 @@ it.each([
                 skills={skills}
                 lineBreaks={lineBreaks ?? false}
                 parseRawHtml={!user}
-                onUseArtifactTemplate={useTemplate ? () => undefined : undefined}
+                onUseArtifactTemplate={templateEnabled ? () => undefined : undefined}
               />
             </MarkdownFindContext>
           </div>

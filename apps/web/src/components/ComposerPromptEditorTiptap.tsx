@@ -1689,7 +1689,9 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
         }
       },
       readSnapshot,
-      hasCaret: () => hasFocusedRef.current,
+      // Focus history preserves the caret after a toolbar click. NodeSelection
+      // and AllSelection have no text caret, so dictation must append instead.
+      hasCaret: () => hasFocusedRef.current && editor?.state.selection instanceof TextSelection,
       isCaretOnVisualEdge: (edge) => {
         const snapshot = readSnapshot();
         if (snapshot.value.length === 0) return true;
