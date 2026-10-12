@@ -28,6 +28,8 @@
  *   as `AppRoot.pendingUserInput.test.tsx` does, and the diff highlighting
  *   worker pool, which happy-dom cannot start.
  */
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+import { makeFenceThreadShell } from "./test/fenceThreadShell";
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
@@ -58,7 +60,7 @@ type FixtureResult =
   | { readonly kind: "failure"; readonly message: string };
 
 const fixture = vi.hoisted(() => ({
-  thread: null as Thread | null,
+  thread: null as EnvironmentThreadShell | null,
   project: {
     id: "tree-diff-fence-project",
     environmentId: "tree-diff-fence-environment",
@@ -377,30 +379,16 @@ beforeEach(() => {
   fixture.liveChanges = { kind: "success", value: DIRTY };
   fixture.oneShotChanges = { kind: "success", value: DIRTY };
   fixture.vcsStatus = dirtyVcsStatus();
-  fixture.thread = {
-    id: threadId,
+  fixture.thread = makeFenceThreadShell({
     environmentId,
+    id: threadId,
     projectId: ProjectId.make("tree-diff-fence-project"),
     title: "Tree diff fence",
-    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    session: null,
-    messages: [],
-    proposedPlans: [],
-    checkpoints: [],
-    pullRequests: [],
-    createdAt: now,
-    updatedAt: now,
-    archivedAt: null,
-    settledOverride: null,
-    settledAt: null,
-    deletedAt: null,
-    latestTurn: null,
     branch: "feature/tree-diff",
     worktreePath,
-    activities: [],
-  };
+    createdAt: now,
+  });
+
   container = document.createElement("div");
   document.body.append(container);
 });
