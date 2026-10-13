@@ -1,11 +1,17 @@
 import { expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
-import { WorkloadListInput, WorkloadListResult, WorkloadControlResult } from "./workloads.ts";
+import {
+  WorkloadListInput,
+  WorkloadListResult,
+  WorkloadControlInput,
+  WorkloadControlResult,
+} from "./workloads.ts";
 import { SharedAgentRamSummary } from "./sharedAgentRam.ts";
 import { WS_METHODS, WsRpcGroup } from "./rpc.ts";
 
 const decodeControl = Schema.decodeUnknownSync(WorkloadControlResult);
 const decodeInput = Schema.decodeUnknownSync(WorkloadListInput);
+const decodeControlInput = Schema.decodeUnknownSync(WorkloadControlInput);
 const decodeResult = Schema.decodeUnknownSync(WorkloadListResult);
 const encodeResult = Schema.encodeSync(WorkloadListResult);
 // The approved control slice adds two protected methods to the former read-only
@@ -13,11 +19,13 @@ const encodeResult = Schema.encodeSync(WorkloadListResult);
 it("F2 wire contract exposes a workload catalogue and protected controls with an optional thread filter", () => {
   expect(decodeInput({})).toEqual({});
   expect(decodeInput({ threadId: "thread-a" })).toEqual({ threadId: "thread-a" });
+  const controlInput = { recordId: "a".repeat(64), threadId: "thread-a" };
+  expect(decodeControlInput(controlInput)).toEqual(controlInput);
   expect(
     [...WsRpcGroup.requests.keys()].filter((method) => method.startsWith("workloads.")),
   ).toEqual([WS_METHODS.workloadsList, WS_METHODS.workloadsStart, WS_METHODS.workloadsStop]);
 });
-it("F2 wire summary keeps association status registration and nullable RAM independent", () => {
+it("F2 wire summary keeps association, manager status and nullable RAM independent", () => {
   const result = {
     registryState: "available",
     incomplete: true,
@@ -27,16 +35,13 @@ it("F2 wire summary keeps association status registration and nullable RAM indep
       {
         recordId: "a".repeat(64),
         name: "preview",
-        association: { state: "unassigned", threadId: null, reason: "generation" },
+        association: { state: "unassigned", threadId: null, reason: "ambiguous" },
         managerState: "unknown",
-        binding: "unknown",
-        registration: "incomplete",
         ramBytes: null,
         memoryCurrentBytes: null,
         ports: [],
         defaultPort: null,
         remoteUrl: null,
-        generation: "a".repeat(32),
         controlsAvailable: false,
       },
     ],
@@ -46,7 +51,7 @@ it("F2 wire summary keeps association status registration and nullable RAM indep
     sharedAgentRam: { status: "unsupported", groups: [], incomplete: false },
   });
   // controlsAvailable now reports a compatible host capability. It does not
-  // grant stop authority to this unassigned, unknown invocation.
+  // grant stop authority to this unassigned workload.
   const compatible = {
     ...result,
     workloads: [{ ...result.workloads[0], controlsAvailable: true }],
@@ -56,15 +61,18 @@ it("F2 wire summary keeps association status registration and nullable RAM indep
     sharedAgentRam: { status: "unsupported", groups: [], incomplete: false },
   });
   expect(() =>
-    decodeResult({ ...result, workloads: [{ ...result.workloads[0], generation: "invalid" }] }),
+    decodeResult({
+      ...result,
+      workloads: [{ ...result.workloads[0], controlsAvailable: "invalid" }],
+    }),
   ).toThrow();
   expect(() =>
     decodeResult({ ...result, workloads: [{ ...result.workloads[0], ports: [65536] }] }),
   ).toThrow();
 });
 
-it("F2 control V2 outcomes reject contradictory mutation and admission claims", () => {
-  const identity = { recordId: "a".repeat(64), oldGeneration: "b".repeat(32) };
+it("F2 direct control outcomes reject contradictory mutation and admission claims", () => {
+  const identity = { recordId: "a".repeat(64) };
   const valid = {
     ...identity,
     status: "completed",
@@ -79,12 +87,9 @@ it("F2 control V2 outcomes reject contradictory mutation and admission claims", 
   expect(() =>
     decodeControl({
       ...identity,
-      status: "partial",
+      status: "incomplete",
       operation: "stop",
-      stage: "admission",
-      mutationAttempted: true,
-      admission: "accepted",
-      registration: "unknown",
+      mutationAttempted: false,
       managerState: "unknown",
     }),
   ).toThrow();
@@ -95,46 +100,40 @@ it("F2 control V2 outcomes reject contradictory mutation and admission claims", 
       operation: "start",
       result: "admitted",
       mutationAttempted: true,
-      newGeneration: "invalid",
-      registration: "unverified",
+      registration: "failed",
       managerState: "unknown",
     }),
   ).toThrow();
 });
 
-it("F2 control V2 completed replay cannot retain the old generation", () => {
+it("F2 completed start records admission without claiming a running manager", () => {
   const result = {
     recordId: "a".repeat(64),
-    oldGeneration: "b".repeat(32),
     status: "completed",
     operation: "start",
     result: "admitted",
     mutationAttempted: true,
-    newGeneration: "b".repeat(32),
-    registration: "unverified",
+    registration: "recorded",
     managerState: "unknown",
   };
-  expect(() => decodeControl(result)).toThrow();
+  expect(decodeControl(result)).toEqual(result);
+  expect(() => decodeControl({ ...result, mutationAttempted: false })).toThrow();
 });
 
-it("F2 control V2 partial replay validates distinct known generations and permits unknown generation", () => {
+it("F2 incomplete start distinguishes accepted registration failure from an unknown command outcome", () => {
   const result = {
     recordId: "a".repeat(64),
-    oldGeneration: "b".repeat(32),
-    status: "partial",
+    status: "incomplete",
     operation: "start",
-    stage: "verification",
     mutationAttempted: true,
     admission: "accepted",
-    registration: "unverified",
-    newGeneration: "b".repeat(32),
+    registration: "failed",
     managerState: "unknown",
   };
-  expect(() => decodeControl(result)).toThrow();
-  const distinct = { ...result, newGeneration: "c".repeat(32) };
-  expect(decodeControl(distinct)).toEqual(distinct);
-  const unknown = { ...result, newGeneration: null };
+  expect(decodeControl(result)).toEqual(result);
+  const unknown = { ...result, admission: "unknown", registration: "unknown" };
   expect(decodeControl(unknown)).toEqual(unknown);
+  expect(() => decodeControl({ ...unknown, mutationAttempted: false })).toThrow();
 });
 
 const decodeSharedRam = Schema.decodeUnknownSync(SharedAgentRamSummary);

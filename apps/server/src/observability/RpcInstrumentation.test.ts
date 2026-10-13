@@ -375,7 +375,6 @@ it.effect.each([WS_METHODS.workloadsStart, WS_METHODS.workloadsStop])(
         const group = groupOf(tag);
         const input = {
           recordId: "a".repeat(64),
-          expectedGeneration: "b".repeat(32),
           threadId: ThreadId.make("private-native-owner"),
         };
         const client = yield* RpcTest.makeClient(group).pipe(
@@ -384,12 +383,12 @@ it.effect.each([WS_METHODS.workloadsStart, WS_METHODS.workloadsStop])(
               group.toLayerHandler(tag, () =>
                 Effect.succeed({
                   recordId: input.recordId,
-                  oldGeneration: input.expectedGeneration,
                   status: "refused" as const,
                   operation:
                     tag === WS_METHODS.workloadsStart ? ("start" as const) : ("stop" as const),
                   reason: "record-unavailable" as const,
                   mutationAttempted: false as const,
+                  managerState: "unknown" as const,
                 }),
               ),
               connectionMiddleware([AuthEnvironmentMaintainScope]),
@@ -402,7 +401,6 @@ it.effect.each([WS_METHODS.workloadsStart, WS_METHODS.workloadsStop])(
           rpcSpans(ended).map((span) => Object.fromEntries(span.attributes)),
         );
         assert.isFalse(attributes.includes(input.recordId));
-        assert.isFalse(attributes.includes(input.expectedGeneration));
         assert.isFalse(attributes.includes(input.threadId));
       }),
     ),

@@ -1,13 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import { WorkloadControlRefusal } from "@t3tools/contracts";
-import {
-  controlOutcomes,
-  GENERATION,
-  NEXT_GENERATION,
-  RECORD,
-  THREAD,
-  workload,
-} from "../../state/workloads.testkit";
+import { controlOutcomes, RECORD, THREAD, workload } from "../../state/workloads.testkit";
 import {
   workloadControlAvailability,
   workloadControlInput,
@@ -15,7 +8,7 @@ import {
   workloadRamLabel,
 } from "./workloadPresentation";
 
-const identity = { recordId: RECORD, oldGeneration: GENERATION };
+const identity = { recordId: RECORD };
 describe("workload control presentation", () => {
   it.each(controlOutcomes)("distinguishes the %j outcome", (result, title, detail) => {
     const notice = workloadControlNotice(result);
@@ -31,16 +24,16 @@ describe("workload control presentation", () => {
         operation: "start",
         reason,
         mutationAttempted: false,
+        managerState: "unknown",
       });
       expect(notice.title).toBe("Start refused");
       expect(notice.detail.length).toBeGreaterThan(10);
       expect(notice.tone).toBe("warning");
     },
   );
-  it("takes the current owner and generation, and cannot control an unassigned record", () => {
-    expect(workloadControlInput(workload({ generation: NEXT_GENERATION }))).toEqual({
+  it("takes the current record and owner, and cannot control an unassigned record", () => {
+    expect(workloadControlInput(workload())).toEqual({
       recordId: RECORD,
-      expectedGeneration: NEXT_GENERATION,
       threadId: THREAD,
     });
     const unassigned = workload({
@@ -49,19 +42,20 @@ describe("workload control presentation", () => {
     expect(workloadControlInput(unassigned)).toBeNull();
     expect(workloadControlAvailability(unassigned).available).toBe(false);
   });
-  it.each(["mismatched", "unverified", "unknown"] as const)(
-    "refuses a %s binding even when a stale control flag says true",
-    (binding) => {
-      expect(workloadControlAvailability(workload({ binding })).available).toBe(false);
-    },
-  );
-  it("keeps an unknown state unavailable and selects replay only for a verified stopped record", () => {
+  it("keeps unavailable host controls disabled", () => {
+    expect(workloadControlAvailability(workload({ controlsAvailable: false })).available).toBe(
+      false,
+    );
+  });
+  it("keeps an unknown state unavailable and selects replay for a stopped record", () => {
     expect(workloadControlAvailability(workload({ managerState: "unknown" })).available).toBe(
       false,
     );
-    expect(
-      workloadControlAvailability(workload({ managerState: "stopped", binding: "historical" })),
-    ).toEqual({ operation: "start", available: true, reason: null });
+    expect(workloadControlAvailability(workload({ managerState: "stopped" }))).toEqual({
+      operation: "start",
+      available: true,
+      reason: null,
+    });
   });
   it("distinguishes an unavailable reading from a measured zero", () => {
     expect(workloadRamLabel(null)).toBe("RAM unavailable");

@@ -23,7 +23,6 @@ import * as Layer from "effect/Layer";
 import * as WorkloadHost from "./WorkloadHost.ts";
 import * as WorkloadRegistry from "./WorkloadRegistry.ts";
 import * as WorkloadThreadQuery from "./WorkloadThreadQuery.ts";
-import { encodeWorkloadRecord, type WorkloadRecord } from "./WorkloadRecord.ts";
 
 export class WorkloadService extends Context.Service<
   WorkloadService,
@@ -33,24 +32,6 @@ export class WorkloadService extends Context.Service<
     readonly list: (input: WorkloadListInput) => Effect.Effect<WorkloadListResult>;
   }
 >()("t3/workloads/WorkloadService") {}
-
-function bindingOf(
-  record: WorkloadRecord,
-  manager: WorkloadHost.WorkloadManagerSnapshot,
-  bootId: string | null,
-): WorkloadSummary["binding"] {
-  if (manager.state === "absent") return "historical";
-  if (record.binding === "unverified") return "unverified";
-  if (manager.state === "unknown" || bootId === null) return "unknown";
-  // A registration timestamp or PID cannot replace any observed invocation field.
-  return manager.unit === record.unit &&
-    manager.generation === record.generation &&
-    manager.invocationId === record.unitInvocationId &&
-    manager.startMonotonic === record.unitStartMonotonic &&
-    bootId === record.bootId
-    ? "matched"
-    : "mismatched";
-}
 
 function isNormalizedDnsName(hostname: string): boolean {
   return (
@@ -88,7 +69,6 @@ const make = Effect.gen(function* () {
     const diagnostics: WorkloadDiagnostic[] = [...scan.diagnostics];
     let incomplete = scan.incomplete;
     const start = yield* Clock.currentTimeMillis;
-    const bootId = scan.records.length > 0 ? yield* host.bootId : null;
     let tailnet: TailscaleStatus | null | undefined;
     let controlsAvailable: boolean | undefined;
     for (const record of [...scan.records].sort((a, b) => a.recordKey.localeCompare(b.recordKey))) {
@@ -98,42 +78,32 @@ const make = Effect.gen(function* () {
         break;
       }
       const resolved = yield* query.resolve(record);
-      // Filter using persisted ownership before observing the host. A live mismatch
-      // may later revoke the visible association without leaking unrelated rows.
+      // Filter using persisted ownership before observing the host.
       if (input.threadId !== undefined && resolved.threadId !== input.threadId) continue;
       let manager = yield* host.manager(record.unit);
-      let binding = bindingOf(record, manager, bootId);
       let resources: WorkloadHost.WorkloadResources = {
         ramBytes: null,
         memoryCurrentBytes: null,
         listeners: [],
         incomplete:
           resolved.state === "assigned" &&
-          binding === "matched" &&
           manager.state === "running" &&
           manager.controlGroup === null,
       };
       if (
         resolved.state === "assigned" &&
-        binding === "matched" &&
         manager.state === "running" &&
         manager.controlGroup !== null
       ) {
         resources = yield* host.resources(manager.controlGroup);
         const after = yield* host.manager(record.unit);
-        // The same invocation can move cgroup or stop during socket/memory reads.
+        // Discard measurements if the unit stops or changes cgroup during reads.
         if (after.controlGroup !== manager.controlGroup || after.state !== manager.state)
           resources = { ramBytes: null, memoryCurrentBytes: null, listeners: [], incomplete: true };
         manager = after;
-        binding = bindingOf(record, after, yield* host.bootId);
       }
-      const historical = binding === "historical";
-      const association: WorkloadAssociation =
-        resolved.state === "unassigned" || binding === "matched" || historical
-          ? resolved
-          : { state: "unassigned", threadId: null, reason: "generation" };
-      const mayPublish =
-        association.state === "assigned" && binding === "matched" && manager.state === "running";
+      const association: WorkloadAssociation = resolved;
+      const mayPublish = association.state === "assigned" && manager.state === "running";
       const listeners = mayPublish ? resources.listeners : [];
       const ports = [...new Set(listeners.map((listener) => listener.port))].sort((a, b) => a - b);
       const defaultPort = ports[0] ?? null;
@@ -153,9 +123,7 @@ const make = Effect.gen(function* () {
           remoteUrl = `http://${tailnet.magicDnsName}:${defaultPort}`;
       }
       const observationIncomplete =
-        binding === "unknown" ||
-        binding === "mismatched" ||
-        (binding === "unverified" && manager.state !== "absent") ||
+        manager.state === "unknown" ||
         resources.incomplete ||
         resolved.reason === "projection-unavailable";
       if (observationIncomplete) {
@@ -168,19 +136,11 @@ const make = Effect.gen(function* () {
         name: record.name,
         association,
         managerState: manager.state,
-        binding,
-        registration:
-          record.binding === "unverified"
-            ? "unverified"
-            : binding === "matched" || historical
-              ? "observed"
-              : "incomplete",
         ramBytes: mayPublish ? resources.ramBytes : null,
         memoryCurrentBytes: mayPublish ? resources.memoryCurrentBytes : null,
         ports,
         defaultPort,
         remoteUrl,
-        generation: record.generation,
         controlsAvailable,
       });
     }
@@ -201,235 +161,114 @@ const make = Effect.gen(function* () {
     suppliedInput: WorkloadControlInput,
   ): Effect.Effect<WorkloadControlResult> =>
     Effect.suspend(() => {
-      // Copy caller-owned input before any asynchronous work. The decoded record
-      // contains fresh arrays; no mutable public list snapshot grants control.
       const input = { ...suppliedInput };
-      const identity = { recordId: input.recordId, oldGeneration: input.expectedGeneration };
       let dispatched = false;
-      let stage: "admission" | "registration" | "verification" = "admission";
-      let admission: "accepted" | "unknown" = "unknown";
-      let registration: "unchanged" | "unknown" = "unknown";
+      let managerState: WorkloadSummary["managerState"] = "unknown";
       const refused = (reason: WorkloadControlRefusal): WorkloadControlResult => ({
-        ...identity,
-        status: "refused",
+        recordId: input.recordId,
         operation,
+        status: "refused",
         reason,
         mutationAttempted: false,
+        managerState,
       });
-      const partial = (
-        managerState: WorkloadSummary["managerState"] = "unknown",
+      const incomplete = (
+        admission: "accepted" | "unknown" = "unknown",
+        registration: "failed" | "unknown" = "unknown",
       ): WorkloadControlResult =>
         operation === "stop"
           ? {
-              ...identity,
-              status: "partial",
+              recordId: input.recordId,
               operation,
-              stage: "stop-completion",
+              status: "incomplete",
               mutationAttempted: true,
-              admission: "not-applicable",
-              registration: "unchanged",
               managerState,
             }
           : {
-              ...identity,
-              status: "partial",
+              recordId: input.recordId,
               operation,
-              stage,
+              status: "incomplete",
               mutationAttempted: true,
               admission,
               registration,
-              newGeneration: null,
               managerState,
             };
-      const read = Effect.gen(function* () {
-        const scan = yield* registry.scan;
-        if (scan.state !== "available" || scan.incomplete)
-          return { reason: "registry-unavailable" as const };
-        const records = scan.records.filter((record) => record.recordKey === input.recordId);
-        if (records.length !== 1) return { reason: "record-unavailable" as const };
-        const record = records[0]!;
-        if (record.generation !== input.expectedGeneration)
-          return { reason: "stale-generation" as const };
-        const owner = yield* query.resolve(record);
-        if (owner.state !== "assigned")
-          return {
-            reason:
-              owner.reason === "projection-unavailable"
-                ? ("owner-unavailable" as const)
-                : ("owner-mismatch" as const),
-          };
-        if (owner.threadId !== input.threadId) return { reason: "owner-mismatch" as const };
-        return { record };
-      });
       const run = Effect.gen(function* () {
         if (!isControlInput(input)) return refused("invalid-input");
         if (platform !== "linux") return refused("unsupported-host");
-        const started = yield* Clock.currentTimeMillis;
-        if (!(yield* bridge.available)) return refused("handoff-unavailable");
-        const initial = yield* read;
-        if ("reason" in initial) return refused(initial.reason);
-        const record = initial.record;
-        const fingerprint = encodeWorkloadRecord(record);
-        const recheck = Effect.gen(function* () {
-          if ((yield* Clock.currentTimeMillis) - started >= CONTROL_BUDGET_MILLIS)
-            return "deadline" as const;
-          const current = yield* read;
-          if ("reason" in current) return current.reason;
-          return encodeWorkloadRecord(current.record) === fingerprint
-            ? null
-            : ("snapshot-changed" as const);
-        });
-        return yield* bridge.withLock(record, (lease) =>
-          Effect.gen(function* () {
-            const queued = yield* recheck;
-            if (queued !== null) return refused(queued);
-            let manager = yield* host.manager(record.unit);
-            if (operation === "stop") {
-              if (manager.state === "absent")
-                return {
-                  ...identity,
-                  status: "completed",
-                  operation,
-                  result: "already-stopped",
-                  mutationAttempted: false,
-                  managerState: "absent",
-                } satisfies WorkloadControlResult;
-              if (bindingOf(record, manager, yield* host.bootId) !== "matched")
-                return refused(
-                  manager.state === "unknown" ? "manager-unknown" : "binding-mismatch",
-                );
-              if (manager.state === "stopped" || manager.state === "failed")
-                return {
-                  ...identity,
-                  status: "completed",
-                  operation,
-                  result: "already-stopped",
-                  mutationAttempted: false,
-                  managerState: manager.state,
-                } satisfies WorkloadControlResult;
-            } else {
-              if (manager.state !== "absent")
-                return refused(manager.state === "unknown" ? "manager-unknown" : "unit-loaded");
-              // V4 snapshots the same PATH it uses for utilities. No bootstrap PATH
-              // can honestly represent null/empty until the wrapper changes.
-              if (!record.PATH) return refused("wrapper-environment-incompatible");
-              const launch = yield* lease
-                .validateReplay(record)
-                .pipe(Effect.timeoutOption("10 seconds"));
-              if (Option.isNone(launch)) return refused("deadline");
-              if (launch.value !== null) return refused(launch.value);
-            }
-            const preflight = yield* recheck;
-            if (preflight !== null) return refused(preflight);
-            manager = yield* host.manager(record.unit);
-            if (operation === "stop") {
-              if (
-                manager.state !== "running" ||
-                bindingOf(record, manager, yield* host.bootId) !== "matched"
-              )
-                return refused("binding-mismatch");
-              // systemd stop addresses a name. This cooperative OFD excludes only
-              // participating replacements, not a hostile same-UID manager action.
-              const final = yield* recheck;
-              if (final !== null) return refused(final);
-              dispatched = true;
-              if ((yield* lease.stop) !== 0) return partial();
-              const after = yield* host.manager(record.unit);
-              if (
-                after.state === "absent" ||
-                ((after.state === "stopped" || after.state === "failed") &&
-                  bindingOf(record, after, yield* host.bootId) === "matched")
-              )
-                return {
-                  ...identity,
-                  status: "completed",
-                  operation,
-                  result: "stopped",
-                  mutationAttempted: true,
-                  managerState: after.state,
-                } satisfies WorkloadControlResult;
-              return partial(after.state);
-            }
-            if (manager.state !== "absent")
-              return refused(manager.state === "unknown" ? "manager-unknown" : "unit-loaded");
-            const final = yield* recheck;
-            if (final !== null) return refused(final);
-            dispatched = true;
-            const code = yield* lease.replay(record);
-            if (code === 3) {
-              admission = "accepted";
-              stage = "registration";
-              // Exit3 establishes admission, not the contents of the retained
-              // record after failure. Preserve "unchanged" only after a fresh read.
-              registration = (yield* recheck) === null ? "unchanged" : "unknown";
-              return partial((yield* host.manager(record.unit)).state);
-            }
-            // V4 also exits1 before systemd-run (for example, failed mktemp).
-            // An unchanged record cannot prove manager admission was attempted
-            // and rejected. Keep ambiguous exits partial until a precise receipt
-            // exists; do not parse diagnostic text into stop/admission authority.
-            if (code !== 0) return partial();
-            admission = "accepted";
-            stage = "verification";
-            const scan = yield* registry.scan;
-            const candidates = scan.records.filter((next) => next.recordKey === record.recordKey);
-            if (scan.state !== "available" || scan.incomplete || candidates.length !== 1)
-              return partial();
-            const next = candidates[0]!;
-            const configuration = (value: WorkloadRecord) =>
-              JSON.stringify([
-                value.name,
-                value.unit,
-                value.recordKey,
-                value.cwd,
-                value.argv,
-                value.PATH,
-                value.providerThreadRef,
-                value.environmentId,
-                value.providerInstanceId,
-                value.memoryHigh,
-              ]);
-            // Minimal replay clears MESURA_THREAD_ID. A retained legacy label is
-            // not native ownership. Keep it pinned in the queued full snapshot,
-            // but require its removal in the new record and compare actual owner.
-            if (
-              next.thread !== null ||
-              next.generation === record.generation ||
-              configuration(next) !== configuration(record)
-            )
-              return partial();
-            const owner = yield* query.resolve(next);
-            if (owner.state !== "assigned" || owner.threadId !== input.threadId) return partial();
-            const after = yield* host.manager(record.unit);
-            if (after.generation !== null && after.generation !== next.generation)
-              return partial(after.state);
-            if (
-              next.binding === "observed" &&
-              after.state !== "absent" &&
-              bindingOf(next, after, yield* host.bootId) !== "matched"
-            )
-              return partial(after.state);
+        const scan = yield* registry.scan;
+        if (scan.state !== "available" || scan.incomplete) return refused("registry-unavailable");
+        const records = scan.records.filter((record) => record.recordKey === input.recordId);
+        if (records.length !== 1) return refused("record-unavailable");
+        const record = records[0]!;
+        const owner = yield* query.resolve(record);
+        if (owner.state !== "assigned")
+          return refused(
+            owner.reason === "projection-unavailable" ? "owner-unavailable" : "owner-mismatch",
+          );
+        if (owner.threadId !== input.threadId) return refused("owner-mismatch");
+        managerState = (yield* host.manager(record.unit)).state;
+        if (
+          operation === "stop" &&
+          (managerState === "absent" || managerState === "stopped" || managerState === "failed")
+        )
+          return {
+            recordId: input.recordId,
+            operation,
+            status: "completed",
+            result: "already-stopped",
+            mutationAttempted: false,
+            managerState,
+          } satisfies WorkloadControlResult;
+        if (managerState === "unknown") return refused("manager-unknown");
+        if (operation === "start" && managerState !== "absent") return refused("unit-loaded");
+        if (!(yield* bridge.available)) return refused("wrapper-unavailable");
+        if (operation === "start") {
+          const launch = yield* bridge.validateReplay(record);
+          if (launch !== null) return refused(launch);
+        }
+        // These commands address the current unit name. No generation lease or
+        // guarantee against an independent replacement is implied.
+        dispatched = true;
+        const code = yield* operation === "stop" ? bridge.stop(record) : bridge.replay(record);
+        managerState = (yield* host.manager(record.unit)).state;
+        if (operation === "stop") {
+          if (
+            code === 0 &&
+            (managerState === "absent" || managerState === "stopped" || managerState === "failed")
+          )
             return {
-              ...identity,
-              status: "completed",
+              recordId: input.recordId,
               operation,
-              result: "admitted",
+              status: "completed",
+              result: "stopped",
               mutationAttempted: true,
-              newGeneration: next.generation,
-              registration: next.binding,
-              managerState: after.state,
+              managerState,
             } satisfies WorkloadControlResult;
-          }),
-        );
+          return incomplete();
+        }
+        if (code === 0)
+          return {
+            recordId: input.recordId,
+            operation,
+            status: "completed",
+            result: "admitted",
+            mutationAttempted: true,
+            registration: "recorded",
+            managerState,
+          } satisfies WorkloadControlResult;
+        // Exit3 is the wrapper's accepted-admission/failed-registration receipt.
+        // Other exits do not establish whether manager admission occurred.
+        return code === 3 ? incomplete("accepted", "failed") : incomplete();
       });
       return run.pipe(
         Effect.catchTags({
           WorkloadBridgeError: (error) =>
-            Effect.succeed(dispatched ? partial() : refused(error.reason)),
+            Effect.succeed(dispatched ? incomplete() : refused(error.reason)),
         }),
         Effect.timeoutOption(CONTROL_BUDGET_MILLIS - CLEANUP_BUDGET_MILLIS),
         Effect.map((value) =>
-          Option.isSome(value) ? value.value : dispatched ? partial() : refused("deadline"),
+          Option.isSome(value) ? value.value : dispatched ? incomplete() : refused("deadline"),
         ),
       );
     });

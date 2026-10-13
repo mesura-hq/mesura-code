@@ -12,7 +12,7 @@ import * as ProcessRunner from "../processRunner.ts";
 import * as WorkloadHost from "./WorkloadHost.ts";
 
 const unit = "mesura-workload-preview.service";
-const managerOutput = `Id=${unit}\nLoadState=loaded\nActiveState=active\nSubState=running\nControlGroup=/fixture.service\nInvocationID=${"b".repeat(32)}\nExecMainStartTimestampMonotonic=12345678901234567890\nEnvironment="SECRET=private value" "MESURA_WORKLOAD_GENERATION=${"a".repeat(32)}"\n`;
+const managerOutput = `Id=${unit}\nLoadState=loaded\nActiveState=active\nSubState=running\nControlGroup=/fixture.service\n`;
 const cgroup = "/sys/fs/cgroup/fixture.service";
 function hostLayer(
   options: { manager?: string; code?: number; changedPid?: boolean; sockets?: string } = {},
@@ -92,15 +92,15 @@ function hostLayer(
   };
 }
 
-it.effect("F2 manager retains exact generation while discarding raw environment and stderr", () =>
+it.effect("F2 manager reads current unit state without exposing raw output", () =>
   Effect.gen(function* () {
     const fixture = hostLayer();
     const host = yield* WorkloadHost.WorkloadHost.pipe(Effect.provide(fixture.layer));
     const manager = yield* host.manager(unit);
     expect(manager).toMatchObject({
       state: "running",
-      generation: "a".repeat(32),
-      startMonotonic: "12345678901234567890",
+      unit,
+      controlGroup: "/fixture.service",
     });
     expect(JSON.stringify(manager)).not.toMatch(/SECRET|private/);
   }),

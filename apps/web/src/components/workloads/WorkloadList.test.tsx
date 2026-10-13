@@ -18,10 +18,9 @@ import {
   actEffect,
   controlOutcomes,
   ENVIRONMENT,
-  GENERATION,
   makeWorkloadHarness,
-  NEXT_GENERATION,
   OTHER_ENVIRONMENT,
+  OTHER_THREAD,
   RECORD,
   THREAD,
   workload,
@@ -86,10 +85,7 @@ describe("shared workload rows", () => {
   it.each(controlOutcomes)(
     "publishes the typed %j result and refreshes without replay",
     async (result, title, detail) => {
-      const row =
-        result.operation === "start"
-          ? workload({ managerState: "stopped", binding: "historical" })
-          : workload();
+      const row = result.operation === "start" ? workload({ managerState: "stopped" }) : workload();
       harness.replies.list = () => Effect.succeed(workloadList([row]));
       harness.replies.control = () => Effect.succeed(result);
       await mount();
@@ -131,13 +127,12 @@ describe("shared workload rows", () => {
     expect(harness.calls.controls).toHaveLength(0);
   });
   it.effect(
-    "shares pending controls across Hosts and thread lists and sends the current generation only",
+    "shares pending controls across Hosts and thread lists and sends only the current record and owner",
     () =>
       Effect.gen(function* () {
         const entered = yield* Deferred.make<void>();
         const release = yield* Deferred.make<WorkloadControlResult>();
-        harness.replies.list = () =>
-          Effect.succeed(workloadList([workload({ generation: NEXT_GENERATION })]));
+        harness.replies.list = () => Effect.succeed(workloadList([workload()]));
         harness.replies.control = () =>
           Effect.gen(function* () {
             yield* Deferred.succeed(entered, undefined);
@@ -171,39 +166,43 @@ describe("shared workload rows", () => {
         expect(harness.calls.controls[0]).toEqual({
           environmentId: ENVIRONMENT,
           operation: "stop",
-          input: { recordId: RECORD, expectedGeneration: NEXT_GENERATION, threadId: THREAD },
+          input: { recordId: RECORD, threadId: THREAD },
         });
         const settled = harness.settledControl();
         yield* actEffect(
           Deferred.succeed(release, {
             recordId: RECORD,
-            oldGeneration: NEXT_GENERATION,
             status: "refused",
             operation: "stop",
-            reason: "stale-generation",
+            reason: "owner-mismatch",
+            managerState: "running",
             mutationAttempted: false,
           }).pipe(Effect.andThen(Effect.promise(() => settled))),
         );
         yield* Effect.promise(() => harness.read());
         yield* Effect.promise(() => harness.read({ threadId: THREAD }));
         expect(container.textContent).toContain("Stop refused");
-        expect(container.textContent).toContain("Refresh and select the action again");
+        expect(container.textContent).toContain("The owning thread changed");
         expect(container.textContent).toContain("Running");
         expect(harness.calls.controls).toHaveLength(1);
       }),
   );
-  it("observes a replacement generation after refusal and uses it only on the next explicit action", async () => {
+  it("observes a changed owner after refusal and uses it only on the next explicit action", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(1_791_910_800_000);
     harness.replies.control = () => {
       harness.replies.list = () =>
-        Effect.succeed(workloadList([workload({ generation: NEXT_GENERATION })]));
+        Effect.succeed(
+          workloadList([
+            workload({ association: { state: "assigned", threadId: OTHER_THREAD, reason: null } }),
+          ]),
+        );
       return Effect.succeed({
         recordId: RECORD,
-        oldGeneration: GENERATION,
         status: "refused",
         operation: "stop",
-        reason: "stale-generation",
+        reason: "owner-mismatch",
+        managerState: "running",
         mutationAttempted: false,
       });
     };
@@ -226,24 +225,22 @@ describe("shared workload rows", () => {
       button("Stop Frontend preview").click();
       await second;
     });
-    expect(harness.calls.controls.map((call) => call.input.expectedGeneration)).toEqual([
-      GENERATION,
-      NEXT_GENERATION,
+    expect(harness.calls.controls.map((call) => call.input.threadId)).toEqual([
+      THREAD,
+      OTHER_THREAD,
     ]);
   });
-  it("does not call an admitted start running when registration remains unverified", async () => {
+  it("does not call an accepted start running when the manager state is unknown", async () => {
     harness.replies.list = () =>
-      Effect.succeed(workloadList([workload({ managerState: "stopped", binding: "historical" })]));
+      Effect.succeed(workloadList([workload({ managerState: "stopped" })]));
     harness.replies.control = () =>
       Effect.succeed({
         recordId: RECORD,
-        oldGeneration: GENERATION,
         status: "completed",
         operation: "start",
         result: "admitted",
         mutationAttempted: true,
-        newGeneration: NEXT_GENERATION,
-        registration: "unverified",
+        registration: "recorded",
         managerState: "unknown",
       });
     await mount();
@@ -253,8 +250,8 @@ describe("shared workload rows", () => {
       await settled;
     });
     await harness.read();
-    expect(container.textContent).toContain("Start admitted");
-    expect(container.textContent).toContain("Registration: unverified. Host state: unknown");
+    expect(container.textContent).toContain("Start accepted");
+    expect(container.textContent).toContain("Launch recorded. Host state: unknown");
     expect(container.textContent).not.toContain("● Running");
     expect(harness.calls.controls).toHaveLength(1);
   });

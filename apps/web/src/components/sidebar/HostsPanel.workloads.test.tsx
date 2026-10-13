@@ -81,7 +81,7 @@ describe("Host workloads beside host readings", () => {
     expect(harness.calls.controls[0]).toEqual({
       environmentId: OTHER_ENVIRONMENT,
       operation: "stop",
-      input: { recordId: RECORD, expectedGeneration: workload().generation, threadId: THREAD },
+      input: { recordId: RECORD, threadId: THREAD },
     });
   });
   it("still shows workload availability when host-stat rows are unavailable, and removes queries on close", async () => {

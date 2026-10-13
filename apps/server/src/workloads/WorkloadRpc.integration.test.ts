@@ -1,8 +1,8 @@
 import type * as ProviderRuntimeResources from "../agentResources/ProviderRuntimeResources.ts";
 // Entry point: production ws.layer GET /ws and its real scoped RpcServer.
 // Authentication, session state, authorization, private registry and SQL are real.
-// The socket/manager are external ports. Baseline cases inject a scoped bridge;
-// actual-OFD cases execute the real Python bridge and contended lock.
+// The socket/manager are external ports. Cancellation cases retain a real
+// scoped child without invoking a host manager. Direct bridge behavior is separate.
 import { expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
 import {
@@ -265,8 +265,6 @@ const unrelatedPorts = Layer.mergeAll(
   FetchHttpClient.layer,
 );
 
-type HostBridgeFixture = Parameters<Parameters<typeof withHostBridgeFixture>[0]>[0];
-
 const decodeAuthorizationError = Schema.decodeUnknownSync(EnvironmentAuthorizationError);
 
 const connectWorkloadRoute = Effect.fnUntraced(function* (token: string) {
@@ -311,12 +309,8 @@ const controlHost = (state: "absent" | "running") =>
       Effect.succeed({
         state,
         unit,
-        generation: "a".repeat(32),
-        invocationId: "b".repeat(32),
-        startMonotonic: "12345678901234567890",
         controlGroup: null,
       }),
-    bootId: Effect.succeed("12345678-1234-1234-1234-123456789abc"),
     resources: () => Effect.die("unused"),
     tailnet: Effect.succeed(null),
   });
@@ -345,258 +339,174 @@ const controlRouteAuthLayer = (
 
 it.effect.each(
   (["start", "stop"] as const).flatMap((operation) =>
-    ([false, true] as const).flatMap((actual) =>
-      (["revoke", "expire", "disconnect", "request-interrupt"] as const).map((mode) => ({
-        operation,
-        mode,
-        actual,
-        name:
-          "F2 control V2 real ws lifetime cancels queued " +
-          operation +
-          " and its captured child on " +
-          mode +
-          (actual ? " with real OFD" : ""),
-      })),
-    ),
+    (["revoke", "expire", "disconnect", "request-interrupt"] as const).map((mode) => ({
+      operation,
+      mode,
+      name: `real ws cancels direct ${operation} on ${mode}`,
+    })),
   ),
-)("$name", ({ operation, mode, actual }) => {
-  const run = (
-    fixture?: HostBridgeFixture,
-    actualBridge?: WorkloadHostBridge.WorkloadHostBridge["Service"],
-  ) =>
-    Effect.gen(function* () {
-      const queued = fixture?.waiting ?? (yield* Deferred.make<void>());
-      const released = yield* Deferred.make<void>();
-      const gate = yield* Deferred.make<void>();
-      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-      const fs = yield* FileSystem.FileSystem;
-      let dispatches = 0;
-      let childPid: number | undefined;
-      const holding = yield* Deferred.make<void>();
-      const holderGate = yield* Deferred.make<void>();
-      const holder =
-        actualBridge && fixture
-          ? yield* actualBridge
-              .withLock(fixture.record, () =>
-                Deferred.succeed(holding, undefined).pipe(
-                  Effect.andThen(Deferred.await(holderGate)),
-                ),
-              )
-              .pipe(Effect.forkScoped)
-          : undefined;
-      if (holder)
+)("$name", ({ operation, mode }) =>
+  Effect.gen(function* () {
+    const queued = yield* Deferred.make<void>();
+    const released = yield* Deferred.make<void>();
+    const gate = yield* Deferred.make<void>();
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const fs = yield* FileSystem.FileSystem;
+    let dispatches = 0;
+    let childPid: number | undefined;
+    const pending = Effect.scoped(
+      Effect.gen(function* () {
+        const child = yield* spawner.spawn(
+          ChildProcess.make("/usr/bin/python3", ["-u", "-c", "import sys; sys.stdin.read()"], {
+            shell: false,
+            env: {},
+            extendEnv: false,
+            forceKillAfter: "2 seconds",
+            stderr: "ignore",
+          }),
+        );
+        childPid = child.pid;
+        yield* Deferred.succeed(queued, undefined);
+        yield* Deferred.await(gate);
+        dispatches++;
+        return 0;
+      }),
+    ).pipe(
+      Effect.mapError(
+        (cause) => new WorkloadHostBridge.WorkloadBridgeError({ reason: "invalid-launch", cause }),
+      ),
+      Effect.ensuring(Deferred.succeed(released, undefined)),
+    );
+    const bridge = WorkloadHostBridge.WorkloadHostBridge.of({
+      available: Effect.succeed(true),
+      validateReplay: () =>
+        operation === "start" ? pending.pipe(Effect.orDie, Effect.as(null)) : Effect.succeed(null),
+      stop: () => pending,
+      replay: () =>
+        Effect.sync(() => {
+          dispatches++;
+          return 0;
+        }),
+    });
+    const host = controlHost(operation === "start" ? "absent" : "running");
+    yield* withControlFixture(({ record, threadId }) =>
+      Effect.gen(function* () {
+        const sessions = yield* SessionStore.SessionStore;
+        const issued = yield* sessions.issue({
+          subject: "workload-rpc",
+          scopes: [AuthEnvironmentMaintainScope, AuthDiagnosticsReadScope],
+          ttl: Duration.seconds(20),
+        });
+        const unaffected = yield* sessions.issue({
+          subject: "workload-rpc-unaffected",
+          scopes: [AuthEnvironmentMaintainScope, AuthDiagnosticsReadScope],
+          ttl: Duration.minutes(5),
+        });
+        const session = yield* sessions.verify(issued.token);
+        const observeList = (
+          connection: {
+            inbound: Queue.Queue<string, Socket.SocketError>;
+            outbound: Queue.Queue<string>;
+          },
+          id: string,
+        ) =>
+          Effect.gen(function* () {
+            yield* Queue.offer(
+              connection.inbound,
+              JSON.stringify({
+                _tag: "Request",
+                id,
+                tag: "workloads.list",
+                payload: {},
+                headers: [],
+              }),
+            );
+            const response = JSON.parse(yield* Queue.take(connection.outbound));
+            expect(response).toMatchObject({
+              _tag: "Exit",
+              requestId: id,
+              exit: {
+                _tag: "Success",
+                value: {
+                  workloads: [{ association: { state: "assigned", threadId } }],
+                },
+              },
+            });
+          });
+        const primary = yield* connectWorkloadRoute(issued.token);
+        const { inbound, outbound, connection } = primary;
+        const other = yield* connectWorkloadRoute(unaffected.token);
+        // Establish and observe the independent connection before cancellation.
+        yield* observeList(other, "2");
+        yield* Queue.offer(
+          inbound,
+          JSON.stringify({
+            _tag: "Request",
+            id: "1",
+            tag: `workloads.${operation}`,
+            payload: {
+              recordId: record.recordKey,
+              threadId,
+            },
+            headers: [],
+          }),
+        );
         yield* Effect.raceFirst(
-          Deferred.await(holding),
-          Fiber.join(holder).pipe(
-            Effect.andThen(Effect.die("The actual holder ended before acquisition")),
+          Deferred.await(queued),
+          Fiber.join(connection).pipe(
+            Effect.andThen(Effect.die("The route ended before the queued operation")),
           ),
         );
-      const bridge = actualBridge
-        ? WorkloadHostBridge.WorkloadHostBridge.of({
-            ...actualBridge,
-            withLock: (record, use) =>
-              actualBridge
-                .withLock(record, use)
-                .pipe(Effect.ensuring(Deferred.succeed(released, undefined))),
-          })
-        : WorkloadHostBridge.WorkloadHostBridge.of({
-            available: Effect.succeed(true),
-            withLock: (_record, use) =>
-              Effect.gen(function* () {
-                const child = yield* spawner
-                  .spawn(
-                    ChildProcess.make(
-                      "/usr/bin/python3",
-                      ["-u", "-c", 'import sys; print("ready",flush=True); sys.stdin.read()'],
-                      {
-                        shell: false,
-                        env: {},
-                        extendEnv: false,
-                        forceKillAfter: "2 seconds",
-                        stderr: "ignore",
-                      },
-                    ),
-                  )
-                  .pipe(
-                    Effect.mapError(
-                      (cause) =>
-                        new WorkloadHostBridge.WorkloadBridgeError({
-                          reason: "lock-unavailable",
-                          cause,
-                          stage: "acquisition",
-                        }),
-                    ),
-                  );
-                childPid = child.pid;
-                yield* Deferred.succeed(queued, undefined);
-                yield* Deferred.await(gate);
-                return yield* use({
-                  validateReplay: () => Effect.succeed(null),
-                  stop: Effect.sync(() => {
-                    dispatches++;
-                    return 0;
-                  }),
-                  replay: () =>
-                    Effect.sync(() => {
-                      dispatches++;
-                      return 0;
-                    }),
-                });
-              }).pipe(Effect.scoped, Effect.ensuring(Deferred.succeed(released, undefined))),
-          });
-      const host = controlHost(fixture && operation === "start" ? "absent" : "running");
-      yield* withControlFixture(({ record, file, threadId }) =>
-        Effect.gen(function* () {
-          if (fixture)
-            yield* fs.writeFileString(
-              file,
-              JSON.stringify({
-                ...record,
-                cwd: fixture.record.cwd,
-                argv: fixture.record.argv,
-                PATH: fixture.record.PATH,
-                memoryHigh: fixture.record.memoryHigh,
-              }),
-            );
-          const sessions = yield* SessionStore.SessionStore;
-          const issued = yield* sessions.issue({
-            subject: "workload-rpc",
-            scopes: [AuthEnvironmentMaintainScope, AuthDiagnosticsReadScope],
-            ttl: Duration.seconds(20),
-          });
-          const unaffected = yield* sessions.issue({
-            subject: "workload-rpc-unaffected",
-            scopes: [AuthEnvironmentMaintainScope, AuthDiagnosticsReadScope],
-            ttl: Duration.minutes(5),
-          });
-          const session = yield* sessions.verify(issued.token);
-          const observeList = (
-            connection: {
-              inbound: Queue.Queue<string, Socket.SocketError>;
-              outbound: Queue.Queue<string>;
-            },
-            id: string,
-          ) =>
-            Effect.gen(function* () {
-              yield* Queue.offer(
-                connection.inbound,
-                JSON.stringify({
-                  _tag: "Request",
-                  id,
-                  tag: "workloads.list",
-                  payload: {},
-                  headers: [],
-                }),
-              );
-              const response = JSON.parse(yield* Queue.take(connection.outbound));
-              expect(response).toMatchObject({
-                _tag: "Exit",
-                requestId: id,
-                exit: {
-                  _tag: "Success",
-                  value: {
-                    workloads: [{ association: { state: "assigned", threadId } }],
-                  },
-                },
-              });
-            });
-          const primary = yield* connectWorkloadRoute(issued.token);
-          const { inbound, outbound, connection } = primary;
-          const other = yield* connectWorkloadRoute(unaffected.token);
-          // Establish and observe the independent connection before cancellation.
-          yield* observeList(other, "2");
-          yield* Queue.offer(
-            inbound,
-            JSON.stringify({
-              _tag: "Request",
-              id: "1",
-              tag: `workloads.${operation}`,
-              payload: {
-                recordId: record.recordKey,
-                expectedGeneration: record.generation,
-                threadId,
-              },
-              headers: [],
-            }),
-          );
-          yield* Effect.raceFirst(
-            Deferred.await(queued),
-            Fiber.join(connection).pipe(
-              Effect.andThen(Effect.die("The route ended before the queued operation")),
-            ),
-          );
-          if (mode === "revoke") yield* sessions.revoke(session.sessionId);
-          else if (mode === "expire") yield* TestClock.adjust("21 seconds");
-          else if (mode === "disconnect")
-            yield* Queue.fail(
-              inbound,
-              new Socket.SocketError({
-                reason: new Socket.SocketCloseError({ code: 1000, closeReason: "fixture closed" }),
-              }),
-            );
-          // Interrupt the actual request frame. Interrupting the connection here
-          // would test disconnect again and would miss per-request cancellation.
-          else yield* Queue.offer(inbound, JSON.stringify({ _tag: "Interrupt", requestId: "1" }));
-          yield* Deferred.await(released);
-          if (fixture) {
-            childPid = fixture.children[1]?.pid;
-            expect(fixture.children).toHaveLength(2);
-            expect(yield* fs.exists(fixture.actions)).toBe(false);
-            expect(yield* fs.exists("/proc/" + fixture.children[0]!.pid)).toBe(true);
-          }
-          yield* Deferred.succeed(gate, undefined);
-          expect(dispatches).toBe(0);
-          expect(childPid).toBeDefined();
-          expect(yield* fs.exists(`/proc/${childPid}`)).toBe(false);
-          if (mode === "request-interrupt") {
-            const interruption = JSON.parse(yield* Queue.take(outbound));
-            expect(interruption).toMatchObject({
-              _tag: "Exit",
-              requestId: "1",
-              exit: { _tag: "Failure" },
-            });
-            yield* observeList(primary, "3");
-          }
-          yield* observeList(other, "4");
+        if (mode === "revoke") yield* sessions.revoke(session.sessionId);
+        else if (mode === "expire") yield* TestClock.adjust("21 seconds");
+        else if (mode === "disconnect")
           yield* Queue.fail(
-            other.inbound,
+            inbound,
             new Socket.SocketError({
               reason: new Socket.SocketCloseError({ code: 1000, closeReason: "fixture closed" }),
             }),
           );
-          yield* Fiber.join(other.connection);
-          if (mode === "request-interrupt")
-            yield* Queue.fail(
-              inbound,
-              new Socket.SocketError({
-                reason: new Socket.SocketCloseError({ code: 1000, closeReason: "fixture closed" }),
-              }),
-            );
-          yield* Fiber.join(connection);
-        }),
-      ).pipe(
-        Effect.provide(controlRouteAuthLayer(bridge, host)),
-        Effect.provideService(WorkloadHostBridge.WorkloadHostBridge, bridge),
-        Effect.provideService(WorkloadHost.WorkloadHost, host),
-      );
-      if (fixture && holder) {
-        yield* Deferred.succeed(holderGate, undefined);
-        yield* Fiber.join(holder);
-        expect(yield* fs.exists("/proc/" + fixture.children[0]!.pid)).toBe(false);
-        expect(yield* fs.exists(fixture.actions)).toBe(false);
-      }
-    }).pipe(Effect.scoped);
-  return Effect.gen(function* () {
-    if (actual)
-      return yield* withHostBridgeFixture((fixture) =>
-        Effect.gen(function* () {
-          const bridge = yield* WorkloadHostBridge.WorkloadHostBridge;
-          return yield* run(fixture, bridge);
-        }),
-      );
-    return yield* run();
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
-});
+        // Interrupt the actual request frame. Interrupting the connection here
+        // would test disconnect again and would miss per-request cancellation.
+        else yield* Queue.offer(inbound, JSON.stringify({ _tag: "Interrupt", requestId: "1" }));
+        yield* Deferred.await(released);
+        yield* Deferred.succeed(gate, undefined);
+        expect(dispatches).toBe(0);
+        expect(childPid).toBeDefined();
+        expect(yield* fs.exists(`/proc/${childPid}`)).toBe(false);
+        if (mode === "request-interrupt") {
+          const interruption = JSON.parse(yield* Queue.take(outbound));
+          expect(interruption).toMatchObject({
+            _tag: "Exit",
+            requestId: "1",
+            exit: { _tag: "Failure" },
+          });
+          yield* observeList(primary, "3");
+        }
+        yield* observeList(other, "4");
+        yield* Queue.fail(
+          other.inbound,
+          new Socket.SocketError({
+            reason: new Socket.SocketCloseError({ code: 1000, closeReason: "fixture closed" }),
+          }),
+        );
+        yield* Fiber.join(other.connection);
+        if (mode === "request-interrupt")
+          yield* Queue.fail(
+            inbound,
+            new Socket.SocketError({
+              reason: new Socket.SocketCloseError({ code: 1000, closeReason: "fixture closed" }),
+            }),
+          );
+        yield* Fiber.join(connection);
+      }),
+    ).pipe(
+      Effect.provide(controlRouteAuthLayer(bridge, host)),
+      Effect.provideService(WorkloadHostBridge.WorkloadHostBridge, bridge),
+      Effect.provideService(WorkloadHost.WorkloadHost, host),
+    );
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
 
 it.effect.each(
   (["start", "stop"] as const).flatMap((operation) =>
@@ -653,7 +563,6 @@ it.effect.each(
               tag: `workloads.${operation}`,
               payload: {
                 recordId: record.recordKey,
-                expectedGeneration: record.generation,
                 threadId,
               },
               headers: [],
@@ -716,7 +625,9 @@ it.effect.each([true, false])(
       let reads = 0;
       const bridge = WorkloadHostBridge.WorkloadHostBridge.of({
         available: Effect.succeed(false),
-        withLock: () => Effect.die("list invoked workload control"),
+        validateReplay: () => Effect.die("list invoked workload control"),
+        stop: () => Effect.die("list invoked workload control"),
+        replay: () => Effect.die("list invoked workload control"),
       });
       const host = controlHost("absent");
       yield* withControlFixture(

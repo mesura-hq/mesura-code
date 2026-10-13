@@ -18,7 +18,6 @@ import { useWorkloadControl, useWorkloadQuery } from "./workloads";
 import {
   actEffect,
   ENVIRONMENT,
-  GENERATION,
   makeWorkloadHarness,
   OTHER_ENVIRONMENT,
   RECORD,
@@ -74,7 +73,7 @@ afterEach(async () => {
 async function render(children: ReactNode) {
   await act(async () => root.render(harness.provider(children)));
 }
-const input = { recordId: RECORD, expectedGeneration: GENERATION, threadId: THREAD };
+const input = { recordId: RECORD, threadId: THREAD };
 
 describe("workload query lifecycle and guarded mutations", () => {
   it("does not read protected diagnostics for a maintenance-only destination", async () => {
@@ -246,10 +245,10 @@ describe("workload query lifecycle and guarded mutations", () => {
         expect(harness.calls.controls).toHaveLength(1);
         const refusal = {
           recordId: RECORD,
-          oldGeneration: GENERATION,
           status: "refused" as const,
           operation: "stop" as const,
-          reason: "stale-generation" as const,
+          reason: "owner-mismatch" as const,
+          managerState: "running" as const,
           mutationAttempted: false as const,
         };
         yield* actEffect(

@@ -1413,6 +1413,8 @@ const layerCodexAppServerClientFactoryCommand = (
             const context = yield* Layer.build(CodexClient.layerChildProcess(handle, options));
             return yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
               Effect.provide(context),
+              // Preserve the upstream factory without claiming a runtime observation.
+              Effect.map((client) => ({ client })),
             );
           }),
       });

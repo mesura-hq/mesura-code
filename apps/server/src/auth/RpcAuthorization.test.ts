@@ -587,7 +587,6 @@ it.effect.each([
     let calls = 0;
     const input = {
       recordId: "a".repeat(64),
-      expectedGeneration: "b".repeat(32),
       threadId: ThreadId.make("control"),
     };
     const result = (operation: "start" | "stop") =>
@@ -595,11 +594,11 @@ it.effect.each([
         calls++;
         return {
           recordId: input.recordId,
-          oldGeneration: input.expectedGeneration,
           status: "refused" as const,
           operation,
           reason: "record-unavailable" as const,
           mutationAttempted: false as const,
+          managerState: "unknown" as const,
         };
       });
     const client = yield* RpcTest.makeClient(group).pipe(

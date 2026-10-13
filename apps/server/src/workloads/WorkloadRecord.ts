@@ -9,22 +9,11 @@ const text = Schema.String.check(
     expected: "text without a NUL",
   }),
 );
-const hex32 = Schema.String.check(Schema.isPattern(/^[0-9a-f]{32}$/));
-const bootId = Schema.String.check(
-  Schema.isPattern(/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/),
-);
-const monotonic = Schema.String.check(Schema.isPattern(/^[0-9]+$/));
-
 const PrivateWorkloadRecord = Schema.Struct({
   version: Schema.Literal(2),
   name: text,
   unit: text,
   recordKey: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
-  generation: hex32,
-  unitInvocationId: Schema.NullOr(hex32),
-  unitStartMonotonic: Schema.NullOr(monotonic),
-  bootId: Schema.NullOr(bootId),
-  binding: Schema.Literals(["observed", "unverified"]),
   cwd: text,
   argv: Schema.Array(text),
   PATH: Schema.NullOr(text),
@@ -36,7 +25,6 @@ const PrivateWorkloadRecord = Schema.Struct({
   startedAt: Schema.String,
 });
 export type WorkloadRecord = typeof PrivateWorkloadRecord.Type;
-export const encodeWorkloadRecord = Schema.encodeSync(Schema.fromJsonString(PrivateWorkloadRecord));
 const decode = Schema.decodeUnknownOption(Schema.fromJsonString(PrivateWorkloadRecord));
 
 export function canonicalWorkloadUnit(name: string): string | null {
@@ -75,19 +63,7 @@ export const decodeWorkloadRecord = Effect.fn("WorkloadRecord.decodeWorkloadReco
         !Number.isFinite(Date.parse(record.startedAt))
       )
         return false;
-      if (record.binding === "unverified")
-        return (
-          record.unitInvocationId === null &&
-          record.unitStartMonotonic === null &&
-          record.bootId === null
-        );
-      return (
-        record.unitInvocationId !== null &&
-        record.unitInvocationId !== "0".repeat(32) &&
-        record.unitStartMonotonic !== null &&
-        BigInt(record.unitStartMonotonic) > 0n &&
-        record.bootId !== null
-      );
+      return true;
     }),
   );
   if (Option.isNone(record)) return record;

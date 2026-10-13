@@ -1,5 +1,4 @@
 import { collectUint8StreamText } from "@t3tools/provider-core/server/collectStreamText";
-import { tokenizeCliArgs } from "@t3tools/shared/cliArgs";
 import { parseTailscaleStatus, type TailscaleStatus } from "@t3tools/tailscale";
 import type { WorkloadSummary } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -14,9 +13,6 @@ import * as ProcessRunner from "../processRunner.ts";
 export interface WorkloadManagerSnapshot {
   readonly state: WorkloadSummary["managerState"];
   readonly unit: string | null;
-  readonly generation: string | null;
-  readonly invocationId: string | null;
-  readonly startMonotonic: string | null;
   readonly controlGroup: string | null;
 }
 export interface WorkloadResources {
@@ -29,7 +25,6 @@ export class WorkloadHost extends Context.Service<
   WorkloadHost,
   {
     readonly manager: (unit: string) => Effect.Effect<WorkloadManagerSnapshot>;
-    readonly bootId: Effect.Effect<string | null>;
     readonly resources: (controlGroup: string) => Effect.Effect<WorkloadResources>;
     readonly tailnet: Effect.Effect<TailscaleStatus | null>;
   }
@@ -38,9 +33,6 @@ export class WorkloadHost extends Context.Service<
 const unknownManager: WorkloadManagerSnapshot = {
   state: "unknown",
   unit: null,
-  generation: null,
-  invocationId: null,
-  startMonotonic: null,
   controlGroup: null,
 };
 const unknownResources: WorkloadResources = {
@@ -55,13 +47,8 @@ const ManagerProperties = Schema.Struct({
   ActiveState: Schema.String,
   SubState: Schema.String,
   ControlGroup: Schema.optionalKey(Schema.String),
-  Environment: Schema.optionalKey(Schema.String),
-  InvocationID: Schema.optionalKey(Schema.String),
-  ExecMainStartTimestampMonotonic: Schema.optionalKey(Schema.String),
 });
 const decodeManager = Schema.decodeUnknownOption(ManagerProperties);
-const hex32 = /^[0-9a-f]{32}$/;
-const bootPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 
 function managerSnapshot(stdout: string, unit: string): WorkloadManagerSnapshot {
   const entries = stdout
@@ -86,13 +73,6 @@ function managerSnapshot(stdout: string, unit: string): WorkloadManagerSnapshot 
   )
     return { ...unknownManager, state: "absent", unit };
   if (value.LoadState !== "loaded") return unknownManager;
-  const markers = tokenizeCliArgs(value.Environment).filter((token) =>
-    token.startsWith("MESURA_WORKLOAD_GENERATION="),
-  );
-  const generation =
-    markers.length === 1 ? markers[0]!.slice("MESURA_WORKLOAD_GENERATION=".length) : "";
-  const invocation = value.InvocationID ?? "";
-  const start = value.ExecMainStartTimestampMonotonic ?? "";
   const state =
     // Active/exited units can retain configuration without a running process.
     value.ActiveState === "active" && value.SubState === "running"
@@ -105,9 +85,6 @@ function managerSnapshot(stdout: string, unit: string): WorkloadManagerSnapshot 
   return {
     state,
     unit,
-    generation: hex32.test(generation) ? generation : null,
-    invocationId: hex32.test(invocation) && invocation !== "0".repeat(32) ? invocation : null,
-    startMonotonic: /^[0-9]+$/.test(start) && BigInt(start) > 0n ? start : null,
     controlGroup: value.ControlGroup || null,
   };
 }
@@ -163,13 +140,10 @@ const make = Effect.gen(function* () {
       "--user",
       "show",
       unit,
-      "--property=Id,LoadState,ActiveState,SubState,ControlGroup,InvocationID,ExecMainStartTimestampMonotonic,Environment",
+      "--property=Id,LoadState,ActiveState,SubState,ControlGroup",
     ]);
     return output === null ? unknownManager : managerSnapshot(output, unit);
   });
-  const bootId = readText("/proc/sys/kernel/random/boot_id").pipe(
-    Effect.map((text) => (text !== null && bootPattern.test(text.trim()) ? text.trim() : null)),
-  );
   const tailnet = command("/usr/bin/tailscale", ["status", "--json"]).pipe(
     Effect.flatMap((output) =>
       output === null
@@ -265,6 +239,6 @@ const make = Effect.gen(function* () {
     },
     Effect.orElseSucceed(() => unknownResources),
   );
-  return WorkloadHost.of({ manager, bootId, resources, tailnet });
+  return WorkloadHost.of({ manager, resources, tailnet });
 });
 export const layer = Layer.effect(WorkloadHost, make);

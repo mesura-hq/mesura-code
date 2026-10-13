@@ -40,22 +40,17 @@ export const OTHER_ENVIRONMENT = EnvironmentId.make("workload-host-b");
 export const THREAD = ThreadId.make("workload-thread");
 export const OTHER_THREAD = ThreadId.make("other-workload-thread");
 export const RECORD = "a".repeat(64);
-export const GENERATION = "a".repeat(32);
-export const NEXT_GENERATION = "b".repeat(32);
 export function workload(overrides: Partial<WorkloadSummary> = {}): WorkloadSummary {
   return {
     recordId: RECORD,
     name: "Frontend preview",
     association: { state: "assigned", threadId: THREAD, reason: null },
     managerState: "running",
-    binding: "matched",
-    registration: "observed",
     ramBytes: 16 * 1024 * 1024,
     memoryCurrentBytes: 128 * 1024 * 1024,
     ports: [5173],
     defaultPort: 5173,
     remoteUrl: "https://preview.example.test:5173",
-    generation: GENERATION,
     controlsAvailable: true,
     ...overrides,
   };
@@ -94,7 +89,6 @@ export function session(
 }
 export const completedStop: WorkloadControlResult = {
   recordId: RECORD,
-  oldGeneration: GENERATION,
   status: "completed",
   operation: "stop",
   result: "stopped",
@@ -311,7 +305,7 @@ export function installWorkloadViewport(initialMobile: boolean) {
   };
 }
 
-const identity = { recordId: RECORD, oldGeneration: GENERATION };
+const identity = { recordId: RECORD };
 export const controlOutcomes = [
   [completedStop, "Stopped", "Host state: stopped."],
   [
@@ -319,11 +313,12 @@ export const controlOutcomes = [
       ...identity,
       status: "refused",
       operation: "stop",
-      reason: "stale-generation",
+      reason: "owner-mismatch",
       mutationAttempted: false,
+      managerState: "running",
     },
     "Stop refused",
-    "Refresh and select the action again",
+    "The owning thread changed",
   ],
   [
     {
@@ -344,34 +339,31 @@ export const controlOutcomes = [
       operation: "start",
       result: "admitted",
       mutationAttempted: true,
-      newGeneration: NEXT_GENERATION,
-      registration: "unverified",
+      registration: "recorded",
       managerState: "unknown",
     },
-    "Start admitted",
-    "Registration: unverified. Host state: unknown.",
+    "Start accepted",
+    "Launch recorded. Host state: unknown.",
   ],
   [
     {
       ...identity,
-      status: "admission-rejected",
+      status: "incomplete",
       operation: "start",
-      admission: "rejected",
+      admission: "accepted",
       mutationAttempted: true,
-      registration: "unchanged",
+      registration: "unknown",
+      managerState: "unknown",
     },
-    "Start rejected",
-    "retained record did not change",
+    "Start outcome incomplete",
+    "Start was accepted. Its saved launch is unconfirmed.",
   ],
   [
     {
       ...identity,
-      status: "partial",
+      status: "incomplete",
       operation: "stop",
-      stage: "stop-completion",
       mutationAttempted: true,
-      admission: "not-applicable",
-      registration: "unchanged",
       managerState: "running",
     },
     "Stop outcome incomplete",
@@ -380,32 +372,28 @@ export const controlOutcomes = [
   [
     {
       ...identity,
-      status: "partial",
+      status: "incomplete",
       operation: "start",
-      stage: "registration",
       mutationAttempted: true,
       admission: "accepted",
-      registration: "unchanged",
-      newGeneration: NEXT_GENERATION,
+      registration: "failed",
       managerState: "unknown",
     },
     "Start outcome incomplete",
-    "Admission: accepted. Registration: unchanged. Host state: unknown.",
+    "Start was accepted, but its record could not be saved.",
   ],
   [
     {
       ...identity,
-      status: "partial",
+      status: "incomplete",
       operation: "start",
-      stage: "admission",
       mutationAttempted: true,
       admission: "unknown",
       registration: "unknown",
-      newGeneration: null,
       managerState: "unknown",
     },
     "Start outcome incomplete",
-    "Stage: admission. Admission: unknown. Registration: unknown.",
+    "The start result is not confirmed.",
   ],
 ] satisfies readonly [WorkloadControlResult, string, string][];
 

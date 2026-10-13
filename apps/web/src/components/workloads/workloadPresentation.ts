@@ -9,21 +9,15 @@ const refusals = {
   "invalid-input": "The workload request is invalid.",
   "registry-unavailable": "The workload registry is unavailable.",
   "record-unavailable": "The workload record is unavailable.",
-  "stale-generation": "The workload changed. Refresh and select the action again.",
-  "snapshot-changed":
-    "The workload changed during the request. Refresh and select the action again.",
   "owner-unavailable": "The owning thread is unavailable.",
   "owner-mismatch": "The owning thread changed.",
   "unsupported-host": "This host does not support workload controls.",
-  "handoff-unavailable": "This host cannot safely hand off the control request.",
-  "lock-unavailable": "Another request holds the workload lock.",
+  "wrapper-unavailable": "The workload launcher is unavailable on this host.",
   deadline: "The request reached its time limit.",
   "manager-unknown": "The host cannot verify the workload state.",
-  "binding-mismatch": "The running workload does not match its record.",
   "unit-loaded": "The workload is still loaded. Stop it before starting again.",
   "invalid-launch": "The recorded launch is invalid.",
-  "replay-context-unavailable": "The original launch context is unavailable.",
-  "wrapper-environment-incompatible": "This host cannot restore the original launch environment.",
+  "replay-context-unavailable": "The saved launch context is unavailable.",
 } satisfies Record<WorkloadControlRefusal, string>;
 
 export function workloadControlNotice(result: WorkloadControlResult) {
@@ -36,8 +30,8 @@ export function workloadControlNotice(result: WorkloadControlResult) {
             tone: "neutral" as const,
           }
         : {
-            title: "Start admitted",
-            detail: `Registration: ${result.registration}. Host state: ${result.managerState}. Refreshing the current generation.`,
+            title: "Start accepted",
+            detail: `Launch recorded. Host state: ${result.managerState}. Refreshing workload state.`,
             tone: "neutral" as const,
           };
     case "refused":
@@ -46,25 +40,26 @@ export function workloadControlNotice(result: WorkloadControlResult) {
         detail: refusals[result.reason],
         tone: "warning" as const,
       };
-    case "admission-rejected":
+    case "incomplete": {
+      if (result.operation === "stop") {
+        return {
+          title: "Stop outcome incomplete",
+          detail: `Host state: ${result.managerState}. Refresh before another action.`,
+          tone: "warning" as const,
+        };
+      }
+      const outcome =
+        result.admission === "unknown"
+          ? "The start result is not confirmed."
+          : result.registration === "failed"
+            ? "Start was accepted, but its record could not be saved."
+            : "Start was accepted. Its saved launch is unconfirmed.";
       return {
-        title: "Start rejected",
-        detail:
-          "The host attempted admission and rejected the launch. The retained record did not change.",
+        title: "Start outcome incomplete",
+        detail: `${outcome} Host state: ${result.managerState}. Refresh before another action.`,
         tone: "warning" as const,
       };
-    case "partial":
-      return result.operation === "stop"
-        ? {
-            title: "Stop outcome incomplete",
-            detail: `Host state: ${result.managerState}. Refresh before another action.`,
-            tone: "warning" as const,
-          }
-        : {
-            title: "Start outcome incomplete",
-            detail: `Stage: ${result.stage}. Admission: ${result.admission}. Registration: ${result.registration}. Host state: ${result.managerState}.`,
-            tone: "warning" as const,
-          };
+    }
   }
 }
 
@@ -72,7 +67,6 @@ export function workloadControlInput(row: WorkloadSummary): WorkloadControlInput
   return row.association.state === "assigned" && row.association.threadId !== null
     ? {
         recordId: row.recordId,
-        expectedGeneration: row.generation,
         threadId: row.association.threadId,
       }
     : null;
@@ -84,17 +78,11 @@ export function workloadControlAvailability(row: WorkloadSummary) {
     return { operation, available: false, reason: "Unassigned workload; controls unavailable." };
   if (row.managerState === "unknown")
     return { operation, available: false, reason: "Workload state unavailable." };
-  if (
-    !row.controlsAvailable ||
-    row.binding === "mismatched" ||
-    row.binding === "unverified" ||
-    row.binding === "unknown" ||
-    row.registration !== "observed"
-  ) {
+  if (!row.controlsAvailable) {
     return {
       operation,
       available: false,
-      reason: "The host cannot verify this workload for control.",
+      reason: "Workload controls unavailable on this host.",
     };
   }
   return { operation, available: true, reason: null };

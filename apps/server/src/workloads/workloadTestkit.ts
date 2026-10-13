@@ -1,8 +1,5 @@
 import type * as ProviderRuntimeResources from "../agentResources/ProviderRuntimeResources.ts";
-import * as Crypto from "effect/Crypto";
-import * as Hex from "effect/encoding/Hex";
 import * as Deferred from "effect/Deferred";
-import * as Stream from "effect/Stream";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import type { WorkloadRecord } from "./WorkloadRecord.ts";
 import * as WorkloadHost from "./WorkloadHost.ts";
@@ -43,11 +40,6 @@ export function recordFixture(overrides: Record<string, unknown> = {}) {
     name: "preview",
     unit,
     recordKey: "3925284943fe057ff73181d687de1755b3012cc4bca421a4304d39e69041bbd6",
-    generation: "a".repeat(32),
-    unitInvocationId: "b".repeat(32),
-    unitStartMonotonic: "12345678901234567890",
-    bootId: "12345678-1234-1234-1234-123456789abc",
-    binding: "observed",
     cwd: "/workspace",
     argv: ["node", "argument with spaces", "$(literal)"],
     PATH: "/nvm/node24/bin",
@@ -109,7 +101,7 @@ export async function fixtureFileSystem() {
   };
 }
 
-// Real private registry and v2 ownership for control/RPC tests. Host and lock
+// Real private registry and v2 ownership for control/RPC tests. Host and process
 // boundaries stay injectable; ownership never comes from a mocked predicate.
 export const withControlFixture = <A, E, R>(
   test: (fixture: {
@@ -169,121 +161,29 @@ export const withControlFixture = <A, E, R>(
     );
   });
 
-// Exact PYPATH seam from reviewed V4 b7eb73fa. The fixture invokes this source
-// unchanged. It injects an owned namespace and a synchronous manager boundary;
-// it does not prove real systemd FD handling or installed-wrapper compatibility.
-const v4PathHelper = String.raw`
-import json
-import os
-from pathlib import Path
-import stat
-import sys
-
-operation, text, *binding = sys.argv[1:]
-path = Path(text)
-if not path.is_absolute() or ".." in path.parts:
-    raise ValueError("workload path must be absolute and contain no parent traversal")
-uid = os.getuid()
-
-def private_directory(directory, runtime=False, create=True):
-    if runtime:
-        # Validate the private canonical parent before creating the runtime child.
-        private_directory(directory.parent, create=create)
-    current = Path(directory.anchor)
-    for index, part in enumerate(("", *directory.parts[1:])):
-        if part:
-            current /= part
-        try:
-            link = current.lstat()
-        except FileNotFoundError:
-            if not create:
-                raise
-            try:
-                current.mkdir(mode=0o700)
-            except FileExistsError:
-                pass
-            link = current.lstat()
-        final = index == len(directory.parts) - 1
-        if stat.S_ISLNK(link.st_mode):
-            if final or link.st_uid != 0:
-                raise ValueError("workload path contains an untrusted symlink")
-            target = current.stat()
-        else:
-            target = link
-        if not stat.S_ISDIR(target.st_mode):
-            raise ValueError("workload path contains a non-directory")
-        if final:
-            forbidden = 0o022 if runtime else 0o077
-            if target.st_uid != uid or stat.S_IMODE(target.st_mode) & forbidden:
-                raise ValueError("workload directory has an unsafe owner or mode")
-        elif target.st_uid not in (0, uid):
-            raise ValueError("workload ancestor has a foreign owner")
-        elif target.st_mode & 0o022 and not target.st_mode & stat.S_ISVTX:
-            raise ValueError("workload ancestor is writable without sticky protection")
-
-def private_regular(metadata):
-    if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != uid
-            or stat.S_IMODE(metadata.st_mode) & 0o077 or metadata.st_nlink != 1):
-        raise ValueError("workload lock must be an owned private regular file")
-
-runtime = operation.startswith("runtime-")
-operation = operation.removeprefix("runtime-")
-if operation == "directory":
-    private_directory(path, runtime=runtime)
-elif operation == "lock":
-    private_directory(path.parent, runtime=runtime)
-    descriptor = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
-    try:
-        private_regular(os.fstat(descriptor))
-    finally:
-        os.close(descriptor)
-elif operation in ("descriptor", "handoff"):
-    if operation == "handoff":
-        # Metadata selects the branch. Only the validated FD9 and its flock
-        # establish the canonical lock; never open or create a handoff path.
-        if not runtime or len(binding) != 2:
-            raise ValueError("incomplete workload lock handoff")
-        expected = {"unit": binding[0], "key": binding[1], "path": text}
-        if json.loads(os.environ["MESURA_WORKLOAD_LOCK_HANDOFF"]) != expected:
-            raise ValueError("workload lock handoff differs from the canonical binding")
-    private_directory(path.parent, runtime=runtime, create=operation != "handoff")
-    link = path.lstat()
-    opened = os.fstat(9)
-    private_regular(link)
-    private_regular(opened)
-    if (link.st_dev, link.st_ino) != (opened.st_dev, opened.st_ino):
-        raise ValueError("workload lock changed during opening")
-else:
-    raise ValueError("unsupported workload path operation")
-`;
-
+// The temporary launcher models the direct wrapper's argv/cwd/environment
+// boundary. It does not contact systemd or an installed wrapper.
 export const controlTargetSource = String.raw`
 import json,os,sys
-try: os.fstat(9); fd9=True
-except OSError: fd9=False
 with open(sys.argv[1],"w") as file:
-    json.dump({"argv":sys.argv[2:],"cwd":os.getcwd(),"env":dict(os.environ),"fd9":fd9,"stdio":[os.readlink("/proc/self/fd/"+str(n)) for n in (0,1,2)]},file)
+    json.dump({"argv":sys.argv[2:],"cwd":os.getcwd(),"env":dict(os.environ)},file)
 `;
-
 export const withHostBridgeFixture = <A, E, R>(
   test: (fixture: {
     record: WorkloadRecord;
-    lock: string;
     root: string;
     receipt: string;
     actions: string;
-    waiting: Deferred.Deferred<void>;
     children: ChildProcessSpawner.ChildProcessHandle[];
+    launched: Deferred.Deferred<void>;
   }) => Effect.Effect<A, E, R>,
-  options: { digest?: string; unsafe?: "mode" | "symlink" | "links"; script?: string } = {},
+  options: { script?: string } = {},
 ) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const crypto = yield* Crypto.Crypto;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const root = yield* fs.makeTempDirectoryScoped({ prefix: "mesura-control-ofd-" });
-    const runtime = path.join(root, "runtime");
+    const root = yield* fs.makeTempDirectoryScoped({ prefix: "mesura-control-direct-" });
     const wrapper = path.join(root, "wrapper.py");
     const receipt = path.join(root, "target.json");
     const actions = path.join(root, "actions.json");
@@ -295,25 +195,20 @@ export const withHostBridgeFixture = <A, E, R>(
         ',"w") as output: json.dump(sys.argv[1:],output)\n',
       { mode: 0o700 },
     );
-    const script =
+    yield* fs.writeFileString(
+      wrapper,
       options.script ??
-      `#!/usr/bin/python3
-import fcntl,json,os,subprocess,sys
+        `#!/usr/bin/python3
+import json,subprocess,sys
 with open(${encodeString(actions)},"w") as output: json.dump(sys.argv[1:],output)
-meta=json.loads(os.environ["MESURA_WORKLOAD_LOCK_HANDOFF"])
-subprocess.run(["/usr/bin/python3","-c",${encodeString(v4PathHelper)},"runtime-handoff",meta["path"],meta["unit"],meta["key"]],pass_fds=(9,),check=True)
-subprocess.run(["/usr/bin/flock","-n","-x","9"],pass_fds=(9,),check=True)
-fcntl.flock(9,fcntl.LOCK_EX|fcntl.LOCK_NB)
-env=dict(os.environ); del env["MESURA_WORKLOAD_LOCK_HANDOFF"]
 assert sys.argv[1:5] == ["preview","--memory","64M","--"]
-subprocess.run(sys.argv[5:],env=env,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,close_fds=True,check=True)
-`;
-    yield* fs.writeFileString(wrapper, script, { mode: 0o700 });
-    yield* fs.makeDirectory(path.join(runtime, "mesura-workloads"), {
-      recursive: true,
-      mode: 0o700,
-    });
-    const record = recordFixture({
+subprocess.run(sys.argv[5:],check=True)
+`,
+      { mode: 0o700 },
+    );
+    const record: WorkloadRecord = {
+      ...recordFixture(),
+      version: 2,
       cwd: root,
       PATH: "/usr/bin:/bin",
       memoryHigh: "64M",
@@ -325,48 +220,26 @@ subprocess.run(sys.argv[5:],env=env,stdin=subprocess.DEVNULL,stdout=subprocess.D
         "literal argument",
         "$(untouched)",
       ],
-    }) as WorkloadRecord;
-    const lock = path.join(runtime, "mesura-workloads", record.recordKey + ".registration.lock");
-    yield* fs.writeFileString(lock, "retained", { mode: 0o600 });
-    if (options.unsafe === "mode") yield* fs.chmod(lock, 0o644);
-    if (options.unsafe === "symlink") {
-      yield* fs.remove(lock);
-      yield* fs.symlink(wrapper, lock);
-    }
-    if (options.unsafe === "links") yield* fs.link(lock, path.join(root, "alias"));
-    const digest = Hex.encode(yield* crypto.digest("SHA-256", new TextEncoder().encode(script)));
-    let waitingCount = 0;
-    const waiting = yield* Deferred.make<void>();
+    };
     const children: ChildProcessSpawner.ChildProcessHandle[] = [];
+    const launched = yield* Deferred.make<void>();
     const capture = ChildProcessSpawner.ChildProcessSpawner.of({
       ...spawner,
       spawn: (command) =>
         spawner.spawn(command).pipe(
-          Effect.map((child) => {
-            children.push(child);
-            return {
-              ...child,
-              stdout: child.stdout.pipe(
-                Stream.decodeText(),
-                Stream.splitLines,
-                Stream.tap((line) =>
-                  line === '{"kind": "waiting"}' && ++waitingCount === 2
-                    ? Deferred.succeed(waiting, undefined)
-                    : Effect.void,
-                ),
-                Stream.map((line) => new TextEncoder().encode(line + "\n")),
-              ),
-            };
-          }),
+          Effect.tap((child) =>
+            Effect.sync(() => {
+              children.push(child);
+            }).pipe(Effect.andThen(Deferred.succeed(launched, undefined))),
+          ),
         ),
     });
-    return yield* test({ record, lock, root, receipt, actions, waiting, children }).pipe(
+    return yield* test({ record, root, receipt, actions, children, launched }).pipe(
       Effect.provide(
         WorkloadHostBridge.layerWith({
           wrapper,
-          runtime,
+          runtime: path.join(root, "runtime"),
           manager,
-          digest: options.digest ?? digest,
         }).pipe(
           Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, capture)),
           Layer.provideMerge(NodeServices.layer),
@@ -380,8 +253,8 @@ subprocess.run(sys.argv[5:],env=env,stdin=subprocess.DEVNULL,stdout=subprocess.D
         ENV: "/unapproved/env",
         NODE_OPTIONS: "unapproved-options",
         MESURA_THREAD_ID: "obsolete-thread",
-        MESURA_WORKLOAD_GENERATION: "obsolete-generation",
       }),
       Effect.provideService(HostProcess.HomeDirectory, root),
+      Effect.provideService(HostProcess.Platform, "linux"),
     );
   });

@@ -66,8 +66,7 @@ function WorkloadRow(props: {
               ? "Unassigned"
               : props.threadId === owner
                 ? "Assigned to this thread"
-                : "Assigned thread"}{" "}
-            · {row.binding} · {row.registration}
+                : "Assigned thread"}
           </p>
         </div>
         <Button

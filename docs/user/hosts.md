@@ -68,13 +68,14 @@ thread. The **Hosts** panel and phone sheet show the registered workloads for ea
 including workloads without an assigned thread.
 
 Select **Stop** to stop a running workload. Select **Start** to replay its saved launch when the
-host can verify the record and its owning thread. These actions require maintenance access to the
-destination environment. Reading workloads requires diagnostics access. An unavailable control
-shows the reason.
+host can read the record and resolve its owning thread. These actions require maintenance access
+to the destination environment. Reading workloads requires diagnostics access. An unavailable
+control shows the reason.
 
-After an action, Mesura Code refreshes the host observation. **Start admitted** means the host
-accepted the launch; the host observation shows whether it runs. A refused action did not attempt
-a change. An incomplete or unknown outcome needs a fresh observation before another action.
+After an action, Mesura Code refreshes the host observation. **Start accepted** means the host
+accepted and recorded the launch. The host observation shows whether it runs. A refused action did
+not attempt a change. If Start was accepted but its record could not be saved, the result is incomplete.
+An incomplete or unknown outcome needs a fresh observation before another action.
 Mesura Code does not retry a mutation automatically.
 
 **Open preview** uses the remote link supplied by the host and your browser preference. A workload
