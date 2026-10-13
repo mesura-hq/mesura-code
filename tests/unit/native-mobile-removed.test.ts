@@ -8,9 +8,34 @@ import { assert, it } from "vite-plus/test";
 import {
   REMOVED_NATIVE_MOBILE_PREFIXES,
   isRemovedNativeMobilePath,
+  pruneNativeMobileJobNeeds,
   pruneNativeMobilePatches,
 } from "../../scripts/lib/native-mobile-removal.ts";
 import { repositoryRoot } from "./contractHarness.ts";
+
+it("removes deleted native jobs from flow and block dependency lists", () => {
+  for (const needs of [
+    "    needs: [lint, mobile_native_changes, mobile_native_static_analysis, test]",
+    "    needs:\n      [\n        lint,\n        mobile_native_changes,\n        mobile_native_static_analysis,\n        test,\n      ]",
+    "    needs:\n      - lint\n      - mobile_native_changes\n      - mobile_native_static_analysis\n      - test",
+  ]) {
+    const input = `jobs:\n  check:\n${needs}\n    runs-on: ubuntu-latest\n`;
+    const result = pruneNativeMobileJobNeeds(input);
+    assert.notInclude(result, "mobile_native_");
+    assert.include(result, "lint");
+    assert.include(result, "test");
+    assert.include(result, "    runs-on: ubuntu-latest\n");
+    assert.equal(pruneNativeMobileJobNeeds(result), result);
+  }
+});
+
+it("keeps the CI workflow free of dependencies on deleted native jobs", () => {
+  const workflow = NodeFS.readFileSync(
+    NodePath.join(repositoryRoot, ".github/workflows/ci.yml"),
+    "utf8",
+  );
+  assert.equal(pruneNativeMobileJobNeeds(workflow), workflow);
+});
 
 /**
  * This fork removed upstream's native mobile apps (ADR-008), and every upstream sync brings

@@ -16,6 +16,7 @@ import * as NodeFS from "node:fs";
 
 import {
   isRemovedNativeMobilePath,
+  pruneNativeMobileJobNeeds,
   pruneNativeMobilePatches,
 } from "./lib/native-mobile-removal.ts";
 
@@ -32,6 +33,22 @@ const trackedPaths = new Set(
 const removedPaths = [...trackedPaths].filter(isRemovedNativeMobilePath).sort();
 
 if (removedPaths.length > 0) git(["rm", "-r", "-q", "--force", "--", ...removedPaths]);
+
+// REGRESSION: Deleted native jobs remained in Check.needs and prevented every CI job from starting.
+const CI_FILE = ".github/workflows/ci.yml";
+const ciYaml = NodeFS.readFileSync(CI_FILE, "utf8");
+if (/^<{7} /m.test(ciYaml)) {
+  process.stdout.write(
+    `${CI_FILE} still has conflict markers: resolve it, then run this script again.\n`,
+  );
+  process.exitCode = 1;
+} else {
+  const prunedCiYaml = pruneNativeMobileJobNeeds(ciYaml);
+  if (prunedCiYaml !== ciYaml) {
+    NodeFS.writeFileSync(CI_FILE, prunedCiYaml);
+    git(["add", "--", CI_FILE]);
+  }
+}
 
 const WORKSPACE_FILE = "pnpm-workspace.yaml";
 const workspaceYaml = NodeFS.readFileSync(WORKSPACE_FILE, "utf8");
