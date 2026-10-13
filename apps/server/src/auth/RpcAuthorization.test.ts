@@ -34,6 +34,63 @@ import {
 import * as RpcAuthorization from "./RpcAuthorization.ts";
 
 describe("RPC authorization scopes", () => {
+  it("F2 workload catalogue requires destination diagnostics permission", () => {
+    expect(requiredScopeForRpcMethod("workloads.list")).toBe(AuthDiagnosticsReadScope);
+    expect([...WsRpcGroup.requests.keys()].filter((tag) => tag.startsWith("workloads."))).toEqual([
+      "workloads.list",
+      "workloads.start",
+      "workloads.stop",
+    ]);
+  });
+  it.effect.each([
+    { name: "no grants", scopes: [], allowed: false },
+    { name: "ordinary thread read", scopes: [AuthOrchestrationReadScope], allowed: false },
+    { name: "destination diagnostics", scopes: [AuthDiagnosticsReadScope], allowed: true },
+  ])("F2 workload RPC enforces $name before the handler runs", ({ scopes, allowed }) =>
+    Effect.gen(function* () {
+      let calls = 0;
+      const group = WsRpcGroup.omit(
+        ...[...WsRpcGroup.requests.keys()].filter(
+          (
+            tag,
+          ): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, typeof WS_METHODS.workloadsList> =>
+            tag !== WS_METHODS.workloadsList,
+        ),
+      );
+      const client = yield* RpcTest.makeClient(group).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            group.toLayerHandler(WS_METHODS.workloadsList, () =>
+              Effect.sync(() => {
+                calls++;
+                return {
+                  registryState: "absent" as const,
+                  workloads: [],
+                  incomplete: false,
+                  diagnostics: [],
+                  agentRamAttribution: "unsupported" as const,
+                  sharedAgentRam: {
+                    status: "unsupported" as const,
+                    groups: [] as const,
+                    incomplete: false,
+                  },
+                };
+              }),
+            ),
+            RpcAuthorization.layer(scopes),
+          ),
+        ),
+      );
+      if (allowed)
+        expect((yield* client[WS_METHODS.workloadsList]({})).registryState).toBe("absent");
+      else
+        expect(yield* client[WS_METHODS.workloadsList]({}).pipe(Effect.flip)).toMatchObject({
+          _tag: "EnvironmentAuthorizationError",
+          requiredPermission: AuthDiagnosticsReadScope,
+        });
+      expect(calls).toBe(allowed ? 1 : 0);
+    }).pipe(Effect.scoped),
+  );
   it("declares exactly one scope for every RPC in the server group", () => {
     expect(new Set(Object.keys(RPC_REQUIRED_SCOPES))).toEqual(new Set(WsRpcGroup.requests.keys()));
   });
@@ -505,5 +562,67 @@ it.effect("separates host file URLs from readable attachment URLs", () =>
       });
     }
     expect(handled).toBe(1);
+  }).pipe(Effect.scoped),
+);
+
+it("F2 control V2 start and stop declare destination maintenance protection", () => {
+  expect(requiredScopeForRpcMethod("workloads.start")).toBe(AuthEnvironmentMaintainScope);
+  expect(requiredScopeForRpcMethod("workloads.stop")).toBe(AuthEnvironmentMaintainScope);
+});
+
+it.effect.each([
+  { name: "empty", scopes: [], allowed: false },
+  { name: "diagnostics", scopes: [AuthDiagnosticsReadScope], allowed: false },
+  { name: "orchestration", scopes: [AuthOrchestrationOperateScope], allowed: false },
+  { name: "maintenance", scopes: [AuthEnvironmentMaintainScope], allowed: true },
+])("F2 control V2 real RPC middleware enforces $name on both operations", ({ scopes, allowed }) =>
+  Effect.gen(function* () {
+    const tags = [WS_METHODS.workloadsStart, WS_METHODS.workloadsStop] as const;
+    const group = WsRpcGroup.omit(
+      ...[...WsRpcGroup.requests.keys()].filter(
+        (tag): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, (typeof tags)[number]> =>
+          !(tags as readonly string[]).includes(tag),
+      ),
+    );
+    let calls = 0;
+    const input = {
+      recordId: "a".repeat(64),
+      expectedGeneration: "b".repeat(32),
+      threadId: ThreadId.make("control"),
+    };
+    const result = (operation: "start" | "stop") =>
+      Effect.sync(() => {
+        calls++;
+        return {
+          recordId: input.recordId,
+          oldGeneration: input.expectedGeneration,
+          status: "refused" as const,
+          operation,
+          reason: "record-unavailable" as const,
+          mutationAttempted: false as const,
+        };
+      });
+    const client = yield* RpcTest.makeClient(group).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          group.toLayerHandler(WS_METHODS.workloadsStart, () => result("start")),
+          group.toLayerHandler(WS_METHODS.workloadsStop, () => result("stop")),
+          RpcAuthorization.layer(scopes),
+        ),
+      ),
+    );
+    for (const tag of tags) {
+      if (allowed)
+        expect(yield* client[tag](input)).toMatchObject({
+          status: "refused",
+          reason: "record-unavailable",
+        });
+      else
+        expect(yield* client[tag](input).pipe(Effect.flip)).toMatchObject({
+          _tag: "EnvironmentAuthorizationError",
+          requiredPermission: AuthEnvironmentMaintainScope,
+        });
+    }
+    expect(calls).toBe(allowed ? 2 : 0);
   }).pipe(Effect.scoped),
 );

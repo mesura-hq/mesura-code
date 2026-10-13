@@ -1,3 +1,9 @@
+import * as WorkloadService from "../workloads/WorkloadService.ts";
+import * as WorkloadRegistry from "../workloads/WorkloadRegistry.ts";
+import * as WorkloadThreadQuery from "../workloads/WorkloadThreadQuery.ts";
+import * as WorkloadHost from "../workloads/WorkloadHost.ts";
+import * as WorkloadHostBridge from "../workloads/WorkloadHostBridge.ts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { limitRecoveryCommand } from "./UsageLimitRecoveryWorker.ts";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
@@ -23,6 +29,7 @@ import {
   PullRequestOperationError,
   ProviderDriverKind,
   ProviderInstanceId,
+  ProviderSessionId,
   ProviderThreadId,
   ProviderTurnId,
   RunId,
@@ -484,6 +491,227 @@ const layerSharedApplicationDataPlaneTest = Layer.mergeAll(
 );
 
 it.layer(layerTest)("OrchestrationV2LayerLive", (it) => {
+  it.effect(
+    "the exported resource read observes the active manager and its retained raw observation",
+    () =>
+      Effect.gen(function* () {
+        const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+        const workloads = yield* WorkloadService.WorkloadService;
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const threadId = ThreadId.make("runtime-layer-passive-ram-a");
+        const otherThreadId = ThreadId.make("runtime-layer-passive-ram-b");
+        const providerSessionId = ProviderSessionId.make("runtime-layer-passive-ram-session");
+        const now = yield* DateTime.now;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const cwd = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "mesura-ram-composition-",
+        });
+        let samples = 0;
+        let sampleGate: Effect.Effect<void> = Effect.void;
+        const observation: ProviderAdapter.ProviderRuntimeObservation = Object.freeze({
+          launchToken: "12345678-1234-4234-8234-123456789abc",
+          readLaunchDescriptor: Effect.succeed({
+            status: "verified" as const,
+            verifiedScopeKey: "composed-scope",
+          }),
+          readAnonymousMemory: Effect.gen(function* () {
+            samples++;
+            yield* sampleGate;
+            return {
+              status: "available" as const,
+              verifiedScopeKey: "composed-scope",
+              anonymousBytes: 123,
+              sampledAt: "2026-10-13T00:00:00.000Z",
+            };
+          }),
+        });
+        const unused = () => Effect.die("resource read invoked provider control");
+        const raw: ProviderAdapter.ProviderAdapterV2SessionRuntime = {
+          instanceId: modelSelection.instanceId,
+          driver,
+          providerSessionId,
+          providerSession: {
+            id: providerSessionId,
+            driver,
+            providerInstanceId: modelSelection.instanceId,
+            status: "ready",
+            cwd,
+            model: modelSelection.model,
+            capabilities: CodexProviderCapabilitiesV2,
+            createdAt: now,
+            updatedAt: now,
+            lastError: null,
+          },
+          events: Stream.never,
+          resourceObservation: observation,
+          ensureThread: unused,
+          resumeThread: unused,
+          startTurn: unused,
+          steerTurn: unused,
+          interruptTurn: unused,
+          respondToRuntimeRequest: unused,
+          readThreadSnapshot: unused,
+          rollbackThread: unused,
+          forkThread: unused,
+        };
+        let currentRaw = raw;
+        const spy = vi
+          .spyOn(orchestrationAdapter, "openSession")
+          .mockImplementation(() => Effect.succeed(currentRaw));
+        yield* Effect.gen(function* () {
+          for (const id of [threadId, otherThreadId]) {
+            yield* orchestrator.dispatch({
+              type: "thread.create",
+              createdBy: "user",
+              creationSource: "web",
+              commandId: CommandId.make("create:" + id),
+              threadId: id,
+              projectId: ProjectId.make("runtime-layer-passive-ram-project"),
+              title: "RAM composition",
+              modelSelection,
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              branch: null,
+              worktreePath: null,
+            });
+            yield* manager.open({
+              threadId: id,
+              providerSessionId,
+              modelSelection,
+              runtimePolicy: {
+                runtimeMode: "full-access",
+                interactionMode: "default",
+                cwd,
+              },
+            });
+          }
+          assert.strictEqual((yield* manager.snapshotRuntimes)[0]!.runtime, raw);
+          assert.strictEqual(
+            (yield* manager.snapshotRuntimes)[0]!.runtime.resourceObservation,
+            observation,
+          );
+          const result = (yield* workloads.list({})).sharedAgentRam;
+          assert.equal(result.status, "available");
+          assert.lengthOf(result.groups, 1);
+          assert.equal(result.groups[0]!.groupId, observation.launchToken);
+          assert.equal(result.groups[0]!.anonymousBytes, 123);
+          assert.equal(result.groups[0]!.attachedThreadCount, 2);
+          assert.equal(samples, 1);
+          for (const id of [threadId, otherThreadId]) {
+            const filtered = (yield* workloads.list({ threadId: id })).sharedAgentRam;
+            assert.deepEqual(filtered, result);
+          }
+          assert.equal(samples, 3);
+          const entered = yield* Deferred.make<void>();
+          const continueRead = yield* Deferred.make<void>();
+          sampleGate = Deferred.succeed(entered, undefined).pipe(
+            Effect.andThen(Deferred.await(continueRead)),
+          );
+          const pending = yield* workloads.list({ threadId }).pipe(Effect.forkChild);
+          yield* Deferred.await(entered);
+          yield* manager.detach({ providerSessionId, threadId });
+          yield* Deferred.succeed(continueRead, undefined);
+          assert.isEmpty((yield* Fiber.join(pending)).sharedAgentRam.groups);
+          sampleGate = Effect.void;
+          const remaining = (yield* workloads.list({ threadId: otherThreadId })).sharedAgentRam;
+          assert.equal(remaining.groups[0]!.anonymousBytes, 123);
+          assert.equal(remaining.groups[0]!.attachedThreadCount, 1);
+
+          const replacementEntered = yield* Deferred.make<void>();
+          const replacementContinue = yield* Deferred.make<void>();
+          sampleGate = Deferred.succeed(replacementEntered, undefined).pipe(
+            Effect.andThen(Deferred.await(replacementContinue)),
+          );
+          const oldRead = yield* workloads.list({ threadId: otherThreadId }).pipe(Effect.forkChild);
+          yield* Deferred.await(replacementEntered);
+          yield* manager.close(providerSessionId);
+          currentRaw = {
+            ...raw,
+            resourceObservation: Object.freeze({
+              ...observation,
+              launchToken: "87654321-4321-4321-8321-cba987654321",
+              readAnonymousMemory: Effect.succeed<ProviderAdapter.ProviderRuntimeAnonymousMemory>({
+                status: "available",
+                verifiedScopeKey: "composed-scope",
+                anonymousBytes: 0,
+                sampledAt: "2026-10-13T00:00:00.000Z",
+              }),
+            }),
+          };
+          yield* manager.open({
+            threadId: otherThreadId,
+            providerSessionId,
+            modelSelection,
+            runtimePolicy: { runtimeMode: "full-access", interactionMode: "default", cwd },
+          });
+          yield* Deferred.succeed(replacementContinue, undefined);
+          const replaced = (yield* Fiber.join(oldRead)).sharedAgentRam;
+          assert.equal(replaced.status, "unavailable");
+          assert.isTrue(
+            replaced.groups.every(
+              (group) => group.groupId !== observation.launchToken && group.anonymousBytes === null,
+            ),
+          );
+          const fresh = (yield* workloads.list({ threadId: otherThreadId })).sharedAgentRam;
+          assert.equal(fresh.groups[0]!.groupId, currentRaw.resourceObservation!.launchToken);
+          assert.equal(fresh.groups[0]!.anonymousBytes, 0);
+          yield* manager.close(providerSessionId);
+          const deadlineEntered = yield* Deferred.make<void>();
+          currentRaw = {
+            ...raw,
+            resourceObservation: {
+              ...observation,
+              launchToken: "11111111-2222-4333-8444-555555555555",
+              readAnonymousMemory: Deferred.succeed(deadlineEntered, undefined).pipe(
+                Effect.andThen(Effect.never),
+              ),
+            },
+          };
+          yield* manager.open({
+            threadId: otherThreadId,
+            providerSessionId,
+            modelSelection,
+            runtimePolicy: { runtimeMode: "full-access", interactionMode: "default", cwd },
+          });
+          const timedRead = yield* workloads.list({}).pipe(Effect.forkChild);
+          yield* Deferred.await(deadlineEntered);
+          yield* TestClock.adjust("1 second");
+          const timedResult = yield* Fiber.join(timedRead);
+          assert.isFalse(timedResult.incomplete);
+          assert.deepEqual(timedResult.sharedAgentRam, {
+            status: "unavailable",
+            groups: [],
+            incomplete: true,
+          });
+          yield* manager.close(providerSessionId);
+          assert.isEmpty((yield* workloads.list({})).sharedAgentRam.groups);
+        }).pipe(Effect.ensuring(Effect.sync(() => spy.mockRestore())));
+      }).pipe(
+        Effect.provide(
+          WorkloadService.layer.pipe(
+            Layer.provide(
+              Layer.mergeAll(
+                Layer.mock(WorkloadRegistry.WorkloadRegistry)({
+                  scan: Effect.succeed({
+                    state: "absent",
+                    records: [],
+                    incomplete: false,
+                    diagnostics: [],
+                  }),
+                }),
+                Layer.mock(WorkloadThreadQuery.WorkloadThreadQuery)({}),
+                Layer.mock(WorkloadHost.WorkloadHost)({}),
+                Layer.mock(WorkloadHostBridge.WorkloadHostBridge)({}),
+                Layer.succeed(HostProcess.Platform, "linux"),
+              ),
+            ),
+            Layer.provideMerge(NodeServices.layer),
+          ),
+        ),
+        Effect.scoped,
+      ),
+  );
+
   it.effect("emits model updates separately from provider switches", () =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;

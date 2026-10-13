@@ -31,6 +31,7 @@ import { ProjectIconDiscovery } from "./project/ProjectIconDiscovery.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import { makeReasonThreadSearch } from "./textGeneration/ThreadSearchReasoning.ts";
 import { AccountLimitsService } from "./usage/AccountLimitsService.ts";
+import * as WorkloadService from "./workloads/WorkloadService.ts";
 import * as WorkspaceFileWatcher from "./workspace/WorkspaceFileWatcher.ts";
 import { projectFileFailureContext } from "./ws.ts";
 
@@ -50,9 +51,13 @@ export const layerWsRpcMesura = ServerWsRpcGroupMesura.toLayer(
     const dictationJobs = yield* DictationJobs;
     const hostStats = yield* HostStatsService;
     const accountLimits = yield* AccountLimitsService;
+    const workloads = yield* WorkloadService.WorkloadService;
     const review = yield* ReviewService.ReviewService;
 
     return ServerWsRpcGroupMesura.of({
+      [WS_METHODS.workloadsList]: (input) => workloads.list(input),
+      [WS_METHODS.workloadsStart]: (input) => workloads.start(input),
+      [WS_METHODS.workloadsStop]: (input) => workloads.stop(input),
       // Agent thread search reads (threadSearchEvidence.ts contracts) and one
       // bounded reasoning step on this environment's configured text model.
       [THREAD_SEARCH_WS_METHODS.listThreadSearchCatalog]: (input) =>

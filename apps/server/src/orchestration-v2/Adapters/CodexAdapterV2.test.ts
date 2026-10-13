@@ -1,3 +1,4 @@
+import * as ProviderRuntimeHost from "../../agentResources/ProviderRuntimeHost.ts";
 import * as NodeOS from "node:os";
 
 import { historyResponseItems } from "@t3tools/provider-core/server/handoffBudget";
@@ -47,6 +48,8 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Ref from "effect/Ref";
+import * as Queue from "effect/Queue";
+import * as Sink from "effect/Sink";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
@@ -63,10 +66,26 @@ import * as ProviderReplayHarness from "../testkit/ProviderReplayHarness.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import type * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import * as CodexAdapterV2 from "./CodexAdapterV2.ts";
+import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
+import type { CodexEffectiveRuntime } from "../../provider/CodexManagedRuntime.ts";
 import { makeReplayServerConfig, withCodexReplayChildMetadata } from "./CodexAdapterV2.testkit.ts";
 import * as CodexAdapterV2Testkit from "./CodexAdapterV2.testkit.ts";
 
+const contextEnvironmentId = EnvironmentId.make("environment-codex-context");
+const contextIdentityLayer = Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+  getEnvironmentId: Effect.succeed(contextEnvironmentId),
+});
+const contextClientFactoryLayer = CodexAdapterV2.layerAppServerClientFactory.pipe(
+  Layer.provide(contextIdentityLayer),
+  Layer.provide(ProviderRuntimeHost.layerUnsupported),
+);
+
 const encodeUnknownJson = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+const decodeCapturedFactoryFrame = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(
+    Schema.Struct({ id: Schema.optional(Schema.Number), method: Schema.String }),
+  ),
+);
 const replayTranscriptJson = Schema.fromJsonString(CodexReplay.CodexAppServerReplayTranscript);
 const encodeReplayTranscriptJson = Schema.encodeEffect(replayTranscriptJson);
 const decodeReplayTranscriptJson = Schema.decodeUnknownEffect(replayTranscriptJson);
@@ -741,7 +760,7 @@ describe("CodexAdapterV2 process spawning", () => {
         );
       });
       const factory = yield* CodexAdapterV2.CodexAppServerClientFactory.pipe(
-        Effect.provide(CodexAdapterV2.layerAppServerClientFactory),
+        Effect.provide(contextClientFactoryLayer),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provideService(
           ProviderEventLoggers.ProviderEventLoggers,
@@ -796,7 +815,7 @@ describe("CodexAdapterV2 process spawning", () => {
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
-            CodexAdapterV2.layerAppServerClientFactory,
+            contextClientFactoryLayer,
             ServerConfig.layerTest(process.cwd(), { prefix: "t3-codex-binary-home-" }),
           ),
         ),
@@ -1707,6 +1726,7 @@ describe("CodexAdapterV2 session initialize", () => {
   const openReplaySession = (
     transcript: CodexReplay.CodexAppServerReplayTranscript,
     beforeEmitInbound?: CodexReplay.CodexAppServerReplayDriver["beforeEmitInbound"],
+    observation?: ProviderAdapter.ProviderRuntimeObservation,
   ) =>
     Effect.gen(function* () {
       const driver = yield* CodexReplay.makeReplayDriver(
@@ -1734,6 +1754,7 @@ describe("CodexAdapterV2 session initialize", () => {
                       }).pipe(Effect.andThen(client.request(method, params))),
                   }) satisfies CodexClient.CodexAppServerClient["Service"],
               ),
+              Effect.map((client) => ({ client, observation })),
               Effect.mapError(
                 (cause) =>
                   new ProviderAdapter.ProviderAdapterOpenSessionError({
@@ -1763,11 +1784,93 @@ describe("CodexAdapterV2 session initialize", () => {
             runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
           }),
         initializeRequests: () => initializeRequests,
+        resourceObservation: runtime.resourceObservation,
       };
     });
 
   const replayPreamble = (nativeThreadId: string) =>
     codexReplayPreamble({ nativeThreadId, nativeTurnId: "unused", prompt: "unused" });
+
+  it.effect(
+    "reads an uninitialized observation without a protocol call, then samples the retained acquisition",
+    () =>
+      Effect.gen(function* () {
+        let hostReads = 0;
+        const observation: ProviderAdapter.ProviderRuntimeObservation = {
+          launchToken: "retained-replay-launch",
+          readLaunchDescriptor: Effect.succeed({ status: "verified", verifiedScopeKey: "scope" }),
+          readAnonymousMemory: Effect.sync(() => {
+            hostReads++;
+            return {
+              status: "available" as const,
+              verifiedScopeKey: "scope",
+              anonymousBytes: 123,
+              sampledAt: "2026-10-13T00:00:00.000Z",
+            };
+          }),
+        };
+        const session = yield* openReplaySession(
+          makeCodexReplayTranscript({
+            scenario: "passive-ram",
+            entries: replayPreamble("passive-native").slice(0, 5),
+          }),
+          undefined,
+          observation,
+        );
+        assert.isDefined(session.resourceObservation);
+        const retained = session.resourceObservation!;
+        assert.equal(retained.launchToken, observation.launchToken);
+        assert.equal((yield* retained.readLaunchDescriptor).status, "verified");
+        assert.equal((yield* retained.readAnonymousMemory).anonymousBytes, null);
+        assert.equal(session.initializeRequests(), 0);
+        assert.equal(hostReads, 0);
+        yield* session.ensureThread("passive-native");
+        assert.equal(session.initializeRequests(), 1);
+        assert.equal((yield* retained.readAnonymousMemory).anonymousBytes, 123);
+        assert.equal(hostReads, 1);
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+        Effect.scoped,
+      ),
+  );
+
+  it.effect("a failed host capture keeps a valid replay session usable", () =>
+    Effect.gen(function* () {
+      const failed: ProviderAdapter.ProviderRuntimeObservation = {
+        launchToken: "failed-capture",
+        readLaunchDescriptor: Effect.succeed({
+          status: "unavailable",
+          verifiedScopeKey: null,
+          reason: "capture_failed",
+        }),
+        readAnonymousMemory: Effect.succeed({
+          status: "unavailable",
+          verifiedScopeKey: null,
+          anonymousBytes: null,
+          sampledAt: null,
+          reason: "capture_failed",
+        }),
+      };
+      const session = yield* openReplaySession(
+        makeCodexReplayTranscript({
+          scenario: "failed-capture-ram",
+          entries: replayPreamble("failed-native").slice(0, 5),
+        }),
+        undefined,
+        failed,
+      );
+      yield* session.ensureThread("failed-native");
+      assert.equal(session.initializeRequests(), 1);
+      assert.equal((yield* session.resourceObservation!.readAnonymousMemory).anonymousBytes, null);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+      Effect.scoped,
+    ),
+  );
 
   it.effect("sends one initialize when two threads start on a fresh session at once", () =>
     Effect.gen(function* () {
@@ -1948,6 +2051,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
                         ),
                     }) satisfies CodexClient.CodexAppServerClient["Service"],
                 ),
+                Effect.map((client) => ({ client, observation: undefined })),
                 Effect.provide(context),
               ),
             ),
@@ -9141,3 +9245,258 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     );
   });
 });
+
+describe("F2 V12 authoritative Codex workload context", () => {
+  it.effect.each(["normal", "managed"] as const)(
+    "F2 V12 %s Codex launch rejects reserved spoofing and preserves resolved credentials and settings",
+    (mode) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "codex-context-fixture-" });
+        const sharedHome = path.join(root, "shared");
+        const normalHome = path.join(root, "shadow");
+        const managedHome = path.join(root, "managed");
+        yield* fs.makeDirectory(sharedHome);
+        yield* fs.writeFileString(path.join(sharedHome, "auth.json"), "synthetic-original-auth");
+        yield* fs.writeFileString(path.join(sharedHome, "config.toml"), "# preserved settings");
+        const inherited = {
+          PATH: "/synthetic/bin",
+          OPENAI_API_KEY: "synthetic-host-key",
+          HOST_ONLY: "preserved",
+          MESURA_ENVIRONMENT_ID: "inherited-wrong",
+          MESURA_PROVIDER_INSTANCE_ID: "inherited-wrong",
+          MESURA_WORKLOAD_IDENTITY_KIND: "legacy-thread",
+          MESURA_THREAD_ID: "inherited-app-thread",
+          CODEX_THREAD_ID: "inherited-native",
+        };
+        const spawned: Array<ChildProcess.StandardCommand> = [];
+        const spawner = ChildProcessSpawner.make((command) => {
+          if (ChildProcess.isStandardCommand(command)) spawned.push(command);
+          return Effect.fail(
+            PlatformError.systemError({
+              _tag: "NotFound",
+              module: "ChildProcess",
+              method: "spawn",
+            }),
+          );
+        });
+        const instanceId = ProviderInstanceId.make("codex-context-owned");
+        const managedEnvironment: NodeJS.ProcessEnv = {
+          ...inherited,
+          ACCESS_TOKEN: "synthetic-managed-token",
+          CODEX_HOME: managedHome,
+          CUSTOM: "managed-preserved",
+        };
+        // Match the real managed resolver's removal of ambient API-key routing.
+        delete managedEnvironment.OPENAI_API_KEY;
+        const adapter = yield* CodexAdapterV2.createCodexAdapterV2(
+          {
+            instanceId,
+            displayName: undefined,
+            enabled: true,
+            environment: [
+              { name: "MESURA_ENVIRONMENT_ID", value: "configured-wrong", sensitive: false },
+              { name: "MESURA_PROVIDER_INSTANCE_ID", value: "configured-wrong", sensitive: false },
+              {
+                name: "MESURA_WORKLOAD_IDENTITY_KIND",
+                value: "configured-wrong",
+                sensitive: false,
+              },
+              { name: "MESURA_THREAD_ID", value: "configured-app-thread", sensitive: false },
+              { name: "CODEX_THREAD_ID", value: "configured-native", sensitive: false },
+              { name: "CUSTOM", value: "normal-preserved", sensitive: false },
+            ],
+            config: {
+              ...DEFAULT_CODEX_SETTINGS,
+              binaryPath: "/normal/codex",
+              homePath: sharedHome,
+              shadowHomePath: normalHome,
+              launchArgs: "--strict-config",
+            },
+          },
+          mode === "managed"
+            ? {
+                resolveRuntime: Effect.succeed<CodexEffectiveRuntime>({
+                  config: {
+                    ...DEFAULT_CODEX_SETTINGS,
+                    setupMode: "managed",
+                    binaryPath: "/managed/codex",
+                    homePath: managedHome,
+                    launchArgs: "--managed-args",
+                  },
+                  environment: managedEnvironment,
+                  revision: "synthetic-managed-token",
+                }),
+              }
+            : {},
+        ).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              contextClientFactoryLayer,
+              ServerConfig.layerTest(root, { prefix: "codex-context-state-" }),
+            ),
+          ),
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.provideService(
+            ProviderEventLoggers.ProviderEventLoggers,
+            ProviderEventLoggers.NoOpProviderEventLoggers,
+          ),
+          Effect.provideService(HostProcess.Environment, inherited),
+        );
+        for (const thread of ["a", "b"]) {
+          const result = yield* adapter
+            .openSession({
+              threadId: ThreadId.make("context-thread-" + thread),
+              providerSessionId: ProviderSessionId.make("context-session-" + thread),
+              modelSelection: CODEX_TEST_MODEL_SELECTION,
+              runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+            })
+            .pipe(Effect.scoped, Effect.exit);
+          assert.equal(result._tag, "Failure");
+        }
+        assert.equal(spawned.length, 2);
+        for (const command of spawned) {
+          const env = command.options.env;
+          assert.equal(env?.MESURA_ENVIRONMENT_ID, contextEnvironmentId);
+          assert.equal(env?.MESURA_PROVIDER_INSTANCE_ID, instanceId);
+          assert.equal(env?.MESURA_WORKLOAD_IDENTITY_KIND, "codex-thread");
+          assert.isFalse(Object.hasOwn(env ?? {}, "MESURA_THREAD_ID"));
+          assert.isFalse(Object.hasOwn(env ?? {}, "CODEX_THREAD_ID"));
+          assert.equal(command.options.extendEnv, false);
+          assert.equal(env?.HOST_ONLY, "preserved");
+          assert.equal(env?.CUSTOM, mode === "managed" ? "managed-preserved" : "normal-preserved");
+          assert.equal(env?.CODEX_HOME, mode === "managed" ? managedHome : normalHome);
+          assert.equal(env?.OPENAI_API_KEY, mode === "managed" ? undefined : "synthetic-host-key");
+          assert.equal(
+            env?.ACCESS_TOKEN,
+            mode === "managed" ? "synthetic-managed-token" : undefined,
+          );
+          assert.equal(command.command, mode === "managed" ? "/managed/codex" : "/normal/codex");
+          assert.deepEqual(command.args, [
+            "app-server",
+            mode === "managed" ? "--managed-args" : "--strict-config",
+          ]);
+        }
+        assert.equal(
+          yield* fs.readFileString(path.join(sharedHome, "auth.json")),
+          "synthetic-original-auth",
+        );
+        assert.equal(
+          yield* fs.readFileString(path.join(sharedHome, "config.toml")),
+          "# preserved settings",
+        );
+        assert.equal(inherited.CODEX_THREAD_ID, "inherited-native");
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+        Effect.provideService(HostProcess.Platform, "linux"),
+        Effect.scoped,
+      ),
+  );
+});
+
+it.effect(
+  "the factory keeps the retained protocol usable when its captured observation is unavailable",
+  () =>
+    Effect.gen(function* () {
+      const replies = yield* Queue.unbounded<Uint8Array>();
+      const methods: Array<string> = [];
+      const handle = ChildProcessSpawner.makeHandle({
+        pid: ChildProcessSpawner.ProcessId(42),
+        exitCode: Effect.never,
+        isRunning: Effect.succeed(true),
+        kill: () => Effect.die("a resource read attempted control"),
+        unref: Effect.succeed(Effect.void),
+        stdin: Sink.forEach((chunk: Uint8Array) =>
+          Effect.gen(function* () {
+            const frame = yield* decodeCapturedFactoryFrame(new TextDecoder().decode(chunk)).pipe(
+              Effect.orDie,
+            );
+            methods.push(frame.method);
+            if (frame.id !== undefined)
+              yield* Queue.offer(
+                replies,
+                new TextEncoder().encode(
+                  JSON.stringify({
+                    id: frame.id,
+                    result: {
+                      userAgent: "fixture",
+                      codexHome: "/fixture",
+                      platformFamily: "unix",
+                      platformOs: "linux",
+                    },
+                  }) + "\n",
+                ),
+              );
+          }),
+        ),
+        stdout: Stream.fromQueue(replies),
+        stderr: Stream.never,
+        all: Stream.never,
+        getInputFd: () => Sink.drain,
+        getOutputFd: () => Stream.empty,
+      });
+      const host = ProviderRuntimeHost.ProviderRuntimeHost.of({
+        prepare: () =>
+          Effect.succeed({
+            capture: (captured) =>
+              Effect.gen(function* () {
+                assert.strictEqual(captured, handle);
+                assert.isTrue(yield* captured.isRunning.pipe(Effect.orDie));
+                return Object.freeze({
+                  launchToken: "captured-factory-launch",
+                  readLaunchDescriptor: Effect.succeed({
+                    status: "unavailable" as const,
+                    verifiedScopeKey: null,
+                    reason: "capture_failed" as const,
+                  }),
+                  readAnonymousMemory: Effect.succeed({
+                    status: "unavailable" as const,
+                    verifiedScopeKey: null,
+                    anonymousBytes: null,
+                    sampledAt: null,
+                    reason: "capture_failed" as const,
+                  }),
+                });
+              }),
+          }),
+      });
+      const factory = yield* CodexAdapterV2.CodexAppServerClientFactory.pipe(
+        Effect.provide(
+          CodexAdapterV2.layerAppServerClientFactory.pipe(
+            Layer.provide(contextIdentityLayer),
+            Layer.provide(Layer.succeed(ProviderRuntimeHost.ProviderRuntimeHost, host)),
+            Layer.provide(
+              Layer.succeed(
+                ChildProcessSpawner.ChildProcessSpawner,
+                ChildProcessSpawner.make(() => Effect.succeed(handle)),
+              ),
+            ),
+            Layer.provide(
+              Layer.succeed(
+                ProviderEventLoggers.ProviderEventLoggers,
+                ProviderEventLoggers.NoOpProviderEventLoggers,
+              ),
+            ),
+          ),
+        ),
+      );
+      const retained = yield* factory.open({
+        instanceId: CodexAdapterV2.CODEX_DEFAULT_INSTANCE_ID,
+        threadId: ThreadId.make("factory-capture"),
+        providerSessionId: ProviderSessionId.make("factory-capture"),
+        runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+        settings: DEFAULT_CODEX_SETTINGS,
+        environment: { PATH: "/usr/local/bin:/usr/bin" },
+      });
+      assert.equal((yield* retained.observation!.readAnonymousMemory).anonymousBytes, null);
+      assert.isEmpty(methods);
+      const response = yield* retained.client.request("initialize", {
+        clientInfo: { name: "fixture", version: "1" },
+      });
+      assert.equal(response.userAgent, "fixture");
+      assert.deepEqual(methods, ["initialize"]);
+    }).pipe(Effect.provideService(HostProcess.Platform, "linux"), Effect.scoped),
+);

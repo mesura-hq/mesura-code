@@ -69,6 +69,10 @@ vi.mock("../QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }));
 import { AppRoot } from "../../AppRoot";
 import { SidebarProvider } from "../ui/sidebar";
 import { SidebarChromeFooter } from "./SidebarChrome";
+import { HostsSheet } from "./HostsSheet";
+import { CommandPalette } from "../CommandPalette";
+import { openCommandPalette } from "../../commandPaletteBus";
+import { closeHostsSheet } from "../../state/hostsSurface";
 import { requestSidebarDockPin } from "./sidebarDockController";
 import {
   NO_ACCESS_HOST_ID,
@@ -98,12 +102,100 @@ let container: HTMLDivElement;
 let router: ReturnType<typeof createRouter>;
 let now: number;
 
+// happy-dom does not perform layout. LegendList needs a measured viewport and
+// measured rows before it can publish the real command items. Supply only the
+// browser geometry boundary inside the palette; actions and filtering stay real.
+function paletteRect(target: Element): DOMRect | undefined {
+  if (!target.closest("[data-command-palette]")) return undefined;
+  const row =
+    target.getAttribute("role") === "option" ||
+    (target instanceof HTMLElement && target.style.position === "absolute");
+  return new DOMRect(0, 0, fixture.mobile ? 368 : 640, row ? 40 : 320);
+}
+
+const paletteResizeObservers = new Set<PaletteResizeObserver>();
+class PaletteResizeObserver implements ResizeObserver {
+  private readonly targets = new Set<Element>();
+  constructor(private readonly callback: ResizeObserverCallback) {}
+  observe(target: Element) {
+    this.targets.add(target);
+    // LegendList retains its shared observer across component lifetimes.
+    paletteResizeObservers.add(this);
+  }
+  unobserve(target: Element) {
+    this.targets.delete(target);
+  }
+  disconnect() {
+    this.targets.clear();
+    paletteResizeObservers.delete(this);
+  }
+  deliver() {
+    const entries = [...this.targets].flatMap((target) => {
+      const rect = target.isConnected ? paletteRect(target) : undefined;
+      if (!rect) return [];
+      const size = [{ inlineSize: rect.width, blockSize: rect.height }];
+      return [
+        {
+          target,
+          contentRect: rect,
+          borderBoxSize: size,
+          contentBoxSize: size,
+          devicePixelContentBoxSize: size,
+        } satisfies ResizeObserverEntry,
+      ];
+    });
+    if (entries.length > 0) this.callback(entries, this);
+  }
+}
+
+function installPaletteLayout() {
+  const originalRect = Element.prototype.getBoundingClientRect;
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+    return paletteRect(this) ?? originalRect.call(this);
+  });
+  for (const dimension of ["clientHeight", "clientWidth"] as const) {
+    const originalGet = Object.getOwnPropertyDescriptor(HTMLElement.prototype, dimension)?.get;
+    vi.spyOn(HTMLElement.prototype, dimension, "get").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      const rect = paletteRect(this);
+      if (rect) return dimension === "clientHeight" ? rect.height : rect.width;
+      const originalValue: unknown = originalGet?.call(this);
+      return typeof originalValue === "number" ? originalValue : 0;
+    });
+  }
+  vi.stubGlobal("ResizeObserver", PaletteResizeObserver);
+}
+
+const paletteItemObservers = new Set<MutationObserver>();
+function observeHostsPaletteItem() {
+  return new Promise<HTMLElement>((resolve) => {
+    const findItem = () =>
+      [...document.querySelectorAll<HTMLElement>('[data-slot="command-item"]')].find((node) =>
+        node.textContent?.includes("Show hosts"),
+      );
+    const check = () => {
+      const item = findItem();
+      if (item) {
+        observer.disconnect();
+        paletteItemObservers.delete(observer);
+        resolve(item);
+      }
+    };
+    const observer = new MutationObserver(check);
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    paletteItemObservers.add(observer);
+    check();
+  });
+}
+
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   now = Date.now();
   fixture.sources = hostStatsFleet(now);
   fixture.sourcesEnabled = [];
   fixture.mobile = false;
+  closeHostsSheet();
   container = document.createElement("div");
   document.body.append(container);
 });
@@ -112,18 +204,35 @@ afterEach(async () => {
   vi.useRealTimers();
   await act(async () => root?.unmount());
   root = undefined;
+  closeHostsSheet();
   container.remove();
+  for (const observer of paletteItemObservers) observer.disconnect();
+  paletteItemObservers.clear();
+  for (const observer of paletteResizeObservers) observer.disconnect();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
-async function mountSidebar(options: { path?: string; sidebarOpen?: boolean } = {}) {
+async function mountSidebar(
+  options: { path?: string; sidebarOpen?: boolean; palette?: boolean } = {},
+) {
   const rootRoute = createRootRoute({
-    component: () => (
-      <SidebarProvider defaultOpen={options.sidebarOpen ?? true}>
-        <SidebarChromeFooter />
-        <Outlet />
-      </SidebarProvider>
-    ),
+    component: () => {
+      const sidebar = (
+        <SidebarProvider defaultOpen={options.sidebarOpen ?? true}>
+          <SidebarChromeFooter />
+          <Outlet />
+        </SidebarProvider>
+      );
+      return options.palette ? (
+        <CommandPalette>{sidebar}</CommandPalette>
+      ) : (
+        <>
+          {sidebar}
+          <HostsSheet />
+        </>
+      );
+    },
   });
   const index = createRoute({ getParentRoute: () => rootRoute, path: "/" });
   const usage = createRoute({ getParentRoute: () => rootRoute, path: "/usage" });
@@ -282,8 +391,9 @@ describe("Hosts dock: the palette's Show hosts from every page", () => {
   const sidebarState = () =>
     container.querySelector<HTMLElement>("[data-sidebar-state]")?.dataset.sidebarState;
 
-  for (const path of ["/usage", "/settings", "/pull-requests"]) {
-    it(`Show hosts from ${path} returns to the thread list and pins the hosts dock`, async () => {
+  it.each(["/usage", "/settings", "/pull-requests"])(
+    "Show hosts from %s returns to the thread list and pins the hosts dock",
+    async (path) => {
       await mountSidebar({ path });
       expect(container.querySelector("[data-hosts-panel]")).toBeNull();
       await act(async () => requestSidebarDockPin("hosts"));
@@ -292,8 +402,8 @@ describe("Hosts dock: the palette's Show hosts from every page", () => {
       // Pinned, not hovered: it stays until Escape.
       await press("keydown", { key: "Escape", code: "Escape" });
       expect(hostsOpen()).toBe(false);
-    });
-  }
+    },
+  );
 
   it("Show hosts expands a collapsed sidebar before pinning the hosts dock", async () => {
     await mountSidebar({ sidebarOpen: false });
@@ -582,4 +692,65 @@ describe("Usage dock guards (criterion 7)", () => {
     await act(async () => footerButton("Usage").click());
     await vi.waitFor(() => expect(router.state.location.pathname).toBe("/usage"));
   });
+});
+
+describe("phone Hosts footer entry", () => {
+  it("opens live Hosts in a sheet from a utility page and releases sources when closed", async () => {
+    fixture.mobile = true;
+    await mountSidebar({ path: "/settings" });
+    await act(async () => footerButton("Hosts").click());
+    const sheet = document.querySelector<HTMLElement>('[data-slot="sheet-popup"]');
+    expect(sheet).not.toBeNull();
+    expect(sheet!.querySelector("[data-hosts-panel]")).not.toBeNull();
+    expect(router.state.location.pathname).toBe("/settings");
+    expect(fixture.sourcesEnabled.at(-1)).toBe(true);
+    await act(async () =>
+      sheet!.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click(),
+    );
+    expect(document.querySelector('[data-slot="sheet-popup"] [data-hosts-panel]')).toBeNull();
+  });
+});
+
+describe("actual Show hosts palette entry", () => {
+  it.each([false, true])(
+    "opens the proper Hosts surface from Settings at mobile=%s",
+    async (mobile) => {
+      fixture.mobile = mobile;
+      installPaletteLayout();
+      await mountSidebar({ path: "/settings", sidebarOpen: false, palette: true });
+      const ready = observeHostsPaletteItem();
+      await act(async () => openCommandPalette({ query: "Show hosts" }));
+      const palette = document.querySelector<HTMLElement>("[data-command-palette]");
+      expect(palette).not.toBeNull();
+      expect(palette!.getBoundingClientRect().height).toBeGreaterThan(0);
+      await act(async () => {
+        for (const observer of paletteResizeObservers) observer.deliver();
+      });
+      // Observe actual materialization, including any LegendList frame work.
+      const item = await ready;
+      expect(item.textContent).toContain("Show hosts");
+      await act(async () => item.click());
+      if (mobile) {
+        expect(router.state.location.pathname).toBe("/settings");
+        expect(
+          document.querySelector('[data-slot="sheet-popup"] [data-hosts-panel]'),
+        ).not.toBeNull();
+        await act(async () =>
+          document
+            .querySelector<HTMLButtonElement>(
+              '[data-slot="sheet-popup"] button[aria-label="Close"]',
+            )!
+            .click(),
+        );
+        expect(document.querySelector('[data-slot="sheet-popup"] [data-hosts-panel]')).toBeNull();
+      } else {
+        expect(router.state.location.pathname).toBe("/");
+        // The utility button has no expansion attribute. The dock's inert state
+        // determines whether its content is available to focus and pointer input.
+        expect(hostsOpen()).toBe(true);
+        await press("keydown", { key: "Escape", code: "Escape" });
+        expect(hostsOpen()).toBe(false);
+      }
+    },
+  );
 });

@@ -529,7 +529,53 @@ export interface ProviderAdapterV2McpApps {
   }) => Effect.Effect<{ readonly contents: ReadonlyArray<unknown> }, ProviderAdapterV2Error>;
 }
 
+/** Private passive observations. Tokens identify one retained factory acquisition. */
+export type ProviderRuntimeResourceReason =
+  | "unsupported_platform"
+  | "unknown_launcher"
+  | "unsupported_path"
+  | "untrusted_chain"
+  | "ambient_cgroup"
+  | "capture_failed"
+  | "exited"
+  | "identity_changed"
+  | "not_initialized"
+  | "sample_failed"
+  | "ambiguous_scope"
+  | "incomplete"
+  | "unsupported_provider";
+
+export type ProviderRuntimeLaunchDescriptor =
+  | { readonly status: "verified"; readonly verifiedScopeKey: string }
+  | {
+      readonly status: "unsupported" | "unavailable";
+      readonly verifiedScopeKey: null;
+      readonly reason: ProviderRuntimeResourceReason;
+    };
+
+export type ProviderRuntimeAnonymousMemory =
+  | {
+      readonly status: "available";
+      readonly verifiedScopeKey: string;
+      readonly anonymousBytes: number;
+      readonly sampledAt: string;
+    }
+  | {
+      readonly status: "unsupported" | "unavailable";
+      readonly verifiedScopeKey: null;
+      readonly anonymousBytes: null;
+      readonly sampledAt: null;
+      readonly reason: ProviderRuntimeResourceReason;
+    };
+
+export interface ProviderRuntimeObservation {
+  readonly launchToken: string;
+  readonly readLaunchDescriptor: Effect.Effect<ProviderRuntimeLaunchDescriptor>;
+  readonly readAnonymousMemory: Effect.Effect<ProviderRuntimeAnonymousMemory>;
+}
+
 export interface ProviderAdapterV2SessionRuntime {
+  readonly resourceObservation?: ProviderRuntimeObservation;
   readonly instanceId: ProviderInstanceId;
   readonly driver: ProviderDriverKind;
   readonly providerSessionId: ProviderSessionId;

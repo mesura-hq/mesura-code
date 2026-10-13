@@ -1,3 +1,4 @@
+import * as ProviderRuntimeHost from "../../agentResources/ProviderRuntimeHost.ts";
 import { revertCodexThread } from "../../provider/CodexThreadRevert.ts";
 import { historyResponseItems } from "@t3tools/provider-core/server/handoffBudget";
 import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
@@ -16,6 +17,8 @@ import type { ManagedServerProvider } from "@t3tools/provider-core/server/snapsh
 import type { CodexEffectiveRuntime } from "../../provider/CodexManagedRuntime.ts";
 import { buildCodexInitializeParams } from "../../provider/CodexProvider.ts";
 import { withoutProviderProbeMarker } from "../../provider/providerProbeMarker.ts";
+import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
+import { codexWorkloadContext } from "../../workloads/codexWorkloadContext.ts";
 import {
   codexRateLimitsToUpdate,
   mergeCodexRateLimits,
@@ -1279,7 +1282,10 @@ export interface CodexAppServerClientFactoryShape {
     readonly settings: CodexSettings;
     readonly environment: NodeJS.ProcessEnv;
   }) => Effect.Effect<
-    CodexClient.CodexAppServerClient["Service"],
+    {
+      readonly client: CodexClient.CodexAppServerClient["Service"];
+      readonly observation?: ProviderAdapter.ProviderRuntimeObservation | undefined;
+    },
     ProviderAdapter.ProviderAdapterOpenSessionError,
     Scope.Scope
   >;
@@ -1448,12 +1454,18 @@ function isSensitiveCodexProtocolKey(key: string): boolean {
 export const layerAppServerClientFactory: Layer.Layer<
   CodexAppServerClientFactory,
   never,
-  ChildProcessSpawner.ChildProcessSpawner | ProviderEventLoggers.ProviderEventLoggers
+  | ChildProcessSpawner.ChildProcessSpawner
+  | ProviderEventLoggers.ProviderEventLoggers
+  | ServerEnvironment.ServerEnvironmentIdentity
+  | ProviderRuntimeHost.ProviderRuntimeHost
 > = Layer.effect(
   CodexAppServerClientFactory,
   Effect.gen(function* () {
+    const runtimeHost = yield* ProviderRuntimeHost.ProviderRuntimeHost;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const { native: nativeEventLogger } = yield* ProviderEventLoggers.ProviderEventLoggers;
+    const environmentId = yield* (yield* ServerEnvironment.ServerEnvironmentIdentity)
+      .getEnvironmentId;
 
     return CodexAppServerClientFactory.of({
       open: (input) =>
@@ -1462,16 +1474,27 @@ export const layerAppServerClientFactory: Layer.Layer<
           // Mesura: a session never carries the probe marker; `codex app-server`
           // has the same argv for a probe and a session, so only this tells a
           // host that confines sessions which one it is.
-          const environment = withoutProviderProbeMarker({
-            ...input.environment,
-            ...(input.settings.homePath ? { CODEX_HOME: input.settings.homePath } : {}),
-          });
+          const environment = codexWorkloadContext(
+            withoutProviderProbeMarker({
+              ...input.environment,
+              ...(input.settings.homePath ? { CODEX_HOME: input.settings.homePath } : {}),
+            }),
+            { environmentId, instanceId: input.instanceId },
+          );
           const command = yield* makeCodexAppServerSpawnCommand({
             command: input.settings.binaryPath || "codex",
             args: codexAppServerArgs(
               resolveCodexLaunchArgs(input.settings.launchArgs, input.environment),
             ),
             env: environment,
+            // Both launch paths already supply their complete resolved environment.
+            // Re-inheritance would restore stale thread IDs and removed managed credentials.
+            extendEnv: false,
+          });
+          const acquisition = yield* runtimeHost.prepare({
+            command: ChildProcess.isStandardCommand(command) ? command.command : "",
+            args: ChildProcess.isStandardCommand(command) ? command.args : [],
+            environment,
           });
           const handle = yield* spawner.spawn(command).pipe(
             Effect.provideService(Scope.Scope, scope),
@@ -1484,6 +1507,7 @@ export const layerAppServerClientFactory: Layer.Layer<
                 }),
             ),
           );
+          const observation = yield* acquisition.capture(handle);
           const protocolLogger = makeCodexAppServerProtocolLogger({
             nativeEventLogger,
             threadId: input.threadId,
@@ -1498,9 +1522,10 @@ export const layerAppServerClientFactory: Layer.Layer<
                   logger: protocolLogger,
                 };
           const context = yield* Layer.build(CodexClient.layerChildProcess(handle, clientOptions));
-          return yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
+          const client = yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
             Effect.provide(context),
           );
+          return { client, observation };
         }),
     });
   }),
@@ -1627,7 +1652,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                     }),
                 ),
               );
-        const client = yield* clientFactory.open({
+        const { client, observation } = yield* clientFactory.open({
           instanceId: adapterOptions.instanceId,
           threadId: input.threadId,
           providerSessionId: input.providerSessionId,
@@ -6324,6 +6349,27 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
         };
 
         const runtime: ProviderAdapter.ProviderAdapterV2SessionRuntime = {
+          ...(observation === undefined
+            ? {}
+            : {
+                resourceObservation: Object.freeze({
+                  launchToken: observation.launchToken,
+                  readLaunchDescriptor: observation.readLaunchDescriptor,
+                  readAnonymousMemory: Ref.get(initialized).pipe(
+                    Effect.flatMap((ready) =>
+                      ready
+                        ? observation.readAnonymousMemory
+                        : Effect.succeed({
+                            status: "unavailable" as const,
+                            verifiedScopeKey: null,
+                            anonymousBytes: null,
+                            sampledAt: null,
+                            reason: "not_initialized" as const,
+                          }),
+                    ),
+                  ),
+                }),
+              }),
           instanceId: adapterOptions.instanceId,
           driver: CODEX_PROVIDER,
           providerSessionId: input.providerSessionId,

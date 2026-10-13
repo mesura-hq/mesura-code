@@ -1,3 +1,4 @@
+import * as ProviderRuntimeResources from "../agentResources/ProviderRuntimeResources.ts";
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as Layer from "effect/Layer";
@@ -134,6 +135,10 @@ const layerProviderSessionManagerProvided = ProviderSessionManager.layer.pipe(
       ProjectionStore.layer,
     ),
   ),
+);
+
+export const layerProviderRuntimeResources = ProviderRuntimeResources.layer.pipe(
+  Layer.provide(layerProviderSessionManagerProvided),
 );
 
 const layerProviderAuthServiceProvided = ProviderAuthService.layer.pipe(
@@ -337,6 +342,7 @@ export const layer = Layer.mergeAll(
   layerThreadManagementProvided,
   layerEffectWorkerProvided,
   layerProviderSessionManagerProvided,
+  layerProviderRuntimeResources,
   layerProviderAuthServiceProvided,
   layerProviderRuntimeRecoveryProvided,
   layerProjectionMaintenanceProvided,

@@ -11,12 +11,14 @@ keeps the last 12 hours of its own readings, so the panel shows a trend as soon 
 - Select the **Hosts** button to keep the panel open. Select it again or press `Escape` to close
   it.
 - Choose **Show hosts** in the command palette to keep the panel open. From Settings, Usage or
-  Pull requests it returns to the thread list first, and it opens a hidden sidebar.
+  Pull requests on a desktop, it returns to the thread list first and opens a hidden sidebar.
+- On a phone, select **Hosts** in the sidebar footer or **Show hosts** in the command palette.
+  A sheet opens. Close it with **Close**, `Escape`, or a tap outside the sheet.
 
 The panel opens inside the sidebar, above the footer buttons, in the same place as the
 [account limits](./account-limits.md) panel. Only one of the two is open at a time: opening one
-closes the other. Like that panel, it is available on the thread list only, and not when the window
-is as narrow as a phone.
+closes the other. The desktop panel is available on the thread list. The phone sheet is available
+from any page.
 
 You can change the shortcut in **Settings → Keybindings**, where it is listed as **Hosts: Peek**.
 
@@ -58,3 +60,28 @@ red when it is close to its limit.
   temperature sensor.
 - **Waiting for the first reading**: the machine is connected and its first readings have not
   arrived yet.
+
+## Manage workloads
+
+Choose **Servers in this thread** beside the thread title to see the workloads assigned to that
+thread. The **Hosts** panel and phone sheet show the registered workloads for each environment,
+including workloads without an assigned thread.
+
+Select **Stop** to stop a running workload. Select **Start** to replay its saved launch when the
+host can verify the record and its owning thread. These actions require maintenance access to the
+destination environment. Reading workloads requires diagnostics access. An unavailable control
+shows the reason.
+
+After an action, Mesura Code refreshes the host observation. **Start admitted** means the host
+accepted the launch; the host observation shows whether it runs. A refused action did not attempt
+a change. An incomplete or unknown outcome needs a fresh observation before another action.
+Mesura Code does not retry a mutation automatically.
+
+**Open preview** uses the remote link supplied by the host and your browser preference. A workload
+without a remote link cannot open a preview.
+
+Workload RAM belongs to the workload scope. Shared agent RAM shows the full anonymous memory of
+each verified shared runtime scope, including its resident processes. Several threads can use one
+runtime. Mesura Code does not divide its memory between them. Per-thread agent RAM is unavailable.
+An empty list means no observed runtime groups, not zero memory use. An unavailable reading does
+not mean zero.

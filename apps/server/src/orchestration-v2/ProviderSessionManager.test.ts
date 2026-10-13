@@ -4049,6 +4049,8 @@ it.effect(
           modelSelection,
           runtimePolicy,
         });
+        const beforeAttach = (yield* manager.snapshotRuntimes)[0]!;
+        const rawRuntime = beforeAttach.runtime;
         const secondRuntime = yield* manager.open({
           threadId: secondThreadId,
           providerSessionId,
@@ -4057,6 +4059,16 @@ it.effect(
         });
 
         assert.strictEqual(firstRuntime, secondRuntime);
+        const afterAttach = (yield* manager.snapshotRuntimes)[0]!;
+        assert.strictEqual(afterAttach.runtime, rawRuntime);
+        assert.sameMembers([...afterAttach.attachedThreadIds], [firstThreadId, secondThreadId]);
+        assert.deepEqual(beforeAttach.attachedThreadIds, [firstThreadId]);
+        // Mutating a copied snapshot cannot alter manager membership.
+        (afterAttach.attachedThreadIds as Array<ThreadId>).push(ThreadId.make("snapshot-only"));
+        assert.sameMembers(
+          [...(yield* manager.snapshotRuntimes)[0]!.attachedThreadIds],
+          [firstThreadId, secondThreadId],
+        );
         assert.equal((yield* Ref.get(state)).openCount, 1);
         const resumeSecondThread = secondRuntime.resumeThread({
           providerThread: secondProviderThread,
@@ -4067,6 +4079,11 @@ it.effect(
         yield* resumeSecondThread;
         yield* resumeSecondThread;
         assert.equal((yield* Ref.get(state)).resumeCount, 1);
+        const afterActivity = (yield* manager.snapshotRuntimes)[0]!;
+        assert.strictEqual(afterActivity.runtime, rawRuntime);
+        assert.isTrue(
+          afterActivity.loadedProviderThreads.some(([threadId]) => threadId === secondThreadId),
+        );
         yield* secondRuntime.resumeThread({
           providerThread: secondProviderThread,
           threadId: secondThreadId,
@@ -4100,6 +4117,12 @@ it.effect(
         );
 
         yield* manager.detach({ providerSessionId, threadId: secondThreadId });
+        const afterDetach = (yield* manager.snapshotRuntimes)[0]!;
+        assert.strictEqual(afterDetach.runtime, rawRuntime);
+        assert.deepEqual(afterDetach.attachedThreadIds, [firstThreadId]);
+        assert.isFalse(
+          afterDetach.loadedProviderThreads.some(([threadId]) => threadId === secondThreadId),
+        );
         yield* manager.open({
           threadId: secondThreadId,
           providerSessionId,
@@ -4124,6 +4147,7 @@ it.effect(
         yield* TestClock.adjust("1 second");
         yield* Effect.yieldNow;
         assert.equal((yield* Ref.get(state)).closeCount, 1);
+        assert.isEmpty(yield* manager.snapshotRuntimes);
       });
 
       yield* effect.pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 1000 })));
@@ -4609,5 +4633,40 @@ it.effect(
         projectExists: false,
       });
       assert.isFalse(denied?.capabilities?.has("device"));
+    }),
+);
+
+it.effect(
+  "passive runtime snapshots do not refresh idle release and reopening changes raw identity",
+  () =>
+    Effect.gen(function* () {
+      const state = yield* Ref.make(emptyState);
+      yield* Effect.gen(function* () {
+        const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const eventSink = yield* EventSink.EventSinkV2;
+        const now = yield* DateTime.now;
+        const threadId = ThreadId.make("passive-snapshot-idle");
+        const providerSessionId = yield* idAllocator.allocate.providerSession({
+          providerInstanceId: modelSelection.instanceId,
+          threadId,
+        });
+        yield* eventSink.write({
+          events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, now })],
+        });
+        const input = { threadId, providerSessionId, modelSelection, runtimePolicy };
+        yield* manager.open(input);
+        const original = (yield* manager.snapshotRuntimes)[0]!.runtime;
+        yield* TestClock.adjust("500 millis");
+        assert.strictEqual((yield* manager.snapshotRuntimes)[0]!.runtime, original);
+        yield* TestClock.adjust("500 millis");
+        yield* Effect.yieldNow;
+        assert.isEmpty(yield* manager.snapshotRuntimes);
+        assert.equal((yield* Ref.get(state)).closeCount, 1);
+        yield* manager.open(input);
+        assert.notStrictEqual((yield* manager.snapshotRuntimes)[0]!.runtime, original);
+        yield* manager.close(providerSessionId);
+        assert.isEmpty(yield* manager.snapshotRuntimes);
+      }).pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 1000 })));
     }),
 );

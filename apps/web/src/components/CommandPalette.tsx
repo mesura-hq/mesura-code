@@ -1,5 +1,8 @@
 "use client";
 
+import { HostsSheet } from "./sidebar/HostsSheet";
+import { requestHostsSheet } from "../state/hostsSurface";
+
 import {
   openProjectIconDiscoveryDialog,
   ProjectIconDiscoveryDialogHost,
@@ -689,6 +692,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
       <TranscriptionsListHost />
       <ProjectIconFileDialogHost />
       <ProjectIconDiscoveryDialogHost />
+      <HostsSheet />
     </AgentThreadSearchSessionProvider>
   );
 }
@@ -831,7 +835,7 @@ function OpenCommandPaletteDialog(props: {
   const availableSettingsSearchItems = useAvailableSettingsSearchItems();
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread, routeThreadRef } =
     useHandleNewThread();
-  // Fork: the sidebar docks never exist at a mobile width; see "Show hosts".
+  // Fork: "Show hosts" selects the phone sheet or the desktop dock.
   const isMobileViewport = useIsMobile();
   const projects = useProjects();
   const referenceThreadRef =
@@ -2204,21 +2208,20 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  // Fork: pins the sidebar's Hosts dock, which Alt+S only peeks. The dock's
-  // controller leaves a utility page and expands the sidebar first, so the row
-  // is offered everywhere the dock can exist: every wide viewport.
-  if (!isMobileViewport)
-    actionItems.push({
-      kind: "action",
-      value: "action:show-hosts",
-      searchTerms: ["hosts", "machines", "servers", "cpu", "memory", "swap", "disk", "load"],
-      title: "Show hosts",
-      icon: <ServerIcon className={ITEM_ICON_CLASS} />,
-      shortcutCommand: "hosts.peek",
-      run: async () => {
-        requestSidebarDockPin("hosts");
-      },
-    });
+  // Fork: the phone opens a sheet. The desktop controller returns to the
+  // thread list and pins the Hosts dock, which Alt+S only peeks.
+  actionItems.push({
+    kind: "action",
+    value: "action:show-hosts",
+    searchTerms: ["show hosts", "machines", "servers", "cpu", "memory", "swap", "disk", "load"],
+    title: "Show hosts",
+    icon: <ServerIcon className={ITEM_ICON_CLASS} />,
+    ...(isMobileViewport ? {} : { shortcutCommand: "hosts.peek" as const }),
+    run: async () => {
+      if (isMobileViewport) requestHostsSheet();
+      else requestSidebarDockPin("hosts");
+    },
+  });
 
   actionItems.push({
     kind: "action",

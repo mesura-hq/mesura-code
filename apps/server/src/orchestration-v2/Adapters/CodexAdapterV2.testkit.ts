@@ -208,7 +208,10 @@ export function layer(input: {
           ),
         );
         return yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
-          Effect.map((client) => withCodexReplayChildMetadata(client, input.transcript)),
+          Effect.map((client) => ({
+            client: withCodexReplayChildMetadata(client, input.transcript),
+            observation: undefined,
+          })),
           Effect.provide(context),
         );
       }),

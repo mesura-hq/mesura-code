@@ -31,6 +31,7 @@ import {
   type HostsDockRowId,
 } from "@t3tools/client-runtime/host-stats/view";
 import type { SidebarDockController } from "./sidebarDockController";
+import { WorkloadList } from "../workloads/WorkloadList";
 
 const SPARKLINE_HEIGHT = 20;
 const STEP_SPARKLINE_HEIGHT = 16;
@@ -99,7 +100,7 @@ const HostRow = memo(function HostRow(props: {
       className="relative grid grid-cols-[38px_1fr_76px] items-center gap-x-2"
       data-host-row={rowId}
     >
-      <span className="font-mono text-[10px] text-muted-foreground">{display.label}</span>
+      <span className="font-mono text-3xs text-muted-foreground">{display.label}</span>
       <div className="min-w-0">
         {visual === "bar" ? (
           <div className="h-1 overflow-hidden rounded-full bg-foreground/8" data-host-bar>
@@ -125,7 +126,7 @@ const HostRow = memo(function HostRow(props: {
       <HostHint hint={display.title}>
         <span
           className={cn(
-            "truncate text-right text-[12.5px] font-semibold tabular-nums text-foreground",
+            "truncate text-right text-xs font-semibold tabular-nums text-foreground",
             levelTextClass(row.level),
           )}
         >
@@ -133,7 +134,7 @@ const HostRow = memo(function HostRow(props: {
           {display.suffix ? (
             <small
               className={cn(
-                "ml-0.5 font-mono text-[9.5px] font-normal text-muted-foreground",
+                "ml-0.5 font-mono text-3xs font-normal text-muted-foreground",
                 levelTextClass(row.secondaryLevel),
               )}
             >
@@ -146,7 +147,7 @@ const HostRow = memo(function HostRow(props: {
           too narrow to give it a column, and it only exists under the pointer. */}
       {reading === null ? null : (
         <span
-          className="pointer-events-none absolute right-0 bottom-full z-10 mb-0.5 whitespace-nowrap rounded border border-border/60 bg-popover px-1.5 py-px font-mono text-[10px] text-popover-foreground shadow-sm"
+          className="pointer-events-none absolute right-0 bottom-full z-10 mb-0.5 whitespace-nowrap rounded border border-border/60 bg-popover px-1.5 py-px font-mono text-3xs text-popover-foreground shadow-sm"
           data-sparkline-readout
         >
           {reading.time} · {reading.value}
@@ -181,23 +182,21 @@ function HostSection(props: {
         <ServerIcon aria-hidden className="size-3.5 shrink-0 text-foreground/70" />
         <span className="truncate text-xs font-medium text-foreground">{host.label}</span>
         {host.isPrimary ? (
-          <span className="shrink-0 rounded border border-border px-1 font-mono text-[9px] text-muted-foreground">
+          <span className="shrink-0 rounded border border-border px-1 font-mono text-3xs text-muted-foreground">
             local
           </span>
         ) : host.platform ? (
-          <span className="truncate font-mono text-[10px] text-muted-foreground/65">
+          <span className="truncate font-mono text-3xs text-muted-foreground/65">
             {host.platform}
           </span>
         ) : null}
         {showsUptime ? (
-          <span className="ml-auto shrink-0 font-mono text-[9px] text-muted-foreground/55">
+          <span className="ml-auto shrink-0 font-mono text-3xs text-muted-foreground/55">
             {formatUptime(host.uptimeMs!)}
           </span>
         ) : null}
       </div>
-      {status ? (
-        <div className="mt-1 text-[10px] text-muted-foreground/75">{status.text}</div>
-      ) : null}
+      {status ? <div className="mt-1 text-3xs text-muted-foreground/75">{status.text}</div> : null}
       {host.rows === null ? null : (
         // Stale and offline keep their numbers, dimmed, under a line that
         // says how old they are: hiding them would lose the last thing known.
@@ -210,7 +209,7 @@ function HostSection(props: {
           {servers ? (
             <HostHint hint={servers.title}>
               <div
-                className="mt-1.5 flex w-fit items-center gap-1 text-[10.5px] text-muted-foreground"
+                className="mt-1.5 flex w-fit items-center gap-1 text-3xs text-muted-foreground"
                 data-host-servers
               >
                 <ServerIcon aria-hidden className="size-3 shrink-0" />
@@ -220,6 +219,11 @@ function HostSection(props: {
           ) : null}
         </div>
       )}
+      {open ? (
+        <div className="mt-3 border-border/50 border-t pt-2">
+          <WorkloadList environmentId={host.environmentId} visible={open} />
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -228,6 +232,7 @@ export function HostsPanelContent(props: {
   readonly hosts: ReadonlyArray<HostStatsHostView>;
   readonly shortcutLabel: string | null;
   readonly open: boolean;
+  readonly sheet?: boolean;
 }) {
   const { hosts, open, shortcutLabel } = props;
   const headingId = useId();
@@ -240,19 +245,19 @@ export function HostsPanelContent(props: {
     // `data-hosts-panel` is a stable selector for tests and browser checks.
     <div
       aria-labelledby={headingId}
-      className="border-border/60 border-y bg-foreground/[0.035] dark:bg-[color-mix(in_srgb,var(--background)_45%,transparent)]"
+      className="border-border/60 border-y bg-foreground/5 dark:bg-background/45"
       data-hosts-panel
       role="group"
     >
       <header className="flex items-center justify-between gap-2 px-3 py-1.5">
         <span
-          className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70"
+          className="text-3xs font-medium uppercase tracking-wide text-muted-foreground/70"
           id={headingId}
         >
           Hosts
         </span>
         {shortcutLabel ? (
-          <kbd className="rounded border border-border/60 bg-muted/40 px-1 py-px font-mono text-[9px] text-muted-foreground/80">
+          <kbd className="rounded border border-border/60 bg-muted/40 px-1 py-px font-mono text-3xs text-muted-foreground/80">
             {shortcutLabel}
           </kbd>
         ) : null}
@@ -260,25 +265,27 @@ export function HostsPanelContent(props: {
 
       {/* The usage dock's cap: the smaller of 55dvh and the window less the
           sidebar's header, footer and a few threads. */}
-      <ScrollArea
-        className="max-h-[min(55dvh,calc(100dvh-20rem))] border-border/40 border-t"
-        scrollFade
-      >
-        {hosts.length === 0 ? (
-          <div className="px-3 py-4 text-center text-[11px] text-muted-foreground">
-            No hosts connected
-          </div>
-        ) : (
-          <>
-            <div className="border-border/50 border-b px-3 py-1.5 font-mono text-[10px] text-muted-foreground/70">
-              {hostFleetSummary(hosts)}
+      <div className="border-border/40 border-t">
+        <ScrollArea
+          className={props.sheet ? "max-h-[65dvh]" : "max-h-[min(55dvh,calc(100dvh-20rem))]"}
+          scrollFade
+        >
+          {hosts.length === 0 ? (
+            <div className="px-3 py-4 text-center text-search-label text-muted-foreground">
+              No hosts connected
             </div>
-            {hosts.map((host, index) => (
-              <HostSection host={host} index={index} key={host.environmentId} open={open} />
-            ))}
-          </>
-        )}
-      </ScrollArea>
+          ) : (
+            <>
+              <div className="border-border/50 border-b px-3 py-1.5 font-mono text-3xs text-muted-foreground/70">
+                {hostFleetSummary(hosts)}
+              </div>
+              {hosts.map((host, index) => (
+                <HostSection host={host} index={index} key={host.environmentId} open={open} />
+              ))}
+            </>
+          )}
+        </ScrollArea>
+      </div>
     </div>
   );
 }
@@ -293,9 +300,6 @@ export function HostsPanelContent(props: {
  */
 export function HostsDock(props: { readonly controller: SidebarDockController }) {
   const { controller } = props;
-  const sources = useHostStatsSources(controller.open);
-  const nowLocal = useHostStatsNow(controller.open);
-  const hosts = useMemo(() => projectHostStats({ ...sources, nowLocal }), [sources, nowLocal]);
   return (
     <div
       aria-hidden={controller.open ? undefined : true}
@@ -309,12 +313,19 @@ export function HostsDock(props: { readonly controller: SidebarDockController })
       onPointerLeave={controller.onPointerLeave}
     >
       <div className="min-h-0 overflow-hidden">
-        <HostsPanelContent
-          hosts={hosts}
-          open={controller.open}
-          shortcutLabel={controller.shortcutLabel}
-        />
+        <HostsLiveContent open={controller.open} shortcutLabel={controller.shortcutLabel} />
       </div>
     </div>
   );
+}
+
+export function HostsLiveContent(props: {
+  readonly open: boolean;
+  readonly shortcutLabel: string | null;
+  readonly sheet?: boolean;
+}) {
+  const sources = useHostStatsSources(props.open);
+  const nowLocal = useHostStatsNow(props.open);
+  const hosts = useMemo(() => projectHostStats({ ...sources, nowLocal }), [sources, nowLocal]);
+  return <HostsPanelContent hosts={hosts} {...props} />;
 }

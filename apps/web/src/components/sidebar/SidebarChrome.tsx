@@ -40,6 +40,7 @@ import { observeResize } from "~/lib/observeResize";
 import { AccountLimitsDock, useAccountLimitsPanelController } from "./AccountLimitsPanel";
 import { HostsDock } from "./HostsPanel";
 import { useSidebarDockController } from "./sidebarDockController";
+import { requestHostsSheet } from "../../state/hostsSurface";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
@@ -193,8 +194,9 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     select: (location) => isSidebarUtilityPage(location.pathname),
   });
   // The dock takes sidebar height, so it only exists where the Usage entry that
-  // opens it does. On a settings or usage page the row shows Back instead, and
-  // a keyboard-only panel there would have no way to say it was there.
+  // opens it does. On a desktop utility page the row shows Back instead.
+  // Phone Hosts opens an independent sheet, so its footer entry stays visible
+  // beside Back. Hiding that entry on utility pages removed the phone path.
   const accountLimitsEnabled = !isMobile && !isOnUtilityPage;
   const accountLimitsController = useAccountLimitsPanelController(accountLimitsEnabled);
   // Fork: the Hosts dock shares the usage dock's gate and its controller.
@@ -237,6 +239,22 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     void navigateToMainApp();
   }, [closeMobileSidebar, navigateToMainApp]);
 
+  const hostsEntry = (
+    <SidebarUtilityItem
+      icon={<ServerIcon />}
+      label="Hosts"
+      onClick={() => {
+        if (isMobile) {
+          setOpenMobile(false);
+          requestHostsSheet();
+        } else hostsController.togglePinned();
+      }}
+      onPointerEnter={hostsController.onPointerEnter}
+      onPointerLeave={hostsController.onPointerLeave}
+      suppressTooltip={hostsController.open}
+    />
+  );
+
   return (
     // The dock and the row it opens from share a column of their own rather
     // than being two items of the footer's. The footer sets `gap-2`, and a gap
@@ -258,12 +276,15 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
       {accountLimitsEnabled ? <HostsDock controller={hostsController} /> : null}
       <SidebarMenu className="flex-row items-center">
         {isOnUtilityPage ? (
-          <SidebarMenuItem className="min-w-0 flex-1">
-            <SidebarMenuButton onClick={handleBackClick}>
-              <ArrowLeftIcon />
-              <span>Back</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
+          <>
+            <SidebarMenuItem className="min-w-0 flex-1">
+              <SidebarMenuButton onClick={handleBackClick}>
+                <ArrowLeftIcon />
+                <span>Back</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            {isMobile ? hostsEntry : null}
+          </>
         ) : (
           <>
             <SidebarUtilityItem
@@ -296,14 +317,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
               onPointerLeave={accountLimitsController.onPointerLeave}
               suppressTooltip={accountLimitsController.open}
             />
-            <SidebarUtilityItem
-              icon={<ServerIcon />}
-              label="Hosts"
-              onClick={hostsController.togglePinned}
-              onPointerEnter={hostsController.onPointerEnter}
-              onPointerLeave={hostsController.onPointerLeave}
-              suppressTooltip={hostsController.open}
-            />
+            {hostsEntry}
           </>
         )}
         <SidebarUpdatePill />

@@ -6,6 +6,7 @@ import {
   OrchestrationV2ProviderSession,
   type OrchestrationV2ProviderThread,
   OrchestrationV2RuntimeRequest,
+  type ProviderDriverKind,
   ProviderInstanceId,
   ProviderSessionId,
   ThreadId,
@@ -148,7 +149,18 @@ export const ProviderSessionManagerV2Error = Schema.Union([
 ]);
 export type ProviderSessionManagerV2Error = typeof ProviderSessionManagerV2Error.Type;
 
+export interface ProviderRuntimeSnapshot {
+  readonly runtime: ProviderAdapter.ProviderAdapterV2SessionRuntime;
+  readonly instanceId: ProviderInstanceId;
+  readonly providerSessionId: ProviderSessionId;
+  readonly driver: ProviderDriverKind;
+  readonly attachedThreadIds: ReadonlyArray<ThreadId>;
+  readonly loadedProviderThreads: ReadonlyArray<readonly [ThreadId, string]>;
+}
+
 export interface ProviderSessionManagerV2Shape {
+  /** Copies membership without activity, request permits, or lifecycle locks. */
+  readonly snapshotRuntimes: Effect.Effect<ReadonlyArray<ProviderRuntimeSnapshot>>;
   readonly shutdown: Effect.Effect<void>;
   readonly open: (input: {
     readonly threadId: ThreadId;
@@ -2016,6 +2028,20 @@ export const layerWithOptions = (
       );
 
       return ProviderSessionManagerV2.of({
+        snapshotRuntimes: Ref.get(sessions).pipe(
+          Effect.map((entries) =>
+            [...entries.values()].map((entry) => ({
+              runtime: entry.runtime,
+              instanceId: entry.runtime.instanceId,
+              providerSessionId: entry.runtime.providerSessionId,
+              driver: entry.runtime.driver,
+              attachedThreadIds: [...entry.attachedThreadIds],
+              loadedProviderThreads: [...entry.loadedProviderThreadKeyByThread].map(
+                ([threadId, key]) => [threadId, key] as const,
+              ),
+            })),
+          ),
+        ),
         shutdown,
         open: (input) =>
           sessionOpen.withLock(

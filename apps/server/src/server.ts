@@ -180,6 +180,11 @@ import * as CursorKeychain from "@t3tools/provider-cursor/server/CursorKeychain"
 import * as CursorUsageAccounts from "@t3tools/provider-cursor/server/CursorUsageAccounts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as AccountLimitsService from "./usage/AccountLimitsService.ts";
+import * as WorkloadService from "./workloads/WorkloadService.ts";
+import * as WorkloadHostBridge from "./workloads/WorkloadHostBridge.ts";
+import * as WorkloadRegistry from "./workloads/WorkloadRegistry.ts";
+import * as WorkloadThreadQuery from "./workloads/WorkloadThreadQuery.ts";
+import * as WorkloadHost from "./workloads/WorkloadHost.ts";
 import * as SubscriptionRegistry from "./usage/SubscriptionRegistry.ts";
 import * as RuntimeLayer from "./orchestration-v2/runtimeLayer.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
@@ -297,6 +302,13 @@ const layerSubscriptionRegistry = SubscriptionRegistry.layer.pipe(
 // discovery at boot.
 const layerAccountLimits = AccountLimitsService.layer.pipe(
   Layer.provide(layerSubscriptionRegistry),
+);
+
+const layerWorkloads = WorkloadService.layer.pipe(
+  Layer.provide(WorkloadHostBridge.layer),
+  Layer.provide(WorkloadRegistry.layer),
+  Layer.provide(WorkloadThreadQuery.layer),
+  Layer.provide(WorkloadHost.layer.pipe(Layer.provide(ProcessRunner.layer))),
 );
 
 const layerResourceDiagnostics = Layer.mergeAll(
@@ -638,6 +650,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   // Mesura: fork services that read the core services below.
   ProjectIconDiscovery.layer,
   layerAccountLimits,
+  layerWorkloads,
   layerHostStats,
   // Mesura: follows Software Factory runs for the MCP tool, the WebSocket and startup alike.
   FactoryRunTracker.layer.pipe(

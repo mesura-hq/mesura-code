@@ -8,6 +8,7 @@ import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
 import {
   AuthAccessWriteScope,
+  AuthEnvironmentMaintainScope,
   AuthOrchestrationOperateScope,
   AuthSourceControlWriteScope,
   ThreadId,
@@ -295,4 +296,41 @@ it.effect("rejects protected unary and streamed RPCs outside a guarded command",
     expect(streamed._tag).toBe("EnvironmentAuthorizationError");
     expect(writes).toBe(0);
   }),
+);
+
+it.effect.each([WS_METHODS.workloadsStart, WS_METHODS.workloadsStop])(
+  "F2 control V2 %s checks the destination maintenance grant at execution",
+  (method) =>
+    Effect.gen(function* () {
+      const registry = yield* setup;
+      const permission = createCommandPermissions(runtime, method);
+      registry.set(
+        sessions(other),
+        AsyncResult.success({
+          ...grant(true),
+          scopes: [AuthEnvironmentMaintainScope],
+          permissions: [AuthEnvironmentMaintainScope],
+        }),
+      );
+      registry.set(sessions(env), AsyncResult.success(grant(true)));
+      expect(registry.get(permission.permissionAtom(env))).toBe(false);
+      expect(yield* permission.authorize(registry, env).pipe(Effect.flip)).toMatchObject({
+        _tag: "EnvironmentAuthorizationError",
+        requiredPermission: AuthEnvironmentMaintainScope,
+      });
+      registry.set(
+        sessions(env),
+        AsyncResult.success({
+          ...grant(true),
+          scopes: [AuthEnvironmentMaintainScope],
+          permissions: [AuthEnvironmentMaintainScope],
+        }),
+      );
+      expect(registry.get(permission.permissionAtom(env))).toBe(true);
+      yield* permission.authorize(registry, env);
+      registry.set(sessions(env), AsyncResult.success(grant(true)));
+      expect(yield* permission.authorize(registry, env).pipe(Effect.flip)).toMatchObject({
+        requiredPermission: AuthEnvironmentMaintainScope,
+      });
+    }).pipe(Effect.scoped),
 );

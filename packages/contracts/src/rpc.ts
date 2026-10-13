@@ -1,5 +1,11 @@
 import { ProjectId } from "./baseSchemas.ts";
 import {
+  WorkloadListInput,
+  WorkloadListResult,
+  WorkloadControlInput,
+  WorkloadControlResult,
+} from "./workloads.ts";
+import {
   ProjectIconDiscoverInput,
   ProjectIconDiscoveryAccepted,
   ProjectIconDiscoveryError,
@@ -426,6 +432,9 @@ import {
 import { Project, ProjectMutation, ProjectMutationError } from "./project.ts";
 
 export const WS_METHODS = {
+  workloadsList: "workloads.list",
+  workloadsStart: "workloads.start",
+  workloadsStop: "workloads.stop",
   issuesList: "issues.list",
   issuesDetail: "issues.detail",
   issuesResolveReference: "issues.resolve-reference",
@@ -1012,6 +1021,23 @@ const WsServerRefreshUsageRatesRpc = Rpc.make(WS_METHODS.serverRefreshUsageRates
 const WsServerGetAccountLimitsRpc = Rpc.make(WS_METHODS.serverGetAccountLimits, {
   payload: Schema.Struct({}),
   success: AccountLimitsSummary,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsWorkloadsListRpc = Rpc.make(WS_METHODS.workloadsList, {
+  payload: WorkloadListInput,
+  success: WorkloadListResult,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsWorkloadsStartRpc = Rpc.make(WS_METHODS.workloadsStart, {
+  payload: WorkloadControlInput,
+  success: WorkloadControlResult,
+  error: EnvironmentAuthorizationError,
+});
+const WsWorkloadsStopRpc = Rpc.make(WS_METHODS.workloadsStop, {
+  payload: WorkloadControlInput,
+  success: WorkloadControlResult,
   error: EnvironmentAuthorizationError,
 });
 
@@ -2346,6 +2372,9 @@ const UpstreamWsRpcGroup = RpcGroup.make(
  * upstream's list, which conflicts at every sync.
  */
 const MesuraWsRpcGroup = RpcGroup.make(
+  WsWorkloadsListRpc,
+  WsWorkloadsStartRpc,
+  WsWorkloadsStopRpc,
   WsServerGetAccountLimitsRpc,
   WsIssuesListRpc,
   WsIssuesDetailRpc,

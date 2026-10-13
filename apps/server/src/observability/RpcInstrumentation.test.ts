@@ -1,10 +1,12 @@
 import { assert, describe, it } from "@effect/vitest";
 import {
   AuthEnvironmentMaintainScope,
+  AuthDiagnosticsReadScope,
   AuthOrchestrationReadScope,
   type AuthEnvironmentScope,
   ScheduledTaskError,
   ScheduledTaskId,
+  ThreadId,
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
@@ -102,6 +104,36 @@ const requestDuration = (snapshots: ReadonlyArray<Metric.Metric.Snapshot>, metho
   )?.state;
 
 describe("WS RPC instrumentation middleware", () => {
+  it.effect("F2 workload reads receive the exhaustive workload aggregate", () =>
+    withTelemetry((ended) =>
+      Effect.gen(function* () {
+        const group = groupOf(WS_METHODS.workloadsList);
+        const client = yield* RpcTest.makeClient(group).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              group.toLayerHandler(WS_METHODS.workloadsList, () =>
+                Effect.succeed({
+                  registryState: "absent" as const,
+                  workloads: [],
+                  incomplete: false,
+                  diagnostics: [],
+                  agentRamAttribution: "unsupported" as const,
+                  sharedAgentRam: {
+                    status: "unsupported" as const,
+                    groups: [] as const,
+                    incomplete: false,
+                  },
+                }),
+              ),
+              connectionMiddleware([AuthDiagnosticsReadScope]),
+            ),
+          ),
+        );
+        yield* client[WS_METHODS.workloadsList]({});
+        assert.equal(rpcSpans(ended)[0]?.attributes.get("rpc.aggregate"), "workloads");
+      }),
+    ),
+  );
   it.effect("records one span and request metric per call, including rejected calls", () =>
     withTelemetry((ended) =>
       Effect.gen(function* () {
@@ -334,3 +366,44 @@ describe("WS RPC instrumentation middleware", () => {
     ),
   );
 });
+
+it.effect.each([WS_METHODS.workloadsStart, WS_METHODS.workloadsStop])(
+  "F2 control V2 %s keeps private control payloads out of telemetry",
+  (tag) =>
+    withTelemetry((ended) =>
+      Effect.gen(function* () {
+        const group = groupOf(tag);
+        const input = {
+          recordId: "a".repeat(64),
+          expectedGeneration: "b".repeat(32),
+          threadId: ThreadId.make("private-native-owner"),
+        };
+        const client = yield* RpcTest.makeClient(group).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              group.toLayerHandler(tag, () =>
+                Effect.succeed({
+                  recordId: input.recordId,
+                  oldGeneration: input.expectedGeneration,
+                  status: "refused" as const,
+                  operation:
+                    tag === WS_METHODS.workloadsStart ? ("start" as const) : ("stop" as const),
+                  reason: "record-unavailable" as const,
+                  mutationAttempted: false as const,
+                }),
+              ),
+              connectionMiddleware([AuthEnvironmentMaintainScope]),
+            ),
+          ),
+        );
+        yield* client[tag](input);
+        assert.equal(rpcSpans(ended)[0]?.attributes.get("rpc.aggregate"), "workloads");
+        const attributes = JSON.stringify(
+          rpcSpans(ended).map((span) => Object.fromEntries(span.attributes)),
+        );
+        assert.isFalse(attributes.includes(input.recordId));
+        assert.isFalse(attributes.includes(input.expectedGeneration));
+        assert.isFalse(attributes.includes(input.threadId));
+      }),
+    ),
+);

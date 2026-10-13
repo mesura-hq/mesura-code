@@ -42,6 +42,7 @@ import {
 import { observeResize } from "~/lib/observeResize";
 import { cn } from "~/lib/utils";
 import { useClientSettings } from "../../hooks/useSettings";
+import { ThreadWorkloadsControl } from "../workloads/ThreadWorkloadsControl";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -325,7 +326,9 @@ export const ChatHeader = memo(function ChatHeader({
       ref={breadcrumbContainerRef}
       className={cn(
         "flex min-w-0 flex-1 items-center gap-2 sm:gap-3",
-        rightPanelOpen ? "pr-10" : "pr-24",
+        // REGRESSION: At 412px, the details Toggle's 44px touch target covered the Servers center.
+        // Coarse-pointer padding keeps the full Servers 44px touch target clear of the panel controls.
+        rightPanelOpen ? "pr-10" : "pr-24 pointer-coarse:pr-32",
       )}
       onContextMenu={handleHeaderContextMenu}
     >
@@ -470,6 +473,13 @@ export const ChatHeader = memo(function ChatHeader({
           ) : null}
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
+      {isServerThread ? (
+        <ThreadWorkloadsControl
+          key={`${activeThreadEnvironmentId}:${activeThreadId}`}
+          environmentId={activeThreadEnvironmentId}
+          threadId={activeThreadId}
+        />
+      ) : null}
     </div>
   );
 });
