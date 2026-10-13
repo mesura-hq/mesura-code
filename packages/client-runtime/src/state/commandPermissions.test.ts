@@ -8,6 +8,7 @@ import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
 import {
   AuthAccessWriteScope,
+  AuthPreviewOperateScope,
   AuthOrchestrationOperateScope,
   AuthSourceControlWriteScope,
   ThreadId,
@@ -25,6 +26,7 @@ import { Atom, AtomRegistry, AsyncResult } from "effect/reactivity";
 import { EnvironmentRegistry } from "../connection/registry.ts";
 import { createCommandPermissions } from "./commandPermissions.ts";
 import { createEnvironmentRpcCommand } from "./runtime.ts";
+import { createPreviewEnvironmentAtoms } from "./preview.ts";
 
 vi.mock("./session.ts", () => ({
   createEnvironmentSessionAtoms: () => ({ sessionStateAtom: sessions }),
@@ -59,6 +61,45 @@ const setup = Effect.gen(function* () {
 });
 
 describe("command permissions", () => {
+  it.effect(
+    "thread-link command exposes the target preview grant and denies execution after revocation",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const registry = yield* setup;
+          const command = createPreviewEnvironmentAtoms(runtime).openLinkTarget;
+          registry.set(sessions(env), AsyncResult.success(grant(true)));
+          expect(command.requiredScopes()).toEqual([AuthPreviewOperateScope]);
+          expect(registry.get(command.permissionAtom(env))).toBe(false);
+          registry.set(
+            sessions(env),
+            AsyncResult.success({
+              ...grant(false),
+              scopes: [AuthPreviewOperateScope],
+              permissions: [AuthPreviewOperateScope],
+            }),
+          );
+          expect(registry.get(command.permissionAtom(env))).toBe(true);
+          registry.set(sessions(other), AsyncResult.success(grant(false)));
+          expect(registry.get(command.permissionAtom(other))).toBe(false);
+          registry.set(sessions(env), AsyncResult.success({ ...grant(true), permissions: [] }));
+          expect(registry.get(command.permissionAtom(env))).toBe(false);
+          const result = yield* Effect.promise(() =>
+            command.run(registry, {
+              environmentId: env,
+              input: { threadId: ThreadId.make("thread-link-command") },
+            }),
+          );
+          expect(result._tag).toBe("Failure");
+          if (result._tag === "Failure") {
+            expect(Option.getOrThrow(Cause.findErrorOption(result.cause))).toMatchObject({
+              _tag: "EnvironmentAuthorizationError",
+              requiredPermission: AuthPreviewOperateScope,
+            });
+          }
+        }),
+      ),
+  );
   it.effect("uses the target grant for both availability and execution", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -277,6 +318,10 @@ it.effect("rejects protected unary and streamed RPCs outside a guarded command",
               writes++;
             }),
           ),
+        [WS_METHODS.previewOpenLinkTarget]: () =>
+          Effect.sync(() => {
+            writes++;
+          }).pipe(Effect.andThen(Effect.never)),
       },
     } as unknown as RpcSession;
     const supervisor = {
@@ -287,6 +332,13 @@ it.effect("rejects protected unary and streamed RPCs outside a guarded command",
       id: ScheduledTaskId.make("task"),
     }).pipe(Effect.provideService(EnvironmentSupervisor, supervisor), Effect.flip);
     expect(unary._tag).toBe("EnvironmentAuthorizationError");
+    const allocation = yield* requestGuarded(WS_METHODS.previewOpenLinkTarget, {
+      threadId: ThreadId.make("thread-link-command"),
+    }).pipe(Effect.provideService(EnvironmentSupervisor, supervisor), Effect.flip);
+    expect(allocation).toMatchObject({
+      _tag: "EnvironmentAuthorizationError",
+      requiredPermission: AuthPreviewOperateScope,
+    });
     const streamed = yield* runStreamGuarded(WS_METHODS.gitRunStackedAction, {
       actionId: "test-action",
       cwd: "/repo",

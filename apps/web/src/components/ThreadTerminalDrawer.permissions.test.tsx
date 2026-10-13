@@ -36,6 +36,13 @@ vi.mock("../hooks/useSettings", () => ({
 }));
 vi.mock("../editorPreferences", () => ({ useOpenInPreferredEditor: () => state.otherCommand }));
 vi.mock("../localApi", () => ({ readLocalApi: () => null }));
+// This terminal-resize fence does not exercise asset URL resolution. Keep that
+// unrelated transport boundary out of its deliberately narrow session fixture.
+vi.mock("../assets/assetUrls", () => ({ resolveAssetUrl: vi.fn() }));
+vi.mock("../browser/previewRuntime", () => ({
+  isPreviewAvailableFor: () => true,
+  previewRuntimeFor: () => undefined,
+}));
 vi.mock("../state/server", () => ({
   serverEnvironment: { configValueAtom: () => "config" },
 }));

@@ -180,6 +180,10 @@ export type PreviewNavStatus = typeof PreviewNavStatus.Type;
 export const PreviewRuntime = Schema.Literals(["desktop", "server"]);
 export type PreviewRuntime = typeof PreviewRuntime.Type;
 
+/** A server-owned tab reserved for this thread's external link navigation. */
+export const PreviewSessionPurpose = Schema.Literal("thread-link");
+export type PreviewSessionPurpose = typeof PreviewSessionPurpose.Type;
+
 /**
  * Host setup the server's browser is missing, sent as JSON in the reason when
  * the preview stream closes with code 4503. Fixing it needs the host's
@@ -213,6 +217,8 @@ export const PreviewSessionSnapshot = Schema.Struct({
    */
   profileId: Schema.optional(BrowserProfileId),
   runtime: Schema.optional(PreviewRuntime),
+  /** Absent on ordinary tabs and snapshots from older servers. */
+  purpose: Schema.optional(PreviewSessionPurpose),
   /** Authenticated provider session owning an isolated server tab. */
   automationOwner: Schema.optional(Schema.String),
   /** An agent opened this tab and asked to show it, so viewers float it. */
@@ -242,6 +248,28 @@ export const PreviewOpenInput = Schema.Struct({
   reveal: Schema.optional(Schema.Boolean),
 });
 export type PreviewOpenInput = typeof PreviewOpenInput.Type;
+
+const PreviewOpenLinkTargetFields = {
+  threadId: PreviewOpenInput.fields.threadId,
+  profileId: PreviewOpenInput.fields.profileId,
+  viewport: PreviewOpenInput.fields.viewport,
+};
+
+/** Allocates an Idle server tab or reuses the thread's designated tab without navigating. */
+export const PreviewOpenLinkTargetInput = Schema.Unknown.check(
+  // Check original keys before Struct strips them; allocation accepts no navigation or ownership.
+  Schema.makeFilter(
+    (input) =>
+      typeof input === "object" &&
+      input !== null &&
+      Object.keys(input).every((key) => Object.hasOwn(PreviewOpenLinkTargetFields, key)),
+    {
+      expected:
+        "a thread-link allocation request containing only threadId, profileId, and viewport",
+    },
+  ),
+).pipe(Schema.decodeTo(Schema.Struct(PreviewOpenLinkTargetFields)));
+export type PreviewOpenLinkTargetInput = typeof PreviewOpenLinkTargetInput.Type;
 
 export const PreviewNavigateInput = Schema.Struct({
   threadId: ThreadId,
@@ -321,6 +349,13 @@ export const PreviewListResult = Schema.Struct({
   revision: NonNegativeInt,
 });
 export type PreviewListResult = typeof PreviewListResult.Type;
+
+/** The selected tab and the complete thread list captured in the same allocation transaction. */
+export const PreviewOpenLinkTargetResult = Schema.Struct({
+  ...PreviewListResult.fields,
+  selectedTabId: PreviewTabId,
+});
+export type PreviewOpenLinkTargetResult = typeof PreviewOpenLinkTargetResult.Type;
 
 const PreviewEventBaseSchema = Schema.Struct({
   threadId: TrimmedNonEmptyString,

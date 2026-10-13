@@ -1,3 +1,8 @@
+/**
+ * Shortcut fence entry point: PreviewManager.registerWebview installs the real
+ * before-input-event handler. Electron focus, guests, and hosts are test doubles;
+ * these cases prove handler forwarding, not native focus or OS accelerator delivery.
+ */
 import { it as effectIt } from "@effect/vitest";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { DESKTOP_PREVIEW_RECORDING_CAPTURE_TRIGGER } from "@t3tools/contracts";
@@ -694,72 +699,131 @@ describe("PreviewManager", () => {
   );
 
   effectIt.effect.each([
-    ["mod+shift+t", "view.reopenClosed"],
-    ["ctrl+alt+u", "sidebar.toggle"],
+    ["mod+shift+t", "view.reopenClosed", "darwin"],
+    ["ctrl+alt+u", "sidebar.toggle", "darwin"],
+    ["mod+w", "rightPanel.close", "darwin"],
+    ["mod+w", "rightPanel.close", "linux"],
+    ["mod+w", "rightPanel.close", "win32"],
+    ["ctrl+q", "rightPanel.close", "darwin"],
+    ["ctrl+q", "rightPanel.close", "linux"],
+    ["ctrl+q", "rightPanel.close", "win32"],
+    ["mod+shift+k", "rightPanel.close", "linux"],
   ] as const)(
-    "forwards only the configured command from the focused guest: %s",
-    ([chord, command]) =>
-      withManager((manager) =>
-        Effect.gen(function* () {
-          const preview = makeFaviconWebContents();
-          const send = vi.fn();
-          Object.assign(preview.webContents, {
-            hostWebContents: { isDestroyed: () => false, send },
-          });
-          fromId.mockReturnValue(preview.webContents);
-          getFocusedWebContents.mockReturnValue(preview.webContents as never);
-          yield* manager.createTab("tab_reopen");
-          yield* manager.registerWebview("tab_reopen", 42);
-          const shortcut = parseKeybindingShortcut(chord)!;
-          yield* manager.setForwardedShortcuts([{ command, shortcut }]);
-          const beforeInput = preview.listeners.get("before-input-event")!;
-          const input = {
-            type: "keyDown",
-            key: shortcut.key.toUpperCase(),
-            meta: shortcut.metaKey || shortcut.modKey,
-            control: shortcut.ctrlKey,
-            shift: shortcut.shiftKey,
-            alt: shortcut.altKey,
-          };
-          const preventDefault = vi.fn();
-          beforeInput({ preventDefault } as never, input as never);
-          expect(preventDefault).toHaveBeenCalledOnce();
-          expect(send).toHaveBeenCalledExactlyOnceWith("desktop:menu-action", command);
-          for (const overrides of [
-            { isAutoRepeat: true },
-            { type: "keyUp" },
-            { shift: !input.shift },
-            { key: "x" },
-          ]) {
+    "forwards only the configured command from the focused guest: %s (%s on %s)",
+    ([chord, command, platform]) =>
+      withManager(
+        (manager) =>
+          Effect.gen(function* () {
+            const preview = makeFaviconWebContents();
+            const send = vi.fn();
+            let hostDestroyed = false;
+            const hostWebContents = { isDestroyed: () => hostDestroyed, send };
+            Object.assign(preview.webContents, { hostWebContents });
+            fromId.mockReturnValue(preview.webContents);
+            getFocusedWebContents.mockReturnValue(preview.webContents as never);
+            yield* manager.setMainWindow({
+              isDestroyed: () => false,
+              once: vi.fn(),
+              webContents: hostWebContents,
+            } as never);
+            yield* manager.createTab("tab_reopen");
+            yield* manager.registerWebview("tab_reopen", 42);
+            const shortcut = parseKeybindingShortcut(chord)!;
+            const forwarded = { command, shortcut };
+            // Duplicate registrations must still dispatch this keyDown only once.
+            yield* manager.setForwardedShortcuts(
+              command === "rightPanel.close" ? [forwarded, forwarded] : [forwarded],
+            );
+            const beforeInput = preview.listeners.get("before-input-event")!;
+            const input = {
+              type: "keyDown",
+              key: shortcut.key.toUpperCase(),
+              meta: shortcut.metaKey || (shortcut.modKey && platform === "darwin"),
+              control: shortcut.ctrlKey || (shortcut.modKey && platform !== "darwin"),
+              shift: shortcut.shiftKey,
+              alt: shortcut.altKey,
+              isAutoRepeat: false,
+              isComposing: false,
+            };
+            const preventDefault = vi.fn();
+            beforeInput({ preventDefault } as never, input as never);
+            expect(preventDefault).toHaveBeenCalledOnce();
+            expect(send).toHaveBeenCalledExactlyOnceWith("desktop:menu-action", command);
+            for (const overrides of [
+              { isAutoRepeat: true },
+              { type: "keyUp" },
+              { isComposing: true },
+              { shift: !input.shift },
+              { alt: !input.alt },
+              { meta: !input.meta, control: !input.control },
+              { key: "x" },
+            ]) {
+              preventDefault.mockClear();
+              beforeInput({ preventDefault } as never, { ...input, ...overrides } as never);
+              expect(preventDefault).toHaveBeenCalledTimes("isAutoRepeat" in overrides ? 1 : 0);
+              expect(send).toHaveBeenCalledOnce();
+            }
+            if (chord === "mod+shift+k") {
+              preventDefault.mockClear();
+              beforeInput(
+                { preventDefault } as never,
+                { ...input, key: "w", shift: false } as never,
+              );
+              expect(preventDefault).not.toHaveBeenCalled();
+              expect(send).toHaveBeenCalledOnce();
+            }
+            getFocusedWebContents.mockReturnValue(null);
             preventDefault.mockClear();
-            beforeInput({ preventDefault } as never, { ...input, ...overrides } as never);
-            expect(preventDefault).toHaveBeenCalledTimes("isAutoRepeat" in overrides ? 1 : 0);
+            beforeInput({ preventDefault } as never, input as never);
+            expect(preventDefault).not.toHaveBeenCalled();
             expect(send).toHaveBeenCalledOnce();
-          }
-          getFocusedWebContents.mockReturnValue(null);
-          preventDefault.mockClear();
-          beforeInput({ preventDefault } as never, input as never);
-          expect(preventDefault).not.toHaveBeenCalled();
-          expect(send).toHaveBeenCalledOnce();
-          getFocusedWebContents.mockReturnValue(preview.webContents as never);
-          yield* manager.setForwardedShortcuts([]);
-          beforeInput({ preventDefault } as never, input as never);
-          expect(preventDefault).not.toHaveBeenCalled();
-          expect(send).toHaveBeenCalledOnce();
-        }),
+            for (const focusedContents of [
+              hostWebContents,
+              makeFaviconWebContents({ id: 43 }).webContents,
+            ]) {
+              getFocusedWebContents.mockReturnValue(focusedContents as never);
+              preventDefault.mockClear();
+              beforeInput({ preventDefault } as never, input as never);
+              expect(preventDefault).not.toHaveBeenCalled();
+              expect(send).toHaveBeenCalledOnce();
+            }
+            getFocusedWebContents.mockReturnValue(preview.webContents as never);
+            hostDestroyed = true;
+            preventDefault.mockClear();
+            beforeInput({ preventDefault } as never, input as never);
+            expect(preventDefault).not.toHaveBeenCalled();
+            expect(send).toHaveBeenCalledOnce();
+            hostDestroyed = false;
+            Object.assign(preview.webContents, { hostWebContents: undefined });
+            beforeInput({ preventDefault } as never, input as never);
+            expect(preventDefault).not.toHaveBeenCalled();
+            expect(send).toHaveBeenCalledOnce();
+            Object.assign(preview.webContents, { hostWebContents });
+            yield* manager.setForwardedShortcuts([]);
+            beforeInput({ preventDefault } as never, input as never);
+            expect(preventDefault).not.toHaveBeenCalled();
+            expect(send).toHaveBeenCalledOnce();
+          }),
+        platform,
       ),
   );
 
   effectIt.effect.each([
-    ["linux", "ctrl+alt+[", "[", "BracketLeft", false],
-    ["win32", "ctrl+alt+8", "[", "Digit8", false],
-    ["win32", "ctrl+alt+k", "K", "KeyK", false],
-    ["linux", "ctrl+alt+`", "Dead", "Backquote", false],
-    ["darwin", "ctrl+alt+[", "[", "BracketLeft", true],
-    ["linux", "ctrl+alt+f7", "F7", "F7", true],
+    ["linux", "ctrl+alt+[", "view.reopenClosed", "[", "BracketLeft", false],
+    ["win32", "ctrl+alt+8", "view.reopenClosed", "[", "Digit8", false],
+    ["win32", "ctrl+alt+k", "view.reopenClosed", "K", "KeyK", false],
+    ["linux", "ctrl+alt+`", "view.reopenClosed", "Dead", "Backquote", false],
+    ["darwin", "ctrl+alt+[", "view.reopenClosed", "[", "BracketLeft", true],
+    ["linux", "ctrl+alt+f7", "view.reopenClosed", "F7", "F7", true],
+    ["linux", "ctrl+alt+[", "rightPanel.close", "[", "BracketLeft", false],
+    ["win32", "ctrl+alt+8", "rightPanel.close", "[", "Digit8", false],
+    ["win32", "ctrl+alt+k", "rightPanel.close", "K", "KeyK", false],
+    ["linux", "ctrl+alt+`", "rightPanel.close", "Dead", "Backquote", false],
+    ["darwin", "ctrl+alt+[", "rightPanel.close", "[", "BracketLeft", true],
+    ["linux", "ctrl+alt+f7", "rightPanel.close", "F7", "F7", true],
   ] as const)(
-    "handles ambiguous preview chords on %s: %s",
-    ([platform, chord, key, code, expected]) =>
+    "handles ambiguous preview chords on %s: %s (%s)",
+    ([platform, chord, command, key, code, expected]) =>
       withManager(
         (manager) =>
           Effect.gen(function* () {
@@ -773,7 +837,7 @@ describe("PreviewManager", () => {
             yield* manager.createTab("tab_alt_graph");
             yield* manager.registerWebview("tab_alt_graph", 42);
             yield* manager.setForwardedShortcuts([
-              { command: "view.reopenClosed", shortcut: parseKeybindingShortcut(chord)! },
+              { command, shortcut: parseKeybindingShortcut(chord)! },
             ]);
             const preventDefault = vi.fn();
             preview.listeners.get("before-input-event")!(
@@ -790,6 +854,9 @@ describe("PreviewManager", () => {
             );
             expect(preventDefault).toHaveBeenCalledTimes(expected ? 1 : 0);
             expect(send).toHaveBeenCalledTimes(expected ? 1 : 0);
+            if (expected) {
+              expect(send).toHaveBeenCalledExactlyOnceWith("desktop:menu-action", command);
+            }
           }),
         platform,
       ),
