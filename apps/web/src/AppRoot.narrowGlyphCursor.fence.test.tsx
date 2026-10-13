@@ -501,10 +501,12 @@ function widenedCursor(): HTMLElement | null {
 
 /** Every block cursor overlay on the page: the widened one and the empty-line one. */
 function blockCursorOverlays(): HTMLElement[] {
+  // The semantic color token replaced bg-sky-500/80 without changing the cursor.
+  // Keep this selector aligned with KeyEngineHost so empty-line overlays remain visible to the fence.
   return [...document.body.querySelectorAll<HTMLElement>("*")].filter(
     (element) =>
       element.hasAttribute("data-mesura-block-cursor") ||
-      element.classList.contains("bg-sky-500/80"),
+      element.classList.contains("bg-key-normal/80"),
   );
 }
 
@@ -1077,7 +1079,7 @@ describe("narrow glyph cursor fence: the composer", () => {
     const [overlay] = overlays;
     expect(overlay!.getAttribute("data-mesura-block-cursor")).not.toBe("glyph");
     expect(overlay!.classList.contains("w-[0.6em]"), "its width class").toBe(true);
-    expect(overlay!.classList.contains("bg-sky-500/80"), "its colour class").toBe(true);
+    expect(overlay!.classList.contains("bg-key-normal/80"), "its colour class").toBe(true);
     expect(overlay!.textContent).toBe("");
   });
 });
