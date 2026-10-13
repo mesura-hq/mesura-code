@@ -2905,6 +2905,7 @@ const layerWsRpc = (
             ),
           ),
         [WS_METHODS.previewOpen]: (input) => previewManager.open(input),
+        [WS_METHODS.previewOpenLinkTarget]: (input) => previewManager.openLinkTarget(input),
         [WS_METHODS.previewNavigate]: (input) => previewManager.navigate(input),
         [WS_METHODS.previewResize]: (input) => previewManager.resize(input),
         [WS_METHODS.previewAdjust]: (input) => previewManager.adjust(input),

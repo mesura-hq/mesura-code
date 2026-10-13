@@ -139,7 +139,6 @@ import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "./ui/collapsi
 import { ScrollArea } from "./ui/scroll-area";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
 import { stackedThreadToast, toastManager } from "./ui/toast";
-import { recordVisitForThread } from "../browserHistoryStore";
 import {
   PreferredEditorEnvironmentRequiredError,
   useOpenInPreferredEditor,
@@ -156,7 +155,11 @@ import { HighlightedCodeLines } from "./chat/HighlightedCodeLines";
 import { RenderErrorBoundary } from "./RenderErrorBoundary";
 import { MermaidDiagram } from "./chat/MermaidDiagram";
 import { useTheme } from "../hooks/useTheme";
-import { getClientSettings, useClientSettings } from "../hooks/useSettings";
+import {
+  getClientSettings,
+  useClientSettings,
+  useClientSettingsHydrated,
+} from "../hooks/useSettings";
 import {
   chatMarkdownClipboardPayload,
   serializeTableElementToCsv,
@@ -203,11 +206,10 @@ import { isPreviewAvailableFor } from "../browser/previewRuntime";
 import {
   isBrowserPreviewFile,
   openFileInPreview,
-  openUrlInPreview,
   BrowserPreviewUnavailableError,
   BrowserSettingsReadError,
 } from "../browser/openFileInPreview";
-import { resolveLinkTarget } from "../browser/browserLinkTarget";
+import { canOpenLinksInApp, readLinkClient, resolveLinkTarget } from "../browser/browserLinkTarget";
 import { PullRequestLinkPreview } from "./pullRequest/PullRequestLinkPreview";
 import { useOpenIssueReference } from "../lib/openIssueLink";
 import { useEnvironment } from "../state/environments";
@@ -2490,6 +2492,7 @@ function useChatMarkdownState({
   // synchronously whether to intercept its `_blank`, and a subscription is what
   // makes a persisted "app" apply once settings hydrate after launch.
   const linkTargetPreference = useClientSettings((settings) => settings.browserLinkTarget);
+  const linkSettingsHydrated = useClientSettingsHydrated();
   const resolveThreadPullRequest = useCallback(
     (href: string): (ThreadPullRequestKey & { readonly url: string }) | null => {
       if (
@@ -2521,36 +2524,24 @@ function useChatMarkdownState({
     [linkedThreadPullRequestFor, pullRequestLinking, threadRef],
   );
   const openExternalLinkInPreview = useCallback(
-    (url: string) => {
-      if (!threadRef || !canOperatePreview) {
-        return Promise.resolve(
-          AsyncResult.failure<void, BrowserPreviewUnavailableError>(
-            Cause.fail(
-              new BrowserPreviewUnavailableError({
-                message: "Preview access is unavailable for this client.",
-              }),
-            ),
-          ),
-        );
-      }
-      return openUrlInPreview({ threadRef, url, openPreview }).then((result) => {
-        if (result._tag === "Success") recordVisitForThread(threadRef, url);
-        else if (!isAtomCommandInterrupted(result)) {
-          const error = squashAtomCommandFailure(result);
-          if (error instanceof BrowserSettingsReadError) {
-            toastManager.add(
-              stackedThreadToast({
-                type: "error",
-                title: "Unable to open link in browser",
-                description: error.message,
-              }),
-            );
-          }
-        }
-        return result;
-      });
-    },
-    [canOperatePreview, openPreview, threadRef],
+    (url: string) =>
+      openDeferredMarkdownLink(url, {
+        explicitApp: true,
+        fallbackOnFailure: false,
+        reportPreviewFailure: (cause) =>
+          reportMarkdownActionFailure({ operation: "open-link-in-preview", target: url }, cause),
+      }).catch((cause: unknown) => {
+        if (cause instanceof BrowserSettingsReadError)
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Unable to open link in browser",
+              description: cause.message,
+            }),
+          );
+        throw cause;
+      }),
+    [openDeferredMarkdownLink],
   );
   const openMarkdownFileInPreview = useCallback(
     (path: string) => {
@@ -2723,6 +2714,7 @@ function useChatMarkdownState({
       inlineCodeFileLinkMetaByText,
       isStreaming,
       linkTargetPreference,
+      linkSettingsHydrated,
       markdownFileLinkMetaByHref,
       onTaskListChange,
       onUseArtifactTemplate,
@@ -2758,6 +2750,7 @@ function useChatMarkdownState({
       inlineCodeFileLinkMetaByText,
       isStreaming,
       linkTargetPreference,
+      linkSettingsHydrated,
       markdownFileLinkMetaByHref,
       onTaskListChange,
       onUseArtifactTemplate,
@@ -2918,6 +2911,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       openChangeRequestLink,
       openDeferredMarkdownLink,
       linkTargetPreference,
+      linkSettingsHydrated,
       openExternalLinkInPreview,
       projects,
       linkedThreadPullRequestFor,
@@ -2984,8 +2978,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
         : null;
       const isSameDocumentLink = href?.startsWith("#") ?? false;
       const onClick = props.onClick;
-      const canOpenInPreview =
-        canOperatePreview && Boolean(threadRef && isPreviewAvailableFor(threadRef.environmentId));
+      const canOpenInPreview = canOperatePreview && canOpenLinksInApp(threadRef);
       const linkChildren = <MarkdownLinkContext value>{children}</MarkdownLinkContext>;
       const link = (
         <a
@@ -3043,7 +3036,8 @@ const CHAT_MARKDOWN_COMPONENTS = {
               resolveLinkTarget({
                 url: href,
                 event,
-                preference: linkTargetPreference,
+                preference: linkSettingsHydrated ? linkTargetPreference : "app",
+                linkClient: readLinkClient(),
                 canOpenInApp: canOpenInPreview,
               }) !== "app"
             ) {
@@ -3051,15 +3045,27 @@ const CHAT_MARKDOWN_COMPONENTS = {
             }
             event.preventDefault();
             event.stopPropagation();
-            // Keep the link here if saved settings could not be read.
-            void openExternalLinkInPreview(href).then((result) => {
-              if (result._tag === "Success" || isAtomCommandInterrupted(result)) return;
+            void openDeferredMarkdownLink(href, {
+              event,
+              reportPreviewFailure: (cause) =>
+                reportMarkdownActionFailure(
+                  { operation: "open-link-in-preview", target: href },
+                  cause,
+                ),
+            }).catch((cause: unknown) => {
               reportMarkdownActionFailure(
                 { operation: "open-link-in-preview", target: href },
-                result.cause,
+                cause,
               );
-              if (squashAtomCommandFailure(result) instanceof BrowserSettingsReadError) return;
-              void readLocalApi()?.shell.openExternal(href);
+              if (cause instanceof BrowserSettingsReadError) {
+                toastManager.add(
+                  stackedThreadToast({
+                    type: "error",
+                    title: "Unable to open link in browser",
+                    description: cause.message,
+                  }),
+                );
+              }
             });
           }}
           onContextMenu={(event) => {
@@ -3081,15 +3087,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
               threadLinkAction,
               position: { x: event.clientX, y: event.clientY },
               showContextMenu: (items, position) => api.contextMenu.show(items, position),
-              openInPreview: async (target) => {
-                const result = await openExternalLinkInPreview(target);
-                if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-                  reportMarkdownActionFailure(
-                    { operation: "open-link-in-preview", target },
-                    result.cause,
-                  );
-                }
-              },
+              openInPreview: openExternalLinkInPreview,
               openExternal: (target) => api.shell.openExternal(target),
               copyLink: (target) => writeTextToClipboard(target, "link"),
               updateThreadLink: updateThreadPullRequestLink,

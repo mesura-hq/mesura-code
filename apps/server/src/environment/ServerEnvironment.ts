@@ -263,6 +263,7 @@ export const make = Effect.gen(function* () {
       // Mesura: the hosts dock.
       hostStats: true,
       serverBrowser: true,
+      threadLinkPreview: true,
       peerLinks: true,
       mcpModeLimitHeader: true,
       linkFence: true,
