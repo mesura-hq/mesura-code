@@ -212,21 +212,19 @@ describe("key engine passthrough scopes", () => {
     ],
   ];
 
-  for (const [name, focusIt] of cases) {
-    it(`passes every key through unconsumed in ${name}`, () => {
-      disposeSurfaces.push(fakeSurface("chat").dispose);
-      focusIt();
-      for (const { key, code } of KEYS) {
-        expect({ key, ...press(key, code) }).toEqual({
-          key,
-          prevented: false,
-          reachedLater: true,
-        });
-      }
-      expect(readKeyEngineSnapshot().scope).toBe("passthrough");
-      expect(readKeyEngineSnapshot().pending).toEqual([]);
-    });
-  }
+  it.each(cases)("passes every key through unconsumed in %s", (_name, focusIt) => {
+    disposeSurfaces.push(fakeSurface("chat").dispose);
+    focusIt();
+    for (const { key, code } of KEYS) {
+      expect({ key, ...press(key, code) }).toEqual({
+        key,
+        prevented: false,
+        reachedLater: true,
+      });
+    }
+    expect(readKeyEngineSnapshot().scope).toBe("passthrough");
+    expect(readKeyEngineSnapshot().pending).toEqual([]);
+  });
 });
 
 describe("key engine in a tree", () => {

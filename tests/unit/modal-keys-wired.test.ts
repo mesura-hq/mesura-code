@@ -680,7 +680,13 @@ it("modal keys seam guard round 2: the panel launcher takes its keys, opens on +
 it("modal keys seam guard round 2: launcher rows close the launcher and keep focus in the panel", () => {
   const file = "apps/web/src/components/RightPanelTabs.tsx";
   const source = read(file);
-  const runAction = region(source, "const runAction = (action: SurfaceAction) =>", "};", file);
+  // REGRESSION: The old seam named the removed focus helper and missed the keyboard-aware launcher path.
+  const runAction = region(
+    source,
+    "const runAction = (action: SurfaceAction, keyboard: boolean) =>",
+    "const panelActions =",
+    file,
+  );
   // The panel is read before the launcher closes, which can unmount the row.
   assert.include(
     runAction,
@@ -690,7 +696,7 @@ it("modal keys seam guard round 2: launcher rows close the launcher and keep foc
   for (const fragment of [
     "closePanelLauncher()",
     "action.onClick()",
-    "if (panel) keepFocusInPanelAfterRender(panel)",
+    "if (panel) activatePanelSurfaceFromLauncher(panel, activate, keyboard)",
   ]) {
     assert.include(runAction, tokens(fragment), `runAction lost ${fragment}`);
   }
@@ -705,7 +711,7 @@ it("modal keys seam guard round 2: launcher rows close the launcher and keep foc
   for (const fragment of [
     "runPanelLauncherAction(chosen)",
     "reportUnavailable(chosen.label, chosen.disabledReason)",
-    "current.runAction(chosen)",
+    "current.runAction(chosen, true)",
   ]) {
     assert.include(letters, tokens(fragment), `the launcher's letter handler lost ${fragment}`);
   }
@@ -715,9 +721,13 @@ it("modal keys seam guard round 2: launcher rows close the launcher and keep foc
     "onClick: () => props.onAddBrowserInProfile(profile.id)",
   ]);
   const enter = region(source, 'if (event.key === "Enter")', 'if (event.key === "Escape"', file);
-  assert.include(enter, tokens("runAction(action)"), "Enter on the launcher bypasses runAction");
+  assert.include(
+    enter,
+    tokens("runAction(action, true)"),
+    "Enter on the launcher bypasses runAction",
+  );
   for (const fragment of [
-    "onClick={() => runAction(action)}",
+    "onClick={(event) => runAction(action, isPanelSurfaceKeyboardActivation(event))}",
     "onClick={() => reportUnavailable(action.label, action.disabledReason)}",
   ]) {
     assert.include(source, tokens(fragment), `a launcher row lost ${fragment}`);

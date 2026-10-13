@@ -188,6 +188,9 @@ jobs:
       - name: Test preview artifact validation
         run: python3 -B .github/scripts/stage-preview-bundle.test.py
 
+      - name: Install Chromium for script browser tests
+        run: node apps/server/node_modules/playwright-core/cli.js install --with-deps --only-shell chromium
+
       - name: Test nightly release checks
         run: node --test .github/scripts/check-nightly-release.test.cjs
 

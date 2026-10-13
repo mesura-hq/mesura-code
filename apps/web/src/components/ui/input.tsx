@@ -11,6 +11,8 @@ type InputProps = Omit<InputPrimitive.Props & React.RefAttributes<HTMLInputEleme
   font?: "default" | "mono";
   unstyled?: boolean;
   nativeInput?: boolean;
+  /** Reserve space in the control for absolutely positioned adornments. */
+  adornmentInset?: "none" | "both";
 };
 
 function Input({
@@ -19,6 +21,7 @@ function Input({
   font = "default",
   unstyled = false,
   nativeInput = false,
+  adornmentInset = "none",
   ...props
 }: InputProps) {
   const inputClassName = cn(
@@ -70,6 +73,7 @@ function Input({
             size === "compact" &&
             "rounded-md before:rounded-[calc(var(--radius-md)-1px)]",
           font === "mono" && "font-mono tabular-nums",
+          adornmentInset === "both" && "pl-9 pr-9",
           className,
         ) || undefined
       }

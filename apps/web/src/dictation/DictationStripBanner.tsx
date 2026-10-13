@@ -35,7 +35,7 @@ const StripButton = memo(function StripButton(props: {
             // Keeps the composer's focus and caret: Stop drops the marker where the caret is.
             onMouseDown={(event) => event.preventDefault()}
             className={cn(
-              "flex size-7 cursor-pointer items-center justify-center rounded-full border border-border/55 bg-background/35 text-secondary-label shadow-xs backdrop-blur-md transition-[color,background-color,border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:scale-[1.06] hover:border-foreground/20 hover:bg-foreground/10 hover:text-foreground hover:shadow-sm focus-visible:border-foreground/25 focus-visible:ring-2 focus-visible:ring-foreground/20 focus-visible:outline-none active:translate-y-0 active:scale-95",
+              "flex size-7 cursor-pointer items-center justify-center rounded-full border border-border/55 bg-background/35 text-secondary-label shadow-xs backdrop-blur-md transition-[color,background-color,border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:scale-[1.06] hover:border-foreground/20 hover:bg-foreground/10 hover:text-foreground hover:shadow-sm focus-visible:border-foreground/25 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-foreground/20 focus-visible:outline-none active:translate-y-0 active:scale-95",
               props.destructive &&
                 "hover:border-destructive/30 hover:bg-destructive/12 hover:text-destructive",
             )}
@@ -74,7 +74,7 @@ export const DictationStripBanner = memo(function DictationStripBanner(props: {
   // resting composer.
   return (
     <ComposerBanner.Attachment
-      className="mesura-dictation-strip pointer-events-auto relative z-0"
+      className="mesura-dictation-strip"
       data-chat-composer-collapsed-controls="true"
       data-phase={phase}
     >
@@ -83,7 +83,7 @@ export const DictationStripBanner = memo(function DictationStripBanner(props: {
         aria-label={`Voice dictation: ${dictationPhaseLabel(phase)}`}
       >
         <div className="flex min-h-7 items-center gap-2 px-2">
-          <span className="w-12 shrink-0 font-mono text-[11px] text-secondary-label tabular-nums @max-[280px]:hidden">
+          <span className="w-12 shrink-0 font-mono text-search-label text-secondary-label tabular-nums @max-[280px]:hidden">
             {formatDictationElapsed(dictationRecordedElapsedMs(session))}
           </span>
           <CenterOutWaveform

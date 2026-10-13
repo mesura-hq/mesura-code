@@ -23,7 +23,7 @@ export function TreeDiffSummary(props: {
   return (
     <div
       className={cn(
-        "flex text-[11px] text-muted-foreground",
+        "flex text-search-label text-muted-foreground",
         props.compact ? "flex-row flex-wrap gap-x-3 gap-y-0.5" : "flex-col gap-0.5",
         props.className,
       )}

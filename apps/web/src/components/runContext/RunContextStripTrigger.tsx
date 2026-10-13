@@ -19,23 +19,24 @@ export function RunContextStripTrigger(props: {
   ariaLabel: string;
   /** Space-separated composer.* commands whose openControl lands here. */
   composerShortcut?: string;
-  className?: string;
+  layout: "paired" | "host" | "workspace";
 }) {
-  const { icon, label, locked, drawerOpen, onPress, ariaLabel, composerShortcut, className } =
-    props;
+  const { icon, label, locked, drawerOpen, onPress, ariaLabel, composerShortcut, layout } = props;
   return (
     <Button
-      variant="ghost"
+      variant="ghost-subtle"
       size="xs"
       aria-label={ariaLabel}
       aria-expanded={drawerOpen}
       data-composer-shortcut={composerShortcut}
       data-composer-context-control
+      data-readonly={locked || undefined}
+      data-open={drawerOpen || undefined}
       className={cn(
-        "min-w-0 font-normal text-xs! active:scale-100",
-        locked ? "text-muted-foreground/70" : "text-muted-foreground/70 hover:text-foreground/80",
-        drawerOpen && "text-foreground/85",
-        className,
+        "min-w-0 active:scale-100",
+        layout === "paired" && "max-w-[48%] flex-initial justify-start",
+        layout === "host" && "max-w-full",
+        layout === "workspace" && "shrink",
       )}
       onClick={onPress}
     >
@@ -46,7 +47,7 @@ export function RunContextStripTrigger(props: {
       >
         <span
           data-composer-label-motion
-          className="block w-full min-w-0 max-w-[240px] truncate transition-opacity duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transition-none"
+          className="block w-full min-w-0 max-w-[240px] truncate transition-opacity duration-180 ease-drawer group-data-[compact]/composer-context:opacity-0 motion-reduce:transition-none"
         >
           {label}
         </span>

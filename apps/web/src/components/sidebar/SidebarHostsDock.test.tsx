@@ -282,8 +282,9 @@ describe("Hosts dock: the palette's Show hosts from every page", () => {
   const sidebarState = () =>
     container.querySelector<HTMLElement>("[data-sidebar-state]")?.dataset.sidebarState;
 
-  for (const path of ["/usage", "/settings", "/pull-requests"]) {
-    it(`Show hosts from ${path} returns to the thread list and pins the hosts dock`, async () => {
+  it.each(["/usage", "/settings", "/pull-requests"])(
+    "Show hosts from %s returns to the thread list and pins the hosts dock",
+    async (path) => {
       await mountSidebar({ path });
       expect(container.querySelector("[data-hosts-panel]")).toBeNull();
       await act(async () => requestSidebarDockPin("hosts"));
@@ -292,8 +293,8 @@ describe("Hosts dock: the palette's Show hosts from every page", () => {
       // Pinned, not hovered: it stays until Escape.
       await press("keydown", { key: "Escape", code: "Escape" });
       expect(hostsOpen()).toBe(false);
-    });
-  }
+    },
+  );
 
   it("Show hosts expands a collapsed sidebar before pinning the hosts dock", async () => {
     await mountSidebar({ sidebarOpen: false });
