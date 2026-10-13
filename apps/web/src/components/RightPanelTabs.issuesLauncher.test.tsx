@@ -13,6 +13,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
+
 import { closePanelLauncher } from "~/lib/panelLauncher";
 
 import { RightPanelTabs } from "./RightPanelTabs";
@@ -31,6 +33,15 @@ function mountTabs(overrides: Partial<TabsProps> = {}) {
   };
   const props: TabsProps = {
     mode: "inline",
+    keybindings: DEFAULT_RESOLVED_KEYBINDINGS,
+    getShortcutContext: () => ({
+      terminalFocus: false,
+      terminalOpen: false,
+      previewFocus: false,
+      previewOpen: false,
+      isWeb: true,
+      isDesktop: false,
+    }),
     surfaces: [],
     environmentId: null,
     activeSurfaceId: null,
@@ -48,21 +59,18 @@ function mountTabs(overrides: Partial<TabsProps> = {}) {
     onAddDiff: () => undefined,
     onAddFiles: () => undefined,
     onAddPullRequest: () => undefined,
-    onAddAgents: () => undefined,
     onAddDevice: () => undefined,
-    liveAgentCount: 0,
     browserAvailable: false,
     terminalAvailable: true,
     diffAvailable: false,
     filesAvailable: false,
     pullRequestAvailable: false,
     pullRequestsAvailable: true,
-    agentsAvailable: false,
     deviceAvailable: false,
     children: <div>surface content</div>,
     ...callbacks,
     ...overrides,
-  } as TabsProps;
+  };
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);

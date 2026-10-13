@@ -11,6 +11,8 @@ import * as Layer from "effect/Layer";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 
 import * as ServerConfig from "../config.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
@@ -121,9 +123,14 @@ describe("GitWorkingTreeChanges parsers", () => {
 /** The real review stack over real git, rooted at `workspaceRoot`. */
 function makeReviewLayer(workspaceRoot: string) {
   return ReviewService.layer.pipe(
+    Layer.provide(
+      Layer.mock(ProjectStore.ProjectStoreV2)({ listShells: () => Effect.succeed([]) }),
+    ),
     Layer.provideMerge(GitVcsDriver.layer),
     Layer.provideMerge(VcsDriverRegistry.layer),
     Layer.provideMerge(VcsProcess.layer),
+    // ReviewService checks managed worktree roots from settings (upstream).
+    Layer.provide(ServerSettings.layerTest()),
     Layer.provide(ServerConfig.layerTest(workspaceRoot, { prefix: "t3-tree-read-base-" })),
     Layer.provideMerge(NodeServices.layer),
   );

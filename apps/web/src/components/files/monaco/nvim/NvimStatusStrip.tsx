@@ -42,7 +42,7 @@ export function NvimStatusStrip({
       <div
         data-nvim-status-strip
         data-nvim-fallback
-        className="flex h-6 shrink-0 items-center gap-2 border-t border-border/50 px-2 text-[11px] text-muted-foreground"
+        className="flex h-6 shrink-0 items-center gap-2 border-t border-border/50 px-2 text-search-label text-muted-foreground"
       >
         <span className="font-mono font-medium tracking-wide text-foreground">NEOVIM OFF</span>
         <span className="truncate">{describeFallback(fallback)}</span>
@@ -63,14 +63,14 @@ export function NvimStatusStrip({
   return (
     <div
       data-nvim-status-strip
-      className="flex h-6 shrink-0 items-center gap-2 border-t border-border/50 px-2 text-[11px] text-muted-foreground"
+      className="flex h-6 shrink-0 items-center gap-2 border-t border-border/50 px-2 text-search-label text-muted-foreground"
     >
       {jumping ? (
         // Neovim still reports normal mode while flash waits for a label, so
         // the strip says what the next key actually does.
         <span
           data-nvim-jumping
-          className="flex items-center gap-1 font-mono font-medium tracking-wide text-amber-600 dark:text-amber-400"
+          className="flex items-center gap-1 font-mono font-medium tracking-wide text-editor-warning"
         >
           <ZapIcon aria-hidden className="size-3 fill-current" />
           FLASH

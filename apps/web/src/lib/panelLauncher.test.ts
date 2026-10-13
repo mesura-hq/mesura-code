@@ -77,6 +77,32 @@ describe("panel launcher", () => {
     window.removeEventListener("keydown", later, true);
   });
 
+  it("panel launcher P1-2: a second inactive key owner cannot hide the active launcher from a surface handler", () => {
+    const unregisterActive = registerLauncherKeyHandler((event) => {
+      event.preventDefault();
+      return true;
+    });
+    const unregisterInactive = registerLauncherKeyHandler(() => false);
+    const surface = vi.fn();
+    window.addEventListener("keydown", surface, true);
+    try {
+      openPanelLauncher();
+      const event = new KeyboardEvent("keydown", { key: "f", cancelable: true });
+      window.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+      expect(surface).not.toHaveBeenCalled();
+      unregisterInactive();
+      const restored = new KeyboardEvent("keydown", { key: "f", cancelable: true });
+      window.dispatchEvent(restored);
+      expect(restored.defaultPrevented).toBe(true);
+      expect(surface).not.toHaveBeenCalled();
+    } finally {
+      unregisterInactive();
+      unregisterActive();
+      window.removeEventListener("keydown", surface, true);
+    }
+  });
+
   it("puts focus back where it was when dismissed", () => {
     const button = document.createElement("button");
     document.body.append(button);

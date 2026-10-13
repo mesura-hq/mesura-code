@@ -2,44 +2,23 @@
  * The Luna request that picks a project icon from local candidates.
  *
  * Shared by the discovery service, which decides when a search may run, and by
- * the Codex driver, which owns the configured runner that answers it.
+ * the Codex driver, which owns the configured runner that answers it. The
+ * types drivers share live in provider-core's `projectIconSelection` module,
+ * because provider-core cannot import the server.
  *
  * @module ProjectIconSelection
  */
 import {
   DEFAULT_TEXT_GENERATION_MODEL,
   isProviderAvailable,
-  type OrchestrationProjectShell,
   type ServerProvider,
   type ServerProviderModel,
 } from "@t3tools/contracts";
+import type { ProjectIconSelectionInput } from "@t3tools/provider-core/server/projectIconSelection";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-
-import type { ProjectIconCandidate } from "./ProjectIconCandidates.ts";
-
-export const ProjectIconSelection = Schema.Struct({
-  path: Schema.NullOr(Schema.String),
-  reason: Schema.String,
-});
-export type ProjectIconSelection = typeof ProjectIconSelection.Type;
-
-export interface ProjectIconSelectionInput {
-  readonly project: Pick<OrchestrationProjectShell, "id" | "title" | "workspaceRoot">;
-  readonly candidates: ReadonlyArray<ProjectIconCandidate>;
-}
-
-/** No configured instance can run the search. Reported before any model work. */
-export class ProjectIconSelectionUnavailable extends Schema.TaggedError<ProjectIconSelectionUnavailable>()(
-  "ProjectIconSelectionUnavailable",
-  { detail: Schema.String },
-) {
-  override get message(): string {
-    return this.detail;
-  }
-}
 
 export const PROJECT_ICON_SELECTION_TIMEOUT_MS = 60_000;
 /** Luna. Searches never fall back to a more expensive model. */

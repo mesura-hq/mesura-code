@@ -3,7 +3,8 @@ import { ChevronRightIcon } from "lucide-react";
 import { memo, useMemo, type ReactNode } from "react";
 
 import ChatMarkdown from "../components/ChatMarkdown";
-import { CHAT_FILE_TAG_CHIP_CLASS_NAME, FileTagChipContent } from "../components/chat/FileTagChip";
+import { ContextChip } from "../components/ContextChip";
+import { FileTagChipContent } from "../components/chat/FileTagChip";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../components/ui/collapsible";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { useTheme } from "../hooks/useTheme";
@@ -66,7 +67,7 @@ function PhaseCard({
         <div className="mt-3 flex flex-wrap gap-1">
           {phase.files.map((file, index) => (
             <Tooltip key={fileKeys[index]}>
-              <TooltipTrigger render={<span className={CHAT_FILE_TAG_CHIP_CLASS_NAME} />}>
+              <TooltipTrigger render={<ContextChip kind="mention" />}>
                 <FileTagChipContent
                   path={file}
                   label={file.split("/").at(-1) ?? file}

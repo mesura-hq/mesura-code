@@ -17,7 +17,7 @@ import {
   threadJumpIndexFromCommand,
   type ShortcutEventLike,
 } from "../keybindings";
-import { sortThreads } from "../lib/threadSort";
+import { getThreadSortTimestamp, sortThreads } from "../lib/threadSort";
 import { normalizeSearchText } from "../lib/utils";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { type Project, type SidebarThreadSummary, type Thread } from "../types";
@@ -68,7 +68,7 @@ export function browseInputEndPaddingClass(input: {
 export type SearchOverlayMode = "command" | "files" | "content" | "projects" | "threads";
 
 export type CommandPaletteOpenIntent =
-  | { readonly kind: "add-project" | "new-thread-in" }
+  | { readonly kind: "add-project" | "new-thread-in" | "change-theme" }
   | {
       readonly kind: "search";
       readonly query: string;
@@ -92,6 +92,7 @@ export type CommandPaletteUiAction =
     }
   | { readonly _tag: "OpenAddProject" }
   | { readonly _tag: "OpenNewThreadIn" }
+  | { readonly _tag: "OpenChangeTheme" }
   | { readonly _tag: "ClearOpenIntent" };
 
 export function reduceCommandPaletteUiState(
@@ -123,6 +124,8 @@ export function reduceCommandPaletteUiState(
       return { open: true, mode: "command", openIntent: { kind: "add-project" } };
     case "OpenNewThreadIn":
       return { open: true, mode: "command", openIntent: { kind: "new-thread-in" } };
+    case "OpenChangeTheme":
+      return { open: true, mode: "command", openIntent: { kind: "change-theme" } };
     case "ClearOpenIntent":
       return state.openIntent ? { ...state, openIntent: null } : state;
   }
@@ -144,6 +147,7 @@ export interface CommandPaletteItem {
   readonly rowContent?: ReactNode;
   readonly threadContentMatch?: CommandPaletteThreadContentMatch;
   readonly timestamp?: string;
+  readonly searchRecency?: number;
   readonly icon: ReactNode;
   readonly disabled?: boolean;
   /** Optional content rendered inline before the title text. */
@@ -151,6 +155,8 @@ export interface CommandPaletteItem {
   /** Optional content rendered inline after the title text (before the timestamp). */
   readonly titleTrailingContent?: ReactNode;
   readonly shortcutCommand?: KeybindingCommand;
+  /** Sorts after every other match in its group; see `SettingsSearchItem.secondary`. */
+  readonly secondary?: boolean;
 }
 
 export interface CommandPaletteActionItem extends CommandPaletteItem {
@@ -202,6 +208,65 @@ export function findJumpTargetItem(input: {
   if (command === null || threadJumpIndexFromCommand(command) === null) return null;
 
   return input.items.find((item) => item.shortcutCommand === command) ?? null;
+}
+
+export type CommandPaletteRow =
+  | {
+      readonly kind: "label";
+      readonly key: string;
+      readonly label: string;
+      readonly first: boolean;
+    }
+  | {
+      readonly kind: "item";
+      readonly key: string;
+      readonly item: CommandPaletteActionItem | CommandPaletteSubmenuItem;
+      /** Position among enabled items, or null for disabled rows the keyboard skips. */
+      readonly itemIndex: number | null;
+    };
+
+/**
+ * Flattens groups into the rows a virtualized list renders. `itemValues` is the
+ * highlightable item order Base UI navigates; `rowIndexByItemIndex` maps a
+ * highlight back to its row for scrolling.
+ */
+export function buildCommandPaletteRows(groups: ReadonlyArray<CommandPaletteGroup>) {
+  const rows: CommandPaletteRow[] = [];
+  const itemValues: string[] = [];
+  const rowIndexByItemIndex: number[] = [];
+  for (const group of groups) {
+    if (group.label) {
+      rows.push({
+        kind: "label",
+        key: `group:${group.value}`,
+        label: group.label,
+        first: rows.length === 0,
+      });
+    }
+    for (const item of group.items) {
+      const itemIndex = item.disabled ? null : itemValues.length;
+      if (itemIndex !== null) {
+        itemValues.push(item.value);
+        rowIndexByItemIndex.push(rows.length);
+      }
+      rows.push({ kind: "item", key: `${group.value}:${item.value}`, item, itemIndex });
+    }
+  }
+  return { rows, itemValues, rowIndexByItemIndex };
+}
+
+/** The enabled item Enter should run for a highlight, whether or not its row is mounted. */
+export function findHighlightedCommandPaletteItem(
+  groups: ReadonlyArray<CommandPaletteGroup>,
+  highlightedItemValue: string | null,
+): CommandPaletteActionItem | CommandPaletteSubmenuItem | null {
+  if (highlightedItemValue === null) return null;
+  for (const group of groups) {
+    for (const item of group.items) {
+      if (item.value === highlightedItemValue && !item.disabled) return item;
+    }
+  }
+  return null;
 }
 
 export function enumerateCommandPaletteItems(
@@ -277,7 +342,7 @@ export type BuildThreadActionItemsThread = Pick<
   | "id"
   | "modelSelection"
   | "projectId"
-  | "session"
+  | "runtime"
   | "title"
   | "worktreePath"
 > & {
@@ -340,12 +405,15 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
           projectTitle ?? ``,
           thread.branch ?? ``,
           contentMatch?.snippet ?? ``,
+          // Last so pasted IDs never outrank title matches for shared substrings.
+          thread.id,
         ],
         title: thread.title,
         description,
         timestamp: formatRelativeTimeLabel(
           thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,
         ),
+        searchRecency: getThreadSortTimestamp(thread, "updated_at"),
         icon: input.icon,
       },
       leadingContent ? { titleLeadingContent: leadingContent } : {},
@@ -397,6 +465,10 @@ function rankCommandPaletteItemMatch(
   for (const [index, field] of terms.entries()) {
     const fieldRank = rankSearchFieldMatch(field, normalizedQuery, queryTokens);
     if (fieldRank !== Number.NEGATIVE_INFINITY) {
+      if (index === 0 && item.searchRecency !== undefined) {
+        // All non-exact thread title matches share a tier so recency breaks the tie.
+        return 1_000 + Number(fieldRank === 3);
+      }
       return 1_000 - index * 100 + fieldRank;
     }
   }
@@ -469,7 +541,13 @@ export function filterCommandPaletteGroups(input: {
         rank: rankCommandPaletteItemMatch(item, normalizedQuery, queryTokens),
       });
     })
-      .toSorted((left, right) => right.rank - left.rank || left.index - right.index)
+      .toSorted(
+        (left, right) =>
+          Number(left.item.secondary ?? false) - Number(right.item.secondary ?? false) ||
+          right.rank - left.rank ||
+          (right.item.searchRecency ?? 0) - (left.item.searchRecency ?? 0) ||
+          left.index - right.index,
+      )
       .map((entry) => entry.item);
 
     if (items.length === 0) {

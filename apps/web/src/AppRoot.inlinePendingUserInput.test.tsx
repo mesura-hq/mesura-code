@@ -18,59 +18,37 @@ import {
   EnvironmentId,
   ThreadId,
   ProjectId,
-  ProviderInstanceId,
-  EventId,
+  type OrchestrationV2ThreadProjection,
   ApprovalRequestId,
-  MessageId,
 } from "@t3tools/contracts";
-import type { Thread } from "./types";
+import {
+  makeFenceThreadProjection,
+  makeFenceThreadShell,
+  makeFenceUserInput,
+  FENCE_USER_INPUT_QUESTIONS,
+  readFenceUserInputItem,
+} from "./test/fenceThreadShell";
+import {
+  appRootFence,
+  FENCE_ENVIRONMENT_ID,
+  FENCE_PROJECT_ID,
+  installFenceFontEvents,
+} from "./test/appRootFenceMocks";
+import { publishFenceThreadProjection, addFenceThread, makeMessage } from "./test/appRootFenceApp";
+import * as Option from "effect/Option";
+import * as DateTime from "effect/DateTime";
 import type { AppRouter } from "./router";
 
 const fixture = vi.hoisted(() => ({
   markdownRenders: 0,
   pendingRowsVisible: true,
-  savedThreads: new Map<string, Thread>(),
-  thread: null as Thread | null,
+  projection: null as OrchestrationV2ThreadProjection | null,
   commands: new Map<unknown, unknown>(),
-  noopCommand: vi.fn(async () => ({ _tag: "Success", value: undefined })),
+  noopCommand: vi.fn(async () => ({ _tag: "Success", value: { providers: [] } })),
   dismiss: vi.fn(async () => ({ _tag: "Success", value: undefined })),
   respond: vi.fn(async () => ({ _tag: "Success", value: undefined })),
   startTurn: vi.fn(async () => ({ _tag: "Success", value: undefined })),
-  refresh: vi.fn(),
-  empty: [],
   threadListeners: new Set<() => void>(),
-  environments: [
-    {
-      environmentId: "phase-two-environment",
-      label: "Fence environment",
-      connection: { phase: "connected" },
-      serverConfig: {
-        environment: {
-          capabilities: {
-            questionAttachments: true,
-            attachmentUploads: true,
-            fileAttachments: { maxUploadBytes: 1048576 },
-          },
-        },
-        providers: [
-          {
-            instanceId: "codex",
-            driver: "codex",
-            enabled: true,
-            installed: true,
-            workspaceSnapshots: [{ cwd: "/tmp/question-fence", skills: [], slashCommands: [] }],
-            status: "ready",
-            version: null,
-            auth: { status: "authenticated" },
-            checkedAt: "2026-09-22T12:00:00.000Z",
-            models: [],
-            slashCommands: [],
-            skills: [],
-          },
-        ],
-      },
-    },
-  ],
 }));
 
 vi.mock("./components/ChatMarkdown", async (importOriginal) => {
@@ -83,82 +61,23 @@ vi.mock("./components/ChatMarkdown", async (importOriginal) => {
     },
   };
 });
-vi.mock("./state/entities", async (importOriginal) => {
-  const { useSyncExternalStore } = await import("react");
-  const useFixtureThread = () =>
-    useSyncExternalStore(
-      (listener) => {
-        fixture.threadListeners.add(listener);
-        return () => {
-          fixture.threadListeners.delete(listener);
-        };
-      },
-      () => fixture.thread,
-    );
-  return {
-    ...(await importOriginal<typeof import("./state/entities")>()),
-    useThread: useFixtureThread,
-    readThread: (ref: { environmentId: string; threadId: string }) =>
-      fixture.thread?.id === ref.threadId && fixture.thread.environmentId === ref.environmentId
-        ? fixture.thread
-        : (fixture.savedThreads.get(JSON.stringify([ref.environmentId, ref.threadId])) ?? null),
-    useThreadShell: useFixtureThread,
-    useThreadRefs: () => fixture.empty,
-    useProjects: () => fixture.empty,
-    useProject: () => ({
-      id: "phase-two-project",
-      environmentId: "phase-two-environment",
-      title: "Question fence",
-      workspaceRoot: "/tmp/question-fence",
-      scripts: [],
-      createdAt: "2026-09-22T12:00:00.000Z",
-      defaultModelSelection: { instanceId: "codex", model: "gpt-5.4" },
-    }),
-  };
-});
-vi.mock("./state/environments", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./state/environments")>()),
-  useEnvironments: () => ({ environments: fixture.environments, isReady: true }),
-  usePrimaryEnvironment: () => null,
-}));
-vi.mock("./state/query", () => ({
-  useEnvironmentQuery: () => ({
-    data: null,
-    error: null,
-    isPending: false,
-    isSuccess: false,
-    refresh: fixture.refresh,
-  }),
-}));
-vi.mock("./state/threads", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./state/threads")>();
-  const { EMPTY_ENVIRONMENT_THREAD_STATE } = await import("@t3tools/client-runtime/state/threads");
-  return { ...actual, useEnvironmentThread: () => EMPTY_ENVIRONMENT_THREAD_STATE };
-});
+const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("@t3tools/client-runtime/state/session", async (original) =>
+  (await fenceMocks()).mockRuntimeSession(original),
+);
+vi.mock("./state/entities", async (original) => (await fenceMocks()).mockEntities(original));
+vi.mock("./state/environments", async (original) =>
+  (await fenceMocks()).mockEnvironments(original),
+);
+vi.mock("./state/query", async () => (await fenceMocks()).mockQuery());
+vi.mock("./state/threads", async (original) => (await fenceMocks()).mockThreads(original));
 vi.mock("./state/use-atom-command", () => ({
   useAtomCommand: (command: unknown) => fixture.commands.get(command) ?? fixture.noopCommand,
 }));
 vi.mock("./state/use-atom-query-runner", () => ({ useAtomQueryRunner: () => fixture.noopCommand }));
-vi.mock("./hooks/useSettings", async (importOriginal) => {
-  const { DEFAULT_SERVER_SETTINGS } = await import("@t3tools/contracts");
-  const { DEFAULT_CLIENT_SETTINGS } = await import("@t3tools/contracts/settings");
-  const settings = { ...DEFAULT_CLIENT_SETTINGS, ...DEFAULT_SERVER_SETTINGS };
-  return {
-    ...(await importOriginal<typeof import("./hooks/useSettings")>()),
-    useEnvironmentSettings: () => settings,
-    useClientSettings: (select?: (value: typeof DEFAULT_CLIENT_SETTINGS) => unknown) =>
-      select ? select(DEFAULT_CLIENT_SETTINGS) : DEFAULT_CLIENT_SETTINGS,
-    useClientSettingsHydrated: () => true,
-  };
-});
+vi.mock("./hooks/useSettings", async (original) => (await fenceMocks()).mockSettings(original));
 vi.mock("./hooks/useHandleNewThread", () => ({ useNewThreadHandler: () => fixture.noopCommand }));
-vi.mock("./hooks/useThreadActions", () => ({
-  useThreadActions: () => ({
-    settleThread: fixture.noopCommand,
-    pinThread: fixture.noopCommand,
-    confirmAndUnpinThread: fixture.noopCommand,
-  }),
-}));
+vi.mock("./hooks/useThreadActions", async () => (await fenceMocks()).mockThreadActions());
 vi.mock("./components/preview/PreviewAutomationHosts", () => ({
   PreviewAutomationHosts: () => null,
 }));
@@ -210,12 +129,11 @@ import ChatView from "./components/ChatView";
 import { SidebarProvider } from "./components/ui/sidebar";
 import { threadEnvironment } from "./state/threads";
 import { useComposerDraftStore } from "./composerDraftStore";
-import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { questionAttachmentDraftId, useQuestionAttachmentPreparation } from "./questionAttachments";
 import * as attachmentUploads from "./lib/attachmentUploadQueue";
-import { useQueuedMessageStore } from "./queuedMessageStore";
 
-const environmentId = EnvironmentId.make("phase-two-environment");
+const environmentId = EnvironmentId.make(FENCE_ENVIRONMENT_ID);
 const threadId = ThreadId.make("phase-two-thread");
 const requestId = "phase-two-request";
 const now = "2026-09-22T12:00:00.000Z";
@@ -224,10 +142,9 @@ let container: HTMLDivElement;
 
 beforeEach(() => {
   fixture.pendingRowsVisible = true;
-  fixture.savedThreads.clear();
   usePendingUserInputDraftStore.setState({ requests: {} });
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  fixture.environments[0]!.connection.phase = "connected";
+  appRootFence.environments[0]!.connection.phase = "connected";
   fixture.respond.mockReset();
   fixture.respond.mockResolvedValue({ _tag: "Success", value: undefined });
   fixture.startTurn.mockClear();
@@ -236,58 +153,29 @@ beforeEach(() => {
   fixture.commands.set(threadEnvironment.dismissUserInput, fixture.dismiss);
   fixture.commands.set(threadEnvironment.respondToUserInput, fixture.respond);
   fixture.commands.set(threadEnvironment.startTurn, fixture.startTurn);
-  fixture.thread = {
+  installFenceFontEvents();
+  Object.assign(appRootFence.environments[0]!.serverConfig.environment.capabilities, {
+    questionAttachments: true,
+    attachmentUploads: true,
+    fileAttachments: { maxUploadBytes: 1048576 },
+  });
+  const shell = makeFenceThreadShell({
     id: threadId,
     environmentId,
-    projectId: ProjectId.make("phase-two-project"),
+    projectId: ProjectId.make(FENCE_PROJECT_ID),
     title: "Question fence",
-    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    session: null,
-    messages: [],
-    proposedPlans: [],
-    checkpoints: [],
-    pullRequests: [],
     createdAt: now,
-    updatedAt: now,
-    archivedAt: null,
-    settledOverride: null,
-    settledAt: null,
-    deletedAt: null,
-    latestTurn: null,
-    branch: null,
-    worktreePath: null,
-    activities: [
-      {
-        id: EventId.make("phase-two-requested"),
-        kind: "user-input.requested",
-        summary: "User input requested",
-        tone: "info",
-        turnId: null,
-        createdAt: now,
-        payload: {
-          requestId,
-          questions: [
-            {
-              id: "scope",
-              header: "Scope",
-              question: "Which scope first?",
-              multiSelect: true,
-              options: [{ label: "Workspace", description: "Current workspace" }],
-            },
-            {
-              id: "timing",
-              header: "Timing",
-              question: "When should it run?",
-              multiSelect: true,
-              options: [{ label: "Now", description: "Run now" }],
-            },
-          ],
-        },
-      },
-    ],
-  };
+  });
+  const { request, item } = makeFenceUserInput({
+    threadId,
+    requestId,
+    createdAt: now,
+    questions: FENCE_USER_INPUT_QUESTIONS,
+  });
+  fixture.projection = makeFenceThreadProjection(shell, {
+    runtimeRequests: [request],
+    turnItems: [item],
+  });
   container = document.createElement("div");
   document.body.append(container);
 });
@@ -296,14 +184,16 @@ afterEach(async () => {
   await act(async () => root?.unmount());
   root = undefined;
   container.remove();
+  appRootFence.threads.clear();
+  appRootFence.threadStates.clear();
   useComposerDraftStore.getState().clearComposerContent(scopeThreadRef(environmentId, threadId));
   useQuestionAttachmentPreparation.setState({ counts: {} });
-  useQueuedMessageStore.getState().drain(scopedThreadKey(scopeThreadRef(environmentId, threadId)));
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
 async function mountApp() {
+  publishFenceThreadProjection(fixture.projection!, environmentId);
   const route = createRootRoute({
     component: () => (
       <SidebarProvider>
@@ -322,6 +212,8 @@ async function mountApp() {
     root.render(<AppRoot router={router as unknown as AppRouter} />);
   });
 }
+
+const questionItem = () => readFenceUserInputItem(fixture.projection!);
 
 function button(text: string) {
   const match = [...container.querySelectorAll("button")].find((entry) =>
@@ -364,7 +256,11 @@ it("phase two incomplete inline request focuses its missing question and retains
 it("phase two pending row survives a thread refresh and remains outside collapsed work", async () => {
   await mountApp();
   await act(async () => {
-    fixture.thread = { ...fixture.thread!, activities: [...fixture.thread!.activities] };
+    fixture.projection = {
+      ...fixture.projection!,
+      runtimeRequests: [...fixture.projection!.runtimeRequests],
+    };
+    publishFenceThreadProjection(fixture.projection!, environmentId);
     for (const listener of fixture.threadListeners) listener();
   });
   expect(
@@ -383,11 +279,19 @@ it("phase two normal composer keeps its own message draft during a pending reque
   expect(container.querySelector("[data-normal-composer]")?.textContent).toContain(
     "A separate normal message",
   );
-  const send = container.querySelector<HTMLButtonElement>('button[aria-label="Send message"]');
+  const send = container.querySelector<HTMLButtonElement>(
+    '[data-normal-composer] button[aria-label="Submit message"], [data-normal-composer] button[aria-label="Queue message"]',
+  );
   expect(send).not.toBeNull();
   await act(async () => send!.click());
-  const queued = useQueuedMessageStore.getState().queuesByThreadKey[scopedThreadKey(target)] ?? [];
-  expect(fixture.startTurn.mock.calls.length + queued.length).toBeGreaterThan(0);
+  // V2 queues messages as server runs rather than in the removed local queuedMessageStore.
+  expect(fixture.startTurn).toHaveBeenCalledOnce();
+  expect(fixture.startTurn).toHaveBeenCalledWith(
+    expect.objectContaining({
+      environmentId,
+      input: expect.objectContaining({ threadId, dispatchMode: "queue" }),
+    }),
+  );
   expect(fixture.respond).not.toHaveBeenCalled();
 });
 
@@ -418,35 +322,25 @@ it("phase two failed answer retains an inline retry and resolved request keeps h
   await act(async () => button("Retry").click());
   expect(fixture.respond).toHaveBeenCalledTimes(2);
   await act(async () => {
-    fixture.thread = {
-      ...fixture.thread!,
-      activities: [
-        ...fixture.thread!.activities,
+    fixture.projection = {
+      ...fixture.projection!,
+      runtimeRequests: fixture.projection!.runtimeRequests.map((request) => ({
+        ...request,
+        status: "resolved",
+        resolvedAt: DateTime.makeUnsafe("2026-09-22T12:00:02.000Z"),
+        answers: { scope: ["Workspace"], timing: ["Now"] },
+      })),
+      visibleTurnItems: [
         {
-          id: EventId.make("phase-two-answer-submitted"),
-          kind: "user-input.answer-submitted",
-          summary: "User input submitted",
-          tone: "info",
-          turnId: null,
-          createdAt: "2026-09-22T12:00:01.000Z",
-          payload: {
-            requestId,
-            questionTextById: { scope: "Which scope first?", timing: "When should it run?" },
-            answers: { scope: ["Workspace"], timing: ["Now"] },
-            attachmentsByQuestionId: {},
-          },
-        },
-        {
-          id: EventId.make("phase-two-resolved"),
-          kind: "user-input.resolved",
-          summary: "User input resolved",
-          tone: "info",
-          turnId: null,
-          createdAt: "2026-09-22T12:00:02.000Z",
-          payload: { requestId },
+          item: questionItem(),
+          position: 0,
+          visibility: "local",
+          sourceThreadId: threadId,
+          sourceItemId: questionItem().id,
         },
       ],
     };
+    publishFenceThreadProjection(fixture.projection!, environmentId);
     for (const listener of fixture.threadListeners) listener();
   });
   expect(
@@ -533,21 +427,19 @@ it("phase two inline drafts survive app remount without entering the normal comp
 });
 
 it("phase two independent requests keep their own submit and dismissal boundaries", async () => {
-  const activity = fixture.thread!.activities[0]!;
-  fixture.thread = {
-    ...fixture.thread!,
-    activities: [
-      activity,
-      {
-        ...activity,
-        id: EventId.make("second-inline-request"),
-        payload: {
-          ...(activity.payload as Record<string, unknown>),
-          requestId: "second-request",
-          responseMode: "message",
-        },
-      },
-    ],
+  const item = questionItem();
+  const secondRequest = makeFenceUserInput({
+    threadId,
+    requestId: "second-request",
+    createdAt: now,
+    questions: item.questions,
+    responseMode: "message",
+    ordinal: 1,
+  });
+  fixture.projection = {
+    ...fixture.projection!,
+    runtimeRequests: [...fixture.projection!.runtimeRequests, secondRequest.request],
+    turnItems: [item, secondRequest.item],
   };
   await mountApp();
   expect(container.querySelectorAll("[data-pending-user-input-request-id]")).toHaveLength(2);
@@ -572,21 +464,15 @@ it("phase two independent requests keep their own submit and dismissal boundarie
     input: { threadId, requestId: "second-request" },
   });
   await act(async () => {
-    fixture.thread = {
-      ...fixture.thread!,
-      activities: [
-        ...fixture.thread!.activities,
-        {
-          id: EventId.make("dismissed-second"),
-          kind: "user-input.resolved",
-          summary: "User input dismissed",
-          tone: "info",
-          turnId: null,
-          createdAt: now,
-          payload: { requestId: "second-request" },
-        },
-      ],
+    fixture.projection = {
+      ...fixture.projection!,
+      runtimeRequests: fixture.projection!.runtimeRequests.map((request) =>
+        request.id === "second-request"
+          ? { ...request, status: "resolved", resolvedAt: DateTime.makeUnsafe(now) }
+          : request,
+      ),
     };
+    publishFenceThreadProjection(fixture.projection!, environmentId);
     for (const listener of fixture.threadListeners) listener();
   });
   expect(container.querySelectorAll("[data-pending-user-input-request-id]")).toHaveLength(1);
@@ -638,15 +524,19 @@ it("phase two question upload failure stays beside its field and blocks request 
 });
 
 it("phase two remote reconnect keeps editable answers and resumes the same request", async () => {
-  fixture.environments[0]!.connection.phase = "reconnecting";
+  appRootFence.environments[0]!.connection.phase = "reconnecting";
   await mountApp();
   await typeQuestion("scope", "Remote draft");
   expect(questionField("scope")?.disabled).toBe(false);
   expect(button("Submit").disabled).toBe(true);
   expect(container.textContent).toContain("Reconnecting. Your answers are saved.");
   await act(async () => {
-    fixture.environments[0]!.connection.phase = "connected";
-    fixture.thread = { ...fixture.thread!, activities: [...fixture.thread!.activities] };
+    appRootFence.environments[0]!.connection.phase = "connected";
+    fixture.projection = {
+      ...fixture.projection!,
+      runtimeRequests: [...fixture.projection!.runtimeRequests],
+    };
+    publishFenceThreadProjection(fixture.projection!, environmentId);
     for (const listener of fixture.threadListeners) listener();
   });
   expect(questionField("scope")?.value).toBe("Remote draft");
@@ -722,47 +612,28 @@ it("phase two rework question shortcut focuses the first unanswered inline field
   expect(document.activeElement).toBe(questionField("timing"));
 });
 
-it("phase two rework unrelated activity leaves existing Markdown rows unrendered", async () => {
-  fixture.thread = {
-    ...fixture.thread!,
-    activities: [],
-    messages: [
-      {
-        id: MessageId.make("stable-assistant"),
-        role: "assistant",
-        text: "Stable **answer**",
-        createdAt: now,
-        updatedAt: now,
-        streaming: false,
-        turnId: null,
-      },
-    ],
-  };
+it("phase two rework unrelated v2 detail update leaves existing Markdown rows unrendered", async () => {
+  addFenceThread(threadId, "Question fence", [
+    makeMessage("stable-assistant", "assistant", "Stable **answer**"),
+  ]);
+  fixture.projection = Option.getOrThrow(appRootFence.threadStates.get(threadId)!.data);
   await mountApp();
   const before = fixture.markdownRenders;
   expect(before).toBeGreaterThan(0);
   await act(async () => {
-    fixture.thread = {
-      ...fixture.thread!,
-      activities: [
-        {
-          id: EventId.make("unrelated-activity"),
-          kind: "provider.session.updated",
-          summary: "Session metadata",
-          tone: "info",
-          turnId: null,
-          createdAt: now,
-          payload: {},
-        },
-      ],
+    // An unrelated v2 detail update keeps the same visible item identities.
+    fixture.projection = {
+      ...fixture.projection!,
+      updatedAt: DateTime.makeUnsafe("2026-09-22T12:00:01.000Z"),
     };
+    publishFenceThreadProjection(fixture.projection!, environmentId);
     for (const listener of fixture.threadListeners) listener();
   });
   expect(fixture.markdownRenders).toBe(before);
 });
 
 it("phase two regression long request keeps answers across virtual scrolling", async () => {
-  const activity = fixture.thread!.activities[0]!;
+  const item = questionItem();
   const questions = Array.from({ length: 12 }, (_, index) => ({
     id: `long-${index}`,
     header: `Question ${index + 1}`,
@@ -770,21 +641,20 @@ it("phase two regression long request keeps answers across virtual scrolling", a
     options: [],
     multiSelect: false,
   }));
-  fixture.thread = {
-    ...fixture.thread!,
-    activities: [{ ...activity, payload: { requestId, questions } }],
-  };
+  fixture.projection = { ...fixture.projection!, turnItems: [{ ...item, questions }] };
   await mountApp();
   expect(container.querySelectorAll("[data-question-id] textarea")).toHaveLength(12);
   await typeQuestion("long-11", "Last answer\nWith more detail");
   await act(async () => {
     fixture.pendingRowsVisible = false;
+    publishFenceThreadProjection(fixture.projection!, environmentId);
     for (const listener of fixture.threadListeners) listener();
   });
   expect(questionField("long-11")).toBeNull();
   expect(container.querySelector("[data-normal-composer]")).not.toBeNull();
   await act(async () => {
     fixture.pendingRowsVisible = true;
+    publishFenceThreadProjection(fixture.projection!, environmentId);
     for (const listener of fixture.threadListeners) listener();
   });
   expect(questionField("long-11")?.value).toContain("Last answer\nWith more detail");

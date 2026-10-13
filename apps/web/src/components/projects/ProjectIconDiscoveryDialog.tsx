@@ -8,7 +8,7 @@ import {
   type ProjectIconDiscoveryState,
   type ProjectIconDiscoveryStatus,
 } from "@t3tools/contracts";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { appAtomRegistry } from "../../rpc/atomRegistry";
@@ -259,47 +259,49 @@ function ProjectIconDiscoveryDialog({ target }: { target: DiscoveryTarget }) {
             existing local image. It never downloads or creates images.
           </DialogDescription>
         </DialogHeader>
-        <DialogPanel className="max-h-[min(55vh,28rem)] space-y-4 overflow-y-auto">
-          <p className="text-sm text-muted-foreground">
-            {previews === null && !error
-              ? "Checking local images…"
-              : finished
-                ? `${saved} ${saved === 1 ? "icon" : "icons"} saved. ${outcomes.size} ${outcomes.size === 1 ? "search" : "searches"} completed.`
-                : `${ready.length} ${ready.length === 1 ? "project has" : "projects have"} images to check. Projects with icons or no candidates need no agent call.`}
-          </p>
-          {running && currentTitle ? (
-            <p role="status" className="text-sm">
-              The agent is checking {currentTitle}…
+        <DialogPanel className="max-h-[min(55vh,28rem)] overflow-y-auto">
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              {previews === null && !error
+                ? "Checking local images…"
+                : finished
+                  ? `${saved} ${saved === 1 ? "icon" : "icons"} saved. ${outcomes.size} ${outcomes.size === 1 ? "search" : "searches"} completed.`
+                  : `${ready.length} ${ready.length === 1 ? "project has" : "projects have"} images to check. Projects with icons or no candidates need no agent call.`}
             </p>
-          ) : null}
-          {error ? (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          ) : null}
-          {connectionLost ? (
-            <p role="alert" className="text-sm text-destructive">
-              The connection to this environment dropped. Projects not yet started will not run.
-            </p>
-          ) : null}
-          <ul className="space-y-3">
-            {shown?.map((project) => {
-              const outcome = outcomes.get(project.projectId);
-              return (
-                <li key={project.projectId} className="rounded-lg border p-3">
-                  <p className="break-words text-sm font-medium">{project.title}</p>
-                  <p className="mt-1 break-words text-xs text-muted-foreground">
-                    {outcome
-                      ? `${OUTCOME_LABELS[outcome.status]}: ${outcome.path ?? outcome.reason}`
-                      : project.reason}
-                  </p>
-                </li>
-              );
-            })}
-          </ul>
-          {previews && shown?.length === 0 ? (
-            <p className="text-sm">Every project already has an icon.</p>
-          ) : null}
+            {running && currentTitle ? (
+              <p role="status" className="text-sm">
+                The agent is checking {currentTitle}…
+              </p>
+            ) : null}
+            {error ? (
+              <p role="alert" className="text-sm text-destructive">
+                {error}
+              </p>
+            ) : null}
+            {connectionLost ? (
+              <p role="alert" className="text-sm text-destructive">
+                The connection to this environment dropped. Projects not yet started will not run.
+              </p>
+            ) : null}
+            <ul className="space-y-3">
+              {shown?.map((project) => {
+                const outcome = outcomes.get(project.projectId);
+                return (
+                  <li key={project.projectId} className="rounded-lg border p-3">
+                    <p className="break-words text-sm font-medium">{project.title}</p>
+                    <p className="mt-1 break-words text-xs text-muted-foreground">
+                      {outcome
+                        ? `${OUTCOME_LABELS[outcome.status]}: ${outcome.path ?? outcome.reason}`
+                        : project.reason}
+                    </p>
+                  </li>
+                );
+              })}
+            </ul>
+            {previews && shown?.length === 0 ? (
+              <p className="text-sm">Every project already has an icon.</p>
+            ) : null}
+          </div>
         </DialogPanel>
         <DialogFooter>
           {running ? (

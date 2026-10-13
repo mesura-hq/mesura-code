@@ -38,7 +38,6 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { ThreadId } from "@t3tools/contracts";
 import { collectAssistantCitations } from "@t3tools/shared/assistantCitations";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { Thread } from "./types";
 
 // The boundaries the fixture replaces: see `test/appRootFenceMocks.tsx`.
 const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
@@ -150,6 +149,7 @@ afterEach(async () => {
   router = undefined;
   container.remove();
   fixture.threads.clear();
+  fixture.threadStates.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -294,20 +294,19 @@ describe("cursor memory fence: the chat cursor per thread", () => {
 
     // Thread A comes back without the remembered row: the cursor falls back
     // to the first visible line, and `h` there moves nothing.
-    const original = fixture.threads.get(threadA)!;
-    fixture.threads.set(threadA, {
-      ...original,
-      messages: [
-        original.messages[0]!,
-        makeMessage(`${threadA}-replacement`, "assistant", "A replacement reply."),
-      ],
-    } as Thread);
+    const originalShell = fixture.threads.get(threadA)!;
+    const originalState = fixture.threadStates.get(threadA)!;
+    addFenceThread(threadA, originalShell.title, [
+      makeMessage(`${threadA}-user`, "user", "Question for A"),
+      makeMessage(`${threadA}-replacement`, "assistant", "A replacement reply."),
+    ]);
     await openThread(threadA);
     await press(key("h"));
     expect(paintedCursor()?.text).toBe("A replacement reply.");
 
     // The remembered row mounts again.
-    fixture.threads.set(threadA, original);
+    fixture.threads.set(threadA, originalShell);
+    fixture.threadStates.set(threadA, originalState);
     await act(async () => {
       for (const listener of fixture.threadListeners) listener();
     });

@@ -21,18 +21,8 @@ describe("isResumeCompactionOffered", () => {
     );
   });
 
-  it("reads the default instance from the legacy providers bucket", () => {
+  it("reads each Claude instance's own config", () => {
     const settings = decodeServerSettings({
-      providers: { claudeAgent: { offerResumeCompaction: false } },
-    });
-    expect(isResumeCompactionOffered(settings, null)).toBe(false);
-    expect(isResumeCompactionOffered(settings, CLAUDE_DEFAULT_INSTANCE_ID)).toBe(false);
-    expect(isResumeCompactionOffered(settings, CLAUDE_CUSTOM_INSTANCE_ID)).toBe(true);
-  });
-
-  it("prefers the instance's own config over the legacy bucket", () => {
-    const settings = decodeServerSettings({
-      providers: { claudeAgent: { offerResumeCompaction: false } },
       providerInstances: {
         claudeAgent: claudeInstance({}),
         claude_work: claudeInstance({ offerResumeCompaction: false }),

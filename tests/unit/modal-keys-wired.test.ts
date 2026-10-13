@@ -46,25 +46,24 @@ const isWordCharacter = (character: string | undefined) =>
  * apostrophe in JSX text spoils at most its own line.
  */
 function canonicalize(source: string): CanonicalSource {
-  let text = "";
+  const characters: string[] = [];
   const inLiteral: boolean[] = [];
   let pendingSpace = false;
   const emit = (character: string, literal: boolean) => {
-    if (pendingSpace && isWordCharacter(text.at(-1)) && isWordCharacter(character)) {
-      text += " ";
+    if (pendingSpace && isWordCharacter(characters.at(-1)) && isWordCharacter(character)) {
+      characters.push(" ");
       inLiteral.push(false);
     }
     pendingSpace = false;
-    text += character;
+    characters.push(character);
     inLiteral.push(literal);
   };
-  // The canonical text never ends in whitespace, so its last character is the
-  // previous token's. Reads only the tail: a whole-text copy per `/` made the
-  // largest sources take seconds.
+  // Read the array tail and join once. Reading a growing concatenated string
+  // repeatedly flattens it and makes large sources such as ChatView quadratic.
   const regexMayStart = () =>
-    text === "" ||
-    "(,=:[!&|?{};".includes(text.at(-1)!) ||
-    (text.endsWith("return") && !isWordCharacter(text.at(-7)));
+    characters.length === 0 ||
+    "(,=:[!&|?{};".includes(characters.at(-1)!) ||
+    (characters.slice(-6).join("") === "return" && !isWordCharacter(characters.at(-7)));
 
   let index = 0;
   while (index < source.length) {
@@ -114,7 +113,7 @@ function canonicalize(source: string): CanonicalSource {
       index += 1;
     }
   }
-  return { text, inLiteral };
+  return { text: characters.join(""), inLiteral };
 }
 
 /** A fragment in the same canonical form as the sources it is searched in. */
@@ -536,7 +535,12 @@ const countOf = (source: string, fragment: string) => source.split(tokens(fragme
 
 it("modal keys seam guard round 2: the sidebar numbers and jumps to the threads on screen", () => {
   const file = "apps/web/src/components/Sidebar.tsx";
-  assertCallCarries(file, "useViewportThreadKeys", ["showThreadJumpHints"]);
+  assert.include(
+    read(file),
+    tokens("showThreadJumpHints: showJumpHints"),
+    "the viewport keys no longer use the visibility state for jump hints",
+  );
+  assertCallCarries(file, "useViewportThreadKeys", ["showJumpHints"]);
   assert.include(
     read(file),
     tokens("(viewportThreadKeys ?? orderedThreadKeys).entries()"),
@@ -651,10 +655,14 @@ it("modal keys seam guard round 2: the panel launcher takes its keys, opens on +
     tokens("dismissPanelLauncher()"),
     "Escape no longer dismisses the launcher",
   );
+  // The clicked panel must own the launcher when several panels are mounted.
+  const addButton = region(source, 'aria-label="Add panel surface"', "</Button>", file);
   assert.include(
-    source,
-    tokens("onClick={openPanelLauncher}"),
-    "the + button no longer opens the panel launcher",
+    addButton,
+    tokens(
+      'onClick={() => openPanelLauncher(tabListRef.current?.closest("[data-preview-panel-mode]"))}',
+    ),
+    "the + button no longer opens its panel's launcher",
   );
   // The overlay is drawn in the branch with open tabs, which stay mounted under it.
   const shown = region(source, "{props.children}", "</>", file);
@@ -672,7 +680,13 @@ it("modal keys seam guard round 2: the panel launcher takes its keys, opens on +
 it("modal keys seam guard round 2: launcher rows close the launcher and keep focus in the panel", () => {
   const file = "apps/web/src/components/RightPanelTabs.tsx";
   const source = read(file);
-  const runAction = region(source, "const runAction = (action: SurfaceAction) =>", "};", file);
+  // REGRESSION: The old seam named the removed focus helper and missed the keyboard-aware launcher path.
+  const runAction = region(
+    source,
+    "const runAction = (action: SurfaceAction, keyboard: boolean) =>",
+    "const panelActions =",
+    file,
+  );
   // The panel is read before the launcher closes, which can unmount the row.
   assert.include(
     runAction,
@@ -682,7 +696,7 @@ it("modal keys seam guard round 2: launcher rows close the launcher and keep foc
   for (const fragment of [
     "closePanelLauncher()",
     "action.onClick()",
-    "if (panel) keepFocusInPanelAfterRender(panel)",
+    "if (panel) activatePanelSurfaceFromLauncher(panel, activate, keyboard)",
   ]) {
     assert.include(runAction, tokens(fragment), `runAction lost ${fragment}`);
   }
@@ -697,7 +711,7 @@ it("modal keys seam guard round 2: launcher rows close the launcher and keep foc
   for (const fragment of [
     "runPanelLauncherAction(chosen)",
     "reportUnavailable(chosen.label, chosen.disabledReason)",
-    "current.runAction(chosen)",
+    "current.runAction(chosen, true)",
   ]) {
     assert.include(letters, tokens(fragment), `the launcher's letter handler lost ${fragment}`);
   }
@@ -707,9 +721,13 @@ it("modal keys seam guard round 2: launcher rows close the launcher and keep foc
     "onClick: () => props.onAddBrowserInProfile(profile.id)",
   ]);
   const enter = region(source, 'if (event.key === "Enter")', 'if (event.key === "Escape"', file);
-  assert.include(enter, tokens("runAction(action)"), "Enter on the launcher bypasses runAction");
+  assert.include(
+    enter,
+    tokens("runAction(action, true)"),
+    "Enter on the launcher bypasses runAction",
+  );
   for (const fragment of [
-    "onClick={() => runAction(action)}",
+    "onClick={(event) => runAction(action, isPanelSurfaceKeyboardActivation(event))}",
     "onClick={() => reportUnavailable(action.label, action.disabledReason)}",
   ]) {
     assert.include(source, tokens(fragment), `a launcher row lost ${fragment}`);
@@ -741,16 +759,34 @@ it("modal keys seam guard round 2: the launcher answers every letter and shows w
   for (const fragment of [
     "panelActions?: readonly PanelLauncherAction[];",
     "const panelActions = props.panelActions ?? [];",
-    "useRef({ actions, runAction, panelActions })",
-    "shortcutActionsRef.current = { actions, runAction, panelActions };",
+    "useRef({ actions, runAction, panelActions, panelOpen: props.panelOpen, })",
+    "const launcherOpen = props.launcherOpen;",
     "rootRef.current = node;",
   ]) {
     assert.include(source, tokens(fragment), `the launcher lost ${fragment}`);
   }
+  // Update the capture handler before layout completes, so retained closing
+  // content cannot read the previous open state and consume launcher keys.
+  const currentActions = blockAfter(source, "useLayoutEffect(() =>", file);
+  assert.include(
+    currentActions,
+    tokens(
+      "shortcutActionsRef.current = { actions, runAction, panelActions, panelOpen: props.panelOpen };",
+    ),
+    "the launcher's layout effect no longer updates its current actions and panel state",
+  );
+  // Global open state let unrelated panels display the same launcher. The
+  // tab bar now reads owner-scoped state and passes it to both launcher mounts.
+  assertCallCarries(file, "usePanelLauncherOwner", ["tabListRef", "props.open !== false"]);
   assert.equal(
-    countOf(source, "usePanelLauncherOpen()"),
+    countOf(source, "launcherOpen={launcherOpen}"),
     2,
-    "the launcher or the tab bar no longer reads whether the launcher is open",
+    "the empty panel or the overlay no longer reads its owner's launcher state",
+  );
+  assert.equal(
+    countOf(source, "panelOpen={props.open !== false}"),
+    2,
+    "the empty panel or the overlay no longer reads whether its panel is open",
   );
   // Unavailable rows and Panel actions answer their letters; a key the page
   // already took is left alone.
@@ -762,8 +798,10 @@ it("modal keys seam guard round 2: the launcher answers every letter and shows w
   );
   for (const fragment of [
     "if (event.defaultPrevented) return false;",
+    "const current = shortcutActionsRef.current;",
     "current.actions.map((entry) => ({ ...entry, available: true }))",
     "current.panelActions.map((entry) => ({ ...entry, available: true }))",
+    'isPanelLauncherKeyboardAvailable(current.panelOpen, rootRef.current?.closest("[data-preview-panel-mode]"),)',
   ]) {
     assert.include(letters, tokens(fragment), `the launcher's letter handler lost ${fragment}`);
   }
@@ -844,13 +882,35 @@ it("modal keys seam guard round 2: the launcher answers every letter and shows w
         .toSorted(),
     );
   assert.lengthOf(launchers, 2, "RightPanelTabs no longer renders the empty panel and the overlay");
-  assert.isAtLeast(launchers[0]!.length, 20, "the empty panel's launcher lost its props");
   assert.deepEqual(
     launchers[1],
     launchers[0],
     "the launcher over the tabs and the empty panel's launcher take different props",
   );
-  for (const prop of ["onAddFactory", "browserProfiles", "liveAgentCount", "panelActions"]) {
+  // Upstream removed the Agents surface and liveAgentCount. Keep each surviving
+  // surface action and availability prop explicit so dropping both launchers
+  // at once cannot hide a missing seam.
+  for (const prop of [
+    "onAddBrowser",
+    "onAddBrowserInProfile",
+    "browserProfiles",
+    "onAddTerminal",
+    "onAddDiff",
+    "onAddFiles",
+    "onAddPullRequest",
+    "onAddPullRequests",
+    "onAddIssues",
+    "onAddDevice",
+    "onAddFactory",
+    "browserAvailable",
+    "terminalAvailable",
+    "diffAvailable",
+    "filesAvailable",
+    "pullRequestAvailable",
+    "pullRequestsAvailable",
+    "deviceAvailable",
+    "panelActions",
+  ]) {
     assert.isTrue(
       launchers[0]!.some((attribute) => attribute.startsWith(`${prop}=`)),
       `the launchers lost ${prop}`,
@@ -936,7 +996,8 @@ it("modal keys seam guard round 2: the Diff panel and its file tree are pane ent
 it("modal keys seam guard round 2: every panel surface keeps its pane entries", () => {
   // File, the attribute value, and how many entries it renders.
   const entries: ReadonlyArray<readonly [string, string, number]> = [
-    ["apps/web/src/components/AgentsPanel.tsx", 'data-pane-entry="1"', 2],
+    // Upstream deliberately removed the Agents surface in v0.0.46. Its pane
+    // entries have no production surface to focus; retain all other surfaces.
     ["apps/web/src/components/pullRequest/ThreadPullRequestsPanel.tsx", 'data-pane-entry="1"', 2],
     ["apps/web/src/components/pullRequest/PullRequestDetailPanel.tsx", 'data-pane-entry="1"', 1],
     ["apps/web/src/components/pullRequest/PullRequestCodeTab.tsx", 'data-pane-entry="2"', 1],
@@ -949,10 +1010,7 @@ it("modal keys seam guard round 2: every panel surface keeps its pane entries", 
   });
   assert.deepEqual(lost, [], "a panel surface lost a keyboard entry");
   // An empty state has no scroll region to focus, so it is focusable itself.
-  for (const file of [
-    "apps/web/src/components/AgentsPanel.tsx",
-    "apps/web/src/components/pullRequest/ThreadPullRequestsPanel.tsx",
-  ]) {
+  for (const file of ["apps/web/src/components/pullRequest/ThreadPullRequestsPanel.tsx"]) {
     const source = read(file);
     const at = source.indexOf(tokens('data-pane-entry="1"'));
     const element = source.slice(source.lastIndexOf("<", at), source.indexOf(">", at));

@@ -19,7 +19,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { useNavigate } from "@tanstack/react-router";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { RotateCcwIcon, SparklesIcon } from "lucide-react";
 import {
   type KeyboardEvent,
@@ -92,10 +92,12 @@ export function handleThreadSearchModeKey(
 /** The hint that tells the user Tab changes the search mode. */
 export function ThreadSearchModeHint(props: { readonly target: string }) {
   return (
-    <KbdGroup className="items-center gap-1.5">
-      <Kbd>Tab</Kbd>
+    <span className="inline-flex items-center gap-1.5">
+      <KbdGroup>
+        <Kbd>Tab</Kbd>
+      </KbdGroup>
       <span>{props.target}</span>
-    </KbdGroup>
+    </span>
   );
 }
 
@@ -308,7 +310,7 @@ export function AgentThreadSearch(props: {
           },
         }}
         mode="none"
-        panelClassName="max-h-[min(34rem,76vh)]"
+        panelSize="tall-list"
         testId="thread-search-picker"
         value={draft}
         onItemHighlighted={(value) => {
@@ -435,12 +437,12 @@ function AgentConversation(props: {
   return (
     <div className="flex flex-col gap-3 px-3 pt-3 pb-2 text-sm">
       <div className="flex items-center justify-between gap-3 border-b border-border/50 pb-2">
-        <span className="text-[11px] font-medium tracking-[0.12em] text-muted-foreground uppercase">
+        <span className="text-search-label font-medium tracking-search-label text-muted-foreground uppercase">
           Search conversation
         </span>
         <Button
           aria-label="Start a new agent search"
-          className="h-6 gap-1.5 px-2 text-xs"
+          size="toolbar"
           variant="ghost"
           onClick={props.onReset}
         >

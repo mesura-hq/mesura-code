@@ -2,7 +2,7 @@ import { FactoryReadSnapshotError, isFactorySnapshotDigest } from "@t3tools/cont
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
-import * as Encoding from "effect/Encoding";
+import * as Hex from "effect/encoding/Hex";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -47,7 +47,7 @@ const make = Effect.gen(function* () {
 
   const put = Effect.fn("FactorySnapshotStore.put")(
     function* (bytes: Uint8Array) {
-      const digest = yield* crypto.digest("SHA-256", bytes).pipe(Effect.map(Encoding.encodeHex));
+      const digest = yield* crypto.digest("SHA-256", bytes).pipe(Effect.map(Hex.encode));
       const target = path.join(directory, digest);
       if (yield* fileSystem.exists(target)) return digest;
       // Created on first use: a server that never sees a plan keeps no empty directory.

@@ -1,11 +1,13 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
 import { createModelSelection } from "@t3tools/shared/model";
 import { expect } from "vite-plus/test";
 
@@ -19,7 +21,7 @@ import {
 
 import * as ServerConfig from "../config.ts";
 import { makeCodexTextGeneration } from "./CodexTextGeneration.ts";
-import { writeFakeCli } from "../testUtils/fakeCli.ts";
+import { writeFakeCli } from "@t3tools/provider-testing/fakeCli";
 import {
   THREAD_SEARCH_BROADEN_MODEL_OUTPUT,
   THREAD_SEARCH_BROADEN_STEP,
@@ -30,7 +32,8 @@ import {
   THREAD_SEARCH_STEP_REQUEST,
   THREAD_SEARCH_QUOTED_EXCERPT,
   THREAD_SEARCH_STEP_EXCERPT,
-} from "./ThreadSearchStep.testFixtures.ts";
+  THREAD_SEARCH_STEP_CWD,
+} from "@t3tools/provider-testing/threadSearchStep";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
 const DEFAULT_TEST_MODEL_SELECTION = createModelSelection(
@@ -38,7 +41,7 @@ const DEFAULT_TEST_MODEL_SELECTION = createModelSelection(
   "gpt-5.4-mini",
 );
 
-const CodexTextGenerationTestLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
+const layerCodexTextGenerationTest = ServerConfig.ServerConfig.layerTest(process.cwd(), {
   prefix: "t3code-codex-text-generation-test-",
 }).pipe(Layer.provideMerge(NodeServices.layer));
 
@@ -181,6 +184,7 @@ function withFakeCodexEnv<A, E, R>(
     launchArgs?: string;
     environment?: NodeJS.ProcessEnv;
     models?: ReadonlyArray<string>;
+    managedRuntime?: boolean;
   },
   effectFn: (
     textGeneration: Effect.Success<ReturnType<typeof makeCodexTextGeneration>>,
@@ -193,7 +197,7 @@ function withFakeCodexEnv<A, E, R>(
     const config = decodeCodexSettings({ binaryPath: codexPath, launchArgs: input.launchArgs });
     const textGeneration = yield* makeCodexTextGeneration(
       config,
-      input.environment,
+      input.environment === undefined ? undefined : { ...process.env, ...input.environment },
       Effect.succeed(
         (input.models ?? []).map((slug) => ({
           slug,
@@ -202,14 +206,22 @@ function withFakeCodexEnv<A, E, R>(
           capabilities: null,
         })),
       ),
+      input.managedRuntime
+        ? Effect.succeed({
+            config,
+            environment: input.environment ?? process.env,
+            revision: "test",
+          })
+        : undefined,
     );
     return yield* effectFn(textGeneration);
   }).pipe(Effect.scoped);
 }
 
-it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
-  for (const selectedModel of ["gpt-5.6-luna", "openai.gpt-5.6-luna"]) {
-    it.effect(`dispatches the qualified live model for ${selectedModel}`, () =>
+it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
+  it.effect.each(["gpt-5.6-luna", "openai.gpt-5.6-luna"])(
+    "dispatches the qualified live model for %s",
+    (selectedModel) =>
       withFakeCodexEnv(
         {
           output: JSON.stringify({ title: "Bedrock title" }),
@@ -227,8 +239,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
             expect(result.title).toBe("Bedrock title");
           }),
       ),
-    );
-  }
+  );
   it.effect("generates and sanitizes commit messages without branch by default", () =>
     withFakeCodexEnv(
       {
@@ -282,6 +293,26 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
             ]),
           }),
       ),
+  );
+
+  it.effect("omits a persisted service tier for managed ChatGPT text generation", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({ subject: "Update project", body: "" }),
+        managedRuntime: true,
+        forbidArg: 'service_tier="priority"',
+      },
+      (textGeneration) =>
+        textGeneration.generateCommitMessage({
+          cwd: process.cwd(),
+          branch: "feature/chatgpt",
+          stagedSummary: "M README.md",
+          stagedPatch: "diff --git a/README.md b/README.md",
+          modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.4", [
+            { id: "serviceTier", value: "priority" },
+          ]),
+        }),
+    ),
   );
 
   it.effect("passes exec-safe launch args into codex exec", () =>
@@ -420,6 +451,76 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
           });
 
           expect(generated.branch).toBe("feat/session");
+        }),
+    ),
+  );
+
+  it.effect.each([
+    {
+      mode: "static",
+      output: "Add Search",
+      expected: "team/add-search",
+      instruction: "without a prefix or namespace",
+    },
+    {
+      mode: "semantic",
+      output: "feat/add-search",
+      expected: "feat/add-search",
+      instruction: "semantic prefix",
+    },
+    {
+      mode: "custom",
+      output: "Julius/ABC-123.v2",
+      expected: "Julius/ABC-123.v2",
+      instruction: "Preserve the issue ID and capitalization.",
+    },
+  ] as const)("generates a branch using $mode naming", (example) =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({ branch: example.output }),
+        stdinMustContain: example.instruction,
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const generated = yield* textGeneration.generateBranchName({
+            cwd: process.cwd(),
+            message: "Add search",
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            naming: {
+              mode: example.mode,
+              prefix: "team/",
+              instructions: "Preserve the issue ID and capitalization.",
+            },
+          });
+          expect(generated.branch).toBe(example.expected);
+        }),
+    ),
+  );
+
+  it.effect("generates branch names even when the ambient scope is already closed", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({
+          branch: "feat/background-generation",
+        }),
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          // Background fibers (e.g. the worktree branch rename fork) can run
+          // after their launching request's scope has closed; temp files must
+          // not be tied to that ambient scope or they are reaped on creation.
+          const closedScope = yield* Scope.make();
+          yield* Scope.close(closedScope, Exit.void);
+
+          const generated = yield* textGeneration
+            .generateBranchName({
+              cwd: process.cwd(),
+              message: "Please update session handling.",
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            })
+            .pipe(Effect.provideService(Scope.Scope, closedScope));
+
+          expect(generated.branch).toBe("feat/background-generation");
         }),
     ),
   );
@@ -604,7 +705,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
                   }),
                 ),
               ),
-              Effect.ensuring(fs.remove(imagePath).pipe(Effect.catch(() => Effect.void))),
+              Effect.ensuring(fs.remove(imagePath).pipe(Effect.ignore)),
             );
 
           expect(generated.branch).toBe("fix/ui-regression");
@@ -627,7 +728,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
           const { attachmentsDir } = yield* ServerConfig.ServerConfig;
           const missingAttachmentId = "thread-missing-attachment";
           const missingPath = path.join(attachmentsDir, `${missingAttachmentId}.png`);
-          yield* fs.remove(missingPath).pipe(Effect.catch(() => Effect.void));
+          yield* fs.remove(missingPath).pipe(Effect.ignore);
 
           const result = yield* textGeneration
             .generateBranchName({
@@ -715,8 +816,9 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
 
   // Guard: every Codex text-generation task already runs as an ephemeral,
   // read-only exec. The thread search step must inherit that isolation.
-  for (const isolationArg of ["--ephemeral", "-s read-only"]) {
-    it.effect(`keeps existing Codex thread titles isolated with ${isolationArg}`, () =>
+  it.effect.each(["--ephemeral", "-s read-only"])(
+    "keeps existing Codex thread titles isolated with %s",
+    (isolationArg) =>
       withFakeCodexEnv(
         { output: JSON.stringify({ title: "Isolated title" }), requireArg: isolationArg },
         (textGeneration) =>
@@ -729,12 +831,12 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
             expect(generated.title).toBe("Isolated title");
           }),
       ),
-    );
-  }
+  );
 
   // Agent thread search, phase 2.
-  for (const requiredArg of ["--ephemeral", "-s read-only", "--model gpt-5.4-mini"]) {
-    it.effect(`Codex answers a schema-checked thread search step with ${requiredArg}`, () =>
+  it.effect.each(["--ephemeral", "-s read-only", "--model gpt-5.4-mini"])(
+    "Codex answers a schema-checked thread search step with %s",
+    (requiredArg) =>
       withFakeCodexEnv(
         {
           output: THREAD_SEARCH_FINISH_MODEL_OUTPUT,
@@ -747,19 +849,20 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
           Effect.gen(function* () {
             const step = yield* textGeneration.generateThreadSearchStep({
               ...THREAD_SEARCH_STEP_REQUEST,
+              cwd: THREAD_SEARCH_STEP_CWD,
               modelSelection: DEFAULT_TEST_MODEL_SELECTION,
             });
             expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
           }),
       ),
-    );
-  }
+  );
 
   it.effect("Codex answers a broaden thread search step with its new terms", () =>
     withFakeCodexEnv({ output: THREAD_SEARCH_BROADEN_MODEL_OUTPUT }, (textGeneration) =>
       Effect.gen(function* () {
         const step = yield* textGeneration.generateThreadSearchStep({
           ...THREAD_SEARCH_STEP_REQUEST,
+          cwd: THREAD_SEARCH_STEP_CWD,
           modelSelection: DEFAULT_TEST_MODEL_SELECTION,
         });
         expect(step).toEqual(THREAD_SEARCH_BROADEN_STEP);
@@ -767,33 +870,33 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
     ),
   );
 
-  for (const [label, output] of [
+  // Effect each passes the whole case first and TestContext second; destructure tuple cases.
+  it.effect.each([
     ["a write action", THREAD_SEARCH_FORBIDDEN_MODEL_OUTPUT],
     ["an inspect step without candidates", THREAD_SEARCH_EMPTY_INSPECT_MODEL_OUTPUT],
     ["non-JSON text", "I could not find it."],
-  ] as const) {
-    it.effect(`Codex rejects ${label} as a thread search step`, () =>
-      withFakeCodexEnv({ output }, (textGeneration) =>
-        Effect.gen(function* () {
-          const error = yield* textGeneration
-            .generateThreadSearchStep({
-              ...THREAD_SEARCH_STEP_REQUEST,
-              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
-            })
-            .pipe(Effect.flip);
-          expect(error).toBeInstanceOf(TextGenerationError);
-          expect(error.operation).toBe("generateThreadSearchStep");
-          expect(error.message).toMatch(/invalid structured output/i);
-        }),
-      ),
-    );
-  }
+  ] as const)("Codex rejects %s as a thread search step", ([_label, output]) =>
+    withFakeCodexEnv({ output }, (textGeneration) =>
+      Effect.gen(function* () {
+        const error = yield* textGeneration
+          .generateThreadSearchStep({
+            ...THREAD_SEARCH_STEP_REQUEST,
+            cwd: THREAD_SEARCH_STEP_CWD,
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          })
+          .pipe(Effect.flip);
+        expect(error).toBeInstanceOf(TextGenerationError);
+        expect(error.operation).toBe("generateThreadSearchStep");
+        expect(error.message).toMatch(/invalid structured output/i);
+      }),
+    ),
+  );
 
   // Review P1-1: search reasoning must not reach Codex tools. The user's
   // config.toml (MCP servers, plugins, profiles) and exec rules are skipped,
   // every tool feature is disabled (disable wins over any --enable), and an
   // MCP server injected through launch args is dropped for this operation.
-  for (const isolationArg of [
+  it.effect.each([
     "--ignore-user-config",
     "--ignore-rules",
     "--disable shell_tool",
@@ -813,21 +916,20 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
     // rest on these two; they follow launch args so those cannot relax them.
     '--config sandbox_mode="read-only"',
     '--config approval_policy="never"',
-  ]) {
-    it.effect(`Codex runs a thread search step without tools: ${isolationArg}`, () =>
-      withFakeCodexEnv(
-        { output: THREAD_SEARCH_FINISH_MODEL_OUTPUT, requireArg: isolationArg },
-        (textGeneration) =>
-          Effect.gen(function* () {
-            const step = yield* textGeneration.generateThreadSearchStep({
-              ...THREAD_SEARCH_STEP_REQUEST,
-              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
-            });
-            expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
-          }),
-      ),
-    );
-  }
+  ])("Codex runs a thread search step without tools: %s", (isolationArg) =>
+    withFakeCodexEnv(
+      { output: THREAD_SEARCH_FINISH_MODEL_OUTPUT, requireArg: isolationArg },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const step = yield* textGeneration.generateThreadSearchStep({
+            ...THREAD_SEARCH_STEP_REQUEST,
+            cwd: THREAD_SEARCH_STEP_CWD,
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          });
+          expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
+        }),
+    ),
+  );
 
   it.effect("Codex drops launch-arg MCP servers from a thread search step", () =>
     withFakeCodexEnv(
@@ -840,6 +942,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
         Effect.gen(function* () {
           const step = yield* textGeneration.generateThreadSearchStep({
             ...THREAD_SEARCH_STEP_REQUEST,
+            cwd: THREAD_SEARCH_STEP_CWD,
             modelSelection: DEFAULT_TEST_MODEL_SELECTION,
           });
           expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
@@ -858,6 +961,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
         Effect.gen(function* () {
           const step = yield* textGeneration.generateThreadSearchStep({
             ...THREAD_SEARCH_STEP_REQUEST,
+            cwd: THREAD_SEARCH_STEP_CWD,
             modelSelection: DEFAULT_TEST_MODEL_SELECTION,
           });
           expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
@@ -886,31 +990,28 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
     ),
   );
 
-  for (const inlineOverride of [
+  it.effect.each([
     "--config=mcp_servers.writer.command=writer-tool",
     "-c=mcp_servers.writer.command=writer-tool",
     "--config mcp_servers.writer.enabled=true",
-  ]) {
-    it.effect(
-      `Codex drops the launch-arg MCP override ${inlineOverride} from a thread search step`,
-      () =>
-        withFakeCodexEnv(
-          {
-            output: THREAD_SEARCH_FINISH_MODEL_OUTPUT,
-            launchArgs: inlineOverride,
-            forbidArg: inlineOverride,
-          },
-          (textGeneration) =>
-            Effect.gen(function* () {
-              const step = yield* textGeneration.generateThreadSearchStep({
-                ...THREAD_SEARCH_STEP_REQUEST,
-                modelSelection: DEFAULT_TEST_MODEL_SELECTION,
-              });
-              expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
-            }),
-        ),
-    );
-  }
+  ])("Codex drops the launch-arg MCP override %s from a thread search step", (inlineOverride) =>
+    withFakeCodexEnv(
+      {
+        output: THREAD_SEARCH_FINISH_MODEL_OUTPUT,
+        launchArgs: inlineOverride,
+        forbidArg: inlineOverride,
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const step = yield* textGeneration.generateThreadSearchStep({
+            ...THREAD_SEARCH_STEP_REQUEST,
+            cwd: THREAD_SEARCH_STEP_CWD,
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          });
+          expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
+        }),
+    ),
+  );
 
   // Real Codex reports `tools.view_image` as ignored and keeps the tool; the
   // search step must not rely on that override.
@@ -921,6 +1022,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
         Effect.gen(function* () {
           const step = yield* textGeneration.generateThreadSearchStep({
             ...THREAD_SEARCH_STEP_REQUEST,
+            cwd: THREAD_SEARCH_STEP_CWD,
             modelSelection: DEFAULT_TEST_MODEL_SELECTION,
           });
           expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
@@ -932,7 +1034,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
   // step must still resolve to a read-only sandbox, never-approve policy, and
   // no image tool: real codex-cli 0.156.0 then rejected every patch and
   // refused view_image through a local Responses endpoint.
-  for (const [label, hostileLaunchArgs] of [
+  it.effect.each([
     ["sandbox", "-c sandbox_mode=danger-full-access"],
     ["approval", "-c approval_policy=on-request"],
     ["image tool", "--enable view_image -c features.view_image=true"],
@@ -940,8 +1042,9 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
       "all at once",
       '--config=sandbox_mode="workspace-write" -c approval_policy=untrusted --enable view_image',
     ],
-  ] as const) {
-    it.effect(`Codex keeps thread search isolation against hostile launch args: ${label}`, () =>
+  ] as const)(
+    "Codex keeps thread search isolation against hostile launch args: %s",
+    ([_label, hostileLaunchArgs]) =>
       withFakeCodexEnv(
         {
           output: THREAD_SEARCH_FINISH_MODEL_OUTPUT,
@@ -953,13 +1056,13 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
           Effect.gen(function* () {
             const step = yield* textGeneration.generateThreadSearchStep({
               ...THREAD_SEARCH_STEP_REQUEST,
+              cwd: THREAD_SEARCH_STEP_CWD,
               modelSelection: DEFAULT_TEST_MODEL_SELECTION,
             });
             expect(step).toEqual(THREAD_SEARCH_FINISH_STEP);
           }),
       ),
-    );
-  }
+  );
 
   // Guard: the fixture itself sees hostile values when nothing overrides them,
   // so the isolation assertions above cannot pass vacuously.
@@ -1000,45 +1103,43 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
     path: "public/brand-logo.png",
     reason: "Brand mark.",
   });
-  for (const requiredArg of [
+  it.effect.each([
     `--model ${DEFAULT_TEXT_GENERATION_MODEL}`,
     "--ignore-user-config",
     "--disable shell_tool",
     "-s read-only",
-  ]) {
-    it.effect(`Codex selects a project icon with Luna and ${requiredArg}`, () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-codex-icon-" });
-        yield* fs.makeDirectory(path.join(root, "public"), { recursive: true });
-        yield* fs.writeFileString(path.join(root, "public/brand-logo.png"), "png");
-        yield* fs.writeFileString(path.join(root, "public/mark.svg"), "<svg id='brand-mark'/>");
-        return yield* withFakeCodexEnv(
-          {
-            output: PROJECT_ICON_MODEL_OUTPUT,
-            models: [DEFAULT_TEXT_GENERATION_MODEL],
-            requireArg: requiredArg,
-            requireImage: true,
-            requireReasoningEffort: "low",
-            stdinMustContain: "brand-mark",
-          },
-          (textGeneration) =>
-            Effect.gen(function* () {
-              const selection = yield* textGeneration.selectProjectIcon(
-                ProviderInstanceId.make("codex"),
-                {
-                  project: { id: ProjectId.make("icon"), title: "Icon", workspaceRoot: root },
-                  candidates: [
-                    { path: "public/brand-logo.png", bytes: 3 },
-                    { path: "public/mark.svg", bytes: 22 },
-                  ],
-                },
-              );
-              expect(selection).toEqual({ path: "public/brand-logo.png", reason: "Brand mark." });
-            }),
-        );
-      }).pipe(Effect.scoped),
-    );
-  }
+  ])("Codex selects a project icon with Luna and %s", (requiredArg) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-codex-icon-" });
+      yield* fs.makeDirectory(path.join(root, "public"), { recursive: true });
+      yield* fs.writeFileString(path.join(root, "public/brand-logo.png"), "png");
+      yield* fs.writeFileString(path.join(root, "public/mark.svg"), "<svg id='brand-mark'/>");
+      return yield* withFakeCodexEnv(
+        {
+          output: PROJECT_ICON_MODEL_OUTPUT,
+          models: [DEFAULT_TEXT_GENERATION_MODEL],
+          requireArg: requiredArg,
+          requireImage: true,
+          requireReasoningEffort: "low",
+          stdinMustContain: "brand-mark",
+        },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const selection = yield* textGeneration.selectProjectIcon(
+              ProviderInstanceId.make("codex"),
+              {
+                project: { id: ProjectId.make("icon"), title: "Icon", workspaceRoot: root },
+                candidates: [
+                  { path: "public/brand-logo.png", bytes: 3 },
+                  { path: "public/mark.svg", bytes: 22 },
+                ],
+              },
+            );
+            expect(selection).toEqual({ path: "public/brand-logo.png", reason: "Brand mark." });
+          }),
+      );
+    }).pipe(Effect.scoped),
+  );
 });

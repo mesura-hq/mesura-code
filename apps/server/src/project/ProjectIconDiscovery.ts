@@ -5,16 +5,15 @@
  * project creation, threads, turns, resets, restarts or replay reaches the
  * model. A request is claimed as a durable job on the project before the
  * worker runs it, the worker runs one model call at a time, and the outcome is
- * written back through the decider, which refuses to overwrite a project that
- * changed since the request. A restart marks unfinished jobs interrupted and
- * never retries them.
+ * committed through `ProjectService.commitIconDiscovery`, whose project
+ * commands refuse to overwrite a project that changed since the request. A
+ * restart marks unfinished jobs interrupted and never retries them.
  *
  * @module ProjectIconDiscovery
  */
 import {
   CommandId,
   ProjectIconDiscoveryError,
-  type OrchestrationCommand,
   type OrchestrationProjectShell,
   type ProjectIconDiscoverInput,
   type ProjectIconDiscoveryAccepted,
@@ -29,35 +28,36 @@ import {
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
-import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
-import { isProjectIconDiscoveryActive } from "../orchestration/projectIconDiscovery.ts";
-import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import type { ProviderInstance } from "../provider/ProviderDriver.ts";
-import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
+import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
+import type { ProjectIconDiscoveryCommand } from "../orchestration-v2/ProjectCommands.ts";
+import { isProjectIconDiscoveryActive } from "../orchestration-v2/projectIconDiscovery.ts";
+import { ProviderInstanceRegistry } from "../provider/ProviderInstanceRegistry.ts";
 import { ServerActivation } from "../serverActivation.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import {
-  collectProjectIconCandidates,
-  validateProjectIconCandidate,
-  type ProjectIconCandidate,
-} from "./ProjectIconCandidates.ts";
-import { ProjectFaviconResolver } from "./ProjectFaviconResolver.ts";
-import {
-  canRunProjectIconSelection,
-  PROJECT_ICON_SELECTION_MODEL,
   ProjectIconSelectionUnavailable,
   type ProjectIconSelection,
   type ProjectIconSelectionInput,
+} from "@t3tools/provider-core/server/projectIconSelection";
+import {
+  collectProjectIconCandidates,
+  type ProjectIconCandidate,
+  validateProjectIconCandidate,
+} from "./ProjectIconCandidates.ts";
+import { ProjectFaviconResolver } from "./ProjectFaviconResolver.ts";
+import * as ProjectService from "./ProjectService.ts";
+import {
+  canRunProjectIconSelection,
+  PROJECT_ICON_SELECTION_MODEL,
 } from "./ProjectIconSelection.ts";
 
-export { ProjectIconSelectionUnavailable } from "./ProjectIconSelection.ts";
+export { ProjectIconSelectionUnavailable } from "@t3tools/provider-core/server/projectIconSelection";
 
 export type ProjectIconSelector = (
   input: ProjectIconSelectionInput,
@@ -133,14 +133,11 @@ type WorkerItem =
       readonly generation: number;
     };
 
-const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
-
 export const makeProjectIconDiscovery = Effect.fn("ProjectIconDiscovery.make")(function* (options: {
   /** Fails with `ProjectIconSelectionUnavailable` when no instance can search. */
   readonly resolveSelector: Effect.Effect<ProjectIconSelector, ProjectIconSelectionUnavailable>;
 }) {
-  const engine = yield* OrchestrationEngineService;
-  const snapshots = yield* ProjectionSnapshotQuery;
+  const projects = yield* ProjectService.ProjectService;
   const resolver = yield* ProjectFaviconResolver;
   // Jobs this process claimed. The startup sweep leaves them alone.
   const claimed = new Set<CommandId>();
@@ -148,7 +145,7 @@ export const makeProjectIconDiscovery = Effect.fn("ProjectIconDiscovery.make")(f
   const enqueued = new Set<CommandId>();
 
   const readProject = (projectId: ProjectId) =>
-    snapshots.getProjectShellById(projectId).pipe(Effect.map(Option.getOrNull));
+    projects.getShell(projectId).pipe(Effect.map(Option.getOrNull));
 
   // The effective icon decides eligibility, not an earlier outcome: a custom
   // icon, then whatever the resolver displays (a saved path that still
@@ -203,7 +200,7 @@ export const makeProjectIconDiscovery = Effect.fn("ProjectIconDiscovery.make")(f
       ),
     );
 
-  const dispatch = (command: OrchestrationCommand) => engine.dispatch(command);
+  const dispatch = (command: ProjectIconDiscoveryCommand) => projects.commitIconDiscovery(command);
 
   /** The project while this job is still its current, running search; otherwise null. */
   const readCurrentJobProject = Effect.fn("ProjectIconDiscovery.readCurrentJobProject")(function* (
@@ -233,7 +230,6 @@ export const makeProjectIconDiscovery = Effect.fn("ProjectIconDiscovery.make")(f
       status,
       path,
       reason,
-      createdAt: yield* nowIso,
     });
   });
 
@@ -245,7 +241,6 @@ export const makeProjectIconDiscovery = Effect.fn("ProjectIconDiscovery.make")(f
       commandId: CommandId.make(`${job.jobToken}:start`),
       projectId: job.projectId,
       jobToken: job.jobToken,
-      createdAt: yield* nowIso,
     });
     // A reset or a moved root supersedes a queued job before it runs: such a
     // job ends here, before any model work.
@@ -312,8 +307,7 @@ export const makeProjectIconDiscovery = Effect.fn("ProjectIconDiscovery.make")(f
   const interruptUnfinished = Effect.fn("ProjectIconDiscovery.interruptUnfinished")(function* () {
     const activation = yield* ServerActivation;
     if (activation !== undefined) yield* activation;
-    const snapshot = yield* snapshots.getShellSnapshot();
-    for (const project of snapshot.projects) {
+    for (const project of yield* projects.listShells()) {
       const state = project.iconDiscovery;
       if (!state || !isProjectIconDiscoveryActive(state) || claimed.has(state.jobToken)) continue;
       yield* dispatch({
@@ -325,7 +319,6 @@ export const makeProjectIconDiscovery = Effect.fn("ProjectIconDiscovery.make")(f
         status: "interrupted",
         path: null,
         reason: "The server stopped before the search finished.",
-        createdAt: yield* nowIso,
       });
     }
   });
@@ -345,10 +338,11 @@ export const makeProjectIconDiscovery = Effect.fn("ProjectIconDiscovery.make")(f
   const preview = Effect.fn("ProjectIconDiscovery.preview")(function* (
     projectIds?: ReadonlyArray<ProjectId>,
   ) {
-    const snapshot = yield* snapshots.getShellSnapshot();
-    const requested = projectIds ? new Set(projectIds) : null;
+    const shells = yield* projects.listShells(
+      projectIds === undefined ? undefined : { projectIds },
+    );
     return yield* Effect.forEach(
-      snapshot.projects.filter((project) => requested === null || requested.has(project.id)),
+      shells,
       (project) =>
         inspect(project, false).pipe(
           Effect.map((inspection): ProjectIconDiscoveryPreview =>
@@ -389,15 +383,13 @@ export const makeProjectIconDiscovery = Effect.fn("ProjectIconDiscovery.make")(f
     // Marked before the request persists, so the startup sweep cannot
     // interrupt a job this process is about to own.
     claimed.add(input.requestId);
-    // The request ID is the command ID, so a transport retry is deduplicated
-    // by the engine's command receipts and joins the job it started.
-    yield* dispatch({
+    // The request ID is the command ID, so a transport retry joins the job it
+    // started: the request command keeps a job that is already pending.
+    const state = yield* dispatch({
       type: "project.icon-discovery.request",
       commandId: input.requestId,
       projectId: input.projectId,
-      createdAt: yield* nowIso,
     });
-    const state = (yield* readProject(input.projectId))?.iconDiscovery;
     if (!state) {
       return yield* new ProjectIconDiscoveryError({ detail: "The project no longer exists." });
     }

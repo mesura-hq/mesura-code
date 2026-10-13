@@ -27,7 +27,11 @@
  * - Environment, thread and project reads, RPC commands and unrelated chrome,
  *   as `AppRoot.pendingUserInput.test.tsx` does, and the diff highlighting
  *   worker pool, which happy-dom cannot start.
+ * - The HTTP session source, with explicit chat and file-read permissions.
+ *   The real scope checks and filesystem-access hooks remain mounted.
  */
+import { makeFenceThreadProjection, makeFenceThreadShell } from "./test/fenceThreadShell";
+import { EMPTY_ENVIRONMENT_THREAD_STATE } from "@t3tools/client-runtime/state/threads";
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
@@ -39,18 +43,24 @@ import {
 } from "@tanstack/react-router";
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vite-plus/test";
 import {
+  DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
   ProjectId,
-  ProviderInstanceId,
+  RunId,
   ThreadId,
   WS_METHODS,
   type GitWorkingTreeChange,
   type GitWorkingTreeChangesResult,
+  type ReviewDiffPreviewResult,
+  type ReviewDiffPreviewSourceKind,
+  type ServerConfig,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
-import { AsyncResult } from "effect/unstable/reactivity";
-import type { Thread } from "./types";
+import * as DateTime from "effect/DateTime";
+import * as Option from "effect/Option";
+import { AsyncResult } from "effect/reactivity";
 import type { AppRouter } from "./router";
+import { appRootFence, installFenceFontEvents, makeFenceSession } from "./test/appRootFenceMocks";
 
 type FixtureResult =
   | { readonly kind: "initial" }
@@ -58,7 +68,6 @@ type FixtureResult =
   | { readonly kind: "failure"; readonly message: string };
 
 const fixture = vi.hoisted(() => ({
-  thread: null as Thread | null,
   project: {
     id: "tree-diff-fence-project",
     environmentId: "tree-diff-fence-environment",
@@ -71,8 +80,6 @@ const fixture = vi.hoisted(() => ({
   // Commands succeed with nothing to report. With a project in the workspace the
   // composer refreshes providers and reads `providers` off the answer.
   noopCommand: async () => ({ _tag: "Success", value: { providers: [] } }),
-  empty: [],
-  threadListeners: new Set<() => void>(),
   /** Every fixture atom, so the query hook can tell them from real ones. */
   atoms: new WeakSet<object>(),
   /** One entry per read of a query or subscription: the request it stands for. */
@@ -83,6 +90,13 @@ const fixture = vi.hoisted(() => ({
   oneShotChanges: { kind: "initial" } as FixtureResult,
   vcsStatus: null as unknown,
   diffPreview: { kind: "initial" } as FixtureResult,
+  diffPreviewsByCwd: new Map<string, FixtureResult>(),
+  initialServerConfig: null as ServerConfig | null,
+  diffFileContentsInputs: [] as unknown[],
+  readDiffFileContents: async (input: unknown) => {
+    fixture.diffFileContentsInputs.push(input);
+    return fixture.noopCommand();
+  },
   runQuery: null as (() => Promise<unknown>) | null,
   environments: [
     {
@@ -114,20 +128,44 @@ const fixture = vi.hoisted(() => ({
   ],
 }));
 
+const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("@t3tools/client-runtime/state/session", async (original) => {
+  const actual = await (await fenceMocks()).mockRuntimeSession(original);
+  const { Atom } = await import("effect/reactivity");
+  const initialConfigValueAtom = Atom.family((environmentId: EnvironmentId) =>
+    Atom.make(() =>
+      fixture.initialServerConfig?.environment.environmentId === environmentId
+        ? fixture.initialServerConfig
+        : null,
+    ).pipe(Atom.setIdleTTL(0)),
+  );
+  return {
+    ...actual,
+    createEnvironmentSessionAtoms: (
+      ...args: Parameters<typeof actual.createEnvironmentSessionAtoms>
+    ) => ({ ...actual.createEnvironmentSessionAtoms(...args), initialConfigValueAtom }),
+  };
+});
+
 vi.mock("@t3tools/client-runtime/state/runtime", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@t3tools/client-runtime/state/runtime")>();
-  const { Atom, AsyncResult } = await import("effect/unstable/reactivity");
+  const { Atom, AsyncResult } = await import("effect/reactivity");
   const Cause = await import("effect/Cause");
   const { WS_METHODS: methods } = await import("@t3tools/contracts");
 
-  const resolve = (key: string) => {
+  const resolve = (key: string, input: unknown) => {
+    const cwd =
+      typeof input === "object" && input !== null && "cwd" in input && typeof input.cwd === "string"
+        ? input.cwd
+        : null;
     const result =
       key === methods.reviewSubscribeWorkingTreeChanges
         ? fixture.liveChanges
         : key === methods.reviewGetWorkingTreeChanges
           ? fixture.oneShotChanges
           : key === methods.reviewGetDiffPreview
-            ? fixture.diffPreview
+            ? ((cwd === null ? undefined : fixture.diffPreviewsByCwd.get(cwd)) ??
+              fixture.diffPreview)
             : key === "environment-data:vcs:status" && fixture.vcsStatus !== null
               ? ({ kind: "success", value: fixture.vcsStatus } as const)
               : ({ kind: "initial" } as const);
@@ -148,10 +186,10 @@ vi.mock("@t3tools/client-runtime/state/runtime", async (importOriginal) => {
       if (cached) return cached;
       const atom = Atom.make((get) => {
         fixture.requests.push({ key, input: target.input });
-        const listener = () => get.setSelf(resolve(key));
+        const listener = () => get.setSelf(resolve(key, target.input));
         fixture.listeners.add(listener);
         get.addFinalizer(() => fixture.listeners.delete(listener));
-        return resolve(key);
+        return resolve(key, target.input);
       });
       fixture.atoms.add(atom);
       cache.set(cacheKey, atom);
@@ -176,44 +214,35 @@ vi.mock("./state/query", async (importOriginal) => {
     ...actual,
     // Fixture atoms read for real; anything else reads as an idle, empty query.
     useEnvironmentQuery: (atom: Parameters<typeof actual.useEnvironmentQuery>[0]) =>
-      actual.useEnvironmentQuery(atom !== null && fixture.atoms.has(atom) ? atom : null),
+      actual.useEnvironmentQuery(
+        atom !== null && (fixture.atoms.has(atom) || appRootFence.queryAtoms.has(atom))
+          ? atom
+          : null,
+      ),
   };
 });
-vi.mock("./state/entities", async (importOriginal) => {
-  const { useSyncExternalStore } = await import("react");
-  const useFixtureThread = () =>
-    useSyncExternalStore(
-      (listener) => {
-        fixture.threadListeners.add(listener);
-        return () => {
-          fixture.threadListeners.delete(listener);
-        };
-      },
-      () => fixture.thread,
-    );
+vi.mock("./state/entities", async (original) => (await fenceMocks()).mockEntities(original));
+vi.mock("./state/environments", async (importOriginal) => {
+  const { DEFAULT_SERVER_SETTINGS } = await import("@t3tools/contracts");
+  const environments = fixture.environments.map((environment) => ({
+    ...environment,
+    serverConfig: {
+      ...environment.serverConfig,
+      settings: { ...DEFAULT_SERVER_SETTINGS, ...environment.serverConfig.settings },
+    },
+  }));
   return {
-    ...(await importOriginal<typeof import("./state/entities")>()),
-    useThread: useFixtureThread,
-    readThread: () => fixture.thread,
-    useThreadShell: useFixtureThread,
-    useThreadRefs: () => fixture.empty,
-    useProjects: () => fixture.empty,
-    // A file surface renders only inside a project's workspace.
-    useProject: () => fixture.project,
+    ...(await importOriginal<typeof import("./state/environments")>()),
+    useEnvironments: () => ({ environments, isReady: true }),
+    usePrimaryEnvironment: () => null,
   };
 });
-vi.mock("./state/environments", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./state/environments")>()),
-  useEnvironments: () => ({ environments: fixture.environments, isReady: true }),
-  usePrimaryEnvironment: () => null,
-}));
-vi.mock("./state/threads", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./state/threads")>();
-  const { EMPTY_ENVIRONMENT_THREAD_STATE } = await import("@t3tools/client-runtime/state/threads");
-  return { ...actual, useEnvironmentThread: () => EMPTY_ENVIRONMENT_THREAD_STATE };
-});
+vi.mock("./state/threads", async (original) => (await fenceMocks()).mockThreads(original));
 vi.mock("./state/use-atom-command", () => ({
-  useAtomCommand: () => fixture.noopCommand,
+  useAtomCommand: (command: unknown) =>
+    command === reviewEnvironment.diffFileContents
+      ? fixture.readDiffFileContents
+      : fixture.noopCommand,
 }));
 vi.mock("./state/use-atom-query-runner", () => ({
   // One-shot reads, such as Tree diff's refresh, answer from `fixture.runQuery` when set.
@@ -236,16 +265,7 @@ vi.mock("./hooks/useHandleNewThread", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./hooks/useHandleNewThread")>()),
   useNewThreadHandler: () => fixture.noopCommand,
 }));
-vi.mock("./hooks/useThreadActions", () => ({
-  useThreadActions: () => ({
-    settleThread: fixture.noopCommand,
-    pinThread: fixture.noopCommand,
-    confirmAndUnpinThread: fixture.noopCommand,
-  }),
-}));
-vi.mock("./components/preview/PreviewAutomationHosts", () => ({
-  PreviewAutomationHosts: () => null,
-}));
+vi.mock("./hooks/useThreadActions", async () => (await fenceMocks()).mockThreadActions());
 vi.mock("./browser/ElectronBrowserHost", () => ({ ElectronBrowserHost: () => null }));
 vi.mock("./components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }));
 vi.mock("./components/chat/ChatHeader", () => ({ ChatHeader: () => null }));
@@ -258,24 +278,11 @@ vi.mock("./components/DiffWorkerPoolProvider", () => ({
   DiffWorkerPoolProvider: ({ children }: { children?: ReactNode }) => children,
 }));
 vi.mock("./components/BranchToolbar", () => ({ BranchToolbar: () => null }));
-vi.mock("@legendapp/list/react", () => ({
-  LegendList: ({
-    data,
-    renderItem,
-  }: {
-    data: Array<{ id: string }>;
-    renderItem: (input: { item: { id: string } }) => ReactNode;
-  }) => (
-    <div>
-      {data.map((item) => (
-        <div key={item.id}>{renderItem({ item })}</div>
-      ))}
-    </div>
-  ),
-}));
+vi.mock("@legendapp/list/react", async () => (await fenceMocks()).mockLegendList());
 
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { AppRoot } from "./AppRoot";
+import { reviewEnvironment } from "./state/review";
 import ChatView from "./components/ChatView";
 import { CommandPalette } from "./components/CommandPalette";
 import { useFileTreeShortcut } from "./components/files/mesuraTree/useFileTreeShortcut";
@@ -300,6 +307,7 @@ let root: Root | undefined;
 /** The mounted app's router, so a spec can navigate away from the thread and back. */
 let appRouter: { navigate: (options: { to: string }) => Promise<void> } | undefined;
 let container: HTMLDivElement;
+let restoreFontEvents: () => void;
 
 function change(
   path: string,
@@ -355,6 +363,7 @@ beforeAll(async () => {
 }, 120_000);
 
 beforeEach(() => {
+  restoreFontEvents = installFenceFontEvents();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   // A browser's ClipboardItem owns the promises it is given. Monaco hands it one
   // on every click and cancels it on the next; happy-dom's leaves it unhandled.
@@ -374,33 +383,32 @@ beforeEach(() => {
   fixture.requests.length = 0;
   fixture.runQuery = null;
   fixture.diffPreview = { kind: "initial" };
+  fixture.diffPreviewsByCwd.clear();
+  fixture.initialServerConfig = null;
+  fixture.diffFileContentsInputs.length = 0;
   fixture.liveChanges = { kind: "success", value: DIRTY };
   fixture.oneShotChanges = { kind: "success", value: DIRTY };
   fixture.vcsStatus = dirtyVcsStatus();
-  fixture.thread = {
-    id: threadId,
+  appRootFence.threads.clear();
+  appRootFence.threadStates.clear();
+  appRootFence.sessions.set(environmentId, makeFenceSession());
+  appRootFence.project = { ...appRootFence.project, ...fixture.project };
+  const shell = makeFenceThreadShell({
     environmentId,
+    id: threadId,
     projectId: ProjectId.make("tree-diff-fence-project"),
     title: "Tree diff fence",
-    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    session: null,
-    messages: [],
-    proposedPlans: [],
-    checkpoints: [],
-    pullRequests: [],
-    createdAt: now,
-    updatedAt: now,
-    archivedAt: null,
-    settledOverride: null,
-    settledAt: null,
-    deletedAt: null,
-    latestTurn: null,
     branch: "feature/tree-diff",
     worktreePath,
-    activities: [],
-  };
+    createdAt: now,
+  });
+  appRootFence.threads.set(threadId, shell);
+  appRootFence.threadStates.set(threadId, {
+    ...EMPTY_ENVIRONMENT_THREAD_STATE,
+    status: "live",
+    data: Option.some(makeFenceThreadProjection(shell)),
+  });
+
   container = document.createElement("div");
   document.body.append(container);
 });
@@ -409,6 +417,7 @@ afterEach(async () => {
   await act(async () => root?.unmount());
   root = undefined;
   container.remove();
+  restoreFontEvents();
   vi.unstubAllGlobals();
 });
 
@@ -510,7 +519,7 @@ async function openModeMenu(): Promise<string[]> {
     trigger.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 }));
   });
   await settle();
-  const items = [...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+  const items = menuItems();
   expect(
     items.length,
     `Expected an open mode menu; rendered: ${document.body.textContent}`,
@@ -577,6 +586,14 @@ it("Tree diff fence: a dirty thread with no stored mode opens on Tree diff", asy
 
 it("Tree diff fence: a mode stored for a dirty thread still wins over the Tree diff default", async () => {
   await mountDiffSurface("branch");
+  expect(selectedMode()).toBe("Branch changes");
+});
+
+it("Tree diff opening guard: a generic opening replaces an old turn selection with Branch changes", async () => {
+  useDiffPanelStore
+    .getState()
+    .selectTurn(threadRef, RunId.make("old-tree-diff-run"), "src/edited.ts");
+  await mountDiffSurface();
   expect(selectedMode()).toBe("Branch changes");
 });
 
@@ -714,7 +731,10 @@ it("Tree diff fence: a nested project opens its own file and declines one outsid
 });
 
 /** A working-tree patch with two new files, as the server sends it for Files diff. */
-function workingTreePatch(paths: ReadonlyArray<string>, kind = "working-tree") {
+function workingTreePatch(
+  paths: ReadonlyArray<string>,
+  kind: ReviewDiffPreviewSourceKind = "working-tree",
+): ReviewDiffPreviewResult {
   const diff = paths
     .map(
       (path) =>
@@ -723,7 +743,7 @@ function workingTreePatch(paths: ReadonlyArray<string>, kind = "working-tree") {
     .join("");
   return {
     cwd: worktreePath,
-    generatedAt: now,
+    generatedAt: DateTime.makeUnsafe(now),
     sources: [
       {
         id: kind,
@@ -738,6 +758,90 @@ function workingTreePatch(paths: ReadonlyArray<string>, kind = "working-tree") {
     ],
   };
 }
+
+function reviewServerConfig(cwd: string): ServerConfig {
+  return {
+    environment: {
+      environmentId,
+      label: "Fence environment",
+      platform: { os: "linux", arch: "x64" },
+      serverVersion: "0.0.0-test",
+      capabilities: { repositoryIdentity: false },
+    },
+    auth: makeFenceSession().auth,
+    cwd,
+    keybindingsConfigPath: `${cwd}/keybindings.json`,
+    keybindings: [],
+    issues: [],
+    providers: [],
+    availableEditors: [],
+    observability: {
+      logsDirectoryPath: `${cwd}/logs`,
+      localTracingEnabled: false,
+      otlpTracesEnabled: false,
+      otlpMetricsEnabled: false,
+      otlpLogsEnabled: false,
+    },
+    settings: DEFAULT_SERVER_SETTINGS,
+  };
+}
+
+const previewScopes = [
+  { scope: "unstaged", label: "Files diff", kind: "working-tree" },
+  { scope: "branch", label: "Branch changes", kind: "branch-range" },
+] as const;
+
+function setExternalReviewPreview(
+  kind: ReviewDiffPreviewSourceKind,
+  projectPreview: FixtureResult,
+) {
+  const serverCwd = "/tmp/tree-diff-fence/server-repo";
+  localStorage.setItem("t3code.diffFileTreeOpen", "true");
+  fixture.initialServerConfig = reviewServerConfig(serverCwd);
+  fixture.diffPreviewsByCwd.set(worktreePath, projectPreview);
+  fixture.diffPreviewsByCwd.set(serverCwd, {
+    kind: "success",
+    value: { ...workingTreePatch(["src/foreign-server-only.ts"], kind), cwd: serverCwd },
+  });
+}
+
+// Retrying a project refusal at the server cwd hid the error and displayed
+// another repository. Preserve the project's error even when that cwd has a diff.
+it.each(previewScopes)(
+  "Registered-project diff boundary: $label keeps a workspace refusal visible instead of displaying the server repository",
+  async ({ scope, label, kind }) => {
+    const refusal = "Review diff preview cwd must stay within the configured workspace root.";
+    setExternalReviewPreview(kind, { kind: "failure", message: refusal });
+
+    await mountDiffSurface(scope);
+    expect(selectedMode()).toBe(label);
+    expect(viewText()).toContain(refusal);
+    expect(viewText()).not.toContain("foreign-server-only.ts");
+    expect(treeRowPaths()).not.toContain("src/foreign-server-only.ts");
+    const previews = requestsFor(WS_METHODS.reviewGetDiffPreview);
+    expect(previews.length).toBeGreaterThan(0);
+    for (const request of previews) expect(request.input).toMatchObject({ cwd: worktreePath });
+    expect(fixture.diffFileContentsInputs).toEqual([]);
+  },
+);
+
+it.each(previewScopes)(
+  "Registered-project diff guard: $label displays the requested project outside the server cwd",
+  async ({ scope, label, kind }) => {
+    setExternalReviewPreview(kind, {
+      kind: "success",
+      value: workingTreePatch(["src/registered-project-only.ts"], kind),
+    });
+
+    await mountDiffSurface(scope);
+    expect(selectedMode()).toBe(label);
+    expect(treeRow("src/registered-project-only.ts")).toMatchObject({ status: "added" });
+    expect(treeRowPaths()).not.toContain("src/foreign-server-only.ts");
+    const previews = requestsFor(WS_METHODS.reviewGetDiffPreview);
+    expect(previews.length).toBeGreaterThan(0);
+    for (const request of previews) expect(request.input).toMatchObject({ cwd: worktreePath });
+  },
+);
 
 it("Tree diff fence: Files diff marks an untracked new file untracked and keeps a staged one added", async () => {
   localStorage.setItem("t3code.diffFileTreeOpen", "true");
@@ -809,7 +913,9 @@ async function pressKey(
 
 const pressAlt = (key: string) => pressKey(key, { altKey: true });
 const diffSurfaceReady = () => document.body.querySelector('[aria-label^="Diff scope: "]') !== null;
-const menuItems = () => [...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+const menuItems = () => [
+  ...document.body.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemradio"]'),
+];
 
 /** The file header's explorer button: its name says what a press does. */
 function explorerButton(): HTMLElement {

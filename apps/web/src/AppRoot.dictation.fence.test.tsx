@@ -38,42 +38,35 @@ import {
 } from "@tanstack/react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import {
-  ApprovalRequestId,
+  RuntimeRequestId,
   DictationJobId,
   EnvironmentId,
   ProjectId,
-  ProviderInstanceId,
   ThreadId,
+  OrchestrationV2RuntimeRequest,
+  OrchestrationV2TurnItem,
   type DictationJob,
   type DictationMode,
   type DictationTarget,
 } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import { findDictationSlots, formatDictationSlot } from "@t3tools/shared/dictationSlots";
-import {
-  $getRoot,
-  $getSelection,
-  $isRangeSelection,
-  $isTextNode,
-  $setSelection,
-  type LexicalEditor,
-  type TextNode,
-} from "lexical";
-import type { Thread } from "./types";
+import type { Editor } from "@tiptap/core";
+import { AllSelection, NodeSelection, TextSelection } from "@tiptap/pm/state";
+import type { OrchestrationV2ThreadProjection } from "@t3tools/contracts";
 import type { AppRouter } from "./router";
 
 const fixture = vi.hoisted(() => ({
-  thread: null as Thread | null,
+  projection: null as OrchestrationV2ThreadProjection | null,
   project: {
-    id: "dictation-phase-four-project",
-    environmentId: "dictation-phase-four-environment",
+    id: "app-root-fence-project",
+    environmentId: "app-root-fence-environment",
     title: "Dictation fence",
     workspaceRoot: "/tmp/dictation-fence",
     scripts: [],
     createdAt: "2026-10-03T12:00:00.000Z",
     defaultModelSelection: { instanceId: "codex", model: "gpt-5.4" },
   },
-  empty: [],
-  threadListeners: new Set<() => void>(),
   /** Set after import: the dictation commands and the turn start, by name. */
   dictationCommands: new Map<unknown, string>(),
   dictationCalls: [] as Array<{ name: string; value: unknown }>,
@@ -91,31 +84,6 @@ const fixture = vi.hoisted(() => ({
   /** False until the subscription's snapshot arrives, as for a fresh subscription. */
   jobsLoaded: true,
   jobListeners: new Set<() => void>(),
-  environments: [
-    {
-      environmentId: "dictation-phase-four-environment",
-      label: "Fence environment",
-      connection: { phase: "connected" },
-      serverConfig: {
-        environment: { capabilities: {} },
-        providers: [
-          {
-            instanceId: "codex",
-            driver: "codex",
-            enabled: true,
-            installed: true,
-            status: "ready",
-            version: null,
-            auth: { status: "authenticated" },
-            checkedAt: "2026-10-03T12:00:00.000Z",
-            models: [],
-            slashCommands: [],
-            skills: [],
-          },
-        ],
-      },
-    },
-  ],
 }));
 
 /** Every command goes through here; dictation commands are recorded by name. */
@@ -134,60 +102,20 @@ function dispatchCommand(command: unknown, value: unknown) {
   return Promise.resolve({ _tag: "Success" as const, value: { providers: [] } });
 }
 
-vi.mock("./state/entities", async (importOriginal) => {
-  const { useSyncExternalStore } = await import("react");
-  const useFixtureThread = () =>
-    useSyncExternalStore(
-      (listener) => {
-        fixture.threadListeners.add(listener);
-        return () => {
-          fixture.threadListeners.delete(listener);
-        };
-      },
-      () => fixture.thread,
-    );
-  return {
-    ...(await importOriginal<typeof import("./state/entities")>()),
-    useThread: useFixtureThread,
-    readThread: () => fixture.thread,
-    useThreadShell: useFixtureThread,
-    useThreadRefs: () => fixture.empty,
-    useThreadShells: () => fixture.empty,
-    useProjects: () => fixture.empty,
-    useProject: () => fixture.project,
-  };
-});
-vi.mock("./state/environments", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./state/environments")>()),
-  useEnvironments: () => ({ environments: fixture.environments, isReady: true }),
-  usePrimaryEnvironment: () => null,
-}));
-vi.mock("./state/query", () => ({
-  useEnvironmentQuery: () => ({
-    data: null,
-    error: null,
-    isPending: false,
-    isSuccess: false,
-    refresh: () => undefined,
-  }),
-}));
-vi.mock("./state/threads", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./state/threads")>();
-  const { EMPTY_ENVIRONMENT_THREAD_STATE } = await import("@t3tools/client-runtime/state/threads");
-  const { Atom } = await import("effect/unstable/reactivity");
-  return {
-    ...actual,
-    useEnvironmentThread: () => EMPTY_ENVIRONMENT_THREAD_STATE,
-    environmentThreadDetails: {
-      ...actual.environmentThreadDetails,
-      detailAtom: (ref: { threadId: string }) =>
-        Atom.make(() => (fixture.thread?.id === ref.threadId ? fixture.thread : null)),
-    },
-  };
-});
+const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("./state/entities", async (original) => (await fenceMocks()).mockEntities(original));
+vi.mock("./state/environments", async (original) =>
+  (await fenceMocks()).mockEnvironments(original),
+);
+vi.mock("./state/query", async () => (await fenceMocks()).mockQuery());
+vi.mock("./state/queries", async (original) => (await fenceMocks()).mockQueries(original));
+vi.mock("./state/threads", async (original) => (await fenceMocks()).mockThreads(original));
+vi.mock("@t3tools/client-runtime/state/session", async (original) =>
+  (await fenceMocks()).mockRuntimeSession(original),
+);
 vi.mock("./state/projects", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./state/projects")>();
-  const { Atom } = await import("effect/unstable/reactivity");
+  const { Atom } = await import("effect/reactivity");
   return {
     ...actual,
     environmentProjects: {
@@ -210,7 +138,7 @@ vi.mock("./state/dictation", async (importOriginal) => {
     ...(await importOriginal<typeof import("./state/dictation")>()),
     useDictationJobs: (environmentId: string | null) => {
       const jobs = useSyncExternalStore(subscribe, () =>
-        environmentId === fixture.environments[0]!.environmentId ? fixture.jobs : none,
+        environmentId === "app-root-fence-environment" ? fixture.jobs : none,
       );
       const loaded = useSyncExternalStore(subscribe, () => fixture.jobsLoaded);
       return { jobs, loaded };
@@ -247,7 +175,7 @@ vi.mock("@t3tools/client-runtime/state/attachments", async (importOriginal) => (
 // The toggle ships unbound; this fixture binds it the way a user's keybindings file would.
 vi.mock("./state/server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./state/server")>();
-  const { Atom } = await import("effect/unstable/reactivity");
+  const { Atom } = await import("effect/reactivity");
   const { compileResolvedKeybindingsConfig, mergeWithDefaultKeybindings } =
     await import("@t3tools/shared/keybindings");
   return {
@@ -274,16 +202,8 @@ vi.mock("./hooks/useSettings", async (importOriginal) => {
     useLegacySidebarEnabled: () => false,
   };
 });
-vi.mock("./hooks/useHandleNewThread", () => ({
-  useNewThreadHandler: () => () => dispatchCommand(null, null),
-}));
-vi.mock("./hooks/useThreadActions", () => ({
-  useThreadActions: () => ({
-    settleThread: () => dispatchCommand(null, null),
-    pinThread: () => dispatchCommand(null, null),
-    confirmAndUnpinThread: () => dispatchCommand(null, null),
-  }),
-}));
+vi.mock("./hooks/useHandleNewThread", async () => (await fenceMocks()).mockHandleNewThread());
+vi.mock("./hooks/useThreadActions", async () => (await fenceMocks()).mockThreadActions());
 vi.mock("./components/Sidebar", () => ({ default: () => null }));
 vi.mock("./components/LegacySidebar", () => ({ default: () => null }));
 vi.mock("./components/preview/PreviewAutomationHosts", () => ({
@@ -315,7 +235,7 @@ vi.mock("@legendapp/list/react", () => ({
   ),
 }));
 
-import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { AppRoot } from "./AppRoot";
 import { AppSidebarLayout } from "./components/AppSidebarLayout";
 import ChatView from "./components/ChatView";
@@ -335,15 +255,30 @@ import { useDictationSessionStore } from "./dictation/dictationSessionStore";
 import { useDictationWidgetActivityStore } from "./dictation/dictationWidgetState";
 import { createFakeMedia } from "./dictation/dictationMedia.testFixtures";
 import { setDictationMediaBackend } from "./dictation/recorder";
-import { useQueuedMessageStore } from "./queuedMessageStore";
+
 import { dictationEnvironment } from "./state/dictation";
 import { threadEnvironment } from "./state/threads";
 
-const environmentId = EnvironmentId.make("dictation-phase-four-environment");
+import {
+  appRootFence,
+  FENCE_ENVIRONMENT_ID,
+  FENCE_PROJECT_ID,
+  installFenceFontEvents,
+} from "./test/appRootFenceMocks";
+import {
+  makeFenceThreadProjection,
+  makeFenceThreadShell,
+  makeFenceUserInput,
+} from "./test/fenceThreadShell";
+import { publishFenceThreadProjection } from "./test/appRootFenceApp";
+const environmentId = EnvironmentId.make(FENCE_ENVIRONMENT_ID);
 const threadId = ThreadId.make("dictation-phase-four-thread");
 const offScreenThreadId = ThreadId.make("dictation-phase-four-other-thread");
 const onScreenTarget = scopeThreadRef(environmentId, threadId);
 const offScreenTarget = scopeThreadRef(environmentId, offScreenThreadId);
+const isRuntimeRequest = Schema.is(OrchestrationV2RuntimeRequest);
+const isTurnItem = Schema.is(OrchestrationV2TurnItem);
+
 const now = "2026-10-03T12:00:00.000Z";
 let root: Root | undefined;
 let container: HTMLDivElement;
@@ -352,36 +287,23 @@ let writeText: ReturnType<typeof vi.fn<(text: string) => Promise<void>>>;
 
 // ── Fixture ─────────────────────────────────────────────────────────────────
 
-function makeThread(): Thread {
-  return {
-    id: threadId,
-    environmentId,
-    projectId: ProjectId.make("dictation-phase-four-project"),
-    title: "Dictation fence",
-    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    session: null,
-    messages: [],
-    proposedPlans: [],
-    checkpoints: [],
-    pullRequests: [],
-    createdAt: now,
-    updatedAt: now,
-    archivedAt: null,
-    settledOverride: null,
-    settledAt: null,
-    deletedAt: null,
-    latestTurn: null,
-    branch: null,
-    worktreePath: null,
-    activities: [],
-  } as unknown as Thread;
+function makeThreadProjection(): OrchestrationV2ThreadProjection {
+  return makeFenceThreadProjection(
+    makeFenceThreadShell({
+      id: threadId,
+      environmentId,
+      projectId: ProjectId.make(FENCE_PROJECT_ID),
+      title: "Dictation fence",
+      createdAt: now,
+    }),
+  );
 }
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  fixture.thread = makeThread();
+  fixture.projection = makeThreadProjection();
+  appRootFence.openThreadId = threadId;
+  installFenceFontEvents();
   fixture.dictationCalls.length = 0;
   fixture.uploads.length = 0;
   fixture.jobs = [];
@@ -399,6 +321,11 @@ beforeEach(() => {
     [threadEnvironment.respondToUserInput, "respond"],
   ]);
   fixture.readPromptAtUpload = () => promptOf(onScreenTarget);
+  Object.assign(appRootFence.environments[0]!.serverConfig.environment.capabilities, {
+    questionAttachments: true,
+    attachmentUploads: true,
+    fileAttachments: { maxUploadBytes: 1048576 },
+  });
   media = createFakeMedia();
   setDictationMediaBackend(media.backend);
   writeText = vi.fn(async (_text: string) => undefined);
@@ -419,7 +346,6 @@ afterEach(async () => {
   useComposerDraftStore.getState().clearComposerContent(onScreenTarget);
   useComposerDraftStore.getState().clearComposerContent(offScreenTarget);
   usePendingUserInputDraftStore.setState({ requests: {} });
-  useQueuedMessageStore.getState().drain(scopedThreadKey(onScreenTarget));
   Reflect.deleteProperty(navigator, "clipboard");
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -461,6 +387,7 @@ async function mountApp(
     createMemoryHistory,
     Outlet,
   } = modules;
+  publishFenceThreadProjection(fixture.projection!, environmentId);
   const route = createRootRoute({
     component: () => (
       <AppSidebarLayout>
@@ -529,7 +456,7 @@ async function navigateAwayFromThread() {
     await router!.navigate({ to: "/elsewhere" as never });
   });
   await settle();
-  expect(container.querySelector('[data-lexical-editor="true"]')).toBeNull();
+  expect(container.querySelector('[data-testid="composer-editor"]')).toBeNull();
 }
 
 /** Lets promise chains (getUserMedia, Blob reads, upload, start) settle inside React's act. */
@@ -607,57 +534,40 @@ const ALT_ENTER = altKey("Enter", "Enter");
 const TOGGLE = { key: "d", code: "KeyD", ctrlKey: true, altKey: true };
 
 function composerEditorElement(): HTMLElement {
-  const editor = container.querySelector<HTMLElement>('[data-lexical-editor="true"]');
+  const editor = container.querySelector<HTMLElement>('[data-testid="composer-editor"]');
   expect(editor, "Expected the composer editor").not.toBeNull();
   return editor!;
 }
 
-function lexicalEditor(): LexicalEditor {
-  const editor = (composerEditorElement() as unknown as { __lexicalEditor?: LexicalEditor })
-    .__lexicalEditor;
-  expect(editor, "Expected the Lexical editor on the composer element").toBeDefined();
+function tiptapEditor(): Editor {
+  const editor = (composerEditorElement() as HTMLElement & { editor?: Editor }).editor;
+  expect(editor, "Expected the Tiptap editor on its view DOM").toBeDefined();
   return editor!;
 }
 
-/** Puts the composer's caret right after `before` in the text node that contains it. */
+/** Places a real ProseMirror text selection after `before` in the document. */
 async function placeCaretAfter(before: string) {
-  const editor = lexicalEditor();
+  const editor = tiptapEditor();
+  let caret: number | undefined;
+  editor.state.doc.descendants((node, position) => {
+    if (caret !== undefined || !node.isText) return;
+    const offset = node.text!.indexOf(before);
+    if (offset >= 0) caret = position + offset + before.length;
+  });
+  expect(caret, `No text node holds ${before}`).toBeDefined();
   await act(async () => {
-    editor.update(
-      () => {
-        const nodes = $getRoot().getAllTextNodes();
-        for (const node of nodes) {
-          const offset = node.getTextContent().indexOf(before);
-          if (offset >= 0) {
-            node.select(offset + before.length, offset + before.length);
-            return;
-          }
-        }
-        throw new Error(`No text node holds ${before}`);
-      },
-      { discrete: true },
+    editor.view.dispatch(
+      editor.state.tr.setSelection(TextSelection.create(editor.state.doc, caret!)),
     );
   });
   expect(textBeforeCaret(), "the fixture placed the caret").toMatch(new RegExp(`${before}$`));
 }
 
-/** The composer's text up to the caret, counting text nodes only (a marker chip has none). */
+/** Reads text through the real document selection, excluding atom chip labels. */
 function textBeforeCaret(): string {
-  return lexicalEditor()
-    .getEditorState()
-    .read(() => {
-      const selection = $getSelection();
-      if (!$isRangeSelection(selection)) return "<no caret>";
-      const anchor = selection.anchor.getNode();
-      let text = "";
-      for (const node of $getRoot().getAllTextNodes()) {
-        if (node.is(anchor) && $isTextNode(anchor)) {
-          return text + (anchor as TextNode).getTextContent().slice(0, selection.anchor.offset);
-        }
-        text += node.getTextContent();
-      }
-      return "<caret outside text>";
-    });
+  const { doc, selection } = tiptapEditor().state;
+  if (!(selection instanceof TextSelection)) return "<no caret>";
+  return doc.textBetween(0, selection.anchor, "", "");
 }
 
 function startCalls() {
@@ -848,9 +758,10 @@ describe("dictation phase 4 fence", () => {
   it("dictation phase 4 AC3: a composer without a caret gets the marker at the end", async () => {
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Existing draft");
     await mountApp();
-    // No caret: the editor holds no selection at all.
+    // ProseMirror always holds a selection. AllSelection represents no text caret.
     await act(async () => {
-      lexicalEditor().update(() => $setSelection(null), { discrete: true });
+      const editor = tiptapEditor();
+      editor.view.dispatch(editor.state.tr.setSelection(new AllSelection(editor.state.doc)));
     });
     expect(textBeforeCaret()).toBe("<no caret>");
 
@@ -861,6 +772,37 @@ describe("dictation phase 4 fence", () => {
     const [slot] = slotsIn(prompt);
     expect(slot, `Expected a marker in ${JSON.stringify(prompt)}`).toBeDefined();
     expect(prompt.slice(0, slot!.start).trimEnd()).toBe("Existing draft");
+    expect(prompt.slice(slot!.end).trim()).toBe("");
+    expect(startCalls()).toHaveLength(1);
+  });
+
+  it("dictation phase 4 regression: selecting an inline Tiptap chip gives dictation no text caret and appends the marker", async () => {
+    const original = "Existing @AGENTS.md draft";
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, original);
+    await mountApp();
+    const editor = tiptapEditor();
+    let chipPosition: number | undefined;
+    editor.state.doc.descendants((node, position) => {
+      if (chipPosition === undefined && node.isInline && node.isAtom && !node.isText) {
+        chipPosition = position;
+      }
+    });
+    expect(chipPosition, "the real editor renders the mention as an atom").toBeDefined();
+    await act(async () => {
+      editor.view.dispatch(
+        editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, chipPosition!)),
+      );
+    });
+    expect(editor.state.selection).toBeInstanceOf(NodeSelection);
+    expect(textBeforeCaret()).toBe("<no caret>");
+
+    await startRecordingFromMicrophone();
+    await stopRecordingFromStrip();
+    const prompt = promptOf(onScreenTarget)!;
+    const [slot, ...others] = slotsIn(prompt);
+    expect(slot, "dictation appends one marker").toBeDefined();
+    expect(others).toHaveLength(0);
+    expect(prompt.slice(0, slot!.start).trimEnd()).toBe(original);
     expect(prompt.slice(slot!.end).trim()).toBe("");
     expect(startCalls()).toHaveLength(1);
   });
@@ -1062,7 +1004,7 @@ describe("dictation phase 4 guards", () => {
     await settle();
     expect(promptOf(onScreenTarget)).toBe("Ship the dictation fence");
 
-    const sendButton = requireButton("Send message");
+    const sendButton = requireButton("Submit message");
     await click(sendButton);
     const turns = fixture.dictationCalls.filter((call) => call.name === "startTurn");
     expect(turns).toHaveLength(1);
@@ -1122,55 +1064,62 @@ async function recordInMode(mode: "send" | "insert") {
   await stopRecordingFromStrip();
 }
 
-const questionRequestId = ApprovalRequestId.make("dictation-phase-five-question");
+const questionRequestId = RuntimeRequestId.make("dictation-phase-five-question");
 
-function withOpenQuestion(thread: Thread): Thread {
-  return {
-    ...thread,
-    activities: [
+function withOpenQuestion(
+  thread: OrchestrationV2ThreadProjection,
+): OrchestrationV2ThreadProjection {
+  const { request, item } = makeFenceUserInput({
+    threadId,
+    requestId: questionRequestId,
+    createdAt: now,
+    questions: [
       {
-        id: "dictation-phase-five-question-requested",
-        kind: "user-input.requested",
-        summary: "User input requested",
-        tone: "info",
-        turnId: null,
-        createdAt: now,
-        payload: {
-          requestId: questionRequestId,
-          questions: [
-            {
-              id: "scope",
-              header: "Scope",
-              question: "Which scope first?",
-              multiSelect: false,
-              options: [{ label: "Workspace", description: "Current workspace" }],
-            },
-          ],
-        },
+        id: "scope",
+        header: "Scope",
+        question: "Which scope first?",
+        multiSelect: false,
+        options: [{ label: "Workspace", description: "Current workspace" }],
       },
     ],
-  } as unknown as Thread;
+  });
+  return {
+    ...thread,
+    runtimeRequests: [request],
+    turnItems: [item],
+    visibleTurnItems: [
+      {
+        item,
+        position: 0,
+        visibility: "local",
+        sourceThreadId: threadId,
+        sourceItemId: item.id,
+      },
+    ],
+  };
 }
 
-function withPendingApproval(thread: Thread): Thread {
+function withPendingApproval(
+  thread: OrchestrationV2ThreadProjection,
+): OrchestrationV2ThreadProjection {
+  const { request, item } = makeFenceUserInput({
+    threadId,
+    requestId: "dictation-phase-five-approval",
+    createdAt: now,
+    questions: [],
+  });
   return {
     ...thread,
-    activities: [
+    runtimeRequests: [{ ...request, kind: "command" }],
+    turnItems: [
       {
-        id: "dictation-phase-five-approval-requested",
-        kind: "approval.requested",
-        summary: "Command approval requested",
-        tone: "info",
-        turnId: null,
-        createdAt: now,
-        payload: {
-          requestId: "dictation-phase-five-approval",
-          requestType: "command_execution_approval",
-          detail: "rm -rf build",
-        },
+        ...item,
+        type: "approval_request",
+        requestKind: "command",
+        prompt: "rm -rf build",
       },
     ],
-  } as unknown as Thread;
+  };
 }
 
 function questionAnswerText(): string {
@@ -1240,7 +1189,7 @@ describe("dictation phase 5 fence", () => {
     await pushJobs([job(jobId, { status: "transcribing", mode: "inject" })]);
     expect(sendWhenReadyBannerShown()).toBe(false);
 
-    const send = requireButton("Send message");
+    const send = requireButton("Submit message");
     expect(send.disabled, "Send stays enabled so that pressing it can arm the draft").toBe(false);
     await click(send);
     expect(turnStarts()).toHaveLength(0);
@@ -1317,7 +1266,7 @@ describe("dictation phase 5 fence", () => {
     expect(turnStarts()).toHaveLength(0);
     expect(slotsIn(promptOf(onScreenTarget))).toHaveLength(0);
 
-    await click(requireButton("Send message"));
+    await click(requireButton("Submit message"));
     const text = onlyTurnText();
     expect(text.startsWith(VOICED), JSON.stringify(text)).toBe(true);
     expect(voicedCount(text)).toBe(1);
@@ -1331,7 +1280,7 @@ describe("dictation phase 5 fence", () => {
       freshDrafts.getState().setPrompt(onScreenTarget, "Typed by hand");
     });
     await settle();
-    await click(requireButton("Send message"));
+    await click(requireButton("Submit message"));
     const typed = turnStarts()[1]?.input.message.text;
     expect(typed).toBe("Typed by hand");
   });
@@ -1372,7 +1321,7 @@ describe("dictation phase 5 fence", () => {
   });
 
   it("dictation phase 5 AC7: a recording stopped while a question card has focus fills the card's answer, and send mode submits it", async () => {
-    fixture.thread = withOpenQuestion(makeThread());
+    fixture.projection = withOpenQuestion(makeThreadProjection());
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Composer draft");
     await mountApp();
     const field = container.querySelector<HTMLTextAreaElement>(
@@ -1406,7 +1355,16 @@ describe("dictation phase 5 fence", () => {
 
 describe("dictation phase 5 guards", () => {
   it("dictation phase 5 guard: a filled send-mode draft is not sent while a button approval is pending", async () => {
-    fixture.thread = withPendingApproval(makeThread());
+    fixture.projection = withPendingApproval(makeThreadProjection());
+    const [request] = fixture.projection.runtimeRequests;
+    const [item] = fixture.projection.turnItems;
+    expect(isRuntimeRequest(request), "the pending approval is a real v2 request").toBe(true);
+    expect(isTurnItem(item), "the approval display item satisfies the v2 union").toBe(true);
+    expect(item?.type).toBe("approval_request");
+    if (item?.type !== "approval_request") throw new Error("Missing fixture approval item");
+    expect(item.requestId).toBe(request!.id);
+    expect(item.nodeId).toBe(request!.nodeId);
+    expect(item.requestKind).toBe(request!.kind);
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Draft");
     await mountApp();
     await pressKey(TOGGLE);
@@ -1531,7 +1489,7 @@ describe("dictation phase 5 rework regressions", () => {
   });
 
   it("dictation phase 5 regression: a send-mode answer is submitted with its voiced tag while its thread is not on screen", async () => {
-    fixture.thread = withOpenQuestion(makeThread());
+    fixture.projection = withOpenQuestion(makeThreadProjection());
     await mountApp();
     await focusQuestionAnswer();
     await recordIntoQuestion("send");
@@ -1553,7 +1511,7 @@ describe("dictation phase 5 rework regressions", () => {
   });
 
   it("dictation phase 5 regression: Submit with a pending answer marker shows the banner, and Don't send keeps the answer unsent", async () => {
-    fixture.thread = withOpenQuestion(makeThread());
+    fixture.projection = withOpenQuestion(makeThreadProjection());
     await mountApp();
     await focusQuestionAnswer();
     await recordIntoQuestion("insert");
@@ -1572,7 +1530,7 @@ describe("dictation phase 5 rework regressions", () => {
   });
 
   it("dictation phase 5 regression: the answer's marker goes at the field's caret", async () => {
-    fixture.thread = withOpenQuestion(makeThread());
+    fixture.projection = withOpenQuestion(makeThreadProjection());
     await mountApp();
     const field = await focusQuestionAnswer();
     await act(async () => {
@@ -1596,18 +1554,18 @@ describe("dictation phase 5 rework regressions", () => {
 
   it("dictation phase 5 regression: a dictated draft that goes to the queue keeps its voiced tag", async () => {
     // An open question makes Send queue the message.
-    fixture.thread = withOpenQuestion(makeThread());
+    fixture.projection = withOpenQuestion(makeThreadProjection());
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Queued");
     await mountApp();
     await recordInMode("insert");
     const { jobId } = startedJob(0).input;
     await pushJobs([job(jobId, { status: "completed", mode: "inject", text: "dictado" })]);
 
-    await click(requireButton(/^(Send message|Queue message)$/));
-    expect(turnStarts()).toHaveLength(0);
-    const queued =
-      useQueuedMessageStore.getState().queuesByThreadKey[scopedThreadKey(onScreenTarget)];
-    expect(JSON.stringify(queued)).toContain("[voiced] Queued dictado");
+    await click(requireButton(/^(Submit message|Queue message)$/));
+    // V2 queues messages as server runs; the removed local queuedMessageStore cannot observe them.
+    expect(turnStarts()).toHaveLength(1);
+    expect(turnStarts()[0]!.input).toMatchObject({ dispatchMode: "queue" });
+    expect(JSON.stringify(turnStarts()[0])).toContain("[voiced] Queued dictado");
   });
 
   it("dictation phase 5 regression: a file sent off screen carries its context record, so its reference resolves", async () => {

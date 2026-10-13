@@ -23,11 +23,11 @@ import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 
-import { writeFileStringAtomically } from "../atomicWrite.ts";
+import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import { ServerConfig } from "../config.ts";
-import type { ProviderInstance } from "../provider/ProviderDriver.ts";
-import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
-import { HttpClient } from "effect/unstable/http";
+import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
+import { ProviderInstanceRegistry } from "../provider/ProviderInstanceRegistry.ts";
+import { HttpClient } from "effect/http";
 
 import * as SubscriptionRegistry from "./SubscriptionRegistry.ts";
 import {

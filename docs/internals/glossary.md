@@ -18,8 +18,6 @@ This is a living glossary for T3 Code. It explains what common terms mean in thi
 - [Editor delegation](#editor-delegation)
 - [Pull requests](#pull-requests)
 - [Composer context](#composer-context)
-- [Pull requests](#pull-requests)
-- [Composer context](#composer-context)
 
 ## Concepts
 
@@ -61,49 +59,49 @@ A user-visible log item attached to a thread. In [the contracts][1], activities 
 
 ### Orchestration
 
-Orchestration is the server-side domain layer that turns runtime activity into stable app state. The main entry point is [OrchestrationEngine.ts][7], with core logic in [decider.ts][8] and [projector.ts][4].
+Orchestration is the server-side domain layer that turns runtime activity into stable app state. This is the V2 orchestrator (`apps/server/src/orchestration-v2/`, PR #2829); it replaced the V1 decider/projector/reactor layer wholesale, not incrementally. The main entry point is [Orchestrator.ts][7], with the durable event log in [EventStore.ts][29] and [EventSink.ts][30].
 
 #### Aggregate
 
-The domain object a command or event belongs to. In [the contracts][1], that is usually `project` or `thread`. See [decider.ts][8].
+The domain object a command or event belongs to. In [the contracts][1], that is usually `project` or `thread`. See [Orchestrator.ts][7].
 
 #### Command
 
-A typed request to change domain state. In [the contracts][1], commands are validated in [commandInvariants.ts][9] and turned into events by [decider.ts][8].
+A typed request to change domain state. Accepting it does not mean its side effects have finished. In [the contracts][1] it is the `OrchestrationV2Command` union, validated and turned into events by [Orchestrator.ts][7], with preconditions in [CommandPolicy.ts][9].
 Examples include `thread.create`, `thread.turn.start`, and `thread.checkpoint.revert`.
 
-#### Domain Event
+#### Event
 
-A persisted fact that something already happened. In [the contracts][1], events are the source of truth, and [projector.ts][4] shows how they are applied.
+A persisted fact produced by a command. In [the contracts][1] it is the `OrchestrationV2DomainEvent` union; [EventStore.ts][29] and [EventSink.ts][30] show how events are appended and read back.
 Examples include `thread.created`, `thread.message-sent`, and `thread.turn-diff-completed`.
 
-#### Decider
+#### Orchestrator
 
-The pure orchestration logic that turns commands plus current state into events. The core implementation is in [decider.ts][8], with preconditions in [commandInvariants.ts][9].
+The service that serializes commands for a thread and decides their events from current state, without I/O. It is the V2 replacement for the old decider/projector pair. The implementation is [Orchestrator.ts][7].
 
 #### Projection
 
-A read-optimized view derived from events. See [projector.ts][4], [ProjectionPipeline.ts][11], and [ProjectionSnapshotQuery.ts][10].
-
-#### Projector
-
-The logic that applies domain events to the read model or projection tables. See [projector.ts][4] and [ProjectionPipeline.ts][11].
+A persisted, read-optimized view derived from events, committed in the same transaction as the events that change it. See [ProjectionStore.ts][11] and [ProjectionMaintenance.ts][31].
 
 #### Read model
 
-The current materialized view of orchestration state. In [the contracts][1], it holds projects, threads, messages, activities, checkpoints, and session state. See [ProjectionSnapshotQuery.ts][10] and [OrchestrationEngine.ts][7].
+The current materialized view of orchestration state. In [the contracts][1], it holds projects, threads, runs, messages, turn items, runtime requests, plans, and provider sessions. See [ProjectionStore.ts][11].
+
+#### Command receipt
+
+A durable record of a command's result, used to make retries idempotent. See [CommandReceiptStore.ts][32].
+
+#### Outbox effect
+
+Side-effect intent committed with the events, such as starting a provider turn or capturing a checkpoint. See [EffectOutbox.ts][12].
+
+#### Effect worker
+
+The worker that runs outbox effects after commit and feeds their results back as commands. This is the V2 replacement for the old generic reactor-after-every-event pattern. See [EffectWorker.ts][33].
 
 #### Reactor
 
-A side-effecting service that handles follow-up work after events or runtime signals. Examples include [CheckpointReactor.ts][6], [ProviderCommandReactor.ts][12], and [ProviderRuntimeIngestion.ts][5].
-
-#### Runtime receipt
-
-A typed signal emitted when an async milestone completes, such as `checkpoint.baseline.captured`, `checkpoint.diff.finalized`, or `turn.processing.quiesced`. Receipts are a test-only mechanism: the production `RuntimeReceiptBusLive` publish is a no-op and only the test layer is PubSub-backed. Do not build production behavior on them. See [RuntimeReceiptBus.ts][13] and [CheckpointReactor.ts][6].
-
-#### Quiesced
-
-"Quiesced" means a turn has gone quiet and stable: follow-up work such as [CheckpointReactor.ts][6] has settled. It appears in [the receipt schema][13], so in practice it is something tests wait on rather than a production signal.
+A side-effecting service scheduled or triggered independently of the command/effect-worker pipeline, such as a polling cadence or an external webhook. Examples include [PullRequestSyncReactor.ts][35] and [PullRequestWatchReactor.ts][34].
 
 ### Provider runtime
 
@@ -284,25 +282,6 @@ panel is the plain Monaco editor it was before. With it on and Neovim unavailabl
 back to that same plain editor and says in its status strip what is missing and how to fix it,
 rather than failing. See [the file panel](../user/file-panel.md).
 
-##### Pull requests
-
-| Term                 | Meaning                                                                                                                                                                                  |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Pull request link    | A persisted thread association identified by host, repository, and number. Links can cross projects within an environment and carry a server-maintained snapshot.                        |
-| Pull request sync    | The reactor that refreshes each distinct linked review once per cadence and discovers native stack layers. Explicit refreshes and failed stack reads trigger another read.               |
-| Current pull request | The link used by single-review controls and older clients. Open work takes precedence; a completed single chain points at its top layer. Unrelated terminal links use the latest update. |
-
-##### Composer context
-
-| Term                 | Meaning                                                                                                                             |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Context record       | The typed payload behind a composer chip, keyed by `contextId` in `message.context.records`. It never holds bytes.                  |
-| Context reference    | One occurrence of a record in message text: `[label](t3-context://v1/<kind>/<contextId>)`. Several references can share one record. |
-| Attachment binding   | The link from an image or file record to its server-owned attachment. Its attachment ID can change without changing `contextId`.    |
-| Attachment inventory | The ordered image records shown as thumbnails above the prose, including images with no inline references.                          |
-
-See [composer context references](./composer-context-references.md) for the contract and lifecycle.
-
 ### Pull requests
 
 | Term                 | Meaning                                                                                                                                                                                  |
@@ -344,20 +323,27 @@ See [composer context references](./composer-context-references.md) for the cont
 [pane-focus-ts]: ../../apps/web/src/lib/paneFocus.ts
 [ed-host]: ../../apps/server/src/editor/hostPlugin.ts
 [ed-grid]: ../../apps/server/src/editor/GridModel.ts
-[1]: ../../packages/contracts/src/orchestration.ts
+[1]: ../../packages/contracts/src/orchestrationV2.ts
 [2]: ./workspace-layout.md
 [3]: ../../apps/server/src/vcs/GitVcsDriverCore.ts
 [4]: ../../apps/server/src/orchestration/projector.ts
 [5]: ../../apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts
 [6]: ../../apps/server/src/orchestration/Layers/CheckpointReactor.ts
-[7]: ../../apps/server/src/orchestration/Layers/OrchestrationEngine.ts
+[7]: ../../apps/server/src/orchestration-v2/Orchestrator.ts
 [8]: ../../apps/server/src/orchestration/decider.ts
-[9]: ../../apps/server/src/orchestration/commandInvariants.ts
+[9]: ../../apps/server/src/orchestration-v2/CommandPolicy.ts
 [10]: ../../apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts
-[11]: ../../apps/server/src/orchestration/Layers/ProjectionPipeline.ts
+[11]: ../../apps/server/src/orchestration-v2/ProjectionStore.ts
 [25]: ../../apps/server/src/workspace/WorkspaceFileWatcher.ts
-[12]: ../../apps/server/src/orchestration/Layers/ProviderCommandReactor.ts
+[12]: ../../apps/server/src/orchestration-v2/EffectOutbox.ts
 [13]: ../../apps/server/src/orchestration/Services/RuntimeReceiptBus.ts
+[29]: ../../apps/server/src/orchestration-v2/EventStore.ts
+[30]: ../../apps/server/src/orchestration-v2/EventSink.ts
+[31]: ../../apps/server/src/orchestration-v2/ProjectionMaintenance.ts
+[32]: ../../apps/server/src/orchestration-v2/CommandReceiptStore.ts
+[33]: ../../apps/server/src/orchestration-v2/EffectWorker.ts
+[34]: ../../apps/server/src/orchestration-v2/PullRequestWatchReactor.ts
+[35]: ../../apps/server/src/orchestration-v2/PullRequestSyncReactor.ts
 [14]: ../../apps/server/src/provider/Layers/ProviderService.ts
 [15]: ../../apps/server/src/provider/Services/ProviderAdapter.ts
 [16]: ./providers.md

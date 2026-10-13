@@ -1,6 +1,6 @@
 import type { FileTreeRowDecoration, GitStatusEntry } from "@pierre/trees";
 import { FileTree, useFileTree, useFileTreeSelector } from "@pierre/trees/react";
-import { ChevronsDownUpIcon, ChevronsUpDownIcon } from "lucide-react";
+import { ChevronsDownUp, ChevronsUpDown } from "lucide";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import { useTheme } from "~/hooks/useTheme";
@@ -10,6 +10,7 @@ import { PIERRE_TREE_UNSAFE_CSS, pierreTreeStyle } from "~/pierre-tree-theme";
 
 import { areAllDirectoriesExpanded, setAllDirectoriesExpanded } from "../files/fileTreeExpansion";
 import { Button } from "../ui/button";
+import { MorphIcon } from "~/components/MorphIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   buildDiffFileTreeUpdates,
@@ -113,7 +114,6 @@ export function DiffFileTree({
   const onSelectFileRef = useRef(onSelectFile);
   // Pierre takes the renderer once, at creation; the ref keeps it current.
   const renderFileDecorationRef = useRef(renderFileDecoration);
-  renderFileDecorationRef.current = renderFileDecoration;
   // Selection driven by `selectedPath` below is an echo of a file already on screen, not a
   // request to scroll to it again.
   const syncingSelectionRef = useRef(false);
@@ -174,6 +174,15 @@ export function DiffFileTree({
     }
     model.setGitStatus(gitStatus);
   }, [directoryPaths, gitStatus, model, ordering, paths, positions]);
+
+  useEffect(() => {
+    // Updating the renderer ref alone leaves counts stale when paths and Git statuses
+    // stay unchanged. Pierre's public render API updates the mounted view without
+    // replacing its model, selection, expansion or virtualized viewport.
+    renderFileDecorationRef.current = renderFileDecoration;
+    const fileTreeContainer = model.getFileTreeContainer();
+    if (fileTreeContainer !== undefined) model.render({ fileTreeContainer });
+  }, [model, renderFileDecoration]);
 
   useEffect(() => {
     if (selectedPath === null) {
@@ -241,11 +250,10 @@ export function DiffFileTree({
                   />
                 }
               >
-                {allDirectoriesExpanded ? (
-                  <ChevronsDownUpIcon className="size-3.5" />
-                ) : (
-                  <ChevronsUpDownIcon className="size-3.5" />
-                )}
+                <MorphIcon
+                  className="size-3.5"
+                  icon={allDirectoriesExpanded ? ChevronsDownUp : ChevronsUpDown}
+                />
               </TooltipTrigger>
               <TooltipPopup>
                 {allDirectoriesExpanded ? "Collapse all folders" : "Expand all folders"}

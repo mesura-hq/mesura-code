@@ -1,6 +1,6 @@
 import { WS_METHODS, type DictationJob, type DictationJobEvent } from "@t3tools/contracts";
 import * as Stream from "effect/Stream";
-import type { Atom } from "effect/unstable/reactivity";
+import type { Atom } from "effect/reactivity";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import {
@@ -43,7 +43,7 @@ export function createDictationEnvironmentAtoms<R, E>(
       tag: WS_METHODS.subscribeDictationJobs,
       transform: (stream) =>
         stream.pipe(
-          Stream.scan([] as ReadonlyArray<DictationJob>, reduceDictationJobs),
+          Stream.scan((): ReadonlyArray<DictationJob> => [], reduceDictationJobs),
           // `scan` emits its seed first; the list is unknown until the snapshot.
           Stream.drop(1),
         ),

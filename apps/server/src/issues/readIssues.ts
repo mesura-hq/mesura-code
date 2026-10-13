@@ -12,8 +12,9 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import * as GitHubCli from "../sourceControl/GitHubCli.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
+import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import * as GitHubIssueCli from "./GitHubIssueCli.ts";
 
 const summaryFields = "number,title,url,state,author,assignees,labels,createdAt,updatedAt";
 const decodeRepository = Schema.decodeUnknownEffect(
@@ -36,23 +37,24 @@ const isIssueReadError = Schema.is(IssueReadError);
 const resolveProjectRepository = Effect.fn("issues.resolveProjectRepository")(function* (
   projectId: IssueListInput["projectId"],
 ) {
-  const projects = yield* ProjectionSnapshotQuery;
+  const projects = yield* ProjectStore.ProjectStoreV2;
   const project = yield* projects
-    .getProjectShellById(projectId)
+    .getShell(projectId)
     .pipe(Effect.mapError(() => new IssueReadError({ message: "Could not read this project." })));
   if (Option.isNone(project))
     return yield* new IssueReadError({ message: "This project is no longer available." });
-  if (
-    project.value.repositoryIdentity?.provider &&
-    project.value.repositoryIdentity.provider !== "github"
-  ) {
+  const cwd = project.value.workspaceRoot;
+  // The V2 project store keeps shells without enrichment, so the identity
+  // comes from the resolver the shell stream enriches them with.
+  const identity = yield* (yield* RepositoryIdentityResolver.RepositoryIdentityResolver).resolve(
+    cwd,
+  );
+  if (identity?.provider && identity.provider !== "github") {
     return yield* new IssueReadError({
       message: "Issues are available for GitHub repositories only.",
     });
   }
-  const github = yield* GitHubCli.GitHubCli;
-  const cwd = project.value.workspaceRoot;
-  const identity = project.value.repositoryIdentity;
+  const github = yield* GitHubIssueCli.GitHubIssueCli;
   // Without a recorded identity, `gh` reads the checkout's default remote. A recorded one decides
   // the repository, and one that is incomplete or names two repositories is refused rather than
   // left to that default, which in a fork with an `upstream` remote is the fork.

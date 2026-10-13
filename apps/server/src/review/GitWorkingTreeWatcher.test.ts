@@ -32,6 +32,8 @@ import * as Stream from "effect/Stream";
 import type { GitWorkingTreeChangesResult } from "@t3tools/contracts";
 
 import * as ServerConfig from "../config.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
@@ -92,10 +94,15 @@ type Tuning = GitWorkingTreeWatcher.WatcherTuning;
 /** The real review stack, with `workspaceRoot` as the configured workspace root. */
 function makeLayer(workspaceRoot: string, tuning: Layer.Layer<never> = Layer.empty) {
   return ReviewService.layer.pipe(
+    Layer.provide(
+      Layer.mock(ProjectStore.ProjectStoreV2)({ listShells: () => Effect.succeed([]) }),
+    ),
     Layer.provideMerge(GitWorkingTreeWatcher.layer),
     Layer.provideMerge(GitVcsDriver.layer),
     Layer.provideMerge(VcsDriverRegistry.layer),
     Layer.provideMerge(VcsProcess.layer),
+    // ReviewService checks managed worktree roots from settings (upstream).
+    Layer.provide(ServerSettings.layerTest()),
     Layer.provide(ServerConfig.layerTest(workspaceRoot, { prefix: "t3-tree-watch-base-" })),
     Layer.provideMerge(tuning),
     Layer.provideMerge(NodeServices.layer),

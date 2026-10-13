@@ -15,6 +15,14 @@ import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { toastManager } from "../ui/toast";
 
+// Keep session grant checks real; the shared fixture supplies authenticated sessions.
+vi.mock("@t3tools/client-runtime/state/session", async (original) =>
+  (await import("../../test/appRootFenceMocks")).mockRuntimeSession(original),
+);
+// happy-dom has no layout for the command palette's virtualized result list.
+vi.mock("@legendapp/list/react", async () =>
+  (await import("../../test/appRootFenceMocks")).mockLegendList(),
+);
 vi.mock("~/state/entities", async (original) =>
   (await import("./threadSearchPicker.testFixtures")).mockEntities(await original()),
 );

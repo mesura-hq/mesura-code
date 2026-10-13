@@ -3,11 +3,11 @@ name: test-t3-app
 description: Launch, retain, and test the Mesura Code web app in isolated development environments, including a paired headless browser for desktop and phone checks, first-try browser authentication with one-time pairing URLs, pairing-token recovery, worktree-safe state directories, cross-turn dev server lifecycle, and direct SQLite inspection or fixture seeding. Use when an agent needs to run T3 locally, screenshot or drive its UI headless, iteratively test UI behavior with a human, recover from an expired or consumed pairing token, isolate dev state, or prepare test data in state.sqlite.
 ---
 
-# Test T3 App
+# Test T3 web and desktop
 
 Use this skill for the web client, including the phone-sized checks this fork relies on in place of native mobile clients (removed, see `docs/mesura/adr-008-remove-native-mobile.md`).
 
-## Start an isolated web environment
+## Start the app
 
 1. Run commands from the repository root.
 2. Choose a base directory that belongs only to the current worktree or test:
@@ -16,15 +16,24 @@ Use this skill for the web client, including the phone-sized checks this fork re
 3. Choose the arguments for `vp run dev`: add `--share` when the user needs to open it from another tailnet device. In a linked worktree it defaults to that worktree's gitignored `.t3`; add `--home-dir <base-dir>` only when the test needs a different isolated directory.
 4. Start it once, so it outlives your turn: under the host's workload runner, never `&` or `nohup`. On vigilia hosts that is `mesura-agent-service <name> --memory 4G -- vp run dev <arguments>`; `--memory 2G` is enough for an empty base directory, and a copied database needs the 4G. Read the selected server port, web port, base directory, and pairing URL from its output (`journalctl --user -u mesura-workload-<name>`).
 
-Treat a base directory as disposable only when it was created or deliberately selected for the current test. Never delete or directly seed the shared `~/.t3` directory. Prefer starting with a new temporary base directory over clearing state of uncertain ownership.
+Test with meaningful project and thread data. Read
+[references/sqlite-fixtures.md](references/sqlite-fixtures.md) only when
+inspecting or seeding SQLite. Stop the test server before direct fixture writes.
 
-The worktree-local default deliberately outranks an ambient `T3CODE_HOME`; do not pass the shared home through to a worktree dev server.
+## Use the Browser panel
 
-Ports are derived from the worktree path but can shift when occupied. Always read the actual values from the `[dev-runner]` line.
+Call `preview_status`, then `preview_open` if the Browser panel is
+closed. Navigate to the complete startup pairing URL once with
+`preview_navigate`, then use `preview_snapshot` and T3's interaction tools.
+If the token was consumed or expired, run `node apps/server/src/bin.ts pair`
+for a fresh one. Keep using the same tab.
 
-Shared browser dev is single-origin: Vite proxies the backend paths, so never set `VITE_HTTP_URL` or `VITE_WS_URL` for `dev`/`dev:web`.
+## Verify and retain
 
-The dev runner disables browser auto-open by default. Do not pass `--browser` during automated testing: an automatically opened page can consume the one-time bootstrap token before the controlled browser uses it.
+Exercise the affected flow and capture the state that proves it works. Keep
+the server, state, and panel available while the user inspects or iterates.
+An assistant turn ending is not teardown. Stop only processes you started,
+using retained terminal sessions or captured PIDs.
 
 ### Verify a shared environment before human handoff
 

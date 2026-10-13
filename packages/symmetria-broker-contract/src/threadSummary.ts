@@ -28,8 +28,6 @@
  */
 import {
   IsoDateTime,
-  OrchestrationLatestTurn,
-  OrchestrationSessionStatus,
   ProjectId,
   ThreadId,
   ThreadTokenUsageSnapshot,
@@ -40,13 +38,40 @@ import * as Schema from "effect/Schema";
 import { NonEmptyText } from "./primitives.ts";
 
 /**
+ * Mesura: the session and turn vocabularies this protocol shipped with.
+ * Upstream's orchestrator v2 (PR #2829) deleted `OrchestrationSessionStatus`
+ * and `OrchestrationLatestTurn`, which these were borrowed from, so the
+ * protocol owns them now. They are frozen copies of the last upstream values:
+ * the wire format and the published JSON Schema stay unchanged, and a producer
+ * maps v2 thread state onto them.
+ */
+export const SymmetriaSessionStatus = Schema.Literals([
+  "idle",
+  "starting",
+  "running",
+  "ready",
+  "interrupted",
+  "stopped",
+  "error",
+]);
+export type SymmetriaSessionStatus = typeof SymmetriaSessionStatus.Type;
+
+export const SymmetriaLatestTurnState = Schema.Literals([
+  "running",
+  "interrupted",
+  "completed",
+  "error",
+]);
+export type SymmetriaLatestTurnState = typeof SymmetriaLatestTurnState.Type;
+
+/**
  * What the thread's provider session is doing, without saying anything about
  * the provider itself. `OrchestrationSession` (`orchestration.ts:299`) also
  * carries `providerName`, `providerInstanceId` and `lastError`; a shell needs
  * none of them to render a row, and `lastError` is free-form provider text.
  */
 export const SymmetriaThreadLiveness = Schema.Struct({
-  status: OrchestrationSessionStatus,
+  status: SymmetriaSessionStatus,
   activeTurnId: Schema.NullOr(TurnId),
 });
 export type SymmetriaThreadLiveness = typeof SymmetriaThreadLiveness.Type;
@@ -58,15 +83,12 @@ export type SymmetriaThreadLiveness = typeof SymmetriaThreadLiveness.Type;
  * transcript, so publishing it would hand a shell an address inside exactly the
  * content this projection keeps out.
  *
- * `state` composes the upstream literal through `OrchestrationLatestTurn.fields`
- * rather than restating it. Upstream exports the struct value but keeps the
- * state literal module-private (`orchestration.ts:351`), and reaching it through
- * the struct's fields needs no copy and therefore no lock: there is only one
- * vocabulary, so nothing can drift out of step with it.
+ * `state` was composed from upstream's `OrchestrationLatestTurn.fields.state`
+ * until v2 deleted it; it is `SymmetriaLatestTurnState` now (see above).
  */
 export const SymmetriaThreadLatestTurn = Schema.Struct({
   turnId: TurnId,
-  state: OrchestrationLatestTurn.fields.state,
+  state: SymmetriaLatestTurnState,
   requestedAt: IsoDateTime,
   startedAt: Schema.NullOr(IsoDateTime),
   completedAt: Schema.NullOr(IsoDateTime),

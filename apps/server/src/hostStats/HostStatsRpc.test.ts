@@ -28,11 +28,7 @@ import {
   type HostStatsSample,
   WS_METHODS,
 } from "@t3tools/contracts";
-import {
-  HostProcessArchitecture,
-  HostProcessHostname,
-  HostProcessPlatform,
-} from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { assert, describe, it } from "@effect/vitest";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -239,9 +235,9 @@ const startHostStats = (options: HarnessOptions = {}) =>
         Layer.provide(Layer.succeed(ServerActivation, Deferred.await(activation))),
         Layer.provide(
           Layer.mergeAll(
-            Layer.succeed(HostProcessPlatform, HOST.platform),
-            Layer.succeed(HostProcessArchitecture, HOST.arch),
-            Layer.succeed(HostProcessHostname, HOST.hostname),
+            Layer.succeed(HostProcess.Platform, HOST.platform),
+            Layer.succeed(HostProcess.Architecture, HOST.arch),
+            Layer.succeed(HostProcess.Hostname, HOST.hostname),
           ),
         ),
       ),

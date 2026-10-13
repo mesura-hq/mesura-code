@@ -35,6 +35,13 @@ import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
 import type { AppRouter } from "./router";
 
+import { appRootFence, makeFenceSession } from "./test/appRootFenceMocks";
+const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("@legendapp/list/react", async () => (await fenceMocks()).mockLegendList());
+vi.mock("@t3tools/client-runtime/state/session", async (original) =>
+  (await fenceMocks()).mockRuntimeSession(original),
+);
+
 interface FixtureProject {
   id: string;
   environmentId: string;
@@ -243,6 +250,9 @@ function effectivePreview(projectId: string, effectiveSource: string) {
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  for (const environment of fixture.environments) {
+    appRootFence.sessions.set(environment.environmentId, makeFenceSession());
+  }
   localStorage.clear();
   fixture.updateRequests.length = 0;
   fixture.previewRequests.length = 0;

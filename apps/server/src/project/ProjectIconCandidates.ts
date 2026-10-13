@@ -4,6 +4,12 @@ import * as NodePath from "node:path";
 import { ProjectFaviconPath } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
+/** One local image the search may choose. Structurally the provider-core input's candidate. */
+export interface ProjectIconCandidate {
+  readonly path: string;
+  readonly bytes: number;
+}
+
 const EXCLUDED_DIRECTORIES = new Set([
   ".git",
   ".t3",
@@ -25,11 +31,6 @@ export const isProjectImagePath = Schema.is(ProjectFaviconPath);
 export const PROJECT_ICON_MAX_BYTES = 2 * 1024 * 1024;
 const ICON_NAME =
   /favicon|apple[-_]touch|isotipo|imagotipo|(?:^|[-_.])(?:logo|icon|brand|mark)(?:[-_.]|$)/i;
-
-export interface ProjectIconCandidate {
-  readonly path: string;
-  readonly bytes: number;
-}
 
 /** Inspect local brand assets with a fixed traversal budget. Never follow symlink directories. */
 export async function collectProjectIconCandidates(

@@ -1,17 +1,17 @@
 import {
   McpCapabilityUnavailableError,
+  OrchestratorMcpFailure,
   ProjectIconEffectiveSource,
   TrimmedNonEmptyString,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
-import * as Tool from "effect/unstable/ai/Tool";
-import * as Toolkit from "effect/unstable/ai/Toolkit";
+import { Tool, Toolkit } from "effect/ai";
 
-import { ServerConfig } from "../../../config.ts";
-import { OrchestrationEngineService } from "../../../orchestration/Services/OrchestrationEngine.ts";
-import { ProjectionSnapshotQuery } from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ServerConfig from "../../../config.ts";
+import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import { ProjectFaviconResolver } from "../../../project/ProjectFaviconResolver.ts";
-import { McpInvocationContext } from "../../McpInvocationContext.ts";
+import * as ProjectService from "../../../project/ProjectService.ts";
+import * as McpInvocationContext from "../../McpInvocationContext.ts";
 
 export class ProjectIconUpdateError extends Schema.TaggedError<ProjectIconUpdateError>()(
   "ProjectIconUpdateError",
@@ -34,12 +34,17 @@ export const ProjectIconsToolkit = Toolkit.make(
       effectiveSource: ProjectIconEffectiveSource,
       message: Schema.String,
     }),
-    failure: Schema.Union([McpCapabilityUnavailableError, ProjectIconUpdateError]),
+    // `OrchestratorMcpFailure` is the access gate's refusal (`McpToolAccess`).
+    failure: Schema.Union([
+      McpCapabilityUnavailableError,
+      ProjectIconUpdateError,
+      OrchestratorMcpFailure,
+    ]),
     dependencies: [
-      McpInvocationContext,
-      ServerConfig,
-      OrchestrationEngineService,
-      ProjectionSnapshotQuery,
+      McpInvocationContext.McpInvocationContext,
+      ThreadManagementService.ThreadManagementService,
+      ProjectService.ProjectService,
+      ServerConfig.ServerConfig,
       ProjectFaviconResolver,
     ],
   })

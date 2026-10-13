@@ -9,10 +9,29 @@ sentences.
 
 ## Composer controls
 
-Use `mod+shift+m` to choose a model, `alt+e` for effort, and `mod+shift+a` for
-access mode. Use `alt+w` to choose where the thread runs: the host, the workspace,
-and the Git branch, in one drawer (see [Run context](#run-context)). Use
-`mod+shift+l` to reuse the previous worktree directly.
+In **Settings → General → Send shortcut**, choose whether Enter sends, requires
+`mod+Enter` for multiline prompts, or always requires `mod+Enter`. `Shift+Enter`
+inserts a new line. This applies to the web and desktop composer at desktop widths.
+
+**Follow-up behavior** chooses Queue or Steer while the agent runs. Use
+`mod+Enter` to do the opposite for one message, even when the send shortcut
+requires a modifier. `mod+Alt+Enter` sends, keeps that thread running in the
+background, and opens a fresh new-thread composer. In a new thread, `mod+Enter`
+does the same. Change these shortcuts in **Settings → Keybindings** under
+**Composer: Opposite Queue or Steer Action**, **Composer: Start in Background**,
+or **Composer: Send and Start New Thread**. These bindings take priority over the
+send shortcut. Click the send button to use the configured follow-up behavior.
+
+When an active turn has queued messages, `mod+Shift+Enter` sends the first as a
+steer. Change it under **Queue: Send First Queued Message as Steer** in Keybindings.
+
+Use `mod+shift+m` to choose a model, `alt+e` for traits (effort, reasoning, agent,
+and variant), and `mod+shift+a` for access mode. Use `alt+w` to open the run
+context drawer: host, workspace, and Git branch together (see
+[Run context](#run-context)). `mod+shift+h` cycles directly to the next machine
+without opening the drawer; `mod+shift+x` opens the drawer on its Workspace tab
+and `mod+shift+g` opens it on its Git branch tab. Use `mod+shift+l` to reuse the
+previous worktree directly.
 Use `mod+alt+a` to attach files. `alt+a` does the same where your desktop
 does not keep `Alt+A` for itself.
 
@@ -33,6 +52,15 @@ to copy its URL and `mod+shift+k` to copy its number with a `#` prefix.
 Both shortcuts can be changed in Settings. Search for “Copy Link or Thread ID”
 or “Copy Number”. They copy the selected PR and leave terminal input alone.
 
+## Find in a diff
+
+Click into a diff in the Diff panel or a pull request's Code tab, then press
+`mod+f` to search every file in it, including folded files and unchanged lines
+hidden between changes. Enter and `Shift+Enter` move between matches, and a
+match in a folded file opens it. Escape closes the search. This shortcut is not
+configurable. A very large uncommitted diff loads its files as you scroll, and
+find only searches the files loaded so far.
+
 ## iPad
 
 With a hardware keyboard, use `Cmd+1` through `Cmd+9` to open the first nine
@@ -41,6 +69,8 @@ displayed threads. The shortcuts follow the current list filters and order.
 Use the arrow keys and Return to choose a result, or `Cmd+1` through `Cmd+9` to
 choose directly. Escape or `Cmd+K` closes the palette. Start a search with `>`
 to show only actions.
+
+In a new thread, `Cmd+Shift+H` moves the draft to the next machine.
 
 In the composer, Return sends and `Shift+Return` inserts a new line. `Cmd+Return`
 also sends. To make Return insert a new line instead, change the Return key
@@ -100,6 +130,20 @@ or Cmd records normally.
 Shortcuts on `tab` reach the desktop app but not the web app. Browsers keep `Ctrl+Tab` and
 `Ctrl+Shift+Tab` for switching their own tabs and never deliver them to a page, so a rule using
 them works in the desktop app and stays silent in a browser.
+
+Available context keys include `terminalFocus`, `terminalOpen`, `previewFocus`,
+`previewOpen`, `modelPickerOpen`, `usagePageOpen`, `composerFocus`, `composerDraft`,
+`turnRunning`, `editableFocus`, `isWeb`, and `isDesktop`, plus this fork's own
+`chatFocus`, `dictationActive`, `draftThreadRoute`, `panelFocus`, `rightPanelOpen`,
+`sidebarFocus`, and `sidebarSearchFocus`.
+`editableFocus` is true while a text field, the composer, or another editor has
+the keyboard. `isWeb` is true in a browser tab. `isDesktop` is true in the
+desktop app. Unknown keys evaluate to `false`.
+
+`mod+1` through `mod+9` jump to the first nine threads, and to models while the
+model picker is open. Those defaults use `isDesktop` so they do not steal the
+browser's tab-switch shortcuts. Remove that condition in Settings if you want
+the same jumps in a browser.
 
 ## Commands
 
@@ -443,6 +487,14 @@ Examples:
 - `"when": "terminalOpen && !terminalFocus"`
 - `"when": "!terminalFocus"`
 
+## Find in the current thread
+
+`chat.find` searches conversation messages and proposed plans in the active thread. Entering a
+query searches the entire thread, including older messages. Thread search requires server support;
+update an older server to enable it. Select **Retry** if a search fails. It defaults to
+`mod+f` outside terminals and previews. Press **Enter** or **Shift+Enter** to move between matches,
+and **Escape** to close find.
+
 ## Precedence
 
 The last rule whose key and condition both match wins, even if it belongs to a
@@ -454,9 +506,20 @@ a shortcut.
 `thread.stop` interrupts the running turn in the focused thread. It has no default
 shortcut; assign one in **Settings → Keybindings**.
 
+`thread.undo` (`mod+z` by default) reverses the actions shown in the notice at the
+bottom of the sidebar, such as unpin, settle, snooze, archive, or discarding a
+draft. Consecutive
+actions of the same kind undo together. The notice remains available for five
+seconds after the latest action. The default shortcut skips text fields and
+terminals so native undo keeps working there.
+
+`navigation.back` (`mod+[` by default) and `navigation.forward` (`mod+]`) move
+through the pages you have visited, like a browser's back and forward buttons.
+
 `chat.new` may ask you to choose a project when there is more than one.
 `chat.newLocal` skips that chooser. Both use your
-[new-thread defaults](./thread-sidebar.md#start-a-thread).
+[new-thread defaults](./thread-sidebar.md#start-a-thread). `chat.newWithoutProject`
+(`mod+alt+n`) starts a thread [without a project](./thread-sidebar.md#start-without-a-project).
 
 ## Reserved shortcuts
 
@@ -465,6 +528,13 @@ tab. When nothing remains to close, it closes the window on macOS and does nothi
 Windows. In a browser, `mod+w`
 closes the browser tab; rebind `rightPanel.close` and `terminal.close` to an available
 shortcut such as `alt+z`.
+
+`mod+shift+t` reopens the last closed tab across the app, including files,
+diffs, pull requests, browsers, and devices, in the order you closed them.
+A browser opens in a fresh session without its old page history. Incognito tabs
+can reopen until you reload or quit the app. This shortcut does not undo deleted work.
+Browsers also use it to reopen browser tabs; choose another binding in Settings
+if the browser takes it first.
 
 Many defaults include `!terminalFocus` so they do not intercept terminal input.
 Keep that condition when remapping them if you want the same behavior.

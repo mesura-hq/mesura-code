@@ -18,7 +18,13 @@ let root: Root;
 let activated: string[];
 let launcherOpen: boolean;
 
-function TabBarProbe({ activeSurfaceId }: { readonly activeSurfaceId: string }) {
+function TabBarProbe({
+  activeSurfaceId,
+  panelOpen,
+}: {
+  readonly activeSurfaceId: string;
+  readonly panelOpen: boolean;
+}) {
   const tabBarRef = useRef<HTMLDivElement | null>(null);
   const open = usePanelLauncherOpen();
   useLayoutEffect(() => {
@@ -26,6 +32,7 @@ function TabBarProbe({ activeSurfaceId }: { readonly activeSurfaceId: string }) 
   });
   useRightPanelTabCycling({
     tabBarRef,
+    panelOpen,
     surfaces: SURFACES,
     activeSurfaceId,
     onActivate: (surface) => activated.push(surface.id),
@@ -33,8 +40,8 @@ function TabBarProbe({ activeSurfaceId }: { readonly activeSurfaceId: string }) 
   return <div ref={tabBarRef} data-testid="tabbar" />;
 }
 
-function render(activeSurfaceId: string): void {
-  act(() => root.render(<TabBarProbe activeSurfaceId={activeSurfaceId} />));
+function render(activeSurfaceId: string, panelOpen = true): void {
+  act(() => root.render(<TabBarProbe activeSurfaceId={activeSurfaceId} panelOpen={panelOpen} />));
 }
 
 /** Dispatches a keydown from the focused element, as the browser does. */
@@ -130,5 +137,50 @@ describe("right panel tab cycling outside the panel", () => {
     focusTestId("chat-focus");
     press({ key: "t", code: "KeyT", ctrlKey: true });
     expect(launcherOpen).toBe(false);
+  });
+});
+
+describe("right panel tab cycling launcher availability regressions", () => {
+  it("retains mounted surface focus across close and opens the launcher only after reopening", () => {
+    focusTestId("surface-focus");
+    render("files", false);
+    const closed = press({ key: "t", code: "KeyT", ctrlKey: true });
+    expect(launcherOpen).toBe(false);
+    expect(closed.defaultPrevented).toBe(false);
+    expect(document.activeElement?.getAttribute("data-testid")).toBe("surface-focus");
+
+    render("files", true);
+    const reopened = press({ key: "t", code: "KeyT", ctrlKey: true });
+    expect(launcherOpen).toBe(true);
+    expect(reopened.defaultPrevented).toBe(true);
+  });
+
+  it("defers the focused panel new-tab chord to a blocking popup until it closes", () => {
+    focusTestId("surface-focus");
+    const popup = document.createElement("div");
+    popup.dataset.slot = "dialog-popup";
+    document.body.append(popup);
+    const blocked = press({ key: "t", code: "KeyT", ctrlKey: true });
+    expect(launcherOpen).toBe(false);
+    expect(blocked.defaultPrevented).toBe(false);
+
+    popup.remove();
+    const unblocked = press({ key: "t", code: "KeyT", ctrlKey: true });
+    expect(launcherOpen).toBe(true);
+    expect(unblocked.defaultPrevented).toBe(true);
+  });
+
+  it("preserves terminal new-tab and tab-cycling chords with a terminal focused inside the panel", () => {
+    const surface = document.querySelector<HTMLElement>("[data-testid='surface-focus']")!;
+    surface.dataset.terminalOwner = "right-panel";
+    surface.focus();
+    const newTab = press({ key: "t", code: "KeyT", ctrlKey: true });
+    const forward = nextTab();
+    const back = previousTab();
+    expect(launcherOpen).toBe(false);
+    expect(activated).toEqual([]);
+    expect(newTab.defaultPrevented).toBe(false);
+    expect(forward.defaultPrevented).toBe(false);
+    expect(back.defaultPrevented).toBe(false);
   });
 });

@@ -55,6 +55,7 @@ export interface ComposerVimAdapter {
   read(): { prompt: string; cursor: number };
   /** Replaces the whole prompt and places the collapsed cursor; keeps focus. */
   write(prompt: string, cursor: number): void;
+  /** Places the caret through the composer's focus path, including mobile expansion. */
   setCursor(cursor: number): void;
   /** The draft the composer is open on, which keys its undo history. */
   draftKey?(): string;
@@ -440,6 +441,42 @@ export function composerNormalOffset(): number | null {
  */
 export function resumeComposerNormalOnFocus(offset: number): void {
   pendingNormalOffset = offset;
+}
+
+/** Restores NORMAL through the mounted composer, which owns visibility and caret placement. */
+export function restoreComposerNormalFocus(offset: number): boolean {
+  if (adapter === null || composerEditorElement() === null) return false;
+  resumeComposerNormalOnFocus(offset);
+  adapter.setCursor(offset);
+  return true;
+}
+
+/** Captures a modal's composer origin before blur clears its NORMAL session. */
+export function captureComposerFocusReturn(
+  origin: Element | null,
+  focusAt: (cursor: number) => void,
+): (() => boolean) | null {
+  const editor = composerEditorElement();
+  if (adapter === null || editor === null || !editor.contains(origin)) return null;
+  const { prompt, cursor } = adapter.read();
+  const draftKey = adapter.draftKey?.();
+  const normalOffset = composerSurface.label() === "NORMAL" ? composerNormalOffset() : null;
+  return () => {
+    // The same editor can render another thread. Do not restore a stale caret
+    // or NORMAL receipt into that draft, or into a draft changed while away.
+    if (
+      adapter === null ||
+      !editor.isConnected ||
+      composerEditorElement() !== editor ||
+      adapter.draftKey?.() !== draftKey ||
+      adapter.read().prompt !== prompt
+    )
+      return false;
+    if (normalOffset !== null) resumeComposerNormalOnFocus(normalOffset);
+    else cancelComposerNormalResume();
+    focusAt(cursor);
+    return true;
+  };
 }
 
 /** Ends a resume `resumeComposerNormalOnFocus` armed: focus arriving enters insert mode again. */

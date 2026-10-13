@@ -1,6 +1,6 @@
 import type { StartThreadTurnInput } from "@t3tools/client-runtime/state/threads";
 import {
-  OrchestrationProposedPlanId,
+  PlanId,
   type CommandId,
   type DictationTarget,
   type EnvironmentId,
@@ -11,9 +11,10 @@ import {
   type RuntimeMode,
   type ServerProvider,
   type ThreadId,
-  type ThreadTurnStartBootstrap,
 } from "@t3tools/contracts";
 import { runAtomCommand } from "@t3tools/client-runtime/state/runtime";
+import { deriveLatestThreadRun } from "@t3tools/client-runtime/state/thread-execution";
+import { derivePendingThreadRequests } from "@t3tools/client-runtime/state/thread-requests";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { serializeLegacyContextMessage } from "@t3tools/shared/composerContextLegacySend";
 
@@ -26,9 +27,9 @@ import {
 import { deriveComposerSendState, readFileAsDataUrl } from "../components/ChatView.logic";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentProjects } from "../state/projects";
-import { environmentThreadDetails, threadEnvironment } from "../state/threads";
+import { readThread } from "../state/entities";
+import { threadEnvironment } from "../state/threads";
 import { buildMessageContext } from "../lib/composerContextRecords";
-import { derivePendingRequests } from "@t3tools/client-runtime/pending-requests";
 import { environmentServerConfigsAtom } from "../state/server";
 import { findLatestProposedPlan, hasActionableProposedPlan } from "../session-logic";
 import { resolvePlanFollowUpSubmission } from "../proposedPlan";
@@ -41,6 +42,8 @@ import {
   getUploadedAttachments,
   startAttachmentUpload,
 } from "../lib/attachmentUploadQueue";
+
+type DirectedTurnStartBootstrap = NonNullable<StartThreadTurnInput["bootstrap"]>;
 
 export type DirectedComposerPendingAction =
   | { readonly kind: "composer" }
@@ -63,7 +66,7 @@ export type DirectedComposerSubmission = {
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   readonly attachments: StartThreadTurnInput["message"]["attachments"];
-  readonly bootstrap: ThreadTurnStartBootstrap | undefined;
+  readonly bootstrap: DirectedTurnStartBootstrap | undefined;
   readonly pendingAction: DirectedComposerPendingAction;
   /**
    * Terminal picks, review comments and preview annotations that travel with
@@ -240,7 +243,7 @@ export function buildDirectedTurnStartInput(
       ? {
           sourceProposedPlan: {
             threadId: submission.threadId,
-            planId: OrchestrationProposedPlanId.make(submission.pendingAction.planId),
+            planId: PlanId.make(submission.pendingAction.planId),
           },
         }
       : {}),
@@ -307,7 +310,9 @@ export async function submitDirectedDictation(input: {
   if (threadRef === null) {
     return { kind: "refused", code: "unsupported_composer_action" };
   }
-  const thread = appAtomRegistry.get(environmentThreadDetails.detailAtom(threadRef));
+  const environmentThread = readThread(threadRef);
+  const projection = environmentThread?.projection ?? null;
+  const thread = projection?.thread ?? null;
   const draft = useComposerDraftStore.getState().getComposerDraft(input.composerTarget);
   const draftSession =
     input.target.kind === "draft"
@@ -317,7 +322,7 @@ export async function submitDirectedDictation(input: {
     draftSession !== null
       ? { environmentId: draftSession.environmentId, projectId: draftSession.projectId }
       : thread !== null
-        ? { environmentId: thread.environmentId, projectId: thread.projectId }
+        ? { environmentId: threadRef.environmentId, projectId: thread.projectId }
         : null;
   const project =
     projectRef === null ? null : appAtomRegistry.get(environmentProjects.projectAtom(projectRef));
@@ -325,10 +330,10 @@ export async function submitDirectedDictation(input: {
     return { kind: "refused", code: "unsupported_composer_action" };
   }
 
-  const pendingRequests = thread ? derivePendingRequests(thread.activities) : null;
+  const pendingRequests = projection ? derivePendingThreadRequests(projection) : null;
   const pendingApproval = pendingRequests?.approvals[0];
-  const latestPlan = thread
-    ? findLatestProposedPlan(thread.proposedPlans, thread.latestTurn?.turnId)
+  const latestPlan = projection
+    ? findLatestProposedPlan(projection, deriveLatestThreadRun(projection)?.runId ?? null)
     : null;
   const pendingAction: DirectedComposerPendingAction =
     input.submissionContext?.pendingAction ??
@@ -421,7 +426,7 @@ export async function submitDirectedDictation(input: {
   if (shouldCreateThread && modelSelection === null) {
     return { kind: "refused", code: "unsupported_composer_action" };
   }
-  const bootstrap: ThreadTurnStartBootstrap | undefined =
+  const bootstrap: DirectedTurnStartBootstrap | undefined =
     shouldCreateThread || shouldPrepareWorktree
       ? {
           ...(shouldCreateThread

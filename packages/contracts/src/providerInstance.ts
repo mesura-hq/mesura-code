@@ -46,7 +46,8 @@ const PROVIDER_SLUG_MAX_CHARS = 64;
  * `claudeAgent`) can be used verbatim during the migration and so external
  * fork authors retain reasonable freedom.
  */
-const PROVIDER_SLUG_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
+// Effect 4 exports regex constraints to JSON Schema only with the Unicode flag.
+const PROVIDER_SLUG_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/u;
 const ENVIRONMENT_VARIABLE_NAME_MAX_CHARS = 128;
 const ENVIRONMENT_VARIABLE_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
@@ -130,6 +131,25 @@ export const ProviderInstanceConfig = Schema.Struct({
   config: Schema.optionalKey(Schema.Unknown),
 });
 export type ProviderInstanceConfig = typeof ProviderInstanceConfig.Type;
+
+/** Atomic mutation for one provider-instance map entry. */
+export const ProviderInstanceMutation = Schema.Union([
+  Schema.Struct({
+    operation: Schema.Literal("create"),
+    instanceId: ProviderInstanceId,
+    instance: ProviderInstanceConfig,
+  }),
+  Schema.Struct({
+    operation: Schema.Literal("upsert"),
+    instanceId: ProviderInstanceId,
+    instance: ProviderInstanceConfig,
+  }),
+  Schema.Struct({
+    operation: Schema.Literal("remove"),
+    instanceId: ProviderInstanceId,
+  }),
+]);
+export type ProviderInstanceMutation = typeof ProviderInstanceMutation.Type;
 
 /**
  * Map shape for `ServerSettings.providerInstances`. Keyed by

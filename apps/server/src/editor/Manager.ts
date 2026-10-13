@@ -1074,7 +1074,7 @@ export const make = Effect.fn("EditorSessionManager.make")(function* () {
     configDirectory: current.neovimConfigDirectory,
     stateDir: config.neovimRuntimeDir,
     tracePath: Option.getOrUndefined(
-      yield* Config.string("MESURA_EDITOR_TRACE").pipe(Config.option),
+      yield* Config.String("MESURA_EDITOR_TRACE").pipe(Config.option),
     ),
   });
 });

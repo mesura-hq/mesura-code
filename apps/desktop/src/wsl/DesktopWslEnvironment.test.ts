@@ -9,7 +9,7 @@ import * as Layer from "effect/Layer";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 
 import {
   buildWslRuntimeInstallScript,
@@ -70,18 +70,27 @@ const runShell = (script: string) => {
 
 const sh = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
-// Backgrounds a process whose argv holds a runtime path, which is the only
-// thing runtime_in_use can see: it greps /proc/[0-9]*/cmdline for the path.
-//
-// The trailing `; :` is load-bearing. `sh -c "sleep 30" PATH` passes PATH as
-// $0, but a shell given one simple command exec's it instead of forking, so
-// the process argv becomes `sleep 30` and $0 is gone from cmdline. The scan
-// then reports the runtime as unused and the test exercises the wrong branch.
-// A second command leaves the shell with nothing to exec into, so it stays
-// alive as itself and keeps $0. Takes a shell expression, not a value: every
-// call site interpolates a shell variable that must expand inside the script.
-const holdingRuntimePath = (shellPathExpression: string) =>
-  `sh -c "sleep 30; :" ${shellPathExpression} >/dev/null 2>&1 &`;
+// Polls for up to five seconds until a background holder has taken effect.
+const awaitHolder = (condition: string) =>
+  `i=0; until ${condition}; do i=$((i + 1)); [ "$i" -lt 500 ] || exit 1; sleep 0.01; done`;
+
+// Holds a cache busy the way a running server does: the holder's argv[0] is the
+// runtime entry, which the prune and install scripts look for in /proc cmdline.
+// It reads a pipe the script keeps open on fd 7, so it exits with the script
+// instead of outliving it on a timer.
+const holdRuntimeBusy = (entry: string) =>
+  [
+    `exec 7> >(exec -a ${entry} cat >/dev/null 2>&1)`,
+    awaitHolder(`grep -qF -- ${entry} /proc/[0-9]*/cmdline 2>/dev/null`),
+  ].join("\n");
+
+// Holds a cache's install lock the way a concurrent install does, and likewise
+// releases it when the script exits.
+const holdInstallLock = (lock: string) =>
+  [
+    `exec 6> >(exec 9> ${lock}; flock -x 9; cat >/dev/null 2>&1)`,
+    awaitHolder(`! flock -n ${lock} true`),
+  ].join("\n");
 
 const readField = (stdout: string, field: string) => {
   const line = stdout.split("\n").find((candidate) => candidate.startsWith(`${field}:`));
@@ -726,9 +735,7 @@ describe.skipIf(posixShellRunner === null)("WSL runtime install script (executed
         `runtime_root=${sh(fixture.runtimeRoot)}`,
         `runtime_parent=${sh(fixture.runtimeParent)}`,
         'rm "$runtime_root/.t3code-wsl-runtime-ready"',
-        holdingRuntimePath('"$runtime_root/t3"'),
-        "active_pid=$!",
-        "sleep 0.1",
+        holdRuntimeBusy('"$runtime_root/t3"'),
         fixture.installScript(),
         'stale=$(find "$runtime_parent" -maxdepth 1 -type d -name ".sha256-*.stale.*" -print -quit)',
         'test -n "$stale"',
@@ -737,8 +744,6 @@ describe.skipIf(posixShellRunner === null)("WSL runtime install script (executed
         "export HOME",
         buildWslRuntimePruneScript(fixture.runtimeId),
         'test ! -e "$stale"',
-        "kill $active_pid",
-        "wait $active_pid 2>/dev/null || true",
       ].join("\n"),
     );
 
@@ -764,15 +769,8 @@ describe.skipIf(posixShellRunner === null)("WSL runtime install script (executed
         'touch -d "4 minutes ago" "$runtime_parent/sha256-active"',
         'touch -d "3 minutes ago" "$runtime_parent/sha256-old"',
         'touch -d "2 minutes ago" "$runtime_parent/sha256-locked"',
-        holdingRuntimePath('"$runtime_parent/sha256-active/t3"'),
-        "active_pid=$!",
-        "(",
-        '  exec 9> "$runtime_parent/.sha256-locked.install.lock"',
-        "  flock -x 9",
-        "  sleep 30",
-        ") >/dev/null 2>&1 &",
-        "lock_pid=$!",
-        "sleep 0.1",
+        holdRuntimeBusy('"$runtime_parent/sha256-active/t3"'),
+        holdInstallLock('"$runtime_parent/.sha256-locked.install.lock"'),
         `HOME="$home"`,
         "export HOME",
         buildWslRuntimePruneScript("sha256-current"),
@@ -783,9 +781,6 @@ describe.skipIf(posixShellRunner === null)("WSL runtime install script (executed
         'test -d "$runtime_parent/versions"',
         'test ! -e "$runtime_parent/sha256-old"',
         'test ! -e "$runtime_parent/sha256-markerless"',
-        "kill $active_pid $lock_pid",
-        "wait $active_pid 2>/dev/null || true",
-        "wait $lock_pid 2>/dev/null || true",
         'rm -rf "$work"',
       ].join("\n"),
     );

@@ -214,6 +214,9 @@ export async function openMesuraPage(options: OpenMesuraPageOptions = {}): Promi
       const minted = new URL(mintPairingUrl(baseDir));
       origin = options.origin ?? minted.origin;
       // The token is not bound to an origin, so an explicit origin pairs on itself.
+      // The empty /pair form captures its token at mount. A hash-only navigation
+      // reuses that form, so start a new document before supplying the token.
+      await page.goto("about:blank");
       await page.goto(new URL(`${minted.pathname}${minted.hash}`, origin).toString());
       await page.waitForURL((url) => !url.pathname.startsWith("/pair"), {
         timeout: PAIR_TIMEOUT_MS,

@@ -1,9 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off
 // Entry point: `makeProjectIconDiscovery`, the service behind the
 // `projectIcons.preview` and `projectIcons.discover` RPCs, running against the
-// real orchestration engine, projection pipeline and snapshot query on a SQLite
-// file. The model is the injected selector; each test counts its invocations.
-// A second runtime on the same file is a server restart.
+// real V2 `ProjectService` (project commands, event sink and project store) on
+// a SQLite file. The model is the injected selector; each test counts its
+// invocations. A second runtime on the same file is a server restart.
 //
 // Project icon discovery phase 1, acceptance criteria 1, 2, 3, 5, 6 (server
 // interruption), 7 (end to end) and 8 (persisted outcomes, unavailable Luna).
@@ -14,16 +14,13 @@ import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
-  DEFAULT_PROVIDER_INTERACTION_MODE,
-  MessageId,
   ProjectId,
   ProviderInstanceId,
-  ThreadId,
   DEFAULT_TEXT_GENERATION_MODEL,
-  type OrchestrationCommand,
   type ServerProvider,
   type OrchestrationProjectShell,
 } from "@t3tools/contracts";
+import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -35,19 +32,11 @@ import * as Scope from "effect/Scope";
 import { describe, expect, it } from "@effect/vitest";
 
 import { ServerConfig } from "../config.ts";
-import { OrchestrationEngineLive } from "../orchestration/Layers/OrchestrationEngine.ts";
-import { OrchestrationProjectionPipelineLive } from "../orchestration/Layers/ProjectionPipeline.ts";
-import { OrchestrationProjectionSnapshotQueryLive } from "../orchestration/Layers/ProjectionSnapshotQuery.ts";
-import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import * as ThreadBackgroundLiveness from "../orchestration/ThreadBackgroundLiveness.ts";
-import * as ThreadPlanProgress from "../orchestration/ThreadPlanProgress.ts";
-import { OrchestrationCommandReceiptRepositoryLive } from "../persistence/Layers/OrchestrationCommandReceipts.ts";
-import { OrchestrationEventStoreLive } from "../persistence/Layers/OrchestrationEventStore.ts";
-import { makeSqlitePersistenceLive } from "../persistence/Layers/Sqlite.ts";
-import type { ProviderInstance } from "../provider/ProviderDriver.ts";
+import * as RuntimeLayer from "../orchestration-v2/runtimeLayer.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import type { ProjectIconCandidate } from "./ProjectIconCandidates.ts";
+import * as ProjectEnrichmentService from "./ProjectEnrichmentService.ts";
 import * as ProjectFaviconResolver from "./ProjectFaviconResolver.ts";
 import {
   makeProjectIconDiscovery,
@@ -55,10 +44,10 @@ import {
   selectProjectIconInstance,
   type ProjectIconInstanceCandidate,
 } from "./ProjectIconDiscovery.ts";
+import * as ProjectService from "./ProjectService.ts";
 import * as RepositoryIdentityResolver from "./RepositoryIdentityResolver.ts";
 import * as T3ProjectFileLoader from "./T3ProjectFileLoader.ts";
 
-const NOW = "2026-10-11T00:00:00.000Z";
 const BRAND_ICON = "web/public/brand-logo.svg";
 
 interface Selection {
@@ -82,24 +71,18 @@ interface DiscoveryState {
 const discoveryOf = (project: OrchestrationProjectShell | null): DiscoveryState | null =>
   (project as { iconDiscovery?: DiscoveryState | null } | null)?.iconDiscovery ?? null;
 
-function orchestrationLayer(databasePath: string) {
-  return Layer.mergeAll(
-    OrchestrationEngineLive.pipe(
-      Layer.provide(OrchestrationProjectionSnapshotQueryLive),
-      Layer.provide(OrchestrationProjectionPipelineLive),
+function projectLayer(databasePath: string) {
+  return RuntimeLayer.layerProjectService.pipe(
+    Layer.provideMerge(ProjectEnrichmentService.layer),
+    Layer.provideMerge(ProjectFaviconResolver.layer.pipe(Layer.provide(T3ProjectFileLoader.layer))),
+    Layer.provideMerge(WorkspacePaths.layer),
+    // No git remotes in these workspaces; identity resolution is not under test.
+    Layer.provideMerge(
+      Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+        resolve: () => Effect.succeed(null),
+      }),
     ),
-    OrchestrationProjectionSnapshotQueryLive,
-    ProjectFaviconResolver.layer.pipe(
-      Layer.provide(WorkspacePaths.layer),
-      Layer.provide(T3ProjectFileLoader.layer),
-    ),
-  ).pipe(
-    Layer.provideMerge(ThreadBackgroundLiveness.layer),
-    Layer.provide(ThreadPlanProgress.layer),
-    Layer.provide(OrchestrationEventStoreLive),
-    Layer.provideMerge(OrchestrationCommandReceiptRepositoryLive),
-    Layer.provide(RepositoryIdentityResolver.layer),
-    Layer.provide(makeSqlitePersistenceLive(databasePath)),
+    Layer.provideMerge(SqlitePersistence.layerFromPath(databasePath)),
     Layer.provideMerge(
       ServerConfig.layerTest(process.cwd(), { prefix: "mesura-icon-discovery-test-" }),
     ),
@@ -137,10 +120,9 @@ const startServer = Effect.fnUntraced(function* (
   } = {},
 ) {
   const scope = yield* Scope.fork(yield* Scope.Scope);
-  const context = yield* Layer.buildWithScope(orchestrationLayer(databasePath), scope);
-  const run = <A, E>(
-    effect: Effect.Effect<A, E, Layer.Success<ReturnType<typeof orchestrationLayer>>>,
-  ) => effect.pipe(Effect.provideContext(context));
+  const context = yield* Layer.buildWithScope(projectLayer(databasePath), scope);
+  const run = <A, E>(effect: Effect.Effect<A, E, Layer.Success<ReturnType<typeof projectLayer>>>) =>
+    effect.pipe(Effect.provideContext(context));
   const calls: SelectInput[] = [];
   const select: Selector =
     options.select ?? (() => Effect.succeed({ path: BRAND_ICON, reason: "The brand mark." }));
@@ -157,14 +139,23 @@ const startServer = Effect.fnUntraced(function* (
           : Effect.fail(new ProjectIconSelectionUnavailable({ detail: options.unavailable })),
     }).pipe(Scope.provide(scope)),
   );
-  const engine = yield* run(Effect.service(OrchestrationEngineService));
-  const snapshots = yield* run(Effect.service(ProjectionSnapshotQuery));
+  const projects = yield* run(Effect.service(ProjectService.ProjectService));
   return {
     calls,
     run,
-    dispatch: (command: OrchestrationCommand) => run(engine.dispatch(command)),
+    projects,
+    update: (input: ProjectService.ProjectUpdateInput) => run(projects.update(input)),
+    /** A request claim persisted without a worker, as a crash between the two leaves it. */
+    claimWithoutWorker: (projectId: ProjectId, commandId: string) =>
+      run(
+        projects.commitIconDiscovery({
+          type: "project.icon-discovery.request",
+          commandId: CommandId.make(commandId),
+          projectId,
+        }),
+      ),
     project: (projectId: ProjectId) =>
-      run(snapshots.getProjectShellById(projectId).pipe(Effect.map(Option.getOrNull))),
+      run(projects.getShell(projectId).pipe(Effect.map(Option.getOrNull))),
     discover: (projectId: ProjectId, requestId: string) =>
       run(discovery.discover({ projectId, requestId: CommandId.make(requestId) })),
     preview: (projectIds?: ReadonlyArray<ProjectId>) => run(discovery.preview(projectIds)),
@@ -186,14 +177,14 @@ const addProject = Effect.fnUntraced(function* (
   yield* fs.makeDirectory(root);
   for (const file of files) yield* writeFile(root, file);
   const projectId = ProjectId.make(`project-${name}`);
-  yield* server.dispatch({
-    type: "project.create",
-    commandId: CommandId.make(`cmd-create-${name}`),
-    projectId,
-    title: name,
-    workspaceRoot: root,
-    createdAt: NOW,
-  });
+  yield* server.run(
+    server.projects.create({
+      commandId: CommandId.make(`cmd-create-${name}`),
+      projectId,
+      title: name,
+      workspaceRoot: root,
+    }),
+  );
   return { projectId, root };
 });
 
@@ -205,41 +196,14 @@ const newDatabase = () =>
 it.layer(NodeServices.layer)("project icon discovery service fence", (it) => {
   describe("criterion 1: lifecycle silence", () => {
     it.effect(
-      "icon discovery fence: adding projects, threads, turns and resets invoke no model",
+      // Threads and turns run on the V2 orchestrator, which has no path to the
+      // selector: `discover` is its only caller, which the service's shape makes so.
+      "icon discovery fence: adding projects and resets invoke no model",
       () =>
         Effect.gen(function* () {
           const server = yield* startServer(yield* newDatabase());
           const { projectId } = yield* addProject(server, "lifecycle");
-          const threadId = ThreadId.make("thread-lifecycle");
-          yield* server.dispatch({
-            type: "thread.create",
-            commandId: CommandId.make("cmd-lifecycle-thread"),
-            threadId,
-            projectId,
-            title: "Lifecycle",
-            modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
-            runtimeMode: "approval-required",
-            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-            branch: null,
-            worktreePath: null,
-            createdAt: NOW,
-          });
-          yield* server.dispatch({
-            type: "thread.turn.start",
-            commandId: CommandId.make("cmd-lifecycle-turn"),
-            threadId,
-            message: {
-              messageId: MessageId.make("msg-lifecycle"),
-              role: "user",
-              text: "hello",
-              attachments: [],
-            },
-            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-            runtimeMode: "approval-required",
-            createdAt: NOW,
-          });
-          yield* server.dispatch({
-            type: "project.meta.update",
+          yield* server.update({
             commandId: CommandId.make("cmd-lifecycle-reset"),
             projectId,
             faviconPath: null,
@@ -265,8 +229,7 @@ it.layer(NodeServices.layer)("project icon discovery service fence", (it) => {
           ]);
           const empty = yield* addProject(server, "preview-empty", []);
           const stale = yield* addProject(server, "preview-stale");
-          yield* server.dispatch({
-            type: "project.meta.update",
+          yield* server.update({
             commandId: CommandId.make("cmd-preview-stale"),
             projectId: stale.projectId,
             faviconPath: "assets/deleted-logo.svg",
@@ -430,8 +393,7 @@ it.layer(NodeServices.layer)("project icon discovery service fence", (it) => {
         const server = yield* startServer(yield* newDatabase());
         const { projectId } = yield* addProject(server, "changed-after-preview");
         expect(yield* server.preview([projectId])).toMatchObject([{ status: "ready" }]);
-        yield* server.dispatch({
-          type: "project.meta.update",
+        yield* server.update({
           commandId: CommandId.make("cmd-changed-after-preview"),
           projectId,
           projectIcon: { kind: "emoji", emoji: "🚀" },
@@ -449,8 +411,7 @@ it.layer(NodeServices.layer)("project icon discovery service fence", (it) => {
       Effect.gen(function* () {
         const server = yield* startServer(yield* newDatabase());
         const custom = yield* addProject(server, "effective-custom");
-        yield* server.dispatch({
-          type: "project.meta.update",
+        yield* server.update({
           commandId: CommandId.make("cmd-effective-custom"),
           projectId: custom.projectId,
           projectIcon: { kind: "emoji", emoji: "🚀" },
@@ -460,8 +421,7 @@ it.layer(NodeServices.layer)("project icon discovery service fence", (it) => {
           BRAND_ICON,
         ]);
         const saved = yield* addProject(server, "effective-saved");
-        yield* server.dispatch({
-          type: "project.meta.update",
+        yield* server.update({
           commandId: CommandId.make("cmd-effective-saved"),
           projectId: saved.projectId,
           faviconPath: BRAND_ICON,
@@ -556,12 +516,7 @@ it.layer(NodeServices.layer)("project icon discovery service fence", (it) => {
           const first = yield* startServer(databasePath);
           const pending = yield* addProject(first, "interrupted-pending");
           // A claim persisted without its worker: the crash happened between the two.
-          yield* first.dispatch({
-            type: "project.icon-discovery.request",
-            commandId: CommandId.make("cmd-interrupted-pending"),
-            projectId: pending.projectId,
-            createdAt: NOW,
-          } as unknown as OrchestrationCommand);
+          yield* first.claimWithoutWorker(pending.projectId, "cmd-interrupted-pending");
           yield* first.stop();
 
           const second = yield* startServer(databasePath);
@@ -587,8 +542,7 @@ it.layer(NodeServices.layer)("project icon discovery service fence", (it) => {
         const { projectId } = yield* addProject(server, "reset-race");
         yield* server.discover(projectId, "cmd-reset-race");
         yield* server.run(Deferred.await(started));
-        yield* server.dispatch({
-          type: "project.meta.update",
+        yield* server.update({
           commandId: CommandId.make("cmd-reset-race-reset"),
           projectId,
           faviconPath: null,
@@ -628,7 +582,7 @@ it.layer(NodeServices.layer)("project icon discovery service fence", (it) => {
     );
 
     it.effect(
-      "icon discovery fence: discover answers before Luna finishes and chat keeps working",
+      "icon discovery fence: discover answers before Luna finishes and project commands keep working",
       () =>
         Effect.gen(function* () {
           const release = yield* Deferred.make<void>();
@@ -645,18 +599,11 @@ it.layer(NodeServices.layer)("project icon discovery service fence", (it) => {
           expect(accepted.jobToken).toBe("cmd-non-blocking");
           yield* server.run(Deferred.await(started));
           expect(discoveryOf(yield* server.project(projectId))?.status).toBe("running");
-          yield* server.dispatch({
-            type: "thread.create",
-            commandId: CommandId.make("cmd-non-blocking-thread"),
-            threadId: ThreadId.make("thread-non-blocking"),
+          // Project commands keep committing while the search runs.
+          yield* server.update({
+            commandId: CommandId.make("cmd-non-blocking-rename"),
             projectId,
-            title: "Chat while Luna runs",
-            modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
-            runtimeMode: "approval-required",
-            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-            branch: null,
-            worktreePath: null,
-            createdAt: NOW,
+            title: "Renamed while Luna runs",
           });
           yield* server.run(Deferred.succeed(release, undefined));
           yield* server.drain();
@@ -790,15 +737,13 @@ it.layer(NodeServices.layer)("project icon discovery service fence", (it) => {
         yield* server.run(Deferred.await(started));
         yield* server.discover(reset.projectId, "cmd-queued-reset");
         yield* server.discover(moved.projectId, "cmd-queued-moved");
-        yield* server.dispatch({
-          type: "project.meta.update",
+        yield* server.update({
           commandId: CommandId.make("cmd-queued-reset-update"),
           projectId: reset.projectId,
           faviconPath: null,
           projectIcon: null,
         });
-        yield* server.dispatch({
-          type: "project.meta.update",
+        yield* server.update({
           commandId: CommandId.make("cmd-queued-moved-update"),
           projectId: moved.projectId,
           workspaceRoot: movedTo,
@@ -846,7 +791,6 @@ it.layer(NodeServices.layer)("project icon discovery service fence", (it) => {
         const { projectId } = yield* addProject(server, "cancelled-request");
         const persisted = yield* Deferred.make<void>();
         const resume = yield* Deferred.make<void>();
-        const engine = yield* server.run(Effect.service(OrchestrationEngineService));
         let calls = 0;
         // The RPC is cancelled while its request command is persisting.
         const discovery = yield* server.run(
@@ -858,11 +802,11 @@ it.layer(NodeServices.layer)("project icon discovery service fence", (it) => {
               }),
             ),
           }).pipe(
-            Effect.provideService(OrchestrationEngineService, {
-              ...engine,
-              dispatch: (command) =>
-                engine
-                  .dispatch(command)
+            Effect.provideService(ProjectService.ProjectService, {
+              ...server.projects,
+              commitIconDiscovery: (command) =>
+                server.projects
+                  .commitIconDiscovery(command)
                   .pipe(
                     Effect.tap(() =>
                       command.commandId === "cmd-cancelled-rpc"
@@ -902,12 +846,7 @@ it.layer(NodeServices.layer)("project icon discovery service fence", (it) => {
         const server = yield* startServer(yield* newDatabase());
         const { projectId } = yield* addProject(server, "orphaned-pending");
         // The request persisted, but its RPC never reached the worker.
-        yield* server.dispatch({
-          type: "project.icon-discovery.request",
-          commandId: CommandId.make("cmd-orphaned"),
-          projectId,
-          createdAt: NOW,
-        } as unknown as OrchestrationCommand);
+        yield* server.claimWithoutWorker(projectId, "cmd-orphaned");
         const joined = yield* server.discover(projectId, "cmd-orphaned-join");
         expect(joined.jobToken).toBe("cmd-orphaned");
         yield* server.drain();
@@ -966,8 +905,7 @@ it.layer(NodeServices.layer)("project icon discovery service fence", (it) => {
           );
           const shown = yield* addProject(server, "saved-shown", ["logo.svg"]);
           for (const project of [masked, shown]) {
-            yield* server.dispatch({
-              type: "project.meta.update",
+            yield* server.update({
               commandId: CommandId.make(`cmd-effective-${project.projectId}`),
               projectId: project.projectId,
               faviconPath: "logo.svg",

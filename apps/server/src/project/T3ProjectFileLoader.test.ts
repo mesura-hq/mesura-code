@@ -9,7 +9,7 @@ import * as Path from "effect/Path";
 
 import * as T3ProjectFileLoader from "./T3ProjectFileLoader.ts";
 
-const TestLayer = Layer.empty.pipe(
+const layerTest = Layer.empty.pipe(
   Layer.provideMerge(T3ProjectFileLoader.layer),
   Layer.provideMerge(NodeServices.layer),
 );
@@ -27,7 +27,7 @@ const writeProjectFile = Effect.fn("writeProjectFile")(function* (cwd: string, c
   yield* fileSystem.writeFileString(path.join(cwd, "t3.json"), contents).pipe(Effect.orDie);
 });
 
-it.layer(TestLayer)("T3ProjectFileLoader", (it) => {
+it.layer(layerTest)("T3ProjectFileLoader", (it) => {
   it.effect("preserves legacy defaults when the Mesura path cannot be read as a file", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -84,7 +84,6 @@ it.layer(TestLayer)("T3ProjectFileLoader", (it) => {
       }).pipe(Effect.provide(Logger.layer([logger], { mergeWithExisting: false })));
     },
   );
-
   describe("load", () => {
     it.effect("loads and decodes a valid t3.json", () =>
       Effect.gen(function* () {

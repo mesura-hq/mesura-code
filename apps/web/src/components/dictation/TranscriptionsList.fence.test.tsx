@@ -18,6 +18,21 @@ const dictationFixture = vi.hoisted(() => ({
   primaryEnvironmentId: undefined as string | null | undefined,
 }));
 
+// happy-dom cannot measure the palette's virtual list. Keep its real rows and actions.
+vi.mock("@legendapp/list/react", async () =>
+  (await import("../../test/appRootFenceMocks")).mockLegendList(),
+);
+vi.mock("~/state/server", async (original) =>
+  (await import("../../test/appRootFenceMocks")).mockServer(original),
+);
+vi.mock("@t3tools/client-runtime/state/session", async (original) => {
+  const { appRootFence, makeFenceSession, mockRuntimeSession } =
+    await import("../../test/appRootFenceMocks");
+  appRootFence.sessions.set("thread-search-laptop", makeFenceSession());
+  appRootFence.sessions.set("thread-search-vigilia", makeFenceSession());
+  return mockRuntimeSession(original);
+});
+
 vi.mock("~/state/entities", async (original) =>
   (await import("../threads/threadSearchPicker.testFixtures")).mockEntities(await original()),
 );

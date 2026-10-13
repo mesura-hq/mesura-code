@@ -23,7 +23,7 @@
  * resolves them) and unrelated chrome. The setup follows
  * `AppRoot.dictation.fence.test.tsx`.
  */
-import { act, type ReactNode } from "react";
+import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
   createMemoryHistory,
@@ -33,124 +33,44 @@ import {
   Outlet,
 } from "@tanstack/react-router";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
-import type { Thread } from "./types";
+import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import { makeFenceThreadProjection, makeFenceThreadShell } from "./test/fenceThreadShell";
+import {
+  appRootFence,
+  FENCE_ENVIRONMENT_ID,
+  FENCE_PROJECT_ID,
+  installFenceFontEvents,
+} from "./test/appRootFenceMocks";
+import { EMPTY_ENVIRONMENT_THREAD_STATE } from "@t3tools/client-runtime/state/threads";
+import * as Option from "effect/Option";
 import type { AppRouter } from "./router";
 
 const fixture = vi.hoisted(() => ({
-  thread: null as Thread | null,
-  vimMode: false,
-  empty: [],
-  threadListeners: new Set<() => void>(),
-  project: {
-    id: "registry-fence-project",
-    environmentId: "registry-fence-environment",
-    title: "Registry fence",
-    workspaceRoot: "/tmp/registry-fence",
-    scripts: [],
-    createdAt: "2026-10-08T12:00:00.000Z",
-    defaultModelSelection: { instanceId: "codex", model: "gpt-5.4" },
-  },
   threadActions: {
     settleThread: [] as unknown[],
     pinThread: [] as unknown[],
     confirmAndUnpinThread: [] as unknown[],
   },
-  environments: [
-    {
-      environmentId: "registry-fence-environment",
-      label: "Fence environment",
-      connection: { phase: "connected" },
-      serverConfig: {
-        environment: { capabilities: { threadSettlement: true, threadPinning: true } },
-        providers: [
-          {
-            instanceId: "codex",
-            driver: "codex",
-            enabled: true,
-            installed: true,
-            status: "ready",
-            version: null,
-            auth: { status: "authenticated" },
-            checkedAt: "2026-10-08T12:00:00.000Z",
-            models: [],
-            slashCommands: [],
-            skills: [],
-          },
-        ],
-      },
-    },
-  ],
 }));
-
+const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("@t3tools/client-runtime/state/session", async (original) =>
+  (await fenceMocks()).mockRuntimeSession(original),
+);
 const success = () => Promise.resolve({ _tag: "Success" as const, value: { providers: [] } });
 
-vi.mock("./state/entities", async (importOriginal) => {
-  const { useSyncExternalStore } = await import("react");
-  const useFixtureThread = () =>
-    useSyncExternalStore(
-      (listener) => {
-        fixture.threadListeners.add(listener);
-        return () => {
-          fixture.threadListeners.delete(listener);
-        };
-      },
-      () => fixture.thread,
-    );
-  return {
-    ...(await importOriginal<typeof import("./state/entities")>()),
-    useThread: useFixtureThread,
-    readThread: () => fixture.thread,
-    useThreadShell: useFixtureThread,
-    useThreadRefs: () => fixture.empty,
-    useThreadShells: () => fixture.empty,
-    useProjects: () => fixture.empty,
-    useProject: () => fixture.project,
-  };
-});
-vi.mock("./state/environments", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./state/environments")>()),
-  useEnvironments: () => ({ environments: fixture.environments, isReady: true }),
-  usePrimaryEnvironment: () => null,
-}));
-vi.mock("./state/query", () => ({
-  useEnvironmentQuery: () => ({
-    data: null,
-    error: null,
-    isPending: false,
-    isSuccess: false,
-    refresh: () => undefined,
-  }),
-}));
-vi.mock("./state/threads", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./state/threads")>();
-  const { EMPTY_ENVIRONMENT_THREAD_STATE } = await import("@t3tools/client-runtime/state/threads");
-  return { ...actual, useEnvironmentThread: () => EMPTY_ENVIRONMENT_THREAD_STATE };
-});
-vi.mock("./state/use-atom-command", () => ({ useAtomCommand: () => success }));
-vi.mock("./state/use-atom-query-runner", () => ({ useAtomQueryRunner: () => success }));
-// The chords the app ships, as a keybindings file with no user rules resolves them.
-vi.mock("./state/server", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./state/server")>();
-  const { Atom } = await import("effect/unstable/reactivity");
-  const { DEFAULT_RESOLVED_KEYBINDINGS } = await import("@t3tools/shared/keybindings");
-  return { ...actual, primaryServerKeybindingsAtom: Atom.make(() => DEFAULT_RESOLVED_KEYBINDINGS) };
-});
-vi.mock("./hooks/useSettings", async (importOriginal) => {
-  const { DEFAULT_SERVER_SETTINGS } = await import("@t3tools/contracts");
-  const { DEFAULT_CLIENT_SETTINGS } = await import("@t3tools/contracts/settings");
-  const clientSettings = () => ({ ...DEFAULT_CLIENT_SETTINGS, vimMode: fixture.vimMode });
-  return {
-    ...(await importOriginal<typeof import("./hooks/useSettings")>()),
-    useEnvironmentSettings: () => ({ ...clientSettings(), ...DEFAULT_SERVER_SETTINGS }),
-    useClientSettings: (select?: (value: typeof DEFAULT_CLIENT_SETTINGS) => unknown) =>
-      select ? select(clientSettings()) : clientSettings(),
-    useClientSettingsHydrated: () => true,
-    useLegacySidebarEnabled: () => false,
-  };
-});
+vi.mock("./state/entities", async (original) => (await fenceMocks()).mockEntities(original));
+vi.mock("./state/environments", async (original) =>
+  (await fenceMocks()).mockEnvironments(original),
+);
+vi.mock("./state/query", async () => (await fenceMocks()).mockQuery());
+vi.mock("./state/threads", async (original) => (await fenceMocks()).mockThreads(original));
+vi.mock("./state/use-atom-command", async () => (await fenceMocks()).mockAtomCommand());
+vi.mock("./state/use-atom-query-runner", async () => (await fenceMocks()).mockAtomQueryRunner());
+vi.mock("./state/server", async (original) => (await fenceMocks()).mockServer(original));
+vi.mock("./hooks/useSettings", async (original) => (await fenceMocks()).mockSettings(original));
 vi.mock("./hooks/useHandleNewThread", () => ({ useNewThreadHandler: () => success }));
 vi.mock("./hooks/useThreadActions", () => ({
+  useAcknowledgeThreadWoke: () => success,
   useThreadActions: () => ({
     settleThread: (ref: unknown) => {
       fixture.threadActions.settleThread.push(ref);
@@ -177,27 +97,7 @@ vi.mock("./components/chat/ChatHeader", () => ({ ChatHeader: () => null }));
 vi.mock("./components/BranchToolbar", () => ({ BranchToolbar: () => null }));
 // happy-dom has no layout. Keep routing and timeline projection real, and
 // replace only the virtual list's measurement boundary.
-vi.mock("@legendapp/list/react", () => ({
-  LegendList: ({
-    data,
-    renderItem,
-    ListHeaderComponent,
-    ListFooterComponent,
-  }: {
-    data: Array<{ id: string }>;
-    renderItem: (input: { item: { id: string } }) => ReactNode;
-    ListHeaderComponent?: ReactNode;
-    ListFooterComponent?: ReactNode;
-  }) => (
-    <div>
-      {ListHeaderComponent}
-      {data.map((item) => (
-        <div key={item.id}>{renderItem({ item })}</div>
-      ))}
-      {ListFooterComponent}
-    </div>
-  ),
-}));
+vi.mock("@legendapp/list/react", async () => (await fenceMocks()).mockLegendList());
 
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { AppRoot } from "./AppRoot";
@@ -208,7 +108,7 @@ import { KeyEngineHost } from "./keys/KeyEngineHost";
 import { readKeyEngineSnapshot } from "./keys/keyEngineStore";
 import { selectActiveRightPanelSurface, useRightPanelStore } from "./rightPanelStore";
 
-const environmentId = EnvironmentId.make("registry-fence-environment");
+const environmentId = EnvironmentId.make(FENCE_ENVIRONMENT_ID);
 const threadId = ThreadId.make("registry-fence-thread");
 const threadRef = scopeThreadRef(environmentId, threadId);
 const now = "2026-10-08T12:00:00.000Z";
@@ -226,37 +126,27 @@ beforeAll(() => {
   installKeyEngine();
 });
 
-function makeThread(): Thread {
-  return {
+function makeThread() {
+  return makeFenceThreadShell({
     id: threadId,
     environmentId,
-    projectId: ProjectId.make("registry-fence-project"),
+    projectId: ProjectId.make(FENCE_PROJECT_ID),
     title: "Registry fence",
-    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    session: null,
-    messages: [],
-    proposedPlans: [],
-    checkpoints: [],
-    pullRequests: [],
     createdAt: now,
-    updatedAt: now,
-    archivedAt: null,
-    settledOverride: null,
-    settledAt: null,
-    deletedAt: null,
-    latestTurn: null,
-    branch: null,
-    worktreePath: null,
-    activities: [],
-  } as unknown as Thread;
+  });
 }
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  fixture.thread = makeThread();
-  fixture.vimMode = false;
+  installFenceFontEvents();
+  const shell = makeThread();
+  appRootFence.threads.set(threadId, shell);
+  appRootFence.threadStates.set(threadId, {
+    ...EMPTY_ENVIRONMENT_THREAD_STATE,
+    status: "live",
+    data: Option.some(makeFenceThreadProjection(shell)),
+  });
+  appRootFence.vimMode = false;
   fixture.threadActions.settleThread.length = 0;
   fixture.threadActions.pinThread.length = 0;
   fixture.threadActions.confirmAndUnpinThread.length = 0;
@@ -271,13 +161,15 @@ afterEach(async () => {
   root = undefined;
   container.remove();
   useRightPanelStore.getState().removeThread(threadRef);
+  appRootFence.threads.clear();
+  appRootFence.threadStates.clear();
   vi.unstubAllGlobals();
 });
 
 let router: ReturnType<typeof createRouter> | undefined;
 
 async function mountApp(options: { readonly vimMode: boolean }) {
-  fixture.vimMode = options.vimMode;
+  appRootFence.vimMode = options.vimMode;
   const route = createRootRoute({
     component: () => (
       <AppSidebarLayout>
@@ -383,39 +275,52 @@ const CLOSE_PANEL_CHORD: Chord = { key: "w", code: "KeyW", ctrlKey: true };
 const SIDEBAR_CHORD: Chord = { key: "b", code: "KeyB", ctrlKey: true };
 
 describe("registry fence: lifted ChatView chords keep their effect", () => {
-  for (const vimMode of [false, true]) {
-    const label = vimMode ? "Vim mode on" : "Vim mode off";
+  const vimModeCases = [false, true].map((vimMode) => ({
+    vimMode,
+    label: vimMode ? "Vim mode on" : "Vim mode off",
+  }));
 
-    it(`registry fence guard: Mod+Shift+S settles the open thread with ${label}`, async () => {
+  it.each(vimModeCases)(
+    "registry fence guard: Mod+Shift+S settles the open thread with $label",
+    async ({ vimMode }) => {
       await mountApp({ vimMode });
       const event = await press(SETTLE_CHORD);
       expect(event.defaultPrevented).toBe(true);
       expect(fixture.threadActions.settleThread).toEqual([threadRef]);
-    });
+    },
+  );
 
-    it(`registry fence guard: Mod+Shift+P pins the open thread with ${label}`, async () => {
+  it.each(vimModeCases)(
+    "registry fence guard: Mod+Shift+P pins the open thread with $label",
+    async ({ vimMode }) => {
       await mountApp({ vimMode });
       const event = await press(PIN_CHORD);
       expect(event.defaultPrevented).toBe(true);
       expect(fixture.threadActions.pinThread).toEqual([threadRef]);
       expect(fixture.threadActions.confirmAndUnpinThread).toEqual([]);
-    });
+    },
+  );
 
-    it(`registry fence guard: Mod+W closes the open panel surface with ${label}`, async () => {
+  it.each(vimModeCases)(
+    "registry fence guard: Mod+W closes the open panel surface with $label",
+    async ({ vimMode }) => {
       await mountApp({ vimMode });
       await openFileSurface();
       const event = await press(CLOSE_PANEL_CHORD);
       expect(event.defaultPrevented).toBe(true);
       expect(activeSurface()).toBeNull();
-    });
+    },
+  );
 
-    it(`registry fence guard: Mod+W with no panel open keeps its native meaning with ${label}`, async () => {
+  it.each(vimModeCases)(
+    "registry fence guard: Mod+W with no panel open keeps its native meaning with $label",
+    async ({ vimMode }) => {
       await mountApp({ vimMode });
       expect(activeSurface()).toBeNull();
       const event = await press(CLOSE_PANEL_CHORD);
       expect(event.defaultPrevented).toBe(false);
-    });
-  }
+    },
+  );
 
   it("registry fence guard: Mod+B toggles the sidebar with Vim mode off", async () => {
     await mountApp({ vimMode: false });

@@ -29,12 +29,18 @@
  * on its own against a stand-in for the upstream types.
  */
 import type {
-  ProviderRuntimeEventType,
+  ProviderRuntimeEvent,
   RuntimeErrorClass,
   RuntimeSessionExitKind,
   RuntimeSessionState,
   RuntimeThreadState,
 } from "@t3tools/contracts";
+
+/**
+ * Mesura: upstream stopped exporting the event-type vocabulary as its own type
+ * (refactor #9917). The union's `type` field is the same set of literals.
+ */
+type ProviderRuntimeEventType = ProviderRuntimeEvent["type"];
 
 /**
  * Resolves to `true` when `A` and `B` denote the same type, and to `never`

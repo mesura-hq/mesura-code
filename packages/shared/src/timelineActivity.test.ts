@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
-import { EventId, type OrchestrationThreadActivity } from "@t3tools/contracts";
-
 import {
+  type TimelineActivityLike,
   activityRemainsVisibleOutsideTurnFold,
   contextCompactionActivityDetail,
   contextCompactionActivityDetailFromHistory,
@@ -13,14 +12,11 @@ function timelineActivity(input: {
   readonly createdAt: string;
   readonly payload: unknown;
   readonly sequence?: number;
-}): OrchestrationThreadActivity {
+}): TimelineActivityLike & { readonly id: string } {
   return {
-    id: EventId.make(input.id),
-    tone: "info",
+    id: input.id,
     kind: input.kind,
-    summary: input.kind,
     payload: input.payload,
-    turnId: null,
     ...(input.sequence !== undefined ? { sequence: input.sequence } : {}),
     createdAt: input.createdAt,
   };
@@ -66,7 +62,7 @@ describe("timeline activity visibility", () => {
         createdAt: "2026-08-22T17:44:43.615Z",
         payload: {},
       }),
-    ] satisfies ReadonlyArray<OrchestrationThreadActivity>;
+    ] satisfies ReadonlyArray<TimelineActivityLike>;
 
     expect(contextCompactionActivityDetailFromHistory(activities[2]!, activities)).toBe(
       "The provider did not expose the compaction summary for this earlier event.\n\n" +
@@ -106,7 +102,7 @@ describe("timeline activity visibility", () => {
         createdAt: "2026-08-22T17:45:00.000Z",
         payload: { usedTokens: 30_000 },
       }),
-    ] satisfies ReadonlyArray<OrchestrationThreadActivity>;
+    ] satisfies ReadonlyArray<TimelineActivityLike>;
 
     expect(contextCompactionActivityDetailFromHistory(activities[2]!, activities)).toContain(
       "Before: 20,000 tokens\nAfter: 4,000 tokens",
@@ -132,7 +128,7 @@ describe("timeline activity visibility", () => {
           },
         },
       }),
-    ] satisfies ReadonlyArray<OrchestrationThreadActivity>;
+    ] satisfies ReadonlyArray<TimelineActivityLike>;
 
     expect(contextCompactionActivityDetailFromHistory(activities[0]!, activities)).toBe(
       "Summary\nKeep the implementation state.\n\n" +

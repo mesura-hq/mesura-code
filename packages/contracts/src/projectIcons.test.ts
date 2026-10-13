@@ -1,18 +1,18 @@
-// Entry point: the `OrchestrationShellStreamEvent` schema, which every client
-// decodes for a `project-upserted` shell event. A Luna search outcome reaches
+// Entry point: the `OrchestrationV2ShellStreamItem` schema, which every client
+// decodes for a `project.updated` shell item. A Luna search outcome reaches
 // the client only if this decode keeps the project's discovery state.
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
-import { OrchestrationShellStreamEvent } from "./orchestration.ts";
+import { OrchestrationV2ShellStreamItem } from "./orchestrationV2.ts";
 import {
   describeProjectIconChange,
   ProjectIconDiscoveryPreview,
   ProjectIconEffectiveSource,
 } from "./projectIcons.ts";
 
-const decodeShellEvent = Schema.decodeUnknownSync(OrchestrationShellStreamEvent);
-const encodeShellEvent = Schema.encodeSync(OrchestrationShellStreamEvent);
+const decodeShellEvent = Schema.decodeUnknownSync(OrchestrationV2ShellStreamItem);
+const encodeShellEvent = Schema.encodeSync(OrchestrationV2ShellStreamItem);
 
 const project = {
   id: "project-icons",
@@ -40,17 +40,17 @@ const iconDiscovery = {
 describe("project icon discovery on the shell stream", () => {
   it("icon discovery contract: a project upsert carries the search outcome to the client", () => {
     const event = decodeShellEvent({
-      kind: "project-upserted",
+      kind: "project.updated",
       sequence: 7,
       project: { ...project, iconDiscovery },
     });
-    expect(event.kind === "project-upserted" && event.project.iconDiscovery).toEqual(iconDiscovery);
+    expect(event.kind === "project.updated" && event.project.iconDiscovery).toEqual(iconDiscovery);
     expect(decodeShellEvent(encodeShellEvent(event))).toEqual(event);
   });
 
   it("icon discovery contract: a project from an older server decodes without discovery state", () => {
-    const event = decodeShellEvent({ kind: "project-upserted", sequence: 7, project });
-    expect(event.kind === "project-upserted" && event.project.iconDiscovery).toBeUndefined();
+    const event = decodeShellEvent({ kind: "project.updated", sequence: 7, project });
+    expect(event.kind === "project.updated" && event.project.iconDiscovery).toBeUndefined();
   });
 });
 

@@ -19,10 +19,14 @@ import {
 } from "@t3tools/contracts";
 
 import * as ServerConfig from "../config.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import { readWorkingTreeChanges } from "./GitWorkingTreeChanges.ts";
 import * as GitWorkingTreeWatcher from "./GitWorkingTreeWatcher.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import { isFilesystemRoot, managedWorktreesDirectories } from "../worktreesDirectory.ts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 
 export class ReviewService extends Context.Service<
   ReviewService,
@@ -52,13 +56,15 @@ export const make = Effect.gen(function* () {
   const vcsRegistry = yield* VcsDriverRegistry.VcsDriverRegistry;
   const git = yield* GitVcsDriver.GitVcsDriver;
   const workingTreeWatcher = yield* GitWorkingTreeWatcher.GitWorkingTreeWatcher;
+  const settings = yield* ServerSettings.ServerSettingsService;
+  const projectStore = yield* ProjectStore.ProjectStoreV2;
 
-  const canonicalizePath = (value: string) => {
+  const canonicalizePath = (value: string, allowMissing = true) => {
     const resolvedPath = path.resolve(value);
     return fileSystem.realPath(resolvedPath).pipe(
       Effect.catchTags({
         PlatformError: (cause) =>
-          cause.reason._tag === "NotFound"
+          cause.reason._tag === "NotFound" && allowMissing
             ? Effect.succeed(resolvedPath)
             : Effect.fail(
                 new VcsRepositoryDetectionError({
@@ -85,14 +91,42 @@ export const make = Effect.gen(function* () {
       | "ReviewService.subscribeWorkingTreeChanges",
     cwd: string,
   ) {
-    const [candidate, workspaceRoot, worktreesRoot] = yield* Effect.all([
+    const worktreesDirectories = yield* settings.getSettings.pipe(
+      Effect.orElseSucceed(() => ({ worktreesDirectory: "", previousWorktreesDirectories: [] })),
+    );
+    const home = yield* HostProcess.HomeDirectory;
+    const [candidate, workspaceRoot, worktreesRoots] = yield* Effect.all([
       canonicalizePath(cwd),
       canonicalizePath(config.cwd),
-      canonicalizePath(config.worktreesDir),
+      // A managed root that cannot be resolved, or resolves to a filesystem
+      // root through a symlink, is skipped rather than failing every review.
+      Effect.forEach(
+        managedWorktreesDirectories(worktreesDirectories, config.worktreesDir, path, home),
+        (directory) => canonicalizePath(directory).pipe(Effect.orElseSucceed(() => null)),
+      ).pipe(
+        Effect.map((roots) =>
+          roots.filter((root): root is string => root !== null && !isFilesystemRoot(root, path)),
+        ),
+      ),
     ]);
 
-    if (isWithinRoot(candidate, workspaceRoot) || isWithinRoot(candidate, worktreesRoot)) {
+    if (
+      isWithinRoot(candidate, workspaceRoot) ||
+      worktreesRoots.some((root) => isWithinRoot(candidate, root))
+    ) {
       return;
+    }
+
+    // Registered projects can live outside the server cwd. Unreadable or
+    // unresolvable project roots grant nothing, including missing roots.
+    const projects = yield* projectStore.listShells().pipe(Effect.orElseSucceed(() => []));
+    for (const project of projects) {
+      const root = yield* canonicalizePath(project.workspaceRoot, false).pipe(
+        Effect.orElseSucceed(() => null),
+      );
+      if (root !== null && isWithinRoot(candidate, root)) {
+        return;
+      }
     }
 
     return yield* new VcsRepositoryDetectionError({

@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off -- a synchronous sha256 fingerprint of a credential, computed in a pure helper.
 /**
  * The subscriptions this environment meters, independent of any agent.
  *
@@ -25,7 +26,7 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 
-import { writeFileStringAtomically } from "../atomicWrite.ts";
+import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import {
   discoverOpenCodeCredentials,
   openCodeDataDirectories,

@@ -20,7 +20,7 @@ const defaultInput = {
   runningUnderArm64Translation: false,
 } satisfies DesktopEnvironment.MakeDesktopEnvironmentInput;
 
-const makeEnvironmentLayer = (
+const layerEnvironment = (
   overrides: Partial<DesktopEnvironment.MakeDesktopEnvironmentInput> = {},
   env: Record<string, string | undefined> = {},
 ) =>
@@ -36,8 +36,7 @@ const makeEnvironmentLayer = (
 const makeEnvironment = (
   overrides: Partial<DesktopEnvironment.MakeDesktopEnvironmentInput> = {},
   env: Record<string, string | undefined> = {},
-) =>
-  DesktopEnvironment.DesktopEnvironment.pipe(Effect.provide(makeEnvironmentLayer(overrides, env)));
+) => DesktopEnvironment.DesktopEnvironment.pipe(Effect.provide(layerEnvironment(overrides, env)));
 
 describe("DesktopEnvironment", () => {
   it.effect("derives state paths and development identity inside Effect", () =>
@@ -51,6 +50,8 @@ describe("DesktopEnvironment", () => {
           VITE_DEV_SERVER_URL: "http://localhost:5173",
           T3CODE_DEV_REMOTE_T3_SERVER_ENTRY_PATH: " /remote/server.mjs ",
           T3CODE_OTLP_TRACES_URL: " http://127.0.0.1:4318/v1/traces ",
+          T3CODE_OTLP_METRICS_URL: " http://127.0.0.1:4318/v1/metrics ",
+          T3CODE_OTLP_LOGS_URL: " http://127.0.0.1:4318/v1/logs ",
           T3CODE_OTLP_EXPORT_INTERVAL_MS: "2500",
           T3CODE_OTLP_HEADERS: "authorization=Basic%20abc%3D%3D,x-tenant=t3",
           T3CODE_OTLP_PROTOCOL: "http/protobuf",
@@ -78,15 +79,10 @@ describe("DesktopEnvironment", () => {
       assert.equal(environment.appUserModelId, "com.t3tools.t3code.dev");
       assert.equal(environment.linuxDesktopEntryName, "mesura-code-dev.desktop");
       assert.equal(environment.linuxWmClass, "mesura-code-dev");
-      // Keep these literals. Electron scopes its single-instance lock to the
-      // userData directory, so upstream's `t3code` lets the separately
-      // installed T3 Code hold the lock and Mesura Code quits without a
-      // window. These two assertions are what fails if a weekly merge resolves
-      // this file in upstream's favor. Do not rewrite them through
-      // resolveDesktopUserDataIdentity — that reads the fork-owned constant a
-      // reverting merge never touches, so it would pass while the app breaks.
-      assert.equal(environment.userDataDirName, "mesura-code-dev");
-      assert.equal(environment.legacyUserDataDirName, "mesura-code-dev");
+      // Mesura: the userData directory names left this environment when
+      // upstream moved profile selection into DesktopUserData.ts. Their
+      // literal guards live in DesktopAppIdentity.test.ts and
+      // DesktopUserData.test.ts.
       assert.deepEqual(
         Option.map(environment.devServerUrl, (url) => url.href),
         Option.some("http://localhost:5173/"),
@@ -95,6 +91,8 @@ describe("DesktopEnvironment", () => {
       assert.deepEqual(environment.configuredBackendPort, Option.some(4949));
       assert.deepEqual(environment.commitHashOverride, Option.some("0123456789abcdef"));
       assert.deepEqual(environment.otlpTracesUrl, Option.some("http://127.0.0.1:4318/v1/traces"));
+      assert.deepEqual(environment.otlpMetricsUrl, Option.some("http://127.0.0.1:4318/v1/metrics"));
+      assert.deepEqual(environment.otlpLogsUrl, Option.some("http://127.0.0.1:4318/v1/logs"));
       assert.equal(environment.otlpExportIntervalMs, 2500);
       assert.deepEqual(
         environment.otlpHeaders,
@@ -123,9 +121,6 @@ describe("DesktopEnvironment", () => {
       assert.equal(environment.serverSettingsPath, "/tmp/t3/userdata/settings.json");
       assert.equal(environment.linuxDesktopEntryName, "mesura-code.desktop");
       assert.equal(environment.linuxWmClass, "mesura-code");
-      // Literals on purpose — see the development case above.
-      assert.equal(environment.userDataDirName, "mesura-code");
-      assert.equal(environment.legacyUserDataDirName, "mesura-code");
       assert.equal(environment.otlpProtocol, "http/json");
     }),
   );

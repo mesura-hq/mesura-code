@@ -14,7 +14,8 @@ import {
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
   MessageId,
-  ORCHESTRATION_WS_METHODS,
+  ORCHESTRATION_V2_WS_METHODS,
+  THREAD_SEARCH_WS_METHODS,
   OrchestrationSearchThreadsError,
   ProjectId,
   THREAD_SEARCH_EVIDENCE_EXCERPT_MAX_LENGTH,
@@ -285,14 +286,14 @@ export const makeFakeEnvironments = Effect.fn("ThreadSearchFakes.makeFakeEnviron
       });
     const sessionRef = yield* SubscriptionRef.make(Option.none<RpcSession>());
     const client = {
-      [ORCHESTRATION_WS_METHODS.searchThreads]: (input: OrchestrationSearchThreadsInput) =>
-        record(ORCHESTRATION_WS_METHODS.searchThreads, input).pipe(
+      [ORCHESTRATION_V2_WS_METHODS.searchThreads]: (input: OrchestrationSearchThreadsInput) =>
+        record(ORCHESTRATION_V2_WS_METHODS.searchThreads, input).pipe(
           Effect.andThen(serveLexicalSearch(spec.threads, input)),
         ),
-      [ORCHESTRATION_WS_METHODS.listThreadSearchCatalog]: (
+      [THREAD_SEARCH_WS_METHODS.listThreadSearchCatalog]: (
         input: OrchestrationThreadSearchCatalogInput,
       ) =>
-        record(ORCHESTRATION_WS_METHODS.listThreadSearchCatalog, input).pipe(
+        record(THREAD_SEARCH_WS_METHODS.listThreadSearchCatalog, input).pipe(
           Effect.andThen(
             measureRead(
               spec.override?.listThreadSearchCatalog?.(input) ?? serveCatalog(spec.threads, input),
@@ -304,20 +305,20 @@ export const makeFakeEnvironments = Effect.fn("ThreadSearchFakes.makeFakeEnviron
               : Effect.void,
           ),
         ),
-      [ORCHESTRATION_WS_METHODS.searchThreadEvidence]: (
+      [THREAD_SEARCH_WS_METHODS.searchThreadEvidence]: (
         input: OrchestrationThreadSearchEvidenceInput,
       ) =>
-        record(ORCHESTRATION_WS_METHODS.searchThreadEvidence, input).pipe(
+        record(THREAD_SEARCH_WS_METHODS.searchThreadEvidence, input).pipe(
           Effect.andThen(
             measureRead(
               spec.override?.searchThreadEvidence?.(input) ?? serveEvidence(spec.threads, input),
             ),
           ),
         ),
-      [ORCHESTRATION_WS_METHODS.reasonThreadSearch]: (
+      [THREAD_SEARCH_WS_METHODS.reasonThreadSearch]: (
         input: OrchestrationThreadSearchReasoningInput,
       ) =>
-        record(ORCHESTRATION_WS_METHODS.reasonThreadSearch, input).pipe(
+        record(THREAD_SEARCH_WS_METHODS.reasonThreadSearch, input).pipe(
           Effect.andThen(
             spec.reason?.(input) ??
               Effect.die(new Error(`${spec.environmentId} does not run the configured model.`)),

@@ -224,8 +224,9 @@ describe("command registry from the key engine", () => {
     expect(OWNED_ROWS.length).toBeGreaterThanOrEqual(27);
   });
 
-  for (const row of OWNED_ROWS) {
-    it(`runs ${row.command} from ${row.keys} through its owner, with no synthetic keydown`, () => {
+  it.each(OWNED_ROWS)(
+    "runs $command from $keys through its owner, with no synthetic keydown",
+    (row) => {
       const ran: string[] = [];
       for (const other of new Set(OWNED_ROWS.map((entry) => entry.command))) {
         register({ [other]: () => ran.push(other) });
@@ -236,8 +237,8 @@ describe("command registry from the key engine", () => {
       expect(ran).toEqual([row.command]);
       expect(syntheticKeydowns()).toEqual([]);
       expect(readKeyEngineSnapshot().notice).toBeNull();
-    });
-  }
+    },
+  );
 
   it("runs an owner's command from the leader when no chord binds it", () => {
     const pin = vi.fn();

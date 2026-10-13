@@ -1,10 +1,18 @@
+import * as NodeModule from "node:module";
+
 import * as Cause from "effect/Cause";
 import * as Data from "effect/Data";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
-import { Packr, Unpackr, addExtension } from "msgpackr";
+
+// Externalizing msgpackr with a static import failed the single-executable ESM guard.
+// Disk require loads the staged native closure in SEA and ordinary Node runtimes.
+const requireForMsgpackr = NodeModule.createRequire(import.meta.url);
+const { Packr, Unpackr, addExtension } = requireForMsgpackr(
+  "msgpackr",
+) as typeof import("msgpackr");
 
 /**
  * Neovim's msgpack-RPC framing, and nothing else.

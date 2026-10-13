@@ -177,7 +177,17 @@ const onKeyInput = () => {
 };
 const onPointerInput = () => {
   lastInputWasKey = false;
+  // Touch can leave focus on the waiting title. It still cancels keyboard entry.
+  cancelPendingEntry?.();
 };
+
+/** Base UI can pass a key event to onClick, or synthesize a click after pointer drag selection. */
+export function isPanelSurfaceKeyboardActivation(event: {
+  type: string;
+  detail?: number;
+}): boolean {
+  return event.type.startsWith("key") || (event.detail === 0 && lastInputWasKey);
+}
 
 /**
  * While a panel is mounted: `enterPanel` is the panel's pane entry, and
@@ -204,19 +214,48 @@ export function usePanelSurfaceKeys(
 
   useEffect(() => {
     const unregisterEntry = registerPaneEntry("panel", enterPanel);
-    window.addEventListener("keydown", onHalfPageKey);
-    window.addEventListener("keydown", onKeyInput, true);
-    window.addEventListener("pointerdown", onPointerInput, true);
+    // Bind allocates listeners per registration. React Compiler hoists
+    // capture-free arrows into shared functions; disposing one panel then
+    // removes another panel's listeners. Each panel must own its callbacks.
+    const halfPageKey = onHalfPageKey.bind(null);
+    const keyInput = onKeyInput.bind(null);
+    const pointerInput = onPointerInput.bind(null);
+    window.addEventListener("keydown", halfPageKey);
+    window.addEventListener("keydown", keyInput, true);
+    window.addEventListener("pointerdown", pointerInput, true);
     return () => {
       unregisterEntry();
-      window.removeEventListener("keydown", onHalfPageKey);
-      window.removeEventListener("keydown", onKeyInput, true);
-      window.removeEventListener("pointerdown", onPointerInput, true);
+      window.removeEventListener("keydown", halfPageKey);
+      window.removeEventListener("keydown", keyInput, true);
+      window.removeEventListener("pointerdown", pointerInput, true);
     };
   }, []);
 }
 
 let cancelPendingEntry: (() => void) | null = null;
+
+/** Runs a launcher selection with an explicit keyboard intent from its activation event. */
+export function activatePanelSurfaceFromLauncher(
+  panel: Element,
+  activate: () => void,
+  keyboard: boolean,
+): void {
+  cancelPendingEntry?.();
+  const previousTitle = panel.querySelector(ACTIVE_TAB_TITLE_SELECTOR);
+  if (keyboard) {
+    const content = panel.querySelector<HTMLElement>(SURFACE_CONTENT_SELECTOR);
+    if (content) {
+      // Removing the focused launcher first leaves BODY. The sheet can queue
+      // popup restoration that steals focus back from the tree.
+      // This content node survives the selection. Move focus before removal,
+      // then use the normal surface entry handoff. It adds no Tab stop or virtual keyboard.
+      content.tabIndex = -1;
+      content.focus({ preventScroll: true });
+    }
+  }
+  activate();
+  if (keyboard) focusPanelSurfaceAfterRender(panel, previousTitle);
+}
 
 /**
  * After a key changed the panel's active surface: focus its entry once it
@@ -233,9 +272,23 @@ export function focusPanelSurfaceAfterRender(
 ): void {
   cancelPendingEntry?.();
   let frames = 0;
+  let cancelled = false;
+  const initialFocus = document.activeElement;
+  // A user or surface focus move wins even before the tab's first frame.
+  const stop = () => {
+    cancelled = true;
+    if (frame !== 0) window.cancelAnimationFrame(frame);
+    document.removeEventListener("focusin", onFocusIn, true);
+    if (cancelPendingEntry === stop) cancelPendingEntry = null;
+  };
+  const onFocusIn = (event: FocusEvent) => {
+    if (event.target !== initialFocus) stop();
+  };
+  document.addEventListener("focusin", onFocusIn, true);
   let frame = window.requestAnimationFrame(function waitForTab() {
     frame = 0;
-    if (!panel.isConnected) return;
+    if (cancelled) return;
+    if (!panel.isConnected) return stop();
     const title = panel.querySelector<HTMLElement>(ACTIVE_TAB_TITLE_SELECTOR);
     // Re-choosing the surface already active never changes the title, so the
     // wait ends with whatever is active then.
@@ -243,18 +296,17 @@ export function focusPanelSurfaceAfterRender(
       title !== null && (title !== previousTitle || frames >= ACTIVE_TAB_WAIT_FRAMES);
     if (!rendered) {
       if (++frames <= ACTIVE_TAB_WAIT_FRAMES) frame = window.requestAnimationFrame(waitForTab);
+      else stop();
       return;
     }
+    stop();
     const content = panel.querySelector(SURFACE_CONTENT_SELECTOR);
-    if (content?.contains(document.activeElement)) return;
+    if (content?.contains(document.activeElement) && document.activeElement !== content) return;
     if (focusPanelSurface(panel)) return;
     title.focus({ preventScroll: true });
     waitForEntry(panel, title);
   });
-  cancelPendingEntry = () => {
-    if (frame !== 0) window.cancelAnimationFrame(frame);
-    cancelPendingEntry = null;
-  };
+  cancelPendingEntry = stop;
 }
 
 function waitForEntry(panel: Element, parkedOn: HTMLElement): void {

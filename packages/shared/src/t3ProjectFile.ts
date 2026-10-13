@@ -30,7 +30,9 @@ export function parseT3ProjectFile(contents: string): T3ProjectFile | null {
  * editors get LSP support via a `$schema` reference.
  */
 export function buildT3ProjectFileJsonSchema(): Record<string, unknown> {
-  const document = Schema.toJsonSchemaDocument(T3ProjectFile);
+  // Closed objects, as before effect rc.113 changed the generator default;
+  // editors then flag unknown keys in t3.json.
+  const document = Schema.toJsonSchemaDocument(T3ProjectFile, { onExcessProperty: "error" });
   const jsonSchema: Record<string, unknown> = {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     $id: T3_PROJECT_FILE_SCHEMA_URL,
@@ -54,7 +56,10 @@ export function parseMesuraProjectFile(contents: string): MesuraProjectFile | nu
 
 /** Build the local editor schema without claiming an upstream or published schema URL. */
 export function buildMesuraProjectFileJsonSchema(): Record<string, unknown> {
-  const document = Schema.toJsonSchemaDocument(Schema.toType(MesuraProjectFile));
+  // Editors flag unknown fields; runtime decoding still strips them for compatibility.
+  const document = Schema.toJsonSchemaDocument(Schema.toType(MesuraProjectFile), {
+    onExcessProperty: "error",
+  });
   return {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     $comment:
@@ -111,6 +116,9 @@ export function resolveRepositoryDefaults(
     ),
     scripts: legacy?.scripts ?? [],
     iconCandidates,
+    // Mesura: the decoded t3.json itself, so `resolveProjectSettings` can run
+    // upstream's file tier for new-thread callers that pass repository defaults.
+    projectFile: legacy,
   };
 }
 

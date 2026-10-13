@@ -8,7 +8,7 @@
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { HostStatsSample, type HostStatsGpu } from "@t3tools/contracts";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { assert, expect, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -21,7 +21,7 @@ import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import * as HostStatsCollector from "./HostStatsCollector.ts";
 import { HostOs, type HostOsApi } from "./portableReaders.ts";
@@ -160,7 +160,7 @@ const makeCollector = (
       sysRoot: path.join(root, "sys"),
       diskPath: root,
     }).pipe(
-      Effect.provideService(HostProcessPlatform, options.platform ?? "linux"),
+      Effect.provideService(HostProcess.Platform, options.platform ?? "linux"),
       options.hostOs ? Effect.provideService(HostOs, options.hostOs) : (effect) => effect,
       Effect.provideService(
         ChildProcessSpawner.ChildProcessSpawner,

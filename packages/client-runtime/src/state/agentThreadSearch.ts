@@ -1,5 +1,5 @@
 import {
-  ORCHESTRATION_WS_METHODS,
+  THREAD_SEARCH_WS_METHODS,
   OrchestrationThreadSearchReasoningEvidence,
   OrchestrationThreadSearchReasoningInput,
   THREAD_SEARCH_CATALOG_MAX_PAGE_SIZE,
@@ -9,6 +9,7 @@ import {
   THREAD_SEARCH_REASONING_MAX_INPUT_BYTES,
   THREAD_SEARCH_REASONING_MAX_TERMS,
   THREAD_SEARCH_TITLE_MAX_LENGTH,
+  type ClientGuardedRpcTag,
   type EnvironmentId,
   type OrchestrationThreadSearchCatalogEntry,
   type OrchestrationThreadSearchCatalogPage,
@@ -196,7 +197,7 @@ function uniqueEnvironments(
 }
 
 /** Runs one unary RPC in an environment and settles its typed failure. */
-function callEnvironment<TTag extends EnvironmentUnaryRpcTag>(
+function callEnvironment<TTag extends Exclude<EnvironmentUnaryRpcTag, ClientGuardedRpcTag>>(
   environmentId: EnvironmentId,
   tag: TTag,
   input: EnvironmentRpcInput<TTag>,
@@ -396,7 +397,7 @@ export const runAgentThreadSearch = Effect.fn("AgentThreadSearch.run")(function*
     const result: Result.Result<OrchestrationThreadSearchCatalogPage, unknown> =
       yield* callEnvironment(
         state.environment.environmentId,
-        ORCHESTRATION_WS_METHODS.listThreadSearchCatalog,
+        THREAD_SEARCH_WS_METHODS.listThreadSearchCatalog,
         { limit: THREAD_SEARCH_CATALOG_MAX_PAGE_SIZE, ...(cursor === undefined ? {} : { cursor }) },
       );
     if (Result.isFailure(result)) {
@@ -446,7 +447,7 @@ export const runAgentThreadSearch = Effect.fn("AgentThreadSearch.run")(function*
       if (!takeRead(state)) return;
       const result = yield* callEnvironment(
         state.environment.environmentId,
-        ORCHESTRATION_WS_METHODS.searchThreadEvidence,
+        THREAD_SEARCH_WS_METHODS.searchThreadEvidence,
         {
           query: term,
           limit: EVIDENCE_PAGE_SIZE,
@@ -632,7 +633,7 @@ export const runAgentThreadSearch = Effect.fn("AgentThreadSearch.run")(function*
     for (const item of selected) issuedRefs.set(item.ref, item);
     const stepResult = yield* callEnvironment(
       input.modelEnvironmentId,
-      ORCHESTRATION_WS_METHODS.reasonThreadSearch,
+      THREAD_SEARCH_WS_METHODS.reasonThreadSearch,
       {
         description,
         searchedTerms: [...searchedTerms],

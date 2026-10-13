@@ -5,13 +5,14 @@ import {
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
 import {
+  AuthOrchestrationOperateScope,
   describeProjectIconChange,
   type EnvironmentId,
   type ProjectIconEffectiveSource,
   type ProjectIconOverride,
   type ProjectId,
 } from "@t3tools/contracts";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import * as Cause from "effect/Cause";
 import { useCallback, useMemo } from "react";
 
@@ -19,7 +20,9 @@ import type { SidebarProjectSnapshot } from "../sidebarProjectGrouping";
 import { useEnvironments } from "../state/environments";
 import { projectIconPreviewCommand } from "../state/projectIcons";
 import { projectEnvironment } from "../state/projects";
+import { readEnvironmentScope } from "../state/session";
 import { useAtomCommand } from "../state/use-atom-command";
+import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 
 /**
@@ -86,7 +89,9 @@ export function useProjectGroupUpdate(group: SidebarProjectSnapshot) {
     () => new Map(environments.map((environment) => [environment.environmentId, environment])),
     [environments],
   );
-  const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
+  const updateProject = useOrchestrationCommand(projectEnvironment.update, {
+    reportFailure: false,
+  });
   const previewProjectIcons = useAtomCommand(projectIconPreviewCommand, { reportFailure: false });
   const reportFailure = useCallback((title: string, result: AtomCommandResult<void, unknown>) => {
     if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
@@ -99,6 +104,37 @@ export function useProjectGroupUpdate(group: SidebarProjectSnapshot) {
       }),
     );
   }, []);
+
+  /**
+   * Upstream (#9786): a connection without the orchestration-operate grant
+   * for some member's environment may not edit the group. Reports the first
+   * denied environment by name and returns the failure, or null when allowed.
+   */
+  const checkProjectAccess = useCallback(
+    (
+      members: ReadonlyArray<{
+        readonly environmentId: EnvironmentId;
+        readonly environmentLabel?: string | null | undefined;
+      }>,
+      failureTitle: string,
+    ): AtomCommandResult<void, unknown> | null => {
+      const denied = members.find(
+        (member) => !readEnvironmentScope(member.environmentId, AuthOrchestrationOperateScope),
+      );
+      if (!denied) return null;
+      const result = AsyncResult.failure<void, Error>(
+        Cause.fail(
+          new Error(
+            `This connection cannot change projects in ${denied.environmentLabel ?? "this environment"}.`,
+          ),
+        ),
+      );
+      reportFailure(failureTitle, result);
+      return result;
+    },
+    [reportFailure],
+  );
+
   // Group-shared fields live on each physical project record, so a
   // group-level edit fans out to every member.
   const updateAllMembers = useCallback(
@@ -120,6 +156,8 @@ export function useProjectGroupUpdate(group: SidebarProjectSnapshot) {
       },
     ): Promise<AtomCommandResult<void, unknown>> => {
       const targets = options?.targets ?? captureProjectGroupWriteTargets(group);
+      const denied = checkProjectAccess(targets, failureTitle);
+      if (denied) return denied;
       const unavailable = targets.find((target) => {
         const environment = environmentById.get(target.environmentId);
         return environment?.connection.phase !== "connected" || !environment.serverConfig;
@@ -133,6 +171,8 @@ export function useProjectGroupUpdate(group: SidebarProjectSnapshot) {
         return result;
       }
       for (const target of targets) {
+        const revoked = checkProjectAccess([target], failureTitle);
+        if (revoked) return revoked;
         const result = mapAtomCommandResult(
           await updateProject({
             environmentId: target.environmentId,
@@ -160,7 +200,7 @@ export function useProjectGroupUpdate(group: SidebarProjectSnapshot) {
       }
       return AsyncResult.success(undefined);
     },
-    [environmentById, group, reportFailure, updateProject],
+    [checkProjectAccess, environmentById, group, reportFailure, updateProject],
   );
 
   /** What each target displays now, read without starting a search; empty when unreadable. */
@@ -222,5 +262,5 @@ export function useProjectGroupUpdate(group: SidebarProjectSnapshot) {
     [group, readEffectiveIcons, updateAllMembers],
   );
 
-  return { updateAllMembers, updateProjectImage, reportFailure };
+  return { updateAllMembers, updateProjectImage, reportFailure, checkProjectAccess };
 }

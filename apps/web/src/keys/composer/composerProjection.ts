@@ -62,18 +62,21 @@ export function positionOf(text: string, offset: number): { line: number; col: n
 }
 
 /**
- * Lexical writes a line break as a plain `<br>`, and ends a paragraph whose
- * last line is empty with one more `<br>` that holds the line open but is not
- * a character. That trailing one is skipped.
+ * The composer (Tiptap/ProseMirror) writes a hard break as a plain `<br>`, and
+ * ends a paragraph whose last line is empty with one more `<br>` that holds the
+ * line open but is not a character. ProseMirror marks that one with
+ * `ProseMirror-trailingBreak`, and may put a separator `<img>` before it after
+ * an inline chip, so the class decides first. That trailing one is skipped.
  */
 function isPlaceholderBreak(br: HTMLBRElement): boolean {
+  if (br.classList.contains("ProseMirror-trailingBreak")) return true;
   if (br.nextSibling !== null) return false;
   const previous = br.previousSibling;
   return previous === null || previous.nodeName === "BR";
 }
 
 /**
- * The DOM point for a collapsed offset inside the Lexical editor. Text nodes
+ * The DOM point for a collapsed offset inside the composer editor. Text nodes
  * count their length, a non-editable chip counts one, a line-break `<br>`
  * counts one, and each paragraph after the first starts after one line break.
  */
@@ -87,9 +90,11 @@ export function domPointAt(
   for (let index = 0; index < paragraphs.length; index += 1) {
     const paragraph = paragraphs[index]!;
     if (index > 0) {
-      if (remaining === 0) return { node: paragraph, offset: 0 };
       remaining -= 1;
     }
+    // Empty paragraphs still have a caret at their start. A separator belongs
+    // to the preceding paragraph's end; consume it before mapping the next line.
+    last = { node: paragraph, offset: 0 };
     const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_ALL, {
       acceptNode(node) {
         const parent = node.parentElement;
@@ -102,6 +107,9 @@ export function domPointAt(
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       if (node.nodeType === Node.TEXT_NODE) {
         const length = (node as Text).length;
+        // An empty Text child has no collapsed character or caret box. Keep
+        // the paragraph start so caretRectAt can use the paragraph's geometry.
+        if (length === 0) continue;
         if (remaining <= length) return { node, offset: remaining };
         remaining -= length;
         last = { node, offset: length };
@@ -119,6 +127,7 @@ export function domPointAt(
         last = { node: parent, offset: at + 1 };
       }
     }
+    if (remaining === 0) return last;
   }
   return last;
 }
@@ -136,9 +145,14 @@ export function caretRectAt(editor: HTMLElement, offset: number): DOMRect | null
   const rect = range.getClientRects()[0];
   if (rect && rect.height > 0) return rect;
   // A caret before a `<br>` or in an empty paragraph has no box of its own.
+  const child = point.node.childNodes[point.offset];
+  // Tiptap can leave an empty Text child before a placeholder break. The
+  // paragraph still supplies the caret box when that child is not an Element.
   const element =
-    point.node.nodeType === Node.ELEMENT_NODE
-      ? ((point.node.childNodes[point.offset] as Element | undefined) ?? (point.node as Element))
+    point.node instanceof Element
+      ? child instanceof Element
+        ? child
+        : point.node
       : point.node.parentElement;
   const box = element?.getBoundingClientRect();
   if (!box) return null;

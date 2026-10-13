@@ -3,10 +3,11 @@ import { ProjectId, type OrchestrationProjectShell } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import * as GitHubCli from "../sourceControl/GitHubCli.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
+import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import * as GitHubIssueCli from "./GitHubIssueCli.ts";
 import { listIssues, readIssueDetail, resolveIssueReference } from "./readIssues.ts";
 
 const projectId = ProjectId.make("issue-project");
@@ -46,15 +47,38 @@ function summaryNumbered(number: number) {
   return { ...summary, number, url: `https://github.com/acme/app/issues/${number}` };
 }
 
+/**
+ * The V2 project store returns shells without enrichment; the repository
+ * identity comes from the resolver, so the fixture's identity is served there.
+ */
+function mockProject(
+  getShell: (id: ProjectId) => Effect.Effect<Option.Option<OrchestrationProjectShell>>,
+) {
+  let identity: OrchestrationProjectShell["repositoryIdentity"] = null;
+  return Layer.mergeAll(
+    Layer.mock(ProjectStore.ProjectStoreV2)({
+      getShell: (id) =>
+        getShell(id).pipe(
+          Effect.tap((shell) =>
+            Effect.sync(() => {
+              identity = Option.isSome(shell) ? (shell.value.repositoryIdentity ?? null) : null;
+            }),
+          ),
+        ),
+    }),
+    Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({
+      resolve: () => Effect.sync(() => identity ?? null),
+    }),
+  );
+}
+
 function mockReads(input: {
   project?: Option.Option<OrchestrationProjectShell>;
-  execute: GitHubCli.GitHubCli["Service"]["execute"];
+  execute: GitHubIssueCli.GitHubIssueCli["Service"]["execute"];
 }) {
   return Layer.mergeAll(
-    Layer.mock(ProjectionSnapshotQuery)({
-      getProjectShellById: () => Effect.succeed(input.project ?? Option.some(project)),
-    }),
-    Layer.mock(GitHubCli.GitHubCli)({ execute: input.execute }),
+    mockProject(() => Effect.succeed(input.project ?? Option.some(project))),
+    Layer.mock(GitHubIssueCli.GitHubIssueCli)({ execute: input.execute }),
   );
 }
 
@@ -208,9 +232,8 @@ it.effect("preserves GitHub authentication errors", () =>
         mockReads({
           execute: () =>
             Effect.fail(
-              new GitHubCli.GitHubCliAuthenticationError({
-                cwd: "/repo",
-                command: "gh",
+              new GitHubIssueCli.GitHubIssueCliError({
+                failure: "authentication",
                 cause: new Error("auth"),
               }),
             ),
@@ -222,12 +245,12 @@ it.effect("preserves GitHub authentication errors", () =>
   }),
 );
 
-type ExecuteInput = Parameters<GitHubCli.GitHubCli["Service"]["execute"]>[0];
+type ExecuteInput = Parameters<GitHubIssueCli.GitHubIssueCli["Service"]["execute"]>[0];
 
 const repositoryOutput = () =>
   output({ nameWithOwner: "acme/app", url: "https://github.com/acme/app" });
 
-const forbidGitHub: GitHubCli.GitHubCli["Service"]["execute"] = () => {
+const forbidGitHub: GitHubIssueCli.GitHubIssueCli["Service"]["execute"] = () => {
   throw new Error("Must not call GitHub");
 };
 
@@ -270,14 +293,13 @@ it.effect("reads issue detail from the requested project's trusted repository", 
     yield* readIssueDetail({ projectId, number: 42 }).pipe(
       Effect.provide(
         Layer.mergeAll(
-          Layer.mock(ProjectionSnapshotQuery)({
-            getProjectShellById: (id) =>
-              Effect.sync(() => {
-                requestedProjects.push(id);
-                return Option.some(project);
-              }),
-          }),
-          Layer.mock(GitHubCli.GitHubCli)({
+          mockProject((id) =>
+            Effect.sync(() => {
+              requestedProjects.push(id);
+              return Option.some(project);
+            }),
+          ),
+          Layer.mock(GitHubIssueCli.GitHubIssueCli)({
             execute: (input) => {
               calls.push(input);
               return input.args[0] === "repo"
@@ -456,64 +478,62 @@ it.effect("returns a readable error for a malformed GitHub repository lookup", (
 const gitHubCliFailures = [
   {
     name: "an unavailable GitHub CLI",
-    error: new GitHubCli.GitHubCliUnavailableError({ cwd: "/repo", command: "gh", cause: null }),
+    error: new GitHubIssueCli.GitHubIssueCliError({ failure: "unavailable", cause: null }),
     remedy: /not available on PATH/,
   },
   {
     name: "a GitHub rate limit",
-    error: new GitHubCli.GitHubCliRateLimitError({ cwd: "/repo", command: "gh", cause: null }),
+    error: new GitHubIssueCli.GitHubIssueCliError({ failure: "rate-limited", cause: null }),
     remedy: /rate limit/,
   },
   {
     name: "missing GitHub authentication",
-    error: new GitHubCli.GitHubCliAuthenticationError({ cwd: "/repo", command: "gh", cause: null }),
+    error: new GitHubIssueCli.GitHubIssueCliError({ failure: "authentication", cause: null }),
     remedy: /gh auth login/,
   },
   {
     name: "a failed GitHub command",
-    error: new GitHubCli.GitHubCliCommandError({ cwd: "/repo", command: "gh", cause: null }),
+    error: new GitHubIssueCli.GitHubIssueCliError({ failure: "command-failed", cause: null }),
     remedy: /GitHub CLI command failed/,
   },
 ] as const;
 
-for (const failure of gitHubCliFailures) {
-  it.effect(`returns a recoverable issue read error for ${failure.name}`, () =>
-    Effect.gen(function* () {
-      let executions = 0;
-      const failing = mockReads({
-        execute: ({ args }) => {
-          executions += 1;
-          return args[0] === "repo" ? repositoryOutput() : Effect.fail(failure.error);
-        },
-      });
-      const listError = yield* listIssues({
-        projectId,
-        state: "open",
-        query: "",
-        limit: 10,
-      }).pipe(Effect.provide(failing), Effect.flip);
-      const detailError = yield* readIssueDetail({ projectId, number: 1 }).pipe(
-        Effect.provide(failing),
-        Effect.flip,
-      );
-      for (const error of [listError, detailError]) {
-        assert.equal(error._tag, "IssueReadError");
-        assert.match(error.message, failure.remedy);
-      }
+it.effect.each(gitHubCliFailures)("returns a recoverable issue read error for $name", (failure) =>
+  Effect.gen(function* () {
+    let executions = 0;
+    const failing = mockReads({
+      execute: ({ args }) => {
+        executions += 1;
+        return args[0] === "repo" ? repositoryOutput() : Effect.fail(failure.error);
+      },
+    });
+    const listError = yield* listIssues({
+      projectId,
+      state: "open",
+      query: "",
+      limit: 10,
+    }).pipe(Effect.provide(failing), Effect.flip);
+    const detailError = yield* readIssueDetail({ projectId, number: 1 }).pipe(
+      Effect.provide(failing),
+      Effect.flip,
+    );
+    for (const error of [listError, detailError]) {
+      assert.equal(error._tag, "IssueReadError");
+      assert.match(error.message, failure.remedy);
+    }
 
-      // Recoverable: the next read after the failure cause clears runs again and succeeds.
-      const retried = yield* listIssues({ projectId, state: "open", query: "", limit: 10 }).pipe(
-        Effect.provide(
-          mockReads({
-            execute: ({ args }) => (args[0] === "repo" ? repositoryOutput() : output([summary])),
-          }),
-        ),
-      );
-      assert.equal(retried.issues.length, 1);
-      assert.equal(executions, 4);
-    }),
-  );
-}
+    // Recoverable: the next read after the failure cause clears runs again and succeeds.
+    const retried = yield* listIssues({ projectId, state: "open", query: "", limit: 10 }).pipe(
+      Effect.provide(
+        mockReads({
+          execute: ({ args }) => (args[0] === "repo" ? repositoryOutput() : output([summary])),
+        }),
+      ),
+    );
+    assert.equal(retried.issues.length, 1);
+    assert.equal(executions, 4);
+  }),
+);
 
 function truncatedOutput(stdout: string) {
   return Effect.succeed({
@@ -563,8 +583,9 @@ const unbalancedSearches = [
   { name: "leaves a quotation open", query: 'label:"needs triage' },
 ] as const;
 
-for (const search of unbalancedSearches) {
-  it.effect(`rejects an issue search that ${search.name} before calling GitHub`, () =>
+it.effect.each(unbalancedSearches)(
+  "rejects an issue search that $name before calling GitHub",
+  (search) =>
     Effect.gen(function* () {
       const error = yield* listIssues({
         projectId,
@@ -575,8 +596,7 @@ for (const search of unbalancedSearches) {
       assert.equal(error._tag, "IssueReadError");
       assert.equal(error.message, "Close every parenthesis and quotation mark in the search.");
     }),
-  );
-}
+);
 
 it.effect(
   "passes balanced groups, quoted parentheses and sort qualifiers to GitHub unchanged",
@@ -659,23 +679,21 @@ const mismatchedDetails = [
   },
 ] as const;
 
-for (const mismatch of mismatchedDetails) {
-  it.effect(`rejects an issue detail ${mismatch.name}`, () =>
-    Effect.gen(function* () {
-      const error = yield* readIssueDetail({ projectId, number: 1 }).pipe(
-        Effect.provide(
-          mockReads({
-            execute: ({ args }) =>
-              args[0] === "repo" ? repositoryOutput() : output(mismatch.detail),
-          }),
-        ),
-        Effect.flip,
-      );
-      assert.equal(error._tag, "IssueReadError");
-      assert.equal(error.message, "GitHub did not return issue #1 of acme/app.");
-    }),
-  );
-}
+it.effect.each(mismatchedDetails)("rejects an issue detail $name", (mismatch) =>
+  Effect.gen(function* () {
+    const error = yield* readIssueDetail({ projectId, number: 1 }).pipe(
+      Effect.provide(
+        mockReads({
+          execute: ({ args }) =>
+            args[0] === "repo" ? repositoryOutput() : output(mismatch.detail),
+        }),
+      ),
+      Effect.flip,
+    );
+    assert.equal(error._tag, "IssueReadError");
+    assert.equal(error.message, "GitHub did not return issue #1 of acme/app.");
+  }),
+);
 
 // Issues pane, phase 3 fence. The measured case: the project's recorded identity names the
 // upstream repository and carries no web URL, while `gh repo view` without an argument would read
@@ -908,8 +926,9 @@ const mismatchedReferences = [
   { name: "without a web URL", record: { number: 7, state: "open" } },
 ] as const;
 
-for (const mismatch of mismatchedReferences) {
-  it.effect(`issues phase 3 fence: reference resolution rejects a record ${mismatch.name}`, () =>
+it.effect.each(mismatchedReferences)(
+  "issues phase 3 fence: reference resolution rejects a record $name",
+  (mismatch) =>
     Effect.gen(function* () {
       const error = yield* resolveIssueReference({ projectId, number: 7 }).pipe(
         Effect.provide(
@@ -922,28 +941,25 @@ for (const mismatch of mismatchedReferences) {
       );
       assert.equal(error._tag, "IssueReadError");
     }),
-  );
-}
+);
 
-for (const failure of gitHubCliFailures) {
-  it.effect(
-    `issues phase 3 fence: reference resolution reports ${failure.name} instead of guessing an issue`,
-    () =>
-      Effect.gen(function* () {
-        const error = yield* resolveIssueReference({ projectId, number: 7 }).pipe(
-          Effect.provide(
-            mockReads({
-              execute: ({ args }) =>
-                args[0] === "repo" ? repositoryOutput() : Effect.fail(failure.error),
-            }),
-          ),
-          Effect.flip,
-        );
-        assert.equal(error._tag, "IssueReadError");
-        assert.match(error.message, failure.remedy);
-      }),
-  );
-}
+it.effect.each(gitHubCliFailures)(
+  "issues phase 3 fence: reference resolution reports $name instead of guessing an issue",
+  (failure) =>
+    Effect.gen(function* () {
+      const error = yield* resolveIssueReference({ projectId, number: 7 }).pipe(
+        Effect.provide(
+          mockReads({
+            execute: ({ args }) =>
+              args[0] === "repo" ? repositoryOutput() : Effect.fail(failure.error),
+          }),
+        ),
+        Effect.flip,
+      );
+      assert.equal(error._tag, "IssueReadError");
+      assert.match(error.message, failure.remedy);
+    }),
+);
 
 it.effect(
   "issues phase 3 fence: reference resolution reports an over-long record as an error",
@@ -1082,34 +1098,32 @@ const contradictoryIdentities = [
   },
 ] as const;
 
-for (const contradiction of contradictoryIdentities) {
-  it.effect(
-    `issues phase 3 regression: an identity with ${contradiction.name} is refused for every read before calling GitHub`,
-    () =>
-      Effect.gen(function* () {
-        const identityProject = Option.some<OrchestrationProjectShell>({
-          ...project,
-          repositoryIdentity: {
-            ...(canonicalOnlyIdentityProject.pipe(Option.getOrThrow).repositoryIdentity ?? {
-              canonicalKey: "",
-              locator: { source: "git-remote", remoteName: "origin", remoteUrl: "x" },
-            }),
-            ...contradiction.identity,
-          },
-        });
-        const reads = mockReads({ project: identityProject, execute: forbidGitHub });
-        const errors = [
-          yield* listIssues({ projectId, state: "open", query: "", limit: 10 }).pipe(
-            Effect.provide(reads),
-            Effect.flip,
-          ),
-          yield* readIssueDetail({ projectId, number: 1 }).pipe(Effect.provide(reads), Effect.flip),
-          yield* resolveIssueReference({ projectId, number: 1 }).pipe(
-            Effect.provide(reads),
-            Effect.flip,
-          ),
-        ];
-        for (const error of errors) assert.equal(error._tag, "IssueReadError");
-      }),
-  );
-}
+it.effect.each(contradictoryIdentities)(
+  "issues phase 3 regression: an identity with $name is refused for every read before calling GitHub",
+  (contradiction) =>
+    Effect.gen(function* () {
+      const identityProject = Option.some<OrchestrationProjectShell>({
+        ...project,
+        repositoryIdentity: {
+          ...(canonicalOnlyIdentityProject.pipe(Option.getOrThrow).repositoryIdentity ?? {
+            canonicalKey: "",
+            locator: { source: "git-remote", remoteName: "origin", remoteUrl: "x" },
+          }),
+          ...contradiction.identity,
+        },
+      });
+      const reads = mockReads({ project: identityProject, execute: forbidGitHub });
+      const errors = [
+        yield* listIssues({ projectId, state: "open", query: "", limit: 10 }).pipe(
+          Effect.provide(reads),
+          Effect.flip,
+        ),
+        yield* readIssueDetail({ projectId, number: 1 }).pipe(Effect.provide(reads), Effect.flip),
+        yield* resolveIssueReference({ projectId, number: 1 }).pipe(
+          Effect.provide(reads),
+          Effect.flip,
+        ),
+      ];
+      for (const error of errors) assert.equal(error._tag, "IssueReadError");
+    }),
+);

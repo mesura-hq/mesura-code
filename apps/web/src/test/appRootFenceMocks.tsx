@@ -1,5 +1,13 @@
 import type { ReactNode } from "react";
-import type { Thread } from "../types";
+import type { AsyncResult, Atom } from "effect/reactivity";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+import type { EnvironmentThreadState } from "@t3tools/client-runtime/state/threads";
+import type {
+  AuthEnvironmentScope,
+  AuthSessionState,
+  EnvironmentId,
+  ThreadId,
+} from "@t3tools/contracts";
 
 /**
  * The fixture the `AppRoot.*.fence` tests mount the real app over: the state
@@ -18,8 +26,8 @@ import type { Thread } from "../types";
  * is still being built. Mounting helpers live in `appRootFenceApp.tsx`.
  *
  * Boundaries replaced, and nothing else: the environment and thread reads
- * (looked up by the thread ref), every RPC command and query, the chords (the
- * shipped defaults), unrelated chrome, the CSS highlight registry happy-dom
+ * (looked up by the thread ref), HTTP session grants, every RPC command and
+ * query, the chords (the shipped defaults), unrelated chrome, the CSS highlight registry happy-dom
  * lacks (recorded instead of painted), the sidebar's thread list, the file
  * manager layer and the virtual list's measurement.
  */
@@ -28,7 +36,10 @@ export const FENCE_ENVIRONMENT_ID = "app-root-fence-environment";
 export const FENCE_PROJECT_ID = "app-root-fence-project";
 
 export const appRootFence = {
-  threads: new Map<string, Thread>(),
+  threads: new Map<string, EnvironmentThreadShell>(),
+  threadStates: new Map<string, EnvironmentThreadState>(),
+  sessions: new Map<string, AuthSessionState>([[FENCE_ENVIRONMENT_ID, makeFenceSession()]]),
+  queryAtoms: new WeakSet<object>(),
   openThreadId: "",
   vimMode: false,
   empty: [] as never[],
@@ -87,7 +98,119 @@ export const appRootFence = {
 /** The testid of the virtual list's scroller. */
 export const FENCE_SCROLLER_TESTID = "app-root-fence-scroller";
 
+/** Indexed rectangles for visibility and editor geometry reads in happy-dom. */
+export function makeFenceClientRects(rectangles: ReadonlyArray<DOMRect>): DOMRectList {
+  const rects = [...rectangles];
+  return Object.assign(rects, {
+    item: (index: number) => rects[index] ?? null,
+  }) as unknown as DOMRectList;
+}
+
+/** happy-dom has no FontFaceSet. Keep font-loading listeners real without loading fonts. */
+export function installFenceFontEvents() {
+  if (document.fonts !== undefined) return () => {};
+  const descriptor = Object.getOwnPropertyDescriptor(document, "fonts");
+  Object.defineProperty(document, "fonts", {
+    configurable: true,
+    value: Object.assign(new EventTarget(), { ready: Promise.resolve() }),
+  });
+  return () => {
+    if (descriptor) Object.defineProperty(document, "fonts", descriptor);
+    else Reflect.deleteProperty(document, "fonts");
+  };
+}
+
 type ImportOriginal<Module> = () => Promise<Module>;
+
+type ModuleWithOverrides<Module, Overrides> = Omit<Module, keyof Overrides> & Overrides;
+type RuntimeSessionModule = typeof import("@t3tools/client-runtime/state/session");
+type FenceRuntimeSessionModule = ModuleWithOverrides<
+  RuntimeSessionModule,
+  {
+    createEnvironmentSessionAtoms: (
+      ...args: Parameters<RuntimeSessionModule["createEnvironmentSessionAtoms"]>
+    ) => ModuleWithOverrides<
+      ReturnType<RuntimeSessionModule["createEnvironmentSessionAtoms"]>,
+      {
+        sessionStateAtom: (
+          environmentId: EnvironmentId,
+        ) => Atom.Atom<
+          AsyncResult.Initial<AuthSessionState> | AsyncResult.Success<AuthSessionState>
+        >;
+      }
+    >;
+  }
+>;
+type FenceEnvironmentsModule = ModuleWithOverrides<
+  typeof import("../state/environments"),
+  {
+    useEnvironments: () => {
+      environments: typeof appRootFence.environments;
+      isReady: boolean;
+    };
+    usePrimaryEnvironment: () => null;
+  }
+>;
+type FenceQueriesModule = ModuleWithOverrides<
+  typeof import("../state/queries"),
+  {
+    useThreadSearch: () => { matches: never[]; query: string; isPending: boolean };
+    useProjectPathSearch: () => {
+      entries: never[];
+      isPending: boolean;
+      error: null;
+      truncated: boolean;
+    };
+  }
+>;
+
+/** Explicit grants for chat and file reads. A fence can supply fewer permissions. */
+export function makeFenceSession(
+  permissions: ReadonlyArray<AuthEnvironmentScope> = [
+    "orchestration:read",
+    "orchestration:operate",
+    "filesystem:read",
+  ],
+): AuthSessionState {
+  return {
+    authenticated: true,
+    auth: {
+      policy: "remote-reachable",
+      bootstrapMethods: [],
+      sessionMethods: [],
+      sessionCookieName: "app-root-fence",
+    },
+    permissions,
+  };
+}
+
+/** Replace the HTTP session source while retaining the real scope checks and hooks. */
+export async function mockRuntimeSession(
+  importOriginal: ImportOriginal<typeof import("@t3tools/client-runtime/state/session")>,
+): Promise<FenceRuntimeSessionModule> {
+  const actual = await importOriginal();
+  const { Atom, AsyncResult } = await import("effect/reactivity");
+  const sessionStateAtom = Atom.family((environmentId: EnvironmentId) => {
+    const atom = Atom.make((get) => {
+      const read = () => {
+        const session = appRootFence.sessions.get(environmentId);
+        return session ? AsyncResult.success(session) : AsyncResult.initial<AuthSessionState>();
+      };
+      const listener = () => get.setSelf(read());
+      appRootFence.threadListeners.add(listener);
+      get.addFinalizer(() => appRootFence.threadListeners.delete(listener));
+      return read();
+    }).pipe(Atom.setIdleTTL(0));
+    appRootFence.queryAtoms.add(atom);
+    return atom;
+  });
+  return {
+    ...actual,
+    createEnvironmentSessionAtoms: (
+      ...args: Parameters<typeof actual.createEnvironmentSessionAtoms>
+    ) => ({ ...actual.createEnvironmentSessionAtoms(...args), sessionStateAtom }),
+  };
+}
 
 const success = () => Promise.resolve({ _tag: "Success" as const, value: { providers: [] } });
 
@@ -95,9 +218,13 @@ export async function mockEntities(
   importOriginal: ImportOriginal<typeof import("../state/entities")>,
 ) {
   const { useSyncExternalStore } = await import("react");
-  const threadFor = (ref: { readonly threadId: string } | null | undefined) =>
-    (ref ? appRootFence.threads.get(ref.threadId) : undefined) ?? null;
-  const useFixtureThread = (ref: { readonly threadId: string } | null | undefined) =>
+  const threadFor = (ref: { readonly environmentId: string; readonly threadId: string } | null) => {
+    const thread = ref ? appRootFence.threads.get(ref.threadId) : undefined;
+    return thread?.environmentId === ref?.environmentId ? (thread ?? null) : null;
+  };
+  const useFixtureThread = (
+    ref: { readonly environmentId: string; readonly threadId: string } | null,
+  ) =>
     useSyncExternalStore(
       (listener) => {
         appRootFence.threadListeners.add(listener);
@@ -109,8 +236,7 @@ export async function mockEntities(
     );
   return {
     ...(await importOriginal()),
-    useThread: useFixtureThread,
-    readThread: threadFor,
+    readThreadShell: threadFor,
     useThreadShell: useFixtureThread,
     useThreadRefs: () => appRootFence.empty,
     useThreadShells: () => appRootFence.empty,
@@ -121,7 +247,14 @@ export async function mockEntities(
 
 export async function mockEnvironments(
   importOriginal: ImportOriginal<typeof import("../state/environments")>,
-) {
+): Promise<FenceEnvironmentsModule> {
+  const { DEFAULT_SERVER_SETTINGS } = await import("@t3tools/contracts");
+  for (const environment of appRootFence.environments) {
+    environment.serverConfig.settings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      ...environment.serverConfig.settings,
+    };
+  }
   return {
     ...(await importOriginal()),
     useEnvironments: () => ({ environments: appRootFence.environments, isReady: true }),
@@ -129,35 +262,124 @@ export async function mockEnvironments(
   };
 }
 
-export function mockQuery() {
+/** Await this factory so the shell bootstrap read uses the real shell atom identities. */
+export async function mockQuery() {
+  const { environmentShell } = await import("../state/shell");
+  const { EnvironmentId, ProjectId, ProviderInstanceId } = await import("@t3tools/contracts");
+  const { Atom, AsyncResult } = await import("effect/reactivity");
+  const { useAtomValue } = await import("@effect/atom-react");
+  const emptySession = Atom.make(AsyncResult.initial<AuthSessionState>());
+  const Option = await import("effect/Option");
+  const shellAtoms = new Map<object, string>(
+    appRootFence.environments.map(({ environmentId }) => [
+      environmentShell.stateAtom(EnvironmentId.make(environmentId)),
+      environmentId,
+    ]),
+  );
   return {
-    useEnvironmentQuery: () => ({
-      data: null,
-      error: null,
-      isPending: false,
-      isSuccess: false,
-      refresh: () => undefined,
-    }),
+    useEnvironmentQuery: (atom?: object | null) => {
+      // Session atoms remain real subscriptions so the filesystem-access hook reads its grant.
+      const isSession = atom != null && appRootFence.queryAtoms.has(atom);
+      const session = useAtomValue(isSession ? (atom as typeof emptySession) : emptySession);
+      if (isSession)
+        return {
+          data: Option.getOrNull(AsyncResult.value(session)),
+          dataUpdatedAt: 0,
+          error: null,
+          failure: null,
+          isPending: session.waiting,
+          isSuccess: AsyncResult.isSuccess(session),
+          refresh: () => undefined,
+        };
+      const environmentId = atom == null ? undefined : shellAtoms.get(atom);
+      const project = appRootFence.project;
+      const snapshot = {
+        schemaVersion: 1,
+        snapshotSequence: 0,
+        threads: [...appRootFence.threads.values()]
+          .filter((shell) => shell.environmentId === environmentId)
+          .map((shell) => shell.source),
+        archivedThreads: [],
+        projects:
+          project.environmentId === environmentId
+            ? [
+                {
+                  ...project,
+                  id: ProjectId.make(project.id),
+                  defaultModelSelection: {
+                    ...project.defaultModelSelection,
+                    instanceId: ProviderInstanceId.make(project.defaultModelSelection.instanceId),
+                  },
+                  updatedAt: project.createdAt,
+                },
+              ]
+            : [],
+      } satisfies import("@t3tools/contracts").OrchestrationV2ShellSnapshot;
+      return {
+        // The v2 chat layout waits for the environment shell before mounting ThreadRouteView.
+        data:
+          environmentId === undefined
+            ? null
+            : { snapshot: Option.some(snapshot), status: "live", error: Option.none() },
+        dataUpdatedAt: 0,
+        error: null,
+        failure: null,
+        isPending: false,
+        isSuccess: environmentId !== undefined,
+        refresh: () => undefined,
+      };
+    },
   };
 }
 
 export async function mockQueries(
   importOriginal: ImportOriginal<typeof import("../state/queries")>,
-) {
+): Promise<FenceQueriesModule> {
   return {
     ...(await importOriginal()),
-    useThreadSearch: () => ({ matches: [], isPending: false }),
+    useThreadSearch: () => ({ matches: [], query: "", isPending: false }),
     useProjectPathSearch: () => ({ entries: [], isPending: false, error: null, truncated: false }),
   };
 }
 
 export async function mockThreads(
   importOriginal: ImportOriginal<typeof import("../state/threads")>,
-) {
-  const { EMPTY_ENVIRONMENT_THREAD_STATE } = await import("@t3tools/client-runtime/state/threads");
+): Promise<typeof import("../state/threads")> {
+  const { createEnvironmentThreadDetailAtoms, EMPTY_ENVIRONMENT_THREAD_STATE } =
+    await import("@t3tools/client-runtime/state/threads");
+  const { threadKey, parseThreadKey } = await import("@t3tools/client-runtime/state/entities");
+  const { Atom, AsyncResult } = await import("effect/reactivity");
+  const { useAtomValue } = await import("@effect/atom-react");
+  const stateFor = (key: string) => {
+    const ref = parseThreadKey(key);
+    const shell = appRootFence.threads.get(ref.threadId);
+    return shell?.environmentId === ref.environmentId
+      ? (appRootFence.threadStates.get(ref.threadId) ?? EMPTY_ENVIRONMENT_THREAD_STATE)
+      : EMPTY_ENVIRONMENT_THREAD_STATE;
+  };
+  const stateAtom = Atom.family((key: string) =>
+    Atom.make((get) => {
+      const listener = () => get.setSelf(AsyncResult.success(stateFor(key)));
+      appRootFence.threadListeners.add(listener);
+      get.addFinalizer(() => appRootFence.threadListeners.delete(listener));
+      return AsyncResult.success(stateFor(key));
+    }).pipe(Atom.setIdleTTL(0)),
+  );
+  const emptyAtom = Atom.make(AsyncResult.success(EMPTY_ENVIRONMENT_THREAD_STATE));
+  const scopedStateAtom = (environmentId: EnvironmentId, threadId: ThreadId) =>
+    stateAtom(threadKey({ environmentId, threadId }));
   return {
     ...(await importOriginal()),
-    useEnvironmentThread: () => EMPTY_ENVIRONMENT_THREAD_STATE,
+    // Keep the real entity hooks and all v2 detail derivations. Only their source is a fixture.
+    environmentThreadDetails: createEnvironmentThreadDetailAtoms(scopedStateAtom),
+    useEnvironmentThread: (environmentId: EnvironmentId | null, threadId: ThreadId | null) => {
+      const result = useAtomValue(
+        environmentId !== null && threadId !== null
+          ? scopedStateAtom(environmentId, threadId)
+          : emptyAtom,
+      );
+      return AsyncResult.isSuccess(result) ? result.value : EMPTY_ENVIRONMENT_THREAD_STATE;
+    },
   };
 }
 
@@ -171,7 +393,7 @@ export function mockAtomQueryRunner() {
 
 /** The chords the app ships, as a keybindings file with no user rules resolves them. */
 export async function mockServer(importOriginal: ImportOriginal<typeof import("../state/server")>) {
-  const { Atom } = await import("effect/unstable/reactivity");
+  const { Atom } = await import("effect/reactivity");
   const { DEFAULT_RESOLVED_KEYBINDINGS } = await import("@t3tools/shared/keybindings");
   return {
     ...(await importOriginal()),
@@ -216,6 +438,7 @@ export async function mockHandleNewThread() {
 
 export function mockThreadActions() {
   return {
+    useAcknowledgeThreadWoke: () => success,
     useThreadActions: () => ({
       settleThread: success,
       pinThread: success,
@@ -286,21 +509,23 @@ export function mockHighlights() {
  */
 export function mockLegendList() {
   return {
-    LegendList: ({
+    LegendList: <Item,>({
       data,
       renderItem,
+      keyExtractor,
       ListHeaderComponent,
       ListFooterComponent,
     }: {
-      data: Array<{ id: string }>;
-      renderItem: (input: { item: { id: string } }) => ReactNode;
+      data: ReadonlyArray<Item>;
+      renderItem: (input: { item: Item }) => ReactNode;
+      keyExtractor: (item: Item) => string;
       ListHeaderComponent?: ReactNode;
       ListFooterComponent?: ReactNode;
     }) => (
       <div data-testid={FENCE_SCROLLER_TESTID} style={{ overflowY: "auto" }}>
         {ListHeaderComponent}
         {data.map((item) => (
-          <div key={item.id}>{renderItem({ item })}</div>
+          <div key={keyExtractor(item)}>{renderItem({ item })}</div>
         ))}
         {ListFooterComponent}
       </div>

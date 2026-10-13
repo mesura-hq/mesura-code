@@ -1,3 +1,5 @@
+import { observeResize } from "~/lib/observeResize";
+
 import {
   setCursorOverlay,
   type CursorHighlightName,
@@ -118,7 +120,7 @@ interface FollowedCursor {
 /** The cursors on a narrow glyph, measured again on the events that move them. */
 const followed = new Map<CursorHighlightName, FollowedCursor>();
 let stopFollowing: (() => void) | null = null;
-let containerSizes: ResizeObserver | null = null;
+const containerResizeSubscriptions = new Map<HTMLElement, () => void>();
 
 function follow(): void {
   for (const [name, cursor] of followed) paintBlockCursor(name, cursor.range, cursor.container);
@@ -129,12 +131,11 @@ function startFollowing(): () => void {
   // scrolls inside the host the overlay is drawn in.
   document.addEventListener("scroll", follow, { capture: true, passive: true });
   const unsubscribeComposer = subscribeComposerLayout(follow);
-  containerSizes = new ResizeObserver(follow);
   return () => {
     document.removeEventListener("scroll", follow, { capture: true });
     unsubscribeComposer();
-    containerSizes?.disconnect();
-    containerSizes = null;
+    for (const stopObservingResize of containerResizeSubscriptions.values()) stopObservingResize();
+    containerResizeSubscriptions.clear();
   };
 }
 
@@ -147,9 +148,14 @@ function setFollowed(name: CursorHighlightName, cursor: FollowedCursor | null): 
     const stillObserved = [...followed.values()].some(
       (other) => other.container === previous.container,
     );
-    if (!stillObserved) containerSizes?.unobserve(previous.container);
+    if (!stillObserved) {
+      containerResizeSubscriptions.get(previous.container)?.();
+      containerResizeSubscriptions.delete(previous.container);
+    }
   }
-  if (cursor && previous?.container !== cursor.container) containerSizes?.observe(cursor.container);
+  if (cursor && !containerResizeSubscriptions.has(cursor.container)) {
+    containerResizeSubscriptions.set(cursor.container, observeResize(cursor.container, follow));
+  }
   if (followed.size === 0 && stopFollowing !== null) {
     stopFollowing();
     stopFollowing = null;

@@ -51,7 +51,7 @@ export function TreeDiffView(props: TreeDiffViewProps) {
           />
         }
       >
-        <RefreshIcon className={cn("size-3.5", changes.isPending && "animate-spin")} />
+        <RefreshIcon size="sm" refreshing={changes.isPending} />
       </TooltipTrigger>
       <TooltipPopup>Refresh</TooltipPopup>
     </Tooltip>
@@ -59,7 +59,7 @@ export function TreeDiffView(props: TreeDiffViewProps) {
 
   // A failed refresh keeps the last result on screen and says why it is not newer.
   const refreshError = changes.refreshError ? (
-    <p role="alert" className="mt-1 text-[11px] text-error/80">
+    <p role="alert" className="mt-1 text-search-label text-error/80">
       Refresh failed: {treeDiffErrorMessage(changes.refreshError)}
     </p>
   ) : null;
@@ -92,7 +92,7 @@ export function TreeDiffView(props: TreeDiffViewProps) {
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
       <div className="shrink-0 px-3 pt-1 pb-2">
         {changes.refName ? (
-          <div className="mb-1 flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground">
+          <div className="mb-1 flex min-w-0 items-center gap-1 text-search-label text-muted-foreground">
             <GitBranchIcon className="size-3 shrink-0" />
             <span className="truncate">{changes.refName}</span>
           </div>
@@ -100,7 +100,7 @@ export function TreeDiffView(props: TreeDiffViewProps) {
         <TreeDiffSummary summary={changes.summary} />
         {refreshError}
         {changes.truncated ? (
-          <p className="mt-1 text-[11px] text-warning">
+          <p className="mt-1 text-search-label text-warning">
             Showing the first {changes.rows.length} files.
           </p>
         ) : null}

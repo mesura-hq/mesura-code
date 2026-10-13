@@ -11,7 +11,7 @@
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { HostStatsMesuraServers } from "@t3tools/contracts";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -151,7 +151,7 @@ const discoverOn = (
       self,
     });
     return yield* discovery.discover;
-  }).pipe(Effect.provideService(HostProcessPlatform, platform));
+  }).pipe(Effect.provideService(HostProcess.Platform, platform));
 
 const servers = (installed: number, dev: number): HostStatsMesuraServers => ({ installed, dev });
 

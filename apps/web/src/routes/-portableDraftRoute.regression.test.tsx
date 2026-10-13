@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
-// Application entry point: _chat.draft.$draftId Route.options.component.
+// Application entry point: ThreadRouteView, rendered by the _chat route layout.
+// The draft leaf route is empty so draft promotion retains the ChatView instance.
 // ChatView, DraftHeroHeadline, the draft store, and defaults resolution remain real.
 // Environment I/O and unrelated expensive panels are test boundaries.
 import { act, lazy, Suspense, type PropsWithChildren } from "react";
@@ -13,7 +14,11 @@ import {
   ProviderInstanceId,
   type ServerConfig,
 } from "@t3tools/contracts";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
+
+import * as Option from "effect/Option";
+import { EMPTY_THREAD_HISTORY_META } from "@t3tools/client-runtime/state/threads";
 
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 
@@ -22,6 +27,7 @@ const fixture = vi.hoisted(() => ({
     environmentId: EnvironmentId;
     label: string;
     connection: { phase: string };
+    entry: { target: { _tag: "PrimaryConnectionTarget" }; profile: Option.Option<never> };
     serverConfig: ServerConfig | null;
   }[],
   projects: [] as EnvironmentProject[],
@@ -51,7 +57,10 @@ vi.mock("@tanstack/react-router", () => ({
   useLocation: () => ({ href: `/draft/${fixture.draftId}`, key: "draft" }),
 }));
 vi.mock("../hooks/useHandleNewThread", () => ({ useNewThreadHandler: () => fixture.command }));
-vi.mock("../hooks/useThreadActions", () => ({ useThreadActions: () => ({}) }));
+vi.mock("../hooks/useThreadActions", async (original) => ({
+  ...(await original<typeof import("../hooks/useThreadActions")>()),
+  useThreadActions: () => ({}),
+}));
 vi.mock("../hooks/useSettings", () => ({
   useEnvironmentSettings: () => DEFAULT_SERVER_SETTINGS,
   useClientSettingsHydrated: () => true,
@@ -66,7 +75,8 @@ vi.mock("../state/environments", () => ({
   usePrimaryEnvironment: () => fixture.environments[0],
   usePrimaryEnvironmentId: () => fixture.environments[0]?.environmentId,
 }));
-vi.mock("../state/entities", () => ({
+vi.mock("../state/entities", async (original) => ({
+  ...(await original<typeof import("../state/entities")>()),
   useServerConfigs: () => new Map(),
   useProject: (ref: { projectId: string } | null) =>
     fixture.projects.find((p) => p.id === ref?.projectId) ?? null,
@@ -74,19 +84,34 @@ vi.mock("../state/entities", () => ({
   useThread: () => null,
   useThreadShell: () => null,
   useThreadRefs: () => fixture.empty,
+  useEnvironmentThreadRefs: () => fixture.empty,
+  useThreadProjection: () => null,
+  useThreadStatus: () => "empty",
+  useThreadHistory: () => EMPTY_THREAD_HISTORY_META,
+  useThreadVisibleTurnItems: () => fixture.empty,
   useThreadShells: () => fixture.empty,
+}));
+vi.mock("../state/session", async (original) => ({
+  ...(await original<typeof import("../state/session")>()),
+  useEnvironmentScope: () => true,
+  readEnvironmentScope: () => true,
 }));
 vi.mock("../state/use-atom-command", () => ({ useAtomCommand: () => fixture.command }));
 vi.mock("../state/use-atom-query-runner", () => ({ useAtomQueryRunner: () => fixture.command }));
 vi.mock("../state/query", () => ({
   useEnvironmentQuery: () => ({ data: null, isPending: false, refresh: fixture.command }),
 }));
-vi.mock("../state/threads", () => ({
+vi.mock("../state/threads", async (original) => ({
+  ...(await original<typeof import("../state/threads")>()),
   threadEnvironment: {},
   useEnvironmentThread: () => ({ data: { _tag: "None" }, status: "idle" }),
 }));
-vi.mock("../state/server", () => ({
-  serverEnvironment: { updateStateAtom: () => "update" },
+vi.mock("../state/server", async (original) => ({
+  ...(await original<typeof import("../state/server")>()),
+  serverEnvironment: {
+    updateStateAtom: () => "update",
+    configValueAtom: () => "config",
+  },
   primaryServerKeybindingsAtom: "keys",
   primaryServerAvailableEditorsAtom: "editors",
   environmentServerConfigsAtom: "configs",
@@ -94,22 +119,33 @@ vi.mock("../state/server", () => ({
 vi.mock("@effect/atom-react", () => ({
   useAtomValue: (atom: string) =>
     atom === "keys"
-      ? { rules: [] }
+      ? DEFAULT_RESOLVED_KEYBINDINGS
       : atom === "editors"
         ? []
-        : atom === "configs"
-          ? new Map()
-          : { status: "idle" },
+        : atom === "config"
+          ? (fixture.environments[0]?.serverConfig ?? null)
+          : atom === "configs"
+            ? new Map()
+            : { status: "idle" },
 }));
 vi.mock("../state/terminalSessions", () => ({
   useKnownTerminalSessions: () => fixture.empty,
   useThreadRunningTerminalIds: () => fixture.empty,
 }));
-vi.mock("../state/projectClones", () => ({ useProjectClone: () => null }));
+vi.mock("../state/projectClones", async (original) => ({
+  ...(await original<typeof import("../state/projectClones")>()),
+  useProjectClone: () => null,
+}));
 vi.mock("../state/device", () => ({
   useDeviceState: () => ({ state: { sessions: fixture.empty }, loaded: true }),
 }));
 vi.mock("../components/files/projectFilesQueryState", () => ({
+  useProjectFileQuery: () => ({
+    data: null,
+    isPending: false,
+    error: null,
+    refresh: fixture.command,
+  }),
   getProjectFileQueryAtom: (environmentId: string, cwd: string, name: string) => ({
     environmentId,
     cwd,
@@ -125,6 +161,11 @@ vi.mock("../rpc/atomRegistry", () => ({
 }));
 vi.mock("../state/presentation", () => ({
   environmentPresentations: { presentationAtom: () => "connection" },
+  useEnvironmentPresentation: (id: string | null) => ({
+    isReady: true,
+    presentation:
+      fixture.environments.find((environment) => environment.environmentId === id) ?? null,
+  }),
 }));
 vi.mock("@t3tools/client-runtime/state/runtime", async (original) => ({
   ...(await original<typeof import("@t3tools/client-runtime/state/runtime")>()),
@@ -182,7 +223,7 @@ vi.mock("../previewStateStore", async (original) => ({
 
 vi.mock("../components/ProjectFavicon", () => ({ ProjectFavicon: () => null }));
 
-import { Route } from "./_chat.draft.$draftId";
+import { ThreadRouteView } from "../components/ThreadRouteView";
 import { DraftId, useComposerDraftStore } from "../composerDraftStore";
 let draftId: DraftId;
 const initialDraftState = useComposerDraftStore.getState();
@@ -191,11 +232,10 @@ let root: Root;
 let container: HTMLDivElement;
 async function renderRoute() {
   await Promise.all(fixture.loads);
-  const Entry = Route.options.component!;
   await act(async () =>
     root.render(
       <Suspense>
-        <Entry />
+        <ThreadRouteView target={{ kind: "draft", draftId }} />
       </Suspense>,
     ),
   );
@@ -204,6 +244,7 @@ beforeEach(() => {
   fixture.draftId = `p2-mounted-${++fixture.sequence}`;
   draftId = DraftId.make(fixture.draftId);
   fixture.reads.mockClear();
+  fixture.command.mockClear();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal(
     "ResizeObserver",
@@ -228,7 +269,13 @@ beforeEach(() => {
     defaultModelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "legacy-model" },
   }));
   fixture.environments = [
-    { environmentId, label: "Owner", connection: { phase: "connected" }, serverConfig: null },
+    {
+      environmentId,
+      label: "Owner",
+      connection: { phase: "connected" },
+      entry: { target: { _tag: "PrimaryConnectionTarget" }, profile: Option.none() },
+      serverConfig: null,
+    },
   ];
   fixture.contents = null;
   fixture.pending = new Promise<void>((resolve) => {
@@ -242,6 +289,8 @@ beforeEach(() => {
       envMode: "local",
       envModeExplicit: false,
     });
+  // The picker retargets a draft with content; an empty draft opens the selected project draft.
+  useComposerDraftStore.getState().setPrompt(draftId, "Keep this prompt while changing projects");
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -252,16 +301,22 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function chooseSecondProject() {
-  const trigger = container.querySelector<HTMLButtonElement>('[aria-label="Change project"]');
+async function selectSecondProject() {
+  const trigger = container.querySelector<HTMLButtonElement>("[data-draft-project-trigger]");
   expect(trigger).not.toBeNull();
   await act(async () => trigger!.click());
-  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) =>
+  const item = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((item) =>
     item.textContent?.includes("second"),
   );
   expect(item).toBeDefined();
   await act(async () => item!.click());
+}
+async function chooseSecondProject() {
+  await selectSecondProject();
   expect(useComposerDraftStore.getState().getDraftSession(draftId)?.projectId).toBe("second");
+  expect(useComposerDraftStore.getState().getComposerDraft(draftId)?.prompt).toBe(
+    "Keep this prompt while changing projects",
+  );
 }
 function config(): ServerConfig {
   return {
@@ -294,6 +349,17 @@ function selection() {
     ProviderInstanceId.make("codex")
   ];
 }
+it("portable draft route guard: an empty draft opens the selected project draft without retargeting", async () => {
+  useComposerDraftStore.getState().setPrompt(draftId, "");
+  await renderRoute();
+  await selectSecondProject();
+  expect(fixture.command).toHaveBeenCalledWith({
+    environmentId,
+    projectId: ProjectId.make("second"),
+  });
+  expect(useComposerDraftStore.getState().getDraftSession(draftId)?.projectId).toBe("first");
+});
+
 it("P2 regression draft route picker applies the selected checkout after a delayed read", async () => {
   fixture.environments[0]!.serverConfig = config();
   await renderRoute();

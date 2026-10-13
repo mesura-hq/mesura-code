@@ -2,12 +2,12 @@ import type { PendingUserInputError } from "../../pendingUserInputDraftStore";
 import { memo, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { CheckIcon, PaperclipIcon, XIcon } from "lucide-react";
 import type {
-  ApprovalRequestId,
+  RuntimeRequestId,
   EnvironmentId,
   ThreadId,
   UserInputQuestion,
 } from "@t3tools/contracts";
-import type { PendingUserInput } from "@t3tools/client-runtime/pending-requests";
+import type { PendingUserInput } from "../../session-logic";
 import { useShallow } from "zustand/react/shallow";
 import {
   buildPendingUserInputAnswers,
@@ -54,12 +54,12 @@ export interface InlinePendingUserInputContext {
   requests: ReadonlyArray<PendingUserInput>;
   supportsAttachments: boolean;
   maxFileBytes: number | null;
-  focusRequestId?: ApprovalRequestId | null;
+  focusRequestId?: RuntimeRequestId | null;
   onQuestionFocused?: () => void;
   unavailable: boolean;
-  respondingRequestIds: ReadonlyArray<ApprovalRequestId>;
-  onRespond: (requestId: ApprovalRequestId, answers: Record<string, unknown>) => Promise<boolean>;
-  onDismiss: (requestId: ApprovalRequestId) => Promise<boolean>;
+  respondingRequestIds: ReadonlyArray<RuntimeRequestId>;
+  onRespond: (requestId: RuntimeRequestId, answers: Record<string, unknown>) => Promise<boolean>;
+  onDismiss: (requestId: RuntimeRequestId) => Promise<boolean>;
 }
 
 export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCard({
@@ -75,6 +75,22 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
     (state) => state.requests[key]?.answers ?? EMPTY_QUESTION_ANSWERS,
   );
   const error = usePendingUserInputDraftStore((state) => state.requests[key]?.error ?? null);
+  // A prefilled editor answer (`initialAnswer`) seeds its field once; an edit or a cleared
+  // answer afterwards wins, because the draft then exists.
+  useEffect(() => {
+    const store = usePendingUserInputDraftStore.getState();
+    const current = store.requests[key]?.answers ?? EMPTY_QUESTION_ANSWERS;
+    for (const question of request.questions) {
+      if (
+        question.initialAnswer === undefined ||
+        question.allowCustomAnswer === false ||
+        current[question.id] !== undefined
+      ) {
+        continue;
+      }
+      store.update(key, question, { text: question.initialAnswer });
+    }
+  }, [key, request.questions]);
   const setError = (value: PendingUserInputError | null) =>
     usePendingUserInputDraftStore.getState().setError(key, value);
   const [missingQuestionId, setMissingQuestionId] = useState<string | null>(null);
@@ -473,9 +489,7 @@ function QuestionField({
                   </span>
                 ) : null}
               </span>
-              {index < 9 ? (
-                <kbd className="text-[10px] text-muted-foreground">{index + 1}</kbd>
-              ) : null}
+              {index < 9 ? <kbd className="text-3xs text-muted-foreground">{index + 1}</kbd> : null}
             </button>
           );
         })}
@@ -554,7 +568,7 @@ function QuestionField({
           placeholder={
             question.options.length ? "Add context to your selection…" : "Type your answer…"
           }
-          className="block min-h-18 w-full resize-none overflow-hidden rounded-lg border border-border bg-background px-3 py-2 text-sm leading-6 outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 disabled:opacity-50"
+          className="block min-h-18 w-full resize-none overflow-hidden rounded-lg border border-border bg-background px-3 py-2 text-sm leading-6 outline-none focus:border-primary focus:ring-1 focus:ring-inset focus:ring-primary/30 disabled:opacity-50"
         />
         {question.allowCustomAnswer === false ? (
           <p id={`${id}-choice-only`} className="mt-1 text-xs text-muted-foreground">

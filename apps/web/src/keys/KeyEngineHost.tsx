@@ -126,7 +126,7 @@ function ModeIndicator() {
   return (
     <div
       className={cn(
-        "pointer-events-none absolute bottom-2 left-2 z-[60] flex items-center gap-2 rounded-md border border-border bg-popover/95 px-2 py-0.5 font-mono text-[11px] text-muted-foreground shadow-sm",
+        "pointer-events-none absolute bottom-2 left-2 z-[60] flex items-center gap-2 rounded-md border border-border bg-popover/95 px-2 py-0.5 font-mono text-search-label text-muted-foreground shadow-sm",
         TOUCH_HIDDEN,
       )}
       data-mesura-mode={snapshot.mode}
@@ -134,11 +134,11 @@ function ModeIndicator() {
       <span
         className={cn(
           "font-semibold",
-          snapshot.mode === "INSERT" && "text-emerald-500",
-          (snapshot.mode === "VISUAL" || snapshot.mode === "V-LINE") && "text-amber-500",
+          snapshot.mode === "INSERT" && "text-key-insert",
+          (snapshot.mode === "VISUAL" || snapshot.mode === "V-LINE") && "text-key-visual",
           snapshot.mode === "FLASH" && "text-(--mesura-flash-accent)",
-          snapshot.mode === "NORMAL" && "text-sky-500",
-          snapshot.mode === "PANE" && "text-violet-400",
+          snapshot.mode === "NORMAL" && "text-key-normal",
+          snapshot.mode === "PANE" && "text-key-pane",
         )}
       >
         {snapshot.mode}
@@ -177,7 +177,7 @@ function WhichKeyPopup() {
               {displayToken(row.token)}
             </kbd>
             <span
-              className={cn("truncate", row.isGroup ? "text-sky-500" : "text-muted-foreground")}
+              className={cn("truncate", row.isGroup ? "text-key-normal" : "text-muted-foreground")}
             >
               {row.isGroup ? `+${row.label ?? "more"}` : (row.label ?? row.command)}
             </span>
@@ -196,7 +196,7 @@ function FlashLabels() {
       {flash.labels.map((label) => (
         <span
           key={label.id}
-          className="pointer-events-none fixed z-[61] rounded-sm bg-(--mesura-flash-accent) px-0.5 font-mono text-[11px] font-bold leading-4 text-(--mesura-flash-ink)"
+          className="pointer-events-none fixed z-[61] rounded-sm bg-(--mesura-flash-accent) px-0.5 font-mono text-search-label font-bold leading-4 text-(--mesura-flash-ink)"
           style={{ left: label.left, top: label.top }}
         >
           {label.label}
@@ -234,7 +234,7 @@ function BlockCursor() {
       <span
         key={owner}
         aria-hidden
-        className="pointer-events-none fixed z-[61] w-[0.6em] bg-sky-500/80"
+        className="pointer-events-none fixed z-[61] w-[0.6em] bg-key-normal/80"
         style={{ left: overlay.left, top: overlay.top, height: overlay.height }}
       />
     ),
@@ -348,7 +348,7 @@ function ComposerLineNumbers() {
         <span
           key={`${line.top}:${line.number}`}
           className={cn(
-            "absolute right-1 font-mono text-[11px] leading-[inherit] tabular-nums",
+            "absolute right-1 font-mono text-search-label leading-inherit tabular-nums",
             line.current ? "text-foreground" : "text-muted-foreground/70",
           )}
           style={{ top: line.top }}
