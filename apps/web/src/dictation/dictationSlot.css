@@ -1,3 +1,15 @@
+@utility dictation-slot {
+  display: inline-flex;
+}
+
+@utility dictation-slot-caret {
+  display: inline-block;
+}
+
+@utility dictation-slot-wave {
+  display: inline-flex;
+}
+
 /*
  * The shadow caret: a dictation marker in the composer while its transcript is on the way.
  *

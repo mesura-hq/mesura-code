@@ -53,7 +53,9 @@ describe("Symmetria broker contract phase-one regression guards", () => {
     );
 
     expect(manifest.name).toBe("@symmetria/acceptance-tests");
-    expect(manifest.scripts?.test).toBe("vp test run");
+    expect(manifest.scripts?.test).toBe(
+      "vp test run --config ../vite.config.ts --dir . --max-workers=1 --no-file-parallelism",
+    );
     expect(manifest.scripts?.typecheck).toBe("tsc --noEmit");
     expect(workspaceSource).toMatch(/^\s*- tests\s*$/m);
     expectSuccessfulCommand(run(typecheckerPath, ["--noEmit"], acceptanceTestsRoot));

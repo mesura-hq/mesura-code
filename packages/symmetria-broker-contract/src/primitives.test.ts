@@ -18,7 +18,7 @@ const brandedNonNegativeIntegers = {
 };
 
 describe("Symmetria-owned branded primitives", () => {
-  for (const [name, schema] of Object.entries(brandedNonNegativeIntegers)) {
+  describe.each(Object.entries(brandedNonNegativeIntegers))("%s", (name, schema) => {
     const decode = Schema.decodeUnknownResult(schema);
 
     it(`${name} accepts zero and positive integers`, () => {
@@ -39,5 +39,5 @@ describe("Symmetria-owned branded primitives", () => {
       expect(Result.isFailure(decode("1"))).toBe(true);
       expect(Result.isFailure(decode(null))).toBe(true);
     });
-  }
+  });
 });

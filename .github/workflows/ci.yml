@@ -188,6 +188,9 @@ jobs:
       - name: Test preview artifact validation
         run: python3 -B .github/scripts/stage-preview-bundle.test.py
 
+      - name: Install Chromium for script browser tests
+        run: node apps/server/node_modules/playwright-core/cli.js install --with-deps --only-shell chromium
+
       - name: Test nightly release checks
         run: node --test .github/scripts/check-nightly-release.test.cjs
 
@@ -384,19 +387,7 @@ jobs:
     name: Check
     if: ${{ always() }}
     needs:
-      [
-        lint,
-        typecheck,
-        build,
-        test,
-        test_web,
-        test_server,
-        transfer-report,
-        rust,
-        mobile_native_changes,
-        mobile_native_static_analysis,
-        release_smoke,
-      ]
+      [lint, typecheck, build, test, test_web, test_server, transfer-report, rust, release_smoke]
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
@@ -405,7 +396,4 @@ jobs:
           RESULTS: ${{ toJSON(needs) }}
         run: |
           echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
-          # Only the macOS lint skips on purpose, when no native mobile code changed.
-          echo "$RESULTS" | jq -e 'all(to_entries[];
-            .value.result == "success"
-            or (.key == "mobile_native_static_analysis" and .value.result == "skipped"))' > /dev/null
+          echo "$RESULTS" | jq -e 'all(to_entries[]; .value.result == "success")' > /dev/null

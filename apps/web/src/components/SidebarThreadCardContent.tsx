@@ -31,7 +31,7 @@ export function SidebarThreadCardContent(props: {
         "relative z-10 min-w-0",
         props.surface === "search"
           ? "w-full px-3 py-2.5"
-          : "h-[4.875rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]",
+          : "h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)",
       )}
     >
       {props.children}

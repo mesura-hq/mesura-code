@@ -240,8 +240,9 @@ describe("chat buffer soft breaks", () => {
     expect(buffer.lines).toEqual(["const a = 1;", "const b = 2;"]);
   });
 
-  for (const whiteSpace of ["pre", "pre-wrap", "pre-line", "break-spaces"]) {
-    it(`soft break guard: an inline white-space ${whiteSpace} keeps its newlines`, () => {
+  it.each(["pre", "pre-wrap", "pre-line", "break-spaces"])(
+    "soft break guard: an inline white-space %s keeps its newlines",
+    (whiteSpace) => {
       const buffer = buildChatBuffer(
         mountTimeline(
           assistantRow(
@@ -253,8 +254,8 @@ describe("chat buffer soft breaks", () => {
       expect(whiteSpaceOf("span")).toBe(whiteSpace);
 
       expect(buffer.lines).toEqual(["first line", "second line"]);
-    });
-  }
+    },
+  );
 
   it("soft break guard: a stylesheet class with white-space pre-wrap keeps a user message's newlines", () => {
     const style = document.createElement("style");

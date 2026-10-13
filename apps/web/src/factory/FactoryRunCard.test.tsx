@@ -622,7 +622,7 @@ it("phase9 web AC6 subscribes to the run stream only while the Run tab is visibl
  */
 function stubViewportWidth(initialWidth: number) {
   let width = initialWidth;
-  const listeners = new Set<() => void>();
+  const queries: { query: string; listeners: Set<(event: MediaQueryListEvent) => void> }[] = [];
   const matches = (query: string) => {
     const maxWidth = /max-width:\s*(\d+)px/.exec(query);
     const minWidth = /min-width:\s*(\d+)px/.exec(query);
@@ -630,22 +630,36 @@ function stubViewportWidth(initialWidth: number) {
     if (minWidth) return width >= Number(minWidth[1]);
     return false;
   };
-  vi.stubGlobal("matchMedia", (query: string) => ({
-    get matches() {
-      return matches(query);
-    },
-    media: query,
-    onchange: null,
-    addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
-    removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
-    addListener: (listener: () => void) => listeners.add(listener),
-    removeListener: (listener: () => void) => listeners.delete(listener),
-    dispatchEvent: () => true,
-  }));
+  vi.stubGlobal("matchMedia", (query: string) => {
+    const listeners = new Set<(event: MediaQueryListEvent) => void>();
+    queries.push({ query, listeners });
+    return {
+      get matches() {
+        return matches(query);
+      },
+      media: query,
+      onchange: null,
+      addEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) =>
+        listeners.add(listener),
+      removeEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) =>
+        listeners.delete(listener),
+      addListener: (listener: (event: MediaQueryListEvent) => void) => listeners.add(listener),
+      removeListener: (listener: (event: MediaQueryListEvent) => void) =>
+        listeners.delete(listener),
+      dispatchEvent: () => true,
+    };
+  });
   return async (nextWidth: number) => {
+    const previousMatches = queries.map(({ query }) => matches(query));
     width = nextWidth;
     await act(async () => {
-      for (const listener of listeners) listener();
+      // REGRESSION: Calling every listener without an event broke Monaco's media listeners in CI.
+      // A browser emits a change event only for queries whose matches value changed.
+      for (const [index, { query, listeners }] of queries.entries()) {
+        if (matches(query) === previousMatches[index]) continue;
+        const event = new MediaQueryListEvent("change", { matches: matches(query), media: query });
+        for (const listener of listeners) listener(event);
+      }
     });
     await settle();
   };

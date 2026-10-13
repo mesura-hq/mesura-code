@@ -9,8 +9,6 @@ import {
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import "@symmetria/fm-ui/overview/styles.css";
-import "@symmetria/fm-search/ui/styles.css";
 
 import { useComposerHandleContext } from "~/composerHandleContext";
 import { registerFocusTarget } from "~/lib/focusTargets";
@@ -26,8 +24,6 @@ import { type HandledReveal, nextRevealRequest } from "./treeReveal";
 import { projectTreeKey, treeShapePersister } from "./treeShapeStorage";
 import { leaveFileTree } from "./fileTreeFocusMoves";
 import { useProjectOverviewModel } from "./useProjectOverviewModel";
-import "../symmetriaIcons.css";
-import "../symmetriaOverview.css";
 import "./fileTree.css";
 
 interface MesuraFileTreeProps {
@@ -243,7 +239,7 @@ export function MesuraFileTree({
         onMiller={openFileManager}
       />
       {truncated ? (
-        <p className="mesura-file-tree-notice">
+        <p className="m-0 px-4 py-1.5 text-2xs leading-normal text-muted-foreground">
           The server listed only part of this project; some files are missing here.
         </p>
       ) : null}

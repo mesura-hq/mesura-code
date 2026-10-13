@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef } from "react";
 
+import { observeResize } from "~/lib/observeResize";
 import { cn } from "~/lib/utils";
 import {
   shouldAnimateDictationWaveform,
@@ -237,7 +238,7 @@ export const CenterOutWaveform = memo(function CenterOutWaveform(props: {
       animationFrame = window.requestAnimationFrame(animate);
     };
 
-    const resizeObserver = new ResizeObserver(() => {
+    const stopObservingResize = observeResize(canvas, () => {
       resize();
       draw(performance.now());
     });
@@ -245,7 +246,6 @@ export const CenterOutWaveform = memo(function CenterOutWaveform(props: {
       waveformColor = getComputedStyle(canvas).color;
       draw(performance.now());
     });
-    resizeObserver.observe(canvas);
     themeObserver.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ["class", "data-theme-id", "data-theme"],
@@ -260,7 +260,7 @@ export const CenterOutWaveform = memo(function CenterOutWaveform(props: {
     }
 
     return () => {
-      resizeObserver.disconnect();
+      stopObservingResize();
       themeObserver.disconnect();
       window.cancelAnimationFrame(animationFrame);
       staticRedrawRef.current = null;

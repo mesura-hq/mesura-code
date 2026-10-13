@@ -1,4 +1,6 @@
 @import "tailwindcss";
+@import "./dictation/dictationSlot.css";
+@import "./dictation/dictationWidget.css";
 
 @custom-variant dark (&:is(.dark, .dark *));
 @custom-variant light (&:not(.dark, .dark *));
@@ -174,6 +176,36 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --text-settings-intro: 13px;
   --text-settings-intro--line-height: 1.45;
   --text-search-label: 11px;
+  /* Dense surfaces retain their absolute font sizes and inherited line height. */
+  --text-micro: 9px;
+  --text-micro-plus: 9.5px;
+  --text-caption: 10px;
+  --text-caption-plus: 10.5px;
+  --text-small-label: 12.5px;
+  --text-phase-label: 0.65rem;
+  --radius-report: 24px;
+  --spacing-safe-bottom: env(safe-area-inset-bottom);
+  --spacing-safe-content: calc(env(safe-area-inset-bottom) + 1.5rem);
+  /* Fixed provider indicators retain their established palette across themes. */
+  --color-key-insert: var(--color-emerald-500);
+  --color-key-visual: var(--color-amber-500);
+  --color-key-normal: var(--color-sky-500);
+  --color-key-pane: var(--color-violet-400);
+  --color-issue-open: light-dark(var(--color-emerald-600), var(--color-emerald-400));
+  --color-issue-closed: light-dark(var(--color-violet-500), var(--color-violet-400));
+  --color-editor-warning: light-dark(var(--color-amber-600), var(--color-amber-400));
+  --color-context-track: color-mix(in oklab, var(--color-muted-foreground) 24%, transparent);
+  --color-sidebar-recess: color-mix(in srgb, var(--background) 45%, transparent);
+  /* The floating dictation widget always uses its dark overlay treatment. */
+  --color-dictation-paused: var(--color-zinc-500);
+  --color-dictation-recording: var(--color-red-500);
+  --color-dictation-label: var(--color-zinc-300);
+  --color-dictation-wave: var(--color-zinc-200);
+  --color-dictation-muted: var(--color-zinc-400);
+  --color-dictation-processing: var(--color-sky-300);
+  --color-dictation-error: var(--color-red-300);
+  --color-dictation-success: var(--color-emerald-400);
+  --color-dictation-surface: var(--color-zinc-900);
   --tracking-search-label: 0.12em;
   /* Two steps below Tailwind's text-xs (12px) for dense UI: metadata rows,
      badges, counters, keyboard hints and diagnostics tables. 2xs is 11px,
@@ -334,6 +366,16 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
       scale: 2;
     }
   }
+}
+
+@utility mesura-dictation-strip {
+  pointer-events: auto;
+  position: relative;
+  z-index: 0;
+}
+
+@utility leading-inherit {
+  line-height: inherit;
 }
 
 @utility surface-glass {
