@@ -25,14 +25,17 @@ afterEach(() => {
 
 describe("Usage page preferences", () => {
   it("uses defaults when no preference has been saved", () => {
-    expect(readUsagePagePreferences()).toEqual({ metric: "limits", windowDays: 30 });
+    expect(readUsagePagePreferences()).toEqual({ metric: "cost", windowDays: 30 });
   });
 
   it.each([1, 7, 30, 90] as const)("round-trips every metric with a %i-day range", (windowDays) => {
-    for (const metric of ["cost", "tokens", "limits"] as const) {
+    for (const metric of ["cost", "tokens"] as const) {
       saveUsagePagePreferences({ metric, windowDays });
       expect(readUsagePagePreferences()).toEqual({ metric, windowDays });
     }
+    // Mesura: the page has no Limits tab, so a saved "limits" reads as Cost.
+    saveUsagePagePreferences({ metric: "limits", windowDays });
+    expect(readUsagePagePreferences()).toEqual({ metric: "cost", windowDays });
   });
 
   it("round-trips hidden providers and reads older saves without them", () => {
@@ -49,7 +52,7 @@ describe("Usage page preferences", () => {
     '{"metric":"cost","windowDays":365}',
   ])("replaces invalid preferences on the next save: %s", (value) => {
     values.set(key, value);
-    expect(readUsagePagePreferences()).toEqual({ metric: "limits", windowDays: 30 });
+    expect(readUsagePagePreferences()).toEqual({ metric: "cost", windowDays: 30 });
     saveUsagePagePreferences({ metric: "tokens", windowDays: 7 });
     expect(readUsagePagePreferences()).toEqual({ metric: "tokens", windowDays: 7 });
   });
@@ -62,8 +65,8 @@ describe("Usage page preferences", () => {
     expect(() => saveUsagePagePreferences({ metric: "tokens", windowDays: 7 })).not.toThrow();
     expect(readUsagePagePreferences()).toEqual({ metric: "cost", windowDays: 30 });
     write.mockRestore();
-    saveUsagePagePreferences({ metric: "limits", windowDays: 7 });
-    expect(readUsagePagePreferences()).toEqual({ metric: "limits", windowDays: 7 });
+    saveUsagePagePreferences({ metric: "tokens", windowDays: 7 });
+    expect(readUsagePagePreferences()).toEqual({ metric: "tokens", windowDays: 7 });
   });
 
   it("contains failures when the browser blocks storage access", () => {
@@ -72,7 +75,7 @@ describe("Usage page preferences", () => {
         throw new Error("SecurityError");
       },
     });
-    expect(readUsagePagePreferences()).toEqual({ metric: "limits", windowDays: 30 });
+    expect(readUsagePagePreferences()).toEqual({ metric: "cost", windowDays: 30 });
     expect(() => saveUsagePagePreferences({ metric: "tokens", windowDays: 7 })).not.toThrow();
   });
 });

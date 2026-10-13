@@ -12,14 +12,15 @@ const UsagePagePreferencesSchema = Schema.Struct({
 });
 export type UsagePagePreferences = typeof UsagePagePreferencesSchema.Type;
 
-// Limits is what most people open the page for (how much subscription quota is
-// left, and when it resets), so it is the first-visit default; the last picked
-// tab sticks after that.
-const DEFAULT_PREFERENCES: UsagePagePreferences = { metric: "limits", windowDays: 30 };
+// Mesura: the page has no Limits tab (the sidebar account-limits panel is the
+// limits view), so Cost is the first-visit default and a saved "limits" reads as Cost.
+const DEFAULT_PREFERENCES: UsagePagePreferences = { metric: "cost", windowDays: 30 };
 
 export function readUsagePagePreferences(): UsagePagePreferences {
   try {
-    return getLocalStorageItem(STORAGE_KEY, UsagePagePreferencesSchema) ?? DEFAULT_PREFERENCES;
+    const stored = getLocalStorageItem(STORAGE_KEY, UsagePagePreferencesSchema);
+    if (!stored) return DEFAULT_PREFERENCES;
+    return stored.metric === "limits" ? { ...stored, metric: "cost" } : stored;
   } catch (error) {
     console.error("Could not read Usage page preferences.", error);
     return DEFAULT_PREFERENCES;

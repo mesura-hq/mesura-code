@@ -31,7 +31,8 @@ export const serverEnvironment = createServerEnvironmentAtoms(connectionAtomRunt
   initialConfigValueAtom: environmentSession.initialConfigValueAtom,
   environmentThemes: true,
   usageLimitSources: true,
-  usageLimitsCommand: true,
+  // Mesura: off, as in connection/runtime.ts; the sidebar panel shows limits.
+  usageLimitsCommand: false,
 });
 /** Updates a host whose protocol is too old for this client to connect to. */
 export const updateOutdatedServer = createOutdatedServerUpdateCommand(connectionAtomRuntime);

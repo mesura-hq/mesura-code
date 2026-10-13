@@ -34,7 +34,9 @@ const layerProvidedClientConnection = layerSnapshotLoader.pipe(
     Connection.layerWithOptions({
       environmentThemes: true,
       usageLimitSources: true,
-      usageLimitsCommand: true,
+      // Mesura: upstream's /usage-limits card is off; the sidebar account-limits
+      // panel is the one limits view. The server only adds the command when asked.
+      usageLimitsCommand: false,
     }),
   ),
   Layer.provideMerge(
