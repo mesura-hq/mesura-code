@@ -42,9 +42,10 @@ export function pruneNativeMobileJobNeeds(workflowYaml: string): string {
         if (kept.length === list.slice(1, -1).split(",").length) return needs;
         return `${indentation}needs: [${kept.join(",")}]`;
       }
-      return needs.replace(/^ +-[ \t]*(\w+)[ \t]*$/gm, (entry: string, job: string) =>
+      const pruned = needs.replace(/^ +-[ \t]*(\w+)[ \t]*$/gm, (entry: string, job: string) =>
         removedJobs.has(job) ? "" : entry,
       );
+      return /^ +-/m.test(pruned) ? pruned : `${indentation}needs: []`;
     },
   );
 }

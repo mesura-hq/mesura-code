@@ -37,6 +37,15 @@ it("keeps the CI workflow free of dependencies on deleted native jobs", () => {
   assert.equal(pruneNativeMobileJobNeeds(workflow), workflow);
 });
 
+it("keeps an empty block dependency list valid after removing both native jobs", () => {
+  assert.equal(
+    pruneNativeMobileJobNeeds(
+      "    needs:\n      - mobile_native_changes\n      - mobile_native_static_analysis\n",
+    ),
+    "    needs: []\n",
+  );
+});
+
 /**
  * This fork removed upstream's native mobile apps (ADR-008), and every upstream sync brings
  * some of their files back. A path that returns is not harmless: agents read it, the suite
