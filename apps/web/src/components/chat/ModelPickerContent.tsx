@@ -12,6 +12,7 @@ import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { memo, useMemo, useState, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { ChevronRightIcon } from "lucide-react";
 import { ModelListRow } from "./ModelListRow";
+import type { ModelPickerExtension } from "./modelPickerExtension";
 import { ModelPickerSidebar } from "./ModelPickerSidebar";
 import { getProviderStatusMessage, hasProviderSetup } from "./ProviderStatusBanner";
 import {
@@ -186,6 +187,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   onOpenProviderSetup?: (instanceId: ProviderInstanceId) => void;
   getModelDisabledReason?: (instanceId: ProviderInstanceId, model: string) => string | null;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
+  /** Mesura: the combined picker's seam. See `modelPickerExtension.ts`. */
+  extension?: ModelPickerExtension;
 }) {
   const {
     keybindings: providedKeybindings,
@@ -766,13 +769,51 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     return mapping.size > 0 ? mapping : EMPTY_MODEL_JUMP_LABELS;
   }, [keybindings, modelJumpCommandByKey, modelJumpShortcutContext]);
   const modelListExtraData = useMemo(
-    () => ({ favoritesSet, modelJumpLabelByKey, activeModelKey, selectedModelKeySet }),
-    [favoritesSet, modelJumpLabelByKey, activeModelKey, selectedModelKeySet],
+    () => ({
+      favoritesSet,
+      modelJumpLabelByKey,
+      activeModelKey,
+      selectedModelKeySet,
+      extensionRowRenderKey: props.extension?.rowRenderKey,
+    }),
+    [
+      favoritesSet,
+      modelJumpLabelByKey,
+      activeModelKey,
+      selectedModelKeySet,
+      props.extension?.rowRenderKey,
+    ],
   );
+
+  const selectAdjacentProvider = useCallback(
+    (direction: 1 | -1) => {
+      const next = adjacentModelPickerProvider({
+        entries: sidebarInstanceEntries,
+        selectedInstanceId,
+        direction,
+        disabledInstanceIds: lockedDisabledInstanceIds,
+        selectableUnavailableInstanceIds,
+      });
+      setSearchQuery("");
+      handleSelectInstance(next);
+    },
+    [
+      handleSelectInstance,
+      lockedDisabledInstanceIds,
+      selectableUnavailableInstanceIds,
+      selectedInstanceId,
+      sidebarInstanceEntries,
+    ],
+  );
+  const extensionHidden = props.extension?.hidden === true;
+  const onVisibleModelsChange = props.extension?.onVisibleModelsChange;
+  useEffect(() => {
+    onVisibleModelsChange?.((modelKey) => filteredModelByKey.has(modelKey));
+  }, [filteredModelByKey, onVisibleModelsChange]);
 
   useEffect(() => {
     const onWindowKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.defaultPrevented || event.repeat || isCommandPaletteOpen()) {
+      if (event.defaultPrevented || event.repeat || isCommandPaletteOpen() || extensionHidden) {
         return;
       }
 
@@ -783,15 +824,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       if (command === "modelPicker.previousProvider" || command === "modelPicker.nextProvider") {
         event.preventDefault();
         event.stopPropagation();
-        const next = adjacentModelPickerProvider({
-          entries: sidebarInstanceEntries,
-          selectedInstanceId,
-          direction: command === "modelPicker.nextProvider" ? 1 : -1,
-          disabledInstanceIds: lockedDisabledInstanceIds,
-          selectableUnavailableInstanceIds,
-        });
-        setSearchQuery("");
-        handleSelectInstance(next);
+        selectAdjacentProvider(command === "modelPicker.nextProvider" ? 1 : -1);
         return;
       }
       const jumpIndex = modelPickerJumpIndexFromCommand(command ?? "");
@@ -818,15 +851,12 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       window.removeEventListener("keydown", onWindowKeyDown, true);
     };
   }, [
+    extensionHidden,
     handleModelSelect,
-    handleSelectInstance,
     keybindings,
-    lockedDisabledInstanceIds,
     modelJumpModelKeys,
     modelJumpShortcutContext,
-    selectableUnavailableInstanceIds,
-    selectedInstanceId,
-    sidebarInstanceEntries,
+    selectAdjacentProvider,
   ]);
 
   useLayoutEffect(() => {
@@ -847,7 +877,12 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     <TooltipProvider delay={0}>
       <div
         ref={pickerContentRef}
-        className="relative flex max-h-86.5 w-screen max-w-90 flex-row overflow-hidden"
+        className={cn(
+          "relative flex max-h-86.5 w-screen max-w-90 flex-row overflow-hidden",
+          props.extension?.rootClassName,
+          extensionHidden && "hidden",
+        )}
+        inert={extensionHidden || undefined}
         // Hold the height from when the search started; results scroll instead of resizing.
         style={isSearching ? { height: searchHeight } : undefined}
         data-model-picker-content="true"
@@ -884,6 +919,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           value={onToggleModel ? [...selectedModelKeySet] : activeModelKey}
           onItemHighlighted={(modelKey, eventDetails) => {
             highlightedModelKeyRef.current = typeof modelKey === "string" ? modelKey : null;
+            props.extension?.onHighlightedModelChange?.(
+              highlightedModelKeyRef.current,
+              eventDetails.reason,
+            );
             if (eventDetails.reason === "keyboard" && eventDetails.index >= 0) {
               void modelListRef.current?.scrollIndexIntoView?.({
                 index: eventDetails.index,
@@ -929,6 +968,14 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                 setSearchQuery(e.target.value);
               }}
               onKeyDown={(e) => {
+                if (
+                  props.extension?.onSearchKeyDown?.(e, {
+                    highlightedModelKey: highlightedModelKeyRef.current,
+                    selectAdjacentProvider,
+                  })
+                ) {
+                  return;
+                }
                 if (
                   showSidebar &&
                   !e.altKey &&
@@ -1049,6 +1096,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                         unavailable={model.isUnavailable === true}
                         jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
                         disabledReason={disabledReason}
+                        accessory={props.extension?.renderRowAccessory?.({
+                          instanceId: model.instanceId,
+                          slug: model.slug,
+                          disabled: disabledReason !== null,
+                        })}
                         onToggleFavorite={() => toggleFavorite(model.instanceId, model.slug)}
                       />
                     );
