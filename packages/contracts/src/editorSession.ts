@@ -58,10 +58,25 @@ export type EditorSessionOpenInput = Schema.Codec.Encoded<typeof EditorSessionOp
 export const EditorSessionAttachInput = EditorSessionThreadInput;
 export type EditorSessionAttachInput = Schema.Codec.Encoded<typeof EditorSessionAttachInput>;
 
+/**
+ * Which batch of keys this is, so a batch sent again is applied once.
+ *
+ * `lane` names one client's stream of keys for a thread and `index` counts its
+ * batches upwards. The server skips a batch whose `index` is not above the
+ * last one it applied for the same `lane`, and answers it as a success: a
+ * client that lost the reply re-sends the batch, and Neovim already has it.
+ */
+export const EditorInputSequence = Schema.Struct({
+  lane: Schema.String.check(Schema.isMaxLength(64)),
+  index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+export type EditorInputSequence = typeof EditorInputSequence.Type;
+
 export const EditorSessionInputInput = Schema.Struct({
   ...EditorSessionThreadInput.fields,
   /** Neovim key notation: `<C-w>v`, `<Esc>`, plain text. */
   keys: Schema.String.check(Schema.isMaxLength(1024)),
+  sequence: Schema.optional(EditorInputSequence),
 });
 export type EditorSessionInputInput = Schema.Codec.Encoded<typeof EditorSessionInputInput>;
 
@@ -407,9 +422,28 @@ export class EditorSessionRpcError extends Schema.TaggedError<EditorSessionRpcEr
   }
 }
 
+/**
+ * A re-sent key batch the server cannot vouch for: the Neovim that accepted it
+ * exited and was replaced, and accepting is not running, so the restored text
+ * may or may not hold it. Sending it again could type it twice; the client
+ * reports the keys lost instead.
+ */
+export class EditorSessionInputLostError extends Schema.TaggedError<EditorSessionInputLostError>()(
+  "EditorSessionInputLostError",
+  {
+    threadId: Schema.String,
+    detail: Schema.String,
+  },
+) {
+  override get message() {
+    return `Keys for thread ${this.threadId} may not have reached Neovim: ${this.detail}`;
+  }
+}
+
 export const EditorSessionError = Schema.Union([
   EditorSessionSpawnError,
   EditorSessionLookupError,
   EditorSessionRpcError,
+  EditorSessionInputLostError,
 ]);
 export type EditorSessionError = typeof EditorSessionError.Type;

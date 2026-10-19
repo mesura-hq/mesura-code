@@ -1,21 +1,23 @@
-import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
+import { RegistryContext, useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import type { EditorTextEdit, EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import type * as monaco from "monaco-editor";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { resolveShortcutCommand } from "~/keybindings";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { useAtomCommand } from "~/state/use-atom-command";
 import {
+  editorKeyLane,
+  editorKeysDeliveryAtom,
   editorSessionAttach,
-  editorSessionInput,
   editorSessionOpen,
   editorSessionReplaceText,
   editorSessionSetCursor,
   editorSessionViewport,
   EMPTY_EDITOR_SESSION_STATE,
+  type EditorKeysDelivery,
   type EditorSessionState,
 } from "~/state/editorSession";
 import { fallbackFromCause, isSessionMissing, type NvimFallback } from "./nvimFallback.ts";
@@ -42,6 +44,8 @@ export interface NvimFileEditorResult extends NvimDriverResult {
   readonly fallback: NvimFallback | null;
   /** Tries again, after the setting that broke it has been fixed. */
   readonly retry: () => void;
+  /** Whether typed keys are reaching Neovim; see `editorKeyLane`. */
+  readonly keysDelivery: EditorKeysDelivery;
 }
 
 export interface NvimFileEditorInput {
@@ -175,7 +179,14 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
   );
 
   const openCommand = useAtomCommand(editorSessionOpen, "editor session open");
-  const inputCommand = useAtomCommand(editorSessionInput, "editor session input");
+  // Keys, clicks and an agent's edits share one lane per thread: see
+  // `editorKeyLane` for the coalescing and the re-sends.
+  const registry = useContext(RegistryContext);
+  const keyLane = useMemo(
+    () => editorKeyLane(registry, { environmentId, threadId }),
+    [registry, environmentId, threadId],
+  );
+  const keysDelivery = useAtomValue(editorKeysDeliveryAtom({ environmentId, threadId }));
   const setCursorCommand = useAtomCommand(editorSessionSetCursor, "editor session set cursor");
   const viewportCommand = useAtomCommand(editorSessionViewport, "editor session viewport");
   const replaceTextCommand = useAtomCommand(
@@ -216,18 +227,13 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
     setOpenGeneration((generation) => generation + 1);
   }, []);
 
-  const sendKeys = useCallback(
-    (keys: string) => {
-      void inputCommand({ environmentId, input: { threadId, keys } });
-    },
-    [inputCommand, environmentId, threadId],
-  );
+  const sendKeys = useCallback((keys: string) => keyLane.keys(keys), [keyLane]);
 
   const setCursor = useCallback(
     (line: number, col: number) => {
-      void setCursorCommand({ environmentId, input: { threadId, line, col } });
+      keyLane.call(() => setCursorCommand({ environmentId, input: { threadId, line, col } }));
     },
-    [setCursorCommand, environmentId, threadId],
+    [keyLane, setCursorCommand, environmentId, threadId],
   );
 
   const sendViewport = useCallback(
@@ -242,9 +248,11 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
 
   const replaceText = useCallback(
     (edits: ReadonlyArray<EditorTextEdit>) => {
-      void replaceTextCommand({ environmentId, input: { threadId, edits: [...edits] } });
+      keyLane.call(() =>
+        replaceTextCommand({ environmentId, input: { threadId, edits: [...edits] } }),
+      );
     },
-    [replaceTextCommand, environmentId, threadId],
+    [keyLane, replaceTextCommand, environmentId, threadId],
   );
 
   const driverState = useMemo(
@@ -287,5 +295,5 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
     state: driverState,
   });
 
-  return { ...driver, fallback, retry };
+  return { ...driver, fallback, retry, keysDelivery };
 }

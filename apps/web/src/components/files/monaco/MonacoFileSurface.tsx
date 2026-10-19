@@ -502,6 +502,7 @@ export function MonacoFileSurface({
           message={nvim.message}
           fallback={nvim.fallback}
           onRetry={nvim.retry}
+          keysDelivery={nvim.keysDelivery}
         />
       ) : null}
     </div>

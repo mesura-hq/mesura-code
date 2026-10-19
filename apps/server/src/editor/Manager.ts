@@ -3,6 +3,7 @@ import * as NodeOS from "node:os";
 import {
   type EditorHighlightDefinition,
   type EditorSessionEndReason,
+  EditorSessionInputLostError,
   EditorSessionLookupError,
   EditorSessionRpcError,
   EditorSessionSpawnError,
@@ -20,6 +21,7 @@ import {
 import type * as Cause from "effect/Cause";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -65,11 +67,63 @@ const MAX_RESTARTS_PER_SESSION = 3;
 
 type Listener = (event: EditorSessionEvent) => Effect.Effect<void>;
 
+/** An event and its place in the session's stream, given when it was made. */
+interface StampedEvent {
+  readonly seq: number;
+  readonly event: EditorSessionEvent;
+}
+
+/**
+ * One attachment's place in the stream.
+ *
+ * `fromSeq` is the last event its snapshot already holds: the drain skips
+ * those, so a delta never reaches a client twice. Until the snapshot has gone
+ * out (`primed`), later events wait in `pending`, so none overtakes it.
+ */
+interface Attachment {
+  readonly fromSeq: number;
+  primed: boolean;
+  readonly pending: Array<EditorSessionEvent>;
+}
+
+/**
+ * What the session knows about one client lane's key batches.
+ *
+ * `generation` is `Session.restarts` when the batch was first seen: a re-send
+ * from an earlier Neovim cannot be vouched for (see `EditorSessionInputLostError`).
+ * `accepted` counts the bytes of `keys` Neovim has taken, so a partial
+ * acceptance resumes where it stopped.
+ */
+interface InputReceipt {
+  readonly index: number;
+  readonly generation: number;
+  accepted: number;
+  done: boolean;
+}
+
+/** Client lanes remembered per session: windows and reloads, not keys. */
+const MAX_INPUT_LANES = 16;
+/** How long Neovim's full input buffer may refuse keys before the batch fails. */
+const INPUT_BUFFER_PATIENCE = 200;
+
 interface OpenBuffer {
   readonly relativePath: string;
   readonly absolutePath: string;
   lastUsedAt: number;
 }
+
+/**
+ * The longest a key's text waits for a cursor read before it goes out alone.
+ *
+ * Most keys never wait: the host plugin pushes the cursor ahead of the frame.
+ * The read is the fallback, and it answers in about a millisecond, or in tens
+ * of milliseconds on a loaded server; the text waits for it, so the caret
+ * moves with the letter however slow the read is. This bound is only for a
+ * Neovim whose main loop is held with the text already sent (`:!make`, a
+ * prompt): past it the text is shown with the caret where it was, the caret
+ * follows when Neovim answers, and the trace and the log say it happened.
+ */
+const TEXT_WAIT_MS = 1_000;
 
 interface Session {
   readonly threadId: string;
@@ -83,7 +137,7 @@ interface Session {
   bridgeScope: Scope.Closeable;
   /** How many times Neovim has been replaced in this session. */
   restarts: number;
-  readonly listeners: Set<Listener>;
+  readonly listeners: Map<Listener, Attachment>;
   /**
    * Events on their way to the listeners.
    *
@@ -92,7 +146,9 @@ interface Session {
    * drains this, so events reach every attachment in the order Neovim produced
    * them rather than in whatever order a scheduler happened to pick.
    */
-  readonly outbox: Queue.Queue<EditorSessionEvent>;
+  readonly outbox: Queue.Queue<StampedEvent>;
+  /** The last sequence number given to an event; see `Attachment`. */
+  eventSeq: number;
   /** Keyed by absolute path, so two threads with the same file do not collide. */
   readonly buffers: Map<string, OpenBuffer>;
   /** The file the window is showing now. */
@@ -101,6 +157,16 @@ interface Session {
   lastActivityAt: number;
   /** Stops the bridge subscription when the session goes. */
   unsubscribe: (() => void) | null;
+  /**
+   * Key batches by client lane, so a re-sent batch is applied once.
+   *
+   * Per lane, because two windows type into one session: a single "last
+   * batch" let window B's input erase window A's record, and A's re-send was
+   * applied twice. Bounded by `MAX_INPUT_LANES`, oldest lane first.
+   */
+  readonly inputReceipts: Map<string, InputReceipt>;
+  /** Publishes the events `wireNotifications` holds for a cursor; see there. */
+  releaseHeld: () => void;
 }
 
 export interface EditorSessionManagerOptions {
@@ -228,12 +294,25 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
     readonly exited: NvimBridge.Session;
   }>();
 
-  const publish = (session: Session, event: EditorSessionEvent) => {
-    if (trace.enabled) {
-      trace.record({ dir: "out", thread: session.threadId, ...summarizeEditorEvent(event) });
-    }
-    Queue.offerUnsafe(session.outbox, event);
+  /** Gives an event its place in the session's stream. */
+  const stamp = (session: Session, event: EditorSessionEvent): StampedEvent => {
+    session.eventSeq += 1;
+    return { seq: session.eventSeq, event };
   };
+
+  const publishStamped = (session: Session, stamped: StampedEvent) => {
+    if (trace.enabled) {
+      trace.record({
+        dir: "out",
+        thread: session.threadId,
+        ...summarizeEditorEvent(stamped.event),
+      });
+    }
+    Queue.offerUnsafe(session.outbox, stamped);
+  };
+
+  const publish = (session: Session, event: EditorSessionEvent) =>
+    publishStamped(session, stamp(session, event));
 
   /**
    * `withThreadLock`, recording the call when tracing is on: how long it queued
@@ -306,7 +385,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       if (trace.enabled) {
         trace.record({ dir: "out", thread: session.threadId, ...summarizeEditorEvent(event) });
       }
-      yield* Effect.forEach([...session.listeners], (listener) => listener(event), {
+      yield* Effect.forEach([...session.listeners.keys()], (listener) => listener(event), {
         discard: true,
       });
     });
@@ -402,7 +481,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       Effect.tapCause(() => Scope.close(scope, Effect.void as never)),
     );
 
-    const outbox = yield* Queue.make<EditorSessionEvent>().pipe(Scope.provide(scope));
+    const outbox = yield* Queue.make<StampedEvent>().pipe(Scope.provide(scope));
 
     const session: Session = {
       threadId,
@@ -412,20 +491,34 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       bridgeScope,
       restarts: 0,
       outbox,
-      listeners: new Set(),
+      eventSeq: 0,
+      listeners: new Map(),
       buffers: new Map(),
       currentPath: null,
       attachedClients: 0,
       lastActivityAt: now(),
       unsubscribe: null,
+      inputReceipts: new Map(),
+      releaseHeld: () => {},
     };
 
     yield* Queue.takeBetween(outbox, 1, Number.MAX_SAFE_INTEGER).pipe(
       Effect.flatMap((events) =>
         Effect.forEach(
           events,
-          (event) =>
-            Effect.forEach(session.listeners, (listener) => listener(event), { discard: true }),
+          ({ seq, event }) =>
+            Effect.forEach(
+              [...session.listeners],
+              ([listener, attachment]) => {
+                if (seq <= attachment.fromSeq) return Effect.void;
+                if (!attachment.primed) {
+                  attachment.pending.push(event);
+                  return Effect.void;
+                }
+                return listener(event);
+              },
+              { discard: true },
+            ),
           { discard: true },
         ),
       ),
@@ -559,7 +652,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
           // refuses, so the client would get an encoding failure rather than
           // an editor.
           session.currentPath = input.relativePath;
-          wireNotifications(session);
+          yield* wireNotifications(session);
 
           // Eviction runs before this session joins the map, so the session
           // being opened right now cannot be the one chosen to go.
@@ -640,6 +733,9 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         // just the caller. One session serves the whole thread, so a client
         // that does not learn about the switch would keep applying this
         // buffer's line events to the file it still believes is open.
+        // Held text goes first: the snapshot already contains it, and a
+        // `lines` event arriving after it would be applied a second time.
+        session.releaseHeld();
         publish(session, { type: "snapshot", snapshot });
         return snapshot;
       }).pipe(
@@ -675,19 +771,68 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
     const sentHighlightIds = new Set<number>();
     let lastVisual = "";
 
+    /**
+     * Events held back while a key's text waits for the cursor it moved.
+     *
+     * A `lines` event arrives before the frame that draws it. Published as
+     * it came, it left in a stream chunk of its own, and the RPC server sends
+     * the next chunk only after the client's Ack: the caret trailed the letter
+     * it typed by a whole round trip. So from a `lines` event on, everything is
+     * held, in order, and published together at the frame. The host plugin
+     * pushes the cursor ahead of that frame, so normally nothing waits on
+     * Neovim. When no push came, the frame forks a cursor read and the text
+     * waits for it; a watchdog bounds that wait for a read Neovim cannot
+     * answer while its main loop is held.
+     */
+    // Stamped as they are made, not as they go out: a snapshot taken while
+    // they wait already holds them, and an attachment made then must skip them.
+    let held: Array<StampedEvent> | null = null;
+    let holdNumber = 0;
+    /** Created by the watchdog this returns; see the end of this function. */
+    let holdsStarted: Queue.Queue<number> | null = null;
+    let heldSince = 0;
+    const release = () => {
+      if (held === null) return;
+      const events = held;
+      held = null;
+      // How long text waited for its cursor: the cost of the hold, traced.
+      if (trace.enabled) {
+        trace.record({
+          dir: "hold",
+          thread: session.threadId,
+          heldMs: Math.round(performance.now() - heldSince),
+          events: events.length,
+        });
+      }
+      for (const stamped of events) publishStamped(session, stamped);
+    };
+    const send = (event: EditorSessionEvent) => {
+      if (held === null) publish(session, event);
+      else held.push(stamp(session, event));
+    };
+    const hold = () => {
+      if (held !== null) return;
+      held = [];
+      heldSince = performance.now();
+      holdNumber += 1;
+      if (holdsStarted !== null) Queue.offerUnsafe(holdsStarted, holdNumber);
+    };
+
     const bridge = session.bridge;
-    const unsubscribe = bridge.subscribe((event) => {
+    const unsubscribeBridge = bridge.subscribe((event) => {
       if (event.kind === "exited") {
+        release();
         Queue.offerUnsafe(exits, { session, exited: bridge });
         return;
       }
       if (event.kind === "lines") {
+        hold();
         // Attributed to the file the session has open. A delta with no name on
         // it is one the client cannot check, and this is the only place that
         // knows which file the mirror is on.
         const relativePath = session.currentPath;
         if (relativePath === null) return;
-        publish(session, {
+        send({
           type: "lines",
           relativePath,
           first: event.first,
@@ -698,12 +843,12 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       }
 
       if (event.kind === "cmdline") {
-        publish(session, { type: "cmdline", cmdline: event.cmdline });
+        send({ type: "cmdline", cmdline: event.cmdline });
         return;
       }
 
       if (event.kind === "message") {
-        publish(session, { type: "message", kind: event.messageKind, text: event.text });
+        send({ type: "message", kind: event.messageKind, text: event.text });
         return;
       }
 
@@ -712,7 +857,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         const absolutePath = String(event.params[0] ?? "");
         const buffer = session.buffers.get(absolutePath);
         if (buffer === undefined) return;
-        publish(session, { type: "writeRequested", relativePath: buffer.relativePath });
+        send({ type: "writeRequested", relativePath: buffer.relativePath });
         return;
       }
 
@@ -725,12 +870,12 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       if (line !== lastCursorLine || col !== lastCursorCol) {
         lastCursorLine = line;
         lastCursorCol = col;
-        publish(session, { type: "cursor", line, col });
+        send({ type: "cursor", line, col });
       }
       if (session.bridge.mode !== lastMode || session.bridge.jumping !== lastJumping) {
         lastMode = session.bridge.mode;
         lastJumping = session.bridge.jumping;
-        publish(session, {
+        send({
           type: "mode",
           mode: lastMode,
           blocking: false,
@@ -748,7 +893,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
           : `${visual.kind}:${visual.anchor.line}:${visual.anchor.col}:${visual.cursor.line}:${visual.cursor.col}`;
       if (visualKey !== lastVisual) {
         lastVisual = visualKey;
-        publish(session, { type: "visual", visual });
+        send({ type: "visual", visual });
       }
 
       // Everything drawn over the text: flash's labels, the search highlight,
@@ -776,9 +921,9 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
           sentHighlightIds.add(id);
           unseen[String(id)] = definition;
         }
-        if (Object.keys(unseen).length > 0) publish(session, { type: "hlDefs", hlDefs: unseen });
+        if (Object.keys(unseen).length > 0) send({ type: "hlDefs", hlDefs: unseen });
 
-        publish(session, {
+        send({
           type: "decorations",
           overlays: session.bridge.overlays.filter((overlay) => changed.has(overlay.line)),
           highlightRuns: session.bridge.highlightRuns.filter((run) => changed.has(run.line)),
@@ -794,14 +939,86 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       const botline = Math.max(topline, session.bridge.botLine);
       if (topline !== lastTopline) {
         lastTopline = topline;
-        publish(session, { type: "viewport", topline, botline });
+        send({ type: "viewport", topline, botline });
       }
-    });
 
+      // A push lands ahead of its frame, so the text waits for that frame and
+      // goes out with the caret and the drawing. A read lands after it.
+      if (event.kind === "cursor" ? event.source === "read" : !bridge.cursorReadPending) release();
+    });
+    const unsubscribe = () => {
+      unsubscribeBridge();
+      release();
+    };
+    session.releaseHeld = release;
     session.unsubscribe = unsubscribe;
+
+    // The bound on a hold, returned for the caller to run: it sleeps until
+    // the latest hold has waited `TEXT_WAIT_MS`, measured from when
+    // that hold began, and releases it if it is still the one held. Forked in
+    // the bridge's scope, so a replaced Neovim takes it along.
+    return Effect.gen(function* () {
+      const queue = yield* Queue.unbounded<number>().pipe(Scope.provide(session.bridgeScope));
+      holdsStarted = queue;
+      yield* Queue.takeAll(queue).pipe(
+        Effect.flatMap((started) => {
+          const number = started.at(-1);
+          const waited = performance.now() - heldSince;
+          return Effect.sleep(Duration.millis(Math.max(0, TEXT_WAIT_MS - waited))).pipe(
+            Effect.andThen(
+              Effect.suspend(() => {
+                if (holdNumber !== number || held === null) return Effect.void;
+                if (trace.enabled) {
+                  trace.record({ dir: "hold", thread: session.threadId, timedOut: true });
+                }
+                release();
+                return Effect.logWarning(
+                  "Neovim did not answer a cursor read; its text was sent without the cursor",
+                  { thread: session.threadId, waitedMs: TEXT_WAIT_MS },
+                );
+              }),
+            ),
+          );
+        }),
+        Effect.forever,
+        Effect.forkIn(session.bridgeScope),
+      );
+    });
   };
 
   const requireSession = (threadId: string) => lookup(threadId);
+
+  /**
+   * Gives Neovim `keys`, from byte `progress.accepted` on, until it has all.
+   *
+   * `nvim_input` answers how many bytes it took, and takes fewer once its
+   * input buffer is full: the rest is sent again once Neovim has read some.
+   * One request per batch in the normal case.
+   */
+  const submitKeys = (session: Session, keys: string, progress: { accepted: number }) =>
+    Effect.gen(function* () {
+      const bytes = new TextEncoder().encode(keys);
+      let refusals = 0;
+      while (progress.accepted < bytes.length) {
+        const rest =
+          progress.accepted === 0
+            ? keys
+            : new TextDecoder().decode(bytes.subarray(progress.accepted));
+        const written = yield* request(session, "nvim_input", [rest]);
+        const taken = typeof written === "number" ? written : bytes.length - progress.accepted;
+        progress.accepted += taken;
+        if (taken > 0) continue;
+        refusals += 1;
+        if (refusals > INPUT_BUFFER_PATIENCE) {
+          return yield* new EditorSessionRpcError({
+            threadId: session.threadId,
+            method: "nvim_input",
+            detail: "Neovim's input buffer stayed full",
+          });
+        }
+        yield* Effect.sleep(Duration.millis(5));
+      }
+    });
 
   const service: EditorSessionManager["Service"] = {
     open,
@@ -810,13 +1027,33 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         input.threadId,
         Effect.gen(function* () {
           const session = yield* requireSession(input.threadId);
-          // The snapshot goes to this attachment alone, and before the listener
-          // is registered, so a delta cannot arrive ahead of the state it edits.
-          yield* emit({
-            type: "snapshot",
-            snapshot: snapshotOf(session, { withHighlightDefinitions: true }),
+          // The snapshot and the attachment's place in the stream are taken
+          // in one step, so every event is either in the snapshot or after
+          // it, never both. Events stamped later wait in `pending` until the
+          // snapshot is out, so none overtakes it.
+          const { snapshot, attachment } = yield* Effect.sync(() => {
+            const attachment: Attachment = {
+              fromSeq: session.eventSeq,
+              primed: false,
+              pending: [],
+            };
+            session.listeners.set(emit, attachment);
+            return {
+              snapshot: snapshotOf(session, { withHighlightDefinitions: true }),
+              attachment,
+            };
           });
-          session.listeners.add(emit);
+          yield* emit({ type: "snapshot", snapshot });
+          // Primed only once nothing waits, checked and set in one step.
+          while (true) {
+            const next = yield* Effect.sync(() => {
+              const event = attachment.pending.shift();
+              if (event === undefined) attachment.primed = true;
+              return event;
+            });
+            if (next === undefined) break;
+            yield* emit(next);
+          }
           session.attachedClients += 1;
           // Returned rather than held in a scope, matching the terminal: the
           // websocket layer already knows how to pair one of these with a
@@ -840,7 +1077,50 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         () => ({ keys: input.keys }),
         Effect.gen(function* () {
           const session = yield* requireSession(input.threadId);
-          yield* request(session, "nvim_input", [input.keys]);
+          const sequence = input.sequence;
+          if (sequence === undefined) {
+            yield* submitKeys(session, input.keys, { accepted: 0 });
+            return;
+          }
+          let receipt = session.inputReceipts.get(sequence.lane);
+          if (receipt !== undefined && sequence.index < receipt.index) return;
+          if (receipt !== undefined && sequence.index === receipt.index) {
+            // Accepted by a Neovim that has since exited: the restored text
+            // may or may not hold it, so it is neither applied nor resent.
+            if (receipt.generation !== session.restarts) {
+              return yield* new EditorSessionInputLostError({
+                threadId: session.threadId,
+                detail: "Neovim restarted after it took these keys",
+              });
+            }
+            if (receipt.done) return;
+          } else {
+            receipt = {
+              index: sequence.index,
+              generation: session.restarts,
+              accepted: 0,
+              done: false,
+            };
+            session.inputReceipts.delete(sequence.lane);
+            session.inputReceipts.set(sequence.lane, receipt);
+            if (session.inputReceipts.size > MAX_INPUT_LANES) {
+              const oldest = session.inputReceipts.keys().next().value;
+              if (oldest !== undefined) session.inputReceipts.delete(oldest);
+            }
+          }
+          // Not interruptible: a client that disconnects mid-call must not
+          // leave keys Neovim took unrecorded, or its re-send types them
+          // twice. The re-send queues on the thread's lock behind this.
+          const accepted = receipt;
+          yield* Effect.uninterruptible(
+            submitKeys(session, input.keys, accepted).pipe(
+              Effect.tap(() =>
+                Effect.sync(() => {
+                  accepted.done = true;
+                }),
+              ),
+            ),
+          );
         }),
       ),
     viewport: (input) =>
@@ -980,7 +1260,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         // Wired only once the new Neovim is on the file. Before that it shows
         // whatever it started on — a dashboard, a restored session — and its
         // text would reach the clients as the file's.
-        wireNotifications(session);
+        yield* wireNotifications(session);
         publish(session, {
           type: "snapshot",
           snapshot: snapshotOf(session, { withHighlightDefinitions: true }),

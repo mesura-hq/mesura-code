@@ -275,6 +275,82 @@ function mesura.close(abs_path)
   end
 end
 
+--- The buffer the host mirrors. Set by the host whenever it follows one.
+mesura.attached = 0
+
+--- The cursor, the mode, the selection anchor and flash's state, as the host
+--- reads them. Called by the host's own read and by the push below, so both
+--- answer the same thing.
+---
+--- Columns leave here in UTF-16 units, which is what the wire and Monaco count
+--- in. Neovim counts bytes: on a line holding an accent or an emoji the raw
+--- byte column put the caret several characters to the right, and past the
+--- end of the line Monaco silently clamped it there. The visual anchor comes
+--- with the mode, because getpos("v") answers wherever the cursor is when no
+--- selection is running, so the mode is what says whether it means anything.
+local function utf16_col(line, byte)
+  local text = vim.fn.getline(line)
+  return vim.str_utfindex(text, "utf-16", math.min(byte, #text), false) + 1
+end
+
+function mesura.cursor_state(attached)
+  local position = vim.api.nvim_win_get_cursor(0)
+  local mode = vim.api.nvim_get_mode().mode
+  local anchor = nil
+  if mode:sub(1, 1) == "v" or mode:sub(1, 1) == "V" or mode:byte(1) == 22 then
+    local other = vim.fn.getpos("v")
+    anchor = { line = other[2], col = utf16_col(other[2], other[3] - 1) }
+  end
+  local tabstop = 8
+  local jumping = false
+  if attached ~= 0 and vim.api.nvim_buf_is_valid(attached) then
+    tabstop = vim.bo[attached].tabstop
+    -- flash draws in its own namespace. Looked up until flash, which loads
+    -- lazily, has created it, and cached after: this runs on every key.
+    mesura.flash_namespace = mesura.flash_namespace or vim.api.nvim_get_namespaces().flash
+    local flash = mesura.flash_namespace
+    if flash ~= nil then
+      -- A label is the one mark with virtual text; the backdrop and the
+      -- matches are plain highlights. Those stay up after an f motion, for ;
+      -- to repeat it, when no label is waiting.
+      local marks = vim.api.nvim_buf_get_extmarks(attached, flash, 0, -1, { details = true })
+      for _, mark in ipairs(marks) do
+        if mark[4].virt_text ~= nil then
+          jumping = true
+          break
+        end
+      end
+    end
+  end
+  return {
+    line = position[1],
+    col = utf16_col(position[1], position[2]),
+    mode = mode,
+    anchor = anchor,
+    window = vim.api.nvim_get_current_win(),
+    tabstop = tabstop,
+    jumping = jumping,
+  }
+end
+
+--- Pushes the cursor to the host whenever it moves or the mode changes.
+---
+--- Neovim runs these autocommands after it handles the key and before it
+--- redraws, so the push reaches the host ahead of the frame that draws the
+--- key, and the host sends the text and the caret together without asking.
+--- They do not fire while typeahead is pending, so a batch of keys pushes once,
+--- after its last key. Whatever moves the cursor without them (flash waiting
+--- for a label) the host still reads after the frame.
+vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI", "ModeChanged" }, {
+  group = group,
+  callback = function()
+    local channel = vim.g.mesura_channel
+    if type(channel) == "number" then
+      pcall(vim.rpcnotify, channel, "mesura:cursor", mesura.cursor_state(mesura.attached))
+    end
+  end,
+})
+
 apply_window_options()
 stop_highlighting(vim.api.nvim_get_current_buf())
 `;

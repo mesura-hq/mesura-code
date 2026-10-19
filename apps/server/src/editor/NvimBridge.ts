@@ -84,6 +84,17 @@ export function shouldReadCursor(trigger: CursorReadTrigger): boolean {
   );
 }
 
+/** What the host plugin's `mesura.cursor_state` answers. */
+interface CursorState {
+  readonly line: number;
+  readonly col: number;
+  readonly mode: string;
+  readonly anchor?: { readonly line: number; readonly col: number } | null;
+  readonly window: number;
+  readonly tabstop: number;
+  readonly jumping: boolean;
+}
+
 /**
  * What a session tells whoever is watching it.
  *
@@ -108,8 +119,13 @@ export type NvimBridgeEvent =
        * nothing was drawn. The read is forked off the notification fiber — see
        * the comment at its trigger — so it finishes after the frame that
        * caused it, and this is what says it has.
+       *
+       * `push` is the host plugin telling the host from an autocommand, which
+       * lands before the frame that draws the key; `read` is the host asking
+       * after a frame, which lands after it.
        */
       readonly kind: "cursor";
+      readonly source: "push" | "read";
     }
   | {
       readonly kind: "lines";
@@ -436,11 +452,20 @@ export declare namespace NvimBridge {
      * traffic. `frames` counts flushes, so a difference of zero says the key
      * caused no frame at all rather than a cheap one.
      */
+    /**
+     * A cursor read is in flight, and a `cursor` event will follow it.
+     *
+     * Read by the manager to hold a key's text until its cursor lands, so the
+     * two reach the client together.
+     */
+    readonly cursorReadPending: boolean;
     readonly metrics: {
       readonly gridCells: number;
       readonly cursorMoves: number;
       readonly bufferEvents: number;
       readonly frames: number;
+      /** Cursor reads sent to Neovim: the request a pushed cursor makes unnecessary. */
+      readonly cursorReads: number;
     };
     /**
      * Waits until every key given has been executed and the mirror has caught
@@ -571,6 +596,9 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
   let flushWaiters: Array<Deferred.Deferred<void>> = [];
   let bufferEvents = 0;
   let frames = 0;
+  let cursorReads = 0;
+  /** A `mesura:cursor` push landed since the last frame. */
+  let cursorPushed = false;
   /** The grid's cursor-move count as of the last time the cursor was read. */
   let lastCursorMoves = 0;
   /** Whether a forked cursor read is already on its way. */
@@ -681,6 +709,8 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
 
     attachedBuffer = buffer;
     lines = current.length === 0 ? [""] : current;
+    // The push reads tabstop and flash's labels from the mirrored buffer.
+    yield* rpc.request("nvim_exec_lua", ["mesura.attached = ...", [buffer]]);
     grid.setBufferLines(lines);
 
     // Last, so a detach that fails cannot leave the mirror following nothing.
@@ -697,78 +727,36 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
    * along because the grid model cannot work it out: `win_pos` says where
    * every window is and never which one the developer is in.
    */
-  const refreshCursorAndMode = Effect.gen(function* () {
-    const state = (yield* rpc.request("nvim_exec_lua", [
-      // The visual anchor comes back in the same round trip as the cursor and
-      // the mode, because it is only meaningful read with them: `getpos("v")`
-      // answers wherever the cursor is when no selection is running, so the
-      // mode is what says whether the answer means anything.
-      //
-      // Columns leave here in UTF-16 units, which is what the wire and Monaco
-      // count in. Neovim counts bytes: on a line holding an accent or an emoji
-      // the raw byte column put the caret several characters to the right, and
-      // past the end of the line Monaco silently clamped it there.
-      `local attached = ...
-       local position = vim.api.nvim_win_get_cursor(0)
-       local mode = vim.api.nvim_get_mode().mode
-       local function utf16_col(line, byte)
-         local text = vim.fn.getline(line)
-         return vim.str_utfindex(text, "utf-16", math.min(byte, #text), false) + 1
-       end
-       local anchor = nil
-       if mode:sub(1, 1) == "v" or mode:sub(1, 1) == "V" or mode:byte(1) == 22 then
-         local other = vim.fn.getpos("v")
-         anchor = { line = other[2], col = utf16_col(other[2], other[3] - 1) }
-       end
-       local tabstop = 8
-       local jumping = false
-       if attached ~= 0 and vim.api.nvim_buf_is_valid(attached) then
-         tabstop = vim.bo[attached].tabstop
-         -- flash draws in its own namespace. Looked up until flash, which loads
-         -- lazily, has created it, and cached after: this runs on every key.
-         mesura.flash_namespace = mesura.flash_namespace or vim.api.nvim_get_namespaces().flash
-         local flash = mesura.flash_namespace
-         if flash ~= nil then
-           -- A label is the one mark with virtual text; the backdrop and the
-           -- matches are plain highlights. Those stay up after an \`f\` motion,
-           -- for \`;\` to repeat it, when no label is waiting.
-           local marks = vim.api.nvim_buf_get_extmarks(attached, flash, 0, -1, { details = true })
-           for _, mark in ipairs(marks) do
-             if mark[4].virt_text ~= nil then
-               jumping = true
-               break
-             end
-           end
-         end
-       end
-       return {
-         line = position[1],
-         col = utf16_col(position[1], position[2]),
-         mode = mode,
-         anchor = anchor,
-         window = vim.api.nvim_get_current_win(),
-         tabstop = tabstop,
-         jumping = jumping,
-       }`,
-      [attachedBuffer],
-    ])) as {
-      line: number;
-      col: number;
-      mode: string;
-      anchor?: { line: number; col: number };
-      window: number;
-      tabstop: number;
-      jumping: boolean;
-    };
+  /** Takes what `mesura.cursor_state` answered, from a read or a push. */
+  const applyCursorState = (state: CursorState) => {
     cursor = { line: state.line, col: state.col };
     mode = state.mode;
     jumping = state.jumping === true;
     visual =
-      state.anchor === undefined
+      state.anchor === undefined || state.anchor === null
         ? null
         : { anchor: state.anchor, cursor: { line: state.line, col: state.col }, kind: state.mode };
     grid.setTabstop(state.tabstop);
     grid.setCurrentWindow(state.window);
+  };
+
+  /**
+   * Asks for the cursor, the mode and the current window in one round trip.
+   *
+   * Asked for rather than read out of the redraw stream, because the stream's
+   * own cursor lags behind what a mapping has already done. The window comes
+   * along because the grid model cannot work it out: `win_pos` says where
+   * every window is and never which one the developer is in. The host plugin
+   * pushes the same state on its own after most keys (`mesura:cursor`); this
+   * read is the fallback for what moves the cursor without telling it.
+   */
+  const refreshCursorAndMode = Effect.gen(function* () {
+    cursorReads += 1;
+    const state = (yield* rpc.request("nvim_exec_lua", [
+      "return mesura.cursor_state(...)",
+      [attachedBuffer],
+    ])) as CursorState;
+    applyCursorState(state);
   });
 
   /** Reads the cursor, then again for as long as frames asked while it was reading. */
@@ -784,7 +772,7 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
       // A `cursor` event carries the freshly read values to the manager, which
       // reads them the same way it reads them from a frame. The drawing frame
       // has already gone out by then.
-      tell({ kind: "cursor" });
+      tell({ kind: "cursor", source: "read" });
     } while (cursorRefreshAgain);
   }).pipe(
     Effect.ensuring(
@@ -815,6 +803,14 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
           bufferEvents += 1;
           grid.setBufferLines(lines);
           tell(applied);
+          return;
+        }
+        if (notification.method === "mesura:cursor") {
+          const [state] = notification.params as [CursorState];
+          if (state === undefined) return;
+          applyCursorState(state);
+          cursorPushed = true;
+          tell({ kind: "cursor", source: "push" });
           return;
         }
         if (notification.method !== "redraw") {
@@ -882,7 +878,12 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
         };
         pendingModeChange = false;
         pendingViewport = false;
-        if (shouldReadCursor(trigger)) {
+        if (cursorPushed) {
+          // The plugin already said where the cursor is, ahead of this frame:
+          // asking again would cost a Neovim round trip and tell nothing new.
+          cursorPushed = false;
+          lastCursorMoves = grid.cursorMoves;
+        } else if (shouldReadCursor(trigger)) {
           lastCursorMoves = grid.cursorMoves;
           if (cursorRefreshPending) {
             cursorRefreshAgain = true;
@@ -1072,8 +1073,17 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
       flushWaiters.push(waiter);
       return Deferred.await(waiter);
     }),
+    get cursorReadPending() {
+      return cursorRefreshPending;
+    },
     get metrics() {
-      return { gridCells: grid.cellsDrawn, cursorMoves: grid.cursorMoves, bufferEvents, frames };
+      return {
+        gridCells: grid.cellsDrawn,
+        cursorMoves: grid.cursorMoves,
+        bufferEvents,
+        frames,
+        cursorReads,
+      };
     },
     awaitFlush: Effect.gen(function* () {
       yield* awaitFlush;
