@@ -15,7 +15,11 @@
  *   the requests in flight with a transport `RpcClientError`.
  * - the Monaco editor: an object that hands out `onKeyDown` and answers every
  *   other call with a disposable. `model` is null, so the driver's text and
- *   cursor effects never run; the keys effect needs only the editor.
+ *   cursor effects never run; the keys effect needs only the editor. Given a
+ *   `layout`, the editor also lays out a model with word wrap on
+ *   (`makeHarnessModel`), so the text, cursor and viewport effects run against
+ *   an editor that scrolls, reveals and reports its visible lines as Monaco's
+ *   does — see `makeFakeEditor`.
  * - `monaco-editor` itself (see `mockMonacoEditor`) and the keybindings atom.
  *
  * Wire it up in the test file, before the imports that load the editor:
@@ -35,6 +39,7 @@ import {
   ThreadId,
   WS_METHODS,
   type EditorSessionEvent,
+  type EditorSessionSnapshot,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import {
@@ -47,6 +52,7 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { Atom, AtomRegistry } from "effect/reactivity";
@@ -64,7 +70,7 @@ export const INPUT_KEYS_LIMIT = 1024;
 interface HarnessRequest {
   readonly method: "input" | "setCursor" | "replaceText" | "viewport" | "open";
   readonly threadId: string;
-  /** The keys, for `input`; `line:col`, for `setCursor`. */
+  /** The keys, for `input`; `line:col`, for `setCursor`; `topline:rows:cols`, for `viewport`. */
   readonly payload: string;
   readonly settled: boolean;
 }
@@ -177,20 +183,30 @@ function makeTransport() {
       return yield* Deferred.await(reply);
     });
 
-  /** Every attachment opens with a snapshot of the harness file, as the server's does. */
-  const snapshot: EditorSessionEvent = {
-    type: "snapshot",
-    snapshot: {
-      relativePath: HARNESS_RELATIVE_PATH,
-      lines: [""],
-      cursor: { line: 1, col: 1 },
-      mode: "n",
-      jumping: false,
-      topline: 1,
-      hlDefs: {},
-    },
+  /** What the harness file holds, as every attachment's snapshot and every `open` reply say. */
+  const DEFAULT_SNAPSHOT: EditorSessionSnapshot = {
+    relativePath: HARNESS_RELATIVE_PATH,
+    lines: [""],
+    cursor: { line: 1, col: 1 },
+    mode: "n",
+    jumping: false,
+    topline: 1,
+    hlDefs: {},
   };
-  const attach = () => Stream.concat(Stream.make(snapshot), Stream.never);
+  let snapshot = DEFAULT_SNAPSHOT;
+  /** One queue per live attachment, fed by `emit`. */
+  const attachments = new Set<Queue.Queue<EditorSessionEvent>>();
+  const attach = () =>
+    Stream.unwrap(
+      Effect.gen(function* () {
+        const queue = yield* Queue.unbounded<EditorSessionEvent>();
+        attachments.add(queue);
+        const opening: EditorSessionEvent = { type: "snapshot", snapshot };
+        return Stream.concat(Stream.make(opening), Stream.fromQueue(queue)).pipe(
+          Stream.ensuring(Effect.sync(() => attachments.delete(queue))),
+        );
+      }),
+    );
 
   const makeSession = (): RpcSession =>
     ({
@@ -198,15 +214,7 @@ function makeTransport() {
         [WS_METHODS.editorSessionAttach]: attach,
         [WS_METHODS.editorSessionOpen]: (input: { threadId: string; relativePath: string }) =>
           receive("open", input.threadId, input.relativePath).pipe(
-            Effect.as({
-              relativePath: input.relativePath,
-              lines: [""],
-              cursor: { line: 1, col: 1 },
-              mode: "n",
-              jumping: false,
-              topline: 1,
-              hlDefs: {},
-            }),
+            Effect.as({ ...snapshot, relativePath: input.relativePath }),
           ),
         [WS_METHODS.editorSessionInput]: (input: { threadId: string; keys: string }) =>
           receive("input", input.threadId, input.keys),
@@ -215,8 +223,12 @@ function makeTransport() {
           line: number;
           col: number;
         }) => receive("setCursor", input.threadId, `${input.line}:${input.col}`),
-        [WS_METHODS.editorSessionViewport]: (input: { threadId: string }) =>
-          receive("viewport", input.threadId, ""),
+        [WS_METHODS.editorSessionViewport]: (input: {
+          threadId: string;
+          topline: number;
+          rows: number;
+          cols: number;
+        }) => receive("viewport", input.threadId, `${input.topline}:${input.rows}:${input.cols}`),
         [WS_METHODS.editorSessionReplaceText]: (input: { threadId: string }) =>
           receive("replaceText", input.threadId, ""),
       },
@@ -266,6 +278,24 @@ function makeTransport() {
     applied: applied as ReadonlyArray<{ readonly method: string; readonly payload: string }>,
     /** The `input` requests only, in arrival order. */
     inputs: () => requests.filter((request) => request.method === "input"),
+    /** The `viewport` requests, in arrival order, as `{ topline, rows, cols }`. */
+    viewports: () =>
+      requests
+        .filter((request) => request.method === "viewport")
+        .map((request) => {
+          const [topline = 0, rows = 0, cols = 0] = request.payload.split(":").map(Number);
+          return { topline, rows, cols };
+        }),
+    /** What the next attachment's snapshot and `open` reply say the file holds. */
+    setSnapshot: (next: Partial<EditorSessionSnapshot>) => {
+      snapshot = { ...snapshot, ...next };
+    },
+    /** Sends events down every live attachment, as Neovim's drawing would. */
+    emit: (...events: ReadonlyArray<EditorSessionEvent>) => {
+      for (const queue of attachments) {
+        for (const event of events) Queue.offerUnsafe(queue, event);
+      }
+    },
     inFlightInputs,
     get maxInFlightInputs() {
       return maxInFlightInputs;
@@ -321,6 +351,7 @@ function makeTransport() {
       }),
     reset: () => {
       requests.length = 0;
+      snapshot = DEFAULT_SNAPSHOT;
       applied.length = 0;
       autoReply = true;
       maxInFlightInputs = 0;
@@ -364,17 +395,130 @@ interface FakeCursorEvent {
   readonly position: { readonly lineNumber: number; readonly column: number };
 }
 
-/** A Monaco editor that only knows how to deliver a keydown and a mouse click. */
-function makeFakeEditor() {
+/**
+ * A text model over fixed lines, enough for the driver: the reads, the URI the
+ * driver checks against the open path, and `applyEdits` for whole-line
+ * replacements, which is what a snapshot that agrees with the model needs —
+ * none.
+ */
+export function makeHarnessModel(lines: ReadonlyArray<string>, uri: string) {
+  const content = [...lines];
+  return {
+    uri: { toString: () => uri },
+    getLineCount: () => content.length,
+    getLineContent: (lineNumber: number) => content[lineNumber - 1] ?? "",
+    getLineMaxColumn: (lineNumber: number) => (content[lineNumber - 1] ?? "").length + 1,
+    getLinesContent: () => [...content],
+    getValue: () => content.join("\n"),
+    onDidChangeContent: () => ({ dispose: () => {} }),
+    applyEdits: (edits: ReadonlyArray<unknown>) => {
+      if (edits.length > 0) throw new Error("the harness model takes no edits");
+    },
+    undo: () => {},
+  };
+}
+
+export type HarnessModel = ReturnType<typeof makeHarnessModel>;
+
+/**
+ * How the fake editor lays its model out: Monaco with word wrap on, every
+ * line `ceil(length / wrapColumn)` rows of `lineHeight` pixels, in a viewport
+ * `height` pixels tall.
+ */
+export interface HarnessLayout {
+  readonly model: HarnessModel;
+  readonly wrapColumn: number;
+  readonly lineHeight: number;
+  readonly height: number;
+}
+
+/** Monaco's layout arithmetic for `HarnessLayout`, in pixels. */
+function wrappedLayout(layout: HarnessLayout) {
+  const { model, wrapColumn, lineHeight, height } = layout;
+  const rowsOf = (lineNumber: number) =>
+    Math.max(1, Math.ceil(model.getLineContent(lineNumber).length / wrapColumn));
+  const topOf = (lineNumber: number) => {
+    let top = 0;
+    for (let line = 1; line < lineNumber; line += 1) top += rowsOf(line) * lineHeight;
+    return top;
+  };
+  /** The lines any part of which is inside `[scrollTop, scrollTop + height)`. */
+  const visibleRange = (scrollTop: number) => {
+    let first = 0;
+    let last = 0;
+    for (let line = 1; line <= model.getLineCount(); line += 1) {
+      const top = topOf(line);
+      const bottom = top + rowsOf(line) * lineHeight;
+      if (bottom > scrollTop && top < scrollTop + height) {
+        if (first === 0) first = line;
+        last = line;
+      }
+    }
+    return { startLineNumber: first, endLineNumber: last };
+  };
+  /** The top of the wrapped row that holds `column` of `lineNumber`. */
+  const rowTopOf = (lineNumber: number, column: number) =>
+    topOf(lineNumber) + Math.floor((column - 1) / wrapColumn) * lineHeight;
+  return { topOf, visibleRange, rowTopOf };
+}
+
+/**
+ * A Monaco editor that delivers a keydown and a mouse click, and, given a
+ * layout, scrolls: `setScrollTop`, `revealPosition` (the smallest scroll that
+ * shows the position, as `ScrollType.Immediate` does), `getVisibleRanges` and
+ * `onDidScrollChange`, with the arithmetic of `wrappedLayout`.
+ */
+function makeFakeEditor(layout?: HarnessLayout) {
   let keyListener: ((event: { browserEvent: KeyboardEvent }) => void) | undefined;
   let cursorListener: ((event: FakeCursorEvent) => void) | undefined;
+  const scrollListeners = new Set<() => void>();
   const container = document.createElement("div");
   const disposable = { dispose: () => {} };
+  const arithmetic = layout === undefined ? null : wrappedLayout(layout);
+  let scrollTop = 0;
+  let position: { lineNumber: number; column: number } | null = null;
+
+  const scrollTo = (top: number) => {
+    const next = Math.max(0, top);
+    if (next === scrollTop) return;
+    scrollTop = next;
+    for (const listener of scrollListeners) listener();
+  };
+
+  const scrolling: Record<string, unknown> =
+    layout === undefined || arithmetic === null
+      ? {}
+      : {
+          getModel: () => layout.model,
+          getLayoutInfo: () => ({ height: layout.height, width: 1600 }),
+          getScrollTop: () => scrollTop,
+          setScrollTop: scrollTo,
+          getTopForLineNumber: arithmetic.topOf,
+          getTopForPosition: arithmetic.rowTopOf,
+          getVisibleRanges: () => [arithmetic.visibleRange(scrollTop)],
+          getPosition: () => position,
+          setPosition: (next: { lineNumber: number; column: number }) => {
+            position = next;
+          },
+          revealPosition: (target: { lineNumber: number; column: number }) => {
+            const rowTop = arithmetic.rowTopOf(target.lineNumber, target.column);
+            if (rowTop < scrollTop) scrollTo(rowTop);
+            else if (rowTop + layout.lineHeight > scrollTop + layout.height) {
+              scrollTo(rowTop + layout.lineHeight - layout.height);
+            }
+          },
+          onDidScrollChange: (listener: () => void) => {
+            scrollListeners.add(listener);
+            return { dispose: () => scrollListeners.delete(listener) };
+          },
+        };
+
   const editor = new Proxy(
     {},
     {
       get: (_target, property) => {
         if (property === "then") return undefined;
+        if (typeof property === "string" && property in scrolling) return scrolling[property];
         if (property === "onKeyDown") {
           return (listener: (event: { browserEvent: KeyboardEvent }) => void) => {
             keyListener = listener;
@@ -397,7 +541,10 @@ function makeFakeEditor() {
         }
         if (property === "getContainerDomNode") return () => container;
         if (property === "getOption") {
-          return () => ({ fontFamily: "monospace", fontSize: 12, lineHeight: 18 });
+          return (option: unknown) =>
+            option === "lineHeight" && layout !== undefined
+              ? layout.lineHeight
+              : { fontFamily: "monospace", fontSize: 12, lineHeight: 18 };
         }
         if (property === "getPosition") return () => null;
         if (property === "getVisibleRanges") return () => [];
@@ -410,6 +557,14 @@ function makeFakeEditor() {
   );
   return {
     editor,
+    /** The lines Monaco shows now, as `getVisibleRanges` reports them. */
+    visibleRange: () => arithmetic?.visibleRange(scrollTop) ?? null,
+    /** Whether the wrapped row holding `column` of `lineNumber` is in view. */
+    showsPosition: (lineNumber: number, column: number) => {
+      if (layout === undefined || arithmetic === null) return false;
+      const rowTop = arithmetic.rowTopOf(lineNumber, column);
+      return rowTop >= scrollTop && rowTop + layout.lineHeight <= scrollTop + layout.height;
+    },
     /** Delivers one keydown the way Monaco's `onKeyDown` does. */
     press: (init: KeyboardEventInit) => {
       if (keyListener === undefined) throw new Error("the driver is not listening for keys");
@@ -441,11 +596,12 @@ export const ESCAPE: KeyboardEventInit = { key: "Escape", code: "Escape", keyCod
  */
 export async function mountNvimEditor(options: {
   readonly renderEditor: (editor: unknown) => ReactNode;
+  readonly layout?: HarnessLayout;
 }) {
   const registry = AtomRegistry.make();
   const container = document.createElement("div");
   document.body.append(container);
-  const fake = makeFakeEditor();
+  const fake = makeFakeEditor(options.layout);
   let root: Root | undefined;
   await act(async () => {
     root = createRoot(container);
@@ -462,6 +618,8 @@ export async function mountNvimEditor(options: {
     press: async (init: KeyboardEventInit) => {
       await act(async () => fake.press(init));
     },
+    visibleRange: fake.visibleRange,
+    showsPosition: fake.showsPosition,
     click: async (lineNumber: number, column: number) => {
       await act(async () => fake.click(lineNumber, column));
     },
@@ -497,6 +655,19 @@ export async function settleUntil(predicate: () => boolean, what: string): Promi
     .map((request) => `${request.method}(${JSON.stringify(request.payload)})`)
     .join(", ");
   throw new Error(`never happened: ${what}. Requests the server saw: [${seen}]`);
+}
+
+/**
+ * Waits on the real clock, for what runs on a timer or an animation frame
+ * rather than on a promise: the lane's backoff, the viewport's coalescing.
+ */
+export async function waitForReal(predicate: () => boolean, limitMs: number, what: string) {
+  const deadline = Date.now() + limitMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error(`never happened within ${limitMs} ms: ${what}`);
+    await flushHarness(1);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
 }
 
 export const harnessThreadRef: ScopedThreadRef = {

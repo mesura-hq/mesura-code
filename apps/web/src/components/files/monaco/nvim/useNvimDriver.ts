@@ -28,6 +28,7 @@ import {
 } from "./nvimHighlightStyles.ts";
 import {
   EMPTY_VIEWPORT_HISTORY,
+  followingHidesCaret,
   rememberTopline,
   shouldEchoViewport,
   viewportFromEditor,
@@ -436,7 +437,8 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
         ...viewportRef.current,
         sentToplines: rememberTopline(viewportRef.current.sentToplines, viewport.topline),
       };
-      sendViewport(viewport);
+      // Only a pointer scroll may move Neovim's cursor; see `EditorViewportSource`.
+      sendViewport({ ...viewport, source: scrollOwnerRef.current });
     };
 
     const schedule = () => {
@@ -485,7 +487,22 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
       neovimToplines: rememberTopline(viewportRef.current.neovimToplines, topline),
     };
     if (scrollOwnerRef.current !== "keys") return;
-    editor.setScrollTop(editor.getTopForLineNumber(topline));
+    const targetTop = editor.getTopForLineNumber(topline);
+    const caret = editor.getPosition();
+    if (
+      caret !== null &&
+      followingHidesCaret({
+        targetTop,
+        // The caret's own row: on a wrapped line it can be many rows below
+        // the line's first one.
+        caretTop: editor.getTopForPosition(caret.lineNumber, caret.column),
+        lineHeight: editor.getOption(monaco.editor.EditorOption.lineHeight),
+        height: editor.getLayoutInfo().height,
+      })
+    ) {
+      return;
+    }
+    editor.setScrollTop(targetTop);
   }, [enabled, editor, relativePath, state.relativePath, state.topline]);
 
   // The pointer takes the view the moment it touches it: a wheel, a trackpad

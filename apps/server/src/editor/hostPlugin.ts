@@ -330,6 +330,9 @@ function mesura.cursor_state(attached)
     window = vim.api.nvim_get_current_win(),
     tabstop = tabstop,
     jumping = jumping,
+    -- How far the window is scrolled sideways. The host's classification
+    -- reads every cell against the buffer from this column on.
+    leftcol = vim.fn.winsaveview().leftcol,
   }
 end
 
@@ -340,8 +343,10 @@ end
 --- key, and the host sends the text and the caret together without asking.
 --- They do not fire while typeahead is pending, so a batch of keys pushes once,
 --- after its last key. Whatever moves the cursor without them (flash waiting
---- for a label) the host still reads after the frame.
-vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI", "ModeChanged" }, {
+--- for a label) the host still reads after the frame. 'WinScrolled' carries
+--- a sideways scroll that left the cursor where it was (zh, zl), because the
+--- push is also where the host learns 'leftcol'.
+vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI", "ModeChanged", "WinScrolled" }, {
   group = group,
   callback = function()
     local channel = vim.g.mesura_channel
@@ -404,20 +409,6 @@ for index = #edits, 1, -1 do
 end`;
 
 /**
- * Puts Neovim's window where the client's window is.
- *
- * `winrestview({ topline })` on its own does not hold. Neovim will not keep a
- * window that hides the cursor, so the moment the call returns the view snaps
- * back — measured: topline reads as the requested value from inside the same
- * Lua call and as the old one on the very next round trip, with no key sent.
- * That is exactly the case this exists for, a wheel scroll with the cursor
- * left where it was, so setting topline alone does nothing at all.
- *
- * The cursor therefore moves into the window, and only when it would otherwise
- * be outside it. That is what Vim's own mouse wheel does, and it is the
- * behaviour a developer who chose modal editing already has in their editor.
- */
-/**
  * Puts the cursor where the client put it, in the window showing the file.
  *
  * Not `nvim_win_set_cursor(0, ...)`. Window `0` is whichever window is
@@ -437,7 +428,29 @@ local target = math.max(1, math.min(line, last))
 local text = vim.api.nvim_buf_get_lines(buffer, target - 1, target, false)[1] or ""
 vim.api.nvim_win_set_cursor(window, { target, vim.str_byteindex(text, "utf-16", col, false) })`;
 
-export const SET_VIEWPORT_LUA = `local buffer, topline, rows = ...
+/**
+ * Puts Neovim's window where the client's window is.
+ *
+ * `winrestview({ topline })` on its own does not hold. Neovim will not keep a
+ * window that hides the cursor, so the moment the call returns the view snaps
+ * back — measured: topline reads as the requested value from inside the same
+ * Lua call and as the old one on the very next round trip, with no key sent.
+ * That is exactly the case this exists for, a wheel scroll with the cursor
+ * left where it was, so setting topline alone does nothing at all.
+ *
+ * The cursor therefore moves into the window, and only when it would otherwise
+ * be outside it. That is what Vim's own mouse wheel does, and it is the
+ * behaviour a developer who chose modal editing already has in their editor.
+ *
+ * Only for a scroll the pointer made. A window the client follows because a
+ * key scrolled Neovim (`keep_cursor`, the fourth argument) never moves the
+ * cursor: the request can be older than the keys Neovim has already run, or
+ * describe fewer lines than Neovim's window holds because Monaco wraps them,
+ * and pulling the cursor into it undid the keys — 50 `j` from the top of the
+ * bench's Markdown ended on line 41. The topline then goes as near the
+ * requested one as keeps the cursor in view.
+ */
+export const SET_VIEWPORT_LUA = `local buffer, topline, rows, keep_cursor = ...
 local window = vim.fn.bufwinid(buffer)
 if window == -1 then
   return
@@ -447,6 +460,31 @@ local top = math.max(1, math.min(topline, last))
 local bottom = math.max(top, math.min(last, top + rows - 1))
 vim.api.nvim_win_call(window, function()
   local view = vim.fn.winsaveview()
+  if keep_cursor then
+    if view.lnum < top then
+      top = view.lnum
+    elseif view.lnum > bottom then
+      top = math.max(1, view.lnum - rows + 1)
+    end
+    vim.fn.winrestview({ topline = top })
+    return
+  end
   local lnum = math.min(math.max(view.lnum, top), bottom)
   vim.fn.winrestview({ topline = top, lnum = lnum, col = view.col })
+end)`;
+
+/**
+ * Scrolls the window showing the file back to its first column.
+ *
+ * Neovim keeps the cursor in view on the next redraw, so asking for column 0
+ * with the cursor further right than the grid is wide only scrolls as far
+ * back as Neovim allows.
+ */
+export const RESET_LEFT_COLUMN_LUA = `local buffer = ...
+local window = vim.fn.bufwinid(buffer)
+if window == -1 then
+  return
+end
+vim.api.nvim_win_call(window, function()
+  vim.fn.winrestview({ leftcol = 0 })
 end)`;

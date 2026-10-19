@@ -1,5 +1,3 @@
-// @effect-diagnostics nodeBuiltinImport:off - writes a scratch configuration for a real Neovim.
-import * as NodeOS from "node:os";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import type { EditorSessionEvent } from "@t3tools/contracts";
@@ -7,11 +5,10 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Stream from "effect/Stream";
 
 import { NodeNvimAdapter } from "../NodeNvimAdapter.ts";
-import * as EditorSessionManager from "../Manager.ts";
 import { NvimBridge } from "../NvimBridge.ts";
+import { makeScratchManager, recordChunks } from "./managerHarness.ts";
 import { nvimAvailable, reportMissingNvim } from "./nvimOnPath.ts";
 
 /**
@@ -40,70 +37,12 @@ const layer = NodeNvimAdapter.layer.pipe(Layer.provideMerge(NodeServices.layer))
 
 const THREAD_ID = "attach-chunks-thread";
 
-/**
- * The developer's configuration when `MESURA_NVIM_CONFIG_DIR` names one, as
- * `realConfig.test.ts` reads it; otherwise a directory with an empty
- * `init.lua`, so the real launch path runs in continuous integration too.
- */
-const realConfigDirectory = (() => {
-  const raw = process.env["MESURA_NVIM_CONFIG_DIR"];
-  if (raw === undefined || raw.trim() === "") return null;
-  return raw.startsWith("~/") ? `${NodeOS.homedir()}/${raw.slice(2)}` : raw;
-})();
-
 const scratchManager = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const root = yield* fs.makeTempDirectoryScoped({ prefix: "editor-attach-chunks-" });
-  if (realConfigDirectory !== null) {
-    const manager = yield* EditorSessionManager.makeWithOptions({
-      configDirectory: realConfigDirectory,
-      stateDir: `${root}/state`,
-    });
-    return { manager, root };
-  }
-  const configDirectory = `${root}/config`;
-  yield* fs.makeDirectory(configDirectory, { recursive: true });
-  yield* fs.writeFileString(`${configDirectory}/init.lua`, "-- a configuration\n");
-  const manager = yield* EditorSessionManager.makeWithOptions({
-    configDirectory,
-    stateDir: `${root}/state`,
-    homeDir: root,
-  });
+  const manager = yield* makeScratchManager(root);
   return { manager, root };
 });
-
-/** Records every chunk the attachment yields, in order, as the RPC server would pull them. */
-const recordChunks = (manager: EditorSessionManager.EditorSessionManager["Service"]) =>
-  Effect.gen(function* () {
-    const chunks: Array<ReadonlyArray<EditorSessionEvent>> = [];
-    const watchers = new Set<() => void>();
-    const attached = yield* Deferred.make<void>();
-    yield* Stream.runForEachArray(
-      EditorSessionManager.attachEventStream(manager, { threadId: THREAD_ID }),
-      (chunk) =>
-        Effect.gen(function* () {
-          chunks.push(chunk);
-          for (const watcher of watchers) watcher();
-          yield* Deferred.succeed(attached, undefined);
-        }),
-    ).pipe(Effect.forkScoped);
-    yield* Deferred.await(attached);
-
-    /** Waits until some recorded event satisfies `matches`. */
-    const waitFor = (matches: (event: EditorSessionEvent) => boolean) =>
-      Effect.gen(function* () {
-        const seen = yield* Deferred.make<void>();
-        const check = () => {
-          if (chunks.some((chunk) => chunk.some(matches))) Deferred.doneUnsafe(seen, Effect.void);
-        };
-        watchers.add(check);
-        check();
-        yield* Deferred.await(seen);
-        watchers.delete(check);
-      });
-
-    return { chunks, waitFor };
-  });
 
 const isMode = (mode: string) => (event: EditorSessionEvent) =>
   event.type === "mode" && event.mode === mode;
@@ -141,7 +80,7 @@ if (nvimAvailable)
             relativePath: "notes.txt",
             lines: ["hello"],
           });
-          const { chunks, waitFor } = yield* recordChunks(manager);
+          const { chunks, waitFor } = yield* recordChunks(manager, THREAD_ID);
 
           yield* manager.input({ threadId: THREAD_ID, keys: "i" });
           yield* waitFor(isMode("i"));

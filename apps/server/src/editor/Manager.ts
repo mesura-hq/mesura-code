@@ -35,7 +35,19 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import { ServerConfig } from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
-import { APPLY_EDITS_LUA, SET_CURSOR_LUA, SET_VIEWPORT_LUA } from "./hostPlugin.ts";
+import {
+  gridColumnsForViewport,
+  grownGridColumns,
+  lineFits,
+  mayExpandUnpredictably,
+  RESERVATION_BATCHES,
+} from "./gridWidth.ts";
+import {
+  APPLY_EDITS_LUA,
+  RESET_LEFT_COLUMN_LUA,
+  SET_CURSOR_LUA,
+  SET_VIEWPORT_LUA,
+} from "./hostPlugin.ts";
 import { NvimAdapter } from "./NvimAdapter.ts";
 import { NvimBridge } from "./NvimBridge.ts";
 import { makeEditorTrace, summarizeEditorEvent } from "./editorTrace.ts";
@@ -125,6 +137,9 @@ interface OpenBuffer {
  */
 const TEXT_WAIT_MS = 1_000;
 
+/** The grid a new Neovim attaches with, before any client has described its window. */
+const INITIAL_GRID = { cols: 120, rows: 40, reservedBatches: 0 } as const;
+
 interface Session {
   readonly threadId: string;
   /** The project Neovim runs in. Kept so a replacement starts in the same place. */
@@ -167,6 +182,12 @@ interface Session {
   readonly inputReceipts: Map<string, InputReceipt>;
   /** Publishes the events `wireNotifications` holds for a cursor; see there. */
   releaseHeld: () => void;
+  /**
+   * The size of the grid the host last gave Neovim's window, and the rows the
+   * client last asked for. The columns are the host's own (`gridWidth.ts`);
+   * reset with the grid when Neovim is replaced.
+   */
+  grid: { cols: number; rows: number; reservedBatches: number };
 }
 
 export interface EditorSessionManagerOptions {
@@ -448,8 +469,8 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
 
   const spawnBridge = (threadId: string, cwd: string, scope: Scope.Closeable) =>
     NvimBridge.spawn({
-      cols: 120,
-      rows: 40,
+      cols: INITIAL_GRID.cols,
+      rows: INITIAL_GRID.rows,
       cwd,
       configDirectory: options.configDirectory,
       stateDir: options.stateDir,
@@ -500,6 +521,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       unsubscribe: null,
       inputReceipts: new Map(),
       releaseHeld: () => {},
+      grid: { ...INITIAL_GRID },
     };
 
     yield* Queue.takeBetween(outbox, 1, Number.MAX_SAFE_INTEGER).pipe(
@@ -995,8 +1017,70 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
    * input buffer is full: the rest is sent again once Neovim has read some.
    * One request per batch in the normal case.
    */
+  /**
+   * Gives the buffer's grid `cols` columns and `rows` rows.
+   *
+   * The buffer's own grid, not the outer one. With `ext_multigrid` the outer
+   * grid is the whole screen and resizing it leaves the window inside it
+   * whatever size it was, so the columns a flash label needs never reach the
+   * grid the label is drawn on. The id is not a constant: the redraw stream
+   * assigns it, and the bridge is what reads that stream. Before the first
+   * `win_pos` there is nothing to resize but the outer grid.
+   */
+  const resizeGrid = (session: Session, cols: number, rows: number) =>
+    Effect.gen(function* () {
+      // Unchanged is no request at all: Neovim would answer it with nothing.
+      if (cols === session.grid.cols && rows === session.grid.rows) return;
+      const gridId = session.bridge.bufferGridId;
+      yield* request(
+        session,
+        gridId === null ? "nvim_ui_try_resize" : "nvim_ui_try_resize_grid",
+        gridId === null ? [cols, rows] : [gridId, cols, rows],
+      );
+      session.grid = { ...session.grid, cols, rows };
+    });
+
+  /**
+   * Widens the grid before keys that could carry the cursor's line past its
+   * edge, so Neovim never has to scroll the window sideways to show the
+   * cursor. Before the keys rather than after their text arrives: once Neovim
+   * has drawn a key past the edge, the scroll has happened. See `gridWidth.ts`.
+   */
+  const growGridFor = (session: Session, keys: string) =>
+    Effect.gen(function* () {
+      const bridge = session.bridge;
+      const unpredictable = mayExpandUnpredictably(keys, bridge.mode);
+      session.grid.reservedBatches = unpredictable
+        ? RESERVATION_BATCHES
+        : Math.max(0, session.grid.reservedBatches - 1);
+      const cols = grownGridColumns(session.grid.cols, {
+        lines: bridge.lines,
+        topline: bridge.topLine + 1,
+        rows: session.grid.rows,
+        tabstop: bridge.tabstop,
+        cursorLine: bridge.cursor.line,
+        pendingCells: keys.length,
+        unpredictable,
+      });
+      if (cols !== null) yield* resizeGrid(session, cols, session.grid.rows);
+      // A change nothing predicted (a mapping, a completion, a paste wider
+      // than the bound left room for) can still have scrolled the window
+      // sideways. Once the grid is wide enough again, scrolling back is what
+      // takes the shift away: Neovim does not undo it on a wider grid by
+      // itself, and it keeps the cursor in view if 0 would hide it.
+      // Only when the line fits: past the bound the shift is the window's
+      // to keep, and resetting it would redraw every row on every key.
+      if (
+        bridge.leftColumn > 0 &&
+        lineFits(bridge.lines[bridge.cursor.line - 1] ?? "", bridge.tabstop, session.grid.cols)
+      ) {
+        yield* request(session, "nvim_exec_lua", [RESET_LEFT_COLUMN_LUA, [bridge.attachedBuffer]]);
+      }
+    });
+
   const submitKeys = (session: Session, keys: string, progress: { accepted: number }) =>
     Effect.gen(function* () {
+      if (progress.accepted === 0) yield* growGridFor(session, keys);
       const bytes = new TextEncoder().encode(keys);
       let refusals = 0;
       while (progress.accepted < bytes.length) {
@@ -1127,25 +1211,31 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       withTracedLock(
         input.threadId,
         "viewport",
-        () => ({ topline: input.topline, rows: input.rows, cols: input.cols }),
+        () => ({
+          topline: input.topline,
+          rows: input.rows,
+          cols: input.cols,
+          source: input.source ?? "keys",
+        }),
         Effect.gen(function* () {
           const session = yield* requireSession(input.threadId);
-          // The buffer's own grid, not the outer one. With `ext_multigrid` the
-          // outer grid is the whole screen and resizing it leaves the window
-          // inside it whatever size it was, so the columns a flash label needs
-          // never reach the grid the label is drawn on. The id is not a
-          // constant: the redraw stream assigns it, and the bridge is what
-          // reads that stream. Before the first `win_pos` there is nothing to
-          // resize but the outer grid.
-          const gridId = session.bridge.bufferGridId;
-          yield* request(
-            session,
-            gridId === null ? "nvim_ui_try_resize" : "nvim_ui_try_resize_grid",
-            gridId === null ? [input.cols, input.rows] : [gridId, input.cols, input.rows],
+          const cols = gridColumnsForViewport(
+            input.cols,
+            {
+              lines: session.bridge.lines,
+              topline: input.topline,
+              rows: input.rows,
+              tabstop: session.bridge.tabstop,
+            },
+            session.grid.cols,
+            session.grid.reservedBatches > 0,
           );
+          yield* resizeGrid(session, cols, input.rows);
+          // The cursor moves into the window only for a scroll Neovim never
+          // saw; see `SET_VIEWPORT_LUA` and `EditorViewportSource`.
           yield* request(session, "nvim_exec_lua", [
             SET_VIEWPORT_LUA,
-            [session.bridge.attachedBuffer, input.topline, input.rows],
+            [session.bridge.attachedBuffer, input.topline, input.rows, input.source !== "pointer"],
           ]);
         }),
       ),
@@ -1246,6 +1336,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         session.restarts += 1;
         session.bridgeScope = yield* Scope.fork(session.scope);
         session.bridge = yield* spawnBridge(session.threadId, session.cwd, session.bridgeScope);
+        session.grid = { ...INITIAL_GRID };
 
         if (openBuffer !== undefined) {
           const buffer = yield* request(session, "nvim_exec_lua", [

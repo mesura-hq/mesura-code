@@ -21,8 +21,16 @@ const EditorColumnSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 const EditorRowsSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).check(
   Schema.isLessThanOrEqualTo(500),
 );
+/**
+ * The widest viewport a client may ask for.
+ *
+ * A request, not the grid: the host sizes Neovim's grid itself, past the
+ * widest line the cursor can reach (`apps/server/src/editor/gridWidth.ts`), so
+ * a client clamps what it measures to this and loses nothing by it.
+ */
+export const EDITOR_VIEWPORT_MAX_COLS = 1000;
 const EditorColsSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).check(
-  Schema.isLessThanOrEqualTo(1000),
+  Schema.isLessThanOrEqualTo(EDITOR_VIEWPORT_MAX_COLS),
 );
 
 /**
@@ -80,11 +88,24 @@ export const EditorSessionInputInput = Schema.Struct({
 });
 export type EditorSessionInputInput = Schema.Codec.Encoded<typeof EditorSessionInputInput>;
 
+/**
+ * Who moved the window a viewport request describes.
+ *
+ * `pointer`: a wheel, a scrollbar, a touch — a scroll Neovim never saw, so the
+ * host moves the cursor into the new window, as Vim's own wheel does.
+ * `keys`, or absent: the client following a scroll a key made. The host never
+ * moves the cursor for one, because the request can be older than keys
+ * Neovim has already run.
+ */
+export const EditorViewportSource = Schema.Literals(["pointer", "keys"]);
+export type EditorViewportSource = typeof EditorViewportSource.Type;
+
 export const EditorSessionViewportInput = Schema.Struct({
   ...EditorSessionThreadInput.fields,
   topline: EditorLineSchema,
   rows: EditorRowsSchema,
   cols: EditorColsSchema,
+  source: Schema.optional(EditorViewportSource),
 });
 export type EditorSessionViewportInput = Schema.Codec.Encoded<typeof EditorSessionViewportInput>;
 

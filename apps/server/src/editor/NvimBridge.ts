@@ -93,6 +93,8 @@ interface CursorState {
   readonly window: number;
   readonly tabstop: number;
   readonly jumping: boolean;
+  /** The window's `leftcol`; absent from a plugin older than the host. */
+  readonly leftcol?: number;
 }
 
 /**
@@ -349,6 +351,10 @@ export declare namespace NvimBridge {
     /** The selection Neovim is showing, `null` outside visual mode. */
     readonly visual: NvimVisual | null;
     readonly topLine: number;
+    /** The mirrored buffer's `tabstop`, which decides how wide a tab is drawn. */
+    readonly tabstop: number;
+    /** How far the window is scrolled sideways (`leftcol`), as last pushed. */
+    readonly leftColumn: number;
     /** One past the last buffer line drawn, as `win_viewport` reports it. */
     readonly botLine: number;
     /** The grid the developer's window is drawn on, `null` until Neovim says. */
@@ -737,6 +743,7 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
         ? null
         : { anchor: state.anchor, cursor: { line: state.line, col: state.col }, kind: state.mode };
     grid.setTabstop(state.tabstop);
+    grid.setLeftColumn(state.leftcol ?? 0);
     grid.setCurrentWindow(state.window);
   };
 
@@ -1039,6 +1046,12 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
     },
     get topLine() {
       return grid.topLine;
+    },
+    get tabstop() {
+      return grid.tabstop;
+    },
+    get leftColumn() {
+      return grid.leftColumn;
     },
     get overlays() {
       return overlays;

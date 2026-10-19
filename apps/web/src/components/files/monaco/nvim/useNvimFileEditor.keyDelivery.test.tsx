@@ -40,6 +40,7 @@ import {
   mountNvimEditor,
   printable,
   settleUntil,
+  waitForReal,
 } from "~/test/nvimEditorHarness";
 import { NvimStatusStrip } from "./NvimStatusStrip";
 import { useNvimFileEditor } from "./useNvimFileEditor";
@@ -97,16 +98,6 @@ afterEach(async () => {
   mounted = undefined;
   vi.unstubAllGlobals();
 });
-
-/** Waits on the real clock, for the lane's own timers. */
-async function waitForReal(predicate: () => boolean, limitMs: number, what: string) {
-  const deadline = Date.now() + limitMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) throw new Error(`never happened within ${limitMs} ms: ${what}`);
-    await flushHarness(1);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-}
 
 const inputPayloads = () => editorTransport.inputs().map((request) => request.payload);
 

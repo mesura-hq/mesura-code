@@ -22,6 +22,7 @@ import {
 } from "~/state/editorSession";
 import { fallbackFromCause, isSessionMissing, type NvimFallback } from "./nvimFallback.ts";
 import { decideSessionRecovery } from "./nvimSessionRecovery.ts";
+import type { NvimViewport } from "./nvimViewport.ts";
 import { useNvimDriver, type NvimDriverResult } from "./useNvimDriver.ts";
 import { APP_SHORTCUTS_THAT_OUTRANK_NEOVIM } from "./appShortcutsThatOutrankNeovim";
 
@@ -237,10 +238,16 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
   );
 
   const sendViewport = useCallback(
-    (viewport: { topline: number; rows: number; cols: number }) => {
+    (viewport: NvimViewport) => {
       void viewportCommand({
         environmentId,
-        input: { threadId, topline: viewport.topline, rows: viewport.rows, cols: viewport.cols },
+        input: {
+          threadId,
+          topline: viewport.topline,
+          rows: viewport.rows,
+          cols: viewport.cols,
+          ...(viewport.source === undefined ? {} : { source: viewport.source }),
+        },
       });
     },
     [viewportCommand, environmentId, threadId],
