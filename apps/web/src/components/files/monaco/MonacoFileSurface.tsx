@@ -435,13 +435,15 @@ export function MonacoFileSurface({
   }, [comments.hasOpenDraft]);
 
   // Read through refs because the dismissal listener is installed once, on
-  // mount, and must see the mode as it is now rather than as it was then.
-  const nvimModeRef = useRef(nvim.mode);
-  nvimModeRef.current = nvim.mode;
+  // mount, and must see Neovim as it is now rather than as it was then.
   const nvimActiveRef = useRef(nvim.active);
   nvimActiveRef.current = nvim.active;
-  const nvimJumpingRef = useRef(nvim.jumping);
-  nvimJumpingRef.current = nvim.jumping;
+  // Layout effect, not render: written after commit and before any later
+  // keydown can reach the listener, so it never decides on a stale answer.
+  const nvimEscapeRef = useRef(nvim.escapeGoesToNeovim);
+  useLayoutEffect(() => {
+    nvimEscapeRef.current = nvim.escapeGoesToNeovim;
+  }, [nvim.escapeGoesToNeovim]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -470,16 +472,14 @@ export function MonacoFileSurface({
       // An open comment form owns Escape: it cancels the draft rather than
       // blurring the editor underneath it.
       //
-      // So does Neovim, whenever it is in any mode but plain normal — Escape
-      // is how a developer leaves insert, visual or an operator, and a host
-      // that blurred the editor instead would strand them in that mode with
-      // the keyboard somewhere else. In plain normal mode there is nothing to
-      // leave, so Escape dismisses as it always did — except while flash waits
-      // for a label. Neovim reports plain normal mode then, and Escape is how
-      // the jump is abandoned; taken as a dismissal it left the labels up.
+      // So does Neovim, unless it is known to rest in plain normal mode —
+      // Escape is how a developer leaves insert, visual or an operator, and a
+      // host that blurred the editor instead would strand them in that mode
+      // with the keyboard somewhere else. Known, not last heard of: a key
+      // still on its way can change the mode, so Escape stays Neovim's until
+      // the answer to every key says plain normal. See `escapeGoesToNeovim`.
       isBlocked: () =>
-        hasOpenDraftRef.current ||
-        (nvimActiveRef.current && (nvimModeRef.current !== "n" || nvimJumpingRef.current)),
+        hasOpenDraftRef.current || (nvimActiveRef.current && nvimEscapeRef.current()),
       onDismiss: () => {},
     });
   }, []);

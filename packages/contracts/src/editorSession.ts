@@ -89,6 +89,29 @@ export const EditorSessionInputInput = Schema.Struct({
 export type EditorSessionInputInput = Schema.Codec.Encoded<typeof EditorSessionInputInput>;
 
 /**
+ * Where Neovim is once it has consumed a batch: the answer to `input`.
+ *
+ * Read after the keys ran, not before, so a batch that changes nothing (`l`
+ * at the end of a line) still says so. The client decides Escape by it: the
+ * editor is released only when the last batch answered plain normal mode, not
+ * blocking and with no flash label waiting, and no batch is still pending. The
+ * attach stream's own `mode` event can arrive after this answer, so a client
+ * that read it alone released the editor on a NORMAL that predated the keys.
+ *
+ * `blocking`: Neovim is waiting for a key a command asked for (`f`, `r`, a
+ * count, a mapping prefix), which an Escape has to reach. `nvim_get_mode` says
+ * so for a native wait; a plugin's `getcharstr()` wait (flash's `f`) leaves
+ * the mode at `n` and shows only in `state()`.
+ */
+export const EditorSessionInputResult = Schema.Struct({
+  mode: Schema.String,
+  blocking: Schema.Boolean,
+  /** flash is labelling jump targets; Neovim's own mode says `n` meanwhile. */
+  jumping: Schema.Boolean,
+});
+export type EditorSessionInputResult = typeof EditorSessionInputResult.Type;
+
+/**
  * Who moved the window a viewport request describes.
  *
  * `pointer`: a wheel, a scrollbar, a touch — a scroll Neovim never saw, so the
@@ -194,6 +217,22 @@ export const EditorSessionSnapshot = Schema.Struct({
   hlDefs: EditorHighlightDefinitions,
 });
 export type EditorSessionSnapshot = typeof EditorSessionSnapshot.Type;
+
+/**
+ * The answer to `open`: the snapshot, and where Neovim is for Escape, read
+ * under the thread's lock as `input` reads it after a batch.
+ *
+ * `escape` is the one confirmation a client has before its first batch, so
+ * Escape right after opening a file releases the editor. Only `open` carries
+ * it: an attach snapshot can be older than the last batch's answer, and a
+ * client takes this one only while its lane sent nothing since the open
+ * began. Absent from a host older than it, which leaves Escape unknown.
+ */
+export const EditorSessionOpenResult = Schema.Struct({
+  ...EditorSessionSnapshot.fields,
+  escape: Schema.optionalKey(EditorSessionInputResult),
+});
+export type EditorSessionOpenResult = typeof EditorSessionOpenResult.Type;
 
 const EditorOverlay = Schema.Struct({
   line: EditorLineSchema,

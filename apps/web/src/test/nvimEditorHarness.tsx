@@ -22,6 +22,10 @@
  *   does — see `makeFakeEditor`.
  * - `monaco-editor` itself (see `mockMonacoEditor`) and the keybindings atom.
  *
+ * `mountMonacoFileSurface` goes one level up: it mounts `MonacoFileSurface`
+ * itself, with its dismissal installed, on an editor whose keys arrive through
+ * the DOM — see there.
+ *
  * Wire it up in the test file, before the imports that load the editor:
  *
  * ```ts
@@ -39,6 +43,7 @@ import {
   ThreadId,
   WS_METHODS,
   type EditorSessionEvent,
+  type EditorSessionInputResult,
   type EditorSessionSnapshot,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
@@ -89,7 +94,8 @@ type HarnessReplyError =
 
 interface PendingRequest extends HarnessRequest {
   settled: boolean;
-  readonly reply: Deferred.Deferred<void, HarnessReplyError>;
+  /** Settles with where Neovim is at that moment: what an `input` answers. */
+  readonly reply: Deferred.Deferred<EditorSessionInputResult | undefined, HarnessReplyError>;
 }
 
 function makeTransport() {
@@ -97,9 +103,18 @@ function makeTransport() {
   /** What Neovim was given, in order: every `input` and `setCursor` the server accepted. */
   const applied: Array<{ readonly method: string; readonly payload: string }> = [];
   let autoReply = true;
+  /** While set, `open` waits for `replyNext(reply, "open")` instead of answering at once. */
+  let opensHeld = false;
   let maxInFlightInputs = 0;
   let maxInFlightKeyLane = 0;
   let waiters: Array<() => void> = [];
+  const RESTING_IN_NORMAL: EditorSessionInputResult = {
+    mode: "n",
+    blocking: false,
+    jumping: false,
+  };
+  /** What an `input` answers when it settles: where the test says Neovim is. */
+  let neovimMode: EditorSessionInputResult | undefined = RESTING_IN_NORMAL;
 
   const notify = () => {
     const current = waiters;
@@ -127,7 +142,7 @@ function makeTransport() {
       if (request.method === "input" || request.method === "setCursor") {
         applied.push({ method: request.method, payload: request.payload });
       }
-      Deferred.doneUnsafe(request.reply, Effect.void);
+      Deferred.doneUnsafe(request.reply, Effect.succeed(neovimMode));
     } else if (reply.kind === "server-error") {
       Deferred.doneUnsafe(
         request.reply,
@@ -167,7 +182,7 @@ function makeTransport() {
 
   const receive = (method: HarnessRequest["method"], threadId: string, payload: string) =>
     Effect.gen(function* () {
-      const reply = yield* Deferred.make<void, HarnessReplyError>();
+      const reply = yield* Deferred.make<EditorSessionInputResult | undefined, HarnessReplyError>();
       const request: PendingRequest = { method, threadId, payload, settled: false, reply };
       requests.push(request);
       maxInFlightInputs = Math.max(maxInFlightInputs, inFlightInputs());
@@ -177,7 +192,7 @@ function makeTransport() {
       // batch cannot pass by reaching a fake that does not check.
       if (method === "input" && payload.length > INPUT_KEYS_LIMIT) {
         settle(request, { kind: "server-error" });
-      } else if (autoReply || method === "viewport" || method === "open") {
+      } else if (method === "open" ? !opensHeld : autoReply || method === "viewport") {
         settle(request, { kind: "ok" });
       }
       return yield* Deferred.await(reply);
@@ -194,6 +209,8 @@ function makeTransport() {
     hlDefs: {},
   };
   let snapshot = DEFAULT_SNAPSHOT;
+  /** While set, an attachment opens with no snapshot: Neovim has not answered yet. */
+  let snapshotHeld = false;
   /** One queue per live attachment, fed by `emit`. */
   const attachments = new Set<Queue.Queue<EditorSessionEvent>>();
   const attach = () =>
@@ -201,8 +218,10 @@ function makeTransport() {
       Effect.gen(function* () {
         const queue = yield* Queue.unbounded<EditorSessionEvent>();
         attachments.add(queue);
-        const opening: EditorSessionEvent = { type: "snapshot", snapshot };
-        return Stream.concat(Stream.make(opening), Stream.fromQueue(queue)).pipe(
+        const opening: ReadonlyArray<EditorSessionEvent> = snapshotHeld
+          ? []
+          : [{ type: "snapshot", snapshot }];
+        return Stream.concat(Stream.fromIterable(opening), Stream.fromQueue(queue)).pipe(
           Stream.ensuring(Effect.sync(() => attachments.delete(queue))),
         );
       }),
@@ -213,9 +232,16 @@ function makeTransport() {
       client: {
         [WS_METHODS.editorSessionAttach]: attach,
         [WS_METHODS.editorSessionOpen]: (input: { threadId: string; relativePath: string }) =>
+          // With the escape state an `open` answers, as `input` answers it.
           receive("open", input.threadId, input.relativePath).pipe(
-            Effect.as({ ...snapshot, relativePath: input.relativePath }),
+            Effect.map((escape) => ({
+              ...snapshot,
+              relativePath: input.relativePath,
+              ...(escape === undefined ? {} : { escape }),
+            })),
           ),
+        // Answers where Neovim was when the reply settled, not when the
+        // request arrived: once it has consumed the keys.
         [WS_METHODS.editorSessionInput]: (input: { threadId: string; keys: string }) =>
           receive("input", input.threadId, input.keys),
         [WS_METHODS.editorSessionSetCursor]: (input: {
@@ -290,6 +316,18 @@ function makeTransport() {
     setSnapshot: (next: Partial<EditorSessionSnapshot>) => {
       snapshot = { ...snapshot, ...next };
     },
+    /** Where Neovim is from here on, as every `input` that settles answers. */
+    setNeovimMode: (next: Partial<EditorSessionInputResult>) => {
+      neovimMode = { ...RESTING_IN_NORMAL, ...next };
+    },
+    /** Every `input` from here on answers nothing, as a host from before answers carried the mode. */
+    answerLikeAnOlderHost: () => {
+      neovimMode = undefined;
+    },
+    /** Attachments made from here on open without their snapshot: Neovim has not answered. */
+    holdSnapshot: () => {
+      snapshotHeld = true;
+    },
     /** Sends events down every live attachment, as Neovim's drawing would. */
     emit: (...events: ReadonlyArray<EditorSessionEvent>) => {
       for (const queue of attachments) {
@@ -311,6 +349,10 @@ function makeTransport() {
         .map((entry) => entry.payload)
         .join(""),
     /** Hold every `input`/`setCursor`/`replaceText` request until the test answers it. */
+    /** Hold every `open` until the test answers it: Neovim has not answered yet. */
+    holdOpens: () => {
+      opensHeld = true;
+    },
     holdReplies: () => {
       autoReply = false;
     },
@@ -352,8 +394,11 @@ function makeTransport() {
     reset: () => {
       requests.length = 0;
       snapshot = DEFAULT_SNAPSHOT;
+      snapshotHeld = false;
+      neovimMode = RESTING_IN_NORMAL;
       applied.length = 0;
       autoReply = true;
+      opensHeld = false;
       maxInFlightInputs = 0;
       maxInFlightKeyLane = 0;
       waiters = [];
@@ -374,18 +419,51 @@ export function mockServerState() {
   return { primaryServerKeybindingsAtom: Atom.make([]) };
 }
 
-/** Enough of `monaco-editor` for a driver whose model is null. */
+/**
+ * What `monaco.editor.create` hands out under `mockMonacoEditor`. Set by
+ * `mountMonacoFileSurface` for the one surface it mounts.
+ */
+let createSurfaceEditor: ((host: HTMLElement) => unknown) | null = null;
+
+/**
+ * Enough of `monaco-editor` for a driver whose model is null, and for
+ * `MonacoFileSurface` to create its editor and apply its theme.
+ */
 export function mockMonacoEditor() {
   const enumLike = new Proxy({}, { get: (_target, property) => String(property) });
+  class Range {
+    constructor(
+      readonly startLineNumber: number,
+      readonly startColumn: number,
+      readonly endLineNumber: number,
+      readonly endColumn: number,
+    ) {}
+    static fromPositions(
+      start: { lineNumber: number; column: number },
+      end: { lineNumber: number; column: number } = start,
+    ) {
+      return new Range(start.lineNumber, start.column, end.lineNumber, end.column);
+    }
+  }
   return {
     Uri: {
       parse: (value: string) => ({ toString: () => value }),
     },
+    Range,
+    languages: { getLanguages: () => [] },
     editor: {
       EditorOption: enumLike,
       ScrollType: enumLike,
       ContentWidgetPositionPreference: enumLike,
       TrackedRangeStickiness: enumLike,
+      create: (host: HTMLElement) => {
+        if (createSurfaceEditor === null) {
+          throw new Error("monaco.editor.create was called outside mountMonacoFileSurface");
+        }
+        return createSurfaceEditor(host);
+      },
+      defineTheme: () => {},
+      setTheme: () => {},
     },
   };
 }
@@ -467,8 +545,14 @@ function wrappedLayout(layout: HarnessLayout) {
  * layout, scrolls: `setScrollTop`, `revealPosition` (the smallest scroll that
  * shows the position, as `ScrollType.Immediate` does), `getVisibleRanges` and
  * `onDidScrollChange`, with the arithmetic of `wrappedLayout`.
+ *
+ * Given a `host`, the editor also lives in the DOM, as Monaco 0.56 does: a
+ * focusable `native-edit-context` node inside the host holds the caret,
+ * `focus` and `hasTextFocus` are about that node, and `onKeyDown` listens to
+ * keydowns on it. A key then reaches the driver only if nothing earlier in the
+ * event's path — the dismissal's capture listener on the document — stopped it.
  */
-function makeFakeEditor(layout?: HarnessLayout) {
+function makeFakeEditor(layout?: HarnessLayout, host?: HTMLElement) {
   let keyListener: ((event: { browserEvent: KeyboardEvent }) => void) | undefined;
   let cursorListener: ((event: FakeCursorEvent) => void) | undefined;
   const scrollListeners = new Set<() => void>();
@@ -477,6 +561,24 @@ function makeFakeEditor(layout?: HarnessLayout) {
   const arithmetic = layout === undefined ? null : wrappedLayout(layout);
   let scrollTop = 0;
   let position: { lineNumber: number; column: number } | null = null;
+  const editContext = host === undefined ? null : document.createElement("div");
+  if (editContext !== null && host !== undefined) {
+    editContext.className = "native-edit-context";
+    editContext.tabIndex = 0;
+    host.append(editContext);
+  }
+  const inDom: Record<string, unknown> =
+    editContext === null
+      ? {}
+      : {
+          focus: () => editContext.focus(),
+          hasTextFocus: () => document.activeElement === editContext,
+          onKeyDown: (listener: (event: { browserEvent: KeyboardEvent }) => void) => {
+            const onKeyDown = (browserEvent: KeyboardEvent) => listener({ browserEvent });
+            editContext.addEventListener("keydown", onKeyDown);
+            return { dispose: () => editContext.removeEventListener("keydown", onKeyDown) };
+          },
+        };
 
   const scrollTo = (top: number) => {
     const next = Math.max(0, top);
@@ -518,6 +620,7 @@ function makeFakeEditor(layout?: HarnessLayout) {
     {
       get: (_target, property) => {
         if (property === "then") return undefined;
+        if (typeof property === "string" && property in inDom) return inDom[property];
         if (typeof property === "string" && property in scrolling) return scrolling[property];
         if (property === "onKeyDown") {
           return (listener: (event: { browserEvent: KeyboardEvent }) => void) => {
@@ -557,6 +660,8 @@ function makeFakeEditor(layout?: HarnessLayout) {
   );
   return {
     editor,
+    /** The node that holds the caret, given a `host`. */
+    editContext,
     /** The lines Monaco shows now, as `getVisibleRanges` reports them. */
     visibleRange: () => arithmetic?.visibleRange(scrollTop) ?? null,
     /** Whether the wrapped row holding `column` of `lineNumber` is in view. */
@@ -627,6 +732,104 @@ export async function mountNvimEditor(options: {
       await act(async () => root?.unmount());
       container.remove();
       registry.dispose();
+    },
+  };
+}
+
+/**
+ * The model cache `MonacoFileSurface` takes as a prop, holding one model: the
+ * layout's. Enough of `MonacoFileModels` for the surface to open the file.
+ */
+function makeSurfaceModels(model: HarnessModel) {
+  return {
+    acquire: () => ({ model, reused: false }),
+    release: () => {},
+    saveViewState: () => {},
+    viewStateFor: () => null,
+  };
+}
+
+/**
+ * Mounts `MonacoFileSurface` — the file panel's editor, with its Neovim hook,
+ * its status strip and its dismissal listeners — on an editor that lives in
+ * the DOM (`makeFakeEditor` with a host) and lays out `layout`.
+ *
+ * Keys are typed the way a browser delivers them: `type` dispatches a keydown
+ * on whatever element has focus, so the dismissal's capture listener on the
+ * document sees it first, and the editor's own listener only if the dismissal
+ * let it through. A key typed after focus left the editor lands on the body.
+ *
+ * `keysOutsideEditor` records every keydown that reached the document with its
+ * target outside the editor and not taken by anyone (`defaultPrevented` false):
+ * the keys the chat composer's type-to-focus would take
+ * (`shouldRedirectInputToComposer` in `ChatView.tsx`).
+ *
+ * The test file mocks what the surface needs beyond the editor and the
+ * session; see `MonacoFileSurface.escape.test.tsx`.
+ */
+export async function mountMonacoFileSurface(options: {
+  readonly layout: HarnessLayout;
+  readonly renderSurface: (models: unknown) => ReactNode;
+}) {
+  const registry = AtomRegistry.make();
+  const container = document.createElement("div");
+  document.body.append(container);
+  let fake: ReturnType<typeof makeFakeEditor> | null = null;
+  createSurfaceEditor = (host) => {
+    fake = makeFakeEditor(options.layout, host);
+    return fake.editor;
+  };
+  const keysOutsideEditor: Array<string> = [];
+  const recordKeyOutsideEditor = (event: KeyboardEvent) => {
+    const host = container.querySelector("[data-monaco-file-surface]");
+    const target = event.target instanceof Node ? event.target : null;
+    if (event.defaultPrevented) return;
+    if (host !== null && target !== null && host.contains(target)) return;
+    keysOutsideEditor.push(event.key);
+  };
+  document.addEventListener("keydown", recordKeyOutsideEditor);
+  const models = makeSurfaceModels(options.layout.model);
+  let root: Root | undefined;
+  await act(async () => {
+    root = createRoot(container);
+    root.render(
+      <RegistryContext.Provider value={registry}>
+        {options.renderSurface(models)}
+      </RegistryContext.Provider>,
+    );
+  });
+  await flushHarness();
+  const editContext = () => {
+    const node = (fake as ReturnType<typeof makeFakeEditor> | null)?.editContext ?? null;
+    if (node === null) throw new Error("the surface never created its editor");
+    return node;
+  };
+  return {
+    registry,
+    container,
+    /** Puts the caret in the editor, as a click on its text does. */
+    focusEditor: async () => {
+      await act(async () => editContext().focus());
+    },
+    /** Whether the editor holds the keyboard. */
+    editorHasFocus: () => document.activeElement === editContext(),
+    /** One keydown, dispatched on whatever has focus, as the browser does. */
+    type: async (init: KeyboardEventInit) => {
+      const target =
+        document.activeElement instanceof HTMLElement ? document.activeElement : document.body;
+      await act(async () => {
+        target.dispatchEvent(
+          new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }),
+        );
+      });
+    },
+    keysOutsideEditor: keysOutsideEditor as ReadonlyArray<string>,
+    unmount: async () => {
+      await act(async () => root?.unmount());
+      document.removeEventListener("keydown", recordKeyOutsideEditor);
+      container.remove();
+      registry.dispose();
+      createSurfaceEditor = null;
     },
   };
 }

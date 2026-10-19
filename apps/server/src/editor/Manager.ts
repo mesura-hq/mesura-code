@@ -12,7 +12,9 @@ import {
   type EditorSessionError,
   type EditorSessionEvent,
   type EditorSessionInputInput,
+  type EditorSessionInputResult,
   type EditorSessionOpenInput,
+  type EditorSessionOpenResult,
   type EditorSessionReplaceTextInput,
   type EditorSessionSetCursorInput,
   type EditorSessionSnapshot,
@@ -117,6 +119,13 @@ interface InputReceipt {
 const MAX_INPUT_LANES = 16;
 /** How long Neovim's full input buffer may refuse keys before the batch fails. */
 const INPUT_BUFFER_PATIENCE = 200;
+/**
+ * How long `mesura.escape_state` after a batch may take before the answer says
+ * `blocking`. The read is not a fast call, so a Neovim that started waiting
+ * for a key after `nvim_get_mode` answered would hold it, and the thread's
+ * lock with it.
+ */
+const ESCAPE_STATE_PATIENCE = Duration.millis(250);
 
 interface OpenBuffer {
   readonly relativePath: string;
@@ -203,9 +212,10 @@ export interface EditorSessionManagerOptions {
 export class EditorSessionManager extends Context.Service<
   EditorSessionManager,
   {
+    /** Answers the snapshot and where Neovim is for Escape; see `EditorSessionOpenResult`. */
     readonly open: (
       input: EditorSessionOpenInput,
-    ) => Effect.Effect<EditorSessionSnapshot, EditorSessionError>;
+    ) => Effect.Effect<EditorSessionOpenResult, EditorSessionError>;
     /**
      * Registers a listener for the life of the caller's scope, after sending
      * it a snapshot of where the session is now.
@@ -219,7 +229,10 @@ export class EditorSessionManager extends Context.Service<
       input: EditorSessionAttachInput,
       emit: Listener,
     ) => Effect.Effect<() => void, EditorSessionError>;
-    readonly input: (input: EditorSessionInputInput) => Effect.Effect<void, EditorSessionError>;
+    /** Answers where Neovim is once it has consumed the keys; see `EditorSessionInputResult`. */
+    readonly input: (
+      input: EditorSessionInputInput,
+    ) => Effect.Effect<EditorSessionInputResult, EditorSessionError>;
     readonly viewport: (
       input: EditorSessionViewportInput,
     ) => Effect.Effect<void, EditorSessionError>;
@@ -759,7 +772,10 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         // `lines` event arriving after it would be applied a second time.
         session.releaseHeld();
         publish(session, { type: "snapshot", snapshot });
-        return snapshot;
+        // After the snapshot went out: the read is a Neovim round trip, and
+        // attached clients need not wait for it.
+        const escape = yield* modeAfterKeys(session);
+        return { ...snapshot, escape };
       }).pipe(
         // A session that could not be opened is not a session. Left in the
         // map it would hold a Neovim, occupy one of the slots, and claim to be
@@ -1104,6 +1120,58 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       }
     });
 
+  /**
+   * Where Neovim is once it has consumed every key it was given: the answer to
+   * `input`, and `open`'s `escape`.
+   *
+   * `nvim_get_mode` is the one call ordered after the keys. Neovim defers it
+   * behind pending input unless it is blocked waiting for a key (neovim#6247),
+   * and answers at once when it is, with `blocking` set. Measured against a
+   * real Neovim, pipelined right after `nvim_input`, in
+   * `conformance/inputMode.test.ts`. A non-fast call is ordered after the keys
+   * too, but never answers while Neovim waits in a native `f`.
+   *
+   * Plain `n` that is not blocking is read once more, because two waits do not
+   * show in the mode: flash's `f`, which waits for its character in
+   * `getcharstr()` while Neovim still serves requests, and flash's labels.
+   * See `mesura.escape_state`. A batch typed in insert mode costs the one fast
+   * call.
+   */
+  const modeAfterKeys = (session: Session) =>
+    Effect.gen(function* () {
+      const reported = (yield* request(session, "nvim_get_mode", [])) as {
+        readonly mode: string;
+        readonly blocking: boolean;
+      };
+      const settled: EditorSessionInputResult = {
+        mode: reported.mode,
+        blocking: reported.blocking,
+        jumping: false,
+      };
+      if (settled.blocking || settled.mode !== "n") return settled;
+      const state = yield* request(session, "nvim_exec_lua", [
+        "return mesura.escape_state(...)",
+        [session.bridge.attachedBuffer],
+      ]).pipe(Effect.timeoutOption(ESCAPE_STATE_PATIENCE));
+      // No answer in time: Neovim is holding its main loop, so an Escape has
+      // to reach it rather than release the editor.
+      if (Option.isNone(state)) return { ...settled, blocking: true };
+      const { waiting, jumping } = (state.value ?? {}) as {
+        readonly waiting?: boolean;
+        readonly jumping?: boolean;
+      };
+      return { ...settled, blocking: waiting === true, jumping: jumping === true };
+    }).pipe(
+      // The keys are Neovim's already, so the batch succeeds; where Neovim is
+      // stays unknown, which keeps the next Escape for Neovim. Failing the
+      // batch instead would have the client send it again.
+      Effect.orElseSucceed((): EditorSessionInputResult => ({
+        mode: session.bridge.mode,
+        blocking: true,
+        jumping: false,
+      })),
+    );
+
   const service: EditorSessionManager["Service"] = {
     open,
     attachStream: (input, emit) =>
@@ -1164,10 +1232,14 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
           const sequence = input.sequence;
           if (sequence === undefined) {
             yield* submitKeys(session, input.keys, { accepted: 0 });
-            return;
+            return yield* modeAfterKeys(session);
           }
+          // A batch skipped as already applied still answers with where Neovim
+          // is now: the client's Escape is decided by the latest answer.
           let receipt = session.inputReceipts.get(sequence.lane);
-          if (receipt !== undefined && sequence.index < receipt.index) return;
+          if (receipt !== undefined && sequence.index < receipt.index) {
+            return yield* modeAfterKeys(session);
+          }
           if (receipt !== undefined && sequence.index === receipt.index) {
             // Accepted by a Neovim that has since exited: the restored text
             // may or may not hold it, so it is neither applied nor resent.
@@ -1177,7 +1249,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
                 detail: "Neovim restarted after it took these keys",
               });
             }
-            if (receipt.done) return;
+            if (receipt.done) return yield* modeAfterKeys(session);
           } else {
             receipt = {
               index: sequence.index,
@@ -1205,6 +1277,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
               ),
             ),
           );
+          return yield* modeAfterKeys(session);
         }),
       ),
     viewport: (input) =>

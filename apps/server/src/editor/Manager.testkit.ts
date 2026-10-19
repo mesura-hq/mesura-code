@@ -41,9 +41,18 @@ export class FakeNvim {
   lines: string[] = [];
   /** Where the fake says the cursor is, when the host reads or is told. */
   cursor = { line: 1, col: 1 };
+  /** What the fake says `nvim_get_mode` is: the mode an `input` answers with. */
+  mode = { mode: "n", blocking: false };
   /** Replies to calls this matches wait in `#heldReplies` until released. */
   #holdMatch: ((method: string, params: ReadonlyArray<unknown>) => boolean) | null = null;
   #heldReplies: Uint8Array[] = [];
+  /** Calls this matches are answered with an error, as a Neovim that refused them. */
+  #failMatch: ((method: string, params: ReadonlyArray<unknown>) => boolean) | null = null;
+
+  /** Answers matching calls with an error from here on. */
+  failReplies(match: (method: string, params: ReadonlyArray<unknown>) => boolean): void {
+    this.#failMatch = match;
+  }
 
   /** Holds the replies to matching calls, the way a busy or stalled Neovim does. */
   holdReplies(match: (method: string, params: ReadonlyArray<unknown>) => boolean): void {
@@ -86,6 +95,8 @@ export class FakeNvim {
         return this.lines;
       case "nvim_replace_termcodes":
         return params[0];
+      case "nvim_get_mode":
+        return this.mode;
       case "nvim_exec_lua": {
         const code = String(params[0]);
         if (code.includes("nvim_get_current_buf")) return 1;
@@ -116,6 +127,8 @@ export class FakeNvim {
     // through `this` inside the generator, which cannot see it.
     const { calls, killed } = this;
     const answer = (method: string, params: ReadonlyArray<unknown>) => this.#answer(method, params);
+    const fails = (method: string, params: ReadonlyArray<unknown>) =>
+      this.#failMatch?.(method, params) === true;
     const setOutbound = (queue: Queue.Queue<Uint8Array, Cause.Done>) => {
       this.#outbound = queue;
     };
@@ -140,7 +153,10 @@ export class FakeNvim {
             ];
             if (kind !== 0) return;
             calls.push({ method, params });
-            reply(method, params, packr.pack([1, messageId, null, answer(method, params)]));
+            const response = fails(method, params)
+              ? [1, messageId, [0, `the fake refused ${method}`], null]
+              : [1, messageId, null, answer(method, params)];
+            reply(method, params, packr.pack(response));
           });
         },
         stdout: Stream.fromQueue(outbound),

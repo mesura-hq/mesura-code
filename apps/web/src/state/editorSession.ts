@@ -10,7 +10,7 @@ import {
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
 import { subscribe, type EnvironmentRpcInput } from "@t3tools/client-runtime/rpc";
-import { WS_METHODS, type EnvironmentId } from "@t3tools/contracts";
+import { WS_METHODS, type EditorSessionInputResult, type EnvironmentId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
@@ -215,7 +215,30 @@ export interface EditorKeyLane {
   readonly keys: (keys: string) => void;
   /** Queues a call that must land between the keys around it: a click, an agent's edit. */
   readonly call: (run: () => Promise<AtomCommandResult<unknown, unknown>>) => void;
+  /**
+   * Whether Neovim is known to be at rest in plain normal mode: nothing is
+   * queued or in flight, and the last batch's answer said `n`, not blocking,
+   * no flash label. Escape releases the editor only then; otherwise it is a
+   * key Neovim has to get.
+   *
+   * Only an answer confirms: a batch's, read after the keys ran, or an
+   * `open`'s (`openBegins`). A snapshot never does: it can be older than the
+   * last answer, and it carries no `blocking`, so a reattach while `f` waits
+   * would read as resting.
+   */
+  readonly restsInNormalMode: () => boolean;
+  /**
+   * Marks an `editorSession.open` about to be sent. Its answer's `escape` is
+   * taken (`takeOpenAnswer`) only if the lane was idle now and queues nothing
+   * until the answer lands, so the answer is newer than anything the lane
+   * knows. Without it Escape right after opening a file would go to Neovim.
+   */
+  readonly openBegins: () => OpenMark;
+  readonly takeOpenAnswer: (mark: OpenMark, escape: EditorSessionInputResult | undefined) => void;
 }
+
+/** What `openBegins` saw: the lane's activity count, or null when it was busy. */
+export type OpenMark = number | null;
 
 const keyLanes = new WeakMap<AtomRegistry.AtomRegistry, Map<string, EditorKeyLane>>();
 
@@ -274,6 +297,12 @@ function makeKeyLane(
   let waitingForSession = false;
   let outageStartedAt: number | null = null;
   let transportRetries = 0;
+  /** Where Neovim said it was after the last batch it answered; null when unknown. */
+  let confirmed: EditorSessionInputResult | null = null;
+  /** Bumped by every key and call queued, so an open's answer can tell it is the newest. */
+  let activity = 0;
+
+  const pending = () => busy || waitingForSession || unacknowledged !== null || queue.length > 0;
 
   const setDelivery = (delivery: EditorKeysDelivery) => {
     if (registry.get(deliveryAtom) !== delivery) registry.set(deliveryAtom, delivery);
@@ -296,6 +325,9 @@ function makeKeyLane(
     );
     busy = false;
     if (result._tag === "Success") {
+      // Empty from a host older than answers that carry the mode: unknown.
+      // Against such a host Escape stays Neovim's; the pane chords leave.
+      confirmed = result.value ?? null;
       unacknowledged = null;
       failures = 0;
       outageStartedAt = null;
@@ -328,6 +360,8 @@ function makeKeyLane(
 
   /** Drops the keys the lane could not deliver, and says so. */
   const giveUp = () => {
+    // Keys that may or may not have run leave Neovim's mode unknown.
+    confirmed = null;
     unacknowledged = null;
     failures = 0;
     outageStartedAt = null;
@@ -410,12 +444,27 @@ function makeKeyLane(
 
   return {
     keys: (keys) => {
+      activity += 1;
       for (const piece of splitKeysToLimit(keys)) queue.push({ kind: "keys", keys: piece });
       pump();
     },
     call: (run) => {
+      activity += 1;
       queue.push({ kind: "call", run });
       pump();
     },
+    openBegins: () => (pending() ? null : activity),
+    takeOpenAnswer: (mark, escape) => {
+      // Empty from an older host: unknown, as an empty batch answer is.
+      if (mark === null || escape === undefined) return;
+      if (activity !== mark || pending()) return;
+      confirmed = escape;
+    },
+    restsInNormalMode: () =>
+      !pending() &&
+      confirmed !== null &&
+      confirmed.mode === "n" &&
+      !confirmed.blocking &&
+      !confirmed.jumping,
   };
 }

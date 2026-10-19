@@ -293,6 +293,39 @@ local function utf16_col(line, byte)
   return vim.str_utfindex(text, "utf-16", math.min(byte, #text), false) + 1
 end
 
+--- Whether flash is waiting for a label in the attached buffer.
+function mesura.flash_jumping(attached)
+  if attached == 0 or not vim.api.nvim_buf_is_valid(attached) then return false end
+  -- flash draws in its own namespace. Looked up until flash, which loads
+  -- lazily, has created it, and cached after: this runs on every key.
+  mesura.flash_namespace = mesura.flash_namespace or vim.api.nvim_get_namespaces().flash
+  local flash = mesura.flash_namespace
+  if flash == nil then return false end
+  -- A label is the one mark with virtual text; the backdrop and the
+  -- matches are plain highlights. Those stay up after an f motion, for ;
+  -- to repeat it, when no label is waiting.
+  local marks = vim.api.nvim_buf_get_extmarks(attached, flash, 0, -1, { details = true })
+  for _, mark in ipairs(marks) do
+    if mark[4].virt_text ~= nil then return true end
+  end
+  return false
+end
+
+--- Whether Neovim, in plain normal mode and not blocked, still waits for keys
+--- a command asked for, and whether flash waits for a label. Read after a key
+--- batch to decide where Escape goes; see modeAfterKeys in Manager.ts.
+---
+--- state() holds S while a command is unfinished: flash's f, which waits in
+--- getcharstr() with requests still served and the mode at n; a count. Also m
+--- halfway a mapping, o an operator, a insert completion, w a blocking wait.
+--- Empty at rest.
+function mesura.escape_state(attached)
+  return {
+    waiting = vim.fn.state():find("[Smoaw]") ~= nil,
+    jumping = mesura.flash_jumping(attached),
+  }
+end
+
 function mesura.cursor_state(attached)
   local position = vim.api.nvim_win_get_cursor(0)
   local mode = vim.api.nvim_get_mode().mode
@@ -302,26 +335,10 @@ function mesura.cursor_state(attached)
     anchor = { line = other[2], col = utf16_col(other[2], other[3] - 1) }
   end
   local tabstop = 8
-  local jumping = false
   if attached ~= 0 and vim.api.nvim_buf_is_valid(attached) then
     tabstop = vim.bo[attached].tabstop
-    -- flash draws in its own namespace. Looked up until flash, which loads
-    -- lazily, has created it, and cached after: this runs on every key.
-    mesura.flash_namespace = mesura.flash_namespace or vim.api.nvim_get_namespaces().flash
-    local flash = mesura.flash_namespace
-    if flash ~= nil then
-      -- A label is the one mark with virtual text; the backdrop and the
-      -- matches are plain highlights. Those stay up after an f motion, for ;
-      -- to repeat it, when no label is waiting.
-      local marks = vim.api.nvim_buf_get_extmarks(attached, flash, 0, -1, { details = true })
-      for _, mark in ipairs(marks) do
-        if mark[4].virt_text ~= nil then
-          jumping = true
-          break
-        end
-      end
-    end
   end
+  local jumping = mesura.flash_jumping(attached)
   return {
     line = position[1],
     col = utf16_col(position[1], position[2]),

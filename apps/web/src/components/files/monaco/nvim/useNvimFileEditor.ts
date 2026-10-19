@@ -47,6 +47,17 @@ export interface NvimFileEditorResult extends NvimDriverResult {
   readonly retry: () => void;
   /** Whether typed keys are reaching Neovim; see `editorKeyLane`. */
   readonly keysDelivery: EditorKeysDelivery;
+  /**
+   * Whether an Escape typed now is Neovim's rather than the panel's.
+   *
+   * The panel takes it only when Neovim is known to rest in plain normal mode:
+   * nothing pending and the last batch's answer saying so (`restsInNormalMode`),
+   * and the attach stream not showing another mode or a flash label either. The
+   * stream alone lags the keys by a round trip — `A x Escape` on a remote host
+   * released the editor on a NORMAL from before the `A`, and left Neovim in
+   * insert mode with the keyboard elsewhere.
+   */
+  readonly escapeGoesToNeovim: () => boolean;
 }
 
 export interface NvimFileEditorInput {
@@ -198,11 +209,15 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
   const openFile = useCallback(
     (lines: ReadonlyArray<string>) => {
       opensInFlightRef.current += 1;
+      const openMark = keyLane.openBegins();
       void openCommand({
         environmentId,
         input: { threadId, cwd, relativePath, lines: [...lines] },
       }).then((result) => {
         opensInFlightRef.current -= 1;
+        // The lane belongs to the thread, not this view, so the answer is
+        // taken even if the view went away meanwhile.
+        if (result._tag === "Success") keyLane.takeOpenAnswer(openMark, result.value.escape);
         if (!mountedRef.current) return;
         // After the open, not alongside it: an attachment that reaches the
         // server first finds no session and fails again. Refreshed whether or
@@ -218,7 +233,7 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
         setFallback(failure);
       });
     },
-    [openCommand, environmentId, threadId, cwd, relativePath],
+    [openCommand, keyLane, environmentId, threadId, cwd, relativePath],
   );
 
   const retry = useCallback(() => {
@@ -302,5 +317,10 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
     state: driverState,
   });
 
-  return { ...driver, fallback, retry, keysDelivery };
+  const escapeGoesToNeovim = useCallback(
+    () => !keyLane.restsInNormalMode() || driver.mode !== "n" || driver.jumping,
+    [keyLane, driver.mode, driver.jumping],
+  );
+
+  return { ...driver, fallback, retry, keysDelivery, escapeGoesToNeovim };
 }
