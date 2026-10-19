@@ -105,13 +105,13 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
 
   // Not subscribed at all while modal editing is off, so a developer who does
   // not use it never starts a Neovim.
-  const atom = enabled
-    ? editorSessionAttach({ environmentId, input: { threadId } })
-    : IDLE_SESSION_ATOM;
+  const atom = useMemo(
+    () =>
+      enabled ? editorSessionAttach({ environmentId, input: { threadId } }) : IDLE_SESSION_ATOM,
+    [enabled, environmentId, threadId],
+  );
   const result = useAtomValue(atom);
-  const state =
-    (Option.getOrNull(AsyncResult.value(result)) as EditorSessionState | null) ??
-    EMPTY_EDITOR_SESSION_STATE;
+  const state = sessionStateOf(result);
 
   // Recovering a session that is gone: see `nvimSessionRecovery.ts` for what
   // is decided, and why in that order. What follows is the bookkeeping.
@@ -194,6 +194,15 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
   // Keys, clicks and an agent's edits share one lane per thread: see
   // `editorKeyLane` for the coalescing and the re-sends.
   const registry = useContext(RegistryContext);
+  // The driver applies text and caret from here, as each event arrives.
+  const stateSource = useMemo(
+    () => ({
+      get: () => sessionStateOf(registry.get(atom)),
+      subscribe: (listener: (state: EditorSessionState) => void) =>
+        registry.subscribe(atom, (next) => listener(sessionStateOf(next))),
+    }),
+    [registry, atom],
+  );
   const keyLane = useMemo(
     () => editorKeyLane(registry, { environmentId, threadId }),
     [registry, environmentId, threadId],
@@ -210,7 +219,7 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
     (lines: ReadonlyArray<string>) => {
       opensInFlightRef.current += 1;
       const openMark = keyLane.openBegins();
-      void openCommand({
+      return openCommand({
         environmentId,
         input: { threadId, cwd, relativePath, lines: [...lines] },
       }).then((result) => {
@@ -218,7 +227,7 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
         // The lane belongs to the thread, not this view, so the answer is
         // taken even if the view went away meanwhile.
         if (result._tag === "Success") keyLane.takeOpenAnswer(openMark, result.value.escape);
-        if (!mountedRef.current) return;
+        if (!mountedRef.current) return null;
         // After the open, not alongside it: an attachment that reaches the
         // server first finds no session and fails again. Refreshed whether or
         // not the open worked — one that failed leaves an attach that fails
@@ -227,10 +236,12 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
           reattachPendingRef.current = false;
           refreshAttachRef.current();
         }
-        if (result._tag !== "Failure") return;
-        const failure = fallbackFromCause(result.cause);
-        if (failure === null) return;
-        setFallback(failure);
+        if (result._tag === "Success") return result.value.lines;
+        if (result._tag === "Failure") {
+          const failure = fallbackFromCause(result.cause);
+          if (failure !== null) setFallback(failure);
+        }
+        return null;
       });
     },
     [openCommand, keyLane, environmentId, threadId, cwd, relativePath],
@@ -293,6 +304,8 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
       writeRequests: state.writeRequests,
       latestEvent: state.latestEvent,
       sequence: state.sequence,
+      snapshots: state.snapshots,
+      snapshotLines: state.snapshotLines,
     }),
     [state],
   );
@@ -315,6 +328,7 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
     replaceText,
     isAppShortcut,
     state: driverState,
+    stateSource,
   });
 
   const escapeGoesToNeovim = useCallback(
@@ -323,4 +337,10 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
   );
 
   return { ...driver, fallback, retry, keysDelivery, escapeGoesToNeovim };
+}
+
+function sessionStateOf(
+  result: AsyncResult.AsyncResult<EditorSessionState, unknown>,
+): EditorSessionState {
+  return Option.getOrNull(AsyncResult.value(result)) ?? EMPTY_EDITOR_SESSION_STATE;
 }

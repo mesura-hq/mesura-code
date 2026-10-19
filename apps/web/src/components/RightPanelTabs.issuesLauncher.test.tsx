@@ -45,7 +45,7 @@ function mountTabs(overrides: Partial<TabsProps> = {}) {
     surfaces: [],
     environmentId: null,
     activeSurfaceId: null,
-    pendingSurfaceIds: new Set(),
+    pendingProjectKey: null,
     previewSessions: {},
     desktopByTabId: {},
     terminalLabelsById: new Map(),

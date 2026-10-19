@@ -209,6 +209,8 @@ function makeTransport() {
     hlDefs: {},
   };
   let snapshot = DEFAULT_SNAPSHOT;
+  /** The lines every `open` handed Neovim, in order. */
+  const openedLines: Array<ReadonlyArray<string>> = [];
   /** While set, an attachment opens with no snapshot: Neovim has not answered yet. */
   let snapshotHeld = false;
   /** One queue per live attachment, fed by `emit`. */
@@ -231,15 +233,27 @@ function makeTransport() {
     ({
       client: {
         [WS_METHODS.editorSessionAttach]: attach,
-        [WS_METHODS.editorSessionOpen]: (input: { threadId: string; relativePath: string }) =>
-          // With the escape state an `open` answers, as `input` answers it.
-          receive("open", input.threadId, input.relativePath).pipe(
-            Effect.map((escape) => ({
-              ...snapshot,
-              relativePath: input.relativePath,
-              ...(escape === undefined ? {} : { escape }),
-            })),
-          ),
+        [WS_METHODS.editorSessionOpen]: (input: {
+          threadId: string;
+          relativePath: string;
+          lines: ReadonlyArray<string>;
+        }) => {
+          openedLines.push(input.lines);
+          // As the server does: the file opens with the text the client handed
+          // over, and every attachment hears a snapshot of it before the open
+          // answers, with the escape state an `input` answers too.
+          return receive("open", input.threadId, input.relativePath).pipe(
+            Effect.map((escape) => {
+              const opened = { ...snapshot, relativePath: input.relativePath, lines: input.lines };
+              // The session now holds this text: a later attachment sees it.
+              snapshot = opened;
+              for (const queue of attachments) {
+                Queue.offerUnsafe(queue, { type: "snapshot", snapshot: opened });
+              }
+              return { ...opened, ...(escape === undefined ? {} : { escape }) };
+            }),
+          );
+        },
         // Answers where Neovim was when the reply settled, not when the
         // request arrived: once it has consumed the keys.
         [WS_METHODS.editorSessionInput]: (input: { threadId: string; keys: string }) =>
@@ -312,7 +326,9 @@ function makeTransport() {
           const [topline = 0, rows = 0, cols = 0] = request.payload.split(":").map(Number);
           return { topline, rows, cols };
         }),
-    /** What the next attachment's snapshot and `open` reply say the file holds. */
+    /** The lines every `open` handed Neovim, in order: the text the client had. */
+    openedLines: () => openedLines as ReadonlyArray<ReadonlyArray<string>>,
+    /** What the next attachment's snapshot says the file holds. */
     setSnapshot: (next: Partial<EditorSessionSnapshot>) => {
       snapshot = { ...snapshot, ...next };
     },
@@ -393,6 +409,7 @@ function makeTransport() {
       }),
     reset: () => {
       requests.length = 0;
+      openedLines.length = 0;
       snapshot = DEFAULT_SNAPSHOT;
       snapshotHeld = false;
       neovimMode = RESTING_IN_NORMAL;
@@ -497,6 +514,101 @@ export function makeHarnessModel(lines: ReadonlyArray<string>, uri: string) {
 }
 
 export type HarnessModel = ReturnType<typeof makeHarnessModel>;
+
+/**
+ * A text model that takes edits, as Monaco's does: every edit in one
+ * `applyEdits` call is placed against the text before the call, a column past
+ * a line's end clamps to that end, and the content listeners hear the change
+ * synchronously — which is what the driver's own-edit flag exists for.
+ */
+export function makeEditableHarnessModel(lines: ReadonlyArray<string>, uri: string) {
+  let text = lines.join("\n");
+  const listeners = new Set<(event: { changes: ReadonlyArray<unknown> }) => void>();
+  const content = () => text.split("\n");
+  const offsetOf = (lineNumber: number, column: number) => {
+    const current = content();
+    const line = Math.min(Math.max(1, lineNumber), current.length);
+    let offset = 0;
+    for (let index = 0; index < line - 1; index += 1) offset += (current[index] ?? "").length + 1;
+    const length = (current[line - 1] ?? "").length;
+    return offset + Math.min(Math.max(1, column), length + 1) - 1;
+  };
+  return {
+    uri: { toString: () => uri },
+    getLineCount: () => content().length,
+    getLineContent: (lineNumber: number) => content()[lineNumber - 1] ?? "",
+    getLineMaxColumn: (lineNumber: number) => (content()[lineNumber - 1] ?? "").length + 1,
+    getLinesContent: () => content(),
+    getValue: () => text,
+    onDidChangeContent: (listener: (event: { changes: ReadonlyArray<unknown> }) => void) => {
+      listeners.add(listener);
+      return { dispose: () => listeners.delete(listener) };
+    },
+    applyEdits: (
+      edits: ReadonlyArray<{
+        readonly range: {
+          readonly startLineNumber: number;
+          readonly startColumn: number;
+          readonly endLineNumber: number;
+          readonly endColumn: number;
+        };
+        readonly text: string;
+      }>,
+    ) => {
+      const placed = edits
+        .map((edit) => ({
+          start: offsetOf(edit.range.startLineNumber, edit.range.startColumn),
+          end: offsetOf(edit.range.endLineNumber, edit.range.endColumn),
+          text: edit.text,
+        }))
+        .toSorted((left, right) => right.start - left.start);
+      for (const edit of placed)
+        text = text.slice(0, edit.start) + edit.text + text.slice(edit.end);
+      const changes = placed.map((edit) => ({
+        rangeOffset: edit.start,
+        text: edit.text,
+      }));
+      for (const listener of listeners) listener({ changes });
+    },
+    undo: () => {},
+  };
+}
+
+/** One call the driver made on the editor, stamped by `recordEditorCalls`. */
+export interface RecordedEditorCall {
+  readonly method: string;
+  readonly args: ReadonlyArray<unknown>;
+  /** What `stamp()` returned when the call was made. */
+  readonly stamp: number;
+}
+
+/**
+ * Wraps an editor so every method call is recorded, in order, with a stamp the
+ * test supplies — a React commit count, say — and `afterCall` observers run
+ * after each call returns.
+ */
+export function recordEditorCalls(editor: unknown, stamp: () => number = () => 0) {
+  const calls: RecordedEditorCall[] = [];
+  const afterCall = new Set<(stamp: number) => void>();
+  const recorded = new Proxy(editor as object, {
+    get: (target, property, receiver) => {
+      const value = Reflect.get(target, property, receiver) as unknown;
+      if (typeof value !== "function" || typeof property !== "string") return value;
+      return (...args: unknown[]) => {
+        const at = stamp();
+        calls.push({ method: property, args, stamp: at });
+        const result = (value as (...inner: unknown[]) => unknown)(...args);
+        for (const observe of afterCall) observe(at);
+        return result;
+      };
+    },
+  });
+  return {
+    editor: recorded,
+    calls: calls as ReadonlyArray<RecordedEditorCall>,
+    afterCall,
+  };
+}
 
 /**
  * How the fake editor lays its model out: Monaco with word wrap on, every

@@ -110,12 +110,10 @@ import { isElectron } from "../env";
 import {
   resolveShortcutCommand,
   shortcutLabelForCommand,
-  shouldShowThreadJumpHintsForModifiers,
   threadJumpCommandForIndex,
   threadJumpIndexFromCommand,
   threadTraversalDirectionFromCommand,
 } from "../keybindings";
-import { useShortcutModifierState } from "../shortcutModifierState";
 import {
   readViewportThreadKeys,
   scrollThreadList,
@@ -143,7 +141,7 @@ import {
 import { useProjectScopeStore } from "../projectScopeStore";
 import { useAcknowledgeThreadWoke, useThreadActions } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
-import { useTerminalFocus } from "../hooks/useTerminalFocus";
+import { ThreadJumpHintModifierSync } from "./sidebar/ThreadJumpHintModifierSync";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { useCommandHandlers } from "../commands/commandRegistry";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
@@ -4965,28 +4963,8 @@ export default function Sidebar() {
     openThreadByKey,
   ]);
 
-  // Same predicate as v1: hints show only while the held modifiers exactly
-  // match a thread-jump binding. Adding Shift (screenshots) or Alt no
-  // longer matches ⌘1..9, so the overlay hides for chords like ⌘⇧4.
-  const shortcutModifiers = useShortcutModifierState();
-  const terminalFocused = useTerminalFocus();
-  const shouldShowJumpHintsNow = shouldShowThreadJumpHintsForModifiers(
-    shortcutModifiers,
-    keybindings,
-    {
-      platform: navigator.platform,
-      context: {
-        terminalFocus: terminalFocused,
-        terminalOpen: routeTerminalOpen,
-        modelPickerOpen: isModelPickerOpen(),
-        isWeb: !isElectron,
-        isDesktop: isElectron,
-      },
-    },
-  );
-  useEffect(() => {
-    updateThreadJumpHintsVisibility(shouldShowJumpHintsNow);
-  }, [shouldShowJumpHintsNow, updateThreadJumpHintsVisibility]);
+  // Mesura: the held modifiers are followed by ThreadJumpHintModifierSync,
+  // below, so a modifier press does not re-render the sidebar.
 
   // New thread defaults to the project you're in (active thread's project,
   // falling back to the top project) — same resolution the command palette
@@ -5027,6 +5005,11 @@ export default function Sidebar() {
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
   return (
     <>
+      <ThreadJumpHintModifierSync
+        keybindings={keybindings}
+        terminalOpen={routeTerminalOpen}
+        onChange={updateThreadJumpHintsVisibility}
+      />
       <ThreadContextDragGhost />
       <SidebarChromeHeader isElectron={isElectron} />
       <SidebarContent

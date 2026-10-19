@@ -77,7 +77,7 @@ function panelElement(overrides: Partial<ComponentProps<typeof RightPanelTabs>> 
       surfaces={[{ id: "files", kind: "files" }]}
       environmentId={null}
       activeSurfaceId="files"
-      pendingSurfaceIds={new Set()}
+      pendingProjectKey={null}
       previewSessions={{}}
       desktopByTabId={{}}
       terminalLabelsById={new Map()}

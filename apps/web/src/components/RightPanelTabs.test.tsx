@@ -111,7 +111,7 @@ function renderTabs(
       surfaces={second ? [previewSurface, secondSurface] : [previewSurface]}
       environmentId={null}
       activeSurfaceId={previewSurface.id}
-      pendingSurfaceIds={new Set()}
+      pendingProjectKey={null}
       previewSessions={sessions}
       desktopByTabId={{
         "tab-1": overlay(first, audio),

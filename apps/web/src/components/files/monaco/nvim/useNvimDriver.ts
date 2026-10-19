@@ -8,7 +8,7 @@ import type {
   ScopedThreadRef,
 } from "@t3tools/contracts";
 import * as monaco from "monaco-editor";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { editsForLinesEvent, editsForSnapshot, type MonacoEdit } from "./nvimModelSync.ts";
 import { toNvimKey } from "./nvimKeymap.ts";
@@ -60,7 +60,10 @@ import {
  * nothing, and the result is checked against the state afterwards. Anything
  * else is a full reconcile. Two events landing between two renders, an event
  * whose arithmetic is wrong, a client that reattached mid-edit: all of them
- * end at the same place instead of at a model that has quietly drifted.
+ * end at the same place instead of at a model that has quietly drifted. An
+ * event that changed no text costs nothing here: the fold keeps the same
+ * `lines` array for it, and the driver compares that identity before it
+ * reads the model at all.
  *
  * **Keeping Monaco's undo stack empty.** Edits are applied with `applyEdits`
  * and never `pushEditOperations`. Undo belongs to Neovim while Neovim is
@@ -94,8 +97,12 @@ export interface NvimDriverOptions {
   readonly enabled: boolean;
   /** Sends keys to the session. Returns once they are accepted, not applied. */
   readonly sendKeys: (keys: string) => void;
-  /** Opens the file in the session, handing over the text the client has. */
-  readonly openFile: (lines: ReadonlyArray<string>) => void;
+  /**
+   * Opens the file in the session, handing over the text the client has.
+   * Resolves with the lines the session answered with, or null when the open
+   * did not succeed.
+   */
+  readonly openFile: (lines: ReadonlyArray<string>) => Promise<ReadonlyArray<string> | null>;
   /** Raised when the file has to be opened again with nothing else changed. */
   readonly openGeneration: number;
   readonly setCursor: (line: number, col: number) => void;
@@ -126,6 +133,21 @@ export interface NvimDriverOptions {
   readonly isAppShortcut: (event: KeyboardEvent) => boolean;
   /** The session's state, as the attach subscription folded it. */
   readonly state: NvimDriverState;
+  /**
+   * The same state, read and followed outside React.
+   *
+   * Text, caret and mode are applied from this subscription as each event
+   * arrives, not from an effect after the render it causes: a passive effect
+   * runs a commit later, and a `j` that left the visible lines painted its
+   * caret about 160 ms after the key on the developer's laptop.
+   */
+  readonly stateSource: NvimDriverStateSource;
+}
+
+export interface NvimDriverStateSource {
+  readonly get: () => NvimDriverState;
+  /** Calls `listener` with every new state, synchronously; returns the unsubscribe. */
+  readonly subscribe: (listener: (state: NvimDriverState) => void) => () => void;
 }
 
 export interface NvimDriverState {
@@ -143,6 +165,10 @@ export interface NvimDriverState {
   readonly writeRequests: number;
   readonly latestEvent: EditorSessionEvent | null;
   readonly sequence: number;
+  /** How many snapshots arrived; see `EditorSessionState.snapshots`. */
+  readonly snapshots: number;
+  /** The lines the last snapshot carried. */
+  readonly snapshotLines: ReadonlyArray<string>;
 }
 
 /** What the status strip shows, and what the caret looks like. */
@@ -182,6 +208,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
     externalEdits,
     replaceText,
     isAppShortcut,
+    stateSource,
   } = options;
   const [mode, setMode] = useState("n");
 
@@ -189,6 +216,35 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   const applyingNvimEditRef = useRef(false);
   /** The last `state.sequence` this driver reconciled to, for this model. */
   const appliedSequenceRef = useRef<number | null>(null);
+  /**
+   * The `state.lines` this driver last made the model agree with.
+   *
+   * The fold keeps the same array for every event that changes no text — a
+   * cursor, a mode, a decoration, a message — so an unchanged identity is
+   * proof the model needs nothing, and the whole-model read and diff are
+   * skipped. Cleared whenever the model may have moved without Neovim.
+   */
+  const appliedLinesRef = useRef<ReadonlyArray<string> | null>(null);
+  /** The model those refs describe. */
+  const reconciledModelRef = useRef<monaco.editor.ITextModel | null>(null);
+  /**
+   * The open this driver is waiting on: the model it handed Neovim, the
+   * snapshot count when it did, and the lines the session answered with.
+   *
+   * Nothing is reconciled into a model until the session's state carries that
+   * open's answer, because until then it describes the text from before it — a
+   * snapshot the attachment cached, or one an attachment made before the open
+   * delivers late, either older than an edit the model kept while modal
+   * editing was off. Reconciling to it would overwrite the edit, and an open
+   * sent after that would hand Neovim the stale text.
+   *
+   * The answer is recognised as a snapshot newer than the open that carries
+   * the lines the open's reply carried: the server publishes the open's
+   * snapshot to every attachment and answers with the same one.
+   */
+  const openRef = useRef<PendingOpen | null>(null);
+  /** The reconcile the subscription runs, for the open's reply to run too. */
+  const reconcileRef = useRef<((state: NvimDriverState) => void) | null>(null);
   const appliedCursorRef = useRef<string | null>(null);
   const appliedModeRef = useRef<string | null>(null);
   /** The toplines each side sent recently, which is what makes one an echo. */
@@ -270,6 +326,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
     // Nothing the session said about the previous file applies to this one, so
     // the next state this driver sees is reconciled in full.
     appliedSequenceRef.current = null;
+    appliedLinesRef.current = null;
     appliedCursorRef.current = null;
     // The toplines belong to the file that was open, and a new file whose
     // first topline happens to equal a stale one would be taken for an echo
@@ -278,10 +335,22 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
     // A new file opens where Neovim has its cursor, whatever the wheel did to
     // the last one.
     scrollOwnerRef.current = "keys";
-    openFile(model.getLinesContent());
+    const open: PendingOpen = {
+      model,
+      snapshotsBefore: stateSource.get().snapshots,
+      reply: undefined,
+      answered: false,
+    };
+    openRef.current = open;
+    void openFile(model.getLinesContent()).then((lines) => {
+      if (openRef.current !== open) return;
+      open.reply = lines;
+      reconcileRef.current?.(stateSource.get());
+    });
     // `openGeneration` is read by nothing here and is still the point: a Retry,
     // or a session that was lost, opens the same file in the same model again.
-  }, [enabled, model, openFile, openGeneration, environmentId, cwd, relativePath]);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `openGeneration`, above.
+  }, [enabled, model, openFile, openGeneration, environmentId, cwd, relativePath, stateSource]);
 
   // Keys.
   useEffect(() => {
@@ -323,7 +392,12 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
     if (!enabled || model === null) return;
     const subscription = model.onDidChangeContent((event) => {
       if (applyingNvimEditRef.current) return;
-      if (externalEdits.isApplying()) return;
+      if (externalEdits.isApplying()) {
+        // The surface wrote the model itself, so the next state is reconciled
+        // in full rather than trusted to match.
+        appliedLinesRef.current = null;
+        return;
+      }
       // Monaco reports changes from the end of the text backwards, so reading
       // them in the order they arrive spells a multi-part composition wrong.
       const composed = [...event.changes]
@@ -339,14 +413,21 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
     return () => subscription.dispose();
   }, [enabled, model, sendKeys, externalEdits]);
 
-  // Text, cursor and mode coming back.
-  useEffect(() => {
+  // Text, cursor and mode coming back, applied as each state arrives.
+  //
+  // Subscribed rather than read in an effect: see `stateSource`. The layout
+  // effect only sets the subscription up, and reconciles once to whatever the
+  // state is by then, so a model, a file or an activation that changed between
+  // two events is caught up at once rather than at the next event.
+  useLayoutEffect(() => {
     if (!enabled || editor === null || model === null) return;
-    // Until the session says which file it has open, and while it says a
-    // different one, nothing here describes the text on screen. One session
-    // serves a whole thread, so a `lines` event still in flight for the file
-    // that was open a moment ago would otherwise be written into this one.
-    if (state.relativePath !== relativePath) return;
+    if (reconciledModelRef.current !== model) {
+      // A model kept from an earlier visit holds whatever it held then.
+      reconciledModelRef.current = model;
+      appliedLinesRef.current = null;
+      appliedSequenceRef.current = null;
+      appliedCursorRef.current = null;
+    }
 
     const apply = (edits: ReadonlyArray<MonacoEdit>) => {
       if (edits.length === 0) return false;
@@ -362,58 +443,89 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
       return true;
     };
 
-    const event = state.latestEvent;
-    const applied = appliedSequenceRef.current;
-    // One event, and this driver saw the state before it. Anything else — a
-    // first reconcile, a coalesced pair of events, an event that is not a line
-    // change — is answered by the state itself.
-    const isTheOnlyEventSince =
-      applied !== null &&
-      state.sequence === applied + 1 &&
-      event !== null &&
-      event.type === "lines";
-
-    let changed = false;
-    if (isTheOnlyEventSince && event !== null && event.type === "lines") {
-      changed = apply(editsForLinesEvent(model.getLineCount(), event));
-      if (!modelAgreesAbout(model, state.lines, event)) {
-        // The shortcut produced something the state does not agree with. The
-        // reconcile below is what makes that a dropped frame rather than a
-        // file the developer has to notice is wrong.
-        changed = apply(editsForSnapshot(model.getLinesContent(), state.lines)) || changed;
+    const reconcileText = (state: NvimDriverState): boolean => {
+      // The text has not changed since the model last agreed with it.
+      if (state.lines === appliedLinesRef.current) return false;
+      const event = state.latestEvent;
+      const applied = appliedSequenceRef.current;
+      // One event, and this driver saw the state before it. Anything else — a
+      // first reconcile, events this listener did not see one by one, a model
+      // the surface wrote to — is answered by the state itself.
+      const isTheOnlyEventSince =
+        appliedLinesRef.current !== null &&
+        applied !== null &&
+        state.sequence === applied + 1 &&
+        event !== null &&
+        event.type === "lines";
+      if (isTheOnlyEventSince && event.type === "lines") {
+        let changed = apply(editsForLinesEvent(model.getLineCount(), event));
+        if (!modelAgreesAbout(model, state.lines, event)) {
+          // The shortcut produced something the state does not agree with. The
+          // reconcile below is what makes that a dropped frame rather than a
+          // file the developer has to notice is wrong.
+          changed = apply(editsForSnapshot(model.getLinesContent(), state.lines)) || changed;
+        }
+        return changed;
       }
-    } else {
-      changed = apply(editsForSnapshot(model.getLinesContent(), state.lines));
-    }
-    appliedSequenceRef.current = state.sequence;
+      return apply(editsForSnapshot(model.getLinesContent(), state.lines));
+    };
 
-    const cursor = state.cursor;
-    if (cursor !== null) {
-      const key = `${cursor.line}:${cursor.col}`;
-      // After text lands, Monaco has moved the caret itself by mapping it
-      // through the edit, so the position is re-asserted even when Neovim
-      // reports the same one it reported before.
-      if (changed || appliedCursorRef.current !== key) {
-        appliedCursorRef.current = key;
-        const position = { lineNumber: cursor.line, column: cursor.col };
-        editor.setPosition(position);
-        // The smallest scroll that shows the caret. Neovim's own topline follows
-        // in the same frame when the key scrolled, and a centring reveal first
-        // made every scroll at the window's edge a jump and a jump back.
-        if (scrollOwnerRef.current === "keys") {
-          editor.revealPosition(position, monaco.editor.ScrollType.Immediate);
+    const reconcile = (state: NvimDriverState) => {
+      // Until the session says which file it has open, and while it says a
+      // different one, nothing here describes the text on screen. One session
+      // serves a whole thread, so a `lines` event still in flight for the file
+      // that was open a moment ago would otherwise be written into this one.
+      if (state.relativePath !== relativePath) return;
+      // Not before the session answered this model's open: see `openRef`.
+      const open = openRef.current;
+      if (open === null || open.model !== model) return;
+      if (!open.answered) {
+        if (open.reply === undefined) return;
+        if (state.snapshots <= open.snapshotsBefore) return;
+        // A failed open has no answer to wait for; the next snapshot will do.
+        if (open.reply !== null && !sameLines(state.snapshotLines, open.reply)) return;
+        open.answered = true;
+      }
+
+      const changed = reconcileText(state);
+      appliedLinesRef.current = state.lines;
+      appliedSequenceRef.current = state.sequence;
+
+      const cursor = state.cursor;
+      if (cursor !== null) {
+        const key = `${cursor.line}:${cursor.col}`;
+        // After text lands, Monaco has moved the caret itself by mapping it
+        // through the edit, so the position is re-asserted even when Neovim
+        // reports the same one it reported before.
+        if (changed || appliedCursorRef.current !== key) {
+          appliedCursorRef.current = key;
+          const position = { lineNumber: cursor.line, column: cursor.col };
+          editor.setPosition(position);
+          // The smallest scroll that shows the caret. Neovim's own topline
+          // follows in the same frame when the key scrolled, and a centring
+          // reveal first made every scroll at the window's edge a jump and a
+          // jump back.
+          if (scrollOwnerRef.current === "keys") {
+            editor.revealPosition(position, monaco.editor.ScrollType.Immediate);
+          }
         }
       }
-    }
 
-    if (appliedModeRef.current !== state.mode) {
-      appliedModeRef.current = state.mode;
-      setMode(state.mode);
-      editor.updateOptions({ cursorStyle: caretStyleFor(state.mode) });
-    }
-    // `state.sequence` is the dependency that matters: the state can be
-    // identical to the last one and still be a new event.
-  }, [enabled, editor, model, relativePath, state.sequence]);
+      if (appliedModeRef.current !== state.mode) {
+        appliedModeRef.current = state.mode;
+        setMode(state.mode);
+        editor.updateOptions({ cursorStyle: caretStyleFor(state.mode) });
+      }
+    };
+
+    const unsubscribe = stateSource.subscribe(reconcile);
+    reconcileRef.current = reconcile;
+    reconcile(stateSource.get());
+    return () => {
+      unsubscribe();
+      if (reconcileRef.current === reconcile) reconcileRef.current = null;
+    };
+  }, [enabled, editor, model, relativePath, stateSource]);
 
   // The window Monaco is showing, told to Neovim.
   //
@@ -748,6 +860,18 @@ function modelAgreesAbout(
 ): boolean {
   if (model.getLineCount() !== lines.length) return false;
   return event.lines.every((line, index) => model.getLineContent(event.first + 1 + index) === line);
+}
+
+interface PendingOpen {
+  readonly model: monaco.editor.ITextModel;
+  readonly snapshotsBefore: number;
+  /** The lines the open answered with; null for a failed open, undefined until it answers. */
+  reply: ReadonlyArray<string> | null | undefined;
+  answered: boolean;
+}
+
+function sameLines(left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean {
+  return left.length === right.length && left.every((line, index) => line === right[index]);
 }
 
 /** A collapsed range at a position, which is what leaving visual mode leaves. */
