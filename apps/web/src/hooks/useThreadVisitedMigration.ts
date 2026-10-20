@@ -20,7 +20,8 @@ const migratedThreadKeys = new Set<string>();
  * this cannot clobber progress made elsewhere.
  */
 export function useThreadVisitedMigration(): void {
-  const threads = useThreadShells();
+  // Mesura: re-read at most once a second; a one-time migration can wait (phase 6).
+  const threads = useThreadShells(true, { throttled: true });
   const visitThreadMutation = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
   useEffect(() => {
     for (const thread of threads) {

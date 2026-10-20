@@ -275,6 +275,104 @@ function mesura.close(abs_path)
   end
 end
 
+--- The buffer the host mirrors. Set by the host whenever it follows one.
+mesura.attached = 0
+
+--- The cursor, the mode, the selection anchor and flash's state, as the host
+--- reads them. Called by the host's own read and by the push below, so both
+--- answer the same thing.
+---
+--- Columns leave here in UTF-16 units, which is what the wire and Monaco count
+--- in. Neovim counts bytes: on a line holding an accent or an emoji the raw
+--- byte column put the caret several characters to the right, and past the
+--- end of the line Monaco silently clamped it there. The visual anchor comes
+--- with the mode, because getpos("v") answers wherever the cursor is when no
+--- selection is running, so the mode is what says whether it means anything.
+local function utf16_col(line, byte)
+  local text = vim.fn.getline(line)
+  return vim.str_utfindex(text, "utf-16", math.min(byte, #text), false) + 1
+end
+
+--- Whether flash is waiting for a label in the attached buffer.
+function mesura.flash_jumping(attached)
+  if attached == 0 or not vim.api.nvim_buf_is_valid(attached) then return false end
+  -- flash draws in its own namespace. Looked up until flash, which loads
+  -- lazily, has created it, and cached after: this runs on every key.
+  mesura.flash_namespace = mesura.flash_namespace or vim.api.nvim_get_namespaces().flash
+  local flash = mesura.flash_namespace
+  if flash == nil then return false end
+  -- A label is the one mark with virtual text; the backdrop and the
+  -- matches are plain highlights. Those stay up after an f motion, for ;
+  -- to repeat it, when no label is waiting.
+  local marks = vim.api.nvim_buf_get_extmarks(attached, flash, 0, -1, { details = true })
+  for _, mark in ipairs(marks) do
+    if mark[4].virt_text ~= nil then return true end
+  end
+  return false
+end
+
+--- Whether Neovim, in plain normal mode and not blocked, still waits for keys
+--- a command asked for, and whether flash waits for a label. Read after a key
+--- batch to decide where Escape goes; see modeAfterKeys in Manager.ts.
+---
+--- state() holds S while a command is unfinished: flash's f, which waits in
+--- getcharstr() with requests still served and the mode at n; a count. Also m
+--- halfway a mapping, o an operator, a insert completion, w a blocking wait.
+--- Empty at rest.
+function mesura.escape_state(attached)
+  return {
+    waiting = vim.fn.state():find("[Smoaw]") ~= nil,
+    jumping = mesura.flash_jumping(attached),
+  }
+end
+
+function mesura.cursor_state(attached)
+  local position = vim.api.nvim_win_get_cursor(0)
+  local mode = vim.api.nvim_get_mode().mode
+  local anchor = nil
+  if mode:sub(1, 1) == "v" or mode:sub(1, 1) == "V" or mode:byte(1) == 22 then
+    local other = vim.fn.getpos("v")
+    anchor = { line = other[2], col = utf16_col(other[2], other[3] - 1) }
+  end
+  local tabstop = 8
+  if attached ~= 0 and vim.api.nvim_buf_is_valid(attached) then
+    tabstop = vim.bo[attached].tabstop
+  end
+  local jumping = mesura.flash_jumping(attached)
+  return {
+    line = position[1],
+    col = utf16_col(position[1], position[2]),
+    mode = mode,
+    anchor = anchor,
+    window = vim.api.nvim_get_current_win(),
+    tabstop = tabstop,
+    jumping = jumping,
+    -- How far the window is scrolled sideways. The host's classification
+    -- reads every cell against the buffer from this column on.
+    leftcol = vim.fn.winsaveview().leftcol,
+  }
+end
+
+--- Pushes the cursor to the host whenever it moves or the mode changes.
+---
+--- Neovim runs these autocommands after it handles the key and before it
+--- redraws, so the push reaches the host ahead of the frame that draws the
+--- key, and the host sends the text and the caret together without asking.
+--- They do not fire while typeahead is pending, so a batch of keys pushes once,
+--- after its last key. Whatever moves the cursor without them (flash waiting
+--- for a label) the host still reads after the frame. 'WinScrolled' carries
+--- a sideways scroll that left the cursor where it was (zh, zl), because the
+--- push is also where the host learns 'leftcol'.
+vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI", "ModeChanged", "WinScrolled" }, {
+  group = group,
+  callback = function()
+    local channel = vim.g.mesura_channel
+    if type(channel) == "number" then
+      pcall(vim.rpcnotify, channel, "mesura:cursor", mesura.cursor_state(mesura.attached))
+    end
+  end,
+})
+
 apply_window_options()
 stop_highlighting(vim.api.nvim_get_current_buf())
 `;
@@ -328,20 +426,6 @@ for index = #edits, 1, -1 do
 end`;
 
 /**
- * Puts Neovim's window where the client's window is.
- *
- * `winrestview({ topline })` on its own does not hold. Neovim will not keep a
- * window that hides the cursor, so the moment the call returns the view snaps
- * back — measured: topline reads as the requested value from inside the same
- * Lua call and as the old one on the very next round trip, with no key sent.
- * That is exactly the case this exists for, a wheel scroll with the cursor
- * left where it was, so setting topline alone does nothing at all.
- *
- * The cursor therefore moves into the window, and only when it would otherwise
- * be outside it. That is what Vim's own mouse wheel does, and it is the
- * behaviour a developer who chose modal editing already has in their editor.
- */
-/**
  * Puts the cursor where the client put it, in the window showing the file.
  *
  * Not `nvim_win_set_cursor(0, ...)`. Window `0` is whichever window is
@@ -361,7 +445,29 @@ local target = math.max(1, math.min(line, last))
 local text = vim.api.nvim_buf_get_lines(buffer, target - 1, target, false)[1] or ""
 vim.api.nvim_win_set_cursor(window, { target, vim.str_byteindex(text, "utf-16", col, false) })`;
 
-export const SET_VIEWPORT_LUA = `local buffer, topline, rows = ...
+/**
+ * Puts Neovim's window where the client's window is.
+ *
+ * `winrestview({ topline })` on its own does not hold. Neovim will not keep a
+ * window that hides the cursor, so the moment the call returns the view snaps
+ * back — measured: topline reads as the requested value from inside the same
+ * Lua call and as the old one on the very next round trip, with no key sent.
+ * That is exactly the case this exists for, a wheel scroll with the cursor
+ * left where it was, so setting topline alone does nothing at all.
+ *
+ * The cursor therefore moves into the window, and only when it would otherwise
+ * be outside it. That is what Vim's own mouse wheel does, and it is the
+ * behaviour a developer who chose modal editing already has in their editor.
+ *
+ * Only for a scroll the pointer made. A window the client follows because a
+ * key scrolled Neovim (`keep_cursor`, the fourth argument) never moves the
+ * cursor: the request can be older than the keys Neovim has already run, or
+ * describe fewer lines than Neovim's window holds because Monaco wraps them,
+ * and pulling the cursor into it undid the keys — 50 `j` from the top of the
+ * bench's Markdown ended on line 41. The topline then goes as near the
+ * requested one as keeps the cursor in view.
+ */
+export const SET_VIEWPORT_LUA = `local buffer, topline, rows, keep_cursor = ...
 local window = vim.fn.bufwinid(buffer)
 if window == -1 then
   return
@@ -371,6 +477,31 @@ local top = math.max(1, math.min(topline, last))
 local bottom = math.max(top, math.min(last, top + rows - 1))
 vim.api.nvim_win_call(window, function()
   local view = vim.fn.winsaveview()
+  if keep_cursor then
+    if view.lnum < top then
+      top = view.lnum
+    elseif view.lnum > bottom then
+      top = math.max(1, view.lnum - rows + 1)
+    end
+    vim.fn.winrestview({ topline = top })
+    return
+  end
   local lnum = math.min(math.max(view.lnum, top), bottom)
   vim.fn.winrestview({ topline = top, lnum = lnum, col = view.col })
+end)`;
+
+/**
+ * Scrolls the window showing the file back to its first column.
+ *
+ * Neovim keeps the cursor in view on the next redraw, so asking for column 0
+ * with the cursor further right than the grid is wide only scrolls as far
+ * back as Neovim allows.
+ */
+export const RESET_LEFT_COLUMN_LUA = `local buffer = ...
+local window = vim.fn.bufwinid(buffer)
+if window == -1 then
+  return
+end
+vim.api.nvim_win_call(window, function()
+  vim.fn.winrestview({ leftcol = 0 })
 end)`;

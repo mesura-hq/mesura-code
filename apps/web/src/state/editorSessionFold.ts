@@ -79,6 +79,15 @@ export interface EditorSessionState {
   readonly ended: EditorSessionEndReason | null;
   readonly latestEvent: EditorSessionEvent | null;
   readonly sequence: number;
+  /**
+   * How many snapshots arrived. The server sends one to every attachment on
+   * each `open`, so a count above the one an open began at is that open's
+   * answer, even when the snapshot and the events after it reached the client
+   * in one update.
+   */
+  readonly snapshots: number;
+  /** The lines the last snapshot carried, before any delta after it. */
+  readonly snapshotLines: ReadonlyArray<string>;
 }
 
 export const EMPTY_EDITOR_SESSION_STATE: EditorSessionState = {
@@ -97,6 +106,8 @@ export const EMPTY_EDITOR_SESSION_STATE: EditorSessionState = {
   ended: null,
   latestEvent: null,
   sequence: 0,
+  snapshots: 0,
+  snapshotLines: [],
 };
 
 /**
@@ -138,6 +149,8 @@ export function applyEditorSessionEvent(
     case "snapshot":
       return {
         ...base,
+        snapshots: state.snapshots + 1,
+        snapshotLines: event.snapshot.lines,
         // A snapshot is a new file or a new attachment, so nothing drawn over
         // the old one survives it.
         decorations: EMPTY_DECORATION_STATE,

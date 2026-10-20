@@ -165,6 +165,11 @@ export function buildFeedPayload(input: {
   };
 }
 
+/** The read model as the change check compares it; computed once per push. */
+export function feedReadModelKey(payload: FeedPayload): string {
+  return JSON.stringify(payload.readModel);
+}
+
 /**
  * Whether the payload says anything new.
  *
@@ -176,5 +181,5 @@ export function buildFeedPayload(input: {
  * stop it.
  */
 export function hasFeedChanged(previous: string | null, next: FeedPayload): boolean {
-  return previous !== JSON.stringify(next.readModel);
+  return previous !== feedReadModelKey(next);
 }

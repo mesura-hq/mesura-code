@@ -10,7 +10,7 @@ import type { FileEditorRetention } from "../fileEditorRetention";
 import { NvimStatusStrip } from "./nvim/NvimStatusStrip";
 import { useNvimFileEditor } from "./nvim/useNvimFileEditor";
 import { installFileEditorDismissal } from "../fileEditorDismissal";
-import { setProjectFileQueryData } from "../projectFilesQueryState";
+import { getProjectFileContents, setProjectFileQueryData } from "../projectFilesQueryState";
 import { useFileSaveCoordinator } from "../useFileSaveCoordinator";
 import { minimalTextEdit } from "./monacoFileEdit";
 import { ensureMonacoEnvironment } from "./monacoEnvironment";
@@ -268,7 +268,19 @@ export function MonacoFileSurface({
     const editor = editorRef.current;
     const model = editor?.getModel();
     if (!editor || !model) return;
-    if (model.getValue() === contents) return;
+    const current = model.getValue();
+    if (current === contents) return;
+    // A render older than the model. Every edit of the editor's own writes the
+    // file's contents at once (the listener above), while this prop reaches the
+    // surface through the panel's state a commit or more later. A burst of
+    // Neovim edits between two commits — a server stall releasing coalesced
+    // keys, a main thread busy with background streams — therefore hands the
+    // surface a text it produced itself a few keys ago. Taken for somebody
+    // else's write, it went to Neovim and deleted the newer keys there (the
+    // phase-6 bench's reverted "measure"). A write from outside reaches the
+    // file's contents first, so a current text that is the model's own means
+    // there is none.
+    if (getProjectFileContents(environmentId, cwd, relativePath) === current) return;
     // Our own text coming back as a confirmation. Rewriting the model with what
     // it already said would move the caret for nothing.
     if (retention.canReuse(relativePath, contents)) return;
@@ -330,7 +342,7 @@ export function MonacoFileSurface({
     // stack on the next return to this file, because `canReuse` would compare
     // the pre-edit text against the file on disk and decide to load fresh.
     retention.noteEditorFile(relativePath, { contents });
-  }, [contents, relativePath, retention]);
+  }, [contents, environmentId, cwd, relativePath, retention]);
 
   useEffect(() => {
     editorRef.current?.updateOptions({ wordWrap: wordWrap ? "on" : "off" });
@@ -435,13 +447,15 @@ export function MonacoFileSurface({
   }, [comments.hasOpenDraft]);
 
   // Read through refs because the dismissal listener is installed once, on
-  // mount, and must see the mode as it is now rather than as it was then.
-  const nvimModeRef = useRef(nvim.mode);
-  nvimModeRef.current = nvim.mode;
+  // mount, and must see Neovim as it is now rather than as it was then.
   const nvimActiveRef = useRef(nvim.active);
   nvimActiveRef.current = nvim.active;
-  const nvimJumpingRef = useRef(nvim.jumping);
-  nvimJumpingRef.current = nvim.jumping;
+  // Layout effect, not render: written after commit and before any later
+  // keydown can reach the listener, so it never decides on a stale answer.
+  const nvimEscapeRef = useRef(nvim.escapeGoesToNeovim);
+  useLayoutEffect(() => {
+    nvimEscapeRef.current = nvim.escapeGoesToNeovim;
+  }, [nvim.escapeGoesToNeovim]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -470,16 +484,14 @@ export function MonacoFileSurface({
       // An open comment form owns Escape: it cancels the draft rather than
       // blurring the editor underneath it.
       //
-      // So does Neovim, whenever it is in any mode but plain normal — Escape
-      // is how a developer leaves insert, visual or an operator, and a host
-      // that blurred the editor instead would strand them in that mode with
-      // the keyboard somewhere else. In plain normal mode there is nothing to
-      // leave, so Escape dismisses as it always did — except while flash waits
-      // for a label. Neovim reports plain normal mode then, and Escape is how
-      // the jump is abandoned; taken as a dismissal it left the labels up.
+      // So does Neovim, unless it is known to rest in plain normal mode —
+      // Escape is how a developer leaves insert, visual or an operator, and a
+      // host that blurred the editor instead would strand them in that mode
+      // with the keyboard somewhere else. Known, not last heard of: a key
+      // still on its way can change the mode, so Escape stays Neovim's until
+      // the answer to every key says plain normal. See `escapeGoesToNeovim`.
       isBlocked: () =>
-        hasOpenDraftRef.current ||
-        (nvimActiveRef.current && (nvimModeRef.current !== "n" || nvimJumpingRef.current)),
+        hasOpenDraftRef.current || (nvimActiveRef.current && nvimEscapeRef.current()),
       onDismiss: () => {},
     });
   }, []);
@@ -502,6 +514,7 @@ export function MonacoFileSurface({
           message={nvim.message}
           fallback={nvim.fallback}
           onRetry={nvim.retry}
+          keysDelivery={nvim.keysDelivery}
         />
       ) : null}
     </div>

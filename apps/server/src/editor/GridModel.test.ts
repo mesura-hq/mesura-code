@@ -264,4 +264,77 @@ describe("classifyRow", () => {
       [],
     );
   });
+
+  describe("in a window scrolled sideways", () => {
+    const scrolled = (text: string, cells: string[], leftColumn: number, highlights?: number[]) =>
+      classifyRow({
+        cells,
+        highlights: highlights ?? cells.map(() => 0),
+        text,
+        line: 7,
+        tabstop: 4,
+        leftColumn,
+        isHostDrawn: notHostDrawn,
+      });
+
+    it("reads the row from the screen column leftcol shows", () => {
+      assert.deepStrictEqual(
+        scrolled("abcdefgh", cellsOf("d", "e", "f", "g", "h"), 3).overlays,
+        [],
+      );
+    });
+
+    it("puts a label in a scrolled row on the character it covers", () => {
+      const result = scrolled("abcdefgh", cellsOf("d", "X", "f"), 3, [0, 9, 0]);
+      assert.deepStrictEqual(result.overlays, [{ line: 7, col: 5, text: "X", hl: 9 }]);
+    });
+
+    it("reads a tab the left edge cuts from the cells it still has", () => {
+      // The tab spans screen columns 0 to 3; scrolled by 2, two of its cells
+      // are left, then "a" and "b".
+      assert.deepStrictEqual(scrolled("\tab", cellsOf(" ", " ", "a", "b"), 2).overlays, []);
+      assert.deepStrictEqual(
+        scrolled("\tab", cellsOf(" ", " ", "a", "Z"), 2, [0, 0, 0, 9]).overlays,
+        [{ line: 7, col: 3, text: "Z", hl: 9 }],
+      );
+    });
+
+    it("reads the < Neovim draws for a wide character the left edge cuts as that character", () => {
+      // `中xyz` at leftcol 1, as `nvim --embed` draws it: `<xyz`.
+      assert.deepStrictEqual(scrolled("中xyz", cellsOf("<", "x", "y", "z"), 1).overlays, []);
+    });
+
+    it("still reports a label drawn where the left edge cuts a wide character", () => {
+      const result = scrolled("中xyz", cellsOf("Q", "x", "y", "z"), 1, [9, 0, 0, 0]);
+      assert.deepStrictEqual(result.overlays, [{ line: 7, col: 1, text: "Q", hl: 9 }]);
+    });
+
+    it("counts an unprintable character before the edge as the six cells of <200b>", () => {
+      // `a\u200bbcd…` at leftcol 7, as Neovim draws it: `bcd…`.
+      assert.deepStrictEqual(scrolled("a\u200bbcdefg", cellsOf("b", "c", "d"), 7).overlays, []);
+    });
+
+    it("reads the rest of a spelling the left edge cuts as that character", () => {
+      // `<200b>` from leftcol 3 is `00b>`, measured.
+      const cells = cellsOf("0", "0", "b", ">", "b", "c");
+      assert.deepStrictEqual(scrolled("a\u200bbcdefg", cells, 3).overlays, []);
+    });
+  });
+
+  it("re-reads every row when only leftcol changed", () => {
+    const model = new GridModel();
+    attachedGrid(model, 10, 1);
+    model.setBufferLines(["abcdefgh"]);
+    writeRow(model, 0, "defgh");
+    // Read against column 0, the shifted text is all phantom labels.
+    assert.isAbove(model.collect().overlays.length, 0);
+    model.setLeftColumn(3);
+    const { overlays, changedRows } = model.collect();
+    assert.deepStrictEqual(overlays, []);
+    assert.deepStrictEqual(
+      changedRows,
+      [0],
+      "the row is owed again, though its cells did not change",
+    );
+  });
 });
