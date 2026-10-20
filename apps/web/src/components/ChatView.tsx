@@ -451,7 +451,7 @@ import {
   useThreadVisibleTurnItems,
   waitForThreadShell,
 } from "../state/entities";
-import { environmentShell } from "../state/shell";
+import { useEnvironmentShellBootstrapped } from "../state/shellBootstrapped";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { createPageScrollController, type PageScrollKey } from "./chat/pageScrollController";
 import { isTimelineScrollTarget } from "./chat/timelineScrollTarget";
@@ -2752,10 +2752,10 @@ export default function ChatView(props: ChatViewProps) {
       params: { projectKey: activeDraftLogicalProjectKey },
     });
   }, [activeDraftLogicalProjectKey, navigate]);
-  const activeEnvironmentShell = useEnvironmentQuery(
-    activeThread ? environmentShell.stateAtom(activeThread.environmentId) : null,
+  // Mesura: the flag alone; the whole shell state re-rendered this view per streamed update.
+  const activeEnvironmentBootstrapComplete = useEnvironmentShellBootstrapped(
+    activeThread?.environmentId ?? null,
   );
-  const activeEnvironmentBootstrapComplete = activeEnvironmentShell.data?.snapshot._tag === "Some";
   const activeProjectKey = activeProject
     ? `${activeProject.environmentId}:${activeProject.workspaceRoot}`
     : null;

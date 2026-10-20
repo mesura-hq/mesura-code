@@ -10,7 +10,7 @@ import type { FileEditorRetention } from "../fileEditorRetention";
 import { NvimStatusStrip } from "./nvim/NvimStatusStrip";
 import { useNvimFileEditor } from "./nvim/useNvimFileEditor";
 import { installFileEditorDismissal } from "../fileEditorDismissal";
-import { setProjectFileQueryData } from "../projectFilesQueryState";
+import { getProjectFileContents, setProjectFileQueryData } from "../projectFilesQueryState";
 import { useFileSaveCoordinator } from "../useFileSaveCoordinator";
 import { minimalTextEdit } from "./monacoFileEdit";
 import { ensureMonacoEnvironment } from "./monacoEnvironment";
@@ -268,7 +268,19 @@ export function MonacoFileSurface({
     const editor = editorRef.current;
     const model = editor?.getModel();
     if (!editor || !model) return;
-    if (model.getValue() === contents) return;
+    const current = model.getValue();
+    if (current === contents) return;
+    // A render older than the model. Every edit of the editor's own writes the
+    // file's contents at once (the listener above), while this prop reaches the
+    // surface through the panel's state a commit or more later. A burst of
+    // Neovim edits between two commits — a server stall releasing coalesced
+    // keys, a main thread busy with background streams — therefore hands the
+    // surface a text it produced itself a few keys ago. Taken for somebody
+    // else's write, it went to Neovim and deleted the newer keys there (the
+    // phase-6 bench's reverted "measure"). A write from outside reaches the
+    // file's contents first, so a current text that is the model's own means
+    // there is none.
+    if (getProjectFileContents(environmentId, cwd, relativePath) === current) return;
     // Our own text coming back as a confirmation. Rewriting the model with what
     // it already said would move the caret for nothing.
     if (retention.canReuse(relativePath, contents)) return;
@@ -330,7 +342,7 @@ export function MonacoFileSurface({
     // stack on the next return to this file, because `canReuse` would compare
     // the pre-edit text against the file on disk and decide to load fresh.
     retention.noteEditorFile(relativePath, { contents });
-  }, [contents, relativePath, retention]);
+  }, [contents, environmentId, cwd, relativePath, retention]);
 
   useEffect(() => {
     editorRef.current?.updateOptions({ wordWrap: wordWrap ? "on" : "off" });

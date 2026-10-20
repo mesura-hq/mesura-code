@@ -22,8 +22,12 @@
 
 /** React's `PerformedWork` fiber flag. */
 const PERFORMED_WORK = 1;
-/** Function, class, forwardRef, memo and simple memo components. */
-const COMPONENT_TAGS = new Set([0, 1, 11, 14, 15]);
+/**
+ * Function, class, forwardRef and simple memo components. Not `MemoComponent`
+ * (14): a `memo` with a comparator wraps a function fiber of the same name,
+ * which is the one that renders, so counting both counted each render twice.
+ */
+const COMPONENT_TAGS = new Set([0, 1, 11, 15]);
 
 interface Fiber {
   readonly tag: number;

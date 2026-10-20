@@ -25,6 +25,16 @@
  * renders, 528 row renders and 2,144 tooltip-trigger renders.
  *
  * The fixture is `test/appRootFenceMocks.tsx` without its sidebar stub.
+ *
+ * Phase 6 ("Desktop background thread sync does not tax the editor") adds one
+ * spec here, for the same harness: with ten agents streaming, every running
+ * thread's shell changes every few seconds, and the editor bench (S8) measured
+ * about 20 ms of main-thread work per shell frame, inside the WebSocket
+ * message, ahead of the editor's own replies and paints. A shell update for
+ * one thread re-rendered every row and every row's tooltips, because the
+ * memoized row's `sortable` bag was new each time: the drag sensor's options
+ * were rebuilt with each sidebar render, which renews every row's listeners,
+ * and the sortable ids were a new array, which dnd-kit reads as a reorder.
  */
 import { act, type ReactNode } from "react";
 import type { Root } from "react-dom/client";
@@ -71,12 +81,37 @@ vi.mock("@t3tools/client-runtime/state/session", async (original) =>
 const sidebarLists = vi.hoisted(() => ({
   threads: [] as unknown[],
   projects: [] as unknown[],
+  /** Readers of the thread list, told when a test replaces it (`updateThreadShell`). */
+  listeners: new Set<() => void>(),
 }));
-vi.mock("./state/entities", async (original) => ({
-  ...(await (await fenceMocks()).mockEntities(original)),
-  useThreadShells: () => sidebarLists.threads,
-  useProjects: () => sidebarLists.projects,
-}));
+vi.mock("./state/entities", async (original) => {
+  const { useSyncExternalStore } = await import("react");
+  const subscribe = (listener: () => void) => {
+    sidebarLists.listeners.add(listener);
+    return () => {
+      sidebarLists.listeners.delete(listener);
+    };
+  };
+  return {
+    ...(await (await fenceMocks()).mockEntities(original)),
+    useThreadShells: () => useSyncExternalStore(subscribe, () => sidebarLists.threads),
+    useProjects: () => sidebarLists.projects,
+  };
+});
+// The sidebar reads its thread list through this hook (phase 6); the same
+// store drives it, synchronously, since these specs count renders, not priority.
+vi.mock("./state/threadShellsTransition", async () => {
+  const { useSyncExternalStore } = await import("react");
+  const subscribe = (listener: () => void) => {
+    sidebarLists.listeners.add(listener);
+    return () => {
+      sidebarLists.listeners.delete(listener);
+    };
+  };
+  return {
+    useThreadShellsInTransition: () => useSyncExternalStore(subscribe, () => sidebarLists.threads),
+  };
+});
 vi.mock("./state/environments", async (original) =>
   (await fenceMocks()).mockEnvironments(original),
 );
@@ -459,6 +494,30 @@ describe("editor keys and the sidebar (phase 4, criterion 2)", () => {
     await mountWithEditorFocused();
     const rendered = commitCounter.stop();
     expect(countByName(rendered, "SidebarThreadRow")).toBeGreaterThanOrEqual(THREAD_COUNT);
+  });
+
+  it("background sync spec: a shell update for one thread re-renders that thread's row only", async () => {
+    await mountWithEditorFocused();
+    await settle();
+    const threads = sidebarLists.threads as ReadonlyArray<{ readonly id: string }>;
+    const changed = threads[3]!;
+    commitCounter.start();
+    // A running thread's shell, as the shell stream delivers it every few
+    // seconds: something on the row changed, its place in the list did not.
+    sidebarLists.threads = threads.map((thread) =>
+      thread === changed
+        ? { ...thread, title: "Editor key cost 4, retitled by its agent" }
+        : thread,
+    );
+    await act(async () => {
+      for (const listener of sidebarLists.listeners) listener();
+    });
+    await settle();
+    const rendered = commitCounter.stop();
+    expect(countByName(rendered, "SidebarThreadRow"), "rows re-rendered").toBe(1);
+    // The drag wrapper around each row ran `useSortable` for every thread on
+    // every shell update: 76 wrappers per update in the S8 bench (phase 6).
+    expect(countByName(rendered, "SortableThreadRow"), "row drag wrappers re-rendered").toBe(1);
   });
 
   it("editor key sidebar cost guard: plain normal and insert keys re-render no sidebar row", async () => {

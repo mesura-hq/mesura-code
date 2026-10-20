@@ -161,6 +161,12 @@ interface Session {
   bridgeScope: Scope.Closeable;
   /** How many times Neovim has been replaced in this session. */
   restarts: number;
+  /**
+   * The last key batch left Neovim waiting for a key in its own command (`g`,
+   * `Z`, an operator). Neovim defers a non-fast request until that key comes,
+   * so a call that would send one checks first; see `refuseWhileWaitingForKey`.
+   */
+  waitingForKey: boolean;
   readonly listeners: Map<Listener, Attachment>;
   /**
    * Events on their way to the listeners.
@@ -524,6 +530,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       scope,
       bridgeScope,
       restarts: 0,
+      waitingForKey: false,
       outbox,
       eventSeq: 0,
       listeners: new Map(),
@@ -698,6 +705,8 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         }
 
         session.lastActivityAt = now();
+        // Before any non-fast request below: see `cancelPendingCommand`.
+        yield* cancelPendingCommand(session, "open");
         // Not `session.currentPath` yet. The path is what every snapshot and
         // every published `lines` event is attributed to, so committing it
         // before the buffer actually exists means a failure anywhere below
@@ -1064,6 +1073,10 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
    */
   const growGridFor = (session: Session, keys: string) =>
     Effect.gen(function* () {
+      // These keys finish a command Neovim is waiting in, so they draw no text,
+      // and Neovim would hold the requests below until it had them: the keys
+      // would wait behind requests that wait for the keys.
+      if (session.waitingForKey) return;
       const bridge = session.bridge;
       const unpredictable = mayExpandUnpredictably(keys, bridge.mode);
       session.grid.reservedBatches = unpredictable
@@ -1121,6 +1134,63 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
     });
 
   /**
+   * Refuses a call whose Neovim request would wait for a key nobody can send.
+   *
+   * While Neovim waits for the rest of a command (`g`, `Z`, an operator), it
+   * defers every non-fast request, `nvim_exec_lua` included, until that key
+   * arrives. These calls hold the thread's lock, and the key arrives through
+   * `input`, which takes the same lock, so the request never answered and the
+   * thread stopped taking keys: the base of the editor latency cycle lost every
+   * key of five S8 windows that way, after a `Z` typed in normal mode. Asked
+   * with `nvim_get_mode`, which Neovim answers while it waits, and only when
+   * the last batch left it waiting, so the common path costs nothing.
+   */
+  const refuseWhileWaitingForKey = (session: Session, method: string) =>
+    Effect.gen(function* () {
+      if (!session.waitingForKey) return;
+      const reported = (yield* request(session, "nvim_get_mode", [])) as {
+        readonly blocking: boolean;
+      };
+      session.waitingForKey = reported.blocking;
+      if (!reported.blocking) return;
+      return yield* new EditorSessionRpcError({
+        threadId: session.threadId,
+        method,
+        detail: "Neovim is waiting for the rest of a command; finish or cancel it first",
+      });
+    });
+
+  /**
+   * Cancels the command Neovim is waiting in, for a call that must reach
+   * Neovim regardless: opening a file, applying an outside write.
+   *
+   * `refuseWhileWaitingForKey` is right for a cursor move or a viewport, which
+   * the client sends again; these two carry state that a refusal loses. The
+   * cancel is `<Esc>` through `nvim_input`, which Neovim takes while it waits,
+   * and the mode read after it is ordered behind it (see `modeAfterKeys`). A
+   * half-typed command is the user's to type again; a lost write is not.
+   */
+  const cancelPendingCommand = (session: Session, method: string) =>
+    Effect.gen(function* () {
+      if (!session.waitingForKey) return;
+      const readMode = request(session, "nvim_get_mode", []).pipe(
+        Effect.map((reported) => (reported as { readonly blocking: boolean }).blocking),
+      );
+      let blocking = yield* readMode;
+      if (blocking) {
+        yield* request(session, "nvim_input", ["<Esc>"]);
+        blocking = yield* readMode;
+      }
+      session.waitingForKey = blocking;
+      if (!blocking) return;
+      return yield* new EditorSessionRpcError({
+        threadId: session.threadId,
+        method,
+        detail: "Neovim is still waiting for a key after <Esc>",
+      });
+    });
+
+  /**
    * Where Neovim is once it has consumed every key it was given: the answer to
    * `input`, and `open`'s `escape`.
    *
@@ -1143,6 +1213,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         readonly mode: string;
         readonly blocking: boolean;
       };
+      session.waitingForKey = reported.blocking;
       const settled: EditorSessionInputResult = {
         mode: reported.mode,
         blocking: reported.blocking,
@@ -1155,7 +1226,10 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       ]).pipe(Effect.timeoutOption(ESCAPE_STATE_PATIENCE));
       // No answer in time: Neovim is holding its main loop, so an Escape has
       // to reach it rather than release the editor.
-      if (Option.isNone(state)) return { ...settled, blocking: true };
+      if (Option.isNone(state)) {
+        session.waitingForKey = true;
+        return { ...settled, blocking: true };
+      }
       const { waiting, jumping } = (state.value ?? {}) as {
         readonly waiting?: boolean;
         readonly jumping?: boolean;
@@ -1165,11 +1239,10 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
       // The keys are Neovim's already, so the batch succeeds; where Neovim is
       // stays unknown, which keeps the next Escape for Neovim. Failing the
       // batch instead would have the client send it again.
-      Effect.orElseSucceed((): EditorSessionInputResult => ({
-        mode: session.bridge.mode,
-        blocking: true,
-        jumping: false,
-      })),
+      Effect.orElseSucceed((): EditorSessionInputResult => {
+        session.waitingForKey = true;
+        return { mode: session.bridge.mode, blocking: true, jumping: false };
+      }),
     );
 
   const service: EditorSessionManager["Service"] = {
@@ -1292,6 +1365,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         }),
         Effect.gen(function* () {
           const session = yield* requireSession(input.threadId);
+          yield* refuseWhileWaitingForKey(session, "viewport");
           const cols = gridColumnsForViewport(
             input.cols,
             {
@@ -1319,6 +1393,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         () => ({ line: input.line, col: input.col }),
         Effect.gen(function* () {
           const session = yield* requireSession(input.threadId);
+          yield* refuseWhileWaitingForKey(session, "setCursor");
           // The window showing the mirror's buffer, not the current one. A
           // plugin can own the window while the mirror is on the file, and
           // moving the cursor in *that* window moves the plugin's.
@@ -1336,6 +1411,9 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         Effect.gen(function* () {
           const session = yield* requireSession(input.threadId);
           if (input.edits.length === 0) return;
+          // An outside write is the file's new text and must land: refusing it
+          // left the editor on the old text, which the next save wrote back.
+          yield* cancelPendingCommand(session, "replaceText");
           // One Lua call, so the whole write is one undo step. Why that
           // matters, and why the edits go back to front, is on APPLY_EDITS_LUA.
           yield* request(session, "nvim_exec_lua", [
@@ -1407,6 +1485,7 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
           return;
         }
         session.restarts += 1;
+        session.waitingForKey = false;
         session.bridgeScope = yield* Scope.fork(session.scope);
         session.bridge = yield* spawnBridge(session.threadId, session.cwd, session.bridgeScope);
         session.grid = { ...INITIAL_GRID };

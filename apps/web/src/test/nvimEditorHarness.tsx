@@ -540,6 +540,11 @@ export function makeEditableHarnessModel(lines: ReadonlyArray<string>, uri: stri
     getLineMaxColumn: (lineNumber: number) => (content()[lineNumber - 1] ?? "").length + 1,
     getLinesContent: () => content(),
     getValue: () => text,
+    /** Monaco's offset to position, against the text as it is now. */
+    getPositionAt: (offset: number) => {
+      const before = text.slice(0, Math.max(0, Math.min(offset, text.length))).split("\n");
+      return { lineNumber: before.length, column: (before.at(-1) ?? "").length + 1 };
+    },
     onDidChangeContent: (listener: (event: { changes: ReadonlyArray<unknown> }) => void) => {
       listeners.add(listener);
       return { dispose: () => listeners.delete(listener) };

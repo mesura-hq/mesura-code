@@ -12,7 +12,12 @@
  */
 import { useEffect, useRef } from "react";
 
-import { buildFeedPayload, hasFeedChanged, type FeedProject, type FeedThread } from "./threadFeed";
+import {
+  buildFeedPayload,
+  feedReadModelKey,
+  type FeedProject,
+  type FeedThread,
+} from "./threadFeed";
 
 /** A value that changes on every mount and never within one. */
 const mintGeneration = (): string =>
@@ -43,10 +48,11 @@ export function useThreadFeed(input: {
     // The read model updates per streaming token and this projection almost
     // never does, so the comparison keeps the message off the channel entirely
     // rather than letting the main process discard it after the fact.
-    const isFirstSend = lastSent.current === null;
-    if (!isFirstSend && !hasFeedChanged(lastSent.current, payload)) return;
+    // One serialization per push: the comparison and the record share it.
+    const readModelKey = feedReadModelKey(payload);
+    if (lastSent.current !== null && readModelKey === lastSent.current) return;
 
-    lastSent.current = JSON.stringify(payload.readModel);
+    lastSent.current = readModelKey;
     // Fire and forget. The answer carries nothing, and a rejection means the
     // main process has no publisher — which is not something the renderer can
     // act on, and not worth a console entry per push.
