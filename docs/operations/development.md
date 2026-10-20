@@ -34,6 +34,44 @@ Read ports from the `[dev-runner]` output. Worktrees derive stable preferences f
 but occupied ports can shift them. `T3CODE_PORT_OFFSET` or `T3CODE_DEV_INSTANCE` can select a
 different preference when needed.
 
+### Isolating a copied home from live providers
+
+A server started on a copy of a live home can reach that home's live provider sessions: the copied
+threads name sessions the developer's real agents own, and a provider started with the developer's
+HOME, binary or credentials resumes them. Editing copied provider settings field by field leaves
+paths open, so keep none of them. Before the copy's first start:
+
+1. **Write `settings.json` fresh; do not copy it.** Add only what the test needs besides the
+   providers. These must stay at their defaults, so do not carry them over from a copy:
+   - `continueThreadsAfterServerUpdate: false`, with no `projectSettingsOverrides` entry turning it
+     on: the restart continuation resumes threads with their last model selection.
+   - `autoResumeLimitedThreads: false`: the usage-limit worker resumes limited threads.
+   - `usageLimitSources: {}` and `cursorKeychainUsageEnabled: false`: both reach live accounts.
+2. **Write `providerInstances` yourself, with stubs only.** One entry per built-in driver with a
+   default instance — `codex`, `claudeAgent`, `cursor`, `grok`, `opencode`, `antigravity`, `pi`,
+   `muse` — so the registry synthesizes no enabled default (`deriveProviderInstanceConfigMap`).
+   Each entry gets a `binaryPath` to an absolute stub and scratch `homePath`/`shadowHomePath` where
+   the driver has them, and nothing else: no `environment` (it can restore `CURSOR_API_KEY`), no
+   OpenCode `serverUrl`, no API key fields. Add no `acpRegistry` instance: it runs its own
+   `commandPath` or a cached binary that no stub covers. `enabled: false` does not isolate an
+   instance, because the session manager still calls a disabled instance's adapter.
+3. **Do not rely on a stub directory on `PATH`.** The server prepends the login shell's `PATH` at
+   start (`fixPath` in `apps/server/src/os-jank.ts`), so a real `claude` in `/usr/local/bin` still
+   wins over a stub put first; the absolute stub `binaryPath`s of step 2 are what isolate.
+4. **Leave the credentials behind.** Do not copy `secrets` or `provider-auth/`, and start the server
+   without provider API keys in its environment (`env -u CURSOR_API_KEY …`). Cursor's V2 SDK
+   ignores `binaryPath` and opens a session with any key it finds there.
+5. **Start the server with a scratch home**: `HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`,
+   `XDG_STATE_HOME` and `XDG_CACHE_HOME` all under one scratch directory, because server and
+   provider code read credential files from the real home (OpenCode's `auth.json`, Cursor's
+   `~/.config/cursor/auth.json`, Antigravity's `~/.gemini`). Run Node and `vp` by absolute path
+   (nvm's `~` no longer resolves), pass the copied state with an absolute `--base-dir` or
+   `--home-dir`, and set `neovimConfigDirectory` to an absolute path if the editor is under test:
+   its default `~/.neovim` now names the scratch home.
+
+Before starting, read `settings.json` back and refuse to start unless `providerInstances` holds
+exactly the stubbed entries above.
+
 ### Sharing and remote debugging
 
 `vp run dev --share` publishes the web port over the machine's tailnet and prints a pairing URL

@@ -1164,8 +1164,10 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
    * Cancels the command Neovim is waiting in, for a call that must reach
    * Neovim regardless: opening a file, applying an outside write.
    *
-   * `refuseWhileWaitingForKey` is right for a cursor move or a viewport, which
-   * the client sends again; these two carry state that a refusal loses. The
+   * `refuseWhileWaitingForKey` is right for a cursor move or a viewport: the
+   * refused call is discarded, nothing retries it, and the user's next click
+   * or scroll sends a fresh one. These two carry state that must reach Neovim
+   * and a refusal would lose. The
    * cancel is `<Esc>` through `nvim_input`, which Neovim takes while it waits,
    * and the mode read after it is ordered behind it (see `modeAfterKeys`). A
    * half-typed command is the user's to type again; a lost write is not.

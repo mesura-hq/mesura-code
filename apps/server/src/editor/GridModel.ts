@@ -95,9 +95,11 @@ export class GridModel {
   /**
    * Whether anything the classification reads moved since the last collect.
    *
-   * A real configuration flushes about 230 times a second while idle, nearly
-   * always drawing nothing, so re-reading the whole grid on every one of them
-   * is work for no answer.
+   * How often an idle Neovim flushes depends on the configuration: the
+   * developer's at `~/.neovim` `c730dae` flushes not at all, while an earlier
+   * state of it flushed about 230 times a second, nearly always drawing
+   * nothing. Re-reading the whole grid on every such flush is work for no
+   * answer.
    */
   #dirty = true;
   #overlays: GridOverlay[] = [];
@@ -159,9 +161,10 @@ export class GridModel {
    * The companion to `cellsDrawn`, and needed because a great many keys draw
    * no cells at all: with autopairs on, typing the `)` it already inserted
    * only steps the cursor over it. Between them the two counters answer "did
-   * anything happen", which is what tells a key's own frame from the steady
-   * stream of empty ones a real configuration emits — measured at about one
-   * every four milliseconds, nearly all of them drawing nothing.
+   * anything happen", which is what tells a key's own frame from the empty
+   * ones a configuration can emit with no key in flight — an earlier state of
+   * the developer's configuration emitted one about every four milliseconds
+   * while idle; at `~/.neovim` `c730dae` it emits none.
    */
   get cursorMoves(): number {
     return this.#cursorMoves;
