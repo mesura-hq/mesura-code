@@ -30,62 +30,59 @@ export const realConfigDirectory = (() => {
  * named, and otherwise a directory under `root` with an empty `init.lua`, so
  * the real launch path runs in continuous integration too.
  */
-export const makeScratchManager = (root: string) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    if (realConfigDirectory !== null) {
-      return yield* EditorSessionManager.makeWithOptions({
-        configDirectory: realConfigDirectory,
-        stateDir: `${root}/state`,
-      });
-    }
-    const configDirectory = `${root}/config`;
-    yield* fs.makeDirectory(configDirectory, { recursive: true });
-    yield* fs.writeFileString(`${configDirectory}/init.lua`, "-- a configuration\n");
+export const makeScratchManager = Effect.fn(function* (root: string) {
+  const fs = yield* FileSystem.FileSystem;
+  if (realConfigDirectory !== null) {
     return yield* EditorSessionManager.makeWithOptions({
-      configDirectory,
+      configDirectory: realConfigDirectory,
       stateDir: `${root}/state`,
-      homeDir: root,
     });
+  }
+  const configDirectory = `${root}/config`;
+  yield* fs.makeDirectory(configDirectory, { recursive: true });
+  yield* fs.writeFileString(`${configDirectory}/init.lua`, "-- a configuration\n");
+  return yield* EditorSessionManager.makeWithOptions({
+    configDirectory,
+    stateDir: `${root}/state`,
+    homeDir: root,
   });
+});
 
 /**
  * Records every chunk the attachment yields, in order, as the RPC server would
  * pull them: the next chunk is pulled the moment the last one is recorded.
  */
-export const recordChunks = (
+export const recordChunks = Effect.fn(function* (
   manager: EditorSessionManager.EditorSessionManager["Service"],
   threadId: string,
-) =>
-  Effect.gen(function* () {
-    const chunks: Array<ReadonlyArray<EditorSessionEvent>> = [];
-    const watchers = new Set<() => void>();
-    const attached = yield* Deferred.make<void>();
-    yield* Stream.runForEachArray(
-      EditorSessionManager.attachEventStream(manager, { threadId }),
-      (chunk) =>
-        Effect.gen(function* () {
-          chunks.push(chunk);
-          for (const watcher of watchers) watcher();
-          yield* Deferred.succeed(attached, undefined);
-        }),
-    ).pipe(Effect.forkScoped);
-    yield* Deferred.await(attached);
-
-    /** Waits until some event recorded at or after chunk `from` satisfies `matches`. */
-    const waitFor = (matches: (event: EditorSessionEvent) => boolean, from = 0) =>
+) {
+  const chunks: Array<ReadonlyArray<EditorSessionEvent>> = [];
+  const watchers = new Set<() => void>();
+  const attached = yield* Deferred.make<void>();
+  yield* Stream.runForEachArray(
+    EditorSessionManager.attachEventStream(manager, { threadId }),
+    (chunk) =>
       Effect.gen(function* () {
-        const seen = yield* Deferred.make<void>();
-        const check = () => {
-          if (chunks.slice(from).some((chunk) => chunk.some(matches))) {
-            Deferred.doneUnsafe(seen, Effect.void);
-          }
-        };
-        watchers.add(check);
-        check();
-        yield* Deferred.await(seen);
-        watchers.delete(check);
-      });
+        chunks.push(chunk);
+        for (const watcher of watchers) watcher();
+        yield* Deferred.succeed(attached, undefined);
+      }),
+  ).pipe(Effect.forkScoped);
+  yield* Deferred.await(attached);
 
-    return { chunks, waitFor };
+  /** Waits until some event recorded at or after chunk `from` satisfies `matches`. */
+  const waitFor = Effect.fn(function* (matches: (event: EditorSessionEvent) => boolean, from = 0) {
+    const seen = yield* Deferred.make<void>();
+    const check = () => {
+      if (chunks.slice(from).some((chunk) => chunk.some(matches))) {
+        Deferred.doneUnsafe(seen, Effect.void);
+      }
+    };
+    watchers.add(check);
+    check();
+    yield* Deferred.await(seen);
+    watchers.delete(check);
   });
+
+  return { chunks, waitFor };
+});

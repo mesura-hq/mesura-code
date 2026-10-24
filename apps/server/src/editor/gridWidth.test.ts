@@ -135,8 +135,10 @@ describe("the cost of measuring before every key batch", () => {
     const lines = Array.from({ length: 300 }, (_, index) => `é${"x".repeat(1099 - (index % 7))}`);
     const input = { lines, topline: 100, rows: 7, tabstop: 8, cursorLine: 103, pendingCells: 1 };
     grownGridColumns(1228, input);
+    // oxlint-disable-next-line t3code/no-wall-clock-in-tests -- This CPU regression measures the cost of 100 real width calculations; virtual time cannot detect repeated work.
     const started = performance.now();
     for (let batch = 0; batch < 100; batch += 1) grownGridColumns(1228, input);
+    // oxlint-disable-next-line t3code/no-wall-clock-in-tests -- This CPU regression measures the cost of 100 real width calculations; virtual time cannot detect repeated work.
     assert.isBelow(performance.now() - started, 1000, "ms for 100 batches");
   });
 });

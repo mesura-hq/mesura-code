@@ -77,7 +77,6 @@ function sortedByIndex(entries: ReadonlyArray<string>, pattern: RegExp): Array<s
 const readOptionalFile = (fs: FileSystem.FileSystem, path: string) =>
   fs.readFileString(path).pipe(Effect.option);
 
-// ---------------------------------------------------------------------------
 // CPU, load, memory
 
 type CpuReading = {
@@ -109,22 +108,26 @@ export function parseProcStat(text: string): CpuReading {
   return { cpuCount: cpuCounters && cpuCount > 0 ? cpuCount : null, cpuCounters };
 }
 
-export const readCpu = (roots: HostStatsRoots) =>
-  Effect.gen(function* () {
+export const readCpu = Effect.fn(
+  function* (roots: HostStatsRoots) {
     const fs = yield* FileSystem.FileSystem;
     return parseProcStat(yield* fs.readFileString(`${roots.procRoot}/stat`));
-  }).pipe(withNullsOnFailure<CpuReading>({ cpuCount: null, cpuCounters: null }));
+  },
+  withNullsOnFailure<CpuReading>({ cpuCount: null, cpuCounters: null }),
+);
 
-export const readLoad = (roots: HostStatsRoots) =>
-  Effect.gen(function* () {
+export const readLoad = Effect.fn(
+  function* (roots: HostStatsRoots) {
     const fs = yield* FileSystem.FileSystem;
     const text = yield* fs.readFileString(`${roots.procRoot}/loadavg`);
     const match = /^(\d+(?:\.\d+)?)\s/.exec(text);
     return { load1: match ? Number(match[1]) : null };
-  }).pipe(withNullsOnFailure<{ readonly load1: number | null }>({ load1: null }));
+  },
+  withNullsOnFailure<{ readonly load1: number | null }>({ load1: null }),
+);
 
-export const readMemory = (roots: HostStatsRoots) =>
-  Effect.gen(function* () {
+export const readMemory = Effect.fn(
+  function* (roots: HostStatsRoots) {
     const fs = yield* FileSystem.FileSystem;
     const text = yield* fs.readFileString(`${roots.procRoot}/meminfo`);
     const kibibytes = new Map(
@@ -148,16 +151,15 @@ export const readMemory = (roots: HostStatsRoots) =>
       swapUsedBytes: swap.used,
       swapTotalBytes: swap.total,
     };
-  }).pipe(
-    withNullsOnFailure<MemoryReading>({
-      memUsedBytes: null,
-      memTotalBytes: null,
-      swapUsedBytes: null,
-      swapTotalBytes: null,
-    }),
-  );
+  },
+  withNullsOnFailure<MemoryReading>({
+    memUsedBytes: null,
+    memTotalBytes: null,
+    swapUsedBytes: null,
+    swapTotalBytes: null,
+  }),
+);
 
-// ---------------------------------------------------------------------------
 // Network
 
 /** Receive and transmit bytes per interface from `/proc/net/dev`, or null when malformed. */
@@ -182,8 +184,8 @@ export function parseProcNetDev(text: string): ReadonlyArray<NetworkInterfaceCou
  * link in `/sys/class/net`, which leaves out `lo`, `tailscale0`, bridges and
  * veths.
  */
-export const readNetwork = (roots: HostStatsRoots) =>
-  Effect.gen(function* () {
+export const readNetwork = Effect.fn(
+  function* (roots: HostStatsRoots) {
     const fs = yield* FileSystem.FileSystem;
     const interfaces = parseProcNetDev(yield* fs.readFileString(`${roots.procRoot}/net/dev`));
     if (!interfaces) return { netCounters: null };
@@ -191,13 +193,12 @@ export const readNetwork = (roots: HostStatsRoots) =>
       fs.exists(`${roots.sysRoot}/class/net/${networkInterface.name}/device`),
     );
     return { netCounters: physical };
-  }).pipe(
-    withNullsOnFailure<{ readonly netCounters: ReadonlyArray<NetworkInterfaceCounters> | null }>({
-      netCounters: null,
-    }),
-  );
+  },
+  withNullsOnFailure<{ readonly netCounters: ReadonlyArray<NetworkInterfaceCounters> | null }>({
+    netCounters: null,
+  }),
+);
 
-// ---------------------------------------------------------------------------
 // Temperature
 
 /** Chips in preference order, with the label that names the package temperature. */
@@ -215,8 +216,8 @@ const CPU_TEMPERATURE_CHIPS: ReadonlyArray<{
  * labelled input wins; without labels, its first input. A preferred chip
  * with an unreadable value is null rather than a lower-priority sensor.
  */
-export const readCpuTemperature = (roots: HostStatsRoots) =>
-  Effect.gen(function* () {
+export const readCpuTemperature = Effect.fn(
+  function* (roots: HostStatsRoots) {
     const fs = yield* FileSystem.FileSystem;
     const hwmonDirectory = `${roots.sysRoot}/class/hwmon`;
     const chips = new Map<string, string>();
@@ -246,11 +247,10 @@ export const readCpuTemperature = (roots: HostStatsRoots) =>
     if (!chosen) return { cpuTemperatureC: null };
     const millidegrees = parseInteger(yield* fs.readFileString(`${chipDirectory}/${chosen}_input`));
     return { cpuTemperatureC: millidegrees === null ? null : millidegrees / 1000 };
-  }).pipe(
-    withNullsOnFailure<{ readonly cpuTemperatureC: number | null }>({ cpuTemperatureC: null }),
-  );
+  },
+  withNullsOnFailure<{ readonly cpuTemperatureC: number | null }>({ cpuTemperatureC: null }),
+);
 
-// ---------------------------------------------------------------------------
 // GPUs
 
 const GPU_VENDORS: Readonly<Record<string, HostStatsGpu["vendor"]>> = {
@@ -343,8 +343,8 @@ const unavailableGpu = (id: string, vendor: HostStatsGpu["vendor"]): HostStatsGp
  * reported as sleeping and nothing is spawned. A card with no metric files
  * (a virtual display adapter) is skipped; no measurable card is null.
  */
-export const readGpus = (roots: HostStatsRoots) =>
-  Effect.gen(function* () {
+export const readGpus = Effect.fn(
+  function* (roots: HostStatsRoots) {
     const fs = yield* FileSystem.FileSystem;
     const drmDirectory = `${roots.sysRoot}/class/drm`;
     const readNumber = (path: string) =>
@@ -398,6 +398,6 @@ export const readGpus = (roots: HostStatsRoots) =>
       }
     }
     return { gpus: gpus.length > 0 ? gpus : null };
-  }).pipe(
-    withNullsOnFailure<{ readonly gpus: ReadonlyArray<HostStatsGpu> | null }>({ gpus: null }),
-  );
+  },
+  withNullsOnFailure<{ readonly gpus: ReadonlyArray<HostStatsGpu> | null }>({ gpus: null }),
+);

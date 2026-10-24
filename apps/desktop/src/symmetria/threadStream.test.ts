@@ -195,6 +195,7 @@ describe("createThreadStreamServer", () => {
       // where the linter reads an unmodified condition and says so.
       if (closed) break;
       server.broadcast(fat);
+      // oxlint-disable-next-line t3code/no-real-time-wait-in-tests -- Yield to the real socket while filling its backpressure buffer; a fake clock cannot drive kernel I/O.
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
 

@@ -96,47 +96,46 @@ error("no window shows a file named *" .. suffix)`;
  * Connects to `socketPath` for the life of the scope. Neovim listens from its
  * first moment, so once the manager's `open` has returned the socket is there.
  */
-export const connectSideChannel = (socketPath: string) =>
-  Effect.gen(function* () {
-    const socket = yield* Effect.acquireRelease(
-      Effect.callback<NodeNet.Socket>((resume) => {
-        const connection = NodeNet.createConnection(socketPath, () =>
-          resume(Effect.succeed(connection)),
-        );
-        connection.once("error", (error) => resume(Effect.die(error)));
-      }),
-      (connection) => Effect.sync(() => connection.destroy()),
-    );
-    const packr = new Packr({ useRecords: false });
-    const unpacker = new UnpackrStream({ useRecords: false, mapsAsObjects: true });
-    socket.pipe(unpacker);
-    const pending = new Map<number, (error: unknown, result: unknown) => void>();
-    unpacker.on("data", (message: ReadonlyArray<unknown>) => {
-      if (message[0] !== 1) return;
-      const answer = pending.get(message[1] as number);
-      pending.delete(message[1] as number);
-      answer?.(message[2], message[3]);
-    });
-    let nextId = 0;
-
-    const request = (method: string, params: ReadonlyArray<unknown>) =>
-      Effect.callback<unknown>((resume) => {
-        nextId += 1;
-        pending.set(nextId, (error, result) =>
-          resume(
-            error === null || error === undefined
-              ? Effect.succeed(result)
-              : Effect.die(new Error(`${method}: ${JSON.stringify(error)}`)),
-          ),
-        );
-        socket.write(packr.pack([0, nextId, method, params]));
-      });
-
-    const inFileWindow = (suffix: string, lua: string) =>
-      request("nvim_exec_lua", [IN_FILE_WINDOW_LUA, [suffix, lua]]);
-
-    const viewOf = (suffix: string) =>
-      inFileWindow(suffix, "return vim.fn.winsaveview()") as Effect.Effect<FileWindowView>;
-
-    return { request, inFileWindow, viewOf } satisfies SideChannel;
+export const connectSideChannel = Effect.fn(function* (socketPath: string) {
+  const socket = yield* Effect.acquireRelease(
+    Effect.callback<NodeNet.Socket>((resume) => {
+      const connection = NodeNet.createConnection(socketPath, () =>
+        resume(Effect.succeed(connection)),
+      );
+      connection.once("error", (error) => resume(Effect.die(error)));
+    }),
+    (connection) => Effect.sync(() => connection.destroy()),
+  );
+  const packr = new Packr({ useRecords: false });
+  const unpacker = new UnpackrStream({ useRecords: false, mapsAsObjects: true });
+  socket.pipe(unpacker);
+  const pending = new Map<number, (error: unknown, result: unknown) => void>();
+  unpacker.on("data", (message: ReadonlyArray<unknown>) => {
+    if (message[0] !== 1) return;
+    const answer = pending.get(message[1] as number);
+    pending.delete(message[1] as number);
+    answer?.(message[2], message[3]);
   });
+  let nextId = 0;
+
+  const request = (method: string, params: ReadonlyArray<unknown>) =>
+    Effect.callback<unknown>((resume) => {
+      nextId += 1;
+      pending.set(nextId, (error, result) =>
+        resume(
+          error === null || error === undefined
+            ? Effect.succeed(result)
+            : Effect.die(new Error(`${method}: ${JSON.stringify(error)}`)),
+        ),
+      );
+      socket.write(packr.pack([0, nextId, method, params]));
+    });
+
+  const inFileWindow = (suffix: string, lua: string) =>
+    request("nvim_exec_lua", [IN_FILE_WINDOW_LUA, [suffix, lua]]);
+
+  const viewOf = (suffix: string) =>
+    inFileWindow(suffix, "return vim.fn.winsaveview()") as Effect.Effect<FileWindowView>;
+
+  return { request, inFileWindow, viewOf } satisfies SideChannel;
+});

@@ -349,6 +349,7 @@ describe("DesktopLinuxUrlHandler", () => {
 
 interface ThemeIconRun {
   readonly root: string;
+  readonly linuxDesktopEntryName?: string;
   readonly commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }>;
   readonly iconCacheOptions?: Array<Record<string, unknown>>;
   readonly sourceMissing?: boolean;
@@ -375,6 +376,9 @@ const registerWithRealFileSystem = (run: ThemeIconRun) =>
                 Effect.map((path) =>
                   makeEnvironment(path, {
                     linuxApplicationsDir: path.join(run.root, "applications"),
+                    ...(run.linuxDesktopEntryName === undefined
+                      ? {}
+                      : { linuxDesktopEntryName: run.linuxDesktopEntryName }),
                   }),
                 ),
               ),
@@ -481,21 +485,25 @@ it.layer(NodeServices.layer)("DesktopLinuxUrlHandler theme icons", (it) => {
       const path = yield* Path.Path;
       const icon = new Uint8Array([137, 80, 78, 71, 1, 2, 3]);
       const fixture = yield* themeIconFixture(icon);
-      const run: ThemeIconRun = { root: fixture.root, commands: [] };
+      const run: ThemeIconRun = {
+        root: fixture.root,
+        commands: [],
+        linuxDesktopEntryName: "Mesura-Code.desktop",
+      };
 
       yield* registerWithRealFileSystem(run);
       assert.deepEqual([...(yield* fileSystem.readDirectory(fixture.appsDir))].sort(), [
-        "com.t3tools.T3Code.png",
-        "com.t3tools.t3code.png",
+        "Mesura-Code.png",
+        "mesura-code.png",
       ]);
-      for (const name of ["com.t3tools.t3code", "com.t3tools.T3Code"]) {
+      for (const name of ["mesura-code", "Mesura-Code"]) {
         const target = path.join(fixture.appsDir, `${name}.png`);
         assert.deepEqual([...(yield* fileSystem.readFile(target))], [...icon]);
         yield* fileSystem.utimes(target, fixture.pastSeconds, fixture.pastSeconds);
       }
 
       yield* registerWithRealFileSystem(run);
-      for (const name of ["com.t3tools.t3code", "com.t3tools.T3Code"]) {
+      for (const name of ["mesura-code", "Mesura-Code"]) {
         const info = yield* fileSystem.stat(path.join(fixture.appsDir, `${name}.png`));
         assert.equal(Option.getOrThrow(info.mtime).getTime(), fixture.pastSeconds * 1000);
       }
@@ -510,8 +518,8 @@ it.layer(NodeServices.layer)("DesktopLinuxUrlHandler theme icons", (it) => {
       const path = yield* Path.Path;
       const fixture = yield* themeIconFixture(new Uint8Array([1, 2, 3]));
       yield* fixture.seedCache;
-      const lower = path.join(fixture.appsDir, "com.t3tools.t3code.png");
-      const upper = path.join(fixture.appsDir, "com.t3tools.T3Code.png");
+      const lower = path.join(fixture.appsDir, "mesura-code.png");
+      const upper = path.join(fixture.appsDir, "Mesura-Code.png");
       yield* fileSystem.writeFile(lower, new Uint8Array([3, 2, 1]));
       yield* fileSystem.writeFile(upper, new Uint8Array([1, 2, 3]));
       for (const target of [lower, upper]) {
@@ -521,6 +529,7 @@ it.layer(NodeServices.layer)("DesktopLinuxUrlHandler theme icons", (it) => {
         root: fixture.root,
         commands: [],
         onIconCacheRefresh: fixture.rewriteCache,
+        linuxDesktopEntryName: "Mesura-Code.desktop",
       };
 
       yield* registerWithRealFileSystem(run);
@@ -553,7 +562,7 @@ it.layer(NodeServices.layer)("DesktopLinuxUrlHandler theme icons", (it) => {
 
       yield* registerWithRealFileSystem(run);
 
-      assert.isTrue(yield* fileSystem.exists(path.join(fixture.appsDir, "com.t3tools.T3Code.png")));
+      assert.isTrue(yield* fileSystem.exists(path.join(fixture.appsDir, "mesura-code.png")));
       assert.equal(iconCacheRuns(run), 1);
     }).pipe(Effect.scoped),
   );

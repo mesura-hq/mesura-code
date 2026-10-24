@@ -243,14 +243,17 @@ export const make = Effect.gen(function* () {
   };
 
   /** The watch set brought up to date, then one read. The order is the point. */
-  const scan = (cwd: string, watches: Map<string, ArmedWatch>, trigger: Queue.Queue<void>) =>
-    Effect.gen(function* () {
-      const layout = yield* readWatchLayout(cwd);
-      reconcileWatches(watches, layout, trigger);
-      const result = yield* readWorkingTreeChanges(readDependencies, cwd);
-      tuning.afterRead(cwd);
-      return { result, overLimit: layout.overLimit };
-    });
+  const scan = Effect.fn(function* (
+    cwd: string,
+    watches: Map<string, ArmedWatch>,
+    trigger: Queue.Queue<void>,
+  ) {
+    const layout = yield* readWatchLayout(cwd);
+    reconcileWatches(watches, layout, trigger);
+    const result = yield* readWorkingTreeChanges(readDependencies, cwd);
+    tuning.afterRead(cwd);
+    return { result, overLimit: layout.overLimit };
+  });
 
   const openSession = Effect.fn("GitWorkingTreeWatcher.openSession")(function* (cwd: string) {
     const scope = yield* Scope.make("sequential");

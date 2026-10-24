@@ -60,16 +60,15 @@ export function roundBucketForWire(bucket: HostStatsBucket): HostStatsBucket {
 }
 
 /** The host facts, read at `now`; boot time is on the server's clock, like `serverNow`. */
-export const readHostFacts = (now: number) =>
-  Effect.gen(function* () {
-    return {
-      hostname: yield* HostProcess.Hostname,
-      platform: yield* HostProcess.Platform,
-      arch: yield* HostProcess.Architecture,
-      cpuCount: (yield* HostOs).cpus().length,
-      bootedAt: Math.max(0, Math.round(now - NodeOS.uptime() * 1000)),
-    } satisfies HostStatsHostFacts;
-  });
+export const readHostFacts = Effect.fn(function* (now: number) {
+  return {
+    hostname: yield* HostProcess.Hostname,
+    platform: yield* HostProcess.Platform,
+    arch: yield* HostProcess.Architecture,
+    cpuCount: (yield* HostOs).cpus().length,
+    bootedAt: Math.max(0, Math.round(now - NodeOS.uptime() * 1000)),
+  } satisfies HostStatsHostFacts;
+});
 
 export function makeSnapshotMessage(input: {
   readonly serverNow: number;

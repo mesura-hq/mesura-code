@@ -294,28 +294,31 @@ export function memoizeRepositoryReads(
     return turnFingerprints.get(cwd) ?? null;
   };
 
-  const remembered = <A, E>(cwd: string, readKey: string, read: Effect.Effect<A, E>) =>
-    Effect.gen(function* () {
-      if (!(yield* UseRepositoryStateMemo)) return yield* read;
-      const fingerprint = fingerprintThisTurn(cwd);
-      if (fingerprint === null) return yield* read;
-      let checkout = checkouts.get(cwd);
-      if (checkout === undefined || checkout.fingerprint !== fingerprint) {
-        checkout = { fingerprint, reads: new Map() };
-        checkouts.delete(cwd);
-        if (checkouts.size >= MAX_CHECKOUTS) {
-          const oldest = checkouts.keys().next().value;
-          if (oldest !== undefined) checkouts.delete(oldest);
-        }
-        checkouts.set(cwd, checkout);
+  const remembered = Effect.fn(function* <A, E>(
+    cwd: string,
+    readKey: string,
+    read: Effect.Effect<A, E>,
+  ): Effect.fn.Return<A, E> {
+    if (!(yield* UseRepositoryStateMemo)) return yield* read;
+    const fingerprint = fingerprintThisTurn(cwd);
+    if (fingerprint === null) return yield* read;
+    let checkout = checkouts.get(cwd);
+    if (checkout === undefined || checkout.fingerprint !== fingerprint) {
+      checkout = { fingerprint, reads: new Map() };
+      checkouts.delete(cwd);
+      if (checkouts.size >= MAX_CHECKOUTS) {
+        const oldest = checkouts.keys().next().value;
+        if (oldest !== undefined) checkouts.delete(oldest);
       }
-      const reads = checkout.reads;
-      if (reads.has(readKey)) return reads.get(readKey) as A;
-      const value = yield* read;
-      // A newer fingerprint may have replaced this checkout's table meanwhile.
-      if (checkouts.get(cwd)?.reads === reads) reads.set(readKey, value);
-      return value;
-    });
+      checkouts.set(cwd, checkout);
+    }
+    const reads = checkout.reads;
+    if (reads.has(readKey)) return reads.get(readKey) as A;
+    const value = yield* read;
+    // A newer fingerprint may have replaced this checkout's table meanwhile.
+    if (checkouts.get(cwd)?.reads === reads) reads.set(readKey, value);
+    return value;
+  });
 
   return {
     ...git,

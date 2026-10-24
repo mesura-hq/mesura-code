@@ -33,6 +33,7 @@ const makeMemoizedDriver = Effect.gen(function* () {
   const asSweep = <A, E>(effect: Effect.Effect<A, E>) =>
     effect.pipe(Effect.provideService(UseRepositoryStateMemo, true));
   // A fresh event-loop turn, so the next read recomputes the fingerprint.
+  // oxlint-disable-next-line t3code/no-real-time-wait-in-tests -- The memo expires fingerprints with setImmediate; a real event-loop turn exercises that cache boundary without sleeping.
   const nextTurn = Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
   return { repo, memoized, spawned, asSweep, nextTurn };
 });

@@ -94,55 +94,53 @@ interface ReadInput {
  * what the panel needs, and a response body is exactly the thing most likely to
  * quote a token back at us.
  */
-function readUsage(input: {
+const readUsage = Effect.fn(function* (input: {
   readonly request: SubscriptionHttpRequest;
   readonly get: (
     request: SubscriptionHttpRequest,
   ) => Effect.Effect<SubscriptionHttpResponse, SubscriptionTransportError>;
   readonly normalize: (payload: unknown) => NormalizedAccountLimits | null;
   readonly vendor: string;
-}): Effect.Effect<NormalizedAccountLimits, SubscriptionReadError> {
-  return Effect.gen(function* () {
-    const response = yield* input.get(input.request).pipe(
-      Effect.timeout(SUBSCRIPTION_READ_TIMEOUT),
-      Effect.mapError(
-        () =>
-          new SubscriptionReadError({
-            reason: "unreachable",
-            detail: `${input.vendor} usage endpoint did not answer.`,
-          }),
-      ),
-    );
-
-    if (response.status === 401 || response.status === 403) {
-      return yield* Effect.fail(
-        new SubscriptionReadError({
-          reason: "unauthorized",
-          detail: `${input.vendor} rejected the subscription's credential.`,
-        }),
-      );
-    }
-    // A throttle is a transient vendor condition, not something we misparsed.
-    // Letting it fall through would report it to the user as our bug.
-    if (response.status === 429 || response.status >= 500) {
-      return yield* Effect.fail(
+}): Effect.fn.Return<NormalizedAccountLimits, SubscriptionReadError> {
+  const response = yield* input.get(input.request).pipe(
+    Effect.timeout(SUBSCRIPTION_READ_TIMEOUT),
+    Effect.mapError(
+      () =>
         new SubscriptionReadError({
           reason: "unreachable",
-          detail: `${input.vendor} usage endpoint answered ${response.status}.`,
+          detail: `${input.vendor} usage endpoint did not answer.`,
         }),
-      );
-    }
+    ),
+  );
 
-    const unrecognized = new SubscriptionReadError({
-      reason: "unrecognized",
-      detail: `${input.vendor} usage reading was not understood.`,
-    });
-    const payload = yield* decodeJson(response.body).pipe(Effect.mapError(() => unrecognized));
-    const normalized = input.normalize(payload);
-    if (normalized === null) return yield* Effect.fail(unrecognized);
-    return normalized;
+  if (response.status === 401 || response.status === 403) {
+    return yield* Effect.fail(
+      new SubscriptionReadError({
+        reason: "unauthorized",
+        detail: `${input.vendor} rejected the subscription's credential.`,
+      }),
+    );
+  }
+  // A throttle is a transient vendor condition, not something we misparsed.
+  // Letting it fall through would report it to the user as our bug.
+  if (response.status === 429 || response.status >= 500) {
+    return yield* Effect.fail(
+      new SubscriptionReadError({
+        reason: "unreachable",
+        detail: `${input.vendor} usage endpoint answered ${response.status}.`,
+      }),
+    );
+  }
+
+  const unrecognized = new SubscriptionReadError({
+    reason: "unrecognized",
+    detail: `${input.vendor} usage reading was not understood.`,
   });
-}
+  const payload = yield* decodeJson(response.body).pipe(Effect.mapError(() => unrecognized));
+  const normalized = input.normalize(payload);
+  if (normalized === null) return yield* Effect.fail(unrecognized);
+  return normalized;
+});
 
 /** The OpenCode Go plan, authenticated with a bearer token. */
 export function readOpenCodeGoUsage(input: ReadInput) {

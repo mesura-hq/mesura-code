@@ -118,69 +118,70 @@ function hostDependencies(overrides: HostOverrides): Dependencies {
   };
 }
 
-export const make = (overrides: HostOverrides = {}) =>
-  Effect.gen(function* () {
-    const transport = createWsIpcSurface();
-    const registry = createRegistry(transport.surface, hostDependencies(overrides));
-    yield* Effect.addFinalizer(() => Effect.sync(() => registry.dispose()));
+export const make = Effect.fn(function* (overrides: HostOverrides = {}) {
+  const transport = createWsIpcSurface();
+  const registry = createRegistry(transport.surface, hostDependencies(overrides));
+  yield* Effect.addFinalizer(() => Effect.sync(() => registry.dispose()));
 
-    const invoke = (clientId: string, sessionId: string, channel: string, payload: unknown) =>
-      Effect.tryPromise({
-        try: () => transport.invoke({ owner: clientId, sessionId }, channel, payload),
-        catch: (cause) =>
-          new FileManagerError({
-            sessionId,
-            channel,
-            message: `The file manager host failed on ${channel}.`,
-            cause,
-          }),
-      });
-
-    const openSession: FileManagerHost["Service"]["openSession"] = (clientId, { sessionId }) =>
-      Effect.gen(function* () {
-        const key = { owner: clientId, sessionId };
-        const queue = yield* Queue.sliding<FileManagerEvent>(SESSION_EVENT_CAPACITY);
-        // Acquired and released under the caller's scope, so an interruption
-        // between opening and streaming cannot leave the session behind.
-        const handle = yield* Effect.acquireRelease(
-          Effect.sync(() =>
-            transport.openSession(key, (event) => {
-              Queue.offerUnsafe(queue, event);
-            }),
-          ),
-          // Only a session this acquire opened is closed on release: a refused
-          // open (`null`) must leave the session that refused it untouched.
-          (opened) =>
-            opened === null
-              ? Effect.void
-              : Effect.sync(() => {
-                  const closed = transport.closeSession(key);
-                  if (closed !== null) registry.disposeSender(closed);
-                }),
-        );
-        if (handle === null) {
-          return yield* new FileManagerError({
-            sessionId,
-            message: `File manager session '${sessionId}' is already open.`,
-          });
-        }
-        // The marker follows the acquire, so a client that waits for it can
-        // never be refused as `session not open`.
-        return Stream.concat(
-          Stream.succeed<FileManagerStreamItem>({ ready: true }),
-          Stream.fromQueue(queue),
-        );
-      });
-
-    return FileManagerHost.of({
-      host: Effect.sync(() => ({ homePath: NodeOS.homedir() })),
-      query: (clientId, input) => invoke(clientId, input.sessionId, input.channel, input.payload),
-      mutate: (clientId, input) => invoke(clientId, input.sessionId, input.channel, input.payload),
-      openSession,
-      events: (clientId, input) => Stream.unwrap(openSession(clientId, input)),
-      trackedSessions: Effect.sync(() => registry.trackedWindows()),
+  const invoke = (clientId: string, sessionId: string, channel: string, payload: unknown) =>
+    Effect.tryPromise({
+      try: () => transport.invoke({ owner: clientId, sessionId }, channel, payload),
+      catch: (cause) =>
+        new FileManagerError({
+          sessionId,
+          channel,
+          message: `The file manager host failed on ${channel}.`,
+          cause,
+        }),
     });
+
+  const openSession: FileManagerHost["Service"]["openSession"] = Effect.fn(function* (
+    clientId,
+    { sessionId },
+  ) {
+    const key = { owner: clientId, sessionId };
+    const queue = yield* Queue.sliding<FileManagerEvent>(SESSION_EVENT_CAPACITY);
+    // Acquired and released under the caller's scope, so an interruption
+    // between opening and streaming cannot leave the session behind.
+    const handle = yield* Effect.acquireRelease(
+      Effect.sync(() =>
+        transport.openSession(key, (event) => {
+          Queue.offerUnsafe(queue, event);
+        }),
+      ),
+      // Only a session this acquire opened is closed on release: a refused
+      // open (`null`) must leave the session that refused it untouched.
+      (opened) =>
+        opened === null
+          ? Effect.void
+          : Effect.sync(() => {
+              const closed = transport.closeSession(key);
+              if (closed !== null) registry.disposeSender(closed);
+            }),
+    );
+    if (handle === null) {
+      return yield* new FileManagerError({
+        sessionId,
+        message: `File manager session '${sessionId}' is already open.`,
+      });
+    }
+    // The marker follows the acquire, so a client that waits for it can
+    // never be refused as `session not open`.
+    return Stream.concat(
+      Stream.succeed<FileManagerStreamItem>({ ready: true }),
+      Stream.fromQueue(queue),
+    );
   });
+
+  return FileManagerHost.of({
+    host: Effect.sync(() => ({ homePath: NodeOS.homedir() })),
+    query: (clientId, input) => invoke(clientId, input.sessionId, input.channel, input.payload),
+    mutate: (clientId, input) => invoke(clientId, input.sessionId, input.channel, input.payload),
+    openSession,
+    events: (clientId, input) => Stream.unwrap(openSession(clientId, input)),
+    trackedSessions: Effect.sync(() => registry.trackedWindows()),
+  });
+});
 
 export const layer = Layer.effect(FileManagerHost, make());
 

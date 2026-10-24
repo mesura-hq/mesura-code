@@ -124,6 +124,7 @@ describe("Symmetria broker contract phase-one regression guards", () => {
   // un valor que no nos pertenece. Primero el conteo exacto de upstream, después
   // el formato de salida de vitest. Lo que sí es nuestro es que la suite esté
   // verde y no se encoja.
+  // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- CPU-bound contract guard runs nested package suites and compilers; this budget bounds real subprocess work.
   it("keeps upstream's contract suite green and not shrinking", () => {
     const reportPath = NodePath.join(
       NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "symmetria-contract-report-")),
@@ -156,6 +157,7 @@ describe("Symmetria broker contract phase-one regression guards", () => {
     expect(report.numPassedTests).toBeGreaterThanOrEqual(CONTRACT_SUITE_FLOOR.tests);
   }, 60_000);
 
+  // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- CPU-bound contract guard runs nested package suites and compilers; this budget bounds real subprocess work.
   it("keeps every borrowed runtime vocabulary locked in both assignability directions", () => {
     expect(NodeFS.existsSync(NodePath.join(contractPackageRoot, "src/upstreamLock.ts"))).toBe(true);
     const temporaryDirectory = NodeFS.mkdtempSync(

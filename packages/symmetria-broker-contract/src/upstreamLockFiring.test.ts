@@ -48,6 +48,7 @@ describe("upstream vocabulary locks", () => {
     }
   });
 
+  // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- CPU-bound compiler guard launches real TypeScript subprocesses; this budget does not hide an asynchronous wait.
   it("upstream vocabulary compiler guard rejects infrastructure errors and unrelated diagnostics even beside a real lock diagnostic", () => {
     const directory = NodeFS.mkdtempSync(
       NodePath.join(NodeOS.tmpdir(), "symmetria-lock-diagnostics-"),
@@ -86,6 +87,7 @@ describe("upstream vocabulary locks", () => {
     }
   }, 60_000);
 
+  // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- CPU-bound compiler guard launches real TypeScript subprocesses; this budget does not hide an asynchronous wait.
   it("compiles clean while every borrowed vocabulary matches upstream", () => {
     const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "symmetria-lock-match-"));
     try {
@@ -99,6 +101,7 @@ describe("upstream vocabulary locks", () => {
     }
   }, 60_000);
 
+  // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- CPU-bound compiler guard launches real TypeScript subprocesses; this budget does not hide an asynchronous wait.
   it("fails when upstream adds or removes a literal in any borrowed vocabulary", () => {
     const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "symmetria-lock-drift-"));
     try {
