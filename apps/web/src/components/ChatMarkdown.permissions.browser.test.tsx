@@ -13,7 +13,7 @@ import { expect, it, vi } from "vite-plus/test";
 import { act, render } from "../../test/render";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import * as Option from "effect/Option";
-import { appAtomRegistry } from "~/rpc/atomRegistry";
+import { appAtomRegistry, AppAtomRegistryProvider } from "~/rpc/atomRegistry";
 import {
   installThreadLinkEnvironment,
   linkEnvelope,
@@ -238,9 +238,19 @@ function setup() {
     else Reflect.deleteProperty(window, "innerWidth");
   });
   stack.use(
-    vi
-      .spyOn(window, "matchMedia")
-      .mockImplementation(() => ({ matches: state.coarse }) as MediaQueryList),
+    vi.spyOn(window, "matchMedia").mockImplementation(
+      (query) =>
+        ({
+          matches: state.coarse,
+          media: query,
+          onchange: null,
+          addEventListener() {},
+          removeEventListener() {},
+          addListener() {},
+          removeListener() {},
+          dispatchEvent: () => true,
+        }) as MediaQueryList,
+    ),
   );
   state.allowed = true;
   state.listeners.clear();
@@ -285,7 +295,11 @@ async function renderMarkdown(text: string) {
       ],
     ]),
   );
-  const screen = await render(<ChatMarkdown cwd="/work" threadRef={threadRef} text={text} />);
+  const screen = await render(
+    <AppAtomRegistryProvider>
+      <ChatMarkdown cwd="/work" threadRef={threadRef} text={text} />
+    </AppAtomRegistryProvider>,
+  );
   const anchor = () => screen.container.querySelector("a")!;
   return Object.assign(screen, {
     anchor,

@@ -13,6 +13,10 @@
  */
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import { presentThreadShell } from "@t3tools/client-runtime/state/shell";
+import {
+  BearerConnectionTarget,
+  PrimaryConnectionTarget,
+} from "@t3tools/client-runtime/connection";
 import type {
   AgentThreadSearchInput,
   AgentThreadSearchMatch,
@@ -26,6 +30,7 @@ import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { useSyncExternalStore } from "react";
 
@@ -183,23 +188,18 @@ export const threadSearchFixture = {
  * the way the shell stream and the connection supervisor do.
  */
 const fixtureListeners = new Set<() => void>();
-let fixtureVersion = 0;
 
 function publishFixtureChange(): void {
-  fixtureVersion += 1;
   for (const listener of fixtureListeners) listener();
 }
 
-function useFixtureVersion(): number {
-  return useSyncExternalStore(
-    (listener) => {
-      fixtureListeners.add(listener);
-      return () => {
-        fixtureListeners.delete(listener);
-      };
-    },
-    () => fixtureVersion,
-  );
+function useFixtureSnapshot<T>(readSnapshot: () => T): T {
+  return useSyncExternalStore((listener) => {
+    fixtureListeners.add(listener);
+    return () => {
+      fixtureListeners.delete(listener);
+    };
+  }, readSnapshot);
 }
 
 /** Adds or replaces an active thread shell, as the shell stream's upsert does. */
@@ -219,7 +219,7 @@ export function setEnvironmentConnectionPhase(
 ): void {
   threadSearchFixture.environments = threadSearchFixture.environments.map((environment) =>
     environment.environmentId === environmentId
-      ? { ...environment, connection: { phase } }
+      ? { ...environment, connection: { phase, error: null, traceId: null } }
       : environment,
   );
   publishFixtureChange();
@@ -263,10 +263,26 @@ function connectedEnvironment(
   return {
     environmentId,
     label,
-    entry: { target: { _tag: targetTag, label, connectionId: `saved:${environmentId}` } },
+    entry: {
+      target:
+        targetTag === "PrimaryConnectionTarget"
+          ? new PrimaryConnectionTarget({
+              environmentId,
+              label,
+              httpBaseUrl: "https://fixture.invalid",
+              wsBaseUrl: "wss://fixture.invalid",
+            })
+          : new BearerConnectionTarget({
+              environmentId,
+              label,
+              connectionId: `saved:${environmentId}`,
+            }),
+      profile: Option.none(),
+      enabled: true,
+    },
     displayUrl: null,
     relayManaged: false,
-    connection: { phase: "connected" },
+    connection: { phase: "connected", error: null, traceId: null },
     serverConfig: null,
   };
 }
@@ -274,17 +290,14 @@ function connectedEnvironment(
 // Each suite registers these factories through its own vi.mock calls.
 
 export function mockEntities<T extends object>(actual: T): T {
+  const useFixtureThreadShell = (ref: { environmentId: string; threadId: string } | null) =>
+    useFixtureSnapshot(() => (ref === null ? null : findThreadShell(ref)));
   return {
     ...actual,
-    useProjects: () => threadSearchFixture.projects,
-    useThreadShells: () => {
-      useFixtureVersion();
-      return threadSearchFixture.threads;
-    },
-    useThreadShell: (ref: { environmentId: string; threadId: string } | null) => {
-      useFixtureVersion();
-      return ref === null ? null : findThreadShell(ref);
-    },
+    useProjects: () => useFixtureSnapshot(() => threadSearchFixture.projects),
+    useThreadShells: () => useFixtureSnapshot(() => threadSearchFixture.threads),
+    useThreadShell: useFixtureThreadShell,
+    useQuietThreadShell: useFixtureThreadShell,
     readThreadShell: findThreadShell,
   };
 }
@@ -293,12 +306,14 @@ export function mockEnvironments<T extends object>(actual: T): T {
   return {
     ...actual,
     useEnvironments: () => {
-      useFixtureVersion();
+      const environments = useFixtureSnapshot(() => threadSearchFixture.environments);
       return {
         isReady: true,
         networkStatus: "online",
-        environments: threadSearchFixture.environments,
-        presentationById: new Map(),
+        environments,
+        presentationById: new Map(
+          environments.map((environment) => [environment.environmentId, environment]),
+        ),
       };
     },
     useEnvironmentProviders: () => new Map(),

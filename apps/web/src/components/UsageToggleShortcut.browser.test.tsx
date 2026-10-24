@@ -12,9 +12,9 @@ const keybindings = compileResolvedKeybindingsConfig([
   { key: "mod+u", command: "usage.open", when: "!usagePageOpen" },
 ]);
 
-vi.mock(import("@effect/atom-react"), async (original) => ({
+vi.mock(import("../state/server"), async (original) => ({
   ...(await original()),
-  useAtomValue: (() => keybindings) as never,
+  primaryServerKeybindingsAtom: (await import("effect/reactivity")).Atom.make(() => keybindings),
 }));
 vi.mock(import("@tanstack/react-router"), async (original) => ({
   ...(await original()),

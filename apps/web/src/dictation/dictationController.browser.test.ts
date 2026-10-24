@@ -38,7 +38,13 @@ vi.mock("@t3tools/client-runtime/state/attachments", async (importOriginal) => (
 }));
 
 import { toastManager } from "~/components/ui/toast";
-import { persistComposerDrafts, useComposerDraftStore } from "~/composerDraftStore";
+import {
+  COMPOSER_DRAFT_STORAGE_KEY,
+  partializeComposerDraftStoreState,
+  persistComposerDrafts,
+  resolveComposerDraftKey,
+  useComposerDraftStore,
+} from "~/composerDraftStore";
 import { dictationEnvironment } from "~/state/dictation";
 import {
   cancelDictation,
@@ -131,6 +137,39 @@ function completed(jobId: string, mode: DictationMode, text: string): DictationJ
 /** Lets the async delivery (clipboard writes) finish. */
 const settle = () => flushBrowserTasks();
 
+// Keep the cold-start case first: Chromium caches native ESM modules across dynamic imports.
+// Seed only durable ownership, without starting this controller and setting its restore latch.
+describe("dictation after a reload", () => {
+  it("dictation phase 4 regression: after a reload the mode keys pick the transcribing job back up", async () => {
+    using _clock = fakeTimers({ now: JOB_CREATED_AT });
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    const jobId = DictationJobId.make("reloaded-transcribing-job");
+    expect(
+      recordOwnDictationJob(jobId, {
+        environmentId,
+        target: { kind: "thread", environmentId, threadId },
+        mode: "submit",
+        createdAt: JOB_CREATED_AT,
+      }),
+    ).toBe(true);
+    const persistedJobs = createOwnDictationJobs(localStorage).store.getState().jobs;
+    useOwnDictationJobsStore.setState({ jobs: persistedJobs });
+    expect(persistedJobs[jobId]).toMatchObject({ environmentId, mode: "submit", handled: false });
+    // Reload discards the volatile recording and last-job state, but keeps device ownership.
+    useDictationSessionStore.setState({ session: null, lastJob: null });
+    expect(isDictationLive()).toBe(false);
+
+    deliverDictationJobs(environmentId, [
+      { ...completed(jobId, "submit", ""), status: "transcribing", text: undefined },
+    ]);
+    expect(isDictationLive()).toBe(true);
+    selectDictationMode("inject");
+    expect(callsNamed("setMode")).toEqual([{ environmentId, input: { jobId, mode: "inject" } }]);
+    expect(callsNamed("start")).toEqual([]);
+  });
+});
+
 describe("dictation mode changes after the recording stopped", () => {
   it("dictation phase 4 regression: a saved job switched to insert drops a marker and fills it", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
@@ -187,29 +226,6 @@ describe("dictation mode changes after the recording stopped", () => {
 });
 
 describe("dictation across reloads and tabs", () => {
-  it("dictation phase 4 regression: after a reload the mode keys pick the transcribing job back up", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
-
-    const jobId = await recordAndStop();
-    fixture.calls.length = 0;
-
-    vi.resetModules();
-    const reloaded = await import("./dictationController");
-    const reloadedStore = await import("./dictationSessionStore");
-    const reloadedCommands = (await import("~/state/dictation")).dictationEnvironment;
-    fixture.names.set(reloadedCommands.start, "start");
-    fixture.names.set(reloadedCommands.setMode, "setMode");
-    expect(reloadedStore.isDictationLive()).toBe(false);
-
-    reloaded.deliverDictationJobs(environmentId, [
-      { ...completed(jobId, "submit", ""), status: "transcribing", text: undefined },
-    ]);
-    expect(reloadedStore.isDictationLive()).toBe(true);
-    reloaded.selectDictationMode("inject");
-    expect(callsNamed("setMode")).toEqual([{ environmentId, input: { jobId, mode: "inject" } }]);
-    expect(callsNamed("start")).toEqual([]);
-  });
-
   it("dictation phase 4 regression: two tabs recording at once keep both records", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 
@@ -331,23 +347,42 @@ describe("restarting a recording", () => {
 });
 
 describe("a transcript another tab overwrites", () => {
-  /**
-   * Tab 2 is a second draft store over the same localStorage, as a second browser tab has. It
-   * holds its own copy of the thread's draft and saves the whole store, as tabs do; the browser
-   * then tells this tab through a `storage` event.
-   */
+  /** Writes another tab's serialized draft without changing this tab's in-memory draft. */
   async function secondTabSaves(prompt: string) {
-    vi.resetModules();
-    const tab2 = await import("~/composerDraftStore");
-    tab2.useComposerDraftStore.getState().setPrompt(draftTarget, prompt);
-    expect(tab2.persistComposerDrafts()).toBe(true);
+    const currentPrompt = useComposerDraftStore.getState().getComposerDraft(draftTarget)?.prompt;
+    const oldValue = localStorage.getItem(COMPOSER_DRAFT_STORAGE_KEY);
+    expect(oldValue, "the other tab starts from persisted drafts").not.toBeNull();
+    const persisted = JSON.parse(oldValue!) as {
+      state: ReturnType<typeof partializeComposerDraftStoreState>;
+      version: number;
+    };
+    const draftKey = resolveComposerDraftKey(useComposerDraftStore.getState(), draftTarget)!;
+    const draft = persisted.state.draftsByThreadKey[draftKey];
+    expect(draft, "the other tab holds the same thread's draft").toBeDefined();
+    const newValue = JSON.stringify({
+      ...persisted,
+      state: {
+        ...persisted.state,
+        draftsByThreadKey: {
+          ...persisted.state.draftsByThreadKey,
+          [draftKey]: { ...draft, prompt },
+        },
+      },
+    });
+    localStorage.setItem(COMPOSER_DRAFT_STORAGE_KEY, newValue);
     window.dispatchEvent(
       new StorageEvent("storage", {
-        key: tab2.COMPOSER_DRAFT_STORAGE_KEY,
-        newValue: localStorage.getItem(tab2.COMPOSER_DRAFT_STORAGE_KEY),
+        key: COMPOSER_DRAFT_STORAGE_KEY,
+        oldValue,
+        newValue,
+        storageArea: localStorage,
+        url: window.location.href,
       }),
     );
     await vi.advanceTimersByTimeAsync(1_000);
+    expect(useComposerDraftStore.getState().getComposerDraft(draftTarget)?.prompt).toBe(
+      currentPrompt,
+    );
   }
 
   const keptNotices = () =>

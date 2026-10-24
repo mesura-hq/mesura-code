@@ -10,6 +10,7 @@
  */
 import { fakeTimers } from "../../../test/render";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { page } from "vite-plus/test/browser";
 
 const dictationFixture = vi.hoisted(() => ({
   jobs: [] as Array<Record<string, unknown>>,
@@ -136,7 +137,9 @@ function dictationJobs() {
 let app: MountedApp | undefined;
 
 async function setupBrowserFixture0() {
-  const clock = fakeTimers({ now: TEST_NOW });
+  // Fix the retention window while native dialog focus and exit timers continue to run.
+  // oxlint-disable-next-line t3code/no-frame-waits-in-browser-tests -- only Date is fixed for retention; native dialog timers and animation frames remain real
+  const clock = fakeTimers({ now: TEST_NOW, toFake: ["Date"] });
 
   resetThreadSearchFixture();
   dictationFixture.jobs = dictationJobs();
@@ -175,6 +178,7 @@ function transcriptionRows(): HTMLElement[] {
 async function openTranscriptionsFromPalette(): Promise<void> {
   await openCommandPalette();
   await click(paletteRowTitled("Transcriptions"));
+  await expect.element(page.getByTestId("command-palette")).not.toBeInTheDocument();
 }
 
 async function openTranscriptions(): Promise<HTMLElement> {

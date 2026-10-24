@@ -2,9 +2,8 @@ import { act, render as renderBrowser, type Screen, fakeTimers } from "../../tes
 // Entry points: `focusPanelSurface` (`panelSurfaceFocus.ts`), and
 // `usePanelSurfaceKeys` mounted beside `useRightPanelTabCycling` in a panel
 // harness, as `RightPanelTabs` mounts them: a real `Ctrl+Tab` keydown changes
-// the active surface, and the specs read where focus lands. happy-dom lays
-// nothing out and runs no frames, so boxes are stubbed and
-// `requestAnimationFrame` runs from a queue the specs flush.
+// the active surface, and the specs read Chromium's native focus and layout.
+// The frame queue controls handoff order without changing native geometry.
 import { useLayoutEffect, useRef, useState } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -16,7 +15,7 @@ import {
 } from "./panelSurfaceFocus";
 import { useRightPanelTabCycling } from "./rightPanelTabCycling";
 
-/** A surface in a panel; happy-dom lays nothing out, so each test says what shows. */
+/** A surface in a panel, including its real tab title and content entry. */
 function mountPanel(surface: string): Element {
   document.body.innerHTML = `
     <div data-preview-panel-mode="inline">
@@ -29,20 +28,19 @@ function mountPanel(surface: string): Element {
 }
 
 const byTestId = (id: string) => document.querySelector<HTMLElement>(`[data-testid="${id}"]`)!;
-const hidden = new Set<Element>();
-
 async function setupBrowserFixture0() {
-  vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(function (
-    this: HTMLElement,
-  ) {
-    const shown = !hidden.has(this);
-    return { length: shown ? 1 : 0 } as DOMRectList;
-  });
+  const style = document.createElement("style");
+  style.textContent = `
+    [data-preview-panel-mode] { width: 400px; }
+    [data-pane-entry], [data-testid="chat-focus"] { min-height: 24px; }
+    [data-right-panel-surface-content] [style*="overflow-y"] { min-height: 24px; }
+  `;
+  document.head.append(style);
 
   return {
     async [Symbol.asyncDispose]() {
       vi.restoreAllMocks();
-      hidden.clear();
+      style.remove();
       document.body.innerHTML = "";
     },
   };
@@ -66,7 +64,7 @@ describe("panel surface focus", () => {
     const panel = mountPanel(`
       <div data-pane-entry="1" data-testid="tree" tabindex="-1"></div>
       <div data-pane-entry="2" data-testid="editor" tabindex="-1"></div>`);
-    hidden.add(byTestId("editor"));
+    byTestId("editor").style.display = "none";
     expect(focusPanelSurface(panel)).toBe(true);
     expect(document.activeElement).toBe(byTestId("tree"));
   });
@@ -185,7 +183,7 @@ async function flushFrames(): Promise<void> {
   }
 }
 
-/** Lets happy-dom deliver its MutationObserver records, which it queues as microtasks. */
+/** Delivers native MutationObserver records before the controlled handoff runs. */
 async function flushMutations(): Promise<void> {
   await act(async () => {
     await Promise.resolve();
@@ -209,6 +207,8 @@ const pressCtrlTab = async () =>
 
 describe("panel surface focus follows a key", () => {
   async function setupBrowserFixture1() {
+    // oxlint-disable-next-line t3code/no-frame-waits-in-browser-tests -- The separate controlled frame queue tests production handoff order without an elapsed-time wait.
+    const clock = fakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     frames = [];
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
       frames.push(callback);
@@ -225,7 +225,7 @@ describe("panel surface focus follows a key", () => {
       async [Symbol.asyncDispose]() {
         await harnessRoot?.[Symbol.asyncDispose]();
         harnessRoot = null;
-        vi.useRealTimers();
+        clock[Symbol.dispose]();
         vi.unstubAllGlobals();
       },
     };
@@ -275,7 +275,6 @@ describe("panel surface focus follows a key", () => {
    * region yet, so focus parks on its tab title and the wait begins.
    */
   async function parkOnLoadingDiff(): Promise<void> {
-    using _timers = fakeTimers();
     surfaceMarkup.diff = `<div data-pane-entry="2" data-testid="diff-loading"><p>Loading…</p></div>`;
     await mountHarness();
     byTestId("files-tree").focus();
@@ -349,7 +348,6 @@ describe("panel surface focus follows a key", () => {
     await using _browserFixture0 = await setupBrowserFixture0();
     await using _browserFixture1 = await setupBrowserFixture1();
 
-    using _timers = fakeTimers();
     // A Files tree still loading after a reload: its entry has no scroll region yet.
     surfaceMarkup.files = `<div data-pane-entry="1" data-testid="files-loading"><p>Loading…</p></div>`;
     await mountHarness();
@@ -387,11 +385,11 @@ describe("panel surface half-page keys", () => {
   /** A surface whose region scrolls: 1000 of content in a 400-high box. */
   async function mountScrollingSurface(inner: string): Promise<HTMLElement> {
     surfaceMarkup.files = `
-      <div data-pane-entry="1" data-testid="region" style="overflow-y: auto" tabindex="-1">${inner}</div>`;
+      <div data-pane-entry="1" data-testid="region" style="overflow-y: auto; height: 400px" tabindex="-1"><div style="height: 1000px">${inner}</div></div>`;
     await mountHarness();
     const region = byTestId("region");
-    Object.defineProperty(region, "scrollHeight", { configurable: true, value: 1000 });
-    Object.defineProperty(region, "clientHeight", { configurable: true, value: 400 });
+    expect(region.scrollHeight).toBe(1000);
+    expect(region.clientHeight).toBe(400);
     region.scrollBy = scrollBy as unknown as HTMLElement["scrollBy"];
     return region;
   }

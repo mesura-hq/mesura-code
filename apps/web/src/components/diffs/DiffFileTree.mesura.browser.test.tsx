@@ -1,4 +1,5 @@
 import { FileTree as FileTreeModel } from "@pierre/trees";
+import "../../index.css";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { act, render, type Screen } from "../../../test/render";
 import { DiffFileTree, type DiffFileTreeEntry } from "./DiffFileTree";
@@ -13,12 +14,17 @@ describe("diff tree decoration refresh guards", () => {
   const files: DiffFileTreeEntry[] = [
     { path: "src/app.ts", status: "modified" },
     { path: "docs/README.md", status: "modified" },
+    ...Array.from({ length: 30 }, (_, index) => ({
+      path: `z-extra/file-${index}.ts`,
+      status: "modified" as const,
+    })),
   ];
   const onSelectFile = () => {};
 
   async function setupBrowserFixture0() {
     container = document.createElement("div");
     container.setAttribute("data-right-panel-surface-content", "");
+    container.style.cssText = "display: flex; flex-direction: column; width: 360px; height: 160px";
     document.body.append(container);
     root = await render(null, { container, router: false });
 
@@ -65,6 +71,8 @@ describe("diff tree decoration refresh guards", () => {
     const row = shadow.querySelector<HTMLElement>('[data-item-path="src/app.ts"]')!;
     expect(row.querySelector('[data-item-section="decoration"]')?.textContent).toBe("+9 −2");
     scroller.scrollTop = 20;
+    expect(scroller.scrollHeight).toBeGreaterThan(scroller.clientHeight);
+    expect(scroller.scrollTop).toBe(20);
 
     await renderDecoration(() => ({ text: "+10 −2" }));
 

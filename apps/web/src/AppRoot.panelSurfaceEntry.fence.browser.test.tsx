@@ -1,5 +1,5 @@
-import { page } from "vite-plus/test/browser";
-import { act, type Screen, fakeTimers } from "../test/render";
+import { cdp, page } from "vite-plus/test/browser";
+import { act, type Screen } from "../test/render";
 /**
  * Entry point: AppRoot, with a memory router whose root renders the real
  * CommandPalette around the real AppSidebarLayout, as `routes/__root.tsx`
@@ -33,11 +33,8 @@ import { act, type Screen, fakeTimers } from "../test/render";
  *   full-panel launcher, a tapped row opens its surface, and no text entry
  *   holds focus. The verifier covers the real phone.
  *
- * happy-dom lays nothing out and loads no CSS. Every element reports one
- * client rect, so all of them count as shown, and the Tailwind overflow
- * utilities the surfaces scroll with (`overflow-y-auto`, `overflow-auto`)
- * read as `overflow-y: auto` through a stubbed computed style; base-ui's
- * ScrollArea viewport sets its overflow inline and needs no stub.
+ * Chromium loads the app's CSS and owns layout, scrolling and animation
+ * frames. The real LegendList preserves the list's pane entry and scroller.
  *
  * Fixture state beyond `test/appRootFenceMocks.tsx`, each the least that makes
  * a surface render:
@@ -53,10 +50,8 @@ import { act, type Screen, fakeTimers } from "../test/render";
  * - The file read (`useProjectFileQuery`) answers every text file with one
  *   Markdown document, and the asset URL (`useAssetUrlState`) answers every
  *   image with a URL. Rendered Markdown is the stored preference.
- * - An attachment's signed URL (`useAssetUrlRefresh`) resolves, and `fetch`
- *   answers it with one Markdown document.
- * - Tailwind's `invisible` reads as `visibility: hidden` on the element and
- *   everything under it, as the pull request page's inactive tabs are.
+ * - An attachment's signed URL (`useAssetUrlRefresh`) resolves to a data URL
+ *   which Chromium loads as an image or fetches as a Markdown document.
  */
 import { type ReactNode } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -69,30 +64,10 @@ import {
 import { makeFenceThreadShell } from "./test/fenceThreadShell";
 import * as Option from "effect/Option";
 import { ProjectId } from "@t3tools/contracts";
-import { makeFenceClientRects } from "./test/appRootFenceMocks";
 
 // The boundaries the fixture replaces: see `test/appRootFenceMocks.tsx`, plus
 // the server configs, the file read, the device state and the asset URL named
 // above, and the diff highlighting worker pool.
-// happy-dom has no canvas. Stub only DecorationsOverviewRuler's painting seam;
-// the real editor's layout, focus, model and keyboard behavior stay real.
-// We tried mocking OverviewRuler, but DecorationsOverviewRuler._render still painted and failed at clearRect on a null canvas.
-// Mock the actual renderer's painting seam to prevent that failure while preserving real editor layout, focus and keyboard behavior.
-vi.mock(
-  "monaco-editor/editor/browser/viewParts/overviewRuler/decorationsOverviewRuler.js",
-  async (original) => {
-    const actual = await original<{
-      DecorationsOverviewRuler: new (...args: unknown[]) => { _render(): void };
-    }>();
-    return {
-      ...actual,
-      DecorationsOverviewRuler: class extends actual.DecorationsOverviewRuler {
-        override _render(): void {}
-      },
-    };
-  },
-);
-
 const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
 vi.mock("./state/presentation", async (original) =>
   (await fenceMocks()).mockPresentation(original),
@@ -131,9 +106,10 @@ const pullRequestDetail = vi.hoisted(() => ({
       "index 1111111..2222222 100644",
       "--- a/build.ts",
       "+++ b/build.ts",
-      "@@ -1,2 +1,3 @@",
+      "@@ -1,2 +1,83 @@",
       " export const steps = 3;",
       "+export const fixed = true;",
+      ...Array.from({ length: 80 }, (_, index) => `+export const buildStep${index} = ${index};`),
       " export default steps;",
       "",
     ].join("\n"),
@@ -268,7 +244,6 @@ vi.mock("./components/files/mesuraFileManager/MesuraFileManagerLayer", async () 
   (await fenceMocks()).mockFileManagerLayer(),
 );
 vi.mock("./keys/highlights", async () => (await fenceMocks()).mockHighlights());
-vi.mock("@legendapp/list/react", async () => (await fenceMocks()).mockLegendList());
 vi.mock("./components/files/projectFilesQueryState", async (original) => ({
   ...(await original<typeof import("./components/files/projectFilesQueryState")>()),
   // The project's listing: what the Files tree shows.
@@ -319,27 +294,39 @@ vi.mock("./state/device", async (original) => ({
     loaded: true,
   }),
 }));
-// happy-dom has no module workers: the highlighting pool is left out, as in
-// `AppRoot.treeDiff.fence.test.tsx`, or Pierre's worker script runs on the
-// page and logs every window message it does not recognise.
+// Diff worker startup is outside the panel keyboard behavior this fence owns.
 vi.mock("./components/DiffWorkerPoolProvider", () => ({
   DiffWorkerPoolProvider: ({ children }: { children?: ReactNode }) => children,
 }));
-const signAttachmentUrl = vi.hoisted(() => async () => "http://fence.invalid/attachment");
-vi.mock("./assets/assetUrls", async (original) => ({
-  ...(await original<typeof import("./assets/assetUrls")>()),
-  useAssetUrlState: () => ({ _tag: "Success", url: "http://fence.invalid/diagram.png" }),
-  // An attachment preview signs its URL on open, through a stable function:
-  // its effect re-signs whenever the function changes.
-  useAssetUrlRefresh: () => signAttachmentUrl,
-}));
+const assetBoundary = vi.hoisted(() => {
+  const imageUrl = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="navy"/></svg>')}`;
+  const markdownUrl = `data:text/markdown,${encodeURIComponent("# Notes\n\nThe release ships on Friday.\n")}`;
+  return {
+    imageUrl,
+    refreshImage: async () => imageUrl,
+    refreshMarkdown: async () => markdownUrl,
+  };
+});
+vi.mock("./assets/assetUrls", async (original) => {
+  const actual = await original<typeof import("./assets/assetUrls")>();
+  return {
+    ...actual,
+    useAssetUrlState: () => ({ _tag: "Success", url: assetBoundary.imageUrl }),
+    // Stable callbacks keep re-signing from restarting the attachment effect.
+    useAssetUrlRefresh: (...[, resource]: Parameters<typeof actual.useAssetUrlRefresh>) =>
+      resource?._tag === "attachment" && resource.mimeType?.startsWith("image/")
+        ? assetBoundary.refreshImage
+        : assetBoundary.refreshMarkdown,
+  };
+});
 
 import { useFileTreeStore } from "./components/files/mesuraTree/fileTreeStore";
-import { PromiseClipboardItem } from "./test/promiseClipboardItem";
 import { installKeyEngine } from "./keys/keyEngine";
+import { composerEditorElement } from "./keys/focusScope";
 import { isFileTreeFocused } from "./lib/focusTargets";
 import { ACTIVE_TAB_TITLE_SELECTOR } from "./lib/panelSurfaceFocus";
 import { useRightPanelStore } from "./rightPanelStore";
+import { flushBrowserTasks } from "./test/browserTasks";
 import {
   addFenceThread,
   fenceEnvironmentId as environmentId,
@@ -354,7 +341,6 @@ import {
 } from "./test/appRootFenceMocks";
 
 const MARKDOWN_DOCUMENT = "# Guide\n\nThe build runs in three steps.\n";
-const ATTACHMENT_MARKDOWN = "# Notes\n\nThe release ships on Friday.\n";
 const SURFACE_CONTENT_SELECTOR = "[data-right-panel-surface-content]";
 const LAUNCHER_SELECTOR = '[aria-label="Open a surface"]';
 const PULL_REQUEST_URL = "https://github.com/acme/app/pull/7";
@@ -369,7 +355,9 @@ const openedThreads: ThreadId[] = [];
 // request page its Code tab; load them before any spec
 // waits on them, under a hook timeout sized for a cold compile.
 async function setupBrowserFixture0() {
-  installKeyEngine();
+  const previousViewport = { width: window.innerWidth, height: window.innerHeight };
+  await setViewport(DESKTOP_VIEWPORT);
+  await installKeyEngine();
   await Promise.all([
     import("./components/files/FilePreviewPanel"),
     import("./factory/FactoryPane"),
@@ -377,8 +365,6 @@ async function setupBrowserFixture0() {
     import("./components/pullRequest/PullRequestCodeTab"),
   ]);
 
-  // Every timer and animation frame runs on test time: `settle` moves it.
-  const _timers = fakeTimers();
   // The source-file guards exercise the editable Monaco surface, which requires a write grant.
   fixture.sessions.set(
     environmentId,
@@ -389,12 +375,6 @@ async function setupBrowserFixture0() {
       "filesystem:write",
     ]),
   );
-  // An attachment's text: what a Markdown attachment preview reads.
-  vi.stubGlobal("fetch", async () => new Response(ATTACHMENT_MARKDOWN));
-
-  // A browser's ClipboardItem owns the promises it is given. Monaco hands it one
-  // on every click and cancels it on the next; happy-dom's leaves it unhandled.
-  vi.stubGlobal("ClipboardItem", PromiseClipboardItem);
   const capabilities = fixture.environments[0]!.serverConfig.environment.capabilities as Record<
     string,
     boolean
@@ -405,22 +385,8 @@ async function setupBrowserFixture0() {
   // Leaving the tree for the editor hides it; each spec starts with it shown.
   useFileTreeStore.setState({ explorerOpen: true });
   container = document.createElement("div");
+  container.style.cssText = "width: 100%; height: 100dvh;";
   document.body.append(container);
-  vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(function (
-    this: HTMLElement,
-  ) {
-    return makeFenceClientRects([this.getBoundingClientRect()]);
-  });
-  const computedStyle = window.getComputedStyle.bind(window);
-  vi.spyOn(window, "getComputedStyle").mockImplementation((element, pseudo) => {
-    const style = computedStyle(element, pseudo);
-    return withStubbedStyle(style, {
-      overflowY: scrollsByClass(element) ? "auto" : null,
-      // Tailwind's `invisible`, inherited as `visibility` is: the pull
-      // request's tabs other than the shown one.
-      visibility: element.closest(".invisible") !== null ? "hidden" : null,
-    });
-  });
 
   return {
     async [Symbol.asyncDispose]() {
@@ -433,18 +399,15 @@ async function setupBrowserFixture0() {
       fixture.threads.clear();
       fixture.threadStates.clear();
       window.localStorage.clear();
-      await setViewport(DEFAULT_VIEWPORT);
-      vi.useRealTimers();
+      await setViewport(previousViewport);
       vi.restoreAllMocks();
       vi.unstubAllGlobals();
-
-      _timers[Symbol.dispose]();
     },
   };
 }
 
-/** happy-dom's default window, and a Pixel 7's, where the panel lays out as the phone's sheet. */
-const DEFAULT_VIEWPORT = { width: 1024, height: 768 };
+/** The desktop panel and the phone sheet both use Chromium's viewport. */
+const DESKTOP_VIEWPORT = { width: 1440, height: 900 };
 const PIXEL_7_VIEWPORT = { width: 412, height: 915 };
 
 async function setViewport(size: {
@@ -452,38 +415,6 @@ async function setViewport(size: {
   readonly height: number;
 }): Promise<void> {
   await page.viewport(size.width, size.height);
-}
-
-const OVERFLOW_UTILITIES = ["overflow-y-auto", "overflow-auto", "overflow-y-scroll"];
-
-function scrollsByClass(element: Element): boolean {
-  return OVERFLOW_UTILITIES.some((utility) => element.classList.contains(utility));
-}
-
-const CSS_NAMES = { overflowY: "overflow-y", visibility: "visibility" } as const;
-type StubbedProperty = keyof typeof CSS_NAMES;
-
-/** A computed style whose `overflow-y` and `visibility` read the given values, where not null. */
-function withStubbedStyle(
-  style: CSSStyleDeclaration,
-  values: Readonly<Record<StubbedProperty, string | null>>,
-): CSSStyleDeclaration {
-  if (values.overflowY === null && values.visibility === null) return style;
-  const byCssName = new Map<string, string | null>(
-    (Object.keys(CSS_NAMES) as StubbedProperty[]).map((key) => [CSS_NAMES[key], values[key]]),
-  );
-  return new Proxy(style, {
-    get(target, property) {
-      if (property === "overflowY" || property === "visibility") {
-        return values[property] ?? target[property];
-      }
-      if (property === "getPropertyValue") {
-        return (name: string) => byCssName.get(name) ?? target.getPropertyValue(name);
-      }
-      const member = Reflect.get(target, property, target) as unknown;
-      return typeof member === "function" ? member.bind(target) : member;
-    },
-  });
 }
 
 /** Registers v2 links and a Factory card at the same boundaries as the live client. */
@@ -572,40 +503,23 @@ function unlinkEveryPullRequest(threadId: ThreadId): void {
   );
 }
 
-/** One display frame on the fake clock. */
-const FRAME_MS = 16;
-/**
- * Frames a key's effects take to land: the panel shows its new tab a frame or
- * more after the key, and `focusPanelSurfaceAfterRender` waits up to ten for
- * it. Far below `ENTRY_WAIT_MS`, so a surface that never renders its entry
- * leaves focus on its title instead of passing late.
- */
-const SETTLE_FRAMES = 12;
-/** Longer than any startup timer the app sets on mount. */
-const APP_STARTUP_MS = 5_000;
-
-/**
- * Runs `SETTLE_FRAMES` frames on the fake clock, with the React updates,
- * microtasks and mutation records each one brings.
- */
-async function settle(): Promise<void> {
-  for (let frame = 0; frame < SETTLE_FRAMES; frame += 1) {
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(FRAME_MS);
-    });
-  }
-}
-
 /** Mounts the app on `threadId` with Vim mode on, the chat holding the keyboard. */
 async function mountApp(threadId: ThreadId): Promise<void> {
   ({ root } = await renderFenceApp(container, threadId, { vimMode: true }));
-  // The app's startup timers run out before any step, as they would on a
-  // real clock long before the first key.
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(APP_STARTUP_MS);
+  await vi.waitFor(() => expect(document.documentElement.dataset.mesuraVimMode).toBe("on"));
+  // The route focuses the composer on mount. Observe that focus before blur
+  // so its startup frame cannot take the keyboard back from a new surface.
+  await vi.waitFor(() => {
+    expect(composerEditorElement()).not.toBeNull();
+    const active = document.activeElement;
+    expect(
+      active === composerEditorElement() ||
+        document.querySelector("[data-pane-entry]")?.contains(active),
+    ).toBe(true);
   });
-  await settle();
-  (document.activeElement as HTMLElement | null)?.blur?.();
+  // Native actionability settles the editor's layout and pending startup focus.
+  if (window.innerWidth >= 640) await page.elementLocator(composerEditorElement()!).click();
+  await act(async () => (document.activeElement as HTMLElement | null)?.blur());
 }
 
 interface Chord {
@@ -614,13 +528,13 @@ interface Chord {
   readonly ctrlKey?: boolean;
 }
 
-/** Dispatches one keydown from the focused element, as the browser does, and settles. */
+/** Dispatches one keydown from the focused element; callers wait for its DOM or focus result. */
 async function press(chord: Chord): Promise<KeyboardEvent> {
   const event = new KeyboardEvent("keydown", { ...chord, bubbles: true, cancelable: true });
   await act(async () => {
     (document.activeElement ?? document.body).dispatchEvent(event);
   });
-  await settle();
+  await flushBrowserTasks();
   return event;
 }
 
@@ -628,9 +542,16 @@ async function press(chord: Chord): Promise<KeyboardEvent> {
 async function openFromLauncher(letter: string): Promise<void> {
   await press({ key: " ", code: "Space" });
   await press({ key: "p", code: "KeyP" });
-  expect(document.querySelector(LAUNCHER_SELECTOR), "Space p shows the launcher").not.toBeNull();
+  await vi.waitFor(() =>
+    expect(document.querySelector(LAUNCHER_SELECTOR), "Space p shows the launcher").not.toBeNull(),
+  );
+  await vi.waitFor(() =>
+    expect(document.querySelector(LAUNCHER_SELECTOR)?.contains(document.activeElement)).toBe(true),
+  );
   await press({ key: letter, code: `Key${letter.toUpperCase()}` });
-  expect(document.querySelector(LAUNCHER_SELECTOR), "the row closed the launcher").toBeNull();
+  await vi.waitFor(() =>
+    expect(document.querySelector(LAUNCHER_SELECTOR), "the row closed the launcher").toBeNull(),
+  );
 }
 
 function surfaceContent(): HTMLElement {
@@ -655,23 +576,87 @@ function describeFocus(): string {
 }
 
 /** Focus is in the active surface's content, on no text entry and on no tab title. */
-function expectFocusInSurfaceContent(): HTMLElement {
-  const active = document.activeElement;
-  expect(surfaceContent().contains(active), `focus is on ${describeFocus()}`).toBe(true);
-  expect(isTextEntry(active), `focus is on ${describeFocus()}`).toBe(false);
-  expect(active?.matches(ACTIVE_TAB_TITLE_SELECTOR) ?? false).toBe(false);
-  return active as HTMLElement;
+async function expectFocusInSurfaceContent(): Promise<HTMLElement> {
+  return vi.waitFor(() => {
+    const content = surfaceContent();
+    const active = document.activeElement;
+    expect(active, "the surface entry replaces the launcher's temporary focus").not.toBe(content);
+    expect(content.contains(active), `focus is on ${describeFocus()}`).toBe(true);
+    expect(isTextEntry(active), `focus is on ${describeFocus()}`).toBe(false);
+    expect(active?.matches(ACTIVE_TAB_TITLE_SELECTOR) ?? false).toBe(false);
+    return active as HTMLElement;
+  });
+}
+
+async function surfaceHeading(text: string, message: string): Promise<HTMLHeadingElement> {
+  return vi.waitFor(() => {
+    const heading = [...surfaceContent().querySelectorAll("h1")].find(
+      (element) => element.textContent === text,
+    );
+    expect(heading, message).toBeDefined();
+    return heading!;
+  });
+}
+
+async function surfaceImage(alt: string, message: string): Promise<HTMLImageElement> {
+  return vi.waitFor(() => {
+    const image = [...surfaceContent().querySelectorAll("img")].find(
+      (element) => element.alt === alt,
+    );
+    expect(image ?? null, message).not.toBeNull();
+    expect(image!.complete && image!.naturalWidth > 0, "Chromium decodes the preview image").toBe(
+      true,
+    );
+    return image!;
+  });
 }
 
 /** `Ctrl+D` on the focused scroll region scrolls it half a page down. */
 async function expectHalfPageScroll(region: HTMLElement): Promise<void> {
-  Object.defineProperty(region, "scrollHeight", { configurable: true, value: 2000 });
-  Object.defineProperty(region, "clientHeight", { configurable: true, value: 600 });
-  const scrollBy = vi.fn();
-  region.scrollBy = scrollBy as unknown as HTMLElement["scrollBy"];
-  const event = await press({ key: "d", code: "KeyD", ctrlKey: true });
-  expect(event.defaultPrevented).toBe(true);
-  expect(scrollBy).toHaveBeenCalledWith(expect.objectContaining({ top: 300 }));
+  await vi.waitFor(() => expect(region.clientHeight).toBeGreaterThan(0));
+  // Images fit their viewport and these documents are short. Add real content
+  // there. The diff virtualizer only counts its own expanded file content.
+  const overflow = region.classList.contains("diff-render-surface")
+    ? null
+    : document.createElement("div");
+  if (overflow) {
+    overflow.setAttribute("aria-hidden", "true");
+    overflow.style.cssText = `height: ${region.clientHeight * 4}px; width: 1px; flex-shrink: 0;`;
+    region.append(overflow);
+  }
+  const scrollBy = vi.spyOn(region, "scrollBy");
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  try {
+    // Chromium applies reduced motion so the native scroll has no animation to settle.
+    await cdp().send("Emulation.setEmulatedMedia", {
+      features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+    });
+    await vi.waitFor(() =>
+      expect(region.scrollHeight - region.clientHeight).toBeGreaterThan(region.clientHeight / 2),
+    );
+    region.scrollTop = 0;
+    const halfPage = region.clientHeight / 2;
+    const event = await press({ key: "d", code: "KeyD", ctrlKey: true });
+    expect(event.defaultPrevented).toBe(true);
+    expect(scrollBy).toHaveBeenCalledWith(expect.objectContaining({ top: halfPage }));
+    await vi.waitFor(() => {
+      if (region.classList.contains("diff-render-surface")) {
+        // The PR header and virtualizer compensate scrollTop as the viewport changes.
+        expect(region.scrollTop).toBeGreaterThan(0);
+        expect(region.scrollTop).toBeLessThanOrEqual(region.scrollHeight - region.clientHeight);
+      } else {
+        expect(Math.abs(region.scrollTop - halfPage)).toBeLessThanOrEqual(1);
+      }
+    });
+  } finally {
+    scrollBy.mockRestore();
+    await cdp().send("Emulation.setEmulatedMedia", {
+      features: [
+        { name: "prefers-reduced-motion", value: reduceMotion ? "reduce" : "no-preference" },
+      ],
+    });
+    overflow?.remove();
+  }
 }
 
 describe("panel surface entry fence: a launcher letter lands in the surface", () => {
@@ -682,6 +667,7 @@ describe("panel surface entry fence: a launcher letter lands in the surface", ()
     await mountApp(addSurfaceThread());
     await press({ key: " ", code: "Space" });
     await press({ key: "p", code: "KeyP" });
+    await vi.waitFor(() => expect(document.querySelector(LAUNCHER_SELECTOR)).not.toBeNull());
     const launcher = document.querySelector(LAUNCHER_SELECTOR);
     expect(launcher).not.toBeNull();
     expect(
@@ -696,8 +682,8 @@ describe("panel surface entry fence: a launcher letter lands in the surface", ()
 
     await mountApp(addSurfaceThread());
     await openFromLauncher("l");
+    await expectFocusInSurfaceContent();
     expect(surfaceContent().querySelector(`a[href="${PULL_REQUEST_URL}"]`)).not.toBeNull();
-    expectFocusInSurfaceContent();
   });
 
   it("panel entry fence spec: Space p p lands in the pull request's content", async () => {
@@ -705,8 +691,11 @@ describe("panel surface entry fence: a launcher letter lands in the surface", ()
 
     await mountApp(addSurfaceThread());
     await openFromLauncher("p");
+    await vi.waitFor(() =>
+      expect(surfaceContent().textContent).toContain("The build runs in three steps."),
+    );
     expect(surfaceContent().textContent).toContain("The build runs in three steps.");
-    expectFocusInSurfaceContent();
+    await expectFocusInSurfaceContent();
   });
 
   it("panel entry fence spec: Space p s lands in Software Factory's scrolling content", async () => {
@@ -714,10 +703,13 @@ describe("panel surface entry fence: a launcher letter lands in the surface", ()
 
     await mountApp(addSurfaceThread());
     await openFromLauncher("s");
+    await vi.waitFor(() =>
+      expect(surfaceContent().querySelector('nav[aria-label="Factory tabs"]')).not.toBeNull(),
+    );
     const tabs = surfaceContent().querySelector('nav[aria-label="Factory tabs"]');
     expect(tabs, "the Factory surface shows").not.toBeNull();
     const scrollingBody = tabs!.nextElementSibling;
-    expectFocusInSurfaceContent();
+    await expectFocusInSurfaceContent();
     expect(scrollingBody?.contains(document.activeElement), `focus is on ${describeFocus()}`).toBe(
       true,
     );
@@ -734,20 +726,40 @@ describe("panel surface entry fence: returning to a pull request surface", () =>
 
     await mountApp(addSurfaceThread());
     await openFromLauncher("p");
+    await expectFocusInSurfaceContent();
     const codeTab = [
       ...surfaceContent().querySelectorAll<HTMLElement>('[aria-label="Pull request tabs"] button'),
     ].find((button) => button.textContent?.trim() === "Code");
     expect(codeTab, "the pull request shows its Code tab").toBeDefined();
-    await act(async () => codeTab!.click());
-    await settle();
+    await page.elementLocator(codeTab!).click();
+    await vi.waitFor(() =>
+      expect(
+        surfaceContent().querySelector(".diff-render-surface"),
+        "the diff shows",
+      ).not.toBeNull(),
+    );
     const summary = surfaceContent().querySelector("[data-pull-request-summary-scroll]");
     expect(summary?.closest(".invisible"), "Summary stays mounted, hidden").not.toBeNull();
     expect(surfaceContent().querySelector(".diff-render-surface"), "the diff shows").not.toBeNull();
+    // The default folds every file. Native half-page scrolling needs an expanded diff.
+    await page
+      .elementLocator(
+        surfaceContent().querySelector<HTMLButtonElement>('[aria-label="Expand all files"]')!,
+      )
+      .click();
+    await vi.waitFor(() => {
+      const diff = surfaceContent().querySelector<HTMLElement>(".diff-render-surface")!;
+      expect(diff.scrollHeight - diff.clientHeight).toBeGreaterThan(diff.clientHeight / 2);
+    });
 
     await press({ key: "h", code: "KeyH", ctrlKey: true });
-    expect(surfaceContent().contains(document.activeElement), "Ctrl+H left the panel").toBe(false);
+    await vi.waitFor(() =>
+      expect(surfaceContent().contains(document.activeElement), "Ctrl+H left the panel").toBe(
+        false,
+      ),
+    );
     await press({ key: "l", code: "KeyL", ctrlKey: true });
-    const active = expectFocusInSurfaceContent();
+    const active = await expectFocusInSurfaceContent();
     expect(active.classList.contains("diff-render-surface"), `focus is on ${describeFocus()}`).toBe(
       true,
     );
@@ -760,17 +772,25 @@ describe("panel surface entry fence: returning to a pull request surface", () =>
     const threadId = addSurfaceThread();
     await mountApp(threadId);
     await openFromLauncher("l");
+    await expectFocusInSurfaceContent();
     await openFromLauncher("s");
+    await expectFocusInSurfaceContent();
     // The last link goes while the keyboard is on Software Factory.
     await act(async () => unlinkEveryPullRequest(threadId));
-    await settle();
-
     await nextTab();
+    await vi.waitFor(() =>
+      expect(document.querySelector(ACTIVE_TAB_TITLE_SELECTOR)?.textContent).toContain(
+        "Pull requests",
+      ),
+    );
+    await vi.waitFor(() =>
+      expect(surfaceContent().textContent).toContain("No linked pull requests"),
+    );
     expect(document.querySelector(ACTIVE_TAB_TITLE_SELECTOR)?.textContent).toContain(
       "Pull requests",
     );
     expect(surfaceContent().textContent).toContain("No linked pull requests");
-    expectFocusInSurfaceContent();
+    await expectFocusInSurfaceContent();
   });
 });
 
@@ -783,12 +803,26 @@ describe("panel surface entry fence: a previewed file takes focus in its scroll 
   async function openThenCycleBack(
     open: (threadRef: ReturnType<typeof scopeThreadRef>) => void,
     title: string,
+    imageAlt = title,
   ): Promise<void> {
     const threadId = addSurfaceThread();
     await act(async () => open(scopeThreadRef(environmentId, threadId)));
     await mountApp(threadId);
+    // Load the initial preview before testing a return to its existing surface.
+    // Returning while a loading entry is replaced exercises a different lifecycle.
+    if (title.endsWith(".md"))
+      await surfaceHeading(
+        title === "notes.md" ? "Notes" : "Guide",
+        "the initial Markdown preview loads",
+      );
+    else if (title.endsWith(".png"))
+      await surfaceImage(imageAlt, "the initial image preview loads");
     await openFromLauncher("s");
+    await expectFocusInSurfaceContent();
     await press({ key: "Tab", code: "Tab", ctrlKey: true });
+    await vi.waitFor(() =>
+      expect(document.querySelector(ACTIVE_TAB_TITLE_SELECTOR)?.textContent).toContain(title),
+    );
     expect(
       document.querySelector(ACTIVE_TAB_TITLE_SELECTOR)?.textContent,
       "Ctrl+Tab brought the tab back",
@@ -799,6 +833,7 @@ describe("panel surface entry fence: a previewed file takes focus in its scroll 
     await openThenCycleBack(
       (threadRef) => useRightPanelStore.getState().openFile(threadRef, relativePath),
       relativePath.slice(relativePath.lastIndexOf("/") + 1),
+      relativePath,
     );
   }
 
@@ -821,11 +856,9 @@ describe("panel surface entry fence: a previewed file takes focus in its scroll 
     await using _browserFixture0 = await setupBrowserFixture0();
 
     await openFileThenCycleBack("docs/guide.md");
-    const heading = [...surfaceContent().querySelectorAll("h1")].find(
-      (element) => element.textContent === "Guide",
-    );
+    const heading = await surfaceHeading("Guide", "the Markdown file shows rendered");
     expect(heading, "the Markdown file shows rendered").toBeDefined();
-    const active = expectFocusInSurfaceContent();
+    const active = await expectFocusInSurfaceContent();
     expect(active.contains(heading!), `focus is on ${describeFocus()}`).toBe(true);
     await expectHalfPageScroll(active);
   });
@@ -834,9 +867,9 @@ describe("panel surface entry fence: a previewed file takes focus in its scroll 
     await using _browserFixture0 = await setupBrowserFixture0();
 
     await openFileThenCycleBack("docs/diagram.png");
-    const image = surfaceContent().querySelector('img[alt="docs/diagram.png"]');
+    const image = await surfaceImage("docs/diagram.png", "the image shows");
     expect(image, "the image shows").not.toBeNull();
-    const active = expectFocusInSurfaceContent();
+    const active = await expectFocusInSurfaceContent();
     expect(active.contains(image), `focus is on ${describeFocus()}`).toBe(true);
     await expectHalfPageScroll(active);
   });
@@ -845,11 +878,9 @@ describe("panel surface entry fence: a previewed file takes focus in its scroll 
     await using _browserFixture0 = await setupBrowserFixture0();
 
     await openAttachmentThenCycleBack("notes.md", "text/markdown");
-    const heading = [...surfaceContent().querySelectorAll("h1")].find(
-      (element) => element.textContent === "Notes",
-    );
+    const heading = await surfaceHeading("Notes", "the Markdown attachment shows rendered");
     expect(heading, "the Markdown attachment shows rendered").toBeDefined();
-    const active = expectFocusInSurfaceContent();
+    const active = await expectFocusInSurfaceContent();
     expect(active.contains(heading!), `focus is on ${describeFocus()}`).toBe(true);
     await expectHalfPageScroll(active);
   });
@@ -858,9 +889,9 @@ describe("panel surface entry fence: a previewed file takes focus in its scroll 
     await using _browserFixture0 = await setupBrowserFixture0();
 
     await openAttachmentThenCycleBack("photo.png", "image/png");
-    const image = surfaceContent().querySelector('img[alt="photo.png"]');
+    const image = await surfaceImage("photo.png", "the image attachment shows");
     expect(image, "the image attachment shows").not.toBeNull();
-    const active = expectFocusInSurfaceContent();
+    const active = await expectFocusInSurfaceContent();
     expect(active.contains(image), `focus is on ${describeFocus()}`).toBe(true);
     await expectHalfPageScroll(active);
   });
@@ -872,6 +903,9 @@ describe("panel surface entry fence: native surfaces keep their tab title", () =
 
     await mountApp(addSurfaceThread());
     await openFromLauncher("m");
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(document.querySelector(ACTIVE_TAB_TITLE_SELECTOR)),
+    );
     const title = document.querySelector(ACTIVE_TAB_TITLE_SELECTOR);
     expect(title, "the Device tab is active").not.toBeNull();
     expect(document.activeElement, `focus is on ${describeFocus()}`).toBe(title);
@@ -887,7 +921,7 @@ describe("panel surface entry fence: the phone's +", () => {
       );
       element.click();
     });
-    await settle();
+    await flushBrowserTasks();
   }
 
   function launcherRow(label: string): HTMLButtonElement {
@@ -909,6 +943,9 @@ describe("panel surface entry fence: the phone's +", () => {
       useRightPanelStore.getState().open(scopeThreadRef(environmentId, threadId), "factory"),
     );
     await mountApp(threadId);
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-preview-panel-mode="sheet"]')).not.toBeNull(),
+    );
     expect(
       document.querySelector('[data-preview-panel-mode="sheet"]'),
       "the panel is a sheet",
@@ -916,16 +953,27 @@ describe("panel surface entry fence: the phone's +", () => {
     const plus = document.querySelector<HTMLElement>('[aria-label="Add panel surface"]');
     expect(plus, "the panel shows its +").not.toBeNull();
     await tap(plus!);
+    await vi.waitFor(() => expect(document.querySelector(LAUNCHER_SELECTOR)).not.toBeNull());
     expect(isTextEntry(document.activeElement), `focus is on ${describeFocus()}`).toBe(false);
 
     for (const label of ["Software Factory", "Linked pull requests", "Files"]) {
       await tap(launcherRow(label));
+      await vi.waitFor(() => {
+        expect(
+          document.querySelector(LAUNCHER_SELECTOR),
+          `${label} closed the launcher`,
+        ).toBeNull();
+        expect(document.querySelector(ACTIVE_TAB_TITLE_SELECTOR)?.textContent).toContain(
+          label === "Linked pull requests" ? "Pull requests" : label,
+        );
+      });
       expect(document.querySelector(LAUNCHER_SELECTOR), `${label} closed the launcher`).toBeNull();
       expect(document.querySelector(ACTIVE_TAB_TITLE_SELECTOR)?.textContent).toContain(
         label === "Linked pull requests" ? "Pull requests" : label,
       );
       expect(isTextEntry(document.activeElement), `focus is on ${describeFocus()}`).toBe(false);
       await tap(document.querySelector<HTMLElement>('[aria-label="Add panel surface"]')!);
+      await vi.waitFor(() => expect(document.querySelector(LAUNCHER_SELECTOR)).not.toBeNull());
     }
   });
 });
@@ -942,13 +990,27 @@ describe("panel surface entry fence: leaving the Files tree lands in the open fi
   async function openFromTree(name: string): Promise<void> {
     await mountApp(addSurfaceThread());
     await openFromLauncher("f");
-    expect(isFileTreeFocused(), `focus is on ${describeFocus()}`).toBe(true);
+    await vi.waitFor(() =>
+      expect(isFileTreeFocused(), `focus is on ${describeFocus()}`).toBe(true),
+    );
     // The tree keeps its cursor per project across mounts: start at the root.
     await press({ key: "Home", code: "Home" });
     for (let row = 0; row <= TREE_ROWS.indexOf(name); row += 1) {
       await press({ key: "j", code: "KeyJ" });
     }
     await press({ key: "Enter", code: "Enter" });
+    await vi.waitFor(() =>
+      expect(document.querySelector(ACTIVE_TAB_TITLE_SELECTOR)?.textContent).toContain(name),
+    );
+    if (name.endsWith(".png")) await surfaceImage(name, "the image shows");
+    else if (name.endsWith(".md"))
+      await surfaceHeading("Guide", "the Markdown file shows rendered");
+    else
+      await vi.waitFor(() =>
+        expect(
+          surfaceContent().querySelector("[data-monaco-file-surface] textarea"),
+        ).not.toBeNull(),
+      );
     expect(document.querySelector(ACTIVE_TAB_TITLE_SELECTOR)?.textContent).toContain(name);
     expect(isFileTreeFocused(), `focus is on ${describeFocus()}`).toBe(true);
   }
@@ -965,11 +1027,9 @@ describe("panel surface entry fence: leaving the Files tree lands in the open fi
 
       await openFromTree("guide.md");
       await press(chord);
-      const heading = [...surfaceContent().querySelectorAll("h1")].find(
-        (element) => element.textContent === "Guide",
-      );
+      const heading = await surfaceHeading("Guide", "the Markdown file shows rendered");
       expect(heading, "the Markdown file shows rendered").toBeDefined();
-      const active = expectFocusInSurfaceContent();
+      const active = await expectFocusInSurfaceContent();
       expect(active.contains(heading!), `focus is on ${describeFocus()}`).toBe(true);
       expect(isFileTreeFocused()).toBe(false);
       await expectHalfPageScroll(active);
@@ -983,9 +1043,9 @@ describe("panel surface entry fence: leaving the Files tree lands in the open fi
 
       await openFromTree("diagram.png");
       await press(chord);
-      const image = surfaceContent().querySelector('img[alt="diagram.png"]');
+      const image = await surfaceImage("diagram.png", "the image shows");
       expect(image, "the image shows").not.toBeNull();
-      const active = expectFocusInSurfaceContent();
+      const active = await expectFocusInSurfaceContent();
       expect(active.contains(image), `focus is on ${describeFocus()}`).toBe(true);
       await expectHalfPageScroll(active);
     },
@@ -998,6 +1058,12 @@ describe("panel surface entry fence: leaving the Files tree lands in the open fi
 
       await openFromTree("index.ts");
       await press(chord);
+      await vi.waitFor(() =>
+        expect(
+          document.activeElement?.closest("[data-monaco-file-surface]"),
+          `focus is on ${describeFocus()}`,
+        ).not.toBeNull(),
+      );
       expect(
         document.activeElement?.closest("[data-monaco-file-surface]"),
         `focus is on ${describeFocus()}`,

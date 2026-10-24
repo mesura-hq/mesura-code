@@ -1,10 +1,20 @@
-import { useEffect } from "react";
-import { expect, it } from "vite-plus/test";
+import { useEffect, useRef } from "react";
+import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
+import { expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
 
 import { render } from "../../../test/render";
 import type { ChatComposerHandle } from "./ChatComposer";
 import { useChatShortcuts } from "./useChatShortcuts";
+
+// Plain-letter redirection applies when the user disables Vim mode.
+vi.mock(import("../../hooks/useSettings"), async (original) => ({
+  ...(await original()),
+  getClientSettings: () => ({
+    ...DEFAULT_CLIENT_SETTINGS,
+    vimMode: false,
+  }),
+}));
 
 const shortcutContext = {
   terminalFocus: false,
@@ -45,16 +55,26 @@ function Launcher(props: { keys: string; received: string[] }) {
 // The chat's shortcut listener registers when the chat mounts, so a launcher that opens
 // later registers after it. Tests mount the chat first and add the launcher by rerendering.
 function Chat(props: { composerKeys: string[]; launcher?: { keys: string; received: string[] } }) {
+  const editorRef = useRef<HTMLTextAreaElement | null>(null);
+  const focusAtEnd = () => {
+    const editor = editorRef.current;
+    editor?.focus();
+    editor?.setSelectionRange(editor.value.length, editor.value.length);
+  };
   useChatShortcuts({
     enabled: true,
     keybindings: [],
     scriptKeybindings: [],
     getShortcutContext: () => shortcutContext,
     threadFindActive: false,
-    // Type-to-focus only calls insertTextAtEnd, so the stand-in composer implements just that.
+    // The insertion contract moves native focus into the composer as the real handle does.
     composerRef: {
       current: {
+        focusAtEnd,
         insertTextAtEnd: (key: string) => {
+          if (!editorRef.current) return false;
+          editorRef.current.value += key;
+          focusAtEnd();
           props.composerKeys.push(key);
           return true;
         },
@@ -65,7 +85,12 @@ function Chat(props: { composerKeys: string[]; launcher?: { keys: string; receiv
     commands: {},
     fallback: () => undefined,
   });
-  return props.launcher ? <Launcher {...props.launcher} /> : null;
+  return (
+    <>
+      <textarea ref={editorRef} aria-label="Composer" />
+      {props.launcher ? <Launcher {...props.launcher} /> : null}
+    </>
+  );
 }
 
 // router: false because the chat shortcuts and the launcher stand-in never navigate.
@@ -93,4 +118,6 @@ it("still types other letters into the composer while the launcher is open", asy
 
   expect(composerKeys).toEqual(["a"]);
   expect(received).toEqual([]);
+  await expect.element(screen.getByRole("textbox", { name: "Composer" })).toHaveValue("a");
+  await expect.element(screen.getByRole("textbox", { name: "Composer" })).toHaveFocus();
 });

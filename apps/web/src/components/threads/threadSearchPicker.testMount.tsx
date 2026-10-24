@@ -1,5 +1,7 @@
 import { flushBrowserTasks } from "../../test/browserTasks";
 import { act, render as renderBrowser } from "../../../test/render";
+import "../../index.css";
+import "../../mesura.css";
 /**
  * Mounts the application entry point for the thread-search picker suites:
  * `AppRoot` with a memory router whose root route renders the real
@@ -76,28 +78,36 @@ function createAppRouter(HomeRoute: RouteComponent = DefaultHomeRoute) {
   return createRouter({
     routeTree: root.addChildren([index, thread]),
     history: createMemoryHistory({ initialEntries: ["/"] }),
+    disableGlobalCatchBoundary: true,
   });
 }
 
 export async function mountApp(
   options: { readonly homeRoute?: RouteComponent } = {},
 ): Promise<MountedApp> {
+  await using resources = new AsyncDisposableStack();
   const container = document.createElement("div");
   document.body.append(container);
+  resources.defer(() => {
+    container.remove();
+    vi.unstubAllGlobals();
+  });
   const router = createAppRouter(options.homeRoute);
   await router.load();
   // AppRoot owns this fixture's memory router.
-  const root = await renderBrowser(<AppRoot router={router as unknown as AppRouter} />, {
-    container,
-    router: false,
-  });
+  resources.use(
+    await renderBrowser(<AppRoot router={router as unknown as AppRouter} />, {
+      container,
+      router: false,
+    }),
+  );
+  await vi.waitFor(() => expect(router.state.status).toBe("idle"));
+  const mounted = resources.move();
   return {
     container,
     router,
     unmount: async () => {
-      await root[Symbol.asyncDispose]();
-      container.remove();
-      vi.unstubAllGlobals();
+      await mounted[Symbol.asyncDispose]();
     },
   };
 }
@@ -109,6 +119,18 @@ export async function settle(): Promise<void> {
       await flushBrowserTasks();
     });
   }
+  // Native CSS keeps closing popups mounted until Base UI restores focus and
+  // unmounts their session observers. Observe that completion before continuing.
+  await vi.waitFor(() =>
+    expect(
+      document.querySelector(
+        '[data-testid="command-palette"][data-closed], [role="alertdialog"][data-closed]',
+      ),
+    ).toBeNull(),
+  );
+  await act(async () => {
+    await flushBrowserTasks();
+  });
 }
 
 export async function pressKey(
@@ -132,19 +154,31 @@ export async function pressKey(
 }
 
 export function openThreadSearch(): Promise<KeyboardEvent> {
-  return pressKey(window, "k", { ctrlKey: true, altKey: true });
+  return toggleOverlay("threads", "k", { ctrlKey: true, altKey: true });
 }
 
 export function openFilePicker(): Promise<KeyboardEvent> {
-  return pressKey(window, "p", { ctrlKey: true });
+  return toggleOverlay("files", "p", { ctrlKey: true });
 }
 
 export function openCommandPalette(): Promise<KeyboardEvent> {
-  return pressKey(window, "o", { ctrlKey: true });
+  return toggleOverlay("command", "o", { ctrlKey: true });
+}
+
+async function toggleOverlay(
+  mode: string,
+  key: string,
+  modifiers: { ctrlKey?: boolean; altKey?: boolean },
+): Promise<KeyboardEvent> {
+  const closing = paletteMode() === mode;
+  const event = await pressKey(window, key, modifiers);
+  await vi.waitFor(() => expect(paletteMode()).toBe(closing ? null : mode));
+  return event;
 }
 
 export function paletteElement(): HTMLElement | null {
-  return document.querySelector<HTMLElement>('[data-testid="command-palette"]');
+  // Base UI keeps an inert popup mounted while its CSS exit finishes.
+  return document.querySelector<HTMLElement>('[data-testid="command-palette"][data-open]');
 }
 
 export function paletteMode(): string | null {
@@ -154,7 +188,7 @@ export function paletteMode(): string | null {
 const PICKER_SELECTOR = '[data-testid="thread-search-picker"]';
 
 export function threadSearchPicker(): HTMLElement | null {
-  return document.querySelector<HTMLElement>(PICKER_SELECTOR);
+  return paletteElement()?.querySelector<HTMLElement>(PICKER_SELECTOR) ?? null;
 }
 
 type TextField = HTMLInputElement | HTMLTextAreaElement;
@@ -222,9 +256,7 @@ export async function click(element: HTMLElement): Promise<void> {
 }
 
 export function optionRows(): HTMLElement[] {
-  return [
-    ...document.querySelectorAll<HTMLElement>('[data-testid="command-palette"] [role="option"]'),
-  ];
+  return [...(paletteElement()?.querySelectorAll<HTMLElement>('[role="option"]') ?? [])];
 }
 
 export function isHighlighted(row: HTMLElement): boolean {
@@ -274,7 +306,7 @@ export function activeSearchMode(): "agent" | "exact" | null {
 }
 
 export function alertDialog(): HTMLElement | null {
-  return document.querySelector<HTMLElement>('[role="alertdialog"]');
+  return document.querySelector<HTMLElement>('[role="alertdialog"][data-open]');
 }
 
 export function buttonIn(root: ParentNode, name: RegExp): HTMLElement {

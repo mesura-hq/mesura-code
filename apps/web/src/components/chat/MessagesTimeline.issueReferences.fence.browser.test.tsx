@@ -21,7 +21,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { AppAtomRegistryProvider } from "../../rpc/atomRegistry";
+import { appAtomRegistry, AppAtomRegistryProvider } from "../../rpc/atomRegistry";
 import * as Cause from "effect/Cause";
 import { createRef, type ReactNode, useSyncExternalStore } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -128,6 +128,15 @@ vi.mock("~/state/server", async (importOriginal) => {
   const atoms = new Map<string, unknown>();
   return {
     ...actual,
+    environmentServerConfigsAtom: Atom.make(
+      () =>
+        new Map(
+          [...fixture.capabilitiesByEnvironment].map(([id, capabilities]) => [
+            id,
+            { environment: { capabilities }, availableEditors: [] },
+          ]),
+        ),
+    ),
     serverEnvironment: {
       ...actual.serverEnvironment,
       configValueAtom: (environmentId: string | null) => {
@@ -182,10 +191,12 @@ vi.mock("~/browser/useOpenLink", () => ({
     fixture.openedExternally.push(url);
   },
 }));
-vi.mock("~/remoteOpen", () => ({
+vi.mock("~/remoteOpen", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/remoteOpen")>()),
   useRemoteOpenResolution: () => ({ state: { mode: "local-exec" }, isResolved: true }),
 }));
-vi.mock("~/editorPreferences", () => ({
+vi.mock("~/editorPreferences", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/editorPreferences")>()),
   useOpenInPreferredEditor: () => vi.fn(),
   usePreferredEditor: () => [null, vi.fn()],
 }));
@@ -198,6 +209,7 @@ import {
 
 import { issueReference } from "~/state/issues";
 import { pullRequestEnvironment } from "~/state/pullRequests";
+import { environmentServerConfigsAtom } from "~/state/server";
 import { MessagesTimeline } from "./MessagesTimeline";
 
 const environmentId = EnvironmentId.make("issue-ref-env");
@@ -319,6 +331,8 @@ async function mountTimeline(
   entries: Array<ReturnType<typeof assistantEntry>>,
   ref: typeof threadRef = threadRef,
 ) {
+  // Link activation reads this map from the application registry at click time.
+  appAtomRegistry.refresh(environmentServerConfigsAtom);
   currentProps = timelineProps(ref, entries);
   const shell = createRootRoute({
     component: TimelineHost,

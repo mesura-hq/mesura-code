@@ -5,8 +5,9 @@ import { act, type Screen, fakeTimers } from "../test/render";
  * MesuraFileManagerLayer. Shared AppRoot boundaries replace RPCs and unrelated
  * chrome. Only the vendor App/bridge are replaced here; the layer's portal,
  * mount focus, unmount cleanup and native Escape boundary remain production.
- * Happy DOM ignores CSS visibility. The local editor focus boundary rejects
- * focus only while the real composer body is hidden, as Chrome does.
+ * Chromium loads the app's styles and owns layout, hidden-composer focus and
+ * visibility. Control the full clock to exercise the focus and release frames;
+ * wait for the editor and focus before exercising a return.
  */
 import { type ComponentProps } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -111,6 +112,7 @@ import { useFileManagerStore } from "./components/files/mesuraFileManager/fileMa
 import { installKeyEngine } from "./keys/keyEngine";
 import { composerEditorElement } from "./keys/focusScope";
 import { readKeyEngineSnapshot } from "./keys/keyEngineStore";
+import { flushBrowserTasks } from "./test/browserTasks";
 import {
   addFenceThread,
   fenceEnvironmentId,
@@ -120,14 +122,14 @@ import {
 
 let root: Screen | undefined;
 let container: HTMLDivElement;
-let restoreEditorFocus: (() => void) | undefined;
 let restoreViewport: (() => Promise<void>) | undefined;
 
 async function setupBrowserFixture0() {
-  const _timers = fakeTimers();
+  const timers = fakeTimers();
   await installKeyEngine();
 
   container = document.createElement("div");
+  container.style.cssText = "width: 100%; height: 100dvh;";
   document.body.append(container);
 
   return {
@@ -135,18 +137,16 @@ async function setupBrowserFixture0() {
       await act(async () => useFileManagerStore.getState().setOpen(false));
       await act(async () => root?.[Symbol.asyncDispose]());
       root = undefined;
-      restoreEditorFocus?.();
-      restoreEditorFocus = undefined;
       await restoreViewport?.();
       restoreViewport = undefined;
       container.remove();
       vi.unstubAllGlobals();
-      _timers[Symbol.dispose]();
+      timers[Symbol.dispose]();
     },
   };
 }
 
-/** Drain the existing focus and release frames, without changing their scheduler. */
+/** Advance the controlled focus and release frames after their DOM milestones. */
 async function frames() {
   for (let frame = 0; frame < 2; frame += 1) {
     await act(async () => {
@@ -161,11 +161,20 @@ async function press(key: string, code = key, modifiers = {}) {
       new KeyboardEvent("keydown", { key, code, ...modifiers, bubbles: true, cancelable: true }),
     );
   });
-  await frames();
+  await flushBrowserTasks();
 }
 
 async function setViewportWidth(width: number) {
   await page.viewport(width, window.innerHeight);
+}
+
+async function expandComposer(surface: Element) {
+  await vi.waitFor(() =>
+    expect(surface.getAttribute("data-chat-composer-mobile-collapsed")).toBe("true"),
+  );
+  await page
+    .elementLocator(surface.querySelector<HTMLButtonElement>('[aria-label="Expand composer"]')!)
+    .click();
 }
 
 async function prepareComposer(width: number, mode: string, label = "return") {
@@ -186,23 +195,24 @@ async function prepareComposer(width: number, mode: string, label = "return") {
   const mounted = await renderFenceApp(container, threadId, { vimMode: true });
   root = mounted.root;
   await frames();
+  await vi.waitFor(() =>
+    expect(composerEditorElement(), "the route mounts its editor").not.toBeNull(),
+  );
   const editor = composerEditorElement()!;
   const surface = editor.closest("[data-chat-composer-surface]")!;
-  const nativeFocus = editor.focus.bind(editor);
-  const focus = vi.spyOn(editor, "focus").mockImplementation((options) => {
-    if (editor.closest("[data-chat-composer-body]")?.classList.contains("hidden")) return;
-    nativeFocus(options);
-  });
-  restoreEditorFocus = () => focus.mockRestore();
-  await act(async () => editor.focus());
-  await act(async () => editor.blur());
   await frames();
-  if (width < 640) {
-    expect(surface.getAttribute("data-chat-composer-mobile-collapsed")).toBe("true");
-    await act(async () =>
-      surface.querySelector<HTMLButtonElement>('[aria-label="Expand composer"]')!.click(),
-    );
-  } else await act(async () => editor.focus());
+  if (width < 640 && surface.getAttribute("data-chat-composer-mobile-collapsed") === "true")
+    await expandComposer(surface);
+  await frames();
+  // Observe the route's initial focus before blurring. A late startup frame
+  // would otherwise compete with the file manager's focus return.
+  await vi.waitFor(() => expect(document.activeElement).toBe(editor));
+  await page.elementLocator(editor).click();
+  await frames();
+  await act(async () => editor.blur());
+  if (width < 640) await expandComposer(surface);
+  else await act(async () => editor.focus());
+  await vi.waitFor(() => expect(document.activeElement).toBe(editor));
   await frames();
   expect(document.activeElement).toBe(editor);
   const clipboardData = new DataTransfer();
@@ -212,8 +222,7 @@ async function prepareComposer(width: number, mode: string, label = "return") {
       new ClipboardEvent("paste", { clipboardData, bubbles: true, cancelable: true }),
     ),
   );
-  await frames();
-  expect(editor.textContent).toBe("hello world");
+  await vi.waitFor(() => expect(editor.textContent).toBe("hello world"));
   await press("Escape", "Escape");
   await press("0", "Digit0");
   await press("l", "KeyL");
@@ -226,10 +235,25 @@ async function prepareComposer(width: number, mode: string, label = "return") {
 
 async function openManager() {
   await press("E", "KeyE", { ctrlKey: true, shiftKey: true });
+  await vi.waitFor(() => {
+    const manager = document.querySelector('[aria-label="File manager"]');
+    expect(manager).not.toBeNull();
+    expect(manager?.querySelector('[data-testid="synthetic-current-column"]')).not.toBeNull();
+    expect(document.activeElement).toBe(manager);
+  });
   const manager = document.querySelector<HTMLElement>('[aria-label="File manager"]')!;
   expect(manager).not.toBeNull();
   expect(manager.querySelector('[data-testid="synthetic-current-column"]')).not.toBeNull();
   expect(document.activeElement).toBe(manager);
+  // The phone collapses after blur in its own frame. Closing before that
+  // milestone would bypass the hidden-editor return path this fence guards.
+  await vi.waitFor(() =>
+    expect(
+      document
+        .querySelector("[data-chat-composer-surface]")
+        ?.getAttribute("data-chat-composer-mobile-collapsed"),
+    ).toBe(String(window.innerWidth < 640)),
+  );
   return manager;
 }
 
@@ -244,6 +268,7 @@ async function closeManager() {
       }),
     );
   });
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="File manager"]')).toBeNull());
   await frames();
   expect(document.querySelector('[aria-label="File manager"]')).toBeNull();
 }
@@ -264,6 +289,7 @@ describe("real file-manager focus-return fence", () => {
       expect(surface.getAttribute("data-chat-composer-mobile-collapsed")).toBe(String(width < 640));
       // Deliver Escape at the vendor boundary. The real layer owns the return.
       await closeManager();
+      await vi.waitFor(() => expect(document.activeElement).toBe(editor));
       expect(document.querySelector('[aria-label="File manager"]')).toBeNull();
       expect(document.activeElement).toBe(editor);
       expect(surface.getAttribute("data-chat-composer-mobile-collapsed")).toBe("false");
@@ -330,10 +356,11 @@ describe("real file-manager focus-return fence", () => {
     const { editor } = await prepareComposer(412, "NORMAL", "reopen");
     const manager = await openManager();
     let reopened = false;
-    const observer = new MutationObserver(async () => {
+    const observer = new MutationObserver(() => {
       if (!reopened && !manager.isConnected) {
         reopened = true;
-        await act(() => useFileManagerStore.getState().setOpen(true));
+        // The close's act owns this mutation. An async observer act can leave later renders pending.
+        useFileManagerStore.getState().setOpen(true);
       }
     });
     observer.observe(document.body, { childList: true, subtree: true });
@@ -367,6 +394,7 @@ describe("real file-manager focus-return fence", () => {
         params: { environmentId: fenceEnvironmentId, threadId: nextThread },
       }),
     );
+    await vi.waitFor(() => expect(composerEditorElement()?.textContent).toBe(""));
     await frames();
     expect(document.querySelector('[aria-label="File manager"]')).toBe(manager);
     expect(document.activeElement).toBe(manager);
@@ -405,18 +433,17 @@ describe("real file-manager focus-return fence", () => {
     const nextThread = addFenceThread("file-manager-reveal-next-thread", "Next revealed draft", [
       makeMessage("file-manager-reveal-next-message", "assistant", "Synthetic next reply"),
     ]);
-    // Happy DOM frames can run before the router finishes its transition.
-    // Hold their delivery at the public route commit to exercise the opposite
-    // supported ordering. Keep native frame IDs and cancellation semantics.
+    // Hold this race's focus frames until the public route commit.
+    // Preserve the controlled clock's frame IDs and cancellation.
     let releaseFrames = () => {};
     const routeCommit = new Promise<void>((resolve) => {
       releaseFrames = resolve;
     });
-    const nativeFrame = window.requestAnimationFrame.bind(window);
-    const nativeCancel = window.cancelAnimationFrame.bind(window);
+    const scheduleFrame = window.requestAnimationFrame.bind(window);
+    const cancelFrame = window.cancelAnimationFrame.bind(window);
     const cancelled = new Set<number>();
     const frameSpy = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
-      const id = nativeFrame((time) => {
+      const id = scheduleFrame((time) => {
         void routeCommit.then(() => {
           if (!cancelled.has(id)) callback(time);
         });
@@ -425,7 +452,7 @@ describe("real file-manager focus-return fence", () => {
     });
     const cancelSpy = vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => {
       cancelled.add(id);
-      nativeCancel(id);
+      cancelFrame(id);
     });
     try {
       await act(async () => {
@@ -440,23 +467,53 @@ describe("real file-manager focus-return fence", () => {
       });
       expect(surface.getAttribute("data-chat-composer-mobile-collapsed")).toBe("false");
       expect(document.activeElement, "reveal precedes deferred focus").not.toBe(editor);
+      expect(frameSpy).toHaveBeenCalled();
+      // Hold the reveal's queued focus. The router needs its own frames to commit.
+      frameSpy.mockRestore();
       await act(async () =>
         router.navigate({
           to: "/$environmentId/$threadId",
           params: { environmentId: fenceEnvironmentId, threadId: nextThread },
         }),
       );
-      expect(editor.textContent, "the new draft commits before the queued focus frame").toBe("");
-      await act(async () => releaseFrames());
+      // draftKey remounts the editor. Wait for the new draft before releasing old focus work.
+      const nextEditor = await vi.waitFor(() => {
+        const current = composerEditorElement();
+        expect(current).not.toBeNull();
+        expect(current).not.toBe(editor);
+        expect(editor.isConnected).toBe(false);
+        expect(current!.textContent).toBe("");
+        return current!;
+      });
       await frames();
-      expect(composerEditorElement()).toBe(editor);
-      expect(editor.textContent).toBe("");
-      // ChatView independently focuses a new route at the end. Cancellation
-      // of the old return must preserve that entry, rather than suppress it.
-      expect(document.activeElement).toBe(editor);
+      await vi.waitFor(() => expect(document.activeElement).toBe(nextEditor));
+      expect(nextEditor.textContent, "the new draft commits before the queued focus frame").toBe(
+        "",
+      );
       expect(readKeyEngineSnapshot()).toMatchObject({ scope: "composer", mode: "INSERT" });
       expect(window.getSelection()?.anchorOffset).toBe(0);
-      expect(editor.getAttribute("data-mesura-vim")).toBeNull();
+      await act(async () => releaseFrames());
+      await vi.waitFor(() => expect(document.activeElement).toBe(nextEditor));
+      await frames();
+      expect(composerEditorElement()).toBe(nextEditor);
+      expect(editor.isConnected).toBe(false);
+      expect(nextEditor.textContent).toBe("");
+      // ChatView independently focuses a new route at the end. Cancellation
+      // of the old return must preserve that entry, rather than suppress it.
+      expect(document.activeElement).toBe(nextEditor);
+      expect(readKeyEngineSnapshot()).toMatchObject({ scope: "composer", mode: "INSERT" });
+      expect(window.getSelection()?.anchorOffset).toBe(0);
+      expect(nextEditor.getAttribute("data-mesura-vim")).toBeNull();
+      await press("Escape", "Escape");
+      await press("u", "KeyU");
+      expect(nextEditor.textContent).toBe("");
+      await press("r", "KeyR", { ctrlKey: true });
+      expect(nextEditor.textContent).toBe("");
+      await press("i", "KeyI");
+      expect(document.activeElement).toBe(nextEditor);
+      expect(readKeyEngineSnapshot()).toMatchObject({ scope: "composer", mode: "INSERT" });
+      expect(window.getSelection()?.anchorOffset).toBe(0);
+      expect(nextEditor.getAttribute("data-mesura-vim")).toBeNull();
     } finally {
       try {
         await act(async () => releaseFrames());

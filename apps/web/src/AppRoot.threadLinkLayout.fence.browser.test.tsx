@@ -118,7 +118,10 @@ async function createLayoutFixture() {
   installKeyEngine();
   await import("./components/files/FilePreviewPanel");
   await import("./components/preview/PreviewPanel");
-  resources.use(fakeTimers());
+  // Keep router promises, CSS exits and React scheduling on the browser's clock.
+  // Only the scheduled composer-focus handoff needs an explicit frame boundary.
+  // oxlint-disable-next-line t3code/no-frame-waits-in-browser-tests -- Advance the production focus callback on a controlled clock, without an elapsed-time wait.
+  resources.use(fakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] }));
   resources.defer(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
@@ -155,6 +158,7 @@ async function createLayoutFixture() {
   });
   useRightPanelStore.getState().openBrowser(ref, "layout-target");
   container = document.createElement("div");
+  container.style.cssText = "width: 1440px; height: 900px";
   document.body.append(container);
   dialogContainer = document.createElement("div");
   document.body.append(dialogContainer);
@@ -482,7 +486,6 @@ function designateTarget() {
 }
 async function settleFocus() {
   // Drain the accepted-close receipt before advancing ChatView's scheduled focus.
-  // Full fake timers also run the editor effects on the same controlled clock.
   await act(flushBrowserTasks);
   await act(() => vi.advanceTimersToNextFrame());
   await act(flushBrowserTasks);

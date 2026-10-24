@@ -1,3 +1,4 @@
+import { page } from "vite-plus/test/browser";
 import { flushBrowserTasks } from "./test/browserTasks";
 import { act, type Screen } from "../test/render";
 /**
@@ -25,10 +26,9 @@ import { act, type Screen } from "../test/render";
  * - Guard: `u` inside one normal-mode session undoes the last change.
  * `keys/composer/composerUndo.test.ts` covers every criterion at the surface.
  *
- * Typing is the one input this file does not drive by keys: happy-dom gives
- * Tiptap no native text input. A typed insert session is the draft's prompt
- * changing while the composer is in INSERT, which is what the editor's own
- * typing does to the draft.
+ * Typing is the one input this file does not drive by keys. A typed insert
+ * session changes the draft's prompt while the composer is in INSERT, which
+ * is what the editor's own typing does to the draft.
  *
  * Boundaries the fixture replaces, and nothing else: the environment and
  * thread reads (looked up by the thread ref), every RPC command and query,
@@ -112,6 +112,8 @@ let container: HTMLDivElement;
 let threadSequence = 0;
 
 async function setupBrowserFixture0() {
+  const previousViewport = { width: window.innerWidth, height: window.innerHeight };
+  await page.viewport(1440, 900);
   installKeyEngine();
 
   fixture.vimMode = false;
@@ -130,6 +132,7 @@ async function setupBrowserFixture0() {
       fixture.environments[0]!.connection.phase = "connected";
       vi.restoreAllMocks();
       vi.unstubAllGlobals();
+      await page.viewport(previousViewport.width, previousViewport.height);
     },
   };
 }
@@ -161,7 +164,9 @@ async function settle(): Promise<void> {
 async function mountApp(threadId: ThreadId) {
   ({ root, router } = await renderFenceApp(container, threadId, { vimMode: true }));
   await settle();
-  (document.activeElement as HTMLElement | null)?.blur?.();
+  // Observe ChatView's initial focus before blurring, so it cannot arrive during an edit.
+  await vi.waitFor(() => expect(composer().contains(document.activeElement)).toBe(true));
+  await act(async () => (document.activeElement as HTMLElement | null)?.blur?.());
 }
 
 /** Opens another thread the way the sidebar does: a navigation to its route. */
@@ -204,7 +209,7 @@ const key = (letter: string): Chord => ({
 
 const ESCAPE: Chord = { key: "Escape", code: "Escape" };
 const REDO: Chord = { key: "r", code: "KeyR", ctrlKey: true };
-// Mod is Control here: happy-dom reports a non-Mac platform.
+// Mod is Control in the Linux Chromium fixture.
 const PALETTE_CHORD: Chord = { key: "o", code: "KeyO", ctrlKey: true };
 
 const citationSource = serializeAssistantCitation({
@@ -236,6 +241,7 @@ function composer(): HTMLElement {
 
 async function focusComposer() {
   await act(async () => composer().focus());
+  await vi.waitFor(() => expect(composer().contains(document.activeElement)).toBe(true));
   await settle();
   expect(readKeyEngineSnapshot()).toMatchObject({ scope: "composer", mode: "INSERT" });
 }
@@ -391,8 +397,12 @@ describe("composer undo app fence: one history per draft", () => {
     expect(promptOf(thread)).toBe("alph");
 
     await press(PALETTE_CHORD);
+    await expect.element(page.getByTestId("command-palette")).toBeVisible();
     expect(palette(), "the palette chord opened the palette").not.toBeNull();
     await press(ESCAPE);
+    // Base UI removes the closed popup after its CSS exit transition.
+    await expect.element(page.getByTestId("command-palette")).not.toBeInTheDocument();
+    await settle();
     expect(palette(), "Escape closed the palette").toBeNull();
     expect(readKeyEngineSnapshot()).toMatchObject({ scope: "composer", mode: "NORMAL" });
 
