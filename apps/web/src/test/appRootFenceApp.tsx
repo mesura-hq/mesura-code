@@ -1,5 +1,8 @@
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import "../index.css";
+import "../mesura.css";
+
+import { render as renderBrowser, type Screen } from "../../test/render";
+
 import {
   createMemoryHistory,
   createRootRoute,
@@ -21,10 +24,10 @@ import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { EMPTY_ENVIRONMENT_THREAD_STATE } from "@t3tools/client-runtime/state/threads";
 
+import type { AppRouter } from "../router";
 import { AppRoot } from "../AppRoot";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
-import type { AppRouter } from "../router";
 import { Route as ChatLayoutRoute } from "../routes/_chat";
 import {
   appRootFence,
@@ -174,16 +177,17 @@ export async function renderFenceApp(
   container: HTMLElement,
   threadId: ThreadId,
   { vimMode }: { vimMode: boolean },
-): Promise<{ root: Root; router: FenceRouter }> {
+): Promise<{ root: Screen; router: FenceRouter }> {
   // The shared browser fixture lasts for this test environment, as document does.
   installFenceFontEvents();
   appRootFence.vimMode = vimMode;
   appRootFence.openThreadId = threadId;
   const router = createFenceRouter(threadId);
   await router.load();
-  const root = createRoot(container);
-  await act(async () => {
-    root.render(<AppRoot router={router as unknown as AppRouter} />);
+  // AppRoot owns this fixture's memory router.
+  const root = await renderBrowser(<AppRoot router={router as unknown as AppRouter} />, {
+    container,
+    router: false,
   });
   return { root, router };
 }

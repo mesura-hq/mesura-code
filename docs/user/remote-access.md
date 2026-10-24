@@ -21,9 +21,11 @@ server with `t3 serve`. Saving your sign-in alone does not make the machine
 reachable.
 
 On your other device, sign in to the same T3 Connect account and choose the
-environment. Over SSH, the CLI prints a browser link and a short code. Open the
-link on any device, confirm the code matches, and approve. The CLI continues on
-its own, so you do not need to forward an OAuth callback port.
+environment. On the app.t3.codes home page with no computer added yet, signing
+in adds compatible computers linked to your account. Over SSH, the CLI prints a
+browser link and a short code. Open the link on any device, confirm the code
+matches, and approve. The CLI continues on its own, so you do not need to forward
+an OAuth callback port.
 
 T3 Connect renews access credentials when needed without disconnecting a healthy
 connection. Pull request diffs and provider settings keep working after the
@@ -205,6 +207,12 @@ If SSH reconnecting fails after an app update, retry the launch once. Removing
 the connection stops a server that T3 Code launched; a server that was already
 running is left alone.
 
+Each desktop app keeps one session on the host for its SSH connection and reuses
+it when it reconnects. Revoke sessions you no longer use in **Settings →
+Connections** on the host, or on a headless host with `t3 auth session list` and
+`t3 auth session revoke <id>`. A desktop that can still sign in over SSH pairs
+again on its next connect.
+
 For Antigravity's Google callback on a remote host, see
 [remote sign-in](./providers-antigravity.md#sign-in-from-a-remote-device).
 
@@ -253,8 +261,9 @@ The server shows the exact line for how you started it, such as
 `sudo npx t3 browser setup`, and keeps your `PATH` when Node is installed only
 for your user. Where `t3` is not on your `PATH`, such as with only the
 desktop app installed, it names the full path of the app's own `t3` instead. It allows Chrome's sandbox with an AppArmor profile and installs
-any missing libraries with apt. It is safe to run again. Without `sudo`, it
-only reports what it would change.
+any missing libraries and system fonts with apt; pages that load without text
+can mean the host has no fonts. It is safe to run again. Without `sudo`, it only
+reports what it would change.
 
 The browser always runs in Chrome's sandbox. Where you cannot change the host,
 set `T3CODE_SERVER_BROWSER_SANDBOX=0` for the environment to run without it.
@@ -267,24 +276,28 @@ threads on an environment through its MCP server. See
 
 ## Link another environment
 
-Link two machines, such as your laptop and a VPS, and agents on one can launch,
-message, wait on and stop threads on the other. On the machine you will work
-from, open **Settings → Connections → Linked environments**, choose **Link**,
-and enter the other machine's address and a pairing code from it. From a
-terminal, use `t3 environment link <address> --pairing-code <code> --access <mode>`.
+Link two machines, such as your laptop and a VPS, and agents on one can work on
+the other: launch, message, wait on and stop its threads, answer their
+questions, and manage its queues, projects and scheduled tasks. On the machine
+you will work from, open **Settings → Connections → Linked environments**,
+choose **Link**, and pick the other machine or enter its address. The list
+holds the machines this app knows and those on your T3 Connect account. If this
+app is connected to that machine with a session that manages access there, it
+makes the pairing code itself; otherwise paste one from that machine's
+**Settings → Connections**. From a terminal, use
+`t3 environment link <address> --pairing-code <code> --access <mode>`.
 
 You can also ask an agent to link a machine by name, such as "delegate this to
-my vps". It shows a card in the thread where you pick the machine from the ones
-this app knows (or enter an address) and the access, then approve. If this app
-is connected to that machine with a session that manages access there, it uses
-that session; otherwise paste a pairing code from that machine's
-**Settings → Connections**.
+my vps". It shows a card in the thread where you pick the machine the same way
+and the access, then approve.
 
 - The access you pick is the most agents from this machine may do there. An
   agent also never gets more there than its own mode here.
 - Threads a link starts are marked **From** and this machine's name there.
-  They can change only other threads the same link started, not that machine's
-  own threads, projects or settings, and they skip its project setup scripts.
+- A full-access link works there like that machine's own agents. Below full
+  access, the link's agents can change only threads it started, not that
+  machine's own threads, projects or settings, and they skip its project setup
+  scripts.
 - The link shows up in that machine's **Settings → Connections** like any
   outside agent. Revoke it there to end it. **Forget** on this machine only
   removes it here.
@@ -315,9 +328,11 @@ npx t3 pair --scope orchestration:read --scope relay:read
 
 The selected scopes replace the default permissions. The same option works with
 `npx t3 auth pairing create` and `npx t3 auth session issue`; each command's
-`--help` lists the available scopes. Without `--scope`, pairing tokens retain
-standard client permissions and issued bearer sessions retain administrative
-permissions.
+`--help` lists the available scopes. Without `--scope`, pairing tokens and issued
+bearer sessions get every permission, including managing access and T3 Connect.
+A terminal or a full-access agent on the host can reach those as well, so a
+client that should not manage access also needs to go without `terminal:operate`
+and `orchestration:operate`.
 
 To change an existing client's permissions, create a fresh pairing link with the
 scopes it needs. In a browser opened directly on the environment, open that link
@@ -336,12 +351,13 @@ worktrees. It does not restrict what a task does. Starting a task in a new
 worktree still creates that branch and worktree with `orchestration:operate`,
 and the agent it runs can use Git however the environment allows.
 
-Settings changes, provider management, and environment maintenance can be granted
-separately from access administration. New standard pairings include these
-permissions. Existing clients can stay connected after an update, but newly separated
-features may require pairing again with the permissions they need. Older clients
-may show controls that the server denies. Create a fresh pairing link to change
-a client's permissions.
+Settings changes, provider management, environment maintenance, access
+management, and T3 Connect management can each be granted separately. New
+pairings without `--scope` include all of them. Existing clients keep the
+permissions they paired with and can stay connected after an update, but newly
+separated features may require pairing again with the permissions they need.
+Older clients may show controls that the server denies. Create a fresh pairing
+link to change a client's permissions.
 
 `filesystem:read` allows browsing host files, opening workspace files, and viewing
 local changes. Add `filesystem:write` to allow editing files or saving plans to
@@ -350,8 +366,14 @@ the workspace. These scopes control direct file access from the client.
 To remove an environment from T3 Connect, open your account menu's **T3 Connect**
 page, or **Settings → T3 Connect** on mobile, and choose **Deregister**. This
 revokes its cloud access and frees its host space even when the environment is
-offline or has been wiped. Removing an environment from a device's connection
-settings only forgets it on that device; it stays registered to your account.
+offline or has been wiped. When T3 Connect rejects a host's link, the host
+shows that it was removed from T3 Connect. To link it again, turn on
+**T3 Connect** in **Settings → Connections** on a desktop host, or run
+`t3 connect link` on a command-line host and then restart T3 Code there. A
+command-line host that released its tunnel when it last stopped may link itself
+again on its next start; run `t3 connect unlink` on that host to keep it off.
+Removing an environment from a device's connection settings only forgets it on
+that device; it stays registered to your account.
 
 When idle tunnel cleanup is enabled, T3 Connect removes a linked environment's
 tunnel after it stays offline for several minutes. The environment stays linked
@@ -373,26 +395,9 @@ screenshots, logs, or bug reports.
 
 ## T3 Connect troubleshooting
 
-Run `t3 connect status` on the host to inspect saved authorization and link
-configuration. It is not a live reachability check. If the environment appears
-offline, run `t3 service status` and read the displayed log. If it disappears
-when SSH closes, see [background-service troubleshooting](./background-service.md#troubleshooting).
-
-| Error                                                     | Recovery                                                                                                                                    |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `environment_link_limit_exceeded` or managed tunnel limit | Deregister an unused environment, then restart T3 Code on the host.                                                                         |
-| `auth_invalid` or `invalid_bearer`                        | Run `t3 connect login`. If credentials were revoked, run `t3 connect logout`, then `t3 connect` again. Restart the server after signing in. |
-| Expired or invalid link proof                             | Check the host's date and time, update T3 Code, then restart it.                                                                            |
-| HTTP 403 without a recognized error                       | Check relay access, proxies, and firewall rules. Keep any Cloudflare Ray ID for a bug report.                                               |
-| HTTP 408, 429, or 5xx                                     | Check network and relay availability. Startup retries temporary failures for up to ten minutes.                                             |
-
-After fixing a permanent rejection, restart the host's server. On Linux, use
-`systemctl --user restart t3code.service` for the background service. For a
-foreground server, stop it and run `t3 serve` again with your usual options.
-Include the diagnostic message and trace ID when reporting a persistent failure.
-
-For a connection that still fails after linking, check the date and time on both
-devices. For server version warnings, follow [Updating T3 Code](./updating.md).
+When a T3 Connect connection fails, see
+[T3 Connect troubleshooting](./t3-connect-troubleshooting.md). It explains each
+error, where the problem is, and how to fix it.
 
 ## Using the Desktop App as a Remote Only
 

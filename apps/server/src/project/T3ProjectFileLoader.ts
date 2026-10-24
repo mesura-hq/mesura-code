@@ -51,10 +51,8 @@ export class T3ProjectFileLoader extends Context.Service<
   T3ProjectFileLoader,
   {
     /**
-     * Load and decode `t3.json` at the workspace root.
-     *
-     * Never fails: missing, unreadable, or invalid files resolve to
-     * `Option.none` (invalid files are logged as warnings).
+     * Never fails: missing, unreadable, or invalid files resolve to `Option.none` (invalid files
+     * are logged as warnings).
      */
     readonly load: (workspaceRoot: string) => Effect.Effect<Option.Option<T3ProjectFile>>;
     /** Read both files in this checkout and resolve their defaults independently per field. */

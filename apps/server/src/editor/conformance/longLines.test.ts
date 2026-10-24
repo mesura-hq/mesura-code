@@ -202,6 +202,7 @@ if (nvimAvailable)
       const TYPESCRIPT_LINE = 467;
       const TYPESCRIPT_LENGTH = typescript[TYPESCRIPT_LINE - 1]?.length ?? 0;
 
+      // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- Long-line redraws run through real Neovim and optional plugins; retain the existing subprocess budget.
       it.effect(
         "keeps leftcol at 0 after A on the widest visible line of a viewport sized to that line",
         () =>
@@ -219,6 +220,7 @@ if (nvimAvailable)
         60_000,
       );
 
+      // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- Long-line redraws run through real Neovim and optional plugins; retain the existing subprocess budget.
       it.effect(
         "keeps leftcol at 0 while 40 typed characters run past the grid's last column",
         () =>
@@ -260,6 +262,7 @@ if (nvimAvailable)
         return fixture;
       });
 
+      // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- Long-line redraws run through real Neovim and optional plugins; retain the existing subprocess budget.
       it.effect(
         "classifies a window scrolled sideways against the buffer shifted by leftcol",
         () =>
@@ -279,6 +282,7 @@ if (nvimAvailable)
         60_000,
       );
 
+      // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- Long-line redraws run through real Neovim and optional plugins; retain the existing subprocess budget.
       it.effect(
         "places a label drawn over a window scrolled sideways at the buffer column it covers",
         () =>
@@ -342,6 +346,7 @@ if (nvimAvailable)
           return heldOverlayList(fixture.chunks);
         });
 
+      // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- Long-line redraws run through real Neovim and optional plugins; retain the existing subprocess budget.
       it.effect(
         "reads a wide character cut by the left edge, drawn as <, as the buffer's own",
         () =>
@@ -355,6 +360,7 @@ if (nvimAvailable)
         60_000,
       );
 
+      // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- Long-line redraws run through real Neovim and optional plugins; retain the existing subprocess budget.
       it.effect(
         "reads an unprintable character cut by the left edge as the rest of its spelling",
         () =>
@@ -366,6 +372,7 @@ if (nvimAvailable)
         60_000,
       );
 
+      // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- Long-line redraws run through real Neovim and optional plugins; retain the existing subprocess budget.
       it.effect(
         "puts a characterwise register at the end of a 300-character line without scrolling sideways",
         () =>
@@ -387,6 +394,7 @@ if (nvimAvailable)
         60_000,
       );
 
+      // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- Long-line redraws run through real Neovim and optional plugins; retain the existing subprocess budget.
       it.effect(
         "emits no overlay and at most 2 KB per key for A plus 40 characters on a long Markdown line",
         () =>
@@ -405,6 +413,7 @@ if (nvimAvailable)
         60_000,
       );
 
+      // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- Long-line redraws run through real Neovim and optional plugins; retain the existing subprocess budget.
       it.effect(
         "types and moves on a visible line longer than the contract's 1,000-column bound",
         () =>
@@ -434,6 +443,7 @@ if (nvimAvailable)
         60_000,
       );
 
+      // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- Long-line redraws run through real Neovim and optional plugins; retain the existing subprocess budget.
       it.effect(
         "holds no overlay after A plus 40 characters on the TypeScript fixture's longest line",
         () =>
@@ -450,6 +460,7 @@ if (nvimAvailable)
 
       // The TypeScript run at 0 ms already lands on line 51 at the base of
       // this phase, so it is a guard: the bench measured it correct there too.
+      // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- Long-line redraws run through real Neovim and optional plugins; retain the existing subprocess budget.
       it.effect.each([
         { name: "the Markdown fixture at 0 ms", path: MARKDOWN, run: "markdownAtDelay0" },
         { name: "the Markdown fixture at 20 ms", path: MARKDOWN, run: "markdownAtDelay20" },
@@ -532,6 +543,7 @@ if (nvimAvailable)
           return costs;
         });
 
+      // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- Long-line redraws run through real Neovim and optional plugins; retain the existing subprocess budget.
       it.effect(
         "widens the grid at most once for a burst of counts and repeats on short lines",
         () =>

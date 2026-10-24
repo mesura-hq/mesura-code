@@ -59,19 +59,26 @@ export function pruneNativeMobileJobNeeds(workflowYaml: string): string {
  */
 export const REMOVED_NATIVE_MOBILE_PATCHED_PACKAGES = [
   "@clerk/expo",
+  "@clerk/expo-native-components",
+  "@expo/fingerprint",
   "@expo/metro-config",
+  "@expo/ui",
   "@react-native-ai/apple",
   "@react-native-menu/menu",
   "@react-navigation/native-stack",
   "expo-audio",
   "expo-blur",
   "expo-glass-effect",
+  "expo-modules-core",
+  "expo-network",
   "expo-sharing",
   "expo-widgets",
   "react-native-gesture-handler",
+  "react-native-image-viewing",
   "react-native-keyboard-controller",
   "react-native-nitro-markdown",
   "react-native-nitro-modules",
+  "react-native-pdf-jsi",
   "react-native-reanimated",
   "react-native-screens",
   "react-native-shiki-engine",
@@ -110,4 +117,18 @@ export function pruneNativeMobilePatches(workspaceYaml: string): {
     kept.push(line);
   }
   return { text: kept.join("\n"), removedPatchFiles };
+}
+
+/** Native tarballs disappear with their app, so their build permissions must disappear too. */
+export function pruneNativeMobileBuilds(workspaceYaml: string): string {
+  let inBuilds = false;
+  return workspaceYaml
+    .split("\n")
+    .filter((line) => {
+      if (/^\S/.test(line)) inBuilds = line.startsWith("allowBuilds:");
+      if (!inBuilds) return true;
+      const tarball = /@file:([^"'\s]+)["']?:/.exec(line)?.[1];
+      return tarball === undefined || !isRemovedNativeMobilePath(tarball);
+    })
+    .join("\n");
 }

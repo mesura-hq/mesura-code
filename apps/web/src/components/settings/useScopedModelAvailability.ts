@@ -1,13 +1,13 @@
 import type { ProviderInstanceId, UnifiedSettings } from "@t3tools/contracts";
-import { useCallback } from "react";
 
+import { mergeEnvironmentSettings } from "../../hooks/useSettings";
 import { getCustomModelOptionsByInstance } from "../../modelSelection";
 import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
   type ProviderInstanceEntry,
 } from "../../providerInstances";
-import { useEnvironments } from "../../state/environments";
+import { useEnvironmentProviders, useEnvironments } from "../../state/environments";
 import { useSettingsScope } from "./SettingsScopeContext";
 
 /**
@@ -27,37 +27,36 @@ export function useScopedModelDisabledReason(
   const requireTextGeneration = options.requireTextGeneration === true;
   const { targets } = useSettingsScope();
   const { environments } = useEnvironments();
-  return useCallback(
-    (instanceId: ProviderInstanceId, model: string): string | null => {
-      const sourceEntry = entries.find((entry) => entry.instanceId === instanceId);
-      for (const candidate of targets) {
-        const environment = environments.find(
-          (entry) => entry.environmentId === candidate.environmentId,
-        );
-        const config = environment?.serverConfig;
-        if (!config) continue;
-        const providers = requireTextGeneration
-          ? config.providers.filter((provider) => provider.supportsTextGeneration !== false)
-          : config.providers;
-        const entry = applyProviderInstanceSettings(
-          deriveProviderInstanceEntries(providers),
-          candidate.settings,
-        ).find((option) => option.instanceId === instanceId);
-        const options = getCustomModelOptionsByInstance(
-          { ...settings, ...candidate.settings },
-          providers,
-        ).get(instanceId);
-        if (
-          !entry?.enabled ||
-          !entry.isAvailable ||
-          entry.driverKind !== sourceEntry?.driverKind ||
-          !options?.some((option) => option.slug === model && !option.isUnavailable)
-        ) {
-          return `This model is unavailable on ${environment?.label ?? "a selected environment"}. Select that environment to choose its model separately.`;
-        }
+  const providersByEnvironment = useEnvironmentProviders();
+  return (instanceId: ProviderInstanceId, model: string): string | null => {
+    const sourceEntry = entries.find((entry) => entry.instanceId === instanceId);
+    for (const candidate of targets) {
+      const environment = environments.find(
+        (entry) => entry.environmentId === candidate.environmentId,
+      );
+      const availableProviders = providersByEnvironment.get(candidate.environmentId);
+      if (!environment?.serverConfig || !availableProviders) continue;
+      const providers = requireTextGeneration
+        ? availableProviders.filter((provider) => provider.supportsTextGeneration !== false)
+        : availableProviders;
+      const entry = applyProviderInstanceSettings(
+        deriveProviderInstanceEntries(providers),
+        candidate.settings,
+        candidate.projectId,
+      ).find((option) => option.instanceId === instanceId);
+      const options = getCustomModelOptionsByInstance(
+        mergeEnvironmentSettings(candidate.settings, settings),
+        providers,
+      ).get(instanceId);
+      if (
+        !entry?.enabled ||
+        !entry.isAvailable ||
+        entry.driverKind !== sourceEntry?.driverKind ||
+        !options?.some((option) => option.slug === model && !option.isUnavailable)
+      ) {
+        return `This model is unavailable on ${environment?.label ?? "a selected environment"}. Select that environment to choose its model separately.`;
       }
-      return null;
-    },
-    [entries, environments, requireTextGeneration, settings, targets],
-  );
+    }
+    return null;
+  };
 }

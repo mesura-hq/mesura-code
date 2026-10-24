@@ -285,18 +285,17 @@ export const makeNvimRpc = Effect.fn("NvimRpc.make")(function* (duplex: NvimRpcD
     }),
   );
 
-  const request: NvimRpc["request"] = (method, params) =>
-    Effect.gen(function* () {
-      const deferred = yield* Deferred.make<unknown, NvimRpcError>();
-      // Checked with nothing that can yield between it and `pending.set`, so a
-      // close cannot land in between and leave this request unanswered.
-      if (closedWith !== null) return yield* closedWith;
-      const messageId = nextMessageId;
-      nextMessageId += 1;
-      pending.set(messageId, deferred);
-      duplex.write(packNvimFrame([0, messageId, method, params]));
-      return yield* Deferred.await(deferred);
-    });
+  const request: NvimRpc["request"] = Effect.fn(function* (method, params) {
+    const deferred = yield* Deferred.make<unknown, NvimRpcError>();
+    // Checked with nothing that can yield between it and `pending.set`, so a
+    // close cannot land in between and leave this request unanswered.
+    if (closedWith !== null) return yield* closedWith;
+    const messageId = nextMessageId;
+    nextMessageId += 1;
+    pending.set(messageId, deferred);
+    duplex.write(packNvimFrame([0, messageId, method, params]));
+    return yield* Deferred.await(deferred);
+  });
 
   const notify: NvimRpc["notify"] = (method, params) =>
     Effect.sync(() => {

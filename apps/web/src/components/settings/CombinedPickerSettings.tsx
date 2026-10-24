@@ -1,5 +1,6 @@
 import {
   DEFAULT_SERVER_SETTINGS,
+  type EnvironmentId,
   type ModelSelection,
   type ProviderInstanceId,
   type RuntimeMode,
@@ -39,6 +40,7 @@ export interface SettingsPickerChange {
  * opening deliberately changed.
  */
 export function CombinedPickerSettings(props: {
+  environmentId: EnvironmentId | null;
   kind: SettingsPickerKind;
   /**
    * The representative target's selection, with its options as stored. Null
@@ -161,6 +163,7 @@ export function CombinedPickerSettings(props: {
 
   return (
     <ProviderModelPicker
+      environmentId={props.environmentId}
       activeInstanceId={shown.instanceId}
       model={shown.model}
       lockedProvider={null}

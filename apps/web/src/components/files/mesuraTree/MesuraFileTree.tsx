@@ -73,6 +73,12 @@ function recordFor(environmentId: EnvironmentId, cwd: string): TreeRecord {
   return record;
 }
 
+// TreeRecord belongs to the imperative tree cache. Queue reveals through this
+// boundary so React does not mutate a record that it already passed to FileTree.
+function deferTreeReveal(record: TreeRecord, absolute: string): void {
+  record.pendingReveal = absolute;
+}
+
 /** The toolbar's Miller button: the file manager over the window, at this project. */
 const openFileManager = () => useFileManagerStore.getState().setOpen(true);
 
@@ -173,7 +179,7 @@ export function MesuraFileTree({
     // Before the tree mounts (entries still loading, or an error shown), the
     // record carries the reveal and the tree resolves it on its first render.
     if (controller.current) controller.current.reveal(absolute);
-    else record.pendingReveal = absolute;
+    else deferTreeReveal(record, absolute);
   }, [cwd, record, selectedPath, selectedPathRevealId]);
 
   const onOpen = (absolute: string) => {

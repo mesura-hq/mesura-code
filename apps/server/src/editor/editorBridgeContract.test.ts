@@ -31,7 +31,7 @@ function editorSourceFiles(): string[] {
 }
 
 /**
- * The one file allowed to wait on a clock, and why.
+ * The tests allowed to wait on a clock, and why.
  *
  * A list rather than a marker comment a file could put on itself: widening
  * this is an edit somebody reads, not something a new test can do quietly.
@@ -51,6 +51,9 @@ const MAY_WAIT_ON_A_CLOCK: ReadonlyMap<string, string> = new Map([
   ["conformance/insertModeLatency.test.ts", "MESURA_NVIM_CONFIG_DIR"],
   // Pins the hold's time bound, which nothing but a clock can show.
   ["Manager.cursorWait.test.ts", "TEXT_WAIT_MS"],
+  // The escape fallback is a timeout contract. Its virtual clock advances only
+  // after the fake Neovim reports the held read, so machine speed cannot decide it.
+  ["Manager.escapeAnswer.test.ts", "mesura.escape_state"],
 ]);
 
 describe("the editor bridge's contract with the repository", () => {

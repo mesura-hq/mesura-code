@@ -4,20 +4,10 @@ import { assert, it } from "vite-plus/test";
 
 import { commandOutput, run } from "./contractHarness.ts";
 
-// Two sites keep T3 Code's `.t3` literal on purpose, and neither can collide
-// with the installed T3 Code this fork runs beside:
-//
-//   packages/shared/src/devHome.ts  a linked worktree's own `<worktree>/.t3`,
-//                                   which is local to that worktree.
-//   packages/ssh/src/tunnel.ts      `$HOME/.t3` inside shell scripts that run on
-//                                   REMOTE hosts, not on this machine. It builds
-//                                   the path from shell text rather than the
-//                                   `".t3"` literal, so this scan never sees it.
-//
-// Every other product path must resolve to Mesura Code's own home. This is a
-// negative over the whole repository: a review by hand cannot promise it,
-// because the cost of missing one site is that the fork writes into the live
-// database of the T3 Code in daily use.
+// A linked worktree keeps its own `<worktree>/.t3` through devHome.ts.
+// The setup marker and icon-scanner exceptions below must prove their local
+// use before this scan accepts them. No product default may reach the shared
+// home of the installed T3 Code that runs beside Mesura Code.
 const SITES_ALLOWED_TO_KEEP_THE_T3_LITERAL = ["packages/shared/src/devHome.ts"];
 
 it("leaves no product code defaulting to T3 Code's shared home", () => {
@@ -50,11 +40,21 @@ it("leaves no product code defaulting to T3 Code's shared home", () => {
   const onlyExcludesWorktreeState =
     candidateScannerSource.match(/"\.t3"/g)?.length === 1 && excludedDirectories?.includes('".t3"');
 
+  // Setup markers belong beside this script's worktree, never under HOME.
+  // Do not allow the file wholesale: a second `.t3` use must fail the scan.
+  const setupPath = "scripts/setup-worktree.ts";
+  const setupSource = NodeFS.readFileSync(new URL(`../../${setupPath}`, import.meta.url), "utf8");
+  const onlyUsesWorktreeMarkers =
+    setupSource.match(/"\.t3"/g)?.length === 1 &&
+    setupSource.includes("const worktree = NodePath.dirname(import.meta.dirname);") &&
+    setupSource.includes('const markerDir = NodePath.join(worktree, ".t3");');
+
   const files = (found.stdout ?? "")
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
     .filter((file) => file !== candidateScannerPath || !onlyExcludesWorktreeState)
+    .filter((file) => file !== setupPath || !onlyUsesWorktreeMarkers)
     .sort();
 
   assert.deepEqual(files, SITES_ALLOWED_TO_KEEP_THE_T3_LITERAL);

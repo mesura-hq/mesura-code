@@ -17,7 +17,14 @@ import {
 
 import { getProviderModelCapabilities } from "../../providerModels";
 import { withImplicitFastModeDefault } from "./composerProviderState";
-import { buildTraitsTriggerDisplay, buildUnavailableModelOptionDescriptors } from "./TraitsPicker";
+import {
+  buildTraitsTriggerDisplay,
+  replaceDescriptorCurrentValue,
+  ULTRATHINK_PROMPT_PREFIX,
+} from "@t3tools/client-runtime/model-traits";
+import { buildUnavailableModelOptionDescriptors } from "./TraitsPicker";
+
+export { ULTRATHINK_PROMPT_PREFIX } from "@t3tools/client-runtime/model-traits";
 
 /**
  * Provider option rules for the combined model picker: which descriptors a
@@ -26,15 +33,13 @@ import { buildTraitsTriggerDisplay, buildUnavailableModelOptionDescriptors } fro
  *
  * The selection and prompt rules mirror `TraitsMenuContent` in
  * `TraitsPicker.tsx` (`getSelectedTraits` and `handleSelectChange`). That
- * upstream menu is no longer mounted in this fork, but it stays unedited so
- * upstream merges stay cheap. When an upstream sync changes those rules,
- * carry the change here too.
+ * composer menu stays available for the model-only controls. Shared descriptor
+ * changes and trigger labels use the runtime model-traits helpers.
  */
 
 type ProviderOptions = ReadonlyArray<ProviderOptionSelection>;
 type SelectDescriptor = Extract<ProviderOptionDescriptor, { type: "select" }>;
 
-export const ULTRATHINK_PROMPT_PREFIX = "Ultrathink:\n";
 const ULTRATHINK_PREFIX_PATTERN = /^Ultrathink:\s*/i;
 
 export const UNAVAILABLE_MODEL_OPTIONS_REASON =
@@ -161,20 +166,6 @@ export interface ProviderOptionChange {
   /** False when only the prompt changes, so callers keep the saved options. */
   modelOptionsChanged: boolean;
   modelOptions?: ProviderOptions | undefined;
-}
-
-function replaceDescriptorCurrentValue(
-  descriptors: ReadonlyArray<ProviderOptionDescriptor>,
-  descriptorId: string,
-  currentValue: string | boolean,
-): ReadonlyArray<ProviderOptionDescriptor> {
-  return descriptors.map((descriptor) =>
-    descriptor.id !== descriptorId
-      ? descriptor
-      : descriptor.type === "boolean"
-        ? { ...descriptor, ...(typeof currentValue === "boolean" ? { currentValue } : {}) }
-        : { ...descriptor, ...(typeof currentValue === "string" ? { currentValue } : {}) },
-  );
 }
 
 /**

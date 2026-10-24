@@ -8,8 +8,16 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
 import { Tool, Toolkit } from "effect/ai";
+import {
+  FetchHttpClient,
+  HttpClient,
+  HttpServer,
+  HttpServerRequest,
+  HttpServerResponse,
+} from "effect/http";
 
 import * as McpHttpServer from "../mcp/McpHttpServer.ts";
 import * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
@@ -71,6 +79,7 @@ const makeA = (descriptor: ExecutionEnvironmentDescriptor) =>
     Effect.map((context) => ({
       links: Context.get(context, PeerLinks.PeerLinks),
       peer: Context.get(context, PeerMcpClient.PeerMcpClient),
+      sql: Context.get(context, SqlClient.SqlClient),
     })),
   );
 
@@ -168,6 +177,64 @@ it.effect("two links racing to one peer leave the stored access matching the tok
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
 
+/** A bare HTTP server on a socket of its own, answering with `handle`. */
+const serveRaw = <E, R>(
+  handle: (
+    request: HttpServerRequest.HttpServerRequest,
+  ) => Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
+) =>
+  Layer.build(Layer.fresh(NodeHttpServer.layerTest)).pipe(
+    Effect.flatMap((server) =>
+      Effect.gen(function* () {
+        yield* HttpServer.serve(Effect.flatMap(HttpServerRequest.HttpServerRequest, handle)).pipe(
+          Layer.build,
+        );
+        const address = (yield* HttpServer.HttpServer).address;
+        if (address._tag === "UnixPathAddress") return yield* Effect.die("expected a TCP address");
+        return `http://127.0.0.1:${address.port}`;
+      }).pipe(Effect.provideContext(server)),
+    ),
+  );
+
+it.effect("never follows a peer's redirect with the pairing code", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const b = yield* serveB(box);
+      const received = yield* Ref.make<ReadonlyArray<string>>([]);
+      const elsewhere = yield* serveRaw((request) =>
+        Ref.update(received, (seen) => [...seen, `${request.method} ${request.url}`]).pipe(
+          Effect.as(HttpServerResponse.empty({ status: 404 })),
+        ),
+      );
+      // Answers as B, then sends every linking request on to another address.
+      const front = yield* serveRaw((request) =>
+        request.url.startsWith("/.well-known/t3/environment")
+          ? HttpClient.get(`${b.url}${request.url}`).pipe(
+              Effect.flatMap((response) => response.text),
+              Effect.map((body) =>
+                HttpServerResponse.text(body, { contentType: "application/json" }),
+              ),
+              Effect.provide(FetchHttpClient.layer),
+              Effect.orDie,
+            )
+          : Effect.succeed(
+              HttpServerResponse.empty({
+                status: 307,
+                headers: { location: `${elsewhere}${request.url}` },
+              }),
+            ),
+      );
+      const a = yield* makeA(laptop);
+      const pairing = yield* b.auth.issuePairingCredential();
+      yield* a.links
+        .link({ url: front, pairingCode: pairing.credential, access: "auto" })
+        .pipe(Effect.flip);
+      expect(yield* Ref.get(received)).toEqual([]);
+      expect(yield* a.links.list).toEqual([]);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
 it.effect("never sends a link's token to an address that stops answering as that peer", () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -220,6 +287,35 @@ it.effect("tells the agent to link again once the peer revokes the link or it ex
       const revoked = yield* probe(a).pipe(Effect.flip);
       expect(revoked.code).toBe("capability_denied");
       expect(revoked.message).toContain("revoked there");
+
+      yield* a.links.link({
+        url: b.url,
+        pairingCode: (yield* b.auth.issuePairingCredential()).credential,
+        access: "auto",
+      });
+      // A link made with a peer that later answers without the fence, as
+      // one made before the fence or a peer moved back to such a version.
+      yield* Ref.set(b.descriptor, descriptorOf("environment-box", "Box", { linkFence: false }));
+      yield* Ref.set(b.bearers, []);
+      const unfenced = yield* probe(a).pipe(Effect.flip);
+      expect(unfenced.code).toBe("capability_denied");
+      expect(unfenced.message).toContain("cannot keep a linked agent's limits");
+      expect(yield* Ref.get(b.bearers)).toEqual([]);
+      yield* Ref.set(b.descriptor, box);
+
+      // A link stored before links were marked: its session there is not a
+      // link's, so the peer would not fence its work even though it can.
+      yield* a.sql`UPDATE peer_environment_links SET fenced = 0`;
+      const legacy = yield* probe(a).pipe(Effect.flip);
+      expect(legacy.code).toBe("capability_denied");
+      expect(legacy.message).toContain("Link it again");
+      expect(yield* Ref.get(b.bearers)).toEqual([]);
+      yield* a.links.link({
+        url: b.url,
+        pairingCode: (yield* b.auth.issuePairingCredential()).credential,
+        access: "auto",
+      });
+      yield* probe(a);
 
       yield* TestClock.adjust(Duration.days(31));
       expect((yield* a.links.list).map((link) => link.status)).toEqual(["expired"]);

@@ -314,11 +314,12 @@ export function AccountLimitsPanelContent(props: {
 export function AccountLimitsDock(props: { readonly controller: AccountLimitsPanelController }) {
   const { controller } = props;
   const view = useAccountLimits();
+  const { refresh } = view;
   const wasOpen = useRef(false);
   useEffect(() => {
-    if (controller.open && !wasOpen.current) view.refresh();
+    if (controller.open && !wasOpen.current) refresh();
     wasOpen.current = controller.open;
-  }, [controller.open, view.refresh]);
+  }, [controller.open, refresh]);
 
   return (
     // Height comes from `grid-template-rows` going `0fr` to `1fr`, so the panel

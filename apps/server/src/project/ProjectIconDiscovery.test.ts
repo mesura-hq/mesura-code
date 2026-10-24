@@ -33,6 +33,7 @@ import { describe, expect, it } from "@effect/vitest";
 
 import { ServerConfig } from "../config.ts";
 import * as RuntimeLayer from "../orchestration-v2/runtimeLayer.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import type { ProjectIconCandidate } from "./ProjectIconCandidates.ts";
@@ -83,6 +84,7 @@ function projectLayer(databasePath: string) {
       }),
     ),
     Layer.provideMerge(SqlitePersistence.layerFromPath(databasePath)),
+    Layer.provideMerge(ServerSettings.layerTest()),
     Layer.provideMerge(
       ServerConfig.layerTest(process.cwd(), { prefix: "mesura-icon-discovery-test-" }),
     ),

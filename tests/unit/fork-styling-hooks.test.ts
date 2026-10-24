@@ -73,21 +73,32 @@ it("stacks the dictation strip inside the composer's banner column", () => {
   // Inside ComposerBanner.Column the strip joins the attached-banner stack and
   // the Dock's side tabs (Stash) sit beside it. Mounted above the form instead,
   // it fused onto the Dock and left the Stash tab hanging below it as a step.
+  const composer = read("apps/web/src/components/chat/ChatComposer.tsx");
   assert.match(
-    read("apps/web/src/components/chat/ChatComposer.tsx"),
+    composer,
     /\{dictationStrip\}\s*<\/ComposerBanner\.Column>/,
     "ChatComposer no longer renders dictationStrip as the last child of ComposerBanner.Column",
   );
   const chatView = read("apps/web/src/components/ChatView.tsx");
   assert.match(
     chatView,
-    /dictationStrip=\{DICTATION_RECORDING_STRIP\}/,
+    /<ChatComposer\b[\s\S]*?dictationStrip=\{<DictationRecordingStrip\s*\/>\}/,
     "ChatView no longer hands the dictation strip to ChatComposer",
   );
   assert.equal(
     chatView.match(/<DictationRecordingStrip\b/g)?.length,
     1,
     "DictationRecordingStrip must mount exactly once, through ChatComposer",
+  );
+  assert.match(
+    composer,
+    /<ComposerBanner\.Dock>\s*<ComposerBanner\.Column>[\s\S]*?\{dictationStrip\}\s*<\/ComposerBanner\.Column>\s*<ComposerStashBadge\b/,
+    "the dictation banner must stay inside the column, beside the Dock's Stash tab",
+  );
+  assert.equal(
+    composer.match(/\{dictationStrip\}/g)?.length,
+    1,
+    "the composer must render the supplied dictation strip exactly once",
   );
 });
 

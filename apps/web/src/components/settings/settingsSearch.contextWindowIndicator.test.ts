@@ -14,12 +14,12 @@ function findCatalogItem(id: string): SettingsSearchItem | undefined {
 }
 
 describe("context window indicator settings search entry", () => {
-  it("titles the context window indicator entry without the legacy label and routes it to Appearance", () => {
+  it("titles the context window indicator entry without the legacy label and routes it to General", () => {
     const entry = findCatalogItem(CONTEXT_WINDOW_INDICATOR_ID);
     expect(entry).toBeDefined();
     expect(entry!.title).toBe("Context window indicator");
     expect(entry!.title).not.toContain("(legacy)");
-    expect(entry!.to).toBe("/settings/appearance");
+    expect(entry!.to).toBe("/settings/general");
   });
 
   it("drops the legacy context window indicator id from the settings search catalog", () => {

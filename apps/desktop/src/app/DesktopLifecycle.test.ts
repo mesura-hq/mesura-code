@@ -35,6 +35,7 @@ function layerElectronApp(
     name: Effect.succeed("Mesura Code"),
     systemLocale: Effect.succeed("en-US"),
     whenReady: Effect.void,
+    requestSingleInstanceLock: Effect.succeed(true),
     quit,
     exit: () => Effect.void,
     relaunch: () => Effect.void,

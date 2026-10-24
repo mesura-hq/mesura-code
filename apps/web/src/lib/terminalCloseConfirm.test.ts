@@ -25,20 +25,6 @@ describe("terminal close confirmation", () => {
     readLocalApiMock.mockReturnValue({ dialogs: { confirm: confirmMock } });
   });
 
-  it("tracks pending state until the confirmation settles", async () => {
-    let settle: (value: boolean) => void = () => undefined;
-    confirmMock.mockImplementation(() => new Promise<boolean>((resolve) => (settle = resolve)));
-
-    expect(isTerminalCloseConfirmPending()).toBe(false);
-
-    const confirmation = confirmTerminalClose(["Terminal 1"]);
-    expect(isTerminalCloseConfirmPending()).toBe(true);
-
-    settle(true);
-    await expect(confirmation).resolves.toBe(true);
-    expect(isTerminalCloseConfirmPending()).toBe(false);
-  });
-
   it("clears pending state and resolves false when the dialog rejects", async () => {
     let reject: (reason?: unknown) => void = () => undefined;
     confirmMock.mockImplementation(

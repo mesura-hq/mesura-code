@@ -14,16 +14,20 @@ downloads belong to upstream T3 Code; they do not update this fork.
 Server updates restart the connection and can interrupt active agents and
 terminal commands. Saved threads, settings, and project files remain.
 
-**Settings → General → Continue threads after restarts** is off by default.
-Enable it to resume supported active threads after an update, crash, or machine
+**Settings → General → Continue threads after restarts** is on by default.
+It resumes supported active threads after an update, crash, or machine
 restart. Changes are saved to connected environments that support this setting;
 update older servers first. If a supported environment was offline or has a
 different value, use **Apply to all** in Settings after it connects.
 Mesura Code must start again on that machine;
 the setting does not enable automatic startup. Terminal commands may still be
 interrupted, and threads without saved provider resume state need a new message.
-If you previously enabled continuation for updates, enable this setting once
-to allow recovery without a connected client.
+A thread that finished its turn to wait on a monitor, subagent, or background task
+is woken and told that this work stopped. A background shell, such as a dev server,
+does not wake it; the thread learns about it with your next message.
+A thread is not resumed while it waits for your approval, answer, or secret, or
+while it is archived, snoozed, or settled. After three automatic resumes in a row,
+the thread waits for your next message.
 
 Updates from the previous orchestration system preserve conversation transcripts but cannot carry
 every kind of runtime history forward. Read [Threads from older T3 Code versions](./thread-migration.md)
@@ -115,12 +119,25 @@ update can roll back to the previous version. If the update still fails:
 3. Install a matching Mesura Code build on that machine, then restart the server
    and reconnect.
 
+Only one server can use a T3 home directory at a time. If startup reports that
+another server owns it, stop that server before retrying, or use a separate home
+directory and pair with the running server.
+
 ## Update providers
 
 **Settings → Providers** shows provider updates for the selected environment.
 **Update all** updates every outdated provider on every connected environment
 at once. Hover it to see which providers it will update. Providers that only
 offer a manual update command are not included.
+
+After a successful provider CLI update, Mesura Code refreshes model discovery for
+every enabled instance of that provider using its own configuration. Connected
+clients receive the refreshed catalogs automatically. Provider update checks
+must be enabled to download the latest Mesura Code model catalog.
+
+Provider updates do not restart running chats. An existing session can keep
+using the previous CLI until it ends. If discovery fails, check the provider
+status and refresh it again.
 
 ## Updates from a phone
 

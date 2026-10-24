@@ -96,15 +96,11 @@ export class FactoryReadSnapshotError extends Schema.TaggedError<FactoryReadSnap
   }
 }
 
-// ---------------------------------------------------------------------------
-// Software Factory runs.
-//
 // A run directory holds `events.jsonl`, one record-version-1 event per line.
 // The single definition of that record is
 // `skills/core/sf-team/bin/run-events.mjs` in the agent-env repository; the
 // schemas below decode the same shape, and `@t3tools/shared/factoryRun` folds
 // it into `FactoryRunState`.
-// ---------------------------------------------------------------------------
 
 export const FACTORY_RUN_RECORD_VERSION = 1;
 
@@ -508,7 +504,6 @@ export const FactoryRunSummary = Schema.Struct({
 });
 export type FactoryRunSummary = typeof FactoryRunSummary.Type;
 
-/** Payload of a `factory.run` activity. */
 export const FactoryRunActivityPayload = Schema.Struct({
   threadId: ThreadId,
   ...FactoryRunSummary.fields,

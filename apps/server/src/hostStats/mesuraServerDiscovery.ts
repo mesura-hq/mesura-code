@@ -128,12 +128,11 @@ function startedWith(startedAt: string, processStartMs: number): boolean {
   return Math.abs(Date.parse(startedAt) - processStartMs) <= RUNTIME_FILE_START_WINDOW_MS;
 }
 
-const bootTimeMs = (procRoot: string) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const btime = Number(/^btime\s+(\d+)/m.exec(yield* fs.readFileString(`${procRoot}/stat`))?.[1]);
-    return Number.isFinite(btime) ? btime * 1000 : yield* Effect.fail("no btime" as const);
-  });
+const bootTimeMs = Effect.fn(function* (procRoot: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const btime = Number(/^btime\s+(\d+)/m.exec(yield* fs.readFileString(`${procRoot}/stat`))?.[1]);
+  return Number.isFinite(btime) ? btime * 1000 : yield* Effect.fail("no btime" as const);
+});
 
 export const make = Effect.fn("makeMesuraServerDiscovery")(function* (
   options: MesuraServerDiscoveryOptions,
@@ -152,75 +151,79 @@ export const make = Effect.fn("makeMesuraServerDiscovery")(function* (
    * ours. A desktop app passing its base dir through the bootstrap fd is not
    * visible here and falls back to that default; the registry finds it instead.
    */
-  const stateHomeOf = (argv: ReadonlyArray<string>, environ: string, cwd: string) =>
-    Effect.gen(function* () {
-      const explicit = baseDirFlag(argv) ?? environmentValue(environ, "T3CODE_HOME");
-      if (explicit === undefined || explicit.trim().length === 0) {
-        const home = environmentValue(environ, "HOME")?.trim();
-        return home !== undefined && path.isAbsolute(home)
-          ? path.join(home, DEFAULT_STATE_HOME_DIR_NAME)
-          : options.defaultStateHome;
-      }
-      const trimmed = explicit.trim();
-      return trimmed.startsWith("~") || path.isAbsolute(trimmed)
-        ? yield* resolveBaseDir(trimmed)
-        : path.resolve(cwd, trimmed);
-    });
+  const stateHomeOf = Effect.fn(function* (
+    argv: ReadonlyArray<string>,
+    environ: string,
+    cwd: string,
+  ) {
+    const explicit = baseDirFlag(argv) ?? environmentValue(environ, "T3CODE_HOME");
+    if (explicit === undefined || explicit.trim().length === 0) {
+      const home = environmentValue(environ, "HOME")?.trim();
+      return home !== undefined && path.isAbsolute(home)
+        ? path.join(home, DEFAULT_STATE_HOME_DIR_NAME)
+        : options.defaultStateHome;
+    }
+    const trimmed = explicit.trim();
+    return trimmed.startsWith("~") || path.isAbsolute(trimmed)
+      ? yield* resolveBaseDir(trimmed)
+      : path.resolve(cwd, trimmed);
+  });
 
   /**
    * The runtime state this process wrote about itself, or none: a file naming
    * its PID and started with it. Each file is checked in full, so a stale file
    * for a reused PID in `userdata` cannot hide the current one in `dev`.
    */
-  const ownRuntimeState = (pid: number, stateHome: string, processStartMs: number) =>
-    Effect.gen(function* () {
-      for (const directory of RUNTIME_STATE_DIRECTORIES) {
-        const state = yield* readPersistedServerRuntimeState(
-          path.join(stateHome, directory, "server-runtime.json"),
-        );
-        if (Option.isNone(state) || state.value.pid !== pid) continue;
-        if (startedWith(state.value.startedAt, processStartMs)) return state;
-      }
-      return Option.none<PersistedServerRuntimeState>();
-    });
+  const ownRuntimeState = Effect.fn(function* (
+    pid: number,
+    stateHome: string,
+    processStartMs: number,
+  ) {
+    for (const directory of RUNTIME_STATE_DIRECTORIES) {
+      const state = yield* readPersistedServerRuntimeState(
+        path.join(stateHome, directory, "server-runtime.json"),
+      );
+      if (Option.isNone(state) || state.value.pid !== pid) continue;
+      if (startedWith(state.value.startedAt, processStartMs)) return state;
+    }
+    return Option.none<PersistedServerRuntimeState>();
+  });
 
   /** The start time of the process at `processDir` when it belongs to this user; null otherwise. */
-  const ownProcessStartMs = (processDir: string, bootedAtMs: number) =>
-    Effect.gen(function* () {
-      if (realUid(yield* fs.readFileString(path.join(processDir, "status"))) !== options.uid) {
-        return null;
-      }
-      const ticks = startTicks(yield* fs.readFileString(path.join(processDir, "stat")));
-      return ticks === null ? null : bootedAtMs + (ticks * 1000) / CLOCK_TICKS_PER_SECOND;
-    });
+  const ownProcessStartMs = Effect.fn(function* (processDir: string, bootedAtMs: number) {
+    if (realUid(yield* fs.readFileString(path.join(processDir, "status"))) !== options.uid) {
+      return null;
+    }
+    const ticks = startTicks(yield* fs.readFileString(path.join(processDir, "stat")));
+    return ticks === null ? null : bootedAtMs + (ticks * 1000) / CLOCK_TICKS_PER_SECOND;
+  });
 
   /**
    * The registry entries of live servers of this user, one per PID. An entry
    * is checked like a runtime file: its process runs, is ours, and started
    * with it. A stale entry, for a dead or reused PID, is skipped.
    */
-  const registeredServers = (bootedAtMs: number) =>
-    Effect.gen(function* () {
-      const entries = (yield* Effect.forEach(
-        options.registryDirectories,
-        readServerRuntimeRegistry,
-      )).flat();
-      const servers = new Map<number, ServerKind>();
-      for (const entry of entries) {
-        if (entry.pid === options.self.pid || servers.has(entry.pid)) continue;
-        const processStartMs = yield* ownProcessStartMs(
-          path.join(options.procRoot, String(entry.pid)),
-          bootedAtMs,
-        ).pipe(Effect.catchCause(() => Effect.succeed(null)));
-        if (processStartMs === null || !startedWith(entry.startedAt, processStartMs)) continue;
-        servers.set(entry.pid, serverKind(entry.devUrl));
-      }
-      return servers;
-    });
+  const registeredServers = Effect.fn(function* (bootedAtMs: number) {
+    const entries = (yield* Effect.forEach(
+      options.registryDirectories,
+      readServerRuntimeRegistry,
+    )).flat();
+    const servers = new Map<number, ServerKind>();
+    for (const entry of entries) {
+      if (entry.pid === options.self.pid || servers.has(entry.pid)) continue;
+      const processStartMs = yield* ownProcessStartMs(
+        path.join(options.procRoot, String(entry.pid)),
+        bootedAtMs,
+      ).pipe(Effect.catchCause(() => Effect.succeed(null)));
+      if (processStartMs === null || !startedWith(entry.startedAt, processStartMs)) continue;
+      servers.set(entry.pid, serverKind(entry.devUrl));
+    }
+    return servers;
+  });
 
   /** The kind of server `pid` is, or null when it is not a live Mesura Code server. */
-  const classify = (pid: number, bootedAtMs: number) =>
-    Effect.gen(function* () {
+  const classify = Effect.fn(
+    function* (pid: number, bootedAtMs: number) {
       const processDir = path.join(options.procRoot, String(pid));
       const processStartMs = yield* ownProcessStartMs(processDir, bootedAtMs);
       if (processStartMs === null) return null;
@@ -235,10 +238,10 @@ export const make = Effect.fn("makeMesuraServerDiscovery")(function* (
       const state = yield* ownRuntimeState(pid, stateHome, processStartMs);
       if (Option.isNone(state)) return null;
       return serverKind(state.value.devUrl);
-    }).pipe(
-      // The process exited, or its files are not ours to read: it is not counted.
-      Effect.catchCause(() => Effect.succeed(null)),
-    );
+    },
+    // The process exited, or its files are not ours to read: it is not counted.
+    Effect.catchCause(() => Effect.succeed(null)),
+  );
 
   const discoverOnLinux = Effect.gen(function* () {
     const bootedAtMs = yield* bootTimeMs(options.procRoot);

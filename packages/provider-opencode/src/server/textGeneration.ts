@@ -19,6 +19,7 @@ const OpenCodeTextGenerationOperation = Schema.Literals([
   "generateBranchName",
   "generateThreadTitle",
   "generateThreadSearchStep",
+  "generateReviewGuide",
 ]);
 
 /** How long cleaning up a search step's session may take before the step fails. */
@@ -222,11 +223,14 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
         const session = yield* Effect.tryPromise({
           // Deliberately not cancelled: an aborted request can still create a
           // session whose ID never arrives, which nothing could then delete.
-          try: () => {
-            const request = client.session.create({
-              title: `Mesura Code ${input.operation}`,
-              permission: [{ permission: "*", pattern: "*", action: "deny" }],
-            });
+          try: (signal) => {
+            const request = client.session.create(
+              {
+                title: `Mesura Code ${input.operation}`,
+                permission: [{ permission: "*", pattern: "*", action: "deny" }],
+              },
+              ephemeralSession === undefined ? { signal } : undefined,
+            );
             if (ephemeralSession !== undefined) {
               ownedSession = {
                 client,
@@ -262,20 +266,44 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
         };
 
         const result = yield* Effect.tryPromise({
-          try: () =>
-            client.session.prompt({
-              sessionID: session.data.id,
-              model: parsedModel,
-              ...(selectedAgent ? { agent: selectedAgent } : {}),
-              ...(selectedVariant ? { variant: selectedVariant } : {}),
-              parts: [{ type: "text", text: input.prompt }, ...fileParts],
-            }),
+          try: (signal) =>
+            client.session.prompt(
+              {
+                sessionID: session.data.id,
+                model: parsedModel,
+                ...(selectedAgent ? { agent: selectedAgent } : {}),
+                ...(selectedVariant ? { variant: selectedVariant } : {}),
+                parts: [{ type: "text", text: input.prompt }, ...fileParts],
+              },
+              { signal },
+            ),
           catch: (cause) =>
             new OpenCodeTextGenerationPromptRequestError({
               ...promptContext,
               cause,
             }),
-        });
+        }).pipe(
+          // Ephemeral searches own a bounded abort-and-delete finalizer. Running
+          // this abort too doubled requests and delayed deletion when abort stalled.
+          // Other requests still need an explicit abort on a shared server.
+          Effect.onInterrupt(() =>
+            ephemeralSession !== undefined
+              ? Effect.void
+              : OpenCodeRuntime.runOpenCodeSdk("session.abort", (signal) =>
+                  client.session.abort({ sessionID: session.data.id }, { signal }),
+                ).pipe(
+                  Effect.interruptible,
+                  Effect.timeout("10 seconds"),
+                  Effect.catch(() =>
+                    Effect.logWarning(
+                      "Failed to stop cancelled OpenCode text generation.",
+                      promptContext,
+                    ),
+                  ),
+                  Effect.asVoid,
+                ),
+          ),
+        );
         const promptFailure = getOpenCodePromptFailure(result.data?.info?.error);
         if (promptFailure) {
           return yield* new OpenCodeTextGenerationPromptResponseError({
@@ -463,5 +491,8 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
     return yield* TextGenerationOperations.decodeJsonReply(input, "OpenCode", rawOutput);
   });
 
-  return TextGenerationOperations.fromRunner("OpenCodeTextGeneration", runOpenCodeJson);
+  return TextGenerationOperations.fromRunner(
+    "OpenCodeTextGeneration",
+    TextGenerationOperations.withoutInvestigation("OpenCode", runOpenCodeJson),
+  );
 });

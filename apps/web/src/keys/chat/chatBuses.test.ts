@@ -1,8 +1,4 @@
-// No `@vitest-environment` pragma on purpose: these run in Node, where `window`
-// is undefined. `MessagesTimeline.test.tsx` renders the timeline there through
-// `react-test-renderer`, so the minimap's effect subscribes to the turn-jump
-// bus, and the selection toolbar's effect subscribes to the cite bus, with no
-// DOM at all.
+// The buses also run in Node, where no window exists.
 import { describe, expect, it } from "vite-plus/test";
 
 import { requestChatCite, subscribeChatCiteRequest } from "./chatCiteBus";

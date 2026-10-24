@@ -167,24 +167,23 @@ const SESSION_OUTAGE_LIMIT_MS = 60_000;
  */
 const editorSessionReachable = createEnvironmentCommand(connectionAtomRuntime, {
   label: "environment-data:editor-session:reachable",
-  execute: (input: { readonly waitMs: number; readonly pauseMs: number }) =>
-    Effect.gen(function* () {
-      const supervisor = yield* EnvironmentSupervisor.EnvironmentSupervisor;
-      if (Option.isSome(yield* SubscriptionRef.get(supervisor.session))) {
-        const dropped = yield* SubscriptionRef.changes(supervisor.session).pipe(
-          Stream.filter(Option.isNone),
-          Stream.runHead,
-          Effect.timeoutOption(input.pauseMs),
-        );
-        if (Option.isNone(dropped)) return "connected";
-      }
-      const back = yield* SubscriptionRef.changes(supervisor.session).pipe(
-        Stream.filter(Option.isSome),
+  execute: Effect.fn(function* (input: { readonly waitMs: number; readonly pauseMs: number }) {
+    const supervisor = yield* EnvironmentSupervisor.EnvironmentSupervisor;
+    if (Option.isSome(yield* SubscriptionRef.get(supervisor.session))) {
+      const dropped = yield* SubscriptionRef.changes(supervisor.session).pipe(
+        Stream.filter(Option.isNone),
         Stream.runHead,
-        Effect.timeoutOption(input.waitMs),
+        Effect.timeoutOption(input.pauseMs),
       );
-      return Option.isSome(back) ? "reconnected" : "unreachable";
-    }),
+      if (Option.isNone(dropped)) return "connected";
+    }
+    const back = yield* SubscriptionRef.changes(supervisor.session).pipe(
+      Stream.filter(Option.isSome),
+      Stream.runHead,
+      Effect.timeoutOption(input.waitMs),
+    );
+    return Option.isSome(back) ? "reconnected" : "unreachable";
+  }),
 });
 
 /**

@@ -34,6 +34,14 @@ import { repositoryRoot } from "./contractHarness.ts";
 const read = (relativePath: string) =>
   NodeFS.readFileSync(NodePath.join(repositoryRoot, relativePath), "utf8");
 
+function between(source: string, startMarker: string, endMarker: string): string {
+  const start = source.indexOf(startMarker);
+  assert.isAbove(start, -1, `the wiring owner "${startMarker}" is gone`);
+  const end = source.indexOf(endMarker, start + startMarker.length);
+  assert.isAbove(end, start, `the boundary "${endMarker}" after "${startMarker}" is gone`);
+  return source.slice(start, end);
+}
+
 it("keeps the sidebar project scope on the store the keybinding writes", () => {
   const sidebar = read("apps/web/src/components/Sidebar.tsx");
   assert.include(
@@ -49,46 +57,154 @@ it("keeps the sidebar project scope on the store the keybinding writes", () => {
 });
 
 it("handles the attach shortcut in the composer that owns the file input", () => {
+  const chatView = read("apps/web/src/components/ChatView.tsx");
   const composer = read("apps/web/src/components/chat/ChatComposer.tsx");
+  const shortcuts = read("apps/web/src/components/chat/useChatShortcuts.ts");
+  const commands = read("apps/web/src/components/chat/composerShortcuts.ts");
+  const attachButton = read("apps/web/src/components/chat/ComposerAttachmentStrip.tsx");
+
+  assert.match(
+    between(chatView, "useChatShortcuts({", "fallback:"),
+    /\bcomposerRef\s*,/,
+    "the chat shortcut listener no longer receives the mounted composer's handle",
+  );
+  assert.match(
+    chatView,
+    /<ChatComposer\b[\s\S]*?composerRef=\{composerRef\}/,
+    "ChatView no longer gives the shortcut listener the same handle as ChatComposer",
+  );
+  assert.include(
+    shortcuts,
+    'import { composerShortcutCommands } from "./composerShortcuts";',
+    "the shortcut listener no longer imports the composer command map",
+  );
+  const dispatch = between(
+    shortcuts,
+    "const command = resolveChatShortcutCommand(",
+    "const dismissFind =",
+  );
+  assert.include(
+    dispatch,
+    "composerShortcutCommands(input.composerRef, input.branchToolbarRef)[command]",
+    "the normal chord listener no longer reaches the composer's attach command",
+  );
+  const claim = dispatch.indexOf("event.preventDefault()");
+  const run = dispatch.indexOf("if (!run || run({ event, terminalFocusOwner }) === false) return;");
+  assert.isAbove(run, -1, "an unavailable shortcut must return before claiming the event");
+  assert.isAbove(
+    claim,
+    run,
+    "the attach shortcut claims alt+a before deciding whether the picker opens",
+  );
+  assert.include(
+    shortcuts,
+    'window.addEventListener("keydown", onKeyDownCapture, true);',
+    "the chat chord handler no longer listens for normal keyboard input",
+  );
+  assert.include(
+    shortcuts,
+    'window.removeEventListener("keydown", onKeyDownCapture, true);',
+    "the chat chord handler no longer releases its listener",
+  );
+  const command = between(commands, '"composer.attachFiles":', '"modelPicker.toggle":');
+  assert.match(
+    command,
+    /!event\.repeat && \(composerRef\.current\?\.openAttachmentPicker\(\) \?\? false\)/,
+    "the attach chord must return the picker's result, including false for an absent handle",
+  );
+
   assert.include(
     composer,
-    'command === "composer.attachFiles"',
-    "the composer no longer handles composer.attachFiles, so alt+a resolves to a command nothing acts on",
+    "openAttachmentPicker: () => boolean;",
+    "the composer handle no longer reports whether the attachment picker opened",
   );
-  // The handler has to reach upstream's own input, which is the same element
-  // the attach button clicks. Anything else would be a second attach route.
-  // Delimited by the next branch rather than a character count, so growing the
-  // comment above cannot silently move the assertions off the end of the window.
-  const branchStart = composer.indexOf('command === "composer.attachFiles"');
-  const branchEnd = composer.indexOf('command !== "composer.stash"', branchStart);
-  assert.isAbove(
-    branchEnd,
-    branchStart,
-    "the composer.stash branch that delimits this one is gone",
-  );
-  const body = composer.slice(branchStart, branchEnd);
-  assert.include(
-    body,
-    "openAttachmentPicker()",
-    "the attach shortcut no longer opens upstream's file input",
-  );
-  // Following the indirection rather than accepting it. The shortcut and the
-  // footer button share this one helper, which is what makes a second attach
-  // route impossible; a helper that stopped clicking the input would leave
-  // both routes dead and the assertion above still passing.
   assert.match(
     composer,
-    /const openAttachmentPicker = useCallback\(\(\) => \{\s*attachmentInputRef\.current\?\.click\(\);\s*\}, \[\]\);/,
-    "openAttachmentPicker no longer clicks upstream's file input, so neither alt+a nor the attach button opens it",
+    /useImperativeHandle\(\s*composerRef,\s*\(\) => \({\s*openAttachmentPicker,/,
+    "the composer handle no longer exposes the same picker the registry uses",
   );
-  // The chord must be claimed only once it will open the picker. Claiming it
-  // first and returning afterwards swallows alt+a in every state where the
-  // button is visible but the composer cannot act — a keystroke that goes
-  // nowhere, which no behavioural test would notice.
-  assert.isBelow(
-    body.indexOf("return;"),
-    body.indexOf("event.preventDefault()"),
-    "the attach shortcut claims alt+a before deciding whether it can open the picker, so the keystroke can be swallowed with nothing opening",
+  assert.match(
+    composer,
+    /useCommandHandlers\(\{\s*"composer.attachFiles": openAttachmentPicker,/,
+    "the registry no longer uses the chord's shared attachment picker",
+  );
+  const picker = between(
+    composer,
+    "const openAttachmentPicker = useStableCallback(",
+    "useCommandHandlers({",
+  );
+  const unavailable = picker.match(/if\s*\(([\s\S]*?)\)\s*(?:\{\s*)?return false;/);
+  assert.isNotNull(
+    unavailable,
+    "the picker no longer returns false when attachment is unavailable",
+  );
+  for (const guard of [
+    "!showComposerAttachAction",
+    "isCommandPaletteOpen()",
+    "isComposerApprovalState",
+    "projectSelectionRequired",
+    "isRevertingCheckpoint",
+  ]) {
+    assert.include(unavailable![1], guard, `the attachment picker no longer checks ${guard}`);
+  }
+  assert.include(picker, "return false;", "an unavailable picker must leave the chord unclaimed");
+  assert.match(
+    picker,
+    /composerFormRef\.current\?\.querySelector<HTMLButtonElement>\(\s*'\[aria-label="Attach files"\]'/,
+    "the attach shortcut no longer reaches the visible upstream attach button",
+  );
+  const availability = picker.indexOf("if (!button || button.disabled) return false;");
+  const click = picker.indexOf("button.click();");
+  assert.isAbove(
+    availability,
+    -1,
+    "the picker no longer rejects a missing or disabled attach button",
+  );
+  assert.isAbove(
+    click,
+    availability,
+    "the picker clicks before checking the attach button's availability",
+  );
+  assert.isAbove(
+    picker.indexOf("return true;"),
+    click,
+    "the picker reports success before clicking the button",
+  );
+
+  // Follow the button into its extracted owner. A live registry and a live
+  // chord are insufficient if either stops reaching the one real file input.
+  assert.match(
+    composer,
+    /const composerAttachButton = showComposerAttachAction \? \(\s*<ComposerAttachButton\s+addComposerAttachments=\{addComposerAttachments\}\s+focusComposer=\{focusComposer\}\s*\/>\s*\) : null;/,
+    "the composer no longer mounts upstream's attach button with the shared attachment intake",
+  );
+  const buttonStart = attachButton.indexOf("export function ComposerAttachButton(");
+  assert.isAbove(buttonStart, -1, "the extracted attachment button owner is gone");
+  const button = attachButton.slice(buttonStart);
+  assert.include(
+    button,
+    "const inputRef = useRef<HTMLInputElement>(null);",
+    "the attach button loses its file input ref",
+  );
+  assert.match(
+    button,
+    /<input\s+ref=\{inputRef\}\s+type="file"\s+multiple/,
+    "the attach button no longer owns upstream's multiple-file input",
+  );
+  assert.match(
+    button,
+    /onClick=\{\(\) => inputRef\.current\?\.click\(\)\}\s+aria-label="Attach files"/,
+    "the shortcut's attach button no longer clicks that same file input",
+  );
+  assert.include(
+    button,
+    "const files = Array.from(event.currentTarget.files ?? []);",
+    "the file input no longer reads its selected files",
+  );
+  assert.include(
+    button,
+    "void addComposerAttachments(files)",
+    "the file input no longer sends its files to the composer's attachment intake",
   );
 });
 
@@ -98,15 +214,58 @@ it("orders the active sidebar list through the fork's sort setting", () => {
   // nothing on that surface read it. The settings row and the command palette
   // both kept working, so no suite noticed.
   const sidebar = read("apps/web/src/components/Sidebar.tsx");
+  const hook = between(sidebar, "function useSidebarThreads(", "function partitionSidebarThreads(");
   assert.include(
+    hook,
+    "useClientSettings((s) => s.sidebarThreadSortOrder)",
+    "the active-list owner no longer subscribes to the fork's sort setting",
+  );
+  const partitionCall = between(hook, "const partition = partitionSidebarThreads({", "});");
+  assert.match(
+    partitionCall,
+    /\bsidebarThreadSortOrder\s*,/,
+    "the partition no longer receives the live sort setting",
+  );
+  assert.include(
+    partitionCall,
+    "clockKey: `${nowMinute}:${snoozeWakeTick}`",
+    "the partition no longer receives snooze wake changes",
+  );
+  assert.notInclude(
+    partitionCall,
+    "=>",
+    "the partition call became deferred; verify its memo dependencies before accepting this change",
+  );
+  assert.include(hook, "...partition,", "the sidebar hook no longer returns the sorted partition");
+  const partition = between(
     sidebar,
-    "sortActiveThreadsForSidebar(active, sidebarThreadSortOrder)",
-    "the sidebar sorts the active list without the thread sort setting, so #33's ordering is inert again",
+    "function partitionSidebarThreads(",
+    "function isOptimisticDropReleased(",
+  );
+  assert.include(
+    partition,
+    "sortActiveThreadsForSidebar(active, input.sidebarThreadSortOrder)",
+    "the sidebar sorts the active list without the thread sort setting, so the setting is inert again",
+  );
+  assert.match(
+    partition,
+    /activeThreads:\s*optimisticDrop\?\.section[^?]*\? sortedActive\s*:/,
+    "the partition no longer returns its sorted active list",
+  );
+  assert.match(
+    sidebar,
+    /activeThreads,[\s\S]*?\}\s*= useSidebarThreads\(\{/,
+    "the sidebar no longer consumes the active list from its subscribed hook",
   );
   assert.include(
     sidebar,
-    "sidebarThreadSortOrder,\n    snoozeWakeTick,",
-    "sidebarThreadSortOrder is missing from the memo's dependencies, so changing the setting does not re-sort the list",
+    'const activeRows = rowsOf(activeThreads, "active");',
+    "the active sidebar rows no longer use the sorted active list",
+  );
+  assert.include(
+    sidebar,
+    "items.push(...activeRows);",
+    "the sorted active rows no longer enter the rendered list",
   );
 });
 
@@ -118,24 +277,22 @@ it("orders the active sidebar list through the fork's sort setting", () => {
 // that visible, and the group is the one place that decides it.
 it("renders the composer footer controls in one group, in order", () => {
   const composer = read("apps/web/src/components/chat/ChatComposer.tsx");
-  const groupStart = composer.indexOf("const ComposerFooterPrimaryActions = memo(");
-  const groupEnd = composer.indexOf("export interface ChatComposerHandle", groupStart);
-  assert.isAbove(groupStart, -1, "ComposerFooterPrimaryActions is gone, so nothing owns the order");
-  assert.isAbove(groupEnd, groupStart, "the declaration that delimits the group is gone");
-  const group = composer.slice(groupStart, groupEnd);
+  // The right-hand footer now owns the order. The extracted primary component
+  // supplies send, while the parent supplies context, attach and dictation.
+  const group = between(composer, 'data-chat-composer-actions="right"', "</div>");
 
   const row = [
     ["context meter", "<ContextWindowMeter"],
-    ["attach button", "props.showAttachControl"],
-    ["dictation microphone", "props.dictationStartControl"],
-    ["send button", "<ComposerPrimaryActions"],
+    ["attach button", "{composerAttachButton}"],
+    ["dictation microphone", "{dictationStartControl}"],
+    ["send button", "<ComposerFooterPrimaryActions"],
   ] as const;
 
   let previousIndex = -1;
   let previousLabel = "the start of the group";
   for (const [label, marker] of row) {
     const index = group.indexOf(marker);
-    assert.isAbove(index, -1, `the ${label} no longer renders inside ComposerFooterPrimaryActions`);
+    assert.isAbove(index, -1, `the ${label} no longer renders inside the right-hand footer group`);
     assert.isAbove(
       index,
       previousIndex,
@@ -144,4 +301,40 @@ it("renders the composer footer controls in one group, in order", () => {
     previousIndex = index;
     previousLabel = label;
   }
+  assert.include(
+    composer,
+    'import { ComposerFooterPrimaryActions } from "./ComposerFooterControls";',
+    "the footer no longer uses the extracted primary controls",
+  );
+  const primary = between(
+    read("apps/web/src/components/chat/ComposerFooterControls.tsx"),
+    "export const ComposerFooterPrimaryActions = memo(",
+    "export function ComposerModelPicker(",
+  );
+  assert.include(primary, "<ComposerPrimaryActions", "the extracted footer no longer renders send");
+  assert.include(
+    group,
+    "activeContextWindow={null}",
+    "the extracted controls render a second context meter",
+  );
+  assert.include(
+    group,
+    "reserveContextWindowMeter={false}",
+    "the extracted controls reserve another context slot",
+  );
+  assert.include(
+    group,
+    "onSubmitMessage={handleSubmitMessageStable}",
+    "the footer no longer reaches submit",
+  );
+  assert.include(
+    primary,
+    "onSubmitMessage={props.onSubmitMessage}",
+    "the extracted send control loses submit",
+  );
+  assert.include(
+    read("apps/web/src/components/ChatView.tsx"),
+    "dictationStartControl={<DictationStartButton />}",
+    "ChatView no longer supplies the footer microphone",
+  );
 });

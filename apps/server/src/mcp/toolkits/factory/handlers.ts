@@ -145,7 +145,7 @@ const make = Effect.gen(function* () {
       headings,
       presentedAt: DateTime.formatIso(yield* DateTime.now),
     };
-    const uuid = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
+    const uuid = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
     // The orchestrator anchors the card to the thread's active run and keeps
     // its place when the same plan file is presented again.
     yield* orchestrator

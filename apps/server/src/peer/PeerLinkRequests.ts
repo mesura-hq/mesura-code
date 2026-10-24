@@ -18,6 +18,7 @@
  */
 import {
   CommandId,
+  type EnvironmentId,
   MessageId,
   type NodeId,
   type OrchestrationV2Notification,
@@ -35,10 +36,11 @@ import {
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Semaphore from "effect/Semaphore";
+import * as KeyedLock from "@t3tools/shared/KeyedLock";
 
 import * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
@@ -111,6 +113,17 @@ const make = Effect.gen(function* () {
         }),
       );
 
+  /**
+   * The stored link to `environmentId`, or nothing once it has expired: an
+   * expired link needs a new pairing code, which only the card asks for.
+   */
+  const usableLink = (environmentId: EnvironmentId) =>
+    Effect.all([peerLinks.get(environmentId), DateTime.now]).pipe(
+      Effect.map(([linked, now]) =>
+        Option.filter(linked, (link) => DateTime.isGreaterThan(link.expiresAt, now)),
+      ),
+    );
+
   const record = (
     card: LinkRequestAsk,
     outcome: LinkRequestOutcome,
@@ -134,8 +147,8 @@ const make = Effect.gen(function* () {
       ...(wake === undefined ? {} : { wake }),
     });
 
-  const request: PeerLinkRequests["Service"]["request"] = (scope, input) =>
-    Effect.gen(function* () {
+  const request: PeerLinkRequests["Service"]["request"] = Effect.fn("PeerLinkRequests.request")(
+    function* (scope, input) {
       // The card is shown in, and answered from, the caller's own thread.
       const threadScope = yield* McpInvocationContext.requireThreadScope(
         scope,
@@ -156,14 +169,12 @@ const make = Effect.gen(function* () {
       }
       // A machine already linked needs no card: the agent can use it now.
       if (input.environmentId !== undefined) {
-        const linked = yield* peerLinks
-          .get(input.environmentId)
-          .pipe(
-            Effect.mapError(
-              (error) =>
-                new OrchestratorMcpFailure({ code: "orchestration_error", message: error.message }),
-            ),
-          );
+        const linked = yield* usableLink(input.environmentId).pipe(
+          Effect.mapError(
+            (error) =>
+              new OrchestratorMcpFailure({ code: "orchestration_error", message: error.message }),
+          ),
+        );
         if (Option.isSome(linked)) {
           return {
             status: "linked",
@@ -173,11 +184,12 @@ const make = Effect.gen(function* () {
           } as const;
         }
       }
-      const key = input.clientRequestId ?? (yield* crypto.randomUUIDv4.pipe(Effect.orDie));
-      // Turn item ids are global; scope the key to this thread. A retry with
-      // the same clientRequestId finds this card and records nothing.
+      const key = input.clientRequestId ?? (yield* crypto.randomUUIDv4().pipe(Effect.orDie));
+      // Turn item ids are global; scope the key to this thread and provider
+      // session, since a later session may reuse it. A retry with the same
+      // clientRequestId finds this card and records nothing.
       const turnItemId = TurnItemId.make(
-        `turn-item:link-request:${encodeURIComponent(threadId)}:${encodeURIComponent(key)}`,
+        `turn-item:link-request:${encodeURIComponent(threadId)}:${encodeURIComponent(scope.requestNamespace)}:${encodeURIComponent(key)}`,
       );
       if (input.clientRequestId !== undefined) {
         const existing = yield* readCard(threadId, turnItemId).pipe(Effect.mapError(unreadable));
@@ -233,7 +245,9 @@ const make = Effect.gen(function* () {
         ),
       );
       return pendingResult(turnItemId);
-    }).pipe(Effect.withSpan("PeerLinkRequests.request"));
+    },
+    Effect.withSpan("PeerLinkRequests.request"),
+  );
 
   const linkedOutcome = (linked: PeerLink): LinkRequestOutcome => ({
     linkStatus: "linked",
@@ -250,14 +264,15 @@ const make = Effect.gen(function* () {
       case "decline":
         return Effect.succeed({ linkStatus: "declined" });
       case "use-existing":
-        return peerLinks.get(answer.environmentId).pipe(
+        return usableLink(answer.environmentId).pipe(
           Effect.flatMap(
             Option.match({
               onNone: () =>
                 Effect.fail(
                   new PeerLinkError({
                     reason: "unknown_link",
-                    message: "That environment is no longer linked here.",
+                    message:
+                      "That environment is no longer linked here, or its link expired. Link it again.",
                   }),
                 ),
               onSome: (linked) => Effect.succeed(linkedOutcome(linked)),
@@ -290,10 +305,11 @@ const make = Effect.gen(function* () {
     }
   };
 
-  // One answer at a time: two answers racing on one card must not both link.
-  const answerLock = yield* Semaphore.make(1);
-  const answer: PeerLinkRequests["Service"]["answer"] = (input) =>
-    Effect.gen(function* () {
+  // One answer per card at a time: two answers racing on one card must not
+  // both link. Other cards go on while a slow peer holds one.
+  const answerLocks = yield* KeyedLock.make<TurnItemId>();
+  const answer: PeerLinkRequests["Service"]["answer"] = Effect.fn("PeerLinkRequests.answer")(
+    function* (input) {
       yield* Effect.annotateCurrentSpan({
         "orchestration_v2.thread_id": input.threadId,
         "link_request.answer": input.answer.type,
@@ -323,7 +339,13 @@ const make = Effect.gen(function* () {
       ).pipe(
         Effect.mapError((cause) => new PeerLinkRequestError({ reason: "record_failed", cause })),
       );
-    }).pipe(answerLock.withPermits(1), Effect.withSpan("PeerLinkRequests.answer"));
+    },
+    (effect, input) =>
+      effect.pipe(
+        (effect) => answerLocks.withLock(input.turnItemId, effect),
+        Effect.withSpan("PeerLinkRequests.answer"),
+      ),
+  );
 
   return PeerLinkRequests.of({ request, answer });
 });

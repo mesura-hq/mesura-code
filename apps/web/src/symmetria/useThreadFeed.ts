@@ -28,7 +28,7 @@ export function useThreadFeed(input: {
   readonly threads: readonly FeedThread[];
 }): void {
   const generation = useRef<string | null>(null);
-  generation.current ??= mintGeneration();
+  if (generation.current === null) generation.current = mintGeneration();
   const lastSent = useRef<string | null>(null);
 
   const { projects, threads } = input;

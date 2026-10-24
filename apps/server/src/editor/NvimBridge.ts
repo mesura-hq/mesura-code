@@ -1011,12 +1011,13 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
   yield* Effect.addFinalizer(() => child.kill("SIGTERM"));
 
   /** Sends keys and settles: the redraw, then the cursor and mode behind it. */
-  const settleAfter = <A, E>(action: Effect.Effect<A, E>) =>
-    Effect.gen(function* () {
-      yield* action;
-      yield* awaitFlush;
-      yield* refreshCursorAndMode;
-    });
+  const settleAfter = Effect.fn(function* <A, E>(
+    action: Effect.Effect<A, E>,
+  ): Effect.fn.Return<void, E | NvimRpcError> {
+    yield* action;
+    yield* awaitFlush;
+    yield* refreshCursorAndMode;
+  });
 
   const session: NvimBridge.Session = {
     pid: child.pid,
@@ -1061,14 +1062,13 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
     },
     request: rpc.request,
     input: (keys) => rpc.request("nvim_input", [keys]).pipe(Effect.asVoid),
-    type: (keys) =>
-      Effect.gen(function* () {
-        // Termcodes first: `<Esc>` and friends are notation, and `nvim_feedkeys`
-        // takes bytes, so feeding the literal text would type five characters.
-        const coded = yield* rpc.request("nvim_replace_termcodes", [keys, true, false, true]);
-        yield* rpc.request("nvim_feedkeys", [coded, "mtx", false]);
-        yield* refreshCursorAndMode;
-      }),
+    type: Effect.fn(function* (keys) {
+      // Termcodes first: `<Esc>` and friends are notation, and `nvim_feedkeys`
+      // takes bytes, so feeding the literal text would type five characters.
+      const coded = yield* rpc.request("nvim_replace_termcodes", [keys, true, false, true]);
+      yield* rpc.request("nvim_feedkeys", [coded, "mtx", false]);
+      yield* refreshCursorAndMode;
+    }),
     settle,
     subscribe: (listener) => {
       watchers.add(listener);
@@ -1111,13 +1111,12 @@ const spawn = Effect.fn("NvimBridge.spawn")(function* (options: NvimBridgeOption
         Effect.catchCause(() => Effect.void),
       );
     }),
-    floorProbe: (keys) =>
-      Effect.gen(function* () {
-        const started = performance.now();
-        yield* rpc.request("nvim_input", [keys]);
-        yield* awaitFlush;
-        return performance.now() - started;
-      }),
+    floorProbe: Effect.fn(function* (keys) {
+      const started = performance.now();
+      yield* rpc.request("nvim_input", [keys]);
+      yield* awaitFlush;
+      return performance.now() - started;
+    }),
   };
 
   return session;

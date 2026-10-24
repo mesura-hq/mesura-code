@@ -70,7 +70,6 @@ const encodeHistoryFile = Schema.encodeSync(
 );
 type AgentCounts = { readonly agentsRunning: number; readonly agentSessionsOpen: number };
 
-// ---------------------------------------------------------------------------
 // Fixtures
 
 /** Whole numbers everywhere, so the wire's rounding leaves every value as it is. */
@@ -302,8 +301,6 @@ const encodedBytes = (message: Message) => new TextEncoder().encode(toWireJson(m
 
 const survivesTheWire = (message: Message) =>
   assert.deepStrictEqual(decodeWireJson(toWireJson(message)), message);
-
-// ---------------------------------------------------------------------------
 
 it.layer(NodeServices.layer)("HostStatsRpc phase 3 fence", (it) => {
   it.effect("phase 3 AC6: subscribeHostStats sends a snapshot, then one update per sample", () =>

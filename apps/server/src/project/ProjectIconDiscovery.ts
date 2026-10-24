@@ -172,26 +172,27 @@ export const makeProjectIconDiscovery = Effect.fn("ProjectIconDiscovery.make")(f
         } as const);
   });
 
-  const inspect = (project: OrchestrationProjectShell, fresh: boolean): Effect.Effect<Inspection> =>
-    Effect.gen(function* () {
-      const existing = yield* effectiveIcon(project, fresh);
-      if (existing !== null) {
-        return {
-          status: "existing",
-          reason: existing.reason,
-          effectiveSource: existing.source,
-        } as const;
-      }
-      const candidates = yield* Effect.tryPromise(() =>
-        collectProjectIconCandidates(project.workspaceRoot),
-      );
-      return candidates.length > 0
-        ? ({ status: "ready", candidates } as const)
-        : ({
-            status: "empty",
-            reason: "No local image candidates. The agent will not run.",
-          } as const);
-    }).pipe(
+  const inspect: (project: OrchestrationProjectShell, fresh: boolean) => Effect.Effect<Inspection> =
+    Effect.fn(
+      function* (project: OrchestrationProjectShell, fresh: boolean) {
+        const existing = yield* effectiveIcon(project, fresh);
+        if (existing !== null) {
+          return {
+            status: "existing",
+            reason: existing.reason,
+            effectiveSource: existing.source,
+          } as const;
+        }
+        const candidates = yield* Effect.tryPromise(() =>
+          collectProjectIconCandidates(project.workspaceRoot),
+        );
+        return candidates.length > 0
+          ? ({ status: "ready", candidates } as const)
+          : ({
+              status: "empty",
+              reason: "No local image candidates. The agent will not run.",
+            } as const);
+      },
       Effect.catch(() =>
         Effect.succeed({
           status: "failed",

@@ -63,7 +63,6 @@ const EXPECTED_CPU_PERCENT = 100 * (1 - CPU_IDLE_DELTA / CPU_TOTAL_DELTA);
 const NET_RX_DELTA = 2_103_605_220 - 2_102_414_876 + (2_149_679 - 2_145_366);
 const NET_TX_DELTA = 3_283_662_277 - 3_274_314_579 + (128_358 - 127_778);
 
-// ---------------------------------------------------------------------------
 // nvidia-smi fakes
 
 type NvidiaSmiBehaviour =
@@ -137,7 +136,6 @@ function fakeSpawner(
   );
 }
 
-// ---------------------------------------------------------------------------
 // fixture helpers
 
 const fixtureRoot = (name: string) => `${FIXTURES_DIRECTORY}/${name}`;
@@ -241,7 +239,6 @@ const gpuByVendor = (sample: HostStatsSample, vendor: HostStatsGpu["vendor"]) =>
   sample.gpus?.find((gpu) => gpu.vendor === vendor);
 
 it.layer(NodeServices.layer)("HostStatsCollector phase 1 fence", (it) => {
-  // -------------------------------------------------------------------------
   // AC1
   it.effect("AC1: a vigilia-home reading reports load, memory, swap, AMD GPU and k10temp", () =>
     Effect.gen(function* () {
@@ -284,7 +281,6 @@ it.layer(NodeServices.layer)("HostStatsCollector phase 1 fence", (it) => {
     }),
   );
 
-  // -------------------------------------------------------------------------
   // AC2
   it.effect(
     "AC2: CPU percent and network rates come from counter deltas, null on the first reading",
@@ -308,7 +304,6 @@ it.layer(NodeServices.layer)("HostStatsCollector phase 1 fence", (it) => {
       }),
   );
 
-  // -------------------------------------------------------------------------
   // AC3
   it.effect("AC3: counters that went backwards yield null rates, never negative ones", () =>
     Effect.gen(function* () {
@@ -506,7 +501,6 @@ it.layer(NodeServices.layer)("HostStatsCollector phase 1 fence", (it) => {
     }),
   );
 
-  // -------------------------------------------------------------------------
   // AC5
   it.effect("AC5: a suspended NVIDIA GPU reads as sleeping and nvidia-smi is never spawned", () =>
     Effect.gen(function* () {
@@ -532,7 +526,6 @@ it.layer(NodeServices.layer)("HostStatsCollector phase 1 fence", (it) => {
     }),
   );
 
-  // -------------------------------------------------------------------------
   // AC6
   const copyLaptopWithActiveNvidia = Effect.gen(function* () {
     const root = yield* copyFixture("arch-laptop");
@@ -673,7 +666,6 @@ it.layer(NodeServices.layer)("HostStatsCollector phase 1 fence", (it) => {
     }),
   );
 
-  // -------------------------------------------------------------------------
   // AC7
   it.effect("AC7: a conversa reading has null GPU and temperature, zero swap, and no error", () =>
     Effect.gen(function* () {
@@ -696,7 +688,6 @@ it.layer(NodeServices.layer)("HostStatsCollector phase 1 fence", (it) => {
     }),
   );
 
-  // -------------------------------------------------------------------------
   // AC8
   type ReaderCase = {
     readonly reader: string;
@@ -838,7 +829,6 @@ it.layer(NodeServices.layer)("HostStatsCollector phase 1 fence", (it) => {
       }),
   );
 
-  // -------------------------------------------------------------------------
   // Non-Linux fallbacks (plan detail): Node's `os` supplies CPU, load and memory.
   const GIB = 1024 * MIB;
 
@@ -945,7 +935,6 @@ it.layer(NodeServices.layer)("HostStatsCollector phase 1 fence", (it) => {
       }),
   );
 
-  // -------------------------------------------------------------------------
   // Regression: what the repair and rework turns learned, beyond the fence.
 
   it.effect("regression: a NIC that vanishes between readings nulls the network rates", () =>

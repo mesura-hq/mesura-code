@@ -6,12 +6,13 @@
  * then one sweep per minute of `TestClock` time, as the server does.
  */
 import {
+  SourceControlProviderKind,
   SourceControlProviderError,
   VcsProcessExitError,
   VcsProcessTimeoutError,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
-import * as GitHubApi from "@t3tools/source-control-github/server/GitHubApi";
+import * as GitHubRequestPolicy from "@t3tools/source-control-github/server/GitHubRequestPolicy";
 import * as GitHubCredentials from "@t3tools/source-control-github/server/GitHubCredentials";
 import * as BitbucketApi from "@t3tools/source-control-bitbucket/server/BitbucketApi";
 import * as ForgejoCli from "@t3tools/source-control-forgejo/server/ForgejoCli";
@@ -42,7 +43,7 @@ const githubIdentity = {
         remoteName: "origin",
         remoteUrl: "git@github.com:acme/widgets.git",
       },
-      provider: "github" as const,
+      provider: SourceControlProviderKind.make("github"),
       displayName: "acme/widgets",
       owner: "acme",
       name: "widgets",
@@ -72,7 +73,7 @@ const forgejoFailure = (
   detail: string,
 ): LookupFailure =>
   new SourceControlProviderError({
-    provider: "forgejo",
+    provider: SourceControlProviderKind.make("forgejo"),
     operation: "listChangeRequests",
     command: "tea",
     cwd: WORKSPACE,
@@ -83,7 +84,7 @@ const forgejoFailure = (
 /** A Bitbucket lookup failure as `BitbucketSourceControlProvider` reports it. */
 const bitbucketFailure = (status: number): LookupFailure =>
   new SourceControlProviderError({
-    provider: "bitbucket",
+    provider: SourceControlProviderKind.make("bitbucket"),
     operation: "listChangeRequests",
     cwd: WORKSPACE,
     detail: "Failed to list change requests.",
@@ -100,7 +101,7 @@ const PERMANENT_FAILURES: ReadonlyArray<readonly [string, () => LookupFailure]> 
     "no source-control provider for the remote",
     () =>
       new SourceControlProviderError({
-        provider: "unknown",
+        provider: SourceControlProviderKind.make("unknown"),
         operation: "listChangeRequests",
         cwd: WORKSPACE,
         detail: "No unknown source control provider is registered.",
@@ -110,11 +111,11 @@ const PERMANENT_FAILURES: ReadonlyArray<readonly [string, () => LookupFailure]> 
     "a GitHub credential that GitHub refuses",
     () =>
       new SourceControlProviderError({
-        provider: "github",
+        provider: SourceControlProviderKind.make("github"),
         operation: "listChangeRequests",
         cwd: WORKSPACE,
         detail: "GitHub is not authenticated. Run `gh auth login` (or set GH_TOKEN) and retry.",
-        cause: new GitHubApi.GitHubApiAuthenticationError({
+        cause: new GitHubRequestPolicy.GitHubApiAuthenticationError({
           host: "github.com",
           operation: "listChangeRequests",
         }),
@@ -124,7 +125,7 @@ const PERMANENT_FAILURES: ReadonlyArray<readonly [string, () => LookupFailure]> 
     "no GitHub credential on the server",
     () =>
       new SourceControlProviderError({
-        provider: "github",
+        provider: SourceControlProviderKind.make("github"),
         operation: "listChangeRequests",
         cwd: WORKSPACE,
         detail:
@@ -136,7 +137,7 @@ const PERMANENT_FAILURES: ReadonlyArray<readonly [string, () => LookupFailure]> 
     "a GitHub CLI with no login for the host",
     () =>
       new SourceControlProviderError({
-        provider: "github",
+        provider: SourceControlProviderKind.make("github"),
         operation: "listChangeRequests",
         cwd: WORKSPACE,
         detail: "No GitHub credential for github.com: run `gh auth login --hostname github.com`.",
@@ -160,7 +161,7 @@ const PERMANENT_FAILURES: ReadonlyArray<readonly [string, () => LookupFailure]> 
         }),
       });
       return new SourceControlProviderError({
-        provider: "gitlab",
+        provider: SourceControlProviderKind.make("gitlab"),
         operation: "listChangeRequests",
         command: "glab",
         cwd: WORKSPACE,
@@ -182,11 +183,11 @@ const TRANSIENT_FAILURES: ReadonlyArray<readonly [string, () => LookupFailure]> 
     "GitHub unreachable over the network",
     () =>
       new SourceControlProviderError({
-        provider: "github",
+        provider: SourceControlProviderKind.make("github"),
         operation: "listChangeRequests",
         cwd: WORKSPACE,
         detail: "Could not reach GitHub at github.com.",
-        cause: new GitHubApi.GitHubApiRequestError({
+        cause: new GitHubRequestPolicy.GitHubApiRequestError({
           host: "github.com",
           operation: "listChangeRequests",
           cause: new TypeError("fetch failed"),
@@ -197,7 +198,7 @@ const TRANSIENT_FAILURES: ReadonlyArray<readonly [string, () => LookupFailure]> 
     "a provider CLI that timed out",
     () =>
       new SourceControlProviderError({
-        provider: "gitlab",
+        provider: SourceControlProviderKind.make("gitlab"),
         operation: "listChangeRequests",
         command: "glab",
         cwd: WORKSPACE,

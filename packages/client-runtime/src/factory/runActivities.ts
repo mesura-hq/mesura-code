@@ -80,9 +80,7 @@ export function deriveFactoryRunItemsById(
   return byId;
 }
 
-// ---------------------------------------------------------------------------
 // Orchestrator v2: cards are `factory_card` turn items, upserted by item id.
-// ---------------------------------------------------------------------------
 
 type FactoryCardTurnItem = Extract<OrchestrationV2TurnItem, { readonly type: "factory_card" }>;
 type FactoryRunCardTurnItem = FactoryCardTurnItem & {

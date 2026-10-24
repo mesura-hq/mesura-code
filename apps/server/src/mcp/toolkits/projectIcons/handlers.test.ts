@@ -47,6 +47,7 @@ import * as ProjectService from "../../../project/ProjectService.ts";
 import * as RepositoryIdentityResolver from "../../../project/RepositoryIdentityResolver.ts";
 import * as T3ProjectFileLoader from "../../../project/T3ProjectFileLoader.ts";
 import * as WorkspacePaths from "../../../workspace/WorkspacePaths.ts";
+import * as ServerSettings from "../../../serverSettings.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import { liveThreadShell } from "../../McpToolAccess.testkit.ts";
@@ -69,6 +70,7 @@ const testLayer = RuntimeLayer.layerProjectService.pipe(
   Layer.provideMerge(WorkspacePaths.layer),
   Layer.provideMerge(SqlitePersistence.layerMemory),
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "project-icon-tool-" })),
+  Layer.provideMerge(ServerSettings.layerTest({})),
   Layer.provideMerge(NodeServices.layer),
 );
 

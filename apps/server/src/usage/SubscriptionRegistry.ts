@@ -115,136 +115,134 @@ export function subscriptionIdentifierFromCredential(credential: string): string
   return NodeCrypto.createHash("sha256").update(credential).digest("hex").slice(0, 16);
 }
 
-export function makeSubscriptionRegistry(input: {
+export const makeSubscriptionRegistry = Effect.fn(function* (input: {
   readonly recordPath: string;
   readonly secrets: SubscriptionSecrets;
-}): Effect.Effect<SubscriptionRegistryShape, never, FileSystem.FileSystem | Path.Path> {
-  return Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const records = new Map<string, SubscriptionRecord>();
-    const stateLock = yield* Semaphore.make(1);
-    const changes = yield* PubSub.unbounded<void>();
+}): Effect.fn.Return<SubscriptionRegistryShape, never, FileSystem.FileSystem | Path.Path> {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const records = new Map<string, SubscriptionRecord>();
+  const stateLock = yield* Semaphore.make(1);
+  const changes = yield* PubSub.unbounded<void>();
 
-    const toRecord = (stored: typeof StoredSubscription.Type): SubscriptionRecord => ({
-      key: accountLimitsSubscriptionKey({
-        namespace: stored.namespace,
-        identifier: stored.identifier,
-      }),
+  const toRecord = (stored: typeof StoredSubscription.Type): SubscriptionRecord => ({
+    key: accountLimitsSubscriptionKey({
       namespace: stored.namespace,
       identifier: stored.identifier,
-      label: stored.label,
-      secretName: stored.secretName,
-    });
+    }),
+    namespace: stored.namespace,
+    identifier: stored.identifier,
+    label: stored.label,
+    secretName: stored.secretName,
+  });
 
-    /**
-     * A file this version cannot decode loads as empty, whole.
-     *
-     * One unknown namespace rejects every entry rather than just its own,
-     * because the array decodes as a unit. That is survivable and deliberate:
-     * discovery re-seeds the records at the next start, so the cost of a
-     * corrupt or future-version file is one boot, not a lost subscription. The
-     * credentials themselves are untouched — nothing here removes a secret.
-     */
-    const ensureLoaded = yield* Effect.cached(
-      fileSystem.readFileString(input.recordPath).pipe(
-        Effect.flatMap(decodeSubscriptionsFile),
-        Effect.catchCause(() =>
-          Effect.succeed({ version: SUBSCRIPTIONS_FILE_VERSION, subscriptions: [] }),
-        ),
-        Effect.tap((stored) =>
-          Effect.sync(() => {
-            for (const subscription of stored.subscriptions) {
-              const record = toRecord(subscription);
-              records.set(record.key, record);
-            }
-          }),
-        ),
-        Effect.asVoid,
+  /**
+   * A file this version cannot decode loads as empty, whole.
+   *
+   * One unknown namespace rejects every entry rather than just its own,
+   * because the array decodes as a unit. That is survivable and deliberate:
+   * discovery re-seeds the records at the next start, so the cost of a
+   * corrupt or future-version file is one boot, not a lost subscription. The
+   * credentials themselves are untouched — nothing here removes a secret.
+   */
+  const ensureLoaded = yield* Effect.cached(
+    fileSystem.readFileString(input.recordPath).pipe(
+      Effect.flatMap(decodeSubscriptionsFile),
+      Effect.catchCause(() =>
+        Effect.succeed({ version: SUBSCRIPTIONS_FILE_VERSION, subscriptions: [] }),
       ),
-    );
-
-    const persist = Effect.fn("SubscriptionRegistry.persist")(function* () {
-      const serialized = yield* encodeSubscriptionsFile({
-        version: SUBSCRIPTIONS_FILE_VERSION,
-        subscriptions: [...records.values()]
-          .sort((left, right) => left.key.localeCompare(right.key))
-          .map((record) => ({
-            namespace: record.namespace,
-            identifier: record.identifier,
-            label: record.label,
-            secretName: record.secretName,
-          })),
-      }).pipe(Effect.orDie);
-      yield* writeFileStringAtomically({ filePath: input.recordPath, contents: serialized }).pipe(
-        Effect.provideService(FileSystem.FileSystem, fileSystem),
-        Effect.provideService(Path.Path, path),
-      );
-    });
-
-    const list = Effect.gen(function* () {
-      yield* ensureLoaded;
-      return [...records.values()].sort((left, right) => left.key.localeCompare(right.key));
-    });
-
-    const credential = (record: SubscriptionRecord) =>
-      input.secrets.get(record.secretName).pipe(Effect.map(Option.getOrNull));
-
-    const upsert = Effect.fn("SubscriptionRegistry.upsert")(function* (upsertInput: {
-      readonly namespace: AccountLimitsNamespace;
-      readonly label: string;
-      readonly credential: string;
-    }) {
-      yield* ensureLoaded;
-      const identifier = subscriptionIdentifierFromCredential(upsertInput.credential);
-      const key = accountLimitsSubscriptionKey({ namespace: upsertInput.namespace, identifier });
-      const secretName = `subscription-${upsertInput.namespace}-${identifier}`;
-      yield* stateLock.withPermits(1)(
-        Effect.gen(function* () {
-          const previous = records.get(key);
-          records.set(key, {
-            key,
-            namespace: upsertInput.namespace,
-            identifier,
-            label: upsertInput.label,
-            secretName,
-          });
-          yield* input.secrets.set(secretName, upsertInput.credential);
-          // Seeding the same credential twice is the ordinary case — discovery
-          // runs on every start — so only a real change costs a write. The
-          // secret name cannot differ here: it is built from the same namespace
-          // and identifier the key was, so only the label can have moved.
-          if (previous?.label !== upsertInput.label) {
-            yield* persist().pipe(Effect.catchCause(() => Effect.void));
-            yield* PubSub.publish(changes, undefined);
+      Effect.tap((stored) =>
+        Effect.sync(() => {
+          for (const subscription of stored.subscriptions) {
+            const record = toRecord(subscription);
+            records.set(record.key, record);
           }
         }),
-      );
-    });
+      ),
+      Effect.asVoid,
+    ),
+  );
 
-    const remove = Effect.fn("SubscriptionRegistry.remove")(function* (key: string) {
-      yield* ensureLoaded;
-      yield* stateLock.withPermits(1)(
-        Effect.gen(function* () {
-          const record = records.get(key);
-          if (record === undefined) return;
-          records.delete(key);
-          yield* input.secrets.remove(record.secretName).pipe(Effect.catchCause(() => Effect.void));
+  const persist = Effect.fn("SubscriptionRegistry.persist")(function* () {
+    const serialized = yield* encodeSubscriptionsFile({
+      version: SUBSCRIPTIONS_FILE_VERSION,
+      subscriptions: [...records.values()]
+        .sort((left, right) => left.key.localeCompare(right.key))
+        .map((record) => ({
+          namespace: record.namespace,
+          identifier: record.identifier,
+          label: record.label,
+          secretName: record.secretName,
+        })),
+    }).pipe(Effect.orDie);
+    yield* writeFileStringAtomically({ filePath: input.recordPath, contents: serialized }).pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
+    );
+  });
+
+  const list = Effect.gen(function* () {
+    yield* ensureLoaded;
+    return [...records.values()].sort((left, right) => left.key.localeCompare(right.key));
+  });
+
+  const credential = (record: SubscriptionRecord) =>
+    input.secrets.get(record.secretName).pipe(Effect.map(Option.getOrNull));
+
+  const upsert = Effect.fn("SubscriptionRegistry.upsert")(function* (upsertInput: {
+    readonly namespace: AccountLimitsNamespace;
+    readonly label: string;
+    readonly credential: string;
+  }) {
+    yield* ensureLoaded;
+    const identifier = subscriptionIdentifierFromCredential(upsertInput.credential);
+    const key = accountLimitsSubscriptionKey({ namespace: upsertInput.namespace, identifier });
+    const secretName = `subscription-${upsertInput.namespace}-${identifier}`;
+    yield* stateLock.withPermits(1)(
+      Effect.gen(function* () {
+        const previous = records.get(key);
+        records.set(key, {
+          key,
+          namespace: upsertInput.namespace,
+          identifier,
+          label: upsertInput.label,
+          secretName,
+        });
+        yield* input.secrets.set(secretName, upsertInput.credential);
+        // Seeding the same credential twice is the ordinary case — discovery
+        // runs on every start — so only a real change costs a write. The
+        // secret name cannot differ here: it is built from the same namespace
+        // and identifier the key was, so only the label can have moved.
+        if (previous?.label !== upsertInput.label) {
           yield* persist().pipe(Effect.catchCause(() => Effect.void));
           yield* PubSub.publish(changes, undefined);
-        }),
-      );
-    });
-
-    return {
-      list,
-      credential,
-      upsert,
-      remove,
-      subscribeChanges: PubSub.subscribe(changes),
-    } satisfies SubscriptionRegistryShape;
+        }
+      }),
+    );
   });
-}
+
+  const remove = Effect.fn("SubscriptionRegistry.remove")(function* (key: string) {
+    yield* ensureLoaded;
+    yield* stateLock.withPermits(1)(
+      Effect.gen(function* () {
+        const record = records.get(key);
+        if (record === undefined) return;
+        records.delete(key);
+        yield* input.secrets.remove(record.secretName).pipe(Effect.catchCause(() => Effect.void));
+        yield* persist().pipe(Effect.catchCause(() => Effect.void));
+        yield* PubSub.publish(changes, undefined);
+      }),
+    );
+  });
+
+  return {
+    list,
+    credential,
+    upsert,
+    remove,
+    subscribeChanges: PubSub.subscribe(changes),
+  } satisfies SubscriptionRegistryShape;
+});
 
 /**
  * Seed records from whatever OpenCode is logged into, once.

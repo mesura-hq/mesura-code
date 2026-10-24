@@ -3,7 +3,6 @@ import { useAtomValue } from "@effect/atom-react";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import {
   memo,
-  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
@@ -13,6 +12,7 @@ import {
   type SyntheticEvent,
 } from "react";
 
+import { useStableCallback } from "../../hooks/useStableCallback";
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../../keybindings";
 import { subscribePickerAction } from "../../lib/pickerActionBus";
@@ -152,9 +152,20 @@ function CombinedPicker(
   const [isModelVisible, setIsModelVisible] = useState<(modelKey: string) => boolean>(
     () => () => true,
   );
-  const reportVisibleModels = useCallback(
-    (isVisible: (modelKey: string) => boolean) => setIsModelVisible(() => isVisible),
-    [],
+  // ModelPickerContent reports visibility from an effect; a new callback
+  // identity would make that effect update parent state after every render.
+  const reportVisibleModels = useStableCallback((isVisible: (modelKey: string) => boolean) =>
+    setIsModelVisible((previous: (modelKey: string) => boolean) => {
+      // The upstream list can rebuild its filter map without changing its contents.
+      // Storing every new predicate caused an effect/render loop when this picker opened.
+      for (const entry of instanceEntries) {
+        for (const model of entry.models) {
+          const key = modelPickerModelKey(entry.instanceId, model.slug);
+          if (previous(key) !== isVisible(key)) return isVisible;
+        }
+      }
+      return previous;
+    }),
   );
   const [effortAnnouncement, setEffortAnnouncement] = useState("");
   const extrasRegionId = useId();
@@ -232,19 +243,19 @@ function CombinedPicker(
     lastHighlightedModelKeyRef.current = modelKey;
   };
 
-  const focusSearch = useCallback(() => {
+  const focusSearch = () => {
     rootRef.current
       ?.querySelector<HTMLInputElement>('[data-slot="combobox-input"]')
       ?.focus({ preventScroll: true });
-  }, []);
+  };
   // The first control in More options, or its toggle when it has none.
-  const focusExtras = useCallback(() => {
+  const focusExtras = () => {
     const target =
       extrasRegionRef.current?.querySelector<HTMLElement>(
         "select:not(:disabled), button:not(:disabled), input:not(:disabled), [role='switch']",
       ) ?? extrasToggleRef.current;
     target?.focus({ preventScroll: true });
-  }, []);
+  };
 
   // Opening on More options focuses its first control. The model content
   // keeps retrying its search focus for a frame, but its search is hidden.

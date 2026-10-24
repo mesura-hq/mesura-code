@@ -20,7 +20,7 @@ import { buildProjectScopeItems } from "./projectScopePicker.logic";
  * are one filter rather than two that drift. Picking a project never navigates:
  * the thread being read stays open, and only the list beside it narrows.
  */
-export function ProjectScopePicker(props: { readonly setOpen: (open: boolean) => void }) {
+export function ProjectScopePicker({ setOpen }: { readonly setOpen: (open: boolean) => void }) {
   const [query, setQuery] = useState("");
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
   const groups = useProjectScopeGroups();
@@ -35,10 +35,10 @@ export function ProjectScopePicker(props: { readonly setOpen: (open: boolean) =>
         allProjectsIcon: <FolderIcon className="size-4 shrink-0 text-icon-muted" />,
         onScope: (projectScopeKey) => {
           setProjectScopeKey(projectScopeKey);
-          props.setOpen(false);
+          setOpen(false);
         },
       }),
-    [groups, props.setOpen, setProjectScopeKey],
+    [groups, setOpen, setProjectScopeKey],
   );
 
   const visibleItems = useMemo(() => {

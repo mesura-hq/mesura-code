@@ -317,17 +317,28 @@ function checkTypes(changeSet: ChangeSet | "all", environment: NodeJS.ProcessEnv
   const isTypeScript7 = /Version 7\./u.test(tscVersion);
   let worst = EXIT_CLEAN;
   for (const workspacePackage of selected) {
+    const usesRustTsc = workspacePackage.typecheckScript === "tsc-rs --noEmit";
     const usesPlainTsc = workspacePackage.typecheckScript === "tsc --noEmit";
-    const command = usesPlainTsc
+    const command = usesRustTsc
       ? [
-          ...(isTypeScript7 ? ["env", "GOMEMLIMIT=1536MiB"] : []),
-          "tsc",
-          ...(isTypeScript7 ? ["--checkers", "1"] : []),
+          "tsc-rs",
+          "--singleThreaded",
+          "--checkers",
+          "1",
           "-p",
           `${workspacePackage.directory}/tsconfig.json`,
           "--noEmit",
         ]
-      : ["vp", "run", "--filter", workspacePackage.name, "typecheck"];
+      : usesPlainTsc
+        ? [
+            ...(isTypeScript7 ? ["env", "GOMEMLIMIT=1536MiB"] : []),
+            "tsc",
+            ...(isTypeScript7 ? ["--checkers", "1"] : []),
+            "-p",
+            `${workspacePackage.directory}/tsconfig.json`,
+            "--noEmit",
+          ]
+        : ["vp", "run", "--filter", workspacePackage.name, "typecheck"];
     const [executable, ...args] = [...lock, ...timeout, ...command];
     const startedAt = Date.now();
     const result = run(executable!, args, environment);

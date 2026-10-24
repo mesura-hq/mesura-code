@@ -17,6 +17,7 @@ import * as NodeFS from "node:fs";
 import {
   isRemovedNativeMobilePath,
   pruneNativeMobileJobNeeds,
+  pruneNativeMobileBuilds,
   pruneNativeMobilePatches,
 } from "./lib/native-mobile-removal.ts";
 
@@ -59,9 +60,9 @@ if (/^<{7} /m.test(workspaceYaml)) {
   );
   process.exitCode = 1;
 } else {
-  const pruned = pruneNativeMobilePatches(workspaceYaml);
+  const pruned = pruneNativeMobilePatches(pruneNativeMobileBuilds(workspaceYaml));
   removedPatchEntries = pruned.removedPatchFiles.length;
-  if (removedPatchEntries > 0) {
+  if (pruned.text !== workspaceYaml) {
     NodeFS.writeFileSync(WORKSPACE_FILE, pruned.text);
     const trackedPatchFiles = pruned.removedPatchFiles.filter((file) => trackedPaths.has(file));
     if (trackedPatchFiles.length > 0) git(["rm", "-q", "--force", "--", ...trackedPatchFiles]);

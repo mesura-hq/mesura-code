@@ -124,6 +124,7 @@ describe("Symmetria broker contract phase-one regression guards", () => {
   // un valor que no nos pertenece. Primero el conteo exacto de upstream, después
   // el formato de salida de vitest. Lo que sí es nuestro es que la suite esté
   // verde y no se encoja.
+  // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- CPU-bound contract guard runs nested package suites and compilers; this budget bounds real subprocess work.
   it("keeps upstream's contract suite green and not shrinking", () => {
     const reportPath = NodePath.join(
       NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "symmetria-contract-report-")),
@@ -156,6 +157,7 @@ describe("Symmetria broker contract phase-one regression guards", () => {
     expect(report.numPassedTests).toBeGreaterThanOrEqual(CONTRACT_SUITE_FLOOR.tests);
   }, 60_000);
 
+  // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- CPU-bound contract guard runs nested package suites and compilers; this budget bounds real subprocess work.
   it("keeps every borrowed runtime vocabulary locked in both assignability directions", () => {
     expect(NodeFS.existsSync(NodePath.join(contractPackageRoot, "src/upstreamLock.ts"))).toBe(true);
     const temporaryDirectory = NodeFS.mkdtempSync(
@@ -334,13 +336,12 @@ describe("Symmetria broker contract phase-one regression guards", () => {
       };
     };
 
-    // Effect 4.0.0-rc.112 emits the bound directly; up to beta.103 it wrapped
-    // it in `allOf: [{ minimum: 0 }]`. What this guard is for is the alignment
-    // below — every non-negative field carrying the SAME constraint — so the
-    // shape is pinned only to catch the day one of them stops matching.
+    // Effect now emits Int's safe-integer ceiling as well as the minimum.
+    // Require the full wire range and keep every branded field aligned with it.
     expect(documents.base).toEqual({
       type: "integer",
       minimum: 0,
+      maximum: Number.MAX_SAFE_INTEGER,
     });
     expect(documents.draftVersion).toEqual(documents.base);
     expect(documents.snapshotRevision).toEqual(documents.base);

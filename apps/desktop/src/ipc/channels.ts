@@ -25,6 +25,7 @@ export const DICTATION_WIDGET_RENDERED_CHANNEL = "desktop:dictation-widget-rende
 // subscription in the main process would be a duplicate with its own auth.
 export const PUBLISH_THREADS_CHANNEL = "desktop:publish-threads";
 export const PASTE_AS_TEXT_CHANNEL = "desktop:paste-as-text";
+export const REVEAL_WINDOW_CHANNEL = "desktop:reveal-window";
 export const SNAP_SHOT_EVENT_CHANNEL = "desktop:snap-shot-event";
 export const WEB_LINK_OPEN_CHANNEL = "desktop:web-link-open";
 export const WEB_LINK_READY_CHANNEL = "desktop:web-link-ready";
@@ -45,6 +46,7 @@ export const CLI_COMMAND_GET_STATE_CHANNEL = "desktop:cli-command-get-state";
 export const CLI_COMMAND_INSTALL_CHANNEL = "desktop:cli-command-install";
 export const CLI_COMMAND_UNINSTALL_CHANNEL = "desktop:cli-command-uninstall";
 export const GET_APP_BRANDING_CHANNEL = "desktop:get-app-branding";
+export const GET_RELAY_TELEMETRY_ENABLED_CHANNEL = "desktop:get-relay-telemetry-enabled";
 export const GET_SYSTEM_LOCALE_CHANNEL = "desktop:get-system-locale";
 export const GET_LOCAL_ENVIRONMENT_BOOTSTRAPS_CHANNEL = "desktop:get-local-environment-bootstraps";
 export const GET_LOCAL_ENVIRONMENT_ENABLED_CHANNEL = "desktop:get-local-environment-enabled";

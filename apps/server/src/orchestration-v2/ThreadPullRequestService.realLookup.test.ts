@@ -9,8 +9,13 @@
  * GitHub provider whose answers the test switches.
  */
 import { describe, expect, it } from "@effect/vitest";
-import { ProjectId, SourceControlProviderError, type ChangeRequest } from "@t3tools/contracts";
-import * as GitHubApi from "@t3tools/source-control-github/server/GitHubApi";
+import {
+  SourceControlProviderKind,
+  ProjectId,
+  SourceControlProviderError,
+  type ChangeRequest,
+} from "@t3tools/contracts";
+import * as GitHubRequestPolicy from "@t3tools/source-control-github/server/GitHubRequestPolicy";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -34,7 +39,7 @@ const MINUTE = 60_000;
 
 const failure = (cause: unknown, detail: string) =>
   new SourceControlProviderError({
-    provider: "github",
+    provider: SourceControlProviderKind.make("github"),
     operation: "listChangeRequests",
     cwd: "/workspace",
     detail,
@@ -43,7 +48,7 @@ const failure = (cause: unknown, detail: string) =>
 
 const authenticationFailure = () =>
   failure(
-    new GitHubApi.GitHubApiAuthenticationError({
+    new GitHubRequestPolicy.GitHubApiAuthenticationError({
       host: "github.com",
       operation: "listChangeRequests",
     }),
@@ -52,7 +57,7 @@ const authenticationFailure = () =>
 
 const networkFailure = () =>
   failure(
-    new GitHubApi.GitHubApiRequestError({
+    new GitHubRequestPolicy.GitHubApiRequestError({
       host: "github.com",
       operation: "listChangeRequests",
       cause: new TypeError("fetch failed"),
@@ -61,7 +66,7 @@ const networkFailure = () =>
   );
 
 const openPullRequest = (repository: string, number: number): ChangeRequest => ({
-  provider: "github",
+  provider: SourceControlProviderKind.make("github"),
   number,
   title: `Pull request ${number}`,
   url: `https://github.com/acme/${repository}/pull/${number}`,
@@ -146,7 +151,6 @@ describe("PR sweep retry policy through the real GitManager", () => {
           expect(sweep.providerMinutes.length).toBeGreaterThan(backedOff);
         }),
       ),
-    { timeout: 120_000 },
   );
 
   it.effect(
@@ -162,7 +166,6 @@ describe("PR sweep retry policy through the real GitManager", () => {
           expect([...minutes].sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
         }),
       ),
-    { timeout: 120_000 },
   );
 });
 
@@ -195,6 +198,5 @@ describe("PR sweep remote changes through the real GitManager", () => {
           ]);
         }),
       ),
-    { timeout: 120_000 },
   );
 });

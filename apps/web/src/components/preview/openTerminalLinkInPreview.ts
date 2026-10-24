@@ -33,14 +33,9 @@ interface OpenTerminalLinkInPreviewInput<E> {
   readonly allocate: AllocateThreadLink<E>;
   readonly ownerSignal?: AbortSignal;
   readonly fallbackToBrowser: () => void;
-  /** Cmd/Ctrl-click bypasses the preference and opens in the system browser. */
   readonly forceBrowser: boolean;
 }
 
-/**
- * Opens a terminal hyperlink where the "Open links in" setting says, unless a
- * Cmd/Ctrl-click explicitly requests the system browser.
- */
 export async function openTerminalLinkInPreview<E>(
   input: OpenTerminalLinkInPreviewInput<E>,
 ): Promise<void> {

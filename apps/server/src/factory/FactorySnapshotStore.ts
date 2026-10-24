@@ -52,7 +52,7 @@ const make = Effect.gen(function* () {
       if (yield* fileSystem.exists(target)) return digest;
       // Created on first use: a server that never sees a plan keeps no empty directory.
       yield* fileSystem.makeDirectory(directory, { recursive: true });
-      const uuid = yield* crypto.randomUUIDv4;
+      const uuid = yield* crypto.randomUUIDv4();
       const temporary = path.join(directory, `.${digest}.${uuid}.tmp`);
       // Written aside, then published with a hard link: a reader never sees a partial file,
       // and a link never replaces a target another call published first. A rename would.

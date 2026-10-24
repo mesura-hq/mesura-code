@@ -184,39 +184,41 @@ export const make = Effect.gen(function* () {
   };
 
   /** Ends the attempt, unless a newer attempt or a cancel already ended it. */
-  const finishAttempt = (jobId: DictationJobId, attempt: number, outcome: Partial<DictationJob>) =>
-    Effect.gen(function* () {
-      const nowMs = yield* Clock.currentTimeMillis;
-      const completedAt = isoAt(nowMs);
-      yield* Effect.sync(() => {
-        const tracked = jobs.get(jobId);
-        if (!tracked || tracked.attempt !== attempt || !isTranscribing(tracked.job)) return;
-        setUnsafe({ ...tracked, fiber: null, job: { ...tracked.job, ...outcome, completedAt } });
-        pruneUnsafe(nowMs, jobId);
-      });
+  const finishAttempt = Effect.fn(function* (
+    jobId: DictationJobId,
+    attempt: number,
+    outcome: Partial<DictationJob>,
+  ) {
+    const nowMs = yield* Clock.currentTimeMillis;
+    const completedAt = isoAt(nowMs);
+    yield* Effect.sync(() => {
+      const tracked = jobs.get(jobId);
+      if (!tracked || tracked.attempt !== attempt || !isTranscribing(tracked.job)) return;
+      setUnsafe({ ...tracked, fiber: null, job: { ...tracked.job, ...outcome, completedAt } });
+      pruneUnsafe(nowMs, jobId);
     });
+  });
 
-  const readAudio = (attachmentId: string) =>
-    Effect.gen(function* () {
-      const audioPath = resolveAttachmentPathById({
-        attachmentsDir: config.attachmentsDir,
-        attachmentId,
-      });
-      if (!audioPath) {
-        return yield* new OpenAiTranscriptionError({
-          reason: MISSING_AUDIO_FAILURE,
-          retryable: false,
-        });
-      }
-      const audio = yield* fs
-        .readFile(audioPath)
-        .pipe(
-          Effect.mapError(
-            () => new OpenAiTranscriptionError({ reason: MISSING_AUDIO_FAILURE, retryable: false }),
-          ),
-        );
-      return { audio, fileName: path.basename(audioPath) };
+  const readAudio = Effect.fn(function* (attachmentId: string) {
+    const audioPath = resolveAttachmentPathById({
+      attachmentsDir: config.attachmentsDir,
+      attachmentId,
     });
+    if (!audioPath) {
+      return yield* new OpenAiTranscriptionError({
+        reason: MISSING_AUDIO_FAILURE,
+        retryable: false,
+      });
+    }
+    const audio = yield* fs
+      .readFile(audioPath)
+      .pipe(
+        Effect.mapError(
+          () => new OpenAiTranscriptionError({ reason: MISSING_AUDIO_FAILURE, retryable: false }),
+        ),
+      );
+    return { audio, fileName: path.basename(audioPath) };
+  });
 
   /**
    * One attempt, run in `jobScope`: read the settings, publish the job's
@@ -224,12 +226,12 @@ export const make = Effect.gen(function* () {
    * is out, whatever happens. A missing key ends the job here, so a client
    * never sees a job transcribing that cannot run.
    */
-  const runAttempt = (
+  const runAttempt: (
     jobId: DictationJobId,
     attempt: number,
     published: Deferred.Deferred<void>,
-  ): Effect.Effect<void> =>
-    Effect.gen(function* () {
+  ) => Effect.Effect<void> = Effect.fn(
+    function* (jobId: DictationJobId, attempt: number, published: Deferred.Deferred<void>) {
       const read = yield* settings.getSettings.pipe(
         Effect.map((value) => value.dictation),
         Effect.exit,
@@ -267,22 +269,25 @@ export const make = Effect.gen(function* () {
         durationMs: plan.durationMs,
         vocabularyHints: plan.vocabularyHints,
       });
-    }).pipe(
-      Effect.onExit((exit) =>
-        Exit.isSuccess(exit)
-          ? exit.value === null
-            ? Effect.void
-            : finishAttempt(jobId, attempt, { status: "completed", text: exit.value })
-          : finishAttempt(jobId, attempt, {
-              status: "failed",
-              failure: Cause.hasInterruptsOnly(exit.cause)
-                ? CANCELLED_FAILURE
-                : describeFailure(exit.cause),
-            }),
+    },
+    (effect, jobId, attempt, published) =>
+      effect.pipe(
+        Effect.onExit((exit) =>
+          Exit.isSuccess(exit)
+            ? exit.value === null
+              ? Effect.void
+              : finishAttempt(jobId, attempt, { status: "completed", text: exit.value })
+            : finishAttempt(jobId, attempt, {
+                status: "failed",
+                failure: Cause.hasInterruptsOnly(exit.cause)
+                  ? CANCELLED_FAILURE
+                  : describeFailure(exit.cause),
+              }),
+        ),
+        Effect.ensuring(Deferred.succeed(published, undefined)),
+        Effect.ignoreCause(),
       ),
-      Effect.ensuring(Deferred.succeed(published, undefined)),
-      Effect.ignoreCause(),
-    );
+  );
 
   /**
    * Hands an attempt the job `claim` stored to a fiber in `jobScope`. Claim,
@@ -290,31 +295,32 @@ export const make = Effect.gen(function* () {
    * disconnects mid-request never strands a job transcribing with no attempt.
    * Waiting for the first state can be interrupted; the attempt carries on.
    */
-  const launch = <E>(claim: (nowMs: number) => Effect.Effect<Claim, E>) =>
-    Effect.gen(function* () {
-      const published = yield* Deferred.make<void>();
-      const claimed = yield* Effect.uninterruptible(
-        Effect.gen(function* () {
-          const nowMs = yield* Clock.currentTimeMillis;
-          const outcome = yield* claim(nowMs);
-          if (outcome.kind === "settled") return outcome;
-          const { tracked } = outcome;
-          const fiber = yield* runAttempt(tracked.job.id, tracked.attempt, published).pipe(
-            Effect.forkIn(jobScope),
-          );
-          yield* Effect.sync(() => {
-            const current = jobs.get(tracked.job.id);
-            if (current?.attempt === tracked.attempt && isTranscribing(current.job)) {
-              jobs.set(tracked.job.id, { ...current, fiber });
-            }
-          });
-          return outcome;
-        }),
-      );
-      if (claimed.kind === "settled") return claimed.job;
-      yield* Deferred.await(published);
-      return jobs.get(claimed.tracked.job.id)?.job ?? claimed.tracked.job;
-    });
+  const launch = Effect.fn(function* <E>(
+    claim: (nowMs: number) => Effect.Effect<Claim, E>,
+  ): Effect.fn.Return<DictationJob, E> {
+    const published = yield* Deferred.make<void>();
+    const claimed = yield* Effect.uninterruptible(
+      Effect.gen(function* () {
+        const nowMs = yield* Clock.currentTimeMillis;
+        const outcome = yield* claim(nowMs);
+        if (outcome.kind === "settled") return outcome;
+        const { tracked } = outcome;
+        const fiber = yield* runAttempt(tracked.job.id, tracked.attempt, published).pipe(
+          Effect.forkIn(jobScope),
+        );
+        yield* Effect.sync(() => {
+          const current = jobs.get(tracked.job.id);
+          if (current?.attempt === tracked.attempt && isTranscribing(current.job)) {
+            jobs.set(tracked.job.id, { ...current, fiber });
+          }
+        });
+        return outcome;
+      }),
+    );
+    if (claimed.kind === "settled") return claimed.job;
+    yield* Deferred.await(published);
+    return jobs.get(claimed.tracked.job.id)?.job ?? claimed.tracked.job;
+  });
 
   const start: DictationJobs["Service"]["start"] = Effect.fn("DictationJobs.start")(
     function* (input) {
@@ -386,21 +392,20 @@ export const make = Effect.gen(function* () {
     },
   );
 
-  const cancel: DictationJobs["Service"]["cancel"] = (jobId) =>
-    Effect.gen(function* () {
-      const fiber = yield* Effect.sync(() => {
-        const tracked = jobs.get(jobId);
-        if (!tracked || !isTranscribing(tracked.job)) return undefined;
-        return tracked.fiber;
-      });
-      if (fiber === undefined) return false;
-      // A running attempt records its own "Cancelled." failure as it stops. A
-      // claimed job whose fiber is not registered yet is ended here; its
-      // attempt then finds it no longer transcribing and does nothing.
-      if (fiber) yield* Fiber.interrupt(fiber);
-      else yield* finishAttempt(jobId, jobs.get(jobId)!.attempt, cancelledOutcome);
-      return true;
+  const cancel: DictationJobs["Service"]["cancel"] = Effect.fn(function* (jobId) {
+    const fiber = yield* Effect.sync(() => {
+      const tracked = jobs.get(jobId);
+      if (!tracked || !isTranscribing(tracked.job)) return undefined;
+      return tracked.fiber;
     });
+    if (fiber === undefined) return false;
+    // A running attempt records its own "Cancelled." failure as it stops. A
+    // claimed job whose fiber is not registered yet is ended here; its
+    // attempt then finds it no longer transcribing and does nothing.
+    if (fiber) yield* Fiber.interrupt(fiber);
+    else yield* finishAttempt(jobId, jobs.get(jobId)!.attempt, cancelledOutcome);
+    return true;
+  });
 
   const setMode: DictationJobs["Service"]["setMode"] = Effect.fn("DictationJobs.setMode")(
     function* (jobId, mode) {

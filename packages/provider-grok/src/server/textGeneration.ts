@@ -43,12 +43,12 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
   const path = yield* Path.Path;
   const homeDirectory = yield* HostProcess.HomeDirectory;
 
-  const runGrokPrompt = <S extends Schema.Top>(
-    request: TextGenerationOperations.Request<S>,
-    nativeSession: GrokNativeSession | undefined,
-  ) => {
-    const { operation, cwd, prompt, modelSelection } = request;
-    return Effect.gen(function* () {
+  const runGrokPrompt = Effect.fn("GrokTextGeneration.runGrokPrompt")(
+    function* <S extends Schema.Top>(
+      request: TextGenerationOperations.Request<S>,
+      nativeSession: GrokNativeSession | undefined,
+    ) {
+      const { operation, cwd, prompt, modelSelection } = request;
       if (nativeSession !== undefined) {
         nativeSession.workingDirectories.push(cwd);
         // Grok may name the project after the resolved path.
@@ -138,19 +138,23 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
       }
 
       return yield* TextGenerationOperations.decodeJsonReply(request, "Grok Agent", trimmed);
-    }).pipe(
-      Effect.mapError((cause) =>
-        isTextGenerationError(cause)
-          ? cause
-          : new TextGenerationError({
-              operation,
-              detail: "Grok ACP text generation failed.",
-              cause,
-            }),
-      ),
-      Effect.scoped,
-    );
-  };
+    },
+    (effect, request) => {
+      const { operation } = request;
+      return effect.pipe(
+        Effect.mapError((cause) =>
+          isTextGenerationError(cause)
+            ? cause
+            : new TextGenerationError({
+                operation,
+                detail: "Grok ACP text generation failed.",
+                cause,
+              }),
+        ),
+        Effect.scoped,
+      );
+    },
+  );
 
   /**
    * The shared runner. Mesura: an untrusted prompt (a thread search step)
@@ -203,5 +207,8 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
     }).pipe(Effect.scoped);
   };
 
-  return TextGenerationOperations.fromRunner("GrokTextGeneration", runGrokJson);
+  return TextGenerationOperations.fromRunner(
+    "GrokTextGeneration",
+    TextGenerationOperations.withoutInvestigation("Grok", runGrokJson),
+  );
 });
