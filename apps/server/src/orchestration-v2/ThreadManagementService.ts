@@ -32,6 +32,7 @@ import {
   resolveProjectProviderInstanceEnabled,
   RunId,
   type ScheduledTaskId,
+  type ThreadAgentSignalKind,
   ThreadId,
   type TurnItemId,
 } from "@t3tools/contracts";
@@ -428,6 +429,18 @@ export interface ThreadManagementServiceShape {
     readonly byOwnAgent: boolean;
   }) => Effect.Effect<
     { readonly sequence: number } | { readonly settlesWhenTurnEnds: true },
+    Orchestrator.OrchestratorV2Error | ThreadManagementProviderInstanceDisabledError
+  >;
+  /**
+   * Mesura: sets the agent's needs-input or ready-to-close mark on the thread, or clears it.
+   */
+  readonly signalThread: (input: {
+    readonly threadId: ThreadId;
+    readonly commandId: CommandId;
+    readonly state: ThreadAgentSignalKind | "clear";
+    readonly note?: string | undefined;
+  }) => Effect.Effect<
+    { readonly sequence: number },
     Orchestrator.OrchestratorV2Error | ThreadManagementProviderInstanceDisabledError
   >;
   readonly interruptThread: (
@@ -995,6 +1008,14 @@ const make = Effect.gen(function* () {
   )(function* (input) {
     const shell = input.byOwnAgent ? yield* orchestrator.getThreadShell(input.threadId) : null;
     if (shell != null && shell.activeRunId !== null) {
+      // Mesura: the deferred settle lives only in memory, so mark the thread first; a settle lost
+      // to a server restart still leaves the thread marked ready to close.
+      yield* dispatch({
+        type: "thread.agent-signal.set",
+        commandId: CommandId.make(`${input.commandId}:ready-to-close`),
+        threadId: input.threadId,
+        kind: "ready_to_close",
+      });
       yield* settleAfterRun({
         projectId: shell.projectId,
         threadId: shell.id,
@@ -1007,6 +1028,27 @@ const make = Effect.gen(function* () {
       commandId: input.commandId,
       threadId: input.threadId,
     });
+    return { sequence: result.sequence };
+  });
+
+  const signalThread: ThreadManagementServiceShape["signalThread"] = Effect.fn(
+    "orchestrationV2.threadManagement.signalThread",
+  )(function* (input) {
+    const result = yield* dispatch(
+      input.state === "clear"
+        ? {
+            type: "thread.agent-signal.clear",
+            commandId: input.commandId,
+            threadId: input.threadId,
+          }
+        : {
+            type: "thread.agent-signal.set",
+            commandId: input.commandId,
+            threadId: input.threadId,
+            kind: input.state,
+            note: input.note ?? null,
+          },
+    );
     return { sequence: result.sequence };
   });
 
@@ -1268,6 +1310,7 @@ const make = Effect.gen(function* () {
     waitForThread,
     settleAfterRun,
     settleThread,
+    signalThread,
     interruptThread,
     stopDelegatedTasks,
     stopWorkflow,

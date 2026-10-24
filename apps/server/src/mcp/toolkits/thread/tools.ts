@@ -18,6 +18,8 @@ import {
   ThreadId,
   RunId,
   NonNegativeInt,
+  THREAD_AGENT_SIGNAL_NOTE_MAX_LENGTH,
+  ThreadAgentSignalNote,
   ProjectId,
 } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
@@ -31,7 +33,7 @@ import * as McpInvocationContext from "../../McpInvocationContext.ts";
 
 const ThreadOrganizeTool = Tool.make("t3_thread_organize", {
   description:
-    "Pin, snooze, settle, archive, or mark a thread unread. Omit threadId for this thread. snooze requires snoozedUntil. Existing thread lifecycle rules apply. Settling this thread takes effect when your turn completes, returning settlesWhenTurnEnds=true; a turn that fails or is interrupted, or a queued message, leaves it active.",
+    "Pin, snooze, settle, archive, or mark a thread unread. Omit threadId for this thread. snooze requires snoozedUntil. Existing thread lifecycle rules apply. Settling this thread marks it ready_to_close at once and takes effect when your turn completes, returning settlesWhenTurnEnds=true; a turn that fails or is interrupted, or a queued message, leaves it active.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     threadId: Schema.optional(ThreadId),
@@ -62,6 +64,25 @@ const ThreadOrganizeTool = Tool.make("t3_thread_organize", {
 })
   .annotate(Tool.Title, "Organize a thread")
   .annotate(Tool.Destructive, true);
+
+// Mesura: the agent's needs-input / ready-to-close mark.
+const ThreadSignalTool = Tool.make("t3_thread_signal", {
+  description: `Mark a thread for the user. needs_input: you are ending your turn with a question or a decision only the user can make. ready_to_close: the whole task is finished and nothing else will happen. clear: remove the mark. note is the question in at most ${THREAD_AGENT_SIGNAL_NOTE_MAX_LENGTH} characters. Omit threadId for this thread. The user's next message clears the mark, a new turn clears ready_to_close, and settling clears both.`,
+  parameters: Schema.Struct({
+    environmentId: OrchestratorMcpEnvironmentTarget,
+    threadId: Schema.optional(ThreadId),
+    state: Schema.Literals(["needs_input", "ready_to_close", "clear"]),
+    note: Schema.optional(ThreadAgentSignalNote),
+  }),
+  success: OrchestrationV2DispatchCommandResult,
+  failure: OrchestratorMcpFailure,
+  failureMode: "return" as const,
+  dependencies: [
+    McpInvocationContext.McpInvocationContext,
+    ThreadManagementService.ThreadManagementService,
+    Crypto.Crypto,
+  ],
+}).annotate(Tool.Title, "Signal the user");
 
 const queueTarget = {
   environmentId: OrchestratorMcpEnvironmentTarget,
@@ -310,6 +331,7 @@ export const ThreadToolkit = Toolkit.make(
   PendingRequestReadTool,
   PendingRequestRespondTool,
   ThreadOrganizeTool,
+  ThreadSignalTool,
   QueueListTool,
   QueueReadTool,
   QueueEditTool,

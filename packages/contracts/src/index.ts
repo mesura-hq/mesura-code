@@ -70,6 +70,7 @@ export * from "./issues.ts";
 export * from "./rpc.ts";
 export * from "./worktreeSetup.ts";
 export * from "./factory.ts";
+export * from "./threadAgentSignal.ts";
 export * from "./projectIcons.ts";
 export * from "./scheduledTask.ts";
 export * from "./worktreeMcp.ts";

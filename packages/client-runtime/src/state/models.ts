@@ -137,6 +137,8 @@ export interface EnvironmentThreadShell {
   readonly linkedPullRequest?: ThreadLinkedPullRequest | null;
   /** Mesura: the attached Software Factory run's sidebar summary, when one is attached. */
   readonly factoryRun?: OrchestrationV2ThreadShell["factoryRun"] | null;
+  /** Mesura: the agent's needs-input or ready-to-close mark. */
+  readonly agentSignal?: OrchestrationV2ThreadShell["agentSignal"] | null;
   readonly branchPullRequest?: ThreadLinkedPullRequest | null;
   /**
    * Server-tracked visited watermark. `undefined` means the environment's
@@ -286,6 +288,7 @@ export function presentThreadShell(
     pinOrderKey: thread.pinOrderKey ?? null,
     activeOrderKey: thread.activeOrderKey ?? null,
     factoryRun: thread.factoryRun ?? null,
+    agentSignal: thread.agentSignal ?? null,
     ...(thread.lastVisitedAt === undefined
       ? {}
       : { lastVisitedAt: nullableIso(thread.lastVisitedAt) }),

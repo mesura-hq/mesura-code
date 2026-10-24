@@ -30,6 +30,7 @@ import * as TerminalManager from "../terminal/Manager.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
+import { agentSignalNeedsInput } from "./ThreadSignal.ts";
 
 export interface SettlementPullRequest {
   readonly state: "open" | "closed" | "merged";
@@ -166,6 +167,8 @@ export function isAutoSettlementCandidate(
   if (thread.archivedAt !== null || thread.settledOverride !== null) return false;
   if (thread.pinnedAt != null || thread.autoSettleDisabledAt != null) return false;
   if (thread.pendingRuntimeRequest !== null) return false;
+  // Mesura: an open question the agent asked in prose blocks settling like a structured one.
+  if (agentSignalNeedsInput(thread)) return false;
   if (thread.activityRunStatus != null) return false;
   if (backgroundWorkHoldsCompletion(thread.pendingBackgroundTasks ?? [])) return false;
   // Mesura: a running Software Factory run will wake its coordinator again.
@@ -182,13 +185,20 @@ export function isAutoSettlementCandidate(
 export function isSnoozed(
   thread: Pick<
     ProjectionStore.ProjectionSettlementCandidate,
-    "snoozedUntil" | "snoozedAt" | "latestRunCompletedAt" | "status" | "pendingRuntimeRequest"
+    | "snoozedUntil"
+    | "snoozedAt"
+    | "latestRunCompletedAt"
+    | "status"
+    | "pendingRuntimeRequest"
+    | "agentSignal"
   >,
   nowMs: number,
 ): boolean {
   const snoozedUntilMs = toMillis(thread.snoozedUntil);
   if (snoozedUntilMs === null || snoozedUntilMs <= nowMs) return false;
   if (thread.pendingRuntimeRequest !== null) return false;
+  // Mesura: so is a question the agent asked in prose.
+  if (agentSignalNeedsInput(thread)) return false;
   const snoozedAtMs = toMillis(thread.snoozedAt);
   const completedAtMs = toMillis(thread.latestRunCompletedAt);
   const wokeOnError =
