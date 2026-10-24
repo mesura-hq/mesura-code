@@ -223,9 +223,9 @@ export function makeFactoryRouteProviders(
 
 /** The routes the card offers by default for `makeFactoryRouteProviders()`. */
 export const FACTORY_DEFAULT_TEST_ROUTES: FactoryRoutes = {
-  implementer: { harness: "claude", model: "claude-opus-5-5", effort: "high", budgetUsd: 25 },
+  implementer: { harness: "claude", model: "claude-opus-5-5", effort: "medium", budgetUsd: 25 },
   reviewer: { harness: "codex", model: "gpt-6-sol", effort: "high" },
-  verifier: { harness: "codex", model: "gpt-6-luna", effort: "max" },
+  verifier: { harness: "codex", model: "gpt-6-luna", effort: "xhigh" },
 };
 
 /**
