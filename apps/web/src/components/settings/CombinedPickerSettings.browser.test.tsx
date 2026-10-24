@@ -10,8 +10,8 @@
  * mounting boundary, so every fixture model is available to keyboard assertions.
  */
 import { type ReactNode } from "react";
-import { act, render as renderBrowser, type Screen } from "../../../test/render";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { act, render as renderBrowser } from "../../../test/render";
+import { describe, expect, it, vi } from "vite-plus/test";
 import {
   DEFAULT_SERVER_SETTINGS,
   ProviderDriverKind,
@@ -184,25 +184,7 @@ const GPT_54: ModelSelection = {
   options: [{ id: "reasoningEffort", value: "high" }],
 };
 
-let screen: Screen | undefined;
-let container: HTMLDivElement;
-let changes: SettingsPickerChange[] = [];
-
-beforeEach(() => {
-  changes = [];
-  container = document.createElement("div");
-  document.body.append(container);
-});
-
-afterEach(async () => {
-  await screen?.[Symbol.asyncDispose]();
-  screen = undefined;
-  container.remove();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-});
-
-async function render(props: {
+async function renderPicker(props: {
   kind: SettingsPickerKind;
   selection?: ModelSelection | null;
   mixedModel?: boolean;
@@ -212,33 +194,45 @@ async function render(props: {
   opensOnExtras?: boolean;
   getModelDisabledReason?: (instanceId: ProviderInstanceId, model: string) => string | null;
 }) {
-  screen = await renderBrowser(
-    <CombinedPickerSettings
-      environmentId={null}
-      kind={props.kind}
-      selection={props.selection === undefined ? GPT_54 : props.selection}
-      instanceEntries={ENTRIES}
-      modelOptionsByInstance={MODEL_OPTIONS}
-      planModeEnabled={false}
-      mixedModel={props.mixedModel ?? false}
-      {...(props.runtimeMode ? { runtimeMode: props.runtimeMode } : {})}
-      {...(props.runtimeModeMixed ? { runtimeModeMixed: true } : {})}
-      {...(props.triggerLabel ? { triggerLabel: props.triggerLabel } : {})}
-      {...(props.opensOnExtras ? { opensOnExtras: true } : {})}
-      triggerAriaLabel="Settings picker"
-      rejectedTitle="Not saved"
-      getModelDisabledReason={props.getModelDisabledReason ?? (() => null)}
-      onChange={(change) => changes.push(change)}
-    />,
-    { container, router: false },
+  await using stack = new AsyncDisposableStack();
+  const changes: SettingsPickerChange[] = [];
+  const screen = stack.use(
+    await renderBrowser(
+      <CombinedPickerSettings
+        environmentId={null}
+        kind={props.kind}
+        selection={props.selection === undefined ? GPT_54 : props.selection}
+        instanceEntries={ENTRIES}
+        modelOptionsByInstance={MODEL_OPTIONS}
+        planModeEnabled={false}
+        mixedModel={props.mixedModel ?? false}
+        {...(props.runtimeMode ? { runtimeMode: props.runtimeMode } : {})}
+        {...(props.runtimeModeMixed ? { runtimeModeMixed: true } : {})}
+        {...(props.triggerLabel ? { triggerLabel: props.triggerLabel } : {})}
+        {...(props.opensOnExtras ? { opensOnExtras: true } : {})}
+        triggerAriaLabel="Settings picker"
+        rejectedTitle="Not saved"
+        getModelDisabledReason={props.getModelDisabledReason ?? (() => null)}
+        onChange={(change) => changes.push(change)}
+      />,
+    ),
   );
-}
+  const container = screen.container;
 
-async function openPicker() {
-  const trigger = container.querySelector<HTMLButtonElement>('[aria-label="Settings picker"]');
-  expect(trigger, "Expected the Settings picker trigger").toBeTruthy();
-  await click(trigger!);
-  expect(pickerContent(), "Expected the picker to open").toBeTruthy();
+  async function openPicker() {
+    const trigger = container.querySelector<HTMLButtonElement>('[aria-label="Settings picker"]');
+    expect(trigger, "Expected the Settings picker trigger").toBeTruthy();
+    await click(trigger!);
+    await vi.waitFor(() => expect(pickerContent(), "Expected the picker to open").toBeTruthy());
+  }
+
+  const lifetime = stack.move();
+  return {
+    container,
+    changes,
+    openPicker,
+    [Symbol.asyncDispose]: () => lifetime.disposeAsync(),
+  };
 }
 
 async function chooseOption(controlLabel: string, value: string) {
@@ -254,21 +248,25 @@ async function chooseOption(controlLabel: string, value: string) {
 
 describe("combined picker in Settings: new-thread defaults", () => {
   it("settings picker shows the saved effort in the trigger", async () => {
-    await render({ kind: "new-thread-defaults" });
+    await using picker = await renderPicker({ kind: "new-thread-defaults" });
     expect(
-      container.querySelector('[data-chat-provider-model-picker-traits="true"]')?.textContent,
+      picker.container.querySelector('[data-chat-provider-model-picker-traits="true"]')
+        ?.textContent,
     ).toBe("High · 272k");
   });
 
   it("settings picker writes a chosen model with its effort and leaves access alone", async () => {
-    await render({ kind: "new-thread-defaults", runtimeMode: "approval-required" });
-    await openPicker();
+    await using picker = await renderPicker({
+      kind: "new-thread-defaults",
+      runtimeMode: "approval-required",
+    });
+    await picker.openPicker();
     await click(buttonByLabel("Decrease effort for GPT-5.5", pickerContent()!)!);
     expect(effortValue("GPT-5.5")).toBe("Low");
 
     await click(row("GPT-5.5"));
 
-    expect(changes).toEqual([
+    expect(picker.changes).toEqual([
       {
         modelSelection: {
           instanceId: CODEX,
@@ -280,47 +278,47 @@ describe("combined picker in Settings: new-thread defaults", () => {
   });
 
   it("settings picker Permissions row opens on More options and writes access alone", async () => {
-    await render({
+    await using picker = await renderPicker({
       kind: "new-thread-defaults",
       runtimeMode: "approval-required",
       triggerLabel: "Supervised",
       opensOnExtras: true,
     });
-    await openPicker();
+    await picker.openPicker();
     expect(moreOptionsToggle()?.getAttribute("aria-expanded")).toBe("true");
     await chooseOption("Access level", "full-access");
 
     await click(buttonByLabel("Use GPT-5.4", extrasRegion()!)!);
 
     // An access edit keeps the saved, possibly inherited, model untouched.
-    expect(changes).toEqual([{ runtimeMode: "full-access" }]);
+    expect(picker.changes).toEqual([{ runtimeMode: "full-access" }]);
   });
 
   it("settings picker keeps a Mixed model when only access changes", async () => {
-    await render({
+    await using picker = await renderPicker({
       kind: "new-thread-defaults",
       mixedModel: true,
       runtimeMode: "approval-required",
       runtimeModeMixed: true,
     });
-    await openPicker();
+    await picker.openPicker();
     expect(accessSummary()).toContain("Mixed");
     await click(moreOptionsToggle()!);
     await chooseOption("Access level", "auto");
     await click(buttonByLabel("Use GPT-5.4", extrasRegion()!)!);
 
-    expect(changes).toEqual([{ runtimeMode: "auto" }]);
+    expect(picker.changes).toEqual([{ runtimeMode: "auto" }]);
   });
 
   it("settings picker applies access without any selectable provider", async () => {
-    await render({
+    await using picker = await renderPicker({
       kind: "new-thread-defaults",
       selection: null,
       runtimeMode: DEFAULT_SERVER_SETTINGS.defaultRuntimeMode,
       triggerLabel: "Full access",
       opensOnExtras: true,
     });
-    await openPicker();
+    await picker.openPicker();
     expect(extrasRegion()?.textContent).toContain("No model highlighted");
     const apply = buttonByLabel(/^Apply access/, extrasRegion()!);
     expect(apply?.disabled).toBe(true);
@@ -328,40 +326,40 @@ describe("combined picker in Settings: new-thread defaults", () => {
     await chooseOption("Access level", "approval-required");
     await click(buttonByLabel(/^Apply access/, extrasRegion()!)!);
 
-    expect(changes).toEqual([{ runtimeMode: "approval-required" }]);
+    expect(picker.changes).toEqual([{ runtimeMode: "approval-required" }]);
   });
 
   it("settings picker shows Full access as the default for new threads", async () => {
-    await render({
+    await using picker = await renderPicker({
       kind: "new-thread-defaults",
       runtimeMode: DEFAULT_SERVER_SETTINGS.defaultRuntimeMode,
     });
-    await openPicker();
+    await picker.openPicker();
     expect(accessSummary()).toContain("Full access");
   });
 
   it("settings picker refuses a model a selected environment lacks and writes nothing", async () => {
-    const add = vi.spyOn(toastManager, "add");
-    await render({
+    using add = vi.spyOn(toastManager, "add");
+    await using picker = await renderPicker({
       kind: "new-thread-defaults",
       getModelDisabledReason: (_instanceId, model) =>
         model === "gpt-5.5" ? "Unavailable on Server." : null,
     });
-    await openPicker();
+    await picker.openPicker();
     expect(row("GPT-5.5").getAttribute("aria-disabled")).toBe("true");
 
     await click(row("GPT-5.5"));
 
-    expect(changes).toEqual([]);
+    expect(picker.changes).toEqual([]);
     expect(add).not.toHaveBeenCalled();
   });
 
   it("settings picker shows Ultrathink without letting Settings choose it", async () => {
-    await render({
+    await using picker = await renderPicker({
       kind: "new-thread-defaults",
       selection: { instanceId: CLAUDE, model: "claude-opus-5" },
     });
-    await openPicker();
+    await picker.openPicker();
     await press(searchInput(), "ArrowDown");
     await press(searchInput(), "ArrowRight");
     await press(searchInput(), "ArrowRight");
@@ -369,16 +367,19 @@ describe("combined picker in Settings: new-thread defaults", () => {
   });
 
   it("settings picker Escape discards the opening", async () => {
-    await render({ kind: "new-thread-defaults", runtimeMode: "approval-required" });
-    await openPicker();
+    await using picker = await renderPicker({
+      kind: "new-thread-defaults",
+      runtimeMode: "approval-required",
+    });
+    await picker.openPicker();
     await press(searchInput(), "ArrowLeft");
     await click(moreOptionsToggle()!);
     await chooseOption("Access level", "auto");
 
     await press(document.activeElement ?? document.body, "Escape");
 
-    expect(pickerContent()).toBeNull();
-    expect(changes).toEqual([]);
+    await vi.waitFor(() => expect(pickerContent()).toBeNull());
+    expect(picker.changes).toEqual([]);
   });
 });
 
@@ -386,8 +387,8 @@ describe("combined picker in Settings: background writing", () => {
   it.each(["text-generation", "source-control-writing"] as const)(
     "settings picker %s shows access as task-managed and an unread option read-only",
     async (kind) => {
-      await render({ kind });
-      await openPicker();
+      await using picker = await renderPicker({ kind });
+      await picker.openPicker();
       await click(moreOptionsToggle()!);
 
       expect(extrasRegion()?.textContent).toContain(SETTINGS_ACCESS_MANAGED_BY_TASK_LABEL);
@@ -400,17 +401,20 @@ describe("combined picker in Settings: background writing", () => {
   );
 
   it("settings picker writing settings write the model with its effort and no access", async () => {
-    await render({ kind: "text-generation" });
-    await openPicker();
+    await using picker = await renderPicker({ kind: "text-generation" });
+    await picker.openPicker();
     await press(searchInput(), "ArrowDown");
     await press(searchInput(), "ArrowLeft");
 
     await press(searchInput(), "Enter");
 
-    expect(changes).toHaveLength(1);
-    expect(changes[0]).not.toHaveProperty("runtimeMode");
-    expect(changes[0]?.modelSelection).toMatchObject({ instanceId: CODEX, model: "gpt-5.4" });
-    expect(changes[0]?.modelSelection?.options).toContainEqual({
+    expect(picker.changes).toHaveLength(1);
+    expect(picker.changes[0]).not.toHaveProperty("runtimeMode");
+    expect(picker.changes[0]?.modelSelection).toMatchObject({
+      instanceId: CODEX,
+      model: "gpt-5.4",
+    });
+    expect(picker.changes[0]?.modelSelection?.options).toContainEqual({
       id: "reasoningEffort",
       value: "medium",
     });

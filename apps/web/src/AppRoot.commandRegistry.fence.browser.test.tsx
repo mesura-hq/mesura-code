@@ -1,3 +1,4 @@
+import { page } from "vite-plus/test/browser";
 import { act, render as renderBrowser, type Screen } from "../test/render";
 /**
  * Entry point: AppRoot, with a memory router whose root renders the real
@@ -97,8 +98,8 @@ vi.mock("./browser/ElectronBrowserHost", () => ({ ElectronBrowserHost: () => nul
 vi.mock("./components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }));
 vi.mock("./components/chat/ChatHeader", () => ({ ChatHeader: () => null }));
 vi.mock("./components/BranchToolbar", () => ({ BranchToolbar: () => null }));
-// happy-dom has no layout. Keep routing and timeline projection real, and
-// replace only the virtual list's measurement boundary.
+// Keep routing and timeline projection real, and replace only the virtual
+// list's measurement boundary.
 vi.mock("@legendapp/list/react", async () => (await fenceMocks()).mockLegendList());
 
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
@@ -127,6 +128,9 @@ const keydownsAtWindow: KeyboardEvent[] = [];
 const pressedByTest = new Set<Event>();
 
 async function setupBrowserFixture0() {
+  const previousViewport = { width: window.innerWidth, height: window.innerHeight };
+  // Native matchMedia must select the desktop sidebar and inline right panel.
+  await page.viewport(1440, 900);
   // Registered before the engine, so it sees every keydown, consumed or not.
   window.addEventListener("keydown", (event) => keydownsAtWindow.push(event), true);
   installKeyEngine();
@@ -157,6 +161,7 @@ async function setupBrowserFixture0() {
       appRootFence.threads.clear();
       appRootFence.threadStates.clear();
       vi.unstubAllGlobals();
+      await page.viewport(previousViewport.width, previousViewport.height);
     },
   };
 }
@@ -239,8 +244,12 @@ async function press(chord: Chord) {
 
 /** Presses a leader sequence such as `<Space>tp`, one key per character after the leader. */
 async function pressLeader(keys: string) {
-  await press({ key: " ", code: "Space" });
-  for (const key of keys) await press({ key, code: `Key${key.toUpperCase()}` });
+  const leader = await press({ key: " ", code: "Space" });
+  expect(leader.defaultPrevented, "the key engine consumes the leader").toBe(true);
+  for (const key of keys) {
+    const event = await press({ key, code: `Key${key.toUpperCase()}` });
+    expect(event.defaultPrevented, `the key engine consumes ${key} after the leader`).toBe(true);
+  }
 }
 
 /** The keydowns no test dispatched, described as `Ctrl+Shift+P` for a readable failure. */
@@ -273,7 +282,7 @@ function sidebarState() {
   return container.querySelector<HTMLElement>('[data-slot="sidebar"][data-state]')?.dataset.state;
 }
 
-// Mod is Control here: happy-dom reports a non-Mac platform.
+// Mod is Control in the Linux Chromium test browser.
 const SETTLE_CHORD: Chord = { key: "S", code: "KeyS", ctrlKey: true, shiftKey: true };
 const PIN_CHORD: Chord = { key: "P", code: "KeyP", ctrlKey: true, shiftKey: true };
 const CLOSE_PANEL_CHORD: Chord = { key: "w", code: "KeyW", ctrlKey: true };

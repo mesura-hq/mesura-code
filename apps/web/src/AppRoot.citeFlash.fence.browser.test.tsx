@@ -1,3 +1,4 @@
+import { page } from "vite-plus/test/browser";
 import { act, render as renderBrowser, type Screen, fakeTimers } from "../test/render";
 /**
  * Entry point: AppRoot, with a memory router whose root renders the real
@@ -25,7 +26,7 @@ import { act, render as renderBrowser, type Screen, fakeTimers } from "../test/r
  * - Criterion 6, guard: with Vim mode on, the mouse cite lands the composer
  *   in insert mode after the chip.
  *
- * happy-dom has no layout. The boxes the cite path measures are stubbed: the
+ * The boxes the cite path measures are stubbed: the
  * reading area (the timeline's scroller and the citation viewport), the
  * composer below it, and every text range as one line inside it, with nothing
  * over it. Everything else the fixture replaces is shared with the other
@@ -86,6 +87,7 @@ vi.mock("./keys/highlights", async () => (await fenceMocks()).mockHighlights());
 vi.mock("@legendapp/list/react", async () => (await fenceMocks()).mockLegendList());
 
 import { useComposerDraftStore } from "./composerDraftStore";
+import { composerEditorElement } from "./keys/focusScope";
 import { stopFlash } from "./keys/flashSession";
 import { useFlashSnapshot, type FlashSnapshot } from "./keys/flashStore";
 import { installKeyEngine } from "./keys/keyEngine";
@@ -111,6 +113,8 @@ let flashObserver: MutationObserver;
 let flashesAdded = 0;
 
 async function setupBrowserFixture0() {
+  const previousViewport = { width: window.innerWidth, height: window.innerHeight };
+  await page.viewport(1440, 900);
   installKeyEngine();
 
   // Every timer and frame runs on test time, so a flash's 1100 ms removal
@@ -163,6 +167,7 @@ async function setupBrowserFixture0() {
       vi.unstubAllGlobals();
 
       _timers[Symbol.dispose]();
+      await page.viewport(previousViewport.width, previousViewport.height);
     },
   };
 }
@@ -227,16 +232,41 @@ async function nextFrame(): Promise<void> {
   await settle();
 }
 
-/** Gives the reading area, the citation viewport and the composer their boxes. */
+function stubReadingArea(element: HTMLElement): void {
+  element.getBoundingClientRect = () => rect(0, 600, 0, 800);
+  Object.defineProperties(element, {
+    clientLeft: { configurable: true, value: 0 },
+    clientTop: { configurable: true, value: 0 },
+    clientWidth: { configurable: true, value: 800 },
+    clientHeight: { configurable: true, value: 600 },
+  });
+}
+
+/** Gives the reading area's clipping ancestors and the composer consistent boxes. */
 function stubLayout(): void {
   const scroller = document.querySelector<HTMLElement>(`[data-testid="${FENCE_SCROLLER_TESTID}"]`);
   expect(scroller, "the timeline's scroller is mounted").not.toBeNull();
   Object.defineProperty(scroller!, "scrollHeight", { configurable: true, value: 2000 });
-  Object.defineProperty(scroller!, "clientHeight", { configurable: true, value: 600 });
-  scroller!.getBoundingClientRect = () => rect(0, 600, 0, 800);
+  stubReadingArea(scroller!);
   const viewport = document.querySelector<HTMLElement>("[data-assistant-citation-viewport]");
   expect(viewport, "the citation viewport is mounted").not.toBeNull();
-  viewport!.getBoundingClientRect = () => rect(0, 600, 0, 800);
+  stubReadingArea(viewport!);
+  // The toolbar checks every clipping ancestor. Real CSS must clip the
+  // controlled range in the same reading area as the fixture's scroller.
+  for (const source of viewport!.querySelectorAll<HTMLElement>(
+    "[data-assistant-citation-source]",
+  )) {
+    for (
+      let ancestor: HTMLElement | null = source;
+      ancestor && ancestor !== viewport;
+      ancestor = ancestor.parentElement
+    ) {
+      const style = getComputedStyle(ancestor);
+      if (style.overflowX !== "visible" || style.overflowY !== "visible") {
+        stubReadingArea(ancestor);
+      }
+    }
+  }
   const composer = document.querySelector<HTMLElement>('[data-slot="composer-shell"]');
   if (composer) composer.getBoundingClientRect = () => rect(620, 120, 0, 800);
 }
@@ -250,12 +280,20 @@ async function mountApp(threadId: ThreadId, { vimMode }: { vimMode: boolean }) {
     await vi.advanceTimersByTimeAsync(APP_STARTUP_MS);
   });
   await settle();
+  // A deferred ChatView can schedule its initial focus after the startup
+  // clock advance. Observe that focus before a selection or key can run.
+  await vi.waitFor(() =>
+    expect(
+      composerEditorElement()?.contains(document.activeElement),
+      "the initial composer focus completed",
+    ).toBe(true),
+  );
   stubLayout();
   const probe = document.createElement("div");
   document.body.append(probe);
   probeRoot = await renderBrowser(null, { container: probe, router: false });
   await act(async () => await probeRoot!.rerender(<FlashProbe />));
-  (document.activeElement as HTMLElement | null)?.blur?.();
+  await act(async () => (document.activeElement as HTMLElement | null)?.blur?.());
 }
 
 interface Chord {
@@ -377,7 +415,12 @@ describe("cite flash fence: the mouse Cite button", () => {
     // One box per line of the cited text, placed where the text draws.
     expect(anchor!.children).toHaveLength(1);
     const box = anchor!.children[0] as HTMLElement;
-    expect([box.style.top, box.style.width, box.style.height]).toEqual(["100px", "200px", "16px"]);
+    // The flash stores offsets from its anchor. Its native box must coincide
+    // with the source range in viewport coordinates, within one CSS subpixel.
+    const painted = box.getBoundingClientRect();
+    expect(Math.abs(painted.left - 10)).toBeLessThanOrEqual(1 / 64);
+    expect(Math.abs(painted.top - 100)).toBeLessThanOrEqual(1 / 64);
+    expect([box.style.width, box.style.height]).toEqual(["200px", "16px"]);
     await settle();
     expect(flashesAdded, "the mouse cite flashes exactly once").toBe(1);
   });

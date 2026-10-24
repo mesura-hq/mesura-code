@@ -27,6 +27,7 @@ import {
   createRouter,
 } from "@tanstack/react-router";
 import { expect, it, vi } from "vite-plus/test";
+import { page } from "vite-plus/test/browser";
 import {
   EnvironmentId,
   factoryRunActivityId,
@@ -281,6 +282,8 @@ async function showRunAt(point: FactoryRunFixturePoint) {
 
 // Preload the lazy pane so assertions observe its state instead of module loading.
 async function setupBrowserFixture0() {
+  const previousViewport = { width: window.innerWidth, height: window.innerHeight };
+  await page.viewport(1440, 900);
   await import("./FactoryPane");
 
   restoreDocumentFonts = installFenceFontEvents();
@@ -348,6 +351,7 @@ async function setupBrowserFixture0() {
       appRootFence.sessions.delete(environmentId);
       vi.restoreAllMocks();
       vi.unstubAllGlobals();
+      await page.viewport(previousViewport.width, previousViewport.height);
     },
   };
 }

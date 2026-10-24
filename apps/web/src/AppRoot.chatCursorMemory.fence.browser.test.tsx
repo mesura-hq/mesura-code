@@ -1,3 +1,4 @@
+import { page } from "vite-plus/test/browser";
 import { flushBrowserTasks } from "./test/browserTasks";
 import { act, type Screen } from "../test/render";
 /**
@@ -24,8 +25,8 @@ import { act, type Screen } from "../test/render";
  *   cited with `<Space>c`, cites the exact rendered text through the real
  *   cite path (the chat cite bus, AssistantSelectionToolbar, the composer).
  *
- * happy-dom has no layout, so the chat surface's first visible line falls
- * back to the last buffer line: that is where a fresh cursor starts here.
+ * Chromium lays out the question as the first visible line. Tests that move
+ * up through a reply first reach its last line with ordinary Vim motions.
  * Every test opens threads with ids no other test uses, because the chat
  * surface's state is module-level and lives for the whole file.
  *
@@ -102,6 +103,8 @@ let container: HTMLDivElement;
 let threadSequence = 0;
 
 async function setupBrowserFixture0() {
+  const previousViewport = { width: window.innerWidth, height: window.innerHeight };
+  await page.viewport(1440, 900);
   installKeyEngine();
 
   fixture.vimMode = false;
@@ -119,6 +122,7 @@ async function setupBrowserFixture0() {
       fixture.threadStates.clear();
       vi.restoreAllMocks();
       vi.unstubAllGlobals();
+      await page.viewport(previousViewport.width, previousViewport.height);
     },
   };
 }
@@ -208,6 +212,14 @@ const key = (letter: string): Chord => ({ key: letter, code: `Key${letter.toUppe
 const DOLLAR: Chord = { key: "$", code: "Digit4" };
 const SPACE: Chord = { key: " ", code: "Space" };
 
+/** Reaches the last reply line through Vim motion, independent of the first visible line. */
+async function moveToLastLine() {
+  await press({ key: "9", code: "Digit9" });
+  await press({ key: "9", code: "Digit9" });
+  await press(key("j"));
+  expect(readKeyEngineSnapshot()).toMatchObject({ scope: "chat", mode: "NORMAL" });
+}
+
 interface PaintedCursor {
   /** The timeline row the cursor is in. */
   readonly rowId: string;
@@ -248,13 +260,17 @@ describe("cursor memory fence: the chat cursor per thread", () => {
     const threadA = addParagraphThread("A");
     const threadB = addParagraphThread("B");
     await mountApp(threadA);
-    // Two lines up from where a fresh cursor starts.
+    await moveToLastLine();
+    expect(paintedCursor()?.text).toBe("A last paragraph.");
+    // Two lines up from the reply's last paragraph.
     await press(key("k"));
     await press(key("k"));
     const before = paintedCursor();
     expect(before?.text).toBe("A second paragraph.");
 
     await openThread(threadB);
+    await moveToLastLine();
+    expect(paintedCursor()?.text).toBe("B last paragraph.");
     await press(key("k"));
     expect(paintedCursor()?.text, "the cursor moved in thread B").toBe("B third paragraph.");
 
@@ -271,9 +287,11 @@ describe("cursor memory fence: the chat cursor per thread", () => {
     const threadA = addParagraphThread("A");
     const threadB = addParagraphThread("B");
     await mountApp(threadA);
+    await moveToLastLine();
     await press(key("k"));
 
     await openThread(threadB);
+    await moveToLastLine();
     await press(key("k"));
     await press(key("k"));
     const inB = paintedCursor();
@@ -294,11 +312,13 @@ describe("cursor memory fence: the chat cursor per thread", () => {
     const threadA = addParagraphThread("A");
     const threadB = addParagraphThread("B");
     await mountApp(threadA);
+    await moveToLastLine();
     await press(key("k"));
     await press(key("k"));
     const before = paintedCursor();
     expect(before?.text).toBe("A second paragraph.");
     await openThread(threadB);
+    await moveToLastLine();
     await press(key("k"));
 
     // Thread A comes back without the remembered row: the cursor falls back
@@ -310,8 +330,17 @@ describe("cursor memory fence: the chat cursor per thread", () => {
       makeMessage(`${threadA}-replacement`, "assistant", "A replacement reply."),
     ]);
     await openThread(threadA);
+    expect(document.querySelector(`[data-timeline-row-id="${before!.rowId}"]`)).toBeNull();
     await press(key("h"));
-    expect(paintedCursor()?.text).toBe("A replacement reply.");
+    expect(paintedCursor()).toMatchObject({
+      rowId: expect.stringContaining(`${threadA}-user`),
+      text: "Question for A",
+    });
+    const fallback = paintedCursor()!;
+    expect(fallback.offset).toBe(readAssistantRowText(fallback.rowId).indexOf("Question for A"));
+    expect(document.querySelector("[data-assistant-citation-source]")?.textContent).toBe(
+      "A replacement reply.",
+    );
 
     // The remembered row mounts again.
     fixture.threads.set(threadA, originalShell);
@@ -331,25 +360,31 @@ describe("cursor memory fence: the chat cursor per thread", () => {
     const threadA = addParagraphThread("A");
     const threadC = addParagraphThread("C");
     await mountApp(threadA);
+    await moveToLastLine();
     await press(key("k"));
     await press(key("k"));
 
     await openThread(threadC);
     await press(key("h"));
 
-    // happy-dom has no layout: the first visible line falls back to the last.
+    // The question is the first visible line in this native desktop viewport.
     const cursor = paintedCursor();
-    expect(cursor?.rowId).toContain(threadC);
-    expect(cursor?.text).toBe("C last paragraph.");
-    expect(cursor?.offset).toBe(readAssistantRowText(cursor!.rowId).indexOf("C last paragraph."));
+    expect(cursor?.rowId).toContain(`${threadC}-user`);
+    expect(cursor?.text).toBe("Question for C");
+    expect(cursor?.offset).toBe(readAssistantRowText(cursor!.rowId).indexOf("Question for C"));
+    const range = fixture.highlights.get("mesura-chat-cursor")![0]!;
+    expect(
+      range.getBoundingClientRect().height,
+      "the first line has native geometry",
+    ).toBeGreaterThan(0);
   });
 
   // Already true at the base (nothing is remembered), and must stay so: a guard.
   it("cursor memory fence guard: remembering the cursor writes nothing to localStorage or sessionStorage", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 
-    // Node's test globals leave `localStorage` undefined, so both stores are
-    // replaced with recording ones: a write to either is seen.
+    // Both browser stores record writes, so cursor persistence cannot hide
+    // behind a different storage API.
     const writes: string[] = [];
     for (const name of ["localStorage", "sessionStorage"] as const) {
       const store = recordingStorage(name, writes);
@@ -367,10 +402,12 @@ describe("cursor memory fence: the chat cursor per thread", () => {
     const threadA = addParagraphThread("A");
     const threadB = addParagraphThread("B");
     await mountApp(threadA);
+    await moveToLastLine();
     const rowIds = new Set(timelineRowIds());
     await press(key("k"));
     await press(key("k"));
     await openThread(threadB);
+    await moveToLastLine();
     for (const rowId of timelineRowIds()) rowIds.add(rowId);
     await press(key("k"));
     await openThread(threadA);
@@ -420,6 +457,8 @@ describe("cursor memory fence: vertical motion across rows", () => {
 
     const thread = addParagraphThread("R");
     await mountApp(thread);
+    await moveToLastLine();
+    expect(paintedCursor()?.text).toBe("R last paragraph.");
     for (let step = 0; step < 3; step += 1) await press(key("k"));
     expect(paintedCursor()?.text).toBe("R first paragraph.");
 
@@ -450,6 +489,8 @@ describe("cursor memory fence: soft breaks read as spaces", () => {
 
     const thread = addSoftBreakThread();
     await mountApp(thread);
+    await moveToLastLine();
+    expect(paintedCursor()?.text).toBe("The closing block.");
     // From the last line, two lines up is the paragraph when it is one line.
     await press(key("k"));
     expect(paintedCursor()?.text).toBe("The next block.");
@@ -465,6 +506,8 @@ describe("cursor memory fence: soft breaks read as spaces", () => {
 
     const thread = addSoftBreakThread();
     await mountApp(thread);
+    await moveToLastLine();
+    expect(paintedCursor()?.text).toBe("The closing block.");
     await press(key("k"));
     await press(key("k"));
     // The whole paragraph, across its former soft break.

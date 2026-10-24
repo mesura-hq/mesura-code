@@ -1,11 +1,13 @@
-import { flushBrowserTasks } from "../test/browserTasks";
-import { act, render as renderBrowser, type Screen } from "../../test/render";
+import "../index.css";
+import "../mesura.css";
+
+import { act, render as renderBrowser } from "../../test/render";
 /**
  * Entry point: the real `/settings/dictation` file route (`settings.dictation.tsx`),
  * mounted under a `/settings` parent the way `routeTree.gen.ts` mounts it, beside
  * the real `SettingsSidebarNav`. The user reaches the page by clicking the nav.
- * The fixture replaces the settings store, the settings scope, and sidebar
- * chrome that needs a live connection; the page and the nav stay real.
+ * The fixture replaces server settings and environment discovery, and sidebar
+ * chrome that needs a live connection. The settings scope, page and nav stay real.
  *
  * Phase 2 of the STT redesign, criteria 1–3: the Dictation settings page.
  */
@@ -17,12 +19,17 @@ import {
   createRoute,
   createRouter,
   useLocation,
+  Outlet,
+  RouterProvider,
 } from "@tanstack/react-router";
 
 import { describe, expect, it, vi } from "vite-plus/test";
 
 const fixture = vi.hoisted(() => ({
   environmentId: "dictation-settings-laptop",
+  projectGroups: [] as ReturnType<
+    typeof import("~/components/settings/useSettingsProjectGroups").useSettingsProjectGroups
+  >,
   dictation: { openAiApiKey: "", vocabularyHints: [] as string[] },
   updates: [] as Array<{ environmentId: string | null; patch: Record<string, unknown> }>,
   /** Every environment the Transcriptions list read jobs for. */
@@ -55,26 +62,9 @@ vi.mock("~/hooks/useSettings", async (importOriginal) => {
     usePrimarySettingsAvailable: () => true,
   };
 });
-vi.mock("~/components/settings/SettingsScopeContext", () => {
-  const environment = {
-    environmentId: fixture.environmentId,
-    label: "Laptop",
-    connection: { phase: "connected" },
-  };
-  const scope = {
-    scope: { kind: "environment", environmentId: fixture.environmentId, label: "Laptop" },
-    search: {},
-    groups: [],
-    singleEnvironment: true,
-    selectScope: () => undefined,
-    environment,
-    environments: [environment],
-    target: null,
-    connectedEnvironments: [environment],
-    targets: [],
-  };
-  return { useSettingsScope: () => scope, useOptionalSettingsScope: () => scope };
-});
+vi.mock("~/components/settings/useSettingsProjectGroups", () => ({
+  useSettingsProjectGroups: () => fixture.projectGroups,
+}));
 vi.mock("~/state/dictation", async (importOriginal) => ({
   ...(await importOriginal<typeof import("~/state/dictation")>()),
   useDictationJobs: (environmentId: string | null) => {
@@ -84,7 +74,7 @@ vi.mock("~/state/dictation", async (importOriginal) => ({
 }));
 vi.mock("~/state/environments", async (importOriginal) => ({
   ...(await importOriginal<typeof import("~/state/environments")>()),
-  useEnvironments: () => ({ environments: [], isReady: true }),
+  useEnvironments: () => ({ environments: [connectedEnvironment()], isReady: true }),
   usePrimaryEnvironmentId: () => null,
   usePrimaryEnvironment: () => null,
 }));
@@ -100,28 +90,48 @@ vi.mock("~/components/clerk/T3ConnectSidebarSignIn", () => ({
   T3ConnectSidebarAvatar: () => null,
 }));
 
-import { closeTranscriptionsList } from "~/components/dictation/TranscriptionsList";
+import {
+  closeTranscriptionsList,
+  TranscriptionsListHost,
+} from "~/components/dictation/TranscriptionsList";
 
 import { Route as SettingsDictationRoute } from "./settings.dictation";
 
-const { Outlet, RouterProvider } = await import("@tanstack/react-router");
-const { TranscriptionsListHost } = await import("~/components/dictation/TranscriptionsList");
-const { SettingsSidebarNav } = await import("~/components/settings/SettingsSidebarNav");
-const { SidebarProvider } = await import("~/components/ui/sidebar");
-const { AppAtomRegistryProvider } = await import("~/rpc/atomRegistry");
+import { SettingsScopeProvider } from "~/components/settings/SettingsScopeContext";
+import { SettingsSidebarNav } from "~/components/settings/SettingsSidebarNav";
+import { SidebarProvider } from "~/components/ui/sidebar";
+import { AppAtomRegistryProvider } from "~/rpc/atomRegistry";
+
+function connectedEnvironment() {
+  return {
+    environmentId: fixture.environmentId,
+    label: "Laptop",
+    connection: { phase: "connected" },
+    serverConfig: {
+      settings: { ...DEFAULT_SERVER_SETTINGS, dictation: fixture.dictation },
+      environment: { platform: { machine: "server" }, capabilities: {} },
+    },
+  };
+}
 
 function SettingsShell() {
   const pathname = useLocation({ select: (location) => location.pathname });
   return (
     <SidebarProvider>
-      <nav data-testid="settings-nav">
-        <SettingsSidebarNav pathname={pathname} />
-      </nav>
-      <main data-testid="settings-page">
-        <Outlet />
-      </main>
-      {/* `__root.tsx` mounts this through the CommandPalette on every page. */}
-      <TranscriptionsListHost />
+      <SettingsScopeProvider
+        search={{ machine: fixture.environmentId }}
+        singleEnvironment
+        onChange={() => undefined}
+      >
+        <nav data-testid="settings-nav">
+          <SettingsSidebarNav pathname={pathname} />
+        </nav>
+        <main data-testid="settings-page">
+          <Outlet />
+        </main>
+        {/* `__root.tsx` mounts this through the CommandPalette on every page. */}
+        <TranscriptionsListHost />
+      </SettingsScopeProvider>
     </SidebarProvider>
   );
 }
@@ -145,40 +155,38 @@ function createSettingsRouter() {
       ]),
     ]),
     history: createMemoryHistory({ initialEntries: ["/settings/general"] }),
+    disableGlobalCatchBoundary: true,
   });
 }
 
-let root: Screen | undefined;
-let container: HTMLDivElement | undefined;
-let router: ReturnType<typeof createSettingsRouter> | undefined;
-
-async function settle(): Promise<void> {
-  for (let round = 0; round < 5; round += 1) {
-    await act(async () => {
-      await flushBrowserTasks();
-    });
-  }
-}
-
-async function mountSettings(): Promise<void> {
-  container = document.createElement("div");
-  document.body.append(container);
-  router = createSettingsRouter();
+async function mountSettings() {
+  await using stack = new AsyncDisposableStack();
+  const router = createSettingsRouter();
   await router.load();
-  await act(async () => {
-    root = await renderBrowser(null, { container: container!, router: false });
-    // `AppRoot` provides the app registry that dialog hosts such as Transcriptions read.
-    await root.rerender(
+  const screen = stack.use(
+    await renderBrowser(
       <AppAtomRegistryProvider>
-        <RouterProvider router={router!} />
+        <RouterProvider router={router} />
       </AppAtomRegistryProvider>,
-    );
-  });
-  await settle();
+      // This fixture mounts its own file-route tree.
+      { router: false },
+    ),
+  );
+  await expect
+    .element(screen.getByText("General settings page", { exact: true }))
+    .toBeInTheDocument();
+  const lifetime = stack.move();
+  return {
+    screen,
+    router,
+    container: screen.container,
+    navButton: (label: string) => navButton(screen.container, label),
+    [Symbol.asyncDispose]: () => lifetime.disposeAsync(),
+  };
 }
 
-function navButton(label: string): HTMLElement {
-  const nav = document.querySelector('[data-testid="settings-nav"]')!;
+function navButton(container: HTMLElement, label: string): HTMLElement {
+  const nav = container.querySelector('[data-testid="settings-nav"]')!;
   const button = [...nav.querySelectorAll<HTMLElement>("button")].find(
     (candidate) => candidate.textContent?.trim() === label,
   );
@@ -189,29 +197,23 @@ function navButton(label: string): HTMLElement {
   return button!;
 }
 
-/**
- * The router plugin code-splits route components, so the first visit to a
- * page waits on a lazy import; a fixed number of ticks is not enough.
- */
-async function settleRouter(): Promise<void> {
-  await settle();
-  for (let round = 0; round < 100 && router!.state.status !== "idle"; round += 1) {
-    await settle();
-  }
-}
-
 async function click(element: HTMLElement): Promise<void> {
-  await act(async () => {
-    element.click();
-  });
-  await settleRouter();
+  await act(async () => element.click());
 }
 
-async function openDictationPage(): Promise<HTMLElement> {
-  await mountSettings();
-  await click(navButton("Dictation"));
-  expect(router!.state.location.pathname).toBe("/settings/dictation");
-  return document.querySelector<HTMLElement>('[data-testid="settings-page"]')!;
+async function openDictationPage() {
+  await using stack = new AsyncDisposableStack();
+  const settings = stack.use(await mountSettings());
+  await click(settings.navButton("Dictation"));
+  await vi.waitFor(() =>
+    expect(settings.router.state.location.pathname).toBe("/settings/dictation"),
+  );
+  await expect.element(settings.screen.getByLabelText("OpenAI API key")).toBeInTheDocument();
+  const lifetime = stack.move();
+  return {
+    page: settings.container.querySelector<HTMLElement>('[data-testid="settings-page"]')!,
+    [Symbol.asyncDispose]: () => lifetime.disposeAsync(),
+  };
 }
 
 function keyField(page: HTMLElement): HTMLInputElement {
@@ -248,7 +250,6 @@ async function typeInto(field: HTMLInputElement | HTMLTextAreaElement, value: st
     Object.getOwnPropertyDescriptor(prototype, "value")?.set?.call(field, value);
     field.dispatchEvent(new Event("input", { bubbles: true }));
   });
-  await settle();
 }
 
 function buttonNamed(scope: ParentNode, name: string): HTMLElement | undefined {
@@ -263,50 +264,47 @@ function dictationPatches(): Array<Record<string, unknown>> {
     .filter((patch): patch is Record<string, unknown> => patch !== undefined);
 }
 
-async function setupBrowserFixture0() {
+function setup() {
+  fixture.projectGroups = [];
   fixture.dictation = { openAiApiKey: "", vocabularyHints: [] };
   fixture.updates = [];
   fixture.jobReads = [];
-
-  return {
-    async [Symbol.asyncDispose]() {
-      closeTranscriptionsList();
-      await act(async () => root?.[Symbol.asyncDispose]());
-      container?.remove();
-      root = undefined;
-      container = undefined;
-      router = undefined;
-      vi.unstubAllGlobals();
-    },
-  };
+  closeTranscriptionsList();
+  return { [Symbol.dispose]: () => closeTranscriptionsList() };
 }
 
 describe("dictation settings guards", () => {
   it("dictation settings guard: the settings navigation still lists the existing sections and opens Providers", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
+    using _fixture = setup();
 
-    await mountSettings();
+    await using settings = await mountSettings();
     for (const label of ["General", "Providers", "Integrations", "Connections", "Archive"]) {
-      navButton(label);
+      settings.navButton(label);
     }
-    await click(navButton("Providers"));
-    expect(router!.state.location.pathname).toBe("/settings/providers");
-    expect(document.body.textContent).toContain("Providers settings page");
+    await click(settings.navButton("Providers"));
+    await vi.waitFor(() =>
+      expect(settings.router.state.location.pathname).toBe("/settings/providers"),
+    );
+    await expect
+      .element(settings.screen.getByText("Providers settings page", { exact: true }))
+      .toBeInTheDocument();
   });
 });
 
 describe("dictation settings page (criterion 1: OpenAI key)", () => {
   it("dictation settings: the settings navigation lists Dictation and opens a page with a password field", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
+    using _fixture = setup();
 
-    const page = await openDictationPage();
+    await using settings = await openDictationPage();
+    const page = settings.page;
     expect(keyField(page).type).toBe("password");
   });
 
   it("dictation settings: saving a typed OpenAI key sends it in one server settings update for the environment", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
+    using _fixture = setup();
 
-    const page = await openDictationPage();
+    await using settings = await openDictationPage();
+    const page = settings.page;
     await typeInto(keyField(page), "sk-proj-fence-key");
     await click(saveButtonFor(keyField(page)));
 
@@ -316,36 +314,40 @@ describe("dictation settings page (criterion 1: OpenAI key)", () => {
   });
 
   it("dictation settings: a stored key is never shown in the password field", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
+    using _fixture = setup();
 
     fixture.dictation = { openAiApiKey: REDACTION_MARKER, vocabularyHints: [] };
-    const page = await openDictationPage();
+    await using settings = await openDictationPage();
+    const page = settings.page;
     expect(keyField(page).value).toBe("");
   });
 });
 
 describe("dictation settings page (criterion 2: configured status)", () => {
   it("dictation settings: the page reports a configured key when the stored value is the redaction marker", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
+    using _fixture = setup();
 
     fixture.dictation = { openAiApiKey: REDACTION_MARKER, vocabularyHints: [] };
-    const page = await openDictationPage();
+    await using settings = await openDictationPage();
+    const page = settings.page;
     expect(page.textContent).toMatch(/configured/i);
     expect(page.textContent).not.toMatch(/not configured/i);
   });
 
   it("dictation settings: the page reports no key when the stored key is empty", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
+    using _fixture = setup();
 
-    const page = await openDictationPage();
+    await using settings = await openDictationPage();
+    const page = settings.page;
     expect(page.textContent).toMatch(/not configured/i);
   });
 
   it("dictation settings: a stored value other than the redaction marker does not count as configured", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
+    using _fixture = setup();
 
     fixture.dictation = { openAiApiKey: "sk-not-a-marker", vocabularyHints: [] };
-    const page = await openDictationPage();
+    await using settings = await openDictationPage();
+    const page = settings.page;
     expect(page.textContent).toMatch(/not configured/i);
     expect(keyField(page).value).toBe("");
     expect(page.textContent).not.toContain("sk-not-a-marker");
@@ -354,18 +356,20 @@ describe("dictation settings page (criterion 2: configured status)", () => {
 
 describe("dictation settings page (criterion 3: vocabulary hints)", () => {
   it("dictation settings: stored vocabulary hints show as one text field, one hint per line", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
+    using _fixture = setup();
 
     fixture.dictation = { openAiApiKey: "", vocabularyHints: ["Mesura", "Symmetria", "Hyprland"] };
-    const page = await openDictationPage();
+    await using settings = await openDictationPage();
+    const page = settings.page;
     expect(hintsField(page).value).toBe("Mesura\nSymmetria\nHyprland");
   });
 
   it("dictation settings: saving vocabulary hints sends one list entry per non-empty line and keeps the stored key", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
+    using _fixture = setup();
 
     fixture.dictation = { openAiApiKey: REDACTION_MARKER, vocabularyHints: [] };
-    const page = await openDictationPage();
+    await using settings = await openDictationPage();
+    const page = settings.page;
     await typeInto(hintsField(page), "Mesura\n  Hyprland  \n\nVigilia\n");
     await click(saveButtonFor(hintsField(page)));
 
@@ -378,10 +382,11 @@ describe("dictation settings page (criterion 3: vocabulary hints)", () => {
 
 describe("dictation settings page (review P2-1: removing the key)", () => {
   it("dictation settings: Remove key deletes a configured key with an empty-key update", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
+    using _fixture = setup();
 
     fixture.dictation = { openAiApiKey: REDACTION_MARKER, vocabularyHints: [] };
-    const page = await openDictationPage();
+    await using settings = await openDictationPage();
+    const page = settings.page;
     const remove = buttonNamed(page, "Remove key");
     expect(remove, `Expected a Remove key button; page: ${page.textContent}`).toBeDefined();
     await click(remove!);
@@ -392,18 +397,20 @@ describe("dictation settings page (review P2-1: removing the key)", () => {
   });
 
   it("dictation settings: Remove key is offered only when a key is configured", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
+    using _fixture = setup();
 
-    const page = await openDictationPage();
+    await using settings = await openDictationPage();
+    const page = settings.page;
     expect(buttonNamed(page, "Remove key")).toBeUndefined();
   });
 });
 
 describe("dictation settings page (review P1-2: Transcriptions entry)", () => {
   it("dictation settings: Show transcriptions opens the list for the page's environment", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
+    using _fixture = setup();
 
-    const page = await openDictationPage();
+    await using settings = await openDictationPage();
+    const page = settings.page;
     const show = buttonNamed(page, "Show transcriptions");
     expect(show, `Expected a Show transcriptions button; page: ${page.textContent}`).toBeDefined();
     await click(show!);

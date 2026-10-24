@@ -1,4 +1,6 @@
-import { act, type Screen, fakeTimers } from "../test/render";
+import { act, type Screen } from "../test/render";
+import { page } from "vite-plus/test/browser";
+import { flushBrowserTasks } from "./test/browserTasks";
 /**
  * Entry point: AppRoot, with a memory router whose root renders the real
  * CommandPalette around the real AppSidebarLayout — and in it the real
@@ -37,6 +39,7 @@ import { act, type Screen, fakeTimers } from "../test/render";
  * and the sortable ids were a new array, which dnd-kit reads as a reorder.
  */
 import { type ReactNode } from "react";
+import * as monaco from "monaco-editor";
 import { PromiseClipboardItem } from "./test/promiseClipboardItem";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -294,7 +297,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 
 import { useFileTreeStore } from "./components/files/mesuraTree/fileTreeStore";
 import { useFileSurfacePendingStore } from "./components/files/fileSurfacePendingStore";
-import { THREAD_JUMP_HINT_SHOW_DELAY_MS } from "./components/Sidebar.logic";
+import { monacoFileModelKey } from "./components/files/monaco/monacoFileModels";
 import { shortcutLabelForCommand } from "./keybindings";
 import { installKeyEngine } from "./keys/keyEngine";
 import { isFileTreeFocused } from "./lib/focusTargets";
@@ -305,30 +308,22 @@ import {
   makeMessage,
   renderFenceApp,
 } from "./test/appRootFenceApp";
-import {
-  appRootFence as fixture,
-  makeFenceClientRects,
-  makeFenceSession,
-} from "./test/appRootFenceMocks";
+import { appRootFence as fixture, makeFenceSession } from "./test/appRootFenceMocks";
 import { editorTransport } from "./test/nvimEditorHarness";
 import type { RenderedComponent } from "./test/reactCommitCounter";
 
 const THREAD_COUNT = 6;
-const FRAME_MS = 16;
-const SETTLE_FRAMES = 12;
-const APP_STARTUP_MS = 5_000;
-/** How long Control is down before the chord's letter. */
-const CHORD_HOLD_MS = 100;
 
 let root: Screen | undefined;
 let container: HTMLDivElement;
 const openedThreads: ThreadId[] = [];
 
 async function setupBrowserFixture0() {
+  const previousViewport = { width: window.innerWidth, height: window.innerHeight };
+  await page.viewport(1440, 900);
   installKeyEngine();
   await import("./components/files/FilePreviewPanel");
 
-  const _timers = fakeTimers();
   editorTransport.reset();
   editorTransport.setSnapshot({
     relativePath: SOURCE_FILE.name,
@@ -350,12 +345,9 @@ async function setupBrowserFixture0() {
   vi.stubGlobal("ClipboardItem", PromiseClipboardItem);
   useFileTreeStore.setState({ explorerOpen: true });
   container = document.createElement("div");
+  // AppRoot normally mounts in #root, whose CSS gives it a definite height.
+  container.style.cssText = "width: 100%; height: 100dvh;";
   document.body.append(container);
-  vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(function (
-    this: HTMLElement,
-  ) {
-    return makeFenceClientRects([this.getBoundingClientRect()]);
-  });
 
   return {
     async [Symbol.asyncDispose]() {
@@ -363,9 +355,7 @@ async function setupBrowserFixture0() {
       await act(async () => root?.[Symbol.asyncDispose]());
       // The unmounted surface writes what it still had and then clears its flag;
       // let that finish here, so it cannot clear the next test's flag instead.
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(SAVE_SETTLED_MS);
-      });
+      await settle();
       useFileSurfacePendingStore.setState({ pendingByProject: new Map() });
       root = undefined;
       container.remove();
@@ -377,20 +367,18 @@ async function setupBrowserFixture0() {
       sidebarLists.threads = [];
       sidebarLists.projects = [];
       window.localStorage.clear();
-      vi.useRealTimers();
       vi.restoreAllMocks();
       vi.unstubAllGlobals();
-
-      _timers[Symbol.dispose]();
+      await page.viewport(previousViewport.width, previousViewport.height);
     },
   };
 }
 
-/** Runs `SETTLE_FRAMES` frames on the fake clock, with what each one brings. */
+/** Drains browser tasks and React work without advancing Monaco's clock. */
 async function settle(): Promise<void> {
-  for (let frame = 0; frame < SETTLE_FRAMES; frame += 1) {
+  for (let round = 0; round < 5; round += 1) {
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(FRAME_MS);
+      await flushBrowserTasks();
     });
   }
 }
@@ -418,18 +406,13 @@ async function tap(chord: Chord): Promise<void> {
 }
 
 /**
- * Control held, `letter` tapped, Control released: what `Ctrl-d` is at the
- * keyboard. Control is down for about 150 ms in the investigation's trace
- * (35,286 to 35,440 ms), under the jump hints' show delay; held longer, the
- * hints appear, which is their purpose and a sidebar render of its own.
+ * Control down, `letter` tapped, Control up: a quick chord, before the jump
+ * hints' show delay. The held-modifier guard waits for the hints separately.
  */
 async function controlChord(letter: string): Promise<void> {
   const control = { key: "Control", code: "ControlLeft", ctrlKey: true, keyCode: 17 };
   const chord = { key: letter, code: `Key${letter.toUpperCase()}`, ctrlKey: true };
   await dispatch("keydown", control);
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(CHORD_HOLD_MS);
-  });
   await dispatch("keydown", chord);
   await dispatch("keyup", chord);
   await dispatch("keyup", { ...control, ctrlKey: false });
@@ -442,18 +425,13 @@ const editorHasFocus = () =>
 
 /** A click on the editor's text: the pointer goes down and up there, and the caret takes focus. */
 async function clickEditorText(): Promise<void> {
-  const lines = container.querySelector<HTMLElement>("[data-monaco-file-surface] .view-lines");
-  const editContext = container.querySelector<HTMLElement>(
-    "[data-monaco-file-surface] .native-edit-context, [data-monaco-file-surface] textarea",
-  );
+  const lines = container.querySelector<HTMLElement>("[data-monaco-file-surface] .view-line");
   expect(lines, "the editor shows its text").not.toBeNull();
-  await act(async () => {
-    lines!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 }));
-    lines!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
-    lines!.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, button: 0 }));
-    lines!.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, button: 0 }));
-    editContext?.focus();
-  });
+  await page.elementLocator(lines!).click();
+  await vi.waitFor(() => expect(editorHasFocus(), `focus is on ${describeFocus()}`).toBe(true));
+  await editorTransport.waitUntil(() =>
+    editorTransport.requests.every((request) => request.settled),
+  );
   await settle();
 }
 
@@ -466,8 +444,8 @@ function describeFocus(): string {
 
 /**
  * Mounts the app on the first of `THREAD_COUNT` threads, opens the source
- * file from the Files tree and leaves the tree for the editor, as the
- * developer does: `Space p f`, `j`, Enter, Escape.
+ * file from the Files tree with `Space p f`, `j`, Enter, and clicks its text.
+ * The actual panel can hand focus to the editor when the file tab mounts.
  */
 async function mountWithEditorFocused({
   backgroundStreaming = false,
@@ -497,20 +475,28 @@ async function mountWithEditorFocused({
   sidebarLists.threads = [...fixture.threads.values()];
   sidebarLists.projects = [fixture.project];
   ({ root } = await renderFenceApp(container, threads[0]!, { vimMode: true }));
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(APP_STARTUP_MS);
-  });
+  await expect.element(page.getByTestId("sidebar-row-card").first()).toBeInTheDocument();
   await settle();
   (document.activeElement as HTMLElement | null)?.blur?.();
 
   await tap({ key: " ", code: "Space" });
   await tap({ key: "p", code: "KeyP" });
   await tap({ key: "f", code: "KeyF" });
+  await vi.waitFor(() => expect(isFileTreeFocused(), `focus is on ${describeFocus()}`).toBe(true));
   expect(isFileTreeFocused(), `focus is on ${describeFocus()}`).toBe(true);
   await tap({ key: "Home", code: "Home" });
   await tap({ key: "j", code: "KeyJ" });
   await tap({ key: "Enter", code: "Enter" });
-  await tap({ key: "Escape", code: "Escape", keyCode: 27 });
+  await editorTransport.waitUntil(() =>
+    editorTransport.requests.some(
+      (request) =>
+        request.method === "open" && request.payload === SOURCE_FILE.name && request.settled,
+    ),
+  );
+  await vi.waitFor(() =>
+    expect(container.querySelector("[data-monaco-file-surface] .view-line")).not.toBeNull(),
+  );
+  await clickEditorText();
   expect(editorHasFocus(), `focus is on ${describeFocus()}`).toBe(true);
   // The driver opened the file in the session, so keys now go to Neovim.
   expect(
@@ -630,6 +616,8 @@ describe("editor keys and the sidebar (phase 4, criterion 2)", () => {
       await tap({ key: letter, code: `Key${letter.toUpperCase()}` });
     }
     await tap({ key: "Escape", code: "Escape", keyCode: 27 });
+    await editorTransport.waitUntil(() => editorTransport.appliedKeys().includes("jjkixy"));
+    await settle();
     const rendered = commitCounter.stop();
 
     expect(editorTransport.appliedKeys(), "the keys reached Neovim").toContain("jjkixy");
@@ -645,6 +633,8 @@ describe("editor keys and the sidebar (phase 4, criterion 2)", () => {
     commitCounter.start();
     await controlChord("d");
     await controlChord("u");
+    await editorTransport.waitUntil(() => editorTransport.appliedKeys().includes("<C-d><C-u>"));
+    await settle();
     const rendered = commitCounter.stop();
 
     expect(editorTransport.appliedKeys(), "the chords reached Neovim").toContain("<C-d><C-u>");
@@ -678,9 +668,9 @@ describe("editor keys and the sidebar (phase 4, criterion 2)", () => {
     const control = { key: "Control", code: "ControlLeft", ctrlKey: true, keyCode: 17 };
 
     await dispatch("keydown", control);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(THREAD_JUMP_HINT_SHOW_DELAY_MS * 2);
-    });
+    await vi.waitFor(() =>
+      expect(jumpHintsShown(), "the hints show while the modifier is held").toBe(true),
+    );
     await settle();
     expect(jumpHintsShown(), "the hints show while the modifier is held").toBe(true);
 
@@ -725,9 +715,6 @@ function unsavedDotShown(): boolean {
   );
 }
 
-/** The autosave's debounce, and then some: the write has gone and confirmed. */
-const SAVE_SETTLED_MS = 1_000;
-
 describe("the first edit of a typing burst (phase 4, criterion 2)", () => {
   /** Line 1 as Neovim holds it, one typed character at a time. */
   let firstLine = SOURCE_FILE.lines[0]!;
@@ -751,14 +738,28 @@ describe("the first edit of a typing burst (phase 4, criterion 2)", () => {
         { type: "cursor", line: 1, col: 2 },
       );
     });
+    await vi.waitFor(() => {
+      const model = monaco.editor.getModel(
+        monaco.Uri.parse(
+          monacoFileModelKey(environmentId, fixture.project.workspaceRoot, SOURCE_FILE.name),
+        ),
+      );
+      expect(model?.getLineContent(1), "the real Monaco model received Neovim's edited line").toBe(
+        firstLine,
+      );
+    });
     await settle();
   }
 
   async function enterInsertMode(): Promise<void> {
+    editorTransport.setNeovimMode({ mode: "i" });
     await tap({ key: "i", code: "KeyI" });
     await act(async () => {
       editorTransport.emit({ type: "mode", mode: "i", blocking: false });
     });
+    await vi.waitFor(() =>
+      expect(container.querySelector("[data-nvim-status-strip]")?.textContent).toContain("INSERT"),
+    );
     await settle();
   }
 
@@ -822,9 +823,9 @@ describe("the first edit of a typing burst (phase 4, criterion 2)", () => {
     await mountWithEditorFocused();
     await enterInsertMode();
     await typeInInsertMode("x");
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(SAVE_SETTLED_MS);
-    });
+    await vi.waitFor(() =>
+      expect(unsavedDotShown(), "the save confirmed and cleared the pending marker").toBe(false),
+    );
     await settle();
 
     expect(unsavedDotShown(), "precondition: the save took the unsaved dot away").toBe(false);
@@ -850,27 +851,27 @@ describe("the first key after opening a file (phase 4, criterion 2)", () => {
       document.querySelector('[data-testid="project-file-picker"]'),
       "precondition: Ctrl+P opened the file picker",
     ).not.toBeNull();
-    for (const character of SOURCE_FILE.name) {
-      await tap({
-        key: character,
-        code: /[a-z]/i.test(character) ? `Key${character.toUpperCase()}` : "",
-      });
-    }
+    const pickerInput = document.querySelector<HTMLInputElement>(
+      '[data-testid="project-file-picker"] input',
+    );
+    expect(pickerInput, "the file picker search input is mounted").not.toBeNull();
+    await page.elementLocator(pickerInput!).fill(SOURCE_FILE.name);
+    expect(pickerInput!.value, "the browser entered the file name").toBe(SOURCE_FILE.name);
     await tap({ key: "Enter", code: "Enter" });
+    await expect.element(page.getByTestId("project-file-picker")).not.toBeInTheDocument();
     // The picker leaves the keyboard in the composer; a click on the text puts
     // it back in the editor, as the verifier's driver and the developer do.
     await clickEditorText();
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2_000);
-    });
     await settle();
     expect(editorHasFocus(), `focus is on ${describeFocus()}`).toBe(true);
 
     commitCounter.start();
     await tap({ key: "j", code: "KeyJ" });
+    await editorTransport.waitUntil(() => editorTransport.appliedKeys().endsWith("j"));
+    await settle();
     const rendered = commitCounter.stop();
 
-    expect(editorTransport.appliedKeys(), "the key reached Neovim").toMatch(/j$/);
+    expect(editorTransport.appliedKeys().endsWith("j"), "the key reached Neovim").toBe(true);
     expect(rendersOutsideFilePanel(rendered)).toEqual({});
   });
 });

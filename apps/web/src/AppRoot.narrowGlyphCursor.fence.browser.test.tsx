@@ -1,3 +1,4 @@
+import { page } from "vite-plus/test/browser";
 import { flushBrowserTasks } from "./test/browserTasks";
 import { act, type Screen } from "../test/render";
 // @effect-diagnostics nodeBuiltinImport:off - reads the app's stylesheets off the checkout, outside any Effect.
@@ -31,25 +32,23 @@ import { act, type Screen } from "../test/render";
  * - The widened cursor is the element `[data-mesura-block-cursor="glyph"]`,
  *   with inline `left`, `top`, `width` and `height` (px, or em against its
  *   own inline font size). It is drawn in the glyph's own container (the
- *   chat row, the composer editor's host), placed from an anchor there; an
- *   element box is empty in happy-dom, so its inline `left` and `top` read as
- *   viewport coordinates here.
+ *   chat row, the composer editor's host), placed from an anchor there. The
+ *   native overlay box converts those offsets to viewport coordinates.
  * - A colour is read from the element's inline style, else from the last
  *   `mesura.css` rule that matches it; `var()` resolves through the custom
- *   properties `index.css` and `mesura.css` declare for the theme. happy-dom
- *   drops an inline `oklch()` colour, so a literal colour has to live in
- *   `mesura.css`, where the highlight's colour already is.
+ *   properties `index.css` and `mesura.css` declare for the theme. The
+ *   highlight and widened cursor share the rules in `mesura.css`.
  *
- * Geometry is stubbed, because happy-dom has no layout: a one-character range
+ * Glyph geometry is controlled: a one-character range
  * inside the text node `GLYPH_LINE` has the box `GLYPH_WIDTHS` gives it, the
  * element that holds that text node computes the font `GLYPH_FONT`, and the
- * virtual list's wrapper is a scroll container. Every other range has no box,
- * so a fresh chat cursor starts on `GLYPH_LINE`, the only line with one.
+ * virtual list's wrapper is a scroll container. Other ranges retain native
+ * geometry. Ordinary Vim motions reach `GLYPH_LINE` from the first visible line.
  *
  * Boundaries the fixture replaces, and nothing else: the environment and
  * thread reads, every RPC command and query, the chords (the shipped
- * defaults), unrelated chrome, the CSS highlight registry happy-dom lacks
- * (recorded instead of painted), the sidebar's thread list, the file manager
+ * defaults), unrelated chrome, the CSS highlight registry (recorded instead
+ * of painted), the sidebar's thread list, the file manager
  * layer, the virtual list's measurement, and the layout reads named above.
  * The setup follows `AppRoot.composerUndo.fence.test.tsx`.
  */
@@ -258,7 +257,7 @@ function stubLayout() {
   vi.stubGlobal("ResizeObserver", FixtureResizeObserver);
 }
 
-/** A `ResizeObserver` the test fires by hand: happy-dom has no layout to resize. */
+/** A `ResizeObserver` the test fires with the controlled glyph geometry. */
 class FixtureResizeObserver {
   readonly #callback: ResizeObserverCallback;
   constructor(callback: ResizeObserverCallback) {
@@ -293,20 +292,22 @@ function resizeObservedElements() {
   }
 }
 
-/** How many elements the app's resize observers watch; the cursor's are told apart by difference. */
-const observedElementCount = () =>
-  [...fixture.resizeObservers.values()].reduce((count, targets) => count + targets.size, 0);
-
-/** Observed elements no longer in the document: what a left thread's cursor would keep. */
-const detachedObservedCount = () =>
+/** The cursor follows its row; composer and timeline observers share the same native observer. */
+const observedElementCount = (owner: Element) =>
   [...fixture.resizeObservers.values()].reduce(
-    (count, targets) => count + [...targets].filter((target) => !target.isConnected).length,
+    (count, targets) => count + Number(targets.has(owner)),
     0,
   );
+
+/** Retains the old cursor owner so navigation cannot hide a dangling observation. */
+const detachedObservedCount = (owner: Element) =>
+  owner.isConnected ? 0 : observedElementCount(owner);
 
 const composerExpanded = () => "mesuraComposerExpanded" in document.documentElement.dataset;
 
 async function setupBrowserFixture0() {
+  const previousViewport = { width: window.innerWidth, height: window.innerHeight };
+  await page.viewport(1440, 900);
   installKeyEngine();
 
   fixture.vimMode = false;
@@ -331,6 +332,7 @@ async function setupBrowserFixture0() {
       document.documentElement.classList.remove("dark");
       vi.restoreAllMocks();
       vi.unstubAllGlobals();
+      await page.viewport(previousViewport.width, previousViewport.height);
     },
   };
 }
@@ -360,7 +362,15 @@ async function mountApp(threadId: ThreadId) {
   Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 2000 });
   Object.defineProperty(scroller, "clientHeight", { configurable: true, value: 500 });
   await settle();
-  (document.activeElement as HTMLElement | null)?.blur?.();
+  // ChatView's first focus runs in a frame, after browser tasks can drain.
+  // Wait for that focus so it cannot take the keyboard during a chat motion.
+  await vi.waitFor(() =>
+    expect(
+      composerEditorElement()?.contains(document.activeElement),
+      "the initial composer focus completed",
+    ).toBe(true),
+  );
+  await act(async () => (document.activeElement as HTMLElement | null)?.blur?.());
 }
 
 /** Opens another thread the way the sidebar does: a navigation, with no key after it. */
@@ -430,10 +440,14 @@ async function holdL() {
 /** Mounts a glyph thread and paints the chat cursor on `GLYPH_LINE`'s `W`. */
 async function chatCursorOnGlyphLine(label: string) {
   await mountApp(addGlyphThread(label));
-  // `h` at the start of a line does not move: it paints where the cursor is.
-  await press(key("h"));
+  // Chromium gives the question a native box. Move to the reply's last line
+  // through the key engine rather than relying on an empty layout fallback.
+  await press(key("9"));
+  await press(key("9"));
+  await press(key("j"));
+  await press(key("0"));
   expect(readKeyEngineSnapshot()).toMatchObject({ scope: "chat", mode: "NORMAL" });
-  expect(paintedGlyph("mesura-chat-cursor"), "a fresh chat cursor starts on W").toBe("W");
+  expect(paintedGlyph("mesura-chat-cursor"), "chat motions reach the reply's W").toBe("W");
 }
 
 function chatScroller(): HTMLElement {
@@ -543,12 +557,12 @@ interface PaintedBox {
 }
 
 function overlayBox(overlay: HTMLElement): PaintedBox {
-  return {
-    left: inlinePx(overlay, "left"),
-    top: inlinePx(overlay, "top"),
-    width: inlinePx(overlay, "width"),
-    height: inlinePx(overlay, "height"),
-  };
+  return overlay.getBoundingClientRect();
+}
+
+/** Chromium rounds layout to 1/64 CSS px; material position changes still fail. */
+function expectCssPixels(actual: number, expected: number, message?: string) {
+  expect(Math.abs(actual - expected), message).toBeLessThanOrEqual(1 / 64);
 }
 
 /** The widened cursor on `GLYPH_LINE[index]`: half an em, centred on the glyph, instead of the highlight. */
@@ -560,13 +574,14 @@ function expectWidenedOn(index: number, highlight: CursorHighlight) {
   expect(overlay!.textContent, "the overlay draws the glyph under it").toBe(glyph);
   const box = overlayBox(overlay!);
   const source = glyphBox(index);
-  expect(box.width, `the cursor on ${glyph} is half an em wide`).toBeCloseTo(HALF_EM_PX, 6);
-  expect(box.left + box.width / 2, `the cursor on ${glyph} is centred on it`).toBeCloseTo(
+  expectCssPixels(box.width, HALF_EM_PX, `the cursor on ${glyph} is half an em wide`);
+  expectCssPixels(
+    box.left + box.width / 2,
     source.left + source.width / 2,
-    6,
+    `the cursor on ${glyph} is centred on it`,
   );
-  expect(box.top).toBeCloseTo(source.top, 6);
-  expect(box.height).toBeCloseTo(source.height, 6);
+  expectCssPixels(box.top, source.top);
+  expectCssPixels(box.height, source.height);
 }
 
 /** The highlight paints `glyph` as in the baseline, and no overlay is drawn. */
@@ -793,7 +808,7 @@ describe("narrow glyph cursor fence: the chat", () => {
     fixture.glyphTop = 80;
     await withinTheSameFrame(() => chatScroller().dispatchEvent(new Event("scroll")));
     expect(widenedCursor(), "the cursor stays widened after the scroll").not.toBeNull();
-    expect(overlayBox(widenedCursor()!).top, "the overlay moved with the glyph").toBeCloseTo(80, 6);
+    expectCssPixels(overlayBox(widenedCursor()!).top, 80, "the overlay moved with the glyph");
     expectWidenedOn(1, "mesura-chat-cursor");
   });
 
@@ -891,11 +906,12 @@ describe("narrow glyph cursor fence: pane resizing", () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 
     await chatCursorOnGlyphLine("chat-resize");
-    const onWideGlyph = observedElementCount();
+    const cursorRow = glyphHolder("chat").closest<HTMLElement>("[data-timeline-row-id]")!;
+    const onWideGlyph = observedElementCount(cursorRow);
     await press(key("l"));
     expectWidenedOn(1, "mesura-chat-cursor");
     expect(
-      observedElementCount(),
+      observedElementCount(cursorRow),
       "the widened cursor follows its container's size",
     ).toBeGreaterThan(onWideGlyph);
 
@@ -908,12 +924,15 @@ describe("narrow glyph cursor fence: pane resizing", () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 
     await chatCursorOnGlyphLine("chat-resize-stop");
-    const onWideGlyph = observedElementCount();
+    const cursorRow = glyphHolder("chat").closest<HTMLElement>("[data-timeline-row-id]")!;
+    const onWideGlyph = observedElementCount(cursorRow);
     await press(key("l"));
-    expect(observedElementCount()).toBeGreaterThan(onWideGlyph);
+    expect(observedElementCount(cursorRow)).toBeGreaterThan(onWideGlyph);
     await press(DOLLAR);
     expectHighlightOnly("0", "mesura-chat-cursor");
-    expect(observedElementCount(), "nothing more is observed for a wide glyph").toBe(onWideGlyph);
+    expect(observedElementCount(cursorRow), "nothing more is observed for a wide glyph").toBe(
+      onWideGlyph,
+    );
   });
 });
 
@@ -973,9 +992,9 @@ describe("narrow glyph cursor fence: clipping and covering", () => {
     await withinTheSameFrame(() => composer().dispatchEvent(new Event("scroll")));
     const overlay = widenedCursor();
     expect(overlay, "the partly visible glyph keeps its widened cursor").not.toBeNull();
-    expect(overlay!.style.getPropertyValue("clip-path"), "the clipped top is cut off").toBe(
-      "inset(10px 0px 0px 0px)",
-    );
+    const expectedClip = document.createElement("span").style;
+    expectedClip.clipPath = "inset(10px 0px 0px 0px)";
+    expect(overlay!.style.clipPath, "the clipped top is cut off").toBe(expectedClip.clipPath);
   });
 
   it("narrow glyph cursor fence regression: a composer glyph scrolled wholly out of the editor draws no overlay", async () => {
@@ -998,11 +1017,17 @@ describe("narrow glyph cursor fence: thread changes", () => {
     await chatCursorOnGlyphLine("thread-from");
     await press(key("l"));
     expectWidenedOn(1, "mesura-chat-cursor");
+    const cursorRow = glyphHolder("chat").closest<HTMLElement>("[data-timeline-row-id]")!;
+    expect(observedElementCount(cursorRow), "the cursor follows the old row").toBeGreaterThan(0);
 
     await openThread(addGlyphThread("thread-to"));
     expect(widenedCursor(), "the left thread's cursor is gone").toBeNull();
     expect(paintedGlyph("mesura-chat-cursor"), "no chat cursor is painted yet").toBeNull();
-    expect(detachedObservedCount(), "nothing of the left thread is still observed").toBe(0);
+    expect(cursorRow.isConnected, "the left thread's cursor row unmounted").toBe(false);
+    expect(
+      detachedObservedCount(cursorRow),
+      "nothing of the left thread's cursor is still observed",
+    ).toBe(0);
   });
 });
 
@@ -1086,10 +1111,7 @@ describe("narrow glyph cursor fence: the composer", () => {
     fixture.glyphTop = 150;
     await withinTheSameFrame(() => composer().dispatchEvent(new Event("scroll")));
     expect(widenedCursor(), "the cursor stays widened after the scroll").not.toBeNull();
-    expect(overlayBox(widenedCursor()!).top, "the overlay moved with the glyph").toBeCloseTo(
-      150,
-      6,
-    );
+    expectCssPixels(overlayBox(widenedCursor()!).top, 150, "the overlay moved with the glyph");
     expectWidenedOn(1, "mesura-composer-cursor");
   });
 
@@ -1191,7 +1213,14 @@ async function expectEmptyCursorAndGutter(top: number, gutterTops: number[]) {
   expect(composerExpanded()).toBe(true);
   const hostTop = composer().parentElement!.getBoundingClientRect().top;
   const gutter = [...composer().parentElement!.querySelectorAll<HTMLElement>("span.tabular-nums")];
-  expect(gutter.map((line) => Number.parseFloat(line.style.top) + hostTop)).toEqual(gutterTops);
+  expect(gutter).toHaveLength(gutterTops.length);
+  gutter.forEach((line, index) => {
+    expectCssPixels(
+      Number.parseFloat(line.style.top) + hostTop,
+      gutterTops[index]!,
+      `gutter line ${index + 1} aligns with its paragraph`,
+    );
+  });
 }
 
 it("narrow glyph cursor fence regression: NORMAL cursor and gutter start on the first empty paragraph", async () => {

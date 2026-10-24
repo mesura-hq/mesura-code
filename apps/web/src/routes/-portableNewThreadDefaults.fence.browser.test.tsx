@@ -1,4 +1,7 @@
 // Application entry point: Route.options.component from _chat.index.tsx.
+import "../index.css";
+import "../mesura.css";
+
 import { lazy, Suspense } from "react";
 import { act, render, type Screen } from "../../test/render";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -46,7 +49,7 @@ const state = vi.hoisted(() => {
       return storedDraft;
     },
     router: {
-      state: { location: { href: "/" }, matches: [{ params: {} }] },
+      state: { location: { href: "/", pathname: "/" }, matches: [{ params: {} }] },
       navigate: vi.fn(async () => undefined),
     },
     reset() {
@@ -63,12 +66,21 @@ const state = vi.hoisted(() => {
       this.carryModel = false;
       this.sticky.mockClear();
       this.context.mockClear();
+      this.router.state.location = { href: "/", pathname: "/" };
+      this.router.navigate.mockClear();
       repositoryRead = new Promise<void>((resolve) => {
         completeRepositoryRead = resolve;
       });
     },
     finishRead() {
       completeRepositoryRead();
+    },
+    finishReadAndDeferRetry() {
+      const finishCurrentRead = completeRepositoryRead;
+      repositoryRead = new Promise<void>((resolve) => {
+        completeRepositoryRead = resolve;
+      });
+      finishCurrentRead();
     },
     mutateDraft() {
       if (storedDraft) storedDraft = { ...storedDraft, envMode: "local", envModeExplicit: true };
@@ -89,37 +101,35 @@ const state = vi.hoisted(() => {
   };
 });
 
-vi.mock("@effect/atom-react", () => ({
-  useAtomValue: () =>
-    new Map([
-      [
-        "remote-environment",
-        {
-          providers: (state.ambiguous ? ["codex_one", "codex_two"] : ["codex"]).map(
-            (instanceId) => ({
-              instanceId,
-              driver: "codex",
-              enabled: true,
-              installed: true,
-              auth: { status: "authenticated" },
-              models: state.models.map((slug) => ({ slug, capabilities: null })),
-            }),
-          ),
-          settings: {
-            ...DEFAULT_SERVER_SETTINGS,
-            defaultThreadEnvMode: "local",
-            projectSettingsOverrides: {
-              "remote-project": {
-                defaultThreadEnvMode: "local",
-                defaultModelSelection: { instanceId: "codex", model: "machine-default" },
-              },
+function readServerConfigs() {
+  return new Map([
+    [
+      "remote-environment",
+      {
+        providers: (state.ambiguous ? ["codex_one", "codex_two"] : ["codex"]).map((instanceId) => ({
+          instanceId,
+          driver: "codex",
+          enabled: true,
+          installed: true,
+          auth: { status: "authenticated" },
+          models: state.models.map((slug) => ({ slug, capabilities: null })),
+        })),
+        settings: {
+          ...DEFAULT_SERVER_SETTINGS,
+          defaultThreadEnvMode: "local",
+          projectSettingsOverrides: {
+            "remote-project": {
+              defaultThreadEnvMode: "local",
+              defaultModelSelection: { instanceId: "codex", model: "machine-default" },
             },
           },
         },
-      ],
-    ]),
-}));
-vi.mock("@t3tools/client-runtime/environment", () => ({
+      },
+    ],
+  ]);
+}
+vi.mock("@t3tools/client-runtime/environment", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@t3tools/client-runtime/environment")>()),
   scopeProjectRef: (environmentId: string, projectId: string) => ({
     environmentId,
     projectId,
@@ -127,7 +137,8 @@ vi.mock("@t3tools/client-runtime/environment", () => ({
   scopeThreadRef: (environmentId: string, threadId: string) => ({ environmentId, threadId }),
   scopedProjectKey: () => "remote-project",
 }));
-vi.mock("@tanstack/react-router", () => ({
+vi.mock("@tanstack/react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tanstack/react-router")>()),
   lazyRouteComponent: (load: () => Promise<Record<string, React.ComponentType>>, name: string) => {
     const loaded = load().then((module) => ({ default: module[name]! }));
     state.routeLoads.push(loaded);
@@ -183,15 +194,18 @@ vi.mock("../logicalProject", () => ({
   selectProjectGroupingSettings: () => ({}),
 }));
 vi.mock("../state/entities", () => ({
+  readProject: () => state.project,
   readProjects: () => [state.project],
   readThreadShell: () => null,
   useProjects: () => [state.project],
   useThread: () => null,
+  useQuietThreadShell: () => null,
   useThreadShells: () => [],
   useAllEnvironmentShellsBootstrapped: () => true,
 }));
 vi.mock("../state/environments", () => ({
   useEnvironments: () => ({ environments: [], isReady: true }),
+  useEnvironment: () => ({ connection: { phase: state.phase } }),
 }));
 vi.mock("../state/server", () => ({
   environmentServerConfigsAtom: "configs",
@@ -209,7 +223,9 @@ vi.mock("../uiStateStore", () => ({
   legacyProjectCwdPreferenceKey: () => "remote-project",
   useUiStateStore: () => [],
 }));
-vi.mock("../hooks/useSettings", () => ({ useClientSettings: () => ({}) }));
+vi.mock("../hooks/useSettings", () => ({
+  useClientSettings: () => ({}),
+}));
 vi.mock("../components/files/projectFilesQueryState", () => ({
   getProjectFileQueryAtom: (_environmentId: string, _cwd: string, name: string) => name,
   resolveProjectFileQueryData: (
@@ -219,7 +235,8 @@ vi.mock("../components/files/projectFilesQueryState", () => ({
     data: unknown,
   ) => data,
 }));
-vi.mock("@t3tools/client-runtime/state/runtime", () => ({
+vi.mock("@t3tools/client-runtime/state/runtime", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@t3tools/client-runtime/state/runtime")>()),
   executeAtomQuery: async (_registry: unknown, name: string, options: { signal: AbortSignal }) => {
     state.readCount++;
     if (name === ".mesura.json") {
@@ -241,17 +258,14 @@ vi.mock("@t3tools/client-runtime/state/runtime", () => ({
 vi.mock("../state/presentation", () => ({
   environmentPresentations: { presentationAtom: () => "connection" },
 }));
-vi.mock("../rpc/atomRegistry", async () => {
-  const { useAtomValue } = await import("@effect/atom-react");
+vi.mock("../rpc/atomRegistry", () => {
   return {
     appAtomRegistry: {
       get: (atom: unknown) =>
         atom === "configs"
-          ? useAtomValue("configs" as never)
+          ? readServerConfigs()
           : atom === "providers"
-            ? (
-                useAtomValue("configs" as never) as unknown as Map<string, { providers: unknown[] }>
-              ).get("remote-environment")!.providers
+            ? readServerConfigs().get("remote-environment")!.providers
             : { connection: { phase: state.phase } },
       subscribe: (_atom: unknown, listener: () => void) => {
         state.connectionListeners.add(listener);
@@ -261,6 +275,8 @@ vi.mock("../rpc/atomRegistry", async () => {
   };
 });
 vi.mock("../components/NoProjectsHero", () => ({ NoProjectsHero: () => null }));
+vi.mock("../components/HostedEmptyState", () => ({ HostedEmptyState: () => null }));
+vi.mock("../components/ui/refresh-icon", () => ({ RefreshIcon: () => null }));
 vi.mock("../components/WorkspacePageHeader", () => ({ WorkspacePageHeader: () => null }));
 vi.mock("../components/ui/button", () => ({ Button: () => null }));
 vi.mock("../components/ui/empty", () => ({
@@ -269,7 +285,9 @@ vi.mock("../components/ui/empty", () => ({
   EmptyHeader: () => null,
   EmptyTitle: () => null,
 }));
-vi.mock("../components/ui/sidebar", () => ({ SidebarInset: () => null }));
+vi.mock("../components/ui/sidebar", () => ({
+  SidebarInset: () => null,
+}));
 
 import { Route } from "./_chat.index";
 import { readRepositoryDefaults } from "../lib/t3ProjectFileDefaults";
@@ -412,9 +430,21 @@ describe("phase 2 web index route", () => {
     state.explicitModel = false;
     await mountEntry();
     state.mutateDraft();
-    await act(async () => state.finishRead());
+    await act(async () => state.finishReadAndDeferRetry());
     expect(state.setLogicalProjectDraftThreadId).not.toHaveBeenCalled();
     expect(state.setModelSelection).not.toHaveBeenCalled();
+    // The index retries a cancelled request. Keep that read pending to observe
+    // the abandoned attempt, then verify that the retry keeps the explicit workspace.
+    expect(state.readCount).toBe(4);
+    await act(async () => state.finishRead());
+    expect(state.context).not.toHaveBeenCalled();
+    expect(state.storedDraft).toMatchObject({ envMode: "local", envModeExplicit: true });
+    expect(state.setLogicalProjectDraftThreadId).toHaveBeenCalledWith(
+      "remote-project",
+      { environmentId: "remote-environment", projectId: "remote-project" },
+      "explicit-draft",
+      expect.any(Object),
+    );
   });
   it("P2 rework web reuses the open draft without repository RPCs", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();

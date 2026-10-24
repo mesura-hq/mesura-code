@@ -25,7 +25,7 @@ import { act, type Screen } from "../test/render";
  * Boundaries the fixture replaces, and nothing else: the environment and
  * thread reads, every RPC command and query, the chords (the shipped
  * defaults, as a fresh keybindings file resolves them), unrelated chrome, the
- * CSS highlight registry happy-dom lacks (recorded instead of painted), the
+ * CSS highlight paint (recorded for cursor assertions), the
  * sidebar's thread list (one focusable row), the terminal drawer (its root
  * and xterm's helper textarea, which is all the pane code reads), and the
  * file manager layer (its focusable root while the store is open; the vendor
@@ -99,6 +99,8 @@ let root: Screen | undefined;
 let container: HTMLDivElement;
 
 async function setupBrowserFixture0() {
+  const previousViewport = { width: window.innerWidth, height: window.innerHeight };
+  await page.viewport(1440, 900);
   installKeyEngine();
 
   seedThread();
@@ -115,6 +117,7 @@ async function setupBrowserFixture0() {
       container.remove();
       document.querySelector("[data-testid='terminal-drawer']")?.remove();
       vi.unstubAllGlobals();
+      await page.viewport(previousViewport.width, previousViewport.height);
     },
   };
 }
@@ -141,7 +144,10 @@ async function settle(): Promise<void> {
 async function mountApp(options: { readonly vimMode: boolean }, selectedThreadId = threadId) {
   ({ root } = await renderFenceApp(container, selectedThreadId, options));
   await settle();
-  (document.activeElement as HTMLElement | null)?.blur?.();
+  // ChatView focuses the composer on its first animation frame.
+  // Observe that focus before blurring so it cannot arrive during a chat motion.
+  await vi.waitFor(() => expect(focusIsInComposer()).toBe(true));
+  await act(async () => (document.activeElement as HTMLElement | null)?.blur?.());
 }
 
 interface Chord {
@@ -163,7 +169,7 @@ async function press(chord: Chord) {
 
 const key = (letter: string): Chord => ({ key: letter, code: `Key${letter.toUpperCase()}` });
 const ESCAPE: Chord = { key: "Escape", code: "Escape" };
-// Mod is Control here: happy-dom reports a non-Mac platform.
+// Mod is Control in the Linux Chromium fixture.
 const PALETTE_CHORD: Chord = { key: "o", code: "KeyO", ctrlKey: true };
 const PANE_UP_CHORD: Chord = { key: "k", code: "KeyK", ctrlKey: true };
 const PANE_RIGHT_CHORD: Chord = { key: "l", code: "KeyL", ctrlKey: true };
@@ -174,11 +180,15 @@ function palette(): HTMLElement | null {
 
 async function openPalette() {
   await press(PALETTE_CHORD);
+  await expect.element(page.getByTestId("command-palette")).toBeVisible();
   expect(palette(), "the palette chord opened the palette").not.toBeNull();
 }
 
 async function closePalette() {
   await press(ESCAPE);
+  // Base UI keeps the closed popup mounted until its exit transition ends.
+  await expect.element(page.getByTestId("command-palette")).not.toBeInTheDocument();
+  await settle();
   expect(palette(), "Escape closed the palette").toBeNull();
 }
 
@@ -194,6 +204,7 @@ function focusIsInComposer(): boolean {
 
 async function focusComposer() {
   await act(async () => composer().focus());
+  await vi.waitFor(() => expect(focusIsInComposer()).toBe(true));
   await settle();
 }
 
@@ -227,11 +238,20 @@ describe("vim landing fence: the palette returns where it was opened", () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp({ vimMode: true });
-    // Two lines up from where a fresh cursor starts.
+    // Chromium starts at the first visible glyph. Use a counted motion to
+    // reach the last paragraph, then move to an interior paragraph.
+    await press({ key: "9", code: "Digit9" });
+    await press({ key: "9", code: "Digit9" });
+    await press(key("j"));
+    expect(chatCursor()?.node.textContent).toBe("The last paragraph.");
     await press(key("k"));
     await press(key("k"));
     const before = chatCursor();
     expect(before, "the chat cursor was painted").not.toBeNull();
+    expect(before?.node.textContent).toBe("The second paragraph.");
+    expect(
+      fixture.highlights.get("mesura-chat-cursor")?.[0]?.getBoundingClientRect().height,
+    ).toBeGreaterThan(0);
     expect(readKeyEngineSnapshot()).toMatchObject({ scope: "chat", mode: "NORMAL" });
 
     await openPalette();
@@ -239,8 +259,8 @@ describe("vim landing fence: the palette returns where it was opened", () => {
 
     expect(focusIsInComposer()).toBe(false);
     expect(readKeyEngineSnapshot()).toMatchObject({ scope: "chat", mode: "NORMAL" });
-    // A cursor kept at `before` returns to it after one line down and one up;
-    // a fresh cursor, on the last line, would not.
+    // A cursor kept at `before` returns after one line down and one up.
+    // A reset cursor starts at the first visible glyph and lands elsewhere.
     await press(key("j"));
     await press(key("k"));
     expect(chatCursor()).toEqual(before);
@@ -294,7 +314,6 @@ describe("phone palette restoration through the real collapsed composer", () => 
     check: (composer: PaletteComposer) => Promise<void>,
   ) {
     const previousWidth = window.innerWidth;
-    let restoreFocus: (() => void) | undefined;
     const prompt = "hello world";
     try {
       const selectedThreadId = addFenceThread(
@@ -311,28 +330,25 @@ describe("phone palette restoration through the real collapsed composer", () => 
       await setViewportWidth(width);
       await mountApp({ vimMode: true }, selectedThreadId);
       const editor = composer();
-      const nativeFocus = editor.focus.bind(editor);
-      // Happy DOM ignores CSS when focusing. Model only the browser's refusal
-      // to focus this editor inside the real composer's hidden body. The app
-      // still owns collapse, expansion, selection, palette cleanup and Vim mode.
-      const visibleFocus = vi.spyOn(editor, "focus").mockImplementation((options) => {
-        if (editor.closest("[data-chat-composer-body]")?.classList.contains("hidden")) return;
-        nativeFocus(options);
-      });
-      restoreFocus = () => visibleFocus.mockRestore();
       const surface = editor.closest("[data-chat-composer-surface]")!;
       const mobile = width < 640;
+      expect(window.innerWidth).toBe(width);
       expect(window.matchMedia("(max-width: 639px)").matches).toBe(mobile);
-      await focusComposer();
+      // On a phone the real hidden body cannot receive native focus.
+      if (!mobile) await focusComposer();
       await act(async () => editor.blur());
-      await settle();
       if (mobile) {
-        expect(surface.getAttribute("data-chat-composer-mobile-collapsed")).toBe("true");
+        // Collapse commits after ChatComposer's blur frame, not a message task.
+        await vi.waitFor(() =>
+          expect(surface.getAttribute("data-chat-composer-mobile-collapsed")).toBe("true"),
+        );
         const expand = surface.querySelector<HTMLButtonElement>('[aria-label="Expand composer"]')!;
-        await act(async () => expand.click());
+        await page.elementLocator(expand).click();
       } else await focusComposer();
-      await settle();
-      expect(focusIsInComposer()).toBe(true);
+      await vi.waitFor(() => expect(focusIsInComposer()).toBe(true));
+      // Native actionability waits for the expanded editor's layout. The
+      // composer's focus and release frames then finish before the next blur.
+      await page.elementLocator(editor).click();
       const clipboardData = new DataTransfer();
       clipboardData.setData("text/plain", prompt);
       await act(async () =>
@@ -355,13 +371,17 @@ describe("phone palette restoration through the real collapsed composer", () => 
       }
       expect(readKeyEngineSnapshot()).toMatchObject({ scope: "composer", mode });
       await openPalette();
-      expect(surface.getAttribute("data-chat-composer-mobile-collapsed")).toBe(String(mobile));
+      await vi.waitFor(() =>
+        expect(surface.getAttribute("data-chat-composer-mobile-collapsed")).toBe(String(mobile)),
+      );
       expect(editor.closest("[data-chat-composer-body]")?.classList.contains("hidden")).toBe(
         mobile,
       );
+      expect(getComputedStyle(editor.closest("[data-chat-composer-body]")!).display).toBe(
+        mobile ? "none" : "block",
+      );
       await check({ editor, surface, prompt });
     } finally {
-      restoreFocus?.();
       await setViewportWidth(previousWidth);
       await settle();
     }
@@ -372,7 +392,7 @@ describe("phone palette restoration through the real collapsed composer", () => 
     mode: string,
   ) {
     await closePalette();
-    expect(focusIsInComposer()).toBe(true);
+    await vi.waitFor(() => expect(focusIsInComposer()).toBe(true));
     expect(surface.getAttribute("data-chat-composer-mobile-collapsed")).toBe("false");
     expect(readKeyEngineSnapshot()).toMatchObject({ scope: "composer", mode });
     expect(editor.textContent).toBe(prompt);
@@ -499,8 +519,7 @@ describe("phone palette restoration through the real collapsed composer", () => 
             )!;
             await act(async () => expand.click());
           }
-          await settle();
-          expect(focusIsInComposer()).toBe(true);
+          await vi.waitFor(() => expect(focusIsInComposer()).toBe(true));
           expect(readKeyEngineSnapshot()).toMatchObject({ scope: "composer", mode: "INSERT" });
           expect(editor.textContent).toBe(prompt);
         } finally {
@@ -533,6 +552,7 @@ describe("vim landing fence: a file manager row keeps the keyboard", () => {
       );
       expect(row, `the palette offers the row; rendered: ${palette()!.textContent}`).toBeDefined();
       await act(async () => row!.click());
+      await expect.element(page.getByTestId("command-palette")).not.toBeInTheDocument();
       await settle();
 
       expect(palette()).toBeNull();

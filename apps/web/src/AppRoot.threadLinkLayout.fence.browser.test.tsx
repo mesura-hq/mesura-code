@@ -7,6 +7,7 @@ import { act, render, fakeTimers, type Screen } from "../test/render";
 import { flushBrowserTasks } from "./test/browserTasks";
 import { installKeyEngine } from "./keys/keyEngine";
 import { expect, it, vi } from "vite-plus/test";
+import { page } from "vite-plus/test/browser";
 import {
   AuthPreviewOperateScope,
   AuthTerminalOperateScope,
@@ -110,8 +111,13 @@ let bridgeDescriptor: PropertyDescriptor | undefined;
 
 async function createLayoutFixture() {
   await using resources = new AsyncDisposableStack();
+  const previousViewport = { width: window.innerWidth, height: window.innerHeight };
+  resources.defer(() => page.viewport(previousViewport.width, previousViewport.height));
+  // useMediaQuery reads native matchMedia, so an innerWidth stub still selects the sheet.
+  await page.viewport(1440, 900);
   installKeyEngine();
   await import("./components/files/FilePreviewPanel");
+  await import("./components/preview/PreviewPanel");
   resources.use(fakeTimers());
   resources.defer(() => {
     vi.unstubAllGlobals();
@@ -123,7 +129,6 @@ async function createLayoutFixture() {
   closeBoundary.browserAvailable = false;
   closeBoundary.close.mockReset().mockResolvedValue(AsyncResult.success(undefined));
   bridgeDescriptor = Object.getOwnPropertyDescriptor(window, "desktopBridge");
-  vi.stubGlobal("innerWidth", 1280);
   addFenceThread(id, "Link layout", [makeMessage("layout-user", "user", "Review the link.")]);
   appRootFence.vimMode = false;
   appRootFence.sessions.set(ref.environmentId, makeFenceSession());
@@ -178,6 +183,10 @@ async function createLayoutFixture() {
 const column = () => container.querySelector<HTMLElement>("[data-chat-column-maximized-away]")!;
 const maximized = () => column().dataset.chatColumnMaximizedAway === "true";
 async function mount() {
+  // Publish grants set after addFenceThread to any session atoms retained between mounts.
+  await act(() => {
+    for (const listener of appRootFence.threadListeners) listener();
+  });
   dialogRoot = await render(<ConfirmDialogHost />, { container: dialogContainer, router: false });
   ({ root, router } = await renderFenceApp(container, id, { vimMode: false }));
   await settleFocus();
@@ -234,6 +243,7 @@ async function answerConfirmation(label: "Confirm" | "Cancel") {
   );
   expect(button).toBeDefined();
   await act(() => button!.click());
+  await vi.waitFor(() => expect(document.querySelector('[role="alertdialog"]')).toBeNull());
 }
 it("thread link AppRoot guard: cancelling the real agent confirmation preserves the target and maximize", async () => {
   await using _fixture = await createLayoutFixture();
@@ -618,6 +628,7 @@ it.each(["terminal", "modal", "user focus", "new surface"] as const)(
     try {
       if (owner === "new surface") {
         await act(() => useRightPanelStore.getState().openFile(ref, "new-owner.md"));
+        await settleFocus();
         await focusPanel();
       } else await act(() => input.focus());
       const active = document.activeElement;

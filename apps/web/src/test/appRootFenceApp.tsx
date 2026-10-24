@@ -1,3 +1,6 @@
+import "../index.css";
+import "../mesura.css";
+
 import { render as renderBrowser, type Screen } from "../../test/render";
 
 import {

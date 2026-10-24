@@ -1,4 +1,5 @@
 import { flushBrowserTasks } from "./test/browserTasks";
+import { page } from "vite-plus/test/browser";
 import { act, render as renderBrowser, type Screen } from "../test/render";
 /**
  * Entry point: AppRoot, with a memory router rendering the real ChatView, whose
@@ -366,6 +367,8 @@ function dirtyVcsStatus() {
 // test that opened a file tab failed on time alone. Load both chunks up front,
 // under a hook timeout sized for that compile.
 async function setupBrowserFixture0() {
+  const previousViewport = { width: window.innerWidth, height: window.innerHeight };
+  await page.viewport(1440, 900);
   await Promise.all([
     import("./components/DiffPanel"),
     import("./components/files/FilePreviewPanel"),
@@ -418,6 +421,7 @@ async function setupBrowserFixture0() {
       container.remove();
       restoreFontEvents();
       vi.unstubAllGlobals();
+      await page.viewport(previousViewport.width, previousViewport.height);
     },
   };
 }
@@ -597,7 +601,9 @@ it("Tree diff opening guard: a generic opening replaces an old turn selection wi
   useDiffPanelStore
     .getState()
     .selectTurn(threadRef, RunId.make("old-tree-diff-run"), "src/edited.ts");
-  await mountDiffSurface();
+  await mountApp();
+  await pressKey("d", { ctrlKey: true, shiftKey: true });
+  await waitFor(diffSurfaceReady);
   expect(selectedMode()).toBe("Branch changes");
 });
 
@@ -1043,16 +1049,22 @@ it("Tree diff keys fence: in the Alt+C menu a mode's first letter and Enter sele
   await mountDiffSurface("tree");
   await pressAlt("c");
   await waitFor(() => menuItems().length > 0);
+  await vi.waitFor(() => expect(document.activeElement?.closest('[role="menu"]')).not.toBeNull());
 
   await pressKey("f");
+  await vi.waitFor(() => expect(document.activeElement?.textContent).toContain("Files diff"));
   await pressKey("Enter");
+  // Base UI retains the menu until its exit transition finishes.
+  await vi.waitFor(() => expect(menuItems()).toEqual([]));
   expect(menuItems()).toEqual([]);
   expect(selectedMode()).toBe("Files diff");
 
   // Tree diff and Turn both start with T: the first T is Tree diff.
   await pressAlt("c");
   await waitFor(() => menuItems().length > 0);
+  await vi.waitFor(() => expect(document.activeElement?.closest('[role="menu"]')).not.toBeNull());
   await pressKey("t");
+  await vi.waitFor(() => expect(document.activeElement?.textContent).toContain("Tree diff"));
   await pressKey("Enter");
   expect(selectedMode()).toBe("Tree diff");
 });

@@ -62,7 +62,10 @@ vi.mock("./state/use-atom-command", () => ({
 }));
 vi.mock("./state/use-atom-query-runner", () => ({ useAtomQueryRunner: () => fixture.noopCommand }));
 vi.mock("./hooks/useSettings", async (original) => (await fenceMocks()).mockSettings(original));
-vi.mock("./hooks/useHandleNewThread", () => ({ useNewThreadHandler: () => fixture.noopCommand }));
+vi.mock("./hooks/useHandleNewThread", async () => ({
+  ...(await (await fenceMocks()).mockHandleNewThread()),
+  useNewThreadHandler: () => fixture.noopCommand,
+}));
 vi.mock("./hooks/useThreadActions", async () => (await fenceMocks()).mockThreadActions());
 vi.mock("./components/preview/PreviewAutomationHosts", () => ({
   PreviewAutomationHosts: () => null,
@@ -72,8 +75,8 @@ vi.mock("./components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }))
 vi.mock("./components/chat/ChatHeader", () => ({ ChatHeader: () => null }));
 vi.mock("./components/BranchToolbar", () => ({ BranchToolbar: () => null }));
 
-// happy-dom has no layout. Keep application routing and timeline projection
-// real, and replace only the virtual list's measurement boundary.
+// Keep application routing and timeline projection real. Replace the virtual
+// list boundary to keep every pending request mounted during the interaction.
 vi.mock("@legendapp/list/react", async () => (await fenceMocks()).mockLegendList());
 import { usePendingUserInputDraftStore } from "./pendingUserInputDraftStore";
 

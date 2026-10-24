@@ -1,3 +1,6 @@
+import "../index.css";
+import "../mesura.css";
+
 import { act, render as renderBrowser, type Screen } from "../../test/render";
 // Application entry point: ThreadRouteView, rendered by the _chat route layout.
 // The draft leaf route is empty so draft promotion retains the ChatView instance.
@@ -14,7 +17,7 @@ import {
   type ServerConfig,
 } from "@t3tools/contracts";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
-import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
+import { DEFAULT_CLIENT_SETTINGS, type UnifiedSettings } from "@t3tools/contracts/settings";
 
 import * as Option from "effect/Option";
 import { EMPTY_THREAD_HISTORY_META } from "@t3tools/client-runtime/state/threads";
@@ -40,8 +43,13 @@ const fixture = vi.hoisted(() => ({
   preview: { sessions: {}, serverEpoch: null },
   command: vi.fn(),
   empty: [] as never[],
+  providersByEnvironment: new Map<EnvironmentId, ServerConfig["providers"]>(),
+  serverConfigs: new Map<EnvironmentId, ServerConfig>(),
 }));
-vi.mock("@tanstack/react-router", () => ({
+const fenceMocks = vi.hoisted(() => () => import("../test/appRootFenceMocks"));
+vi.mock("../connection/runtime", async () => (await fenceMocks()).mockConnectionRuntime());
+vi.mock("@tanstack/react-router", async (original) => ({
+  ...(await original<typeof import("@tanstack/react-router")>()),
   createFileRoute: () => (options: unknown) => ({
     options,
     useParams: () => ({ draftId: fixture.draftId }),
@@ -53,41 +61,78 @@ vi.mock("@tanstack/react-router", () => ({
   },
   useNavigate: () => fixture.command,
   useRouter: () => ({ navigate: fixture.command }),
-  useLocation: () => ({ href: `/draft/${fixture.draftId}`, key: "draft" }),
+  useLocation: (options?: { select?: (location: unknown) => unknown }) => {
+    const location = { href: `/draft/${fixture.draftId}`, state: { __TSR_key: "draft" } };
+    return options?.select ? options.select(location) : location;
+  },
 }));
-vi.mock("../hooks/useHandleNewThread", () => ({ useNewThreadHandler: () => fixture.command }));
+vi.mock("../hooks/useHandleNewThread", () => ({
+  useNewThreadHandler: () => fixture.command,
+  useHandleNewThread: () => ({
+    activeDraftThread: null,
+    activeThread: null,
+    defaultProjectRef: null,
+    handleNewThread: fixture.command,
+    routeDraftId: null,
+    routeThreadRef: null,
+  }),
+}));
 vi.mock("../hooks/useThreadActions", async (original) => ({
   ...(await original<typeof import("../hooks/useThreadActions")>()),
   useThreadActions: () => ({}),
 }));
-vi.mock("../hooks/useSettings", () => ({
-  useEnvironmentSettings: () => DEFAULT_SERVER_SETTINGS,
-  useClientSettingsHydrated: () => true,
-  useClientSettings: (select?: (s: typeof DEFAULT_CLIENT_SETTINGS) => unknown) =>
-    select ? select(DEFAULT_CLIENT_SETTINGS) : DEFAULT_CLIENT_SETTINGS,
+vi.mock("../hooks/useSettings", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../hooks/useSettings")>();
+  const settings = original.mergeEnvironmentSettings(
+    DEFAULT_SERVER_SETTINGS,
+    DEFAULT_CLIENT_SETTINGS,
+  );
+  return {
+    ...original,
+    useEnvironmentSettings: (
+      _environmentId: string,
+      select?: (settings: UnifiedSettings) => unknown,
+    ) => {
+      return select ? select(settings) : settings;
+    },
+    useClientSettingsHydrated: () => true,
+    useClientSettings: (select?: (s: typeof DEFAULT_CLIENT_SETTINGS) => unknown) =>
+      select ? select(DEFAULT_CLIENT_SETTINGS) : DEFAULT_CLIENT_SETTINGS,
+  };
+});
+vi.mock("../hooks/useTheme", async (original) => ({
+  ...(await original<typeof import("../hooks/useTheme")>()),
+  useTheme: () => ({ resolvedTheme: "light" }),
 }));
-vi.mock("../hooks/useTheme", () => ({ useTheme: () => ({ resolvedTheme: "light" }) }));
-vi.mock("../hooks/useMediaQuery", () => ({ useMediaQuery: () => false }));
-vi.mock("../state/environments", () => ({
+vi.mock("../hooks/useMediaQuery", async (original) => ({
+  ...(await original<typeof import("../hooks/useMediaQuery")>()),
+  useMediaQuery: () => false,
+}));
+vi.mock("../state/environments", async (original) => ({
+  ...(await original<typeof import("../state/environments")>()),
   useEnvironments: () => ({ environments: fixture.environments }),
   useEnvironment: (id: string) => fixture.environments.find((e) => e.environmentId === id),
   usePrimaryEnvironment: () => fixture.environments[0],
   usePrimaryEnvironmentId: () => fixture.environments[0]?.environmentId,
+  useEnvironmentProviders: () => fixture.providersByEnvironment,
 }));
 vi.mock("../state/entities", async (original) => ({
   ...(await original<typeof import("../state/entities")>()),
-  useServerConfigs: () => new Map(),
+  useServerConfigs: () => fixture.serverConfigs,
   useProject: (ref: { projectId: string } | null) =>
     fixture.projects.find((p) => p.id === ref?.projectId) ?? null,
   useProjects: () => fixture.projects,
   useThread: () => null,
   useThreadShell: () => null,
+  useQuietThreadShell: () => null,
+  useEnvironmentSupportsServerBrowser: () => false,
   useThreadRefs: () => fixture.empty,
   useEnvironmentThreadRefs: () => fixture.empty,
   useThreadProjection: () => null,
   useThreadStatus: () => "empty",
   useThreadHistory: () => EMPTY_THREAD_HISTORY_META,
   useThreadVisibleTurnItems: () => fixture.empty,
+  useThreadCheckpointSummaries: () => fixture.empty,
   useThreadShells: () => fixture.empty,
 }));
 vi.mock("../state/session", async (original) => ({
@@ -97,37 +142,43 @@ vi.mock("../state/session", async (original) => ({
 }));
 vi.mock("../state/use-atom-command", () => ({ useAtomCommand: () => fixture.command }));
 vi.mock("../state/use-atom-query-runner", () => ({ useAtomQueryRunner: () => fixture.command }));
-vi.mock("../state/query", () => ({
+vi.mock("../state/query", async (original) => ({
+  ...(await original<typeof import("../state/query")>()),
   useEnvironmentQuery: () => ({ data: null, isPending: false, refresh: fixture.command }),
 }));
 vi.mock("../state/threads", async (original) => ({
   ...(await original<typeof import("../state/threads")>()),
-  threadEnvironment: {},
   useEnvironmentThread: () => ({ data: { _tag: "None" }, status: "idle" }),
 }));
-vi.mock("../state/server", async (original) => ({
-  ...(await original<typeof import("../state/server")>()),
-  serverEnvironment: {
-    updateStateAtom: () => "update",
-    configValueAtom: () => "config",
-  },
-  primaryServerKeybindingsAtom: "keys",
-  primaryServerAvailableEditorsAtom: "editors",
-  environmentServerConfigsAtom: "configs",
+vi.mock("../state/server", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../state/server")>();
+  const { Atom } = await import("effect/reactivity");
+  const updateStateAtom = Atom.make({ status: "idle" as const });
+  return {
+    ...original,
+    serverEnvironment: {
+      ...original.serverEnvironment,
+      updateStateAtom: () => updateStateAtom,
+      configValueAtom: Atom.family((id: EnvironmentId | null) =>
+        Atom.make(
+          () =>
+            fixture.environments.find((environment) => environment.environmentId === id)
+              ?.serverConfig ?? null,
+        ),
+      ),
+    },
+    primaryServerKeybindingsAtom: Atom.make(DEFAULT_RESOLVED_KEYBINDINGS),
+    primaryServerAvailableEditorsAtom: Atom.make([]),
+    environmentServerConfigsAtom: Atom.make(() => fixture.serverConfigs),
+  };
+});
+vi.mock("../state/shell", async (original) => ({
+  ...(await original<typeof import("../state/shell")>()),
+  useEnvironmentShellStatus: () => "live",
+  useEnvironmentShellHasSnapshot: () => true,
 }));
-vi.mock("@effect/atom-react", () => ({
-  useAtomValue: (atom: string) =>
-    atom === "keys"
-      ? DEFAULT_RESOLVED_KEYBINDINGS
-      : atom === "editors"
-        ? []
-        : atom === "config"
-          ? (fixture.environments[0]?.serverConfig ?? null)
-          : atom === "configs"
-            ? new Map()
-            : { status: "idle" },
-}));
-vi.mock("../state/terminalSessions", () => ({
+vi.mock("../state/terminalSessions", async (original) => ({
+  ...(await original<typeof import("../state/terminalSessions")>()),
   useKnownTerminalSessions: () => fixture.empty,
   useThreadRunningTerminalIds: () => fixture.empty,
 }));
@@ -135,10 +186,12 @@ vi.mock("../state/projectClones", async (original) => ({
   ...(await original<typeof import("../state/projectClones")>()),
   useProjectClone: () => null,
 }));
-vi.mock("../state/device", () => ({
+vi.mock("../state/device", async (original) => ({
+  ...(await original<typeof import("../state/device")>()),
   useDeviceState: () => ({ state: { sessions: fixture.empty }, loaded: true }),
 }));
-vi.mock("../components/files/projectFilesQueryState", () => ({
+vi.mock("../components/files/projectFilesQueryState", async (original) => ({
+  ...(await original<typeof import("../components/files/projectFilesQueryState")>()),
   useProjectFileQuery: () => ({
     data: null,
     isPending: false,
@@ -152,20 +205,27 @@ vi.mock("../components/files/projectFilesQueryState", () => ({
   }),
   resolveProjectFileQueryData: (_id: string, _cwd: string, _name: string, data: unknown) => data,
 }));
-vi.mock("../rpc/atomRegistry", () => ({
-  appAtomRegistry: {
-    get: () => ({ connection: { phase: "connected" } }),
-    subscribe: () => () => {},
-  },
-}));
-vi.mock("../state/presentation", () => ({
-  environmentPresentations: { presentationAtom: () => "connection" },
-  useEnvironmentPresentation: (id: string | null) => ({
-    isReady: true,
-    presentation:
-      fixture.environments.find((environment) => environment.environmentId === id) ?? null,
-  }),
-}));
+vi.mock("../state/presentation", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../state/presentation")>();
+  const { Atom } = await import("effect/reactivity");
+  return {
+    ...original,
+    environmentPresentations: {
+      ...original.environmentPresentations,
+      presentationAtom: Atom.family((id: string) =>
+        Atom.make(
+          () =>
+            fixture.environments.find((environment) => environment.environmentId === id) ?? null,
+        ),
+      ),
+    },
+    useEnvironmentPresentation: (id: string | null) => ({
+      isReady: true,
+      presentation:
+        fixture.environments.find((environment) => environment.environmentId === id) ?? null,
+    }),
+  };
+});
 vi.mock("@t3tools/client-runtime/state/runtime", async (original) => ({
   ...(await original<typeof import("@t3tools/client-runtime/state/runtime")>()),
   executeAtomQuery: async (
@@ -183,7 +243,8 @@ vi.mock("@t3tools/client-runtime/state/runtime", async (original) => ({
     };
   },
 }));
-vi.mock("../components/ui/sidebar", () => ({
+vi.mock("../components/ui/sidebar", async (original) => ({
+  ...(await original<typeof import("../components/ui/sidebar")>()),
   SidebarInset: ({ children }: PropsWithChildren) => <main>{children}</main>,
 }));
 vi.mock("../components/chat/ChatComposer", () => ({
@@ -192,16 +253,24 @@ vi.mock("../components/chat/ChatComposer", () => ({
 vi.mock("../components/chat/MessagesTimeline", () => ({ MessagesTimeline: () => null }));
 vi.mock("../components/BranchToolbar", () => ({ BranchToolbar: () => null }));
 vi.mock("../components/chat/ChatHeader", () => ({ ChatHeader: () => null }));
-vi.mock("../components/ThreadTerminalDrawer", () => ({ default: () => null }));
+vi.mock("../components/ThreadTerminalDrawer", async (original) => ({
+  ...(await original<typeof import("../components/ThreadTerminalDrawer")>()),
+  default: () => null,
+}));
 vi.mock("../components/WorkspacePageHeader", () => ({ WorkspacePageHeader: () => null }));
-vi.mock("../components/chat/ExpandedImageDialog", () => ({ ExpandedImageDialog: () => null }));
+vi.mock("../components/chat/ExpandedImageDialog", () => ({
+  ExpandedImageDialog: () => null,
+  ExpandedImageDialogHost: () => null,
+  openExpandedImagePreview: () => undefined,
+}));
 vi.mock("../components/PullRequestThreadDialog", () => ({ PullRequestThreadDialog: () => null }));
 
 vi.mock("../components/chat/useAutoBalanceUpdateBanner", () => ({
   useAutoBalanceUpdateBanner: () => null,
 }));
 
-vi.mock("../assets/assetUrls", () => ({
+vi.mock("../assets/assetUrls", async (original) => ({
+  ...(await original<typeof import("../assets/assetUrls")>()),
   useAssetUrls: () => fixture.empty,
   useAssetUrl: () => null,
 }));
@@ -223,6 +292,9 @@ vi.mock("../previewStateStore", async (original) => ({
 vi.mock("../components/ProjectFavicon", () => ({ ProjectFavicon: () => null }));
 
 import { DraftId, useComposerDraftStore } from "../composerDraftStore";
+import { appAtomRegistry, AppAtomRegistryProvider } from "../rpc/atomRegistry";
+import { environmentServerConfigsAtom, serverEnvironment } from "../state/server";
+import { environmentPresentations } from "../state/presentation";
 const { Suspense } = await import("react");
 const { ThreadRouteView } = await import("../components/ThreadRouteView");
 
@@ -233,14 +305,31 @@ let root: Screen;
 let container: HTMLDivElement;
 async function renderRoute() {
   await Promise.all(fixture.loads);
-  await act(
-    async () =>
-      await root.rerender(
+  fixture.providersByEnvironment = new Map(
+    fixture.environments.map((environment) => [
+      environment.environmentId,
+      environment.serverConfig?.providers ?? fixture.empty,
+    ]),
+  );
+  fixture.serverConfigs = new Map(
+    fixture.environments.flatMap((environment) =>
+      environment.serverConfig
+        ? [[environment.environmentId, environment.serverConfig] as const]
+        : [],
+    ),
+  );
+  await act(async () => {
+    appAtomRegistry.refresh(environmentServerConfigsAtom);
+    appAtomRegistry.refresh(serverEnvironment.configValueAtom(environmentId));
+    appAtomRegistry.refresh(environmentPresentations.presentationAtom(environmentId));
+    await root.rerender(
+      <AppAtomRegistryProvider>
         <Suspense>
           <ThreadRouteView target={{ kind: "draft", draftId }} />
-        </Suspense>,
-      ),
-  );
+        </Suspense>
+      </AppAtomRegistryProvider>,
+    );
+  });
 }
 async function setupBrowserFixture0() {
   fixture.draftId = `p2-mounted-${++fixture.sequence}`;
@@ -256,9 +345,10 @@ async function setupBrowserFixture0() {
       unobserve() {}
     },
   );
-  window.matchMedia = vi
-    .fn()
-    .mockReturnValue({ matches: false, addEventListener() {}, removeEventListener() {} });
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn().mockReturnValue({ matches: false, addEventListener() {}, removeEventListener() {} }),
+  );
   fixture.projects = ["first", "second"].map((id) => ({
     id: ProjectId.make(id),
     environmentId,
