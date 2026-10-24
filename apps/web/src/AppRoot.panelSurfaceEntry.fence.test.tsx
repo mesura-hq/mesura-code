@@ -329,6 +329,7 @@ vi.mock("./assets/assetUrls", async (original) => ({
 }));
 
 import { useFileTreeStore } from "./components/files/mesuraTree/fileTreeStore";
+import { PromiseClipboardItem } from "./test/promiseClipboardItem";
 import { installKeyEngine } from "./keys/keyEngine";
 import { isFileTreeFocused } from "./lib/focusTargets";
 import { ACTIVE_TAB_TITLE_SELECTOR } from "./lib/panelSurfaceFocus";
@@ -389,16 +390,7 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   // A browser's ClipboardItem owns the promises it is given. Monaco hands it one
   // on every click and cancels it on the next; happy-dom's leaves it unhandled.
-  vi.stubGlobal(
-    "ClipboardItem",
-    class {
-      readonly types: ReadonlyArray<string>;
-      constructor(items: Record<string, Promise<unknown>>) {
-        this.types = Object.keys(items);
-        for (const item of Object.values(items)) Promise.resolve(item).catch(() => {});
-      }
-    },
-  );
+  vi.stubGlobal("ClipboardItem", PromiseClipboardItem);
   const capabilities = fixture.environments[0]!.serverConfig.environment.capabilities as Record<
     string,
     boolean

@@ -14,12 +14,17 @@ import { useSettingsScope } from "./SettingsScopeContext";
  * A model choice fans out to every selected target, so it must exist on all
  * of them. Returns the reason a (instance, model) pair cannot be applied, or
  * null when every target can honor it. The representative's entries decide
- * which driver the instance id names.
+ * which driver the instance id names. With `requireTextGeneration`, each
+ * target's providers are filtered the way the representative's text
+ * generation catalog is, so a provider that cannot generate text on one
+ * target is unavailable there.
  */
 export function useScopedModelDisabledReason(
   settings: UnifiedSettings,
   entries: readonly ProviderInstanceEntry[],
+  options: { requireTextGeneration?: boolean } = {},
 ) {
+  const requireTextGeneration = options.requireTextGeneration === true;
   const { targets } = useSettingsScope();
   const { environments } = useEnvironments();
   return useCallback(
@@ -31,13 +36,16 @@ export function useScopedModelDisabledReason(
         );
         const config = environment?.serverConfig;
         if (!config) continue;
+        const providers = requireTextGeneration
+          ? config.providers.filter((provider) => provider.supportsTextGeneration !== false)
+          : config.providers;
         const entry = applyProviderInstanceSettings(
-          deriveProviderInstanceEntries(config.providers),
+          deriveProviderInstanceEntries(providers),
           candidate.settings,
         ).find((option) => option.instanceId === instanceId);
         const options = getCustomModelOptionsByInstance(
           { ...settings, ...candidate.settings },
-          config.providers,
+          providers,
         ).get(instanceId);
         if (
           !entry?.enabled ||
@@ -50,6 +58,6 @@ export function useScopedModelDisabledReason(
       }
       return null;
     },
-    [entries, environments, settings, targets],
+    [entries, environments, requireTextGeneration, settings, targets],
   );
 }

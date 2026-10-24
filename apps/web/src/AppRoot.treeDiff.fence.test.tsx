@@ -32,6 +32,7 @@
  */
 import { makeFenceThreadProjection, makeFenceThreadShell } from "./test/fenceThreadShell";
 import { EMPTY_ENVIRONMENT_THREAD_STATE } from "@t3tools/client-runtime/state/threads";
+import { PromiseClipboardItem } from "./test/promiseClipboardItem";
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
@@ -367,16 +368,7 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   // A browser's ClipboardItem owns the promises it is given. Monaco hands it one
   // on every click and cancels it on the next; happy-dom's leaves it unhandled.
-  vi.stubGlobal(
-    "ClipboardItem",
-    class {
-      readonly types: ReadonlyArray<string>;
-      constructor(items: Record<string, Promise<unknown>>) {
-        this.types = Object.keys(items);
-        for (const item of Object.values(items)) Promise.resolve(item).catch(() => {});
-      }
-    },
-  );
+  vi.stubGlobal("ClipboardItem", PromiseClipboardItem);
   localStorage.clear();
   useDiffPanelStore.setState({ byThreadKey: {}, branchBaseRefByThreadKey: {} });
   useRightPanelStore.setState({ byThreadKey: {}, userActionRevisionByThreadKey: {} });

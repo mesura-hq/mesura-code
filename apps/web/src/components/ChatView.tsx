@@ -11133,7 +11133,7 @@ export default function ChatView(props: ChatViewProps) {
 
   const onProviderModelSelect = useCallback(
     (instanceId: ProviderInstanceId, model: string, options?: { focusComposer?: boolean }) => {
-      if (!activeThread) return;
+      if (!activeThread) return false;
       // Look up the configured instance so model normalization and custom
       // model lookup stay scoped to that exact instance. Unknown instance ids
       // are rejected by returning early; the server remains authoritative too.
@@ -11146,7 +11146,7 @@ export default function ChatView(props: ChatViewProps) {
         resolvedDriverKind !== lockedProvider
       ) {
         if (options?.focusComposer !== false) scheduleComposerFocus();
-        return;
+        return false;
       }
       if (
         !supportsProviderSwitchingViaHandoff &&
@@ -11162,7 +11162,7 @@ export default function ChatView(props: ChatViewProps) {
           currentEntry.continuation.groupKey !== entry.continuation.groupKey
         ) {
           if (options?.focusComposer !== false) scheduleComposerFocus();
-          return;
+          return false;
         }
       }
       const resolvedModel = resolveAppModelSelectionForInstance(
@@ -11173,7 +11173,7 @@ export default function ChatView(props: ChatViewProps) {
       );
       if (!resolvedModel) {
         if (options?.focusComposer !== false) scheduleComposerFocus();
-        return;
+        return false;
       }
       // Restore this model's own remembered options; without any, start it
       // from its default rather than carrying the previous model's over.
@@ -11200,7 +11200,7 @@ export default function ChatView(props: ChatViewProps) {
           description: modelChangeBlockReason.description,
         });
         if (options?.focusComposer !== false) scheduleComposerFocus();
-        return;
+        return false;
       }
       setComposerDraftModelSelection(
         scopeThreadRef(activeThread.environmentId, activeThread.id),
@@ -11211,6 +11211,7 @@ export default function ChatView(props: ChatViewProps) {
       );
       setStickyComposerModelSelection(nextModelSelection);
       if (options?.focusComposer !== false) scheduleComposerFocus();
+      return true;
     },
     [
       activeThread,
