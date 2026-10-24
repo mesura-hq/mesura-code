@@ -99,6 +99,8 @@ import {
   type PullRequestSurface,
 } from "~/rightPanelStore";
 import { useSidebarProjectGroups } from "~/hooks/useSidebarProjectGroups";
+import { useEnvironments } from "~/state/environments";
+import { parseIssueSearch, someEnvironmentHasIssues } from "../issues/issues.logic";
 import {
   pullRequestEnvironment,
   usePullRequestList,
@@ -139,6 +141,7 @@ const EMPTY_TERMINAL_LABELS = new Map<string, string>();
 const EMPTY_PENDING_SURFACES = new Set<string>();
 export function PullRequestsPage() {
   useEscapeToGoBack();
+  const { environments } = useEnvironments();
   const search = useSearch({ from: "/_chat/pull-requests" });
   const sort = search.sort ?? "ready";
   const statsPolicy: PullRequestStatsPolicy =
@@ -1456,6 +1459,11 @@ export function PullRequestsPage() {
             onAddFiles={() => undefined}
             onAddPullRequest={() => undefined}
             onAddPullRequests={() => undefined}
+            onAddIssues={
+              someEnvironmentHasIssues(environments)
+                ? () => void navigate({ to: "/issues", search: parseIssueSearch({}) })
+                : undefined
+            }
             onAddDevice={() => undefined}
             browserAvailable={false}
             terminalAvailable={false}

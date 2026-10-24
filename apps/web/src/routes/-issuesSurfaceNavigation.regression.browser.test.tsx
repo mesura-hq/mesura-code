@@ -1,3 +1,6 @@
+import "../index.css";
+import "../mesura.css";
+
 import { act, render as renderBrowser, type Screen } from "../../test/render";
 /**
  * Entry point: the real `/_chat/pull-requests` file route (`_chat.pull-requests.tsx`), mounted at
@@ -17,13 +20,16 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
+  Outlet,
+  RouterProvider,
+  type AnyRouter,
 } from "@tanstack/react-router";
 
 import { describe, expect, it, vi } from "vite-plus/test";
 
 const fixture = vi.hoisted(() => ({
-  environments: [] as Array<unknown>,
-  projects: [] as Array<unknown>,
+  environments: [] as Array<ReturnType<typeof connectedEnvironment>>,
+  projects: [] as Array<typeof project>,
 }));
 
 vi.mock("~/state/environments", async (importOriginal) => ({
@@ -60,9 +66,8 @@ import { PULL_REQUESTS_PANEL_REF, useRightPanelStore } from "~/rightPanelStore";
 
 import { Route as PullRequestsRoute } from "./_chat.pull-requests";
 
-const { Outlet, RouterProvider } = await import("@tanstack/react-router");
-const { SidebarProvider } = await import("~/components/ui/sidebar");
-const { AppAtomRegistryProvider } = await import("~/rpc/atomRegistry");
+import { SidebarProvider } from "~/components/ui/sidebar";
+import { AppAtomRegistryProvider } from "~/rpc/atomRegistry";
 
 const environmentId = EnvironmentId.make("issues-navigation-env");
 
@@ -96,21 +101,15 @@ const project = {
   },
 };
 
-let root: Screen | null = null;
-let container: HTMLDivElement | null = null;
-let router: ReturnType<typeof createRouter> | null = null;
-
-async function settleRouter() {
-  for (let round = 0; round < 20; round += 1) {
-    await act(async () => {
-      await router?.latestLoadPromise;
-      await Promise.resolve();
-    });
-    if (router?.state.status === "idle") return;
-  }
+async function settleRouter(router: AnyRouter) {
+  await act(async () => {
+    await router.latestLoadPromise;
+  });
+  await vi.waitFor(() => expect(router.state.status).toBe("idle"));
 }
 
 async function mountPullRequestsPage() {
+  await using stack = new AsyncDisposableStack();
   const shell = createRootRoute({
     component: () => (
       <SidebarProvider>
@@ -118,45 +117,54 @@ async function mountPullRequestsPage() {
       </SidebarProvider>
     ),
   });
+  const chat = createRoute({ getParentRoute: () => shell, id: "_chat" });
   const pullRequests = (PullRequestsRoute as unknown as ReturnType<typeof createRoute>).update({
     id: "/pull-requests",
     path: "/pull-requests",
-    getParentRoute: () => shell,
+    getParentRoute: () => chat,
   } as never);
   const issues = createRoute({
-    getParentRoute: () => shell,
+    getParentRoute: () => chat,
     path: "/issues",
     component: () => <p>Standalone issues page</p>,
   });
-  router = createRouter({
-    routeTree: shell.addChildren([pullRequests as never, issues]),
+  const router = createRouter({
+    routeTree: shell.addChildren([chat.addChildren([pullRequests as never, issues])]),
     history: createMemoryHistory({ initialEntries: ["/pull-requests"] }),
-  }) as never;
-  await act(async () => {
-    await router!.load();
+    disableGlobalCatchBoundary: true,
   });
-  container = document.createElement("div");
-  document.body.append(container);
-  root = await renderBrowser(null, { container: container, router: false });
-  await act(async () => {
-    await root!.rerender(
+  await router.load();
+  const screen = stack.use(
+    await renderBrowser(
       <AppAtomRegistryProvider>
-        <RouterProvider router={router as never} />
+        <RouterProvider router={router} />
       </AppAtomRegistryProvider>,
-    );
-  });
-  await settleRouter();
+      // This fixture mounts its own file-route tree.
+      { router: false },
+    ),
+  );
+  await expect
+    .element(screen.getByRole("button", { name: "Add panel surface", exact: true }))
+    .toBeInTheDocument();
+  const lifetime = stack.move();
+  return {
+    screen,
+    router,
+    container: screen.container,
+    [Symbol.asyncDispose]: () => lifetime.disposeAsync(),
+  };
 }
 
-async function openAddSurfaceMenu() {
-  const trigger = container!.querySelector<HTMLButtonElement>(
+async function openAddSurfaceMenu(screen: Screen) {
+  const trigger = screen.container.querySelector<HTMLButtonElement>(
     'button[aria-label="Add panel surface"]',
   );
   expect(trigger, "the shared pull-request panel shows its tab strip").not.toBeNull();
   await act(async () => {
     trigger!.click();
   });
-  const menu = container!.querySelector<HTMLElement>('[aria-label="Open a surface"]');
+  await expect.element(screen.getByLabelText("Open a surface")).toBeInTheDocument();
+  const menu = screen.container.querySelector<HTMLElement>('[aria-label="Open a surface"]');
   expect(menu?.textContent).toContain("Issues");
   return menu!;
 }
@@ -169,8 +177,12 @@ function issuesMenuItem(menu: HTMLElement) {
   return item!;
 }
 
-async function setupBrowserFixture0() {
+function setup() {
+  fixture.environments = [];
   fixture.projects = [project];
+  closePanelLauncher();
+  const previous = useRightPanelStore.getState();
+  useRightPanelStore.getState().closeAllSurfaces(PULL_REQUESTS_PANEL_REF);
   useRightPanelStore.getState().openPullRequest(PULL_REQUESTS_PANEL_REF, {
     environmentId,
     projectId: project.id,
@@ -179,45 +191,38 @@ async function setupBrowserFixture0() {
   });
 
   return {
-    async [Symbol.asyncDispose]() {
-      await act(async () => {
-        closePanelLauncher();
-        await root?.[Symbol.asyncDispose]();
-      });
-      container?.remove();
-      document.body.replaceChildren();
-      root = null;
-      container = null;
-      router = null;
-      useRightPanelStore.getState().closeAllSurfaces?.(PULL_REQUESTS_PANEL_REF);
-      vi.unstubAllGlobals();
+    [Symbol.dispose]() {
+      closePanelLauncher();
+      useRightPanelStore.setState(previous);
     },
   };
 }
 
 describe("Issues regression: the pull-request page's Add surface entry", () => {
   it("issues navigation regression: choosing Issues on the pull-request page opens the standalone page", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
+    using _fixture = setup();
 
     fixture.environments = [connectedEnvironment({ issues: true })];
-    await mountPullRequestsPage();
-    const menu = await openAddSurfaceMenu();
+    await using page = await mountPullRequestsPage();
+    const menu = await openAddSurfaceMenu(page.screen);
 
     await act(async () => {
       issuesMenuItem(menu).click();
     });
-    await settleRouter();
+    await settleRouter(page.router);
 
-    expect(router!.state.location.pathname).toBe("/issues");
-    expect(container!.textContent).toContain("Standalone issues page");
+    await vi.waitFor(() => expect(page.router.state.location.pathname).toBe("/issues"));
+    await expect
+      .element(page.screen.getByText("Standalone issues page", { exact: true }))
+      .toBeInTheDocument();
   });
 
   it("issues navigation regression: without a server that reads issues the entry stays on the pull-request page", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
+    using _fixture = setup();
 
     fixture.environments = [connectedEnvironment({})];
-    await mountPullRequestsPage();
-    const menu = await openAddSurfaceMenu();
+    await using page = await mountPullRequestsPage();
+    const menu = await openAddSurfaceMenu(page.screen);
     const item = issuesMenuItem(menu);
 
     expect(item.getAttribute("aria-disabled")).toBe("true");
@@ -227,8 +232,8 @@ describe("Issues regression: the pull-request page's Add surface entry", () => {
         new KeyboardEvent("keydown", { key: "i", bubbles: true, cancelable: true }),
       );
     });
-    await settleRouter();
+    await settleRouter(page.router);
 
-    expect(router!.state.location.pathname).toBe("/pull-requests");
+    expect(page.router.state.location.pathname).toBe("/pull-requests");
   });
 });
