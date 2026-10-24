@@ -292,6 +292,20 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       targetRunId: input.targetRunId,
     })),
   ),
+  // Mesura: the agent's needs-input / ready-to-close mark.
+  t3_thread_signal: writesThread((input) =>
+    Effect.gen(function* () {
+      const { threads, projection } = yield* readThread(input.threadId);
+      return yield* threads
+        .signalThread({
+          commandId: yield* newCommandId(),
+          threadId: projection.thread.id,
+          state: input.state,
+          note: input.note,
+        })
+        .pipe(Effect.mapError(dispatchFailure));
+    }),
+  ),
   t3_thread_organize: writesThread((input) =>
     Effect.gen(function* () {
       const { threads, projection, caller } = yield* readThread(input.threadId);

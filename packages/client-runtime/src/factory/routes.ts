@@ -85,19 +85,19 @@ interface FamilyDefault {
   readonly effort: string;
 }
 
-/** Newest Opus at high, Sol at high, Luna at max, as the developer asked. */
+/** Newest Opus at medium, Sol at high, Luna at xhigh, as the developer asked. */
 const ROLE_DEFAULTS: Readonly<
   Record<FactoryRouteRole, Partial<Record<FactoryHarness, FamilyDefault>>>
 > = {
   implementer: {
-    claude: { family: "opus", effort: "high" },
+    claude: { family: "opus", effort: "medium" },
     codex: { family: "sol", effort: "high" },
   },
   reviewer: {
     claude: { family: "opus", effort: "high" },
     codex: { family: "sol", effort: "high" },
   },
-  verifier: { codex: { family: "luna", effort: "max" } },
+  verifier: { codex: { family: "luna", effort: "xhigh" } },
 };
 
 const otherHarness = (harness: FactoryHarness): FactoryHarness =>
@@ -293,7 +293,7 @@ function defaultRouteSlot(
   };
 }
 
-/** The card's starting routes: newest Opus at high with a budget, Sol at high, Luna at max. */
+/** The card's starting routes: newest Opus at medium with a budget, Sol at high, Luna at xhigh. */
 export function defaultFactoryRoutes(providers: ReadonlyArray<ServerProvider>): FactoryRouteSlots {
   return {
     implementer: defaultRouteSlot(providers, "implementer", "claude"),

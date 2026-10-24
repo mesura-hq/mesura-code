@@ -113,6 +113,9 @@ function shouldPublishAgentAwarenessEvent(
     case "thread.active-reordered":
     case "thread.visited":
     case "thread.marked-unread":
+    // Mesura: the relay's activity state does not read the agent signal.
+    case "thread.agent-signal-set":
+    case "thread.agent-signal-cleared":
     case "thread.runtime-mode-updated":
     case "thread.interaction-mode-updated":
     case "run.background-work-cancelled":

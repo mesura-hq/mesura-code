@@ -157,18 +157,22 @@ const eventOf = <Type extends string, Fields extends Schema.Struct.Fields>(
 
 /** Every record-version-1 event type, keyed by `type`. */
 export const FactoryRunEventSchemas = {
+  // A skill run (sf-solo, sf-seal-prototype, prototype) dispatches no roles, so it may omit the
+  // routes and the returns budget, and a run without a plan file omits the plan fields.
   "run.started": eventOf("run.started", {
     runId: Schema.String,
     request: Schema.String,
-    planPath: Schema.String,
-    intentPath: Schema.NullOr(Schema.String),
-    planDigest: Schema.String,
-    routes: Schema.Struct({
-      implementer: FactoryRunRoute,
-      verifier: FactoryRunRoute,
-      reviewer: FactoryRunRoute,
-    }),
-    returnsBudget: NonNegativeInt,
+    planPath: Schema.optional(Schema.String),
+    intentPath: Schema.optional(Schema.NullOr(Schema.String)),
+    planDigest: Schema.optional(Schema.String),
+    routes: Schema.optional(
+      Schema.Struct({
+        implementer: FactoryRunRoute,
+        verifier: FactoryRunRoute,
+        reviewer: FactoryRunRoute,
+      }),
+    ),
+    returnsBudget: Schema.optional(NonNegativeInt),
     phases: Schema.Array(
       Schema.Struct({
         index: PhaseNumber,
@@ -467,6 +471,11 @@ export const FactoryRunShellSummary = Schema.Struct({
   node: Schema.NullOr(Schema.String),
 });
 export type FactoryRunShellSummary = typeof FactoryRunShellSummary.Type;
+
+/** A running run will wake its coordinator again, so its thread is not Done and not settled. */
+export const factoryRunHoldsCompletion = (
+  run: Pick<FactoryRunShellSummary, "status"> | null | undefined,
+) => run?.status === "running";
 
 /** The compact state a run card draws; replaced in place, and under 4 KiB for an 11-phase run. */
 export const FactoryRunSummary = Schema.Struct({

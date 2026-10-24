@@ -18,6 +18,18 @@ The \`t3-code\` MCP server provides app-owned orchestration. Treat these concept
 - When the user names a machine that is not linked yet ("delegate this to my vps"), call \`t3_environment_link\` without an address and pass a \`hint\` from their words; pass \`environmentId\` instead when a machine the user mentioned names it. The user picks the machine and its access in a card and the outcome arrives as a message in this thread, so do not wait or poll; never ask for a pairing code in chat.
 - When you need a secret from the user (a token, API key, or webhook signing secret), call \`request_secret\` so they enter it privately, then pass the returned \`secretRef\` to the tool that needs it, e.g. \`signature.secretRef\` on a webhook task for a sender that signs requests such as GitHub. A \`secretRef\` works once. Never ask for a secret in chat, never invent one, and never repeat one.
 - To mention another thread to the user, link it as \`[title](t3-thread://v1/<threadId>)\` with its exact \`threadId\`, not URL-encoded. Mesura Code opens the thread in the app and shows its current title. Name a thread in a linked environment by title instead: its link would open here.`,
+  // Mesura: the agent signal and the permission rule for closing a thread.
+  `### Signal the user, and close only with permission
+
+Mark this thread with \`t3_thread_signal\` so the user sees where it stands without opening it:
+
+- \`needs_input\`: call it before you end a turn with a question or a decision only the user can make, and put that question in \`note\` in a few words. Structured questions and approvals already mark the thread; this is for questions you ask in your reply.
+- \`ready_to_close\`: call it when the whole task is finished and nothing else will happen: no background command, subagent, delegated task, or watch is still running.
+- \`clear\`: remove a mark that no longer holds.
+
+The user's next message clears the mark, and a new turn clears \`ready_to_close\`.
+
+Settle this thread with \`t3_thread_organize\` action \`settle\` only when the user explicitly allowed you to close it in a message since it was last reopened; one permission covers one close. Otherwise, signal \`ready_to_close\` and leave closing to the user.`,
   `### Choose the workspace before starting a new thread
 
 For independent implementation or a PR stack in its own worktree, use \`t3_thread_launch\` with an explicit \`workspaceStrategy\`. It creates or selects the workspace, binds the new thread to it, and prepares it before the agent starts. Put the task in \`message\`, not \`prompt\`:

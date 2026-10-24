@@ -28,6 +28,7 @@ import {
   type ThreadSortInput,
 } from "../lib/threadSort";
 import type { SidebarThreadSummary, Thread } from "../types";
+import type { SidebarThreadAttentionKind } from "./sidebarThreadAttention";
 import { normalizeSearchText } from "../lib/utils";
 import { isLatestRunSettled } from "../session-logic";
 
@@ -912,8 +913,12 @@ export function shouldRecedeSidebarThread(input: {
   isWoke: boolean;
   isActive: boolean;
   isSelected: boolean;
+  /** Mesura: the top-slot label from sidebarThreadAttention.ts, which outranks the status. */
+  attentionKind?: SidebarThreadAttentionKind | null;
 }): boolean {
   if (input.isActive || input.isSelected || input.status === "input") return false;
+  if (input.attentionKind === "input") return false;
+  if (input.attentionKind === "ready_to_close") return !input.isUnread && !input.isWoke;
   if (input.status === "working" || input.status === "waiting") return true;
   if (input.status === "ready" || input.status === "approval") {
     return !input.isUnread && !input.isWoke;

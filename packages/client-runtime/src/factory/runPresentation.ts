@@ -88,6 +88,19 @@ export function factoryRunLabel(
   }
 }
 
+/**
+ * The thread row's top status slot for a running run: `5/11 Review`. The long label stays for
+ * the run card and the accessible name. Null for a thread without a run.
+ */
+export function factoryRunShortLabel(
+  run: FactoryRunShellSummary | null | undefined,
+): string | null {
+  if (run == null) return null;
+  if (run.phaseIndex === 0) return "Starting";
+  const phase = `${run.phaseIndex}/${run.phaseCount}`;
+  return run.node === null ? phase : `${phase} ${factoryNodeDisplayName(run.node)}`;
+}
+
 export function factoryPhaseMarkTone(status: FactoryRunPhaseStatus): FactoryPhaseMarkTone {
   switch (status) {
     case "running":

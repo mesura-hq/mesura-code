@@ -29,6 +29,7 @@ import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 
+import * as FactoryRunShellSummaries from "../factory/FactoryRunShellSummaries.ts";
 import * as GitManager from "../git/GitManager.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
@@ -1087,4 +1088,98 @@ describe("isSnoozed", () => {
       }),
     ).toBeNull();
   });
+});
+
+// Mesura: a running Software Factory run holds a thread out of auto-settle. Settlement
+// candidates come from the store's settlement query, which carries no `factoryRun`, so the
+// worker spec gives the run only through `FactoryRunShellSummaries`, as the run tracker does.
+describe("auto-settle with a Software Factory run", () => {
+  const factoryRun = (status: "running" | "done") => ({
+    status,
+    phaseIndex: 5,
+    phaseCount: 11,
+    node: "review",
+  });
+
+  it("auto-settle factory spec: a running Factory run keeps a thread a non-candidate", () => {
+    expect(
+      ThreadSettlementService.isAutoSettlementCandidate(
+        shell({ factoryRun: factoryRun("running") }),
+        NOW_MS,
+      ),
+    ).toBe(false);
+  });
+
+  it("auto-settle factory guard: a finished Factory run leaves a thread a candidate", () => {
+    expect(
+      ThreadSettlementService.isAutoSettlementCandidate(
+        shell({ factoryRun: factoryRun("done") }),
+        NOW_MS,
+      ),
+    ).toBe(true);
+  });
+
+  it.effect(
+    "auto-settle factory spec: the worker skips a thread whose Factory run is running",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* TestClock.setTime(Date.parse(NOW));
+          const completedAt = DateTime.makeUnsafe("2026-08-25T00:00:00.000Z");
+          const running = makeThread("factory-run-running", { latestRunCompletedAt: completedAt });
+          const finished = makeThread("factory-run-done", { latestRunCompletedAt: completedAt });
+          const summaries = FactoryRunShellSummaries.make();
+          summaries.set(running.id, factoryRun("running"));
+          summaries.set(finished.id, factoryRun("done"));
+          const fixture = yield* makeHarness({
+            snapshot: makeSnapshot([running, finished]),
+            settings: { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: 2 },
+          });
+          yield* Effect.gen(function* () {
+            const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
+            yield* startHarness(service, fixture.activation, fixture.snapshotReads);
+            const commands = yield* Ref.get(fixture.commands);
+            expect(commands.map((command) => command.threadId)).toEqual([finished.id]);
+          }).pipe(
+            Effect.provide(
+              fixture.layer.pipe(
+                Layer.provideMerge(
+                  Layer.succeed(FactoryRunShellSummaries.FactoryRunShellSummaries, summaries),
+                ),
+              ),
+            ),
+          );
+        }),
+      ),
+  );
+
+  it.effect(
+    "auto-settle factory guard: the worker still settles a thread with a pending command",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* TestClock.setTime(Date.parse(NOW));
+          const thread = makeThread("pending-command", {
+            latestRunCompletedAt: DateTime.makeUnsafe("2026-08-25T00:00:00.000Z"),
+            pendingBackgroundTasks: [
+              {
+                taskId: "bgzzoxe8f",
+                description: "Dispatch phase 6 implement turn 3",
+                kind: "command",
+              },
+            ],
+          });
+          const fixture = yield* makeHarness({
+            snapshot: makeSnapshot([thread]),
+            settings: { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: 2 },
+          });
+          yield* Effect.gen(function* () {
+            const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
+            yield* startHarness(service, fixture.activation, fixture.snapshotReads);
+            const commands = yield* Ref.get(fixture.commands);
+            expect(commands.map((command) => command.threadId)).toEqual([thread.id]);
+          }).pipe(Effect.provide(fixture.layer));
+        }),
+      ),
+  );
 });

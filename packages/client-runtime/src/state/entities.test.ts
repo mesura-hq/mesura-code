@@ -95,7 +95,8 @@ describe("V2 client presentation", () => {
   });
 
   it.each([
-    { kinds: ["command"], expected: "completed" },
+    // Mesura: a pending command holds a settled run (threadAttention.ts); upstream completes.
+    { kinds: ["command"], expected: "idle" },
     { kinds: ["command", "subagent"], expected: "idle" },
     { kinds: ["background_task"], expected: "idle" },
   ] as const)("presents a completed shell with $kinds as $expected", ({ kinds, expected }) => {
