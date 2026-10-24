@@ -26,12 +26,16 @@ vi.mock("./AppRoot", async (importOriginal) => {
   };
 });
 const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("./state/presentation", async (original) =>
+  (await fenceMocks()).mockPresentation(original),
+);
+vi.mock("./connection/runtime", async () => (await fenceMocks()).mockConnectionRuntime());
 vi.mock("./state/entities", async (original) => (await fenceMocks()).mockEntities(original));
 vi.mock("./state/environments", async (original) =>
   (await fenceMocks()).mockEnvironments(original),
 );
-vi.mock("./state/query", async () => {
-  const common = await (await fenceMocks()).mockQuery();
+vi.mock("./state/query", async (original) => {
+  const common = await (await fenceMocks()).mockQuery(original);
   return {
     ...common,
     useEnvironmentQuery: (atom?: object | null) => {
@@ -120,30 +124,27 @@ let restoreEditorFocus: (() => void) | undefined;
 let restoreViewport: (() => Promise<void>) | undefined;
 
 async function setupBrowserFixture0() {
-const _timers = fakeTimers();
-await (installKeyEngine());
-
+  const _timers = fakeTimers();
+  await installKeyEngine();
 
   container = document.createElement("div");
   document.body.append(container);
 
-return {async [Symbol.asyncDispose]() {
-
-  await act(async () => useFileManagerStore.getState().setOpen(false));
-  await act(async () => root?.[Symbol.asyncDispose]());
-  root = undefined;
-  restoreEditorFocus?.();
-  restoreEditorFocus = undefined;
-  await restoreViewport?.();
-  restoreViewport = undefined;
-  container.remove();
-  vi.unstubAllGlobals();
-  _timers[Symbol.dispose]();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      await act(async () => useFileManagerStore.getState().setOpen(false));
+      await act(async () => root?.[Symbol.asyncDispose]());
+      root = undefined;
+      restoreEditorFocus?.();
+      restoreEditorFocus = undefined;
+      await restoreViewport?.();
+      restoreViewport = undefined;
+      container.remove();
+      vi.unstubAllGlobals();
+      _timers[Symbol.dispose]();
+    },
+  };
 }
-
-
 
 /** Drain the existing focus and release frames, without changing their scheduler. */
 async function frames() {
@@ -164,8 +165,8 @@ async function press(key: string, code = key, modifiers = {}) {
 }
 
 async function setViewportWidth(width: number) {
-    await page.viewport(width, window.innerHeight);
-  }
+  await page.viewport(width, window.innerHeight);
+}
 
 async function prepareComposer(width: number, mode: string, label = "return") {
   const previousWidth = window.innerWidth;
@@ -256,7 +257,7 @@ describe("real file-manager focus-return fence", () => {
   ])(
     "file-manager return regression: $mode preserves caret at $width pixels",
     async ({ width, mode }) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+      await using _browserFixture0 = await setupBrowserFixture0();
 
       const { editor, surface } = await prepareComposer(width, mode);
       await openManager();
@@ -283,7 +284,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   );
 
   it("file-manager return guard: a noncomposer origin keeps its direct focus path", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await prepareComposer(1184, "INSERT", "external");
     const origin = document.createElement("button");
@@ -298,7 +299,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   it.each(["modal", "panel"])(
     "file-manager return ownership: a later %s retains the keyboard on close",
     async (owner) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+      await using _browserFixture0 = await setupBrowserFixture0();
 
       const { editor } = await prepareComposer(1184, "NORMAL", owner);
       await openManager();
@@ -324,7 +325,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   );
 
   it("file-manager return ownership: reopening after removal cancels the old return", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const { editor } = await prepareComposer(412, "NORMAL", "reopen");
     const manager = await openManager();
@@ -353,7 +354,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("file-manager return identity: a route change before close retains the new draft", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const { router } = await prepareComposer(412, "NORMAL", "route");
     const manager = await openManager();
@@ -378,7 +379,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("file-manager return ownership: an explicit composer entry retains its new caret and mode", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const { editor } = await prepareComposer(1184, "NORMAL", "explicit-entry");
     await openManager();
@@ -397,7 +398,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("file-manager return identity: a route change during reveal preserves the new route's INSERT entry", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const { editor, surface, router } = await prepareComposer(412, "NORMAL", "pending-route");
     await openManager();

@@ -2210,3 +2210,36 @@ it.effect("replays an accepted send after the project disables the instance", ()
     }
   }).pipe(Effect.provide(Layer.mergeAll(harness.layer, layerFiles)));
 });
+
+// Keep the fork namespace on the new preview's asynchronous preparation path.
+// Await setup instead of polling: checkout completes before this milestone.
+it.effect.each([false, true])(
+  "uses the Mesura worktree namespace when its branch namespace is blocked: %s",
+  (blocked) =>
+    Effect.gen(function* () {
+      const setupStarted = yield* Deferred.make<void>();
+      const harness = makeHarness({
+        hasCommit: ({ refName }) => Effect.succeed(blocked && refName === "refs/heads/mesura"),
+        runSetup: () =>
+          Deferred.succeed(setupStarted, undefined).pipe(
+            Effect.as({ status: "no-script" as const }),
+          ),
+      });
+      yield* Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        yield* launches.launch(
+          launchInput({
+            command: `command:launch:mesura-prefix:${blocked}`,
+            thread: `thread:launch:mesura-prefix:${blocked}`,
+            message: "Build the feature",
+            workspace: { type: "worktree", baseRef: "main" },
+          }),
+        );
+        yield* Deferred.await(setupStarted);
+        assert.match(
+          harness.createWorktree.mock.calls[0]?.[0]?.newRefName ?? "",
+          blocked ? /^mesura-[0-9a-f]{8}$/u : /^mesura\/[0-9a-f]{8}$/u,
+        );
+      }).pipe(Effect.provide(harness.layer));
+    }),
+);

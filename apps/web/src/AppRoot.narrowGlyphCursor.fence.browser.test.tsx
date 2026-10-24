@@ -63,11 +63,15 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 
 // The boundaries the fixture replaces: see `test/appRootFenceMocks.tsx`.
 const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("./state/presentation", async (original) =>
+  (await fenceMocks()).mockPresentation(original),
+);
+vi.mock("./connection/runtime", async () => (await fenceMocks()).mockConnectionRuntime());
 vi.mock("./state/entities", async (original) => (await fenceMocks()).mockEntities(original));
 vi.mock("./state/environments", async (original) =>
   (await fenceMocks()).mockEnvironments(original),
 );
-vi.mock("./state/query", async () => (await fenceMocks()).mockQuery());
+vi.mock("./state/query", async (original) => (await fenceMocks()).mockQuery(original));
 vi.mock("./state/queries", async (original) => (await fenceMocks()).mockQueries(original));
 vi.mock("./state/threads", async (original) => (await fenceMocks()).mockThreads(original));
 vi.mock("./state/use-atom-command", async () => (await fenceMocks()).mockAtomCommand());
@@ -303,10 +307,7 @@ const detachedObservedCount = () =>
 const composerExpanded = () => "mesuraComposerExpanded" in document.documentElement.dataset;
 
 async function setupBrowserFixture0() {
-
   installKeyEngine();
-
-
 
   fixture.vimMode = false;
   fixture.glyphTop = 200;
@@ -319,19 +320,19 @@ async function setupBrowserFixture0() {
   container = document.createElement("div");
   document.body.append(container);
 
-return {async [Symbol.asyncDispose]() {
-
-  await act(async () => root?.[Symbol.asyncDispose]());
-  root = undefined;
-  router = undefined;
-  container.remove();
-  fixture.threads.clear();
-  fixture.threadStates.clear();
-  document.documentElement.classList.remove("dark");
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      await act(async () => root?.[Symbol.asyncDispose]());
+      root = undefined;
+      router = undefined;
+      container.remove();
+      fixture.threads.clear();
+      fixture.threadStates.clear();
+      document.documentElement.classList.remove("dark");
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    },
+  };
 }
 
 /** Registers a thread whose reply is `GLYPH_LINE`, with an id no other test uses. */
@@ -343,10 +344,6 @@ function addGlyphThread(label: string): ThreadId {
     makeMessage(`${id}-assistant`, "assistant", GLYPH_LINE),
   ]);
 }
-
-
-
-
 
 async function settle(): Promise<void> {
   for (let round = 0; round < 5; round += 1) {
@@ -729,7 +726,7 @@ function overlayBackground(overlay: HTMLElement, theme: Theme): string {
 // The specs' reds and greens are only as good as the stubs they read through.
 describe("narrow glyph cursor fence: the fixture", () => {
   it("narrow glyph cursor fence fixture check: the glyph line has its stubbed boxes and font, and the highlight colour resolves", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await chatCursorOnGlyphLine("fixture");
     const range = fixture.highlights.get("mesura-chat-cursor")![0]!;
@@ -753,7 +750,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("narrow glyph cursor fence: the chat", () => {
   it("narrow glyph cursor fence spec: the chat cursor on i, l and . is a half-em overlay centred on the glyph", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await chatCursorOnGlyphLine("chat-narrow");
     for (const glyph of NARROW_GLYPHS) {
@@ -763,7 +760,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("narrow glyph cursor fence spec: the widened chat cursor draws its glyph in var(--background) and the glyph's own font", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await chatCursorOnGlyphLine("chat-font");
     await press(key("l"));
@@ -773,7 +770,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("narrow glyph cursor fence spec: the widened chat cursor has the highlight cursor's colour in light and dark", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await chatCursorOnGlyphLine("chat-colour");
     await press(key("l"));
@@ -787,7 +784,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("narrow glyph cursor fence spec: the widened chat cursor follows a scroll of the timeline in the same frame", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await chatCursorOnGlyphLine("chat-scroll");
     await press(key("l"));
@@ -801,7 +798,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("narrow glyph cursor fence spec: a held l moves the widened chat cursor glyph by glyph in the same frame", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await chatCursorOnGlyphLine("chat-held");
     await press(key("l"));
@@ -814,7 +811,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
   // Already true at the base, and must stay so: a guard.
   it("narrow glyph cursor fence guard: the chat cursor on a glyph half an em or wider is the highlight alone", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await chatCursorOnGlyphLine("chat-wide");
     expectHighlightOnly("W", "mesura-chat-cursor");
@@ -828,7 +825,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 // where the highlight it replaces was covered.
 describe("narrow glyph cursor fence: covered cursors", () => {
   it("narrow glyph cursor fence regression: the expanded composer covers the widened chat cursor, and collapsing it shows the cursor again", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await chatCursorOnGlyphLine("chat-covered");
     await press(key("l"));
@@ -858,7 +855,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 // event the cursor followed fired.
 describe("narrow glyph cursor fence: closed layers", () => {
   it("narrow glyph cursor fence regression: the command palette hides the widened chat cursor, and closing it shows the cursor again", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await chatCursorOnGlyphLine("chat-palette");
     await press(key("l"));
@@ -891,7 +888,7 @@ function expectInGlyphRow(overlay: HTMLElement | null, when: string) {
 // Review P1-1: a pane resize reflows the glyph with no scroll, focus or key.
 describe("narrow glyph cursor fence: pane resizing", () => {
   it("narrow glyph cursor fence regression: resizing a pane re-places the widened chat cursor with no scroll, focus or key", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await chatCursorOnGlyphLine("chat-resize");
     const onWideGlyph = observedElementCount();
@@ -908,7 +905,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("narrow glyph cursor fence regression: a cursor that leaves the narrow glyphs stops observing sizes", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await chatCursorOnGlyphLine("chat-resize-stop");
     const onWideGlyph = observedElementCount();
@@ -924,7 +921,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 // covering the glyph's own highlight gets.
 describe("narrow glyph cursor fence: clipping and covering", () => {
   it("narrow glyph cursor fence regression: the widened chat cursor renders inside the glyph's own row, under the timeline's clipping and layers", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await chatCursorOnGlyphLine("chat-context");
     await press(key("l"));
@@ -944,7 +941,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("narrow glyph cursor fence regression: the widened chat cursor in a row adds nothing to the row's text projection", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await chatCursorOnGlyphLine("chat-projection");
     const row = glyphHolder("chat").closest<HTMLElement>("[data-timeline-row-id]")!;
@@ -955,7 +952,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("narrow glyph cursor fence regression: the widened composer cursor renders beside the editor, never inside its editable content", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await composerCursorOnGlyphLine("composer-context");
     await press(key("l"));
@@ -968,7 +965,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("narrow glyph cursor fence regression: a composer glyph partly scrolled out of the editor shows only its visible part", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await composerCursorOnGlyphLine("composer-clip");
     await press(key("l"));
@@ -982,7 +979,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("narrow glyph cursor fence regression: a composer glyph scrolled wholly out of the editor draws no overlay", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await composerCursorOnGlyphLine("composer-clipped-out");
     await press(key("l"));
@@ -996,7 +993,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 // painted and its observers connected.
 describe("narrow glyph cursor fence: thread changes", () => {
   it("narrow glyph cursor fence regression: opening another thread clears the widened chat cursor and stops following it, before any key", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await chatCursorOnGlyphLine("thread-from");
     await press(key("l"));
@@ -1013,7 +1010,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 // remembered cursor unpainted until the next key.
 describe("narrow glyph cursor fence: returning to a thread", () => {
   it("narrow glyph cursor fence regression: browser Back to a thread paints its remembered cursor before any key", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await chatCursorOnGlyphLine("back-from");
     await press(key("l"));
@@ -1030,7 +1027,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("narrow glyph cursor fence regression: browser Back to a thread whose cursor sat on a wide glyph paints the highlight there", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await chatCursorOnGlyphLine("back-wide-from");
     await press(key("l"));
@@ -1046,7 +1043,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("narrow glyph cursor fence: the composer", () => {
   it("narrow glyph cursor fence spec: the composer cursor on i, l and . is a half-em overlay centred on the glyph", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await composerCursorOnGlyphLine("composer-narrow");
     for (const glyph of NARROW_GLYPHS) {
@@ -1056,7 +1053,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("narrow glyph cursor fence spec: the widened composer cursor draws its glyph in var(--background) and the glyph's own font", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await composerCursorOnGlyphLine("composer-font");
     await press(key("l"));
@@ -1066,7 +1063,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("narrow glyph cursor fence spec: the widened composer cursor has the highlight cursor's colour in light and dark", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await composerCursorOnGlyphLine("composer-colour");
     await press(key("l"));
@@ -1080,7 +1077,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("narrow glyph cursor fence spec: the widened composer cursor follows a scroll of the editor in the same frame", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await composerCursorOnGlyphLine("composer-scroll");
     await press(key("l"));
@@ -1097,7 +1094,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("narrow glyph cursor fence spec: a held l moves the widened composer cursor glyph by glyph in the same frame", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await composerCursorOnGlyphLine("composer-held");
     await press(key("l"));
@@ -1110,7 +1107,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
   // Already true at the base, and must stay so: a guard.
   it("narrow glyph cursor fence guard: the composer cursor on a glyph half an em or wider is the highlight alone", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await composerCursorOnGlyphLine("composer-wide");
     expectHighlightOnly("W", "mesura-composer-cursor");
@@ -1122,7 +1119,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   // empty-line overlay keeps its own look even where it differs from the
   // highlight's colour.
   it("narrow glyph cursor fence guard: the composer's empty-line cursor is the overlay it was, with no glyph", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await composerNormalWith("composer-empty", `${GLYPH_LINE}\n\nThe last line.`);
     // The first line, then the empty line under it.
@@ -1146,7 +1143,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 // Two empty paragraphs project to "\n": offset zero is the first paragraph,
 // and offset one is the second. The old offset-zero assertion pinned the wrong line.
 it("narrow glyph cursor fence regression: an empty Tiptap paragraph uses its box when the caret precedes an empty Text child", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountApp(addGlyphThread("empty-text-child"));
   const editor = (composer() as HTMLElement & { editor: Editor }).editor;
@@ -1198,7 +1195,7 @@ async function expectEmptyCursorAndGutter(top: number, gutterTops: number[]) {
 }
 
 it("narrow glyph cursor fence regression: NORMAL cursor and gutter start on the first empty paragraph", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await composerNormalWith("first-empty-paragraph", "\n\n");
   const paragraphs = stubComposerParagraphBoxes();
@@ -1209,7 +1206,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("narrow glyph cursor fence regression: NORMAL cursor and gutter remain visible in a single empty paragraph", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await composerNormalWith("single-empty-paragraph", "");
   expect(stubComposerParagraphBoxes()).toHaveLength(1);
@@ -1218,7 +1215,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("narrow glyph cursor fence guard: collapsed DOM offsets preserve text, inline tokens, hard breaks and paragraph separators", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountApp(addGlyphThread("collapsed-dom-offsets"));
   const editor = (composer() as HTMLElement & { editor: Editor }).editor;

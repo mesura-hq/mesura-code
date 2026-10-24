@@ -12,7 +12,12 @@ import { act, render as renderBrowser, type Screen } from "../../test/render";
  * its Add surface entry navigates to the standalone page, and only when a server can read issues.
  */
 import { EnvironmentId, ProjectId } from "@t3tools/contracts";
-import { createMemoryHistory, createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+} from "@tanstack/react-router";
 
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -165,9 +170,6 @@ function issuesMenuItem(menu: HTMLElement) {
 }
 
 async function setupBrowserFixture0() {
-
-
-
   fixture.projects = [project];
   useRightPanelStore.getState().openPullRequest(PULL_REQUESTS_PANEL_REF, {
     environmentId,
@@ -176,28 +178,26 @@ async function setupBrowserFixture0() {
     number: 12,
   });
 
-return {async [Symbol.asyncDispose]() {
-
-  await act(async () => {
-    closePanelLauncher();
-    await root?.[Symbol.asyncDispose]();
-  });
-  container?.remove();
-  document.body.replaceChildren();
-  root = null;
-  container = null;
-  router = null;
-  useRightPanelStore.getState().closeAllSurfaces?.(PULL_REQUESTS_PANEL_REF);
-  vi.unstubAllGlobals();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      await act(async () => {
+        closePanelLauncher();
+        await root?.[Symbol.asyncDispose]();
+      });
+      container?.remove();
+      document.body.replaceChildren();
+      root = null;
+      container = null;
+      router = null;
+      useRightPanelStore.getState().closeAllSurfaces?.(PULL_REQUESTS_PANEL_REF);
+      vi.unstubAllGlobals();
+    },
+  };
 }
-
-
 
 describe("Issues regression: the pull-request page's Add surface entry", () => {
   it("issues navigation regression: choosing Issues on the pull-request page opens the standalone page", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.environments = [connectedEnvironment({ issues: true })];
     await mountPullRequestsPage();
@@ -213,7 +213,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues navigation regression: without a server that reads issues the entry stays on the pull-request page", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.environments = [connectedEnvironment({})];
     await mountPullRequestsPage();

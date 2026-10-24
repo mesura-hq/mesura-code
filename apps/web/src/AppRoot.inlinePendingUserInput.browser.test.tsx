@@ -61,6 +61,10 @@ vi.mock("./components/ChatMarkdown", async (importOriginal) => {
   };
 });
 const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("./state/presentation", async (original) =>
+  (await fenceMocks()).mockPresentation(original),
+);
+vi.mock("./connection/runtime", async () => (await fenceMocks()).mockConnectionRuntime());
 vi.mock("@t3tools/client-runtime/state/session", async (original) =>
   (await fenceMocks()).mockRuntimeSession(original),
 );
@@ -68,7 +72,7 @@ vi.mock("./state/entities", async (original) => (await fenceMocks()).mockEntitie
 vi.mock("./state/environments", async (original) =>
   (await fenceMocks()).mockEnvironments(original),
 );
-vi.mock("./state/query", async () => (await fenceMocks()).mockQuery());
+vi.mock("./state/query", async (original) => (await fenceMocks()).mockQuery(original));
 vi.mock("./state/threads", async (original) => (await fenceMocks()).mockThreads(original));
 vi.mock("./state/use-atom-command", () => ({
   useAtomCommand: (command: unknown) => fixture.commands.get(command) ?? fixture.noopCommand,
@@ -123,9 +127,6 @@ vi.mock("@legendapp/list/react", () => ({
 }));
 import { usePendingUserInputDraftStore } from "./pendingUserInputDraftStore";
 
-
-
-
 import { threadEnvironment } from "./state/threads";
 import { useComposerDraftStore } from "./composerDraftStore";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
@@ -144,8 +145,6 @@ let root: Screen | undefined;
 let container: HTMLDivElement;
 
 async function setupBrowserFixture0() {
-
-
   fixture.pendingRowsVisible = true;
   usePendingUserInputDraftStore.setState({ requests: {} });
 
@@ -184,22 +183,22 @@ async function setupBrowserFixture0() {
   container = document.createElement("div");
   document.body.append(container);
 
-return {async [Symbol.asyncDispose]() {
-
-  await act(async () => root?.[Symbol.asyncDispose]());
-  root = undefined;
-  container.remove();
-  appRootFence.threads.clear();
-  appRootFence.threadStates.clear();
-  useComposerDraftStore.getState().clearComposerContent(scopeThreadRef(environmentId, threadId));
-  useQuestionAttachmentPreparation.setState({ counts: {} });
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      await act(async () => root?.[Symbol.asyncDispose]());
+      root = undefined;
+      container.remove();
+      appRootFence.threads.clear();
+      appRootFence.threadStates.clear();
+      useComposerDraftStore
+        .getState()
+        .clearComposerContent(scopeThreadRef(environmentId, threadId));
+      useQuestionAttachmentPreparation.setState({ counts: {} });
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    },
+  };
 }
-
-
 
 async function mountApp() {
   publishFenceThreadProjection(fixture.projection!, environmentId);
@@ -239,7 +238,7 @@ function questionField(questionId: string) {
 }
 
 it("phase two inline card shows every pending question in one conversation row", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountApp();
   const cards = container.querySelectorAll(
@@ -255,7 +254,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("phase two incomplete inline request focuses its missing question and retains both drafts", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountApp();
   await act(async () => button("Workspace").click());
@@ -267,7 +266,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("phase two pending row survives a thread refresh and remains outside collapsed work", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountApp();
   await act(async () => {
@@ -284,7 +283,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("phase two normal composer keeps its own message draft during a pending request", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   const target = scopeThreadRef(environmentId, threadId);
   useComposerDraftStore.getState().setPrompt(target, "A separate normal message");
@@ -313,7 +312,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("phase two per-question upload state appears beside its own text field", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   const key = questionAttachmentDraftId(
     environmentId,
@@ -329,7 +328,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("phase two failed answer retains an inline retry and resolved request keeps history", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   fixture.respond.mockRejectedValue(new Error("Provider refused"));
   await mountApp();
@@ -371,7 +370,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("phase two guard keeps a normal message draft while an option is selected", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   const target = scopeThreadRef(environmentId, threadId);
   useComposerDraftStore.getState().setPrompt(target, "Keep the normal message");
@@ -384,7 +383,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("phase two guard keeps attachment drafts separate by question", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   const first = questionAttachmentDraftId(
     environmentId,
@@ -415,7 +414,7 @@ async function typeQuestion(questionId: string, text: string) {
 }
 
 it("phase two inline keyboard choices and multiline text submit one complete request", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountApp();
   await act(async () => {
@@ -442,7 +441,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("phase two inline drafts survive app remount without entering the normal composer", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountApp();
   await typeQuestion("scope", "Keep this answer");
@@ -456,7 +455,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("phase two independent requests keep their own submit and dismissal boundaries", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   const item = questionItem();
   const secondRequest = makeFenceUserInput({
@@ -514,7 +513,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("phase two question upload failure stays beside its field and blocks request submission", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   vi.spyOn(attachmentUploads, "startAttachmentUpload").mockImplementation(() => {});
   const key = questionAttachmentDraftId(
@@ -557,7 +556,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("phase two remote reconnect keeps editable answers and resumes the same request", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   appRootFence.environments[0]!.connection.phase = "reconnecting";
   await mountApp();
@@ -580,7 +579,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("phase two picked question file uses the shared upload draft and request attachment map", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   const upload = vi.spyOn(attachmentUploads, "startAttachmentUpload").mockImplementation(() => {});
   await mountApp();
@@ -632,7 +631,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("phase two rework clears missing-answer feedback as soon as a choice answers it", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountApp();
   await act(async () => button("Submit").click());
@@ -645,7 +644,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("phase two rework question shortcut focuses the first unanswered inline field", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountApp();
   await act(async () => button("Workspace").click());
@@ -654,7 +653,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("phase two rework unrelated v2 detail update leaves existing Markdown rows unrendered", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   addFenceThread(threadId, "Question fence", [
     makeMessage("stable-assistant", "assistant", "Stable **answer**"),
@@ -676,7 +675,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("phase two regression long request keeps answers across virtual scrolling", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   const item = questionItem();
   const questions = Array.from({ length: 12 }, (_, index) => ({
@@ -708,7 +707,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("phase two regression both file pickers preserve normal and question attachment ownership", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   vi.spyOn(attachmentUploads, "startAttachmentUpload").mockImplementation(() => {});
   await mountApp();

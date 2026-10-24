@@ -23,6 +23,7 @@ import {
 } from "react";
 import { ChevronRightIcon } from "lucide-react";
 import { ModelListRow } from "./ModelListRow";
+import type { ModelPickerExtension } from "./modelPickerExtension";
 import { ModelPickerSidebar } from "./ModelPickerSidebar";
 import { getProviderStatusMessage, hasProviderSetup } from "./ProviderStatusBanner";
 import {
@@ -357,6 +358,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   onOpenProviderSetup?: (instanceId: ProviderInstanceId) => void;
   getModelDisabledReason?: (instanceId: ProviderInstanceId, model: string) => string | null;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
+  /** Mesura: the combined picker extends the upstream model list. */
+  extension?: ModelPickerExtension;
 }) {
   const {
     keybindings: providedKeybindings,
@@ -750,10 +753,28 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     modelJumpLabelByKey,
     activeModelKey,
     selectedModelKeySet,
+    extensionRowRenderKey: props.extension?.rowRenderKey,
   };
 
+  const selectAdjacentProvider = (direction: 1 | -1) => {
+    const next = adjacentModelPickerProvider({
+      entries: sidebarInstanceEntries,
+      selectedInstanceId,
+      direction,
+      disabledInstanceIds: lockedDisabledInstanceIds,
+      selectableUnavailableInstanceIds,
+    });
+    setSearchQuery("");
+    handleSelectInstance(next);
+  };
+  const extensionHidden = props.extension?.hidden === true;
+  const onVisibleModelsChange = props.extension?.onVisibleModelsChange;
+  useEffect(() => {
+    onVisibleModelsChange?.((modelKey) => filteredModelByKey.has(modelKey));
+  }, [filteredModelByKey, onVisibleModelsChange]);
+
   const onWindowKeyDown = (event: globalThis.KeyboardEvent) => {
-    if (event.defaultPrevented || event.repeat || isCommandPaletteOpen()) {
+    if (event.defaultPrevented || event.repeat || isCommandPaletteOpen() || extensionHidden) {
       return;
     }
 
@@ -764,15 +785,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     if (command === "modelPicker.previousProvider" || command === "modelPicker.nextProvider") {
       event.preventDefault();
       event.stopPropagation();
-      const next = adjacentModelPickerProvider({
-        entries: sidebarInstanceEntries,
-        selectedInstanceId,
-        direction: command === "modelPicker.nextProvider" ? 1 : -1,
-        disabledInstanceIds: lockedDisabledInstanceIds,
-        selectableUnavailableInstanceIds,
-      });
-      setSearchQuery("");
-      handleSelectInstance(next);
+      selectAdjacentProvider(command === "modelPicker.nextProvider" ? 1 : -1);
       return;
     }
     const jumpIndex = modelPickerJumpIndexFromCommand(command ?? "");
@@ -798,7 +811,12 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       <WindowKeyDownListener onKeyDown={onWindowKeyDown} />
       <div
         ref={pickerContentRef}
-        className="relative flex max-h-86.5 w-screen max-w-90 flex-row overflow-hidden"
+        className={cn(
+          "relative flex max-h-86.5 w-screen max-w-90 flex-row overflow-hidden",
+          props.extension?.rootClassName,
+          extensionHidden && "hidden",
+        )}
+        inert={extensionHidden || undefined}
         style={isSearching ? { height: searchHeight } : undefined}
         data-model-picker-content="true"
       >
@@ -832,6 +850,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           value={onToggleModel ? [...selectedModelKeySet] : activeModelKey}
           onItemHighlighted={(modelKey, eventDetails) => {
             highlightedModelKeyRef.current = typeof modelKey === "string" ? modelKey : null;
+            props.extension?.onHighlightedModelChange?.(
+              highlightedModelKeyRef.current,
+              eventDetails.reason,
+            );
             if (eventDetails.reason === "keyboard" && eventDetails.index >= 0) {
               void modelListRef.current?.scrollIndexIntoView?.({
                 index: eventDetails.index,
@@ -877,6 +899,13 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                 setSearchQuery(e.target.value);
               }}
               onKeyDown={(e) => {
+                if (
+                  props.extension?.onSearchKeyDown?.(e, {
+                    highlightedModelKey: highlightedModelKeyRef.current,
+                    selectAdjacentProvider,
+                  })
+                )
+                  return;
                 if (
                   showSidebar &&
                   !e.altKey &&
@@ -991,6 +1020,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                     unavailable={model.isUnavailable === true}
                     jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
                     disabledReason={disabledReason}
+                    accessory={props.extension?.renderRowAccessory?.({
+                      instanceId: model.instanceId,
+                      slug: model.slug,
+                      disabled: disabledReason !== null,
+                    })}
                     onToggleFavorite={toggleFavorite}
                   />
                 );

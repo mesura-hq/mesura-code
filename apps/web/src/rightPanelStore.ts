@@ -144,7 +144,7 @@ export interface ThreadPanelVisibility {
 interface RightPanelStoreState {
   byThreadKey: Record<string, ThreadRightPanelState>;
   pendingMaximizeThreadKey: string | null;
-  requestMaximize: (ref: ScopedThreadRef) => void;
+  requestMaximize: (ref: ScopedThreadRef) => () => void;
   consumeMaximizeRequest: (ref: ScopedThreadRef) => boolean;
   threadPanelVisibilityByThreadKey: Record<string, ThreadPanelVisibility>;
   userActionRevisionByThreadKey: Record<string, number>;
@@ -688,14 +688,28 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
   return { byThreadKey, threadPanelVisibilityByThreadKey };
 }
 
+// Only a request's own cancellation handle can withdraw it. A later OS/manual
+// opener for the same thread replaces this temporary identity.
+let pendingMaximizeOwner: object | null = null;
 export const useRightPanelStore = create<RightPanelStoreState>()(
   persist(
     (set, get) => ({
       byThreadKey: {},
       pendingMaximizeThreadKey: null,
-      requestMaximize: (ref) => set({ pendingMaximizeThreadKey: scopedThreadKey(ref) }),
+      requestMaximize: (ref) => {
+        const owner = {};
+        pendingMaximizeOwner = owner;
+        const key = scopedThreadKey(ref);
+        set({ pendingMaximizeThreadKey: key });
+        return () => {
+          if (pendingMaximizeOwner !== owner || get().pendingMaximizeThreadKey !== key) return;
+          pendingMaximizeOwner = null;
+          set({ pendingMaximizeThreadKey: null });
+        };
+      },
       consumeMaximizeRequest: (ref) => {
         if (get().pendingMaximizeThreadKey !== scopedThreadKey(ref)) return false;
+        pendingMaximizeOwner = null;
         set({ pendingMaximizeThreadKey: null });
         return true;
       },

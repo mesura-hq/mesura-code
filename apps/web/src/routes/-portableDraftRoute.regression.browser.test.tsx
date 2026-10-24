@@ -222,7 +222,6 @@ vi.mock("../previewStateStore", async (original) => ({
 
 vi.mock("../components/ProjectFavicon", () => ({ ProjectFavicon: () => null }));
 
-
 import { DraftId, useComposerDraftStore } from "../composerDraftStore";
 const { Suspense } = await import("react");
 const { ThreadRouteView } = await import("../components/ThreadRouteView");
@@ -234,17 +233,16 @@ let root: Screen;
 let container: HTMLDivElement;
 async function renderRoute() {
   await Promise.all(fixture.loads);
-  await act(async () =>
-    await root.rerender(
-      <Suspense>
-        <ThreadRouteView target={{ kind: "draft", draftId }} />
-      </Suspense>,
-    ),
+  await act(
+    async () =>
+      await root.rerender(
+        <Suspense>
+          <ThreadRouteView target={{ kind: "draft", draftId }} />
+        </Suspense>,
+      ),
   );
 }
 async function setupBrowserFixture0() {
-
-
   fixture.draftId = `p2-mounted-${++fixture.sequence}`;
   draftId = DraftId.make(fixture.draftId);
   fixture.reads.mockClear();
@@ -299,15 +297,14 @@ async function setupBrowserFixture0() {
   document.body.append(container);
   root = await renderBrowser(null, { container: container, router: false });
 
-return {async [Symbol.asyncDispose]() {
-
-  await act(async () => root[Symbol.asyncDispose]());
-  container.remove();
-  vi.unstubAllGlobals();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      await act(async () => root[Symbol.asyncDispose]());
+      container.remove();
+      vi.unstubAllGlobals();
+    },
+  };
 }
-
 
 async function selectSecondProject() {
   const trigger = container.querySelector<HTMLButtonElement>("[data-draft-project-trigger]");
@@ -358,7 +355,7 @@ function selection() {
   ];
 }
 it("portable draft route guard: an empty draft opens the selected project draft without retargeting", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   useComposerDraftStore.getState().setPrompt(draftId, "");
   await renderRoute();
@@ -371,7 +368,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("P2 regression draft route picker applies the selected checkout after a delayed read", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   fixture.environments[0]!.serverConfig = config();
   await renderRoute();
@@ -390,7 +387,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 });
 it("P2 regression draft route picker retains the project fallback without server configuration", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await renderRoute();
   await chooseSecondProject();
@@ -401,7 +398,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 it.each(["before", "during"])(
   "P2 regression draft route picker preserves explicit choices made %s the delayed read",
   async (timing) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.environments[0]!.serverConfig = config();
     const chooseExplicit = () => {
@@ -428,7 +425,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   },
 );
 it("P2 regression mounted ChatView logs an unsafe model once across repeated provider status updates", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   fixture.environments[0]!.serverConfig = config();
   fixture.contents = '{"version":1,"defaultModelSelection":{"provider":"codex","model":"missing"}}';

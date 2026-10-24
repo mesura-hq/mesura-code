@@ -25,6 +25,10 @@ import {
   renderProviderTraitsPicker,
 } from "./composerProviderState";
 import type { useComposerProviderModel } from "./useComposerProviderModel";
+import {
+  isComposerRestingBlockShown,
+  type useComposerCombinedPicker,
+} from "./useComposerCombinedPicker";
 
 /**
  * The composer footer controls: model picker, traits, mode controls and the overflow menu for
@@ -78,6 +82,7 @@ export function ComposerControlsBar(props: {
   onModelPickerOpenChange: (open: boolean) => void;
   modelPickerIconClassName: string | undefined;
   getModelDisabledReason: ChatComposerProps["getModelDisabledReason"];
+  combinedPicker?: ReturnType<typeof useComposerCombinedPicker>;
 }) {
   const {
     environmentId,
@@ -127,6 +132,7 @@ export function ComposerControlsBar(props: {
     onModelPickerOpenChange,
     modelPickerIconClassName,
     getModelDisabledReason,
+    combinedPicker,
   } = props;
   const providerTraitsMenuContent = renderProviderTraitsMenuContent({
     provider: selectedProvider,
@@ -180,6 +186,7 @@ export function ComposerControlsBar(props: {
       content: (
         <ComposerFooterModeControls
           showInteractionModeToggle={planModeUiEnabled}
+          showRuntimeMode={combinedPicker === undefined}
           interactionMode={interactionMode}
           runtimeMode={compatibleRuntimeMode}
           runtimeModeOptions={compatibleRuntimeModeOptions}
@@ -190,7 +197,7 @@ export function ComposerControlsBar(props: {
         />
       ),
     },
-  ];
+  ].filter((def) => isComposerRestingBlockShown(def.id, { planModeUiEnabled }));
   const hiddenRestingBlockIds = restingBlockDefs
     .slice(restingBlockDefs.length - restingHiddenBlockCount)
     .map((def) => def.id);
@@ -248,6 +255,9 @@ export function ComposerControlsBar(props: {
           }
         : {})}
       onOpenChange={onModelPickerOpenChange}
+      {...(combinedPicker
+        ? { combined: combinedPicker.config, triggerAccessory: combinedPicker.triggerAccessory }
+        : {})}
       getModelDisabledReason={getModelDisabledReason}
       onOpenProviderSetup={onOpenProviderSetup}
     />
@@ -317,6 +327,7 @@ export function ComposerControlsBar(props: {
             size={composerControlsCollapsed ? "xs" : "sm"}
             hidden={composerControlsHidden || hiddenRestingBlockIds.length === 0}
             showInteractionModeToggle={planModeUiEnabled && hiddenRestingBlockIds.includes("mode")}
+            showRuntimeMode={combinedPicker === undefined}
             traitsMenuContent={
               hiddenRestingBlockIds.includes("traits") ? providerTraitsMenuContent : undefined
             }

@@ -44,6 +44,10 @@ const fixture = vi.hoisted(() => ({
 }));
 
 const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("./state/presentation", async (original) =>
+  (await fenceMocks()).mockPresentation(original),
+);
+vi.mock("./connection/runtime", async () => (await fenceMocks()).mockConnectionRuntime());
 vi.mock("@t3tools/client-runtime/state/session", async (original) =>
   (await fenceMocks()).mockRuntimeSession(original),
 );
@@ -51,7 +55,7 @@ vi.mock("./state/entities", async (original) => (await fenceMocks()).mockEntitie
 vi.mock("./state/environments", async (original) =>
   (await fenceMocks()).mockEnvironments(original),
 );
-vi.mock("./state/query", async () => (await fenceMocks()).mockQuery());
+vi.mock("./state/query", async (original) => (await fenceMocks()).mockQuery(original));
 vi.mock("./state/threads", async (original) => (await fenceMocks()).mockThreads(original));
 vi.mock("./state/use-atom-command", () => ({
   useAtomCommand: (command: unknown) => fixture.commands.get(command) ?? fixture.noopCommand,
@@ -73,9 +77,6 @@ vi.mock("./components/BranchToolbar", () => ({ BranchToolbar: () => null }));
 vi.mock("@legendapp/list/react", async () => (await fenceMocks()).mockLegendList());
 import { usePendingUserInputDraftStore } from "./pendingUserInputDraftStore";
 
-
-
-
 import { threadEnvironment } from "./state/threads";
 import { useComposerDraftStore } from "./composerDraftStore";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
@@ -93,8 +94,6 @@ let root: Screen | undefined;
 let container: HTMLDivElement;
 
 async function setupBrowserFixture0() {
-
-
   usePendingUserInputDraftStore.setState({ requests: {} });
 
   fixture.respond.mockClear();
@@ -125,21 +124,21 @@ async function setupBrowserFixture0() {
   container = document.createElement("div");
   document.body.append(container);
 
-return {async [Symbol.asyncDispose]() {
-
-  await act(async () => root?.[Symbol.asyncDispose]());
-  root = undefined;
-  container.remove();
-  appRootFence.threads.clear();
-  appRootFence.threadStates.clear();
-  useComposerDraftStore.getState().clearComposerContent(scopeThreadRef(environmentId, threadId));
-  useQuestionAttachmentPreparation.setState({ counts: {} });
-  vi.unstubAllGlobals();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      await act(async () => root?.[Symbol.asyncDispose]());
+      root = undefined;
+      container.remove();
+      appRootFence.threads.clear();
+      appRootFence.threadStates.clear();
+      useComposerDraftStore
+        .getState()
+        .clearComposerContent(scopeThreadRef(environmentId, threadId));
+      useQuestionAttachmentPreparation.setState({ counts: {} });
+      vi.unstubAllGlobals();
+    },
+  };
 }
-
-
 
 async function mountApp() {
   publishFenceThreadProjection(fixture.projection!, environmentId);
@@ -173,7 +172,7 @@ function button(text: string) {
 }
 
 it("AppRoot selection submits the same scoped request draft", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountApp();
   await act(async () => button("Workspace").click());
@@ -188,7 +187,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("AppRoot submits a selected final question from its scoped draft", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   const item = questionItem();
   fixture.projection = {
@@ -206,7 +205,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("AppRoot keeps an unanswered request unsent and a selected option visible", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountApp();
   expect(button("Submit").disabled).toBe(false);
@@ -217,7 +216,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("AppRoot keeps a visible selection and its note through submission", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   const item = questionItem();
   fixture.projection = {
@@ -260,7 +259,7 @@ async function pasteQuestionNote(note: string) {
 }
 
 it("AppRoot selecting an option keeps the prior note out of the normal thread draft", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   const item = questionItem();
   fixture.projection = {
@@ -286,7 +285,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("AppRoot clears optimistic selection after a noted draft is confirmed during attachment preparation", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   const item = questionItem();
   fixture.projection = {

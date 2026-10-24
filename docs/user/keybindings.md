@@ -25,8 +25,9 @@ send shortcut. Click the send button to use the configured follow-up behavior.
 When an active turn has queued messages, `mod+Shift+Enter` sends the first as a
 steer. Change it under **Queue: Send First Queued Message as Steer** in Keybindings.
 
-Use `mod+shift+m` to choose a model, `alt+e` for traits (effort, reasoning, agent,
-and variant), and `mod+shift+a` for access mode. Use `alt+w` to open the run
+Use `mod+shift+m` to choose a model and its effort. `alt+e` opens the model
+picker on **More options**, which holds the model's other settings and the
+access mode; `mod+shift+a` opens the same model picker. Use `alt+w` to open the run
 context drawer: host, workspace, and Git branch together (see
 [Run context](#run-context)). `mod+shift+h` cycles directly to the next machine
 without opening the drawer; `mod+shift+x` opens the drawer on its Workspace tab
@@ -40,10 +41,16 @@ To change effort one step without opening the picker, bind
 Both are unbound by default. Increase wraps from the highest level to the
 lowest, and decrease wraps from the lowest level to the highest.
 
-In the model picker, press Left in an empty search field or Shift+Tab to reach
-the provider list. Use Up/Down to move and Enter to choose. Right returns to
-model search. `mod+shift+up` and `mod+shift+down` switch providers directly and clear the
-search. These provider shortcuts can also be changed in Settings.
+In the model picker, Tab and Shift+Tab move to the next or previous provider,
+including Favorites. Up/Down highlight a model, and Left/Right change that
+model's effort without choosing it. Enter or a click uses the highlighted model
+with its effort. `alt+e` opens or closes **More options**, which holds the
+highlighted model's other settings and the access mode. This screen replaces
+model search. **Back to models** returns to search and keeps pending edits. Tab
+moves through the options normally. Escape or a click outside closes the picker
+and discards pending edits.
+`mod+shift+up` and `mod+shift+down` also switch providers and clear the search.
+These provider shortcuts can also be changed in Settings.
 
 These shortcuts run inside the focused web or desktop client. `mod` uses Command
 on macOS and Ctrl on Windows and Linux, including GNOME, KDE Plasma, Niri, and
@@ -215,12 +222,12 @@ case-insensitive matching.
 ### Composer pickers and question prompts
 
 `modelPicker.toggle` opens the model picker from the composer and defaults to `mod+shift+m`, and
-additionally to `alt+m`. While it is open, `mod+1` through `mod+9` select a model directly.
+additionally to `alt+m`. On the model search screen, `mod+1` through `mod+9` select a model directly.
 
-`traitsPicker.toggle` opens the composer control that holds reasoning effort, thinking, fast mode,
-context window, and agent. It defaults to `alt+e`. Two cases make it do nothing, both by design:
-a provider that exposes none of those traits does not render the control at all, and a narrow
-composer folds the traits into its compact controls menu, which has no separate picker to open.
+`traitsPicker.toggle` opens the model picker's **More options** screen: thinking, fast mode,
+context window, agent, and the access mode. While the picker is open it switches between options
+and model search. It defaults to `alt+e`. `composer.effort` does the same and has no default binding.
+`composer.mode` (`mod+shift+a`) opens the model search screen.
 
 `question.toggleCollapse` defaults to `alt+q`. On web and desktop it jumps to the first pending
 request in the conversation and focuses its first unanswered field or option. If all answers are

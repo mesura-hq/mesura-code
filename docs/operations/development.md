@@ -60,16 +60,17 @@ paths open, so keep none of them. Before the copy's first start:
 3. **Do not rely on a stub directory on `PATH`.** The server prepends the login shell's `PATH` at
    start (`fixPath` in `apps/server/src/os-jank.ts`), so a real `claude` in `/usr/local/bin` still
    wins over a stub put first; the absolute stub `binaryPath`s of step 2 are what isolate.
-4. **Leave the credentials behind.** Do not copy `secrets` or `provider-auth/`, and start the server
-   without provider API keys in its environment (`env -u CURSOR_API_KEY …`). Cursor's V2 SDK
-   ignores `binaryPath` and opens a session with any key it finds there.
-5. **Start the server with a scratch home**: `HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`,
-   `XDG_STATE_HOME` and `XDG_CACHE_HOME` all under one scratch directory, because server and
-   provider code read credential files from the real home (OpenCode's `auth.json`, Cursor's
-   `~/.config/cursor/auth.json`, Antigravity's `~/.gemini`). Run Node and `vp` by absolute path
-   (nvm's `~` no longer resolves), pass the copied state with an absolute `--base-dir` or
-   `--home-dir`, and set `neovimConfigDirectory` to an absolute path if the editor is under test:
-   its default `~/.neovim` now names the scratch home.
+4. **Leave the credentials behind.** Do not copy `secrets` or `provider-auth/`.
+5. **Start the server with a cleared environment and a scratch home**: `env -i`, then only `PATH`,
+   and `HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` and `XDG_CACHE_HOME` all under
+   one scratch directory. An inherited variable can carry a key (`CURSOR_API_KEY`, which Cursor's
+   V2 SDK uses whatever `binaryPath` says) or point usage polling at live data
+   (`OPENCODE_DATA_DIR`, `ANTIGRAVITY_DATA_DIR`), and server and provider code read credential
+   files from the real home (OpenCode's `auth.json`, Cursor's `~/.config/cursor/auth.json`,
+   Antigravity's `~/.gemini`). Run Node and `vp` by absolute path (nvm's `~` no longer resolves),
+   pass the copied state with an absolute `--base-dir` or `--home-dir`, and set
+   `neovimConfigDirectory` to an absolute path if the editor is under test: its default
+   `~/.neovim` now names the scratch home.
 
 Before starting, read `settings.json` back and refuse to start unless `providerInstances` holds
 exactly the stubbed entries above.

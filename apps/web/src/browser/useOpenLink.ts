@@ -1,20 +1,16 @@
-import { AuthPreviewOperateScope, type ScopedThreadRef } from "@t3tools/contracts";
+import { type ScopedThreadRef } from "@t3tools/contracts";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { recordVisitForThread } from "~/browserHistoryStore";
+import type * as Cause from "effect/Cause";
+
 import { readLocalApi } from "~/localApi";
 import { previewEnvironment } from "~/state/preview";
-import { readEnvironmentScope } from "~/state/session";
 import { useAtomCommand } from "~/state/use-atom-command";
-
-import {
-  canOpenLinksInApp,
-  resolveBrowserLinkTargetPreference,
-  resolveLinkTarget,
-} from "./browserLinkTarget";
-import { BrowserSettingsReadError, openUrlInPreview } from "./openFileInPreview";
+import { useThreadLinkOwner } from "./useThreadLinkOwner";
+import { openThreadLinkInPreview } from "./openThreadLinkInPreview";
+import { BrowserSettingsReadError } from "./openFileInPreview";
 
 const NO_MODIFIER = { metaKey: false, ctrlKey: false } as const;
 
@@ -31,30 +27,29 @@ export function useOpenLink(threadRef: ScopedThreadRef | null | undefined): (
       readonly button?: number | undefined;
     };
     readonly threadRef?: ScopedThreadRef | undefined;
+    readonly explicitApp?: boolean;
+    readonly fallbackOnFailure?: boolean;
+    readonly reportPreviewFailure?: (cause: Cause.Cause<unknown>) => void;
   },
 ) => Promise<void> {
-  const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });
+  const allocate = useAtomCommand(previewEnvironment.openLinkTarget, { reportFailure: false });
+  const captureOwner = useThreadLinkOwner(threadRef);
   return async (url, options = {}) => {
-    const targetThreadRef = options.threadRef ?? threadRef;
-    const target = resolveLinkTarget({
+    const result = await openThreadLinkInPreview({
+      threadRef: options.threadRef ?? threadRef,
       url,
       event: options.event ?? NO_MODIFIER,
-      preference: await resolveBrowserLinkTargetPreference(),
-      canOpenInApp:
-        targetThreadRef != null &&
-        readEnvironmentScope(targetThreadRef.environmentId, AuthPreviewOperateScope) &&
-        canOpenLinksInApp(targetThreadRef),
+      ...(options.explicitApp === undefined ? {} : { explicitApp: options.explicitApp }),
+      allocate,
+      ownerSignal: captureOwner(),
     });
-    if (target === "app" && targetThreadRef) {
-      const result = await openUrlInPreview({ threadRef: targetThreadRef, url, openPreview });
-      if (isAtomCommandInterrupted(result)) return;
-      if (result._tag === "Success") {
-        recordVisitForThread(targetThreadRef, url);
-        return;
-      }
+    if (result._tag !== "System") {
+      if (isAtomCommandInterrupted(result) || result._tag === "Success") return;
       const failure = squashAtomCommandFailure(result);
       if (failure instanceof BrowserSettingsReadError) throw failure;
-      console.error(result.cause);
+      if (options.reportPreviewFailure) options.reportPreviewFailure(result.cause);
+      else console.error(result.cause);
+      if (options.fallbackOnFailure === false) return;
     }
     const api = readLocalApi();
     if (!api) throw new Error("Link opening is unavailable.");

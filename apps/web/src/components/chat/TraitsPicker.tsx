@@ -76,7 +76,7 @@ function savedOptionLabel(id: string): string {
   );
 }
 
-function buildUnavailableModelOptionDescriptors(
+export function buildUnavailableModelOptionDescriptors(
   selections: ProviderOptions | null | undefined,
 ): ReadonlyArray<ProviderOptionDescriptor> {
   return (selections ?? []).map((selection) =>

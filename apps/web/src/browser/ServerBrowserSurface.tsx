@@ -1,3 +1,7 @@
+"use client";
+
+import { serverBrowserNavigation } from "./serverBrowserNavigation";
+
 import {
   createPreviewFramePainter,
   createPreviewStreamClient,
@@ -41,7 +45,8 @@ import { refreshPreviewStreamAccess, usePreviewStreamAccess } from "~/state/prev
 import { observeResize } from "~/lib/observeResize";
 
 export interface ServerBrowserHandle {
-  readonly navigate: (url: string) => void;
+  readonly navigate: (url: string) => boolean;
+  readonly readiness: () => "waiting" | "ready" | "refused";
   readonly history: (delta: -1 | 1) => void;
   readonly reload: (options?: { readonly ignoreCache?: boolean }) => void;
   readonly viewport: (setting: PreviewViewportSetting) => void;
@@ -143,6 +148,9 @@ export function ServerBrowserSurface(props: {
   readonly onFirstFrame?: () => void;
   readonly onViewport?: (viewport: PreviewStreamViewport) => void;
   readonly onControl?: (control: PreviewStreamControl | null) => void;
+  /** Unexpected socket loss, separate from an intentional effect reconnect. */
+  readonly onDisconnected?: () => void;
+  /** The page opened a new tab from this viewer's click; the viewer should switch to it. */
   readonly onPopup?: (tabId: string) => void;
   readonly className?: string;
   readonly pdfUrl?: string | null;
@@ -158,6 +166,7 @@ export function ServerBrowserSurface(props: {
     onFirstFrame,
     onViewport,
     onControl,
+    onDisconnected,
     onPopup,
     className,
     pdfUrl = null,
@@ -212,14 +221,11 @@ export function ServerBrowserSurface(props: {
     onViewport?.(viewport),
   );
   const controlChanged = useEffectEvent((next: PreviewStreamControl | null) => onControl?.(next));
+  const disconnected = useEffectEvent(() => onDisconnected?.());
   const popupOpened = useEffectEvent((popupTabId: string) => onPopup?.(popupTabId));
   const [cap, setCap] = useState<{ width: number; height: number } | null>(null);
 
-  // These read only refs, so each is cached once. The stream effect keys on
-  // clearInput and would reconnect if it changed.
-  const send = (input: PreviewStreamInput) => {
-    clientRef.current?.send(input);
-  };
+  const send = (input: PreviewStreamInput) => clientRef.current?.send(input) ?? false;
 
   const clearInput = () => {
     if (inputFrameRef.current !== null) cancelAnimationFrame(inputFrameRef.current);
@@ -302,7 +308,10 @@ export function ServerBrowserSurface(props: {
   useImperativeHandle(
     ref,
     () => ({
-      navigate: (url) => send({ type: "navigate", url }),
+      ...serverBrowserNavigation(
+        () => clientRef.current,
+        () => controlRef.current,
+      ),
       history: (delta) => send({ type: "history", delta }),
       reload: (options) =>
         send({ type: "reload", ...(options?.ignoreCache ? { ignoreCache: true } : {}) }),
@@ -417,6 +426,7 @@ export function ServerBrowserSurface(props: {
         },
         onConnectedChange: (connected) => {
           if (connected) return;
+          disconnected();
           setFileChooser(null);
           controlRef.current = null;
           setControl(null);
@@ -446,6 +456,9 @@ export function ServerBrowserSurface(props: {
       if (clientRef.current === client) clientRef.current = null;
       controlRef.current = null;
       setControl(null);
+      // Cap growth intentionally reconnects before the first control grant.
+      // Clear readiness, but do not report that cleanup as unexpected socket loss.
+      // A submitted navigation still cancels when its control becomes unready.
       controlChanged(null);
       clearInput();
     };

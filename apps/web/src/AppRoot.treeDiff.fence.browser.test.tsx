@@ -34,7 +34,13 @@ import { act, render as renderBrowser, type Screen } from "../test/render";
 import { makeFenceThreadProjection, makeFenceThreadShell } from "./test/fenceThreadShell";
 import { EMPTY_ENVIRONMENT_THREAD_STATE } from "@t3tools/client-runtime/state/threads";
 import { type ReactNode } from "react";
-import { createMemoryHistory, createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
+import { PromiseClipboardItem } from "./test/promiseClipboardItem";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+} from "@tanstack/react-router";
 import { expect, it, vi } from "vite-plus/test";
 import {
   DEFAULT_SERVER_SETTINGS,
@@ -123,6 +129,10 @@ const fixture = vi.hoisted(() => ({
 }));
 
 const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("./state/presentation", async (original) =>
+  (await fenceMocks()).mockPresentation(original, fixture.environments),
+);
+vi.mock("./connection/runtime", async () => (await fenceMocks()).mockConnectionRuntime());
 vi.mock("@t3tools/client-runtime/state/session", async (original) => {
   const actual = await (await fenceMocks()).mockRuntimeSession(original);
   const { Atom } = await import("effect/reactivity");
@@ -229,7 +239,7 @@ vi.mock("./state/environments", async (importOriginal) => {
     ...(await importOriginal<typeof import("./state/environments")>()),
     useEnvironments: () => ({ environments, isReady: true }),
     useEnvironmentProviders: () => new Map(),
-  usePrimaryEnvironment: () => null,
+    usePrimaryEnvironment: () => null,
   };
 });
 vi.mock("./state/threads", async (original) => (await fenceMocks()).mockThreads(original));
@@ -278,7 +288,6 @@ vi.mock("@legendapp/list/react", async () => (await fenceMocks()).mockLegendList
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 
 import { reviewEnvironment } from "./state/review";
-
 
 import { useFileTreeShortcut } from "./components/files/mesuraTree/useFileTreeShortcut";
 import { useFileTreeStore } from "./components/files/mesuraTree/fileTreeStore";
@@ -357,27 +366,16 @@ function dirtyVcsStatus() {
 // test that opened a file tab failed on time alone. Load both chunks up front,
 // under a hook timeout sized for that compile.
 async function setupBrowserFixture0() {
-
   await Promise.all([
     import("./components/DiffPanel"),
     import("./components/files/FilePreviewPanel"),
   ]);
 
-
   restoreFontEvents = installFenceFontEvents();
 
   // A browser's ClipboardItem owns the promises it is given. Monaco hands it one
   // on every click and cancels it on the next; happy-dom's leaves it unhandled.
-  vi.stubGlobal(
-    "ClipboardItem",
-    class {
-      readonly types: ReadonlyArray<string>;
-      constructor(items: Record<string, Promise<unknown>>) {
-        this.types = Object.keys(items);
-        for (const item of Object.values(items)) Promise.resolve(item).catch(() => {});
-      }
-    },
-  );
+  vi.stubGlobal("ClipboardItem", PromiseClipboardItem);
   localStorage.clear();
   useDiffPanelStore.setState({ byThreadKey: {}, branchBaseRefByThreadKey: {} });
   useRightPanelStore.setState({ byThreadKey: {}, userActionRevisionByThreadKey: {} });
@@ -413,20 +411,16 @@ async function setupBrowserFixture0() {
   container = document.createElement("div");
   document.body.append(container);
 
-return {async [Symbol.asyncDispose]() {
-
-  await act(async () => root?.[Symbol.asyncDispose]());
-  root = undefined;
-  container.remove();
-  restoreFontEvents();
-  vi.unstubAllGlobals();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      await act(async () => root?.[Symbol.asyncDispose]());
+      root = undefined;
+      container.remove();
+      restoreFontEvents();
+      vi.unstubAllGlobals();
+    },
+  };
 }
-
-
-
-
 
 /** The chat route's shell around ChatView: the `fileTree.toggle` listener `_chat.tsx` mounts. */
 function ThreadRoute() {
@@ -567,7 +561,7 @@ async function pushLive(result: GitWorkingTreeChangesResult) {
 }
 
 it("Tree diff fence: the mode menu lists Tree diff, Files diff, Branch changes, Latest turn, Turn in order", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountDiffSurface("branch");
   const labels = await openModeMenu();
@@ -584,21 +578,21 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("Tree diff fence: a dirty thread with no stored mode opens on Tree diff", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountDiffSurface();
   expect(selectedMode()).toBe("Tree diff");
 });
 
 it("Tree diff fence: a mode stored for a dirty thread still wins over the Tree diff default", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountDiffSurface("branch");
   expect(selectedMode()).toBe("Branch changes");
 });
 
 it("Tree diff opening guard: a generic opening replaces an old turn selection with Branch changes", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   useDiffPanelStore
     .getState()
@@ -608,7 +602,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("Tree diff fence: Tree diff shows the branch, non-empty summary rows and lettered rows with counts", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountDiffSurface("tree");
   expect(selectedMode()).toBe("Tree diff");
@@ -625,7 +619,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("Tree diff fence: a file changed on disk appears in Tree diff from the live stream alone", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountDiffSurface("tree");
   expect(requestsFor(WS_METHODS.reviewSubscribeWorkingTreeChanges).length).toBeGreaterThan(0);
@@ -638,7 +632,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("Tree diff fence: Tree diff sends no diff preview or ref-listing request", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountDiffSurface("tree");
   expect(requestsFor(WS_METHODS.reviewSubscribeWorkingTreeChanges).length).toBeGreaterThan(0);
@@ -647,7 +641,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("Tree diff fence: a refused folder reads as one plain sentence, not the server error", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   const serverText = `Workspace ${worktreePath} is outside the configured workspace root /srv/other.`;
   fixture.liveChanges = { kind: "failure", message: serverText };
@@ -658,7 +652,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("Tree diff fence: a clean working tree from the live stream reads Working tree clean", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   fixture.liveChanges = { kind: "success", value: changes([]) };
   fixture.oneShotChanges = { kind: "initial" };
@@ -667,7 +661,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("Tree diff fence: a failed refresh says why beside the result it kept, until a newer one arrives", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   fixture.runQuery = async () =>
     AsyncResult.failure(Cause.fail(new Error("git status failed: index.lock exists")));
@@ -696,7 +690,7 @@ async function clickRefresh() {
 }
 
 it("Tree diff fence: a refresh's answer shows until the stream sends a newer one", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   fixture.runQuery = async () =>
     AsyncResult.success(changes([change("src/edited.ts", ".", "M", [0, 0], [9, 2])]));
@@ -710,7 +704,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("Tree diff fence: a refresh answer older than the stream's newest value never replaces it", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   let answerRefresh: (result: unknown) => void = () => {};
   fixture.runQuery = () =>
@@ -735,7 +729,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("Tree diff fence: a nested project opens its own file and declines one outside it", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   const rows = gitChangeRows(
     [
@@ -838,7 +832,7 @@ function setExternalReviewPreview(
 it.each(previewScopes)(
   "Registered-project diff boundary: $label keeps a workspace refusal visible instead of displaying the server repository",
   async ({ scope, label, kind }) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const refusal = "Review diff preview cwd must stay within the configured workspace root.";
     setExternalReviewPreview(kind, { kind: "failure", message: refusal });
@@ -858,7 +852,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 it.each(previewScopes)(
   "Registered-project diff guard: $label displays the requested project outside the server cwd",
   async ({ scope, label, kind }) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     setExternalReviewPreview(kind, {
       kind: "success",
@@ -876,7 +870,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 );
 
 it("Tree diff fence: Files diff marks an untracked new file untracked and keeps a staged one added", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   localStorage.setItem("t3code.diffFileTreeOpen", "true");
   fixture.diffPreview = {
@@ -898,7 +892,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("Tree diff fence: Branch changes keeps a new file added and reads no working-tree status", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   localStorage.setItem("t3code.diffFileTreeOpen", "true");
   fixture.diffPreview = {
@@ -985,7 +979,7 @@ async function clickTreeRow(path: string) {
 }
 
 it("Tree diff keys fence: Alt+G with the panel closed opens the Diff surface on Tree diff", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   useDiffPanelStore.getState().selectGitScope(threadRef, "branch");
   await mountApp();
@@ -999,7 +993,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("Tree diff keys fence: Alt+G on the Diff surface in another mode switches it to Tree diff", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountDiffSurface("branch");
   await pressAlt("g");
@@ -1008,7 +1002,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("Tree diff keys fence: Alt+G closes the panel when Tree diff is the active mode and tab", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountDiffSurface("tree");
   await pressAlt("g");
@@ -1016,7 +1010,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("Tree diff keys fence: Alt+G on another tab brings the Diff surface forward on Tree diff", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountDiffSurface("tree");
   await act(async () => useRightPanelStore.getState().openFile(threadRef, "src/edited.ts"));
@@ -1031,7 +1025,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("Tree diff keys fence: Alt+C with the panel closed opens the Diff surface and its mode menu", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   useDiffPanelStore.getState().selectGitScope(threadRef, "branch");
   await mountApp();
@@ -1044,7 +1038,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("Tree diff keys fence: in the Alt+C menu a mode's first letter and Enter select it", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountDiffSurface("tree");
   await pressAlt("c");
@@ -1064,7 +1058,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("Tree diff keys fence: the palette's Show tree diff row shows Alt+G and opens Tree diff", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   useDiffPanelStore.getState().selectGitScope(threadRef, "branch");
   await mountApp();
@@ -1086,7 +1080,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("Tree diff keys fence: a file clicked in Tree diff opens alone in its own tab without the explorer", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   useFileTreeStore.getState().setExplorerOpen(true);
   await mountDiffSurface("tree");
@@ -1104,7 +1098,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("Tree diff keys fence: the file header's explorer button shows the explorer on a Tree diff tab", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   useFileTreeStore.getState().setExplorerOpen(false);
   await mountDiffSurface("tree");
@@ -1118,7 +1112,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("Tree diff keys fence: Mod+E shows the explorer on a Tree diff tab", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   useFileTreeStore.getState().setExplorerOpen(true);
   await mountDiffSurface("tree");
@@ -1131,7 +1125,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("Tree diff keys fence (guard): a file opened elsewhere follows the stored explorer preference", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   useFileTreeStore.getState().setExplorerOpen(true);
   await mountDiffSurface("tree");
@@ -1147,7 +1141,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("Tree diff keys fence (guard): reopening a Tree diff file from elsewhere restores the stored preference", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   useFileTreeStore.getState().setExplorerOpen(true);
   await mountDiffSurface("tree");
@@ -1174,7 +1168,7 @@ async function closeModeMenu() {
 }
 
 it("Tree diff review: Alt+G closes the panel when Tree diff shows as a dirty thread's default", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountDiffSurface();
   expect(selectedMode()).toBe("Tree diff");
@@ -1184,7 +1178,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("Tree diff review: Alt+G switches to Tree diff when the open panel still shows the default it mounted with", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   fixture.vcsStatus = { ...dirtyVcsStatus(), hasWorkingTreeChanges: false };
   await mountDiffSurface();
@@ -1204,7 +1198,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("Tree diff review: after leaving and returning to the thread with Diff open, the mode menu stays shut until Alt+C", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountDiffSurface("tree");
   await pressAlt("c");
@@ -1221,7 +1215,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("Tree diff review: after leaving and returning to the thread with Diff closed, Alt+C opens Diff and its mode menu", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await mountDiffSurface("tree");
   await pressAlt("c");
@@ -1241,7 +1235,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("Tree diff review: Mod+E on a hidden panel holding a Tree diff file shows it with the explorer", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   useFileTreeStore.getState().setExplorerOpen(true);
   await mountDiffSurface("tree");

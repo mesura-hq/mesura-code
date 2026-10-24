@@ -24,7 +24,12 @@ import { act, render as renderBrowser, type Screen } from "../test/render";
  * `AppRoot.dictation.fence.test.tsx`.
  */
 
-import { createMemoryHistory, createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+} from "@tanstack/react-router";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { makeFenceThreadProjection, makeFenceThreadShell } from "./test/fenceThreadShell";
@@ -46,6 +51,10 @@ const fixture = vi.hoisted(() => ({
   },
 }));
 const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("./state/presentation", async (original) =>
+  (await fenceMocks()).mockPresentation(original),
+);
+vi.mock("./connection/runtime", async () => (await fenceMocks()).mockConnectionRuntime());
 vi.mock("@t3tools/client-runtime/state/session", async (original) =>
   (await fenceMocks()).mockRuntimeSession(original),
 );
@@ -55,7 +64,7 @@ vi.mock("./state/entities", async (original) => (await fenceMocks()).mockEntitie
 vi.mock("./state/environments", async (original) =>
   (await fenceMocks()).mockEnvironments(original),
 );
-vi.mock("./state/query", async () => (await fenceMocks()).mockQuery());
+vi.mock("./state/query", async (original) => (await fenceMocks()).mockQuery(original));
 vi.mock("./state/threads", async (original) => (await fenceMocks()).mockThreads(original));
 vi.mock("./state/use-atom-command", async () => (await fenceMocks()).mockAtomCommand());
 vi.mock("./state/use-atom-query-runner", async () => (await fenceMocks()).mockAtomQueryRunner());
@@ -94,8 +103,6 @@ vi.mock("@legendapp/list/react", async () => (await fenceMocks()).mockLegendList
 
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 
-
-
 import { installKeyEngine } from "./keys/keyEngine";
 
 import { readKeyEngineSnapshot } from "./keys/keyEngineStore";
@@ -120,12 +127,9 @@ const keydownsAtWindow: KeyboardEvent[] = [];
 const pressedByTest = new Set<Event>();
 
 async function setupBrowserFixture0() {
-
   // Registered before the engine, so it sees every keydown, consumed or not.
   window.addEventListener("keydown", (event) => keydownsAtWindow.push(event), true);
   installKeyEngine();
-
-
 
   installFenceFontEvents();
   const shell = makeThread();
@@ -144,17 +148,17 @@ async function setupBrowserFixture0() {
   container = document.createElement("div");
   document.body.append(container);
 
-return {async [Symbol.asyncDispose]() {
-
-  await act(async () => root?.[Symbol.asyncDispose]());
-  root = undefined;
-  container.remove();
-  useRightPanelStore.getState().removeThread(threadRef);
-  appRootFence.threads.clear();
-  appRootFence.threadStates.clear();
-  vi.unstubAllGlobals();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      await act(async () => root?.[Symbol.asyncDispose]());
+      root = undefined;
+      container.remove();
+      useRightPanelStore.getState().removeThread(threadRef);
+      appRootFence.threads.clear();
+      appRootFence.threadStates.clear();
+      vi.unstubAllGlobals();
+    },
+  };
 }
 
 function makeThread() {
@@ -166,10 +170,6 @@ function makeThread() {
     createdAt: now,
   });
 }
-
-
-
-
 
 let router: ReturnType<typeof createRouter> | undefined;
 
@@ -288,7 +288,7 @@ describe("registry fence: lifted ChatView chords keep their effect", () => {
   it.each(vimModeCases)(
     "registry fence guard: Mod+Shift+S settles the open thread with $label",
     async ({ vimMode }) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+      await using _browserFixture0 = await setupBrowserFixture0();
 
       await mountApp({ vimMode });
       const event = await press(SETTLE_CHORD);
@@ -300,7 +300,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   it.each(vimModeCases)(
     "registry fence guard: Mod+Shift+P pins the open thread with $label",
     async ({ vimMode }) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+      await using _browserFixture0 = await setupBrowserFixture0();
 
       await mountApp({ vimMode });
       const event = await press(PIN_CHORD);
@@ -313,7 +313,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   it.each(vimModeCases)(
     "registry fence guard: Mod+W closes the open panel surface with $label",
     async ({ vimMode }) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+      await using _browserFixture0 = await setupBrowserFixture0();
 
       await mountApp({ vimMode });
       await openFileSurface();
@@ -326,7 +326,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   it.each(vimModeCases)(
     "registry fence guard: Mod+W with no panel open keeps its native meaning with $label",
     async ({ vimMode }) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+      await using _browserFixture0 = await setupBrowserFixture0();
 
       await mountApp({ vimMode });
       expect(activeSurface()).toBeNull();
@@ -336,7 +336,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   );
 
   it("registry fence guard: Mod+B toggles the sidebar with Vim mode off", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp({ vimMode: false });
     const before = sidebarState();
@@ -349,7 +349,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   // Vim's page back (`chat/chatSurface.ts`, SCROLL_KEYS), so the chord never
   // reaches the sidebar from the chat. `<leader>b` is the way there.
   it("registry fence guard: Mod+B in the chat stays the buffer's page back with Vim mode on", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp({ vimMode: true });
     const before = sidebarState();
@@ -362,7 +362,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("registry fence: leader rows run the owner's function at the app", () => {
   it("registry fence spec: <leader>ts settles the open thread with no synthetic keydown", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp({ vimMode: true });
     await pressLeader("ts");
@@ -372,7 +372,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("registry fence spec: <leader>tp pins the open thread with no synthetic keydown", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp({ vimMode: true });
     await pressLeader("tp");
@@ -382,7 +382,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("registry fence spec: <leader>px closes the open panel surface with no synthetic keydown", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp({ vimMode: true });
     await openFileSurface();
@@ -393,7 +393,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("registry fence spec: <leader>b toggles the sidebar with no synthetic keydown", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp({ vimMode: true });
     const before = sidebarState();
@@ -407,7 +407,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("registry fence: the key engine leaves with the chat", () => {
   it("registry fence regression: Space reaches a focused Settings control after leaving a Vim chat", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp({ vimMode: true });
     // The engine is on in the chat: Space starts a leader sequence.
@@ -427,7 +427,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("registry fence regression: the engine stays on while the chat host re-renders with Vim mode on", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp({ vimMode: true });
     await act(async () => {

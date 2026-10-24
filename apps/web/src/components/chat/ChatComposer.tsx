@@ -296,6 +296,11 @@ import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
 import { useRestingComposerControlsLayout } from "./useRestingComposerControlsLayout";
 import { useProviderWorkspaceSnapshotRefresh } from "./useProviderWorkspaceSnapshotRefresh";
 import { useComposerProviderModel } from "./useComposerProviderModel";
+import {
+  COMPOSER_USES_COMBINED_PICKER,
+  useComposerCombinedPicker,
+  useOpenCombinedPickerOnEffortShortcut,
+} from "./useComposerCombinedPicker";
 import { useComposerImageGroups } from "./useComposerImageGroups";
 import { useComposerStash } from "./useComposerStash";
 import { useComposerContextImport } from "./useComposerContextImport";
@@ -530,7 +535,7 @@ export interface ChatComposerProps {
     instanceId: ProviderInstanceId,
     model: string,
     options?: { focusComposer?: boolean },
-  ) => void;
+  ) => boolean;
   onOpenProviderSetup: (instanceId: ProviderInstanceId) => void;
   getModelDisabledReason: (instanceId: ProviderInstanceId, model: string) => string | null;
   toggleInteractionMode: () => void;
@@ -2640,6 +2645,27 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const iconOnlyBlockCount = composerControlsCollapsed
     ? restingControlsIconOnlyBlockCount
     : expandedControlsIconOnlyBlockCount;
+  const combinedPicker = useComposerCombinedPicker({
+    composerDraftTarget,
+    instanceId: selectedInstanceId,
+    driverKind: selectedProvider,
+    model: selectedModelForPickerWithCustomFallback,
+    models: selectedProviderModels,
+    modelOptions: composerModelOptions?.[selectedInstanceId],
+    reportedModelSelection,
+    prompt,
+    promptRef,
+    runtimeMode: compatibleRuntimeMode,
+    planModeEnabled: settings.planModeEnabled,
+    compactTrigger: composerControlsCollapsed && !showInlineRestingControls,
+    showsMultipleModels: multipleModelSelections !== null,
+    selectModel: onProviderModelSelect,
+    setRuntimeMode: handleRuntimeModeChange,
+    setPrompt: (nextPrompt) => editPromptFromTraitsStable(() => nextPrompt),
+    scheduleComposerFocus,
+    clearMultipleModels: () => setMultipleModelSelections(null),
+    pickerOpen: isComposerModelPickerOpen,
+  });
   const composerControls = (
     <ComposerControlsBar
       environmentId={environmentId}
@@ -2693,6 +2719,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       onModelPickerOpenChange={setIsComposerModelPickerOpen}
       modelPickerIconClassName={composerProviderState.modelPickerIconClassName}
       getModelDisabledReason={getModelDisabledReason}
+      {...(COMPOSER_USES_COMBINED_PICKER ? { combinedPicker } : {})}
     />
   );
   const showTasksTab =
@@ -3167,6 +3194,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setIsComposerModelPickerOpen(true);
   };
   const openModelPickerStable = useStableCallback(openModelPicker);
+  useOpenCombinedPickerOnEffortShortcut({
+    enabled:
+      COMPOSER_USES_COMBINED_PICKER && !isComposerModelPickerOpen && !showProviderUnavailable,
+    openOnMoreOptions: combinedPicker.openOnMoreOptions,
+    openPicker: openModelPickerStable,
+  });
 
   useCommandHandlers({
     "composer.attachFiles": () => {
@@ -3291,6 +3324,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         }
       },
       openControl: (command) => {
+        if (
+          COMPOSER_USES_COMBINED_PICKER &&
+          (command === "composer.mode" || command === "composer.effort")
+        ) {
+          if (command === "composer.effort") combinedPicker.openOnMoreOptions();
+          openModelPickerStable();
+          return;
+        }
         if (composerBlurFrameRef.current !== null) {
           window.cancelAnimationFrame(composerBlurFrameRef.current);
           composerBlurFrameRef.current = null;
@@ -3456,6 +3497,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       applyPromptReplacementStable,
       isComposerModelPickerOpen,
       openModelPickerStable,
+      combinedPicker.openOnMoreOptions,
       readComposerSnapshotStable,
       resetComposerTrigger,
       setComposerTrigger,

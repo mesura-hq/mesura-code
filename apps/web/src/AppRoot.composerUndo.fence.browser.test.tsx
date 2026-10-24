@@ -45,11 +45,15 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 
 // The boundaries the fixture replaces: see `test/appRootFenceMocks.tsx`.
 const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("./state/presentation", async (original) =>
+  (await fenceMocks()).mockPresentation(original),
+);
+vi.mock("./connection/runtime", async () => (await fenceMocks()).mockConnectionRuntime());
 vi.mock("./state/entities", async (original) => (await fenceMocks()).mockEntities(original));
 vi.mock("./state/environments", async (original) =>
   (await fenceMocks()).mockEnvironments(original),
 );
-vi.mock("./state/query", async () => (await fenceMocks()).mockQuery());
+vi.mock("./state/query", async (original) => (await fenceMocks()).mockQuery(original));
 vi.mock("./state/queries", async (original) => (await fenceMocks()).mockQueries(original));
 vi.mock("./state/threads", async (original) => (await fenceMocks()).mockThreads(original));
 vi.mock("./state/use-atom-command", async () => (await fenceMocks()).mockAtomCommand());
@@ -108,29 +112,26 @@ let container: HTMLDivElement;
 let threadSequence = 0;
 
 async function setupBrowserFixture0() {
-
   installKeyEngine();
-
-
 
   fixture.vimMode = false;
   fixture.highlights.clear();
   container = document.createElement("div");
   document.body.append(container);
 
-return {async [Symbol.asyncDispose]() {
-
-  await act(async () => root?.[Symbol.asyncDispose]());
-  root = undefined;
-  router = undefined;
-  container.remove();
-  fixture.threads.clear();
-  fixture.threadStates.clear();
-  fixture.environments[0]!.connection.phase = "connected";
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      await act(async () => root?.[Symbol.asyncDispose]());
+      root = undefined;
+      router = undefined;
+      container.remove();
+      fixture.threads.clear();
+      fixture.threadStates.clear();
+      fixture.environments[0]!.connection.phase = "connected";
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    },
+  };
 }
 
 /** Registers a thread with an id no other test uses, and returns that id. */
@@ -147,9 +148,6 @@ function addThread(label: string, assistantText: string): ThreadId {
  * A thread whose assistant reply has four one-line paragraphs, so a cursor
  * moved up from the last line is told apart from a fresh one.
  */
-
-
-
 
 async function settle(): Promise<void> {
   for (let round = 0; round < 5; round += 1) {
@@ -292,7 +290,7 @@ function composerChipCount(): number {
 
 describe("composer undo app fence: one history per draft", () => {
   it("composer undo app fence spec: an insert session in the real composer is one undo step, and Ctrl+R redoes it", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const thread = addThread("insert", "An answer.");
     await mountApp(thread);
@@ -309,7 +307,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("composer undo app fence spec: sending the prompt starts a fresh history for the next draft", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const thread = addThread("send", "An answer.");
     await mountApp(thread);
@@ -332,7 +330,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("composer undo app fence spec: switching thread starts a fresh history for the other thread's draft", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const threadA = addThread("switch-a", "Answer A.");
     const threadB = addThread("switch-b", "Answer B.");
@@ -355,7 +353,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("composer undo app fence spec: returning to a thread walks back that thread's own history", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const threadA = addThread("return-a", "Answer A.");
     const threadB = addThread("return-b", "Answer B.");
@@ -382,7 +380,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("composer undo app fence spec: a palette round trip pushes no undo step and keeps the history", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const thread = addThread("palette", "An answer.");
     await mountApp(thread);
@@ -407,7 +405,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("composer undo app fence: inline tokens", () => {
   it("composer undo app fence spec: a mention and a citation come back as the same tokens and chips after undo and redo", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const thread = addThread("tokens", "An answer.");
     const prompt = `@AGENTS.md ${citationSource} tail`;
@@ -437,7 +435,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("composer undo app fence: guards", () => {
   it("composer undo app fence guard: u inside one normal-mode session undoes the last change in the real composer", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const thread = addThread("guard", "An answer.");
     await mountApp(thread);
@@ -458,7 +456,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 // soon as the send was dispatched, even when the send kept the draft.
 describe("composer undo app fence: review regressions", () => {
   it("composer undo app fence regression: a send refused while the environment reconnects keeps the draft's history", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.environments[0]!.connection.phase = "reconnecting";
     const thread = addThread("refused", "An answer.");

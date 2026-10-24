@@ -34,7 +34,9 @@ import {
   FILL_PREVIEW_VIEWPORT,
   INCOGNITO_BROWSER_PROFILE_ID,
   ThreadId,
+  type PreviewSessionSnapshot,
 } from "@t3tools/contracts";
+import type { ThreadPreviewState } from "~/previewStateStore";
 
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -48,6 +50,27 @@ const STUB_BROWSER_DEFAULTS = {
   profiles: BUILT_IN_BROWSER_PROFILES,
   profileId: DEFAULT_BROWSER_PROFILE_ID,
 };
+const STUB_BROWSER_SNAPSHOT = {
+  threadId: "thread-1",
+  tabId: "tab-1",
+  runtime: "desktop",
+  navStatus: { _tag: "Success", url: "http://example.com/", title: "Example" },
+  canGoBack: false,
+  canGoForward: false,
+  updatedAt: "2026-10-08T12:00:00.000Z",
+} satisfies PreviewSessionSnapshot;
+const STUB_PREVIEW_STATE = {
+  snapshot: STUB_BROWSER_SNAPSHOT,
+  activeTabId: STUB_BROWSER_SNAPSHOT.tabId,
+  serverEpoch: null,
+  serverRevision: 0,
+  listLoaded: true,
+  suppressedTabIds: new Set<string>(),
+  desktopOverlay: null,
+  desktopByTabId: {},
+  recentlySeenUrls: [],
+  sessions: { [STUB_BROWSER_SNAPSHOT.tabId]: STUB_BROWSER_SNAPSHOT },
+} satisfies ThreadPreviewState;
 
 vi.mock("~/browser/BrowserSurfaceSlot", () => ({
   BrowserSurfaceSlot: (props: { visible: boolean }) => {
@@ -55,16 +78,19 @@ vi.mock("~/browser/BrowserSurfaceSlot", () => ({
     return <div data-testid="browser-slot" />;
   },
 }));
-vi.mock("~/browserHistoryStore", () => ({
+vi.mock("~/browserHistoryStore", async (original) => ({
+  ...(await original<typeof import("~/browserHistoryStore")>()),
   recordVisitForThread: vi.fn(),
   setTitleForThreadUrl: vi.fn(),
   removeUrlForThread: vi.fn(),
   BROWSER_HISTORY_MAX_ENTRIES_PER_PROJECT: 50,
   useThreadRecentHistory: () => [],
 }));
-vi.mock("~/browser/browserDefaults", () => ({
+vi.mock("~/browser/browserDefaults", async (original) => ({
+  ...(await original<typeof import("~/browser/browserDefaults")>()),
   useBrowserDefaults: () => STUB_BROWSER_DEFAULTS,
   getBrowserDefaults: () => STUB_BROWSER_DEFAULTS,
+  resolveBrowserDefaults: async () => STUB_BROWSER_DEFAULTS,
   browserDefaultOpenViewport: () => FILL_PREVIEW_VIEWPORT,
   browserDefaultOpenProfileId: () => DEFAULT_BROWSER_PROFILE_ID,
   browserDefaultTabState: () => ({
@@ -73,31 +99,21 @@ vi.mock("~/browser/browserDefaults", () => ({
   }),
   browserResponsiveViewportForToggle: () => FILL_PREVIEW_VIEWPORT,
 }));
-vi.mock("~/previewStateStore", () => ({
+vi.mock("~/previewStateStore", async (original) => ({
+  ...(await original<typeof import("~/previewStateStore")>()),
   isPreviewSupportedInRuntime: () => true,
   rememberPreviewUrl: vi.fn(),
   updatePreviewServerSnapshot: vi.fn(),
-  useThreadPreviewState: () => ({
-    activeTabId: "tab-1",
-    serverEpoch: null,
-    desktopByTabId: {},
-    recentlySeenUrls: [],
-    sessions: {
-      "tab-1": {
-        threadId: "thread-1",
-        tabId: "tab-1",
-        navStatus: { _tag: "Success", url: "http://example.com/", title: "Example" },
-        canGoBack: false,
-        canGoForward: false,
-        updatedAt: "2026-10-08T12:00:00.000Z",
-      },
-    },
-  }),
+  useThreadPreviewState: () => STUB_PREVIEW_STATE,
 }));
 vi.mock("@t3tools/client-runtime/state/session", async (original) =>
   (await import("../../test/appRootFenceMocks")).mockRuntimeSession(original),
 );
-vi.mock("~/state/environments", () => ({
+vi.mock("~/connection/runtime", async () =>
+  (await import("../../test/appRootFenceMocks")).mockConnectionRuntime(),
+);
+vi.mock("~/state/environments", async (original) => ({
+  ...(await original<typeof import("~/state/environments")>()),
   useEnvironment: () => ({ label: "Fence" }),
   useEnvironmentHttpBaseUrl: () => "http://fence.invalid:3773",
   usePrimaryEnvironmentId: () => THREAD_REF.environmentId,
@@ -106,7 +122,6 @@ vi.mock("~/state/entities", async (original) => ({
   ...(await original<typeof import("~/state/entities")>()),
   useEnvironmentSupportsServerBrowser: () => false,
 }));
-vi.mock("~/state/preview", () => ({ previewEnvironment: { open: {}, resize: {} } }));
 vi.mock("~/state/use-atom-command", () => ({ useAtomCommand: () => vi.fn() }));
 vi.mock("~/browser/browserRecording", () => ({
   findActiveBrowserRecordingRuntimeTabId: vi.fn(() => null),
@@ -135,7 +150,10 @@ vi.mock("./previewBridge", () => ({
   },
 }));
 vi.mock("./usePreviewSession", () => ({ usePreviewSession: vi.fn() }));
-vi.mock("./AgentBrowserCursor", () => ({ AgentBrowserCursor: () => null }));
+vi.mock("./AgentBrowserCursor", async (original) => ({
+  ...(await original<typeof import("./AgentBrowserCursor")>()),
+  AgentBrowserCursor: () => null,
+}));
 
 import { appRootFence, makeFenceSession } from "../../test/appRootFenceMocks";
 
@@ -170,6 +188,7 @@ async function setupBrowserFixture0() {
       await root?.[Symbol.asyncDispose]();
       root = undefined;
       document.body.innerHTML = "";
+      appRootFence.sessions.delete(THREAD_REF.environmentId);
       vi.restoreAllMocks();
       vi.unstubAllGlobals();
     },
@@ -185,8 +204,14 @@ async function mountBrowserTab(): Promise<void> {
       </div>
       <div data-right-panel-surface-content data-testid="surface"></div>
     </div>`;
-  root = await renderBrowser(null, { container: document.querySelector('[data-testid="surface"]')!, router: false });
-  await act(async () => await root!.rerender(<PreviewPanel mode="embedded" threadRef={THREAD_REF} visible />));
+  root = await renderBrowser(null, {
+    container: document.querySelector('[data-testid="surface"]')!,
+    router: false,
+  });
+  await act(
+    async () =>
+      await root!.rerender(<PreviewPanel mode="embedded" threadRef={THREAD_REF} visible />),
+  );
 }
 
 const lastSlotVisible = () => recorded.slotVisible.at(-1);
@@ -220,9 +245,15 @@ describe("browser slot under the panel launcher", () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 
     document.body.innerHTML = `<div data-testid="surface"></div>`;
-    root = await renderBrowser(null, { container: document.querySelector('[data-testid="surface"]')!, router: false });
-    await act(async () =>
-      await root!.rerender(<PreviewPanel mode="embedded" threadRef={THREAD_REF} visible={false} />),
+    root = await renderBrowser(null, {
+      container: document.querySelector('[data-testid="surface"]')!,
+      router: false,
+    });
+    await act(
+      async () =>
+        await root!.rerender(
+          <PreviewPanel mode="embedded" threadRef={THREAD_REF} visible={false} />,
+        ),
     );
     expect(lastSlotVisible()).toBe(false);
   });
@@ -243,51 +274,52 @@ describe("browser tab focus", () => {
 async function renderBrowserPanel(
   onAddBrowserInProfile: (profileId: string) => void = () => undefined,
 ): Promise<void> {
-  await act(async () =>
-    await root!.rerender(
-      <RightPanelTabs
-        mode="inline"
-        keybindings={DEFAULT_RESOLVED_KEYBINDINGS}
-        getShortcutContext={() => ({
-          terminalFocus: false,
-          terminalOpen: false,
-          previewFocus: false,
-          previewOpen: false,
-          isWeb: false,
-          isDesktop: true,
-        })}
-        surfaces={[{ id: "browser:tab-1", kind: "preview", resourceId: "tab-1" }]}
-        environmentId={null}
-        activeSurfaceId="browser:tab-1"
-        pendingProjectKey={null}
-        previewSessions={{}}
-        desktopByTabId={{}}
-        terminalLabelsById={new Map()}
-        onActivate={() => undefined}
-        onCloseSurface={() => undefined}
-        onCloseOtherSurfaces={() => undefined}
-        onCloseSurfacesToRight={() => undefined}
-        onCloseAllSurfaces={() => undefined}
-        onCopyFilePath={() => undefined}
-        onAddBrowser={() => undefined}
-        onAddBrowserInProfile={onAddBrowserInProfile}
-        onAddTerminal={() => undefined}
-        onAddPullRequest={() => undefined}
-        onAddPullRequests={() => undefined}
-        onAddDiff={() => undefined}
-        onAddFiles={() => undefined}
-        onAddDevice={() => undefined}
-        browserAvailable
-        terminalAvailable={false}
-        diffAvailable={false}
-        filesAvailable={false}
-        pullRequestAvailable={false}
-        pullRequestsAvailable={false}
-        deviceAvailable={false}
-      >
-        <PreviewPanel mode="embedded" threadRef={THREAD_REF} visible />
-      </RightPanelTabs>,
-    ),
+  await act(
+    async () =>
+      await root!.rerender(
+        <RightPanelTabs
+          mode="inline"
+          keybindings={DEFAULT_RESOLVED_KEYBINDINGS}
+          getShortcutContext={() => ({
+            terminalFocus: false,
+            terminalOpen: false,
+            previewFocus: false,
+            previewOpen: false,
+            isWeb: false,
+            isDesktop: true,
+          })}
+          surfaces={[{ id: "browser:tab-1", kind: "preview", resourceId: "tab-1" }]}
+          environmentId={null}
+          activeSurfaceId="browser:tab-1"
+          pendingProjectKey={null}
+          previewSessions={{}}
+          desktopByTabId={{}}
+          terminalLabelsById={new Map()}
+          onActivate={() => undefined}
+          onCloseSurface={() => undefined}
+          onCloseOtherSurfaces={() => undefined}
+          onCloseSurfacesToRight={() => undefined}
+          onCloseAllSurfaces={() => undefined}
+          onCopyFilePath={() => undefined}
+          onAddBrowser={() => undefined}
+          onAddBrowserInProfile={onAddBrowserInProfile}
+          onAddTerminal={() => undefined}
+          onAddPullRequest={() => undefined}
+          onAddPullRequests={() => undefined}
+          onAddDiff={() => undefined}
+          onAddFiles={() => undefined}
+          onAddDevice={() => undefined}
+          browserAvailable
+          terminalAvailable={false}
+          diffAvailable={false}
+          filesAvailable={false}
+          pullRequestAvailable={false}
+          pullRequestsAvailable={false}
+          deviceAvailable={false}
+        >
+          <PreviewPanel mode="embedded" threadRef={THREAD_REF} visible />
+        </RightPanelTabs>,
+      ),
   );
 }
 
@@ -297,7 +329,10 @@ describe("browser profile choice in the panel launcher", () => {
 
     const opened: string[] = [];
     document.body.innerHTML = `<div data-preview-panel-mode="inline" data-testid="panel"></div>`;
-    root = await renderBrowser(null, { container: document.querySelector('[data-testid="panel"]')!, router: false });
+    root = await renderBrowser(null, {
+      container: document.querySelector('[data-testid="panel"]')!,
+      router: false,
+    });
     await renderBrowserPanel((profileId) => opened.push(profileId));
     const launcher = () => document.querySelector('[aria-label="Open a surface"]');
     await act(() => openPanelLauncher());
@@ -326,7 +361,10 @@ describe("browser panel launcher route disposal", () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 
     document.body.innerHTML = '<div data-testid="panel"></div>';
-    root = await renderBrowser(null, { container: document.querySelector('[data-testid="panel"]')!, router: false });
+    root = await renderBrowser(null, {
+      container: document.querySelector('[data-testid="panel"]')!,
+      router: false,
+    });
     await renderBrowserPanel();
     expect(lastSlotVisible()).toBe(true);
     await act(() => openPanelLauncher());

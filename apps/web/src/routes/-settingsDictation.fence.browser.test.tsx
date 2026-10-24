@@ -11,7 +11,13 @@ import { act, render as renderBrowser, type Screen } from "../../test/render";
  */
 import { DEFAULT_SERVER_SETTINGS, SECRET_SETTING_REDACTION_MARKER } from "@t3tools/contracts";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
-import { createMemoryHistory, createRootRoute, createRoute, createRouter, useLocation } from "@tanstack/react-router";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  useLocation,
+} from "@tanstack/react-router";
 
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -96,8 +102,6 @@ vi.mock("~/components/clerk/T3ConnectSidebarSignIn", () => ({
 
 import { closeTranscriptionsList } from "~/components/dictation/TranscriptionsList";
 
-
-
 import { Route as SettingsDictationRoute } from "./settings.dictation";
 
 const { Outlet, RouterProvider } = await import("@tanstack/react-router");
@@ -157,7 +161,6 @@ async function settle(): Promise<void> {
 }
 
 async function mountSettings(): Promise<void> {
-
   container = document.createElement("div");
   document.body.append(container);
   router = createSettingsRouter();
@@ -261,30 +264,26 @@ function dictationPatches(): Array<Record<string, unknown>> {
 }
 
 async function setupBrowserFixture0() {
-
-
   fixture.dictation = { openAiApiKey: "", vocabularyHints: [] };
   fixture.updates = [];
   fixture.jobReads = [];
 
-return {async [Symbol.asyncDispose]() {
-
-  closeTranscriptionsList();
-  await act(async () => root?.[Symbol.asyncDispose]());
-  container?.remove();
-  root = undefined;
-  container = undefined;
-  router = undefined;
-  vi.unstubAllGlobals();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      closeTranscriptionsList();
+      await act(async () => root?.[Symbol.asyncDispose]());
+      container?.remove();
+      root = undefined;
+      container = undefined;
+      router = undefined;
+      vi.unstubAllGlobals();
+    },
+  };
 }
-
-
 
 describe("dictation settings guards", () => {
   it("dictation settings guard: the settings navigation still lists the existing sections and opens Providers", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountSettings();
     for (const label of ["General", "Providers", "Integrations", "Connections", "Archive"]) {
@@ -298,14 +297,14 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("dictation settings page (criterion 1: OpenAI key)", () => {
   it("dictation settings: the settings navigation lists Dictation and opens a page with a password field", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const page = await openDictationPage();
     expect(keyField(page).type).toBe("password");
   });
 
   it("dictation settings: saving a typed OpenAI key sends it in one server settings update for the environment", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const page = await openDictationPage();
     await typeInto(keyField(page), "sk-proj-fence-key");
@@ -317,7 +316,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation settings: a stored key is never shown in the password field", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.dictation = { openAiApiKey: REDACTION_MARKER, vocabularyHints: [] };
     const page = await openDictationPage();
@@ -327,7 +326,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("dictation settings page (criterion 2: configured status)", () => {
   it("dictation settings: the page reports a configured key when the stored value is the redaction marker", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.dictation = { openAiApiKey: REDACTION_MARKER, vocabularyHints: [] };
     const page = await openDictationPage();
@@ -336,14 +335,14 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation settings: the page reports no key when the stored key is empty", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const page = await openDictationPage();
     expect(page.textContent).toMatch(/not configured/i);
   });
 
   it("dictation settings: a stored value other than the redaction marker does not count as configured", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.dictation = { openAiApiKey: "sk-not-a-marker", vocabularyHints: [] };
     const page = await openDictationPage();
@@ -355,7 +354,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("dictation settings page (criterion 3: vocabulary hints)", () => {
   it("dictation settings: stored vocabulary hints show as one text field, one hint per line", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.dictation = { openAiApiKey: "", vocabularyHints: ["Mesura", "Symmetria", "Hyprland"] };
     const page = await openDictationPage();
@@ -363,7 +362,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation settings: saving vocabulary hints sends one list entry per non-empty line and keeps the stored key", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.dictation = { openAiApiKey: REDACTION_MARKER, vocabularyHints: [] };
     const page = await openDictationPage();
@@ -379,7 +378,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("dictation settings page (review P2-1: removing the key)", () => {
   it("dictation settings: Remove key deletes a configured key with an empty-key update", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.dictation = { openAiApiKey: REDACTION_MARKER, vocabularyHints: [] };
     const page = await openDictationPage();
@@ -393,7 +392,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation settings: Remove key is offered only when a key is configured", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const page = await openDictationPage();
     expect(buttonNamed(page, "Remove key")).toBeUndefined();
@@ -402,7 +401,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("dictation settings page (review P1-2: Transcriptions entry)", () => {
   it("dictation settings: Show transcriptions opens the list for the page's environment", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const page = await openDictationPage();
     const show = buttonNamed(page, "Show transcriptions");

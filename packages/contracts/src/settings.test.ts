@@ -441,3 +441,56 @@ describe("ServerSettings.neovimConfigDirectory", () => {
     ).toBe("/srv/nvim");
   });
 });
+
+describe("branch naming settings", () => {
+  it("defaults existing settings to the mesura static prefix", () => {
+    expect(decodeServerSettings({})).toMatchObject({
+      branchNamingMode: "static",
+      branchNamePrefix: "mesura",
+      branchNameInstructions: "",
+    });
+  });
+
+  it.each(["t3", "t3code"])(
+    "preserves the saved %s prefix and an independent custom project prefix",
+    (branchNamePrefix) => {
+      const input = {
+        branchNamingMode: "static",
+        branchNamePrefix,
+        projectSettingsOverrides: {
+          project: { branchNamingMode: "static", branchNamePrefix: "Team/Julius/" },
+        },
+      };
+      expect(encodeServerSettings(decodeServerSettings(input))).toMatchObject(input);
+      expect(decodeServerSettingsPatch(input)).toEqual(input);
+    },
+  );
+
+  it.each(["static", "semantic", "custom"])(
+    "round-trips %s and project overrides",
+    (branchNamingMode) => {
+      const naming = {
+        branchNamingMode,
+        branchNamePrefix: "team/",
+        branchNameInstructions: "Include the issue ID.",
+      };
+      const input = { ...naming, projectSettingsOverrides: { project: naming } };
+      expect(encodeServerSettings(decodeServerSettings(input))).toMatchObject(input);
+      expect(decodeServerSettingsPatch(input)).toEqual(input);
+    },
+  );
+});
+
+describe("ServerSettings.removeAgentCreditsOnMerge", () => {
+  it("keeps agent credits by default and accepts opt-in patches", () => {
+    expect(decodeServerSettings({}).removeAgentCreditsOnMerge).toBe(false);
+    expect(
+      decodeServerSettingsPatch({ removeAgentCreditsOnMerge: true }).removeAgentCreditsOnMerge,
+    ).toBe(true);
+    expect(
+      decodeServerSettings({
+        projectSettingsOverrides: { project: { removeAgentCreditsOnMerge: true } },
+      }).projectSettingsOverrides["project" as ProjectId]?.removeAgentCreditsOnMerge,
+    ).toBe(true);
+  });
+});

@@ -24,13 +24,22 @@ import { act, render as renderBrowser, type Screen } from "../test/render";
  *   `AppRoot.projectIconDiscovery.fence.test.tsx` does.
  */
 
-import { createMemoryHistory, createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+} from "@tanstack/react-router";
 import { expect, it, vi } from "vite-plus/test";
 import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
 import type { AppRouter } from "./router";
 
 import { appRootFence, makeFenceSession } from "./test/appRootFenceMocks";
 const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("./state/presentation", async (original) =>
+  (await fenceMocks()).mockPresentation(original, fixture.environments),
+);
+vi.mock("./connection/runtime", async () => (await fenceMocks()).mockConnectionRuntime());
 vi.mock("@legendapp/list/react", async () => (await fenceMocks()).mockLegendList());
 vi.mock("@t3tools/client-runtime/state/session", async (original) =>
   (await fenceMocks()).mockRuntimeSession(original),
@@ -194,12 +203,7 @@ vi.mock("./components/preview/PreviewAutomationHosts", () => ({
 vi.mock("./browser/ElectronBrowserHost", () => ({ ElectronBrowserHost: () => null }));
 vi.mock("./components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }));
 
-
 import { openCommandPalette } from "./commandPaletteBus";
-
-
-
-
 
 const { Outlet } = await import("@tanstack/react-router");
 const { AppRoot } = await import("./AppRoot");
@@ -251,9 +255,6 @@ function effectivePreview(projectId: string, effectiveSource: string) {
 }
 
 async function setupBrowserFixture0() {
-
-
-
   for (const environment of fixture.environments) {
     appRootFence.sessions.set(environment.environmentId, makeFenceSession());
   }
@@ -278,18 +279,16 @@ async function setupBrowserFixture0() {
   container = document.createElement("div");
   document.body.append(container);
 
-return {async [Symbol.asyncDispose]() {
-
-  await act(async () => root?.[Symbol.asyncDispose]());
-  root = undefined;
-  container.remove();
-  document.body.innerHTML = "";
-  vi.unstubAllGlobals();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      await act(async () => root?.[Symbol.asyncDispose]());
+      root = undefined;
+      container.remove();
+      document.body.innerHTML = "";
+      vi.unstubAllGlobals();
+    },
+  };
 }
-
-
 
 async function mountApp(page: "home" | "settings" = "home") {
   const route = createRootRoute({
@@ -398,7 +397,7 @@ async function pressEscape() {
 }
 
 it("icon manual guard: Update project icon opens the picker and cancel changes nothing", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await openPickerFromPalette();
   expect(document.body.textContent).toContain("logo.svg");
@@ -409,7 +408,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("icon manual fence: the palette writes every group member with its own root", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await openPickerFromPalette();
   await click(option("logo.svg"));
@@ -437,7 +436,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("icon manual fence: Settings writes every group member with its own root", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await openPickerFromSettings();
   await click(option("logo.svg"));
@@ -456,7 +455,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("icon manual guard: a failed member names its environment and stops the palette fan-out", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   fixture.failingEnvironmentId = "icon-laptop";
   await openPickerFromPalette();
@@ -467,7 +466,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("icon manual guard: a disconnected member blocks the Settings write before any update", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   fixture.environments[1]!.connection.phase = "disconnected";
   await openPickerFromSettings();
@@ -477,7 +476,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("icon manual fence: the palette says a repository icon still displays after a save", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   fixture.previews = [
     effectivePreview("brand-laptop", "mesura"),
@@ -493,7 +492,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("icon manual fence: Settings says a repository icon still displays after a save", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   fixture.previews = [
     effectivePreview("brand-laptop", "mesura"),
@@ -507,7 +506,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("icon manual fence: a save that displays says only that it was saved", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await openPickerFromPalette();
   await click(option("logo.svg"));
@@ -534,7 +533,7 @@ const expectedRoots = () =>
   ]);
 
 it("icon manual rework: the palette writes the roots captured when its picker opened", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await openPickerFromPalette();
   await moveCheckout("brand-server", "/srv/moved/brand");
@@ -546,7 +545,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("icon manual rework: Settings writes the roots captured when its picker opened", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await openPickerFromSettings();
   await moveCheckout("brand-server", "/srv/moved/brand");
@@ -558,7 +557,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("icon manual rework: a Settings reset names each member's root", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   fixture.projects = fixture.projects.map((project) => ({
     ...project,
@@ -582,7 +581,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("icon manual rework: checkouts that display different icons are each named", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   fixture.previews = [
     effectivePreview("brand-laptop", "project"),
@@ -596,7 +595,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("icon manual regression: a checkout missing the saved image is named in the confirmation", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   fixture.previews = [
     effectivePreview("brand-laptop", "project"),
@@ -612,7 +611,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("icon manual regression: every checkout missing the saved image gives one explanation", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   fixture.previews = [
     effectivePreview("brand-laptop", "detected"),
@@ -626,7 +625,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("icon manual regression: a reset confirms the fallback and starts no search", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   fixture.projects = fixture.projects.map((project) => ({
     ...project,

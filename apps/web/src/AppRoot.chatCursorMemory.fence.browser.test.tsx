@@ -41,11 +41,15 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 
 // The boundaries the fixture replaces: see `test/appRootFenceMocks.tsx`.
 const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("./state/presentation", async (original) =>
+  (await fenceMocks()).mockPresentation(original),
+);
+vi.mock("./connection/runtime", async () => (await fenceMocks()).mockConnectionRuntime());
 vi.mock("./state/entities", async (original) => (await fenceMocks()).mockEntities(original));
 vi.mock("./state/environments", async (original) =>
   (await fenceMocks()).mockEnvironments(original),
 );
-vi.mock("./state/query", async () => (await fenceMocks()).mockQuery());
+vi.mock("./state/query", async (original) => (await fenceMocks()).mockQuery(original));
 vi.mock("./state/queries", async (original) => (await fenceMocks()).mockQueries(original));
 vi.mock("./state/threads", async (original) => (await fenceMocks()).mockThreads(original));
 vi.mock("./state/use-atom-command", async () => (await fenceMocks()).mockAtomCommand());
@@ -98,28 +102,25 @@ let container: HTMLDivElement;
 let threadSequence = 0;
 
 async function setupBrowserFixture0() {
-
   installKeyEngine();
-
-
 
   fixture.vimMode = false;
   fixture.highlights.clear();
   container = document.createElement("div");
   document.body.append(container);
 
-return {async [Symbol.asyncDispose]() {
-
-  await act(async () => root?.[Symbol.asyncDispose]());
-  root = undefined;
-  router = undefined;
-  container.remove();
-  fixture.threads.clear();
-  fixture.threadStates.clear();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      await act(async () => root?.[Symbol.asyncDispose]());
+      root = undefined;
+      router = undefined;
+      container.remove();
+      fixture.threads.clear();
+      fixture.threadStates.clear();
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    },
+  };
 }
 
 /** Registers a thread with an id no other test uses, and returns that id. */
@@ -155,10 +156,6 @@ const SOFT_PARAGRAPH_RENDERED = "Cite the first half and the second half.";
 function addSoftBreakThread(): ThreadId {
   return addThread("soft", [SOFT_PARAGRAPH, "The next block.", "The closing block."].join("\n\n"));
 }
-
-
-
-
 
 async function settle(): Promise<void> {
   for (let round = 0; round < 5; round += 1) {
@@ -246,7 +243,7 @@ function timelineRowIds(): string[] {
 
 describe("cursor memory fence: the chat cursor per thread", () => {
   it("cursor memory fence spec: returning to thread A puts the cursor on the row and offset it had", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const threadA = addParagraphThread("A");
     const threadB = addParagraphThread("B");
@@ -269,7 +266,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("cursor memory fence spec: returning to thread B after thread A puts B's cursor back too", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const threadA = addParagraphThread("A");
     const threadB = addParagraphThread("B");
@@ -292,7 +289,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   // Review P1-1: a key that leaves the fallback cursor where it is must not
   // replace the remembered position of a row that is not mounted.
   it("cursor memory fence regression: a remembered row that unmounts and mounts again gets its cursor back", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const threadA = addParagraphThread("A");
     const threadB = addParagraphThread("B");
@@ -329,7 +326,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
   // Already true at the base, and must stay so: a guard.
   it("cursor memory fence guard: a thread opened for the first time starts at the first visible line", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const threadA = addParagraphThread("A");
     const threadC = addParagraphThread("C");
@@ -349,7 +346,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
   // Already true at the base (nothing is remembered), and must stay so: a guard.
   it("cursor memory fence guard: remembering the cursor writes nothing to localStorage or sessionStorage", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     // Node's test globals leave `localStorage` undefined, so both stores are
     // replaced with recording ones: a write to either is seen.
@@ -419,7 +416,7 @@ function readAssistantRowText(rowId: string): string {
 // from a row's first line never reached the row before.
 describe("cursor memory fence: vertical motion across rows", () => {
   it("cursor memory fence regression: k from a row's first line crosses the separator into the row before, and j comes back", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const thread = addParagraphThread("R");
     await mountApp(thread);
@@ -449,7 +446,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("cursor memory fence: soft breaks read as spaces", () => {
   it("cursor memory fence spec: a paragraph with one soft break is one line and j from it lands on the next block", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const thread = addSoftBreakThread();
     await mountApp(thread);
@@ -464,7 +461,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("cursor memory fence spec: a visual selection across a soft break cites the exact rendered text", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const thread = addSoftBreakThread();
     await mountApp(thread);

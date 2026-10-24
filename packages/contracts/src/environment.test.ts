@@ -14,6 +14,23 @@ const descriptor = {
 } as const;
 
 describe("ExecutionEnvironmentDescriptor", () => {
+  it("thread-link capability is optional for old environments and independent of server browser support", () => {
+    expect(decodeDescriptor(descriptor).capabilities.threadLinkPreview).toBeUndefined();
+    expect(
+      decodeDescriptor({ ...descriptor, capabilities: { serverBrowser: true } }).capabilities
+        .threadLinkPreview,
+    ).toBeUndefined();
+    expect(
+      decodeDescriptor({
+        ...descriptor,
+        capabilities: { serverBrowser: true, threadLinkPreview: true },
+      }).capabilities.threadLinkPreview,
+    ).toBe(true);
+    expect(
+      decodeDescriptor({ ...descriptor, capabilities: { threadLinkPreview: false } }).capabilities
+        .threadLinkPreview,
+    ).toBe(false);
+  });
   it("decodes old, recognized and future manual installation descriptors", () => {
     expect(decodeDescriptor(descriptor).capabilities.serverInstallation).toBeUndefined();
     for (const installation of [{ kind: "npx" }, { kind: "npm-global", prefix: "/opt/node" }]) {

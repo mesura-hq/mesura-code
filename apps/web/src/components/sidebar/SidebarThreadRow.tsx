@@ -1,3 +1,4 @@
+import { threadBranchCardLabel } from "./threadBranchLabel";
 import { FactoryRunThreadLabel } from "../../factory/FactoryRunThreadLabel";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "../ThreadHoverCard";
 import { ThreadTerminalStatusButton } from "../ThreadStatusIndicators";
@@ -370,9 +371,16 @@ function SnoozeMenuButton(props: {
   timestampFormat: TimestampFormat;
 }) {
   const { open, onOpenChange, onSnooze, timestampFormat } = props;
-  const presets = open ? resolveSnoozePresets(new Date(), timestampFormat) : [];
+  const [openedAt, setOpenedAt] = useState(() => new Date());
+  const presets = open ? resolveSnoozePresets(openedAt, timestampFormat) : [];
   return (
-    <Menu open={open} onOpenChange={onOpenChange}>
+    <Menu
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (nextOpen) setOpenedAt(new Date());
+        onOpenChange(nextOpen);
+      }}
+    >
       <Tooltip>
         <TooltipTrigger
           render={
@@ -851,6 +859,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     now: new Date().toISOString(),
   }));
   if (snoozeGateClock.thread !== thread) {
+    // oxlint-disable-next-line react/purity -- This guarded state reset captures one clock value per thread change; a periodic row clock regresses streaming performance.
     setSnoozeGateClock({ thread, now: new Date().toISOString() });
   }
   const snoozeGateNow = snoozeGateClock.now;
@@ -1440,7 +1449,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 <>
                   <ThreadWorktreeIndicator thread={thread} />
                   <span className="flex min-w-0 flex-1 text-muted-foreground/40">
-                    <MiddleTruncate value={thread.branch} showTitle={false} />
+                    <MiddleTruncate
+                      value={threadBranchCardLabel(thread.branch)}
+                      showTitle={false}
+                    />
                   </span>
                 </>
               ) : showsScratchMachine ? (

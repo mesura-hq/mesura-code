@@ -31,13 +31,15 @@ import {
 } from "../../modelSelection";
 import { useEnvironmentProviders } from "../../state/environments";
 import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
-import { ProviderModelPicker } from "../chat/ProviderModelPicker";
-import { TraitsPicker } from "../chat/TraitsPicker";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
-import { toastManager } from "../ui/toast";
 import { Button } from "../ui/button";
+import { ProviderModelPicker } from "../chat/ProviderModelPicker";
+import { TraitsPicker } from "../chat/TraitsPicker";
+import { toastManager } from "../ui/toast";
+import { CombinedPickerSettings } from "./CombinedPickerSettings";
+import { withStoredOptions } from "./combinedPickerSettings";
 import {
   SETTINGS_PICKER_TRIGGER_CLASSNAME,
   SettingResetButton,
@@ -151,10 +153,9 @@ export function SourceControlWritingSettingsSection() {
     activeSelection.instanceId,
     activeSelection.model,
   );
-  const writerModelDisabledReason = useScopedModelDisabledReason(settings, instanceEntries);
-  const writerInstanceEntry = instanceEntries.find(
-    (entry) => entry.instanceId === activeSelection.instanceId,
-  );
+  const writerModelDisabledReason = useScopedModelDisabledReason(settings, instanceEntries, {
+    requireTextGeneration: true,
+  });
   const usesReviewGuideModel = settings.reviewGuideModelSelection !== null;
   const reviewGuideSelection = resolveAppModelSelectionState(
     {
@@ -352,16 +353,25 @@ export function SourceControlWritingSettingsSection() {
                 </span>
               ) : null}
               {usesDedicatedModel && canEnableDedicatedModel ? (
-                <ProviderModelPicker
+                <CombinedPickerSettings
                   environmentId={environmentId}
-                  activeInstanceId={activeSelection.instanceId}
-                  model={activeSelection.model}
-                  lockedProvider={null}
+                  kind="source-control-writing"
+                  selection={withStoredOptions(
+                    activeSelection,
+                    resolveSourceControlWriterModelSelection(
+                      settings,
+                      projectEffectiveTextGenerationProviders,
+                      target?.projectId ?? null,
+                    ),
+                  )}
                   instanceEntries={instanceEntries}
                   modelOptionsByInstance={modelOptionsByInstance}
-                  triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
+                  planModeEnabled={
+                    settings.planModeEnabled || selectsPlanAgent(activeSelection.options)
+                  }
+                  mixedModel={mixedWriterModel}
                   triggerAriaLabel="Source control writer model"
-                  {...(mixedWriterModel ? { triggerLabel: "Mixed" } : {})}
+                  rejectedTitle="Source control writer model not saved"
                   {...(environmentId
                     ? {
                         onOpenProviderSetup: (instanceId: ProviderInstanceId) => {
@@ -373,47 +383,15 @@ export function SourceControlWritingSettingsSection() {
                       }
                     : {})}
                   getModelDisabledReason={writerModelDisabledReason}
-                  onInstanceModelChange={(instanceId, model) => {
-                    const reason = writerModelDisabledReason(instanceId, model);
-                    if (reason) {
-                      toastManager.add({
-                        type: "error",
-                        title: "Source control writer model not saved",
-                        description: reason,
-                      });
-                      return;
+                  onChange={({ modelSelection }) => {
+                    // The complete accepted options; unedited saved values stay.
+                    if (modelSelection) {
+                      updateSettings({ sourceControlWriterModelSelection: modelSelection });
                     }
-                    updateSettings({
-                      sourceControlWriterModelSelection: createModelSelection(instanceId, model),
-                    });
                   }}
                 />
               ) : null}
-              {usesDedicatedModel &&
-              canEnableDedicatedModel &&
-              !mixedWriterModel &&
-              writerInstanceEntry ? (
-                <TraitsPicker
-                  provider={writerInstanceEntry.driverKind}
-                  models={writerInstanceEntry.models}
-                  model={activeSelection.model}
-                  modelOptions={activeSelection.options ?? []}
-                  allowPromptInjectedEffort={false}
-                  planModeEnabled={
-                    settings.planModeEnabled || selectsPlanAgent(activeSelection.options)
-                  }
-                  triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                  onModelOptionsChange={(options) =>
-                    updateSettings({
-                      sourceControlWriterModelSelection: createModelSelection(
-                        activeSelection.instanceId,
-                        activeSelection.model,
-                        options,
-                      ),
-                    })
-                  }
-                />
-              ) : null}
+
               <Switch
                 checked={usesDedicatedModel}
                 disabled={!usesDedicatedModel && !canEnableDedicatedModel}

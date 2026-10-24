@@ -1,4 +1,5 @@
 import {
+  type AuthEnvironmentScope,
   AuthEnvironmentMaintainScope,
   AuthDiagnosticsReadScope,
   AuthFilesystemReadScope,
@@ -26,6 +27,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as RpcTest from "effect/rpc/RpcTest";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as PreviewManager from "../preview/Manager.ts";
 
 import {
   RPC_REQUIRED_SCOPES,
@@ -35,6 +38,17 @@ import {
 import * as RpcAuthorization from "./RpcAuthorization.ts";
 
 describe("RPC authorization scopes", () => {
+  it("thread-link allocation requires preview operation while observation stays read-only", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.previewOpenLinkTarget)).toBe(
+      AuthPreviewOperateScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.previewOpen)).toBe(AuthPreviewOperateScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.previewClose)).toBe(AuthPreviewOperateScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.previewList)).toBe(AuthOrchestrationReadScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.subscribePreviewEvents)).toBe(
+      AuthOrchestrationReadScope,
+    );
+  });
   it("declares exactly one scope for every RPC in the server group", () => {
     expect(new Set(Object.keys(RPC_REQUIRED_SCOPES))).toEqual(new Set(WsRpcGroup.requests.keys()));
   });
@@ -284,6 +298,57 @@ describe("RPC authorization scopes", () => {
     }
   });
 });
+
+it.effect(
+  "thread-link RPC denies allocation before its handler and allows the preview grant without thread operation",
+  () =>
+    Effect.gen(function* () {
+      const group = WsRpcGroup.omit(
+        ...[...WsRpcGroup.requests.keys()].filter(
+          (
+            tag,
+          ): tag is Exclude<
+            keyof typeof RPC_REQUIRED_SCOPES,
+            typeof WS_METHODS.previewOpenLinkTarget
+          > => tag !== WS_METHODS.previewOpenLinkTarget,
+        ),
+      );
+      let allocations = 0;
+      const manager = yield* PreviewManager.make.pipe(Effect.provide(NodeCrypto.layer));
+      const threadId = ThreadId.make("thread-link-auth");
+      const before = yield* manager.list({ threadId });
+      const clientFor = (scopes: readonly AuthEnvironmentScope[]) =>
+        RpcTest.makeClient(group).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              group.toLayerHandler(WS_METHODS.previewOpenLinkTarget, (input) =>
+                Effect.sync(() => {
+                  allocations++;
+                }).pipe(Effect.andThen(manager.openLinkTarget(input))),
+              ),
+              RpcAuthorization.layer(scopes),
+            ),
+          ),
+        );
+      const denied = yield* clientFor([AuthOrchestrationReadScope]);
+      expect(
+        yield* denied[WS_METHODS.previewOpenLinkTarget]({ threadId }).pipe(Effect.flip),
+      ).toMatchObject({
+        _tag: "EnvironmentAuthorizationError",
+        requiredPermission: AuthPreviewOperateScope,
+      });
+      expect(allocations).toBe(0);
+      expect(yield* manager.list({ threadId })).toEqual(before);
+      const allowed = yield* clientFor([AuthPreviewOperateScope]);
+      const result = yield* allowed[WS_METHODS.previewOpenLinkTarget]({ threadId });
+      expect(result).toEqual({
+        ...(yield* manager.list({ threadId })),
+        selectedTabId: result.sessions[0]?.tabId,
+      });
+      expect(result.sessions).toHaveLength(1);
+      expect(allocations).toBe(1);
+    }).pipe(Effect.scoped),
+);
 
 it("requires operate permission for host retry while preserving read-only listing", () => {
   expect(requiredScopeForDeviceList({})).toBe(AuthOrchestrationReadScope);

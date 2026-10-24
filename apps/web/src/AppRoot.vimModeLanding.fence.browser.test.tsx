@@ -39,11 +39,15 @@ import { ThreadId } from "@t3tools/contracts";
 
 // The boundaries the fixture replaces: see `test/appRootFenceMocks.tsx`.
 const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("./state/presentation", async (original) =>
+  (await fenceMocks()).mockPresentation(original),
+);
+vi.mock("./connection/runtime", async () => (await fenceMocks()).mockConnectionRuntime());
 vi.mock("./state/entities", async (original) => (await fenceMocks()).mockEntities(original));
 vi.mock("./state/environments", async (original) =>
   (await fenceMocks()).mockEnvironments(original),
 );
-vi.mock("./state/query", async () => (await fenceMocks()).mockQuery());
+vi.mock("./state/query", async (original) => (await fenceMocks()).mockQuery(original));
 vi.mock("./state/queries", async (original) => (await fenceMocks()).mockQueries(original));
 vi.mock("./state/threads", async (original) => (await fenceMocks()).mockThreads(original));
 vi.mock("./state/use-atom-command", async () => (await fenceMocks()).mockAtomCommand());
@@ -95,10 +99,7 @@ let root: Screen | undefined;
 let container: HTMLDivElement;
 
 async function setupBrowserFixture0() {
-
   installKeyEngine();
-
-
 
   seedThread();
   fixture.vimMode = false;
@@ -106,16 +107,16 @@ async function setupBrowserFixture0() {
   container = document.createElement("div");
   document.body.append(container);
 
-return {async [Symbol.asyncDispose]() {
-
-  await act(async () => useFileManagerStore.getState().setOpen(false));
-  await act(async () => root?.[Symbol.asyncDispose]());
-  root = undefined;
-  container.remove();
-  document.querySelector("[data-testid='terminal-drawer']")?.remove();
-  vi.unstubAllGlobals();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      await act(async () => useFileManagerStore.getState().setOpen(false));
+      await act(async () => root?.[Symbol.asyncDispose]());
+      root = undefined;
+      container.remove();
+      document.querySelector("[data-testid='terminal-drawer']")?.remove();
+      vi.unstubAllGlobals();
+    },
+  };
 }
 
 function seedThread() {
@@ -128,10 +129,6 @@ function seedThread() {
     ),
   ]);
 }
-
-
-
-
 
 async function settle(): Promise<void> {
   for (let round = 0; round < 5; round += 1) {
@@ -227,7 +224,7 @@ function sidebarRow(): HTMLElement {
 
 describe("vim landing fence: the palette returns where it was opened", () => {
   it("vim landing fence spec: palette from the chat in normal mode returns to the chat in NORMAL with the cursor kept", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp({ vimMode: true });
     // Two lines up from where a fresh cursor starts.
@@ -250,7 +247,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("vim landing fence spec: palette from the composer in normal mode returns to the composer in NORMAL", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp({ vimMode: true });
     await focusComposer();
@@ -265,7 +262,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("vim landing fence guard: palette from the composer in insert mode returns to the composer in INSERT", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp({ vimMode: true });
     await focusComposer();
@@ -401,7 +398,7 @@ describe("phone palette restoration through the real collapsed composer", () => 
   ])(
     "phone palette restore regression: $mode survives hidden editor at $width pixels",
     async ({ width, mode }) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+      await using _browserFixture0 = await setupBrowserFixture0();
 
       await withPaletteComposer(width, mode, "return", (composer) =>
         expectRestoredComposer(composer, mode),
@@ -412,7 +409,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   it.each(["NORMAL", "INSERT"])(
     "desktop palette restore guard: %s keeps nonempty draft and caret",
     async (mode) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+      await using _browserFixture0 = await setupBrowserFixture0();
 
       await withPaletteComposer(1184, mode, "return", (composer) =>
         expectRestoredComposer(composer, mode),
@@ -430,7 +427,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   ])(
     "phone palette restore ownership: $owner cancels deferred $mode focus",
     async ({ mode, owner }) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+      await using _browserFixture0 = await setupBrowserFixture0();
 
       await withPaletteComposer(412, mode, owner, async ({ editor, surface, prompt }) => {
         let activated = false;
@@ -527,7 +524,7 @@ describe("vim landing fence: a file manager row keeps the keyboard", () => {
   it.each(vimModeCases)(
     "vim landing fence guard: the Open file manager row hands the file manager the keyboard with $label",
     async ({ vimMode }) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+      await using _browserFixture0 = await setupBrowserFixture0();
 
       await mountApp({ vimMode });
       await openPalette();
@@ -548,7 +545,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("vim landing fence: pane chords into the chat land in normal mode", () => {
   it("vim landing fence spec: Ctrl+K from the terminal drawer lands in the chat scope in NORMAL", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp({ vimMode: true });
     const terminal = mountTerminalDrawer();
@@ -562,7 +559,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("vim landing fence spec: Ctrl+L from the sidebar lands in the chat scope in NORMAL", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp({ vimMode: true });
     await act(async () => sidebarRow().focus());
@@ -579,7 +576,7 @@ describe("vim landing fence: review regressions", () => {
   // Review P1-1: the engine consumes Escape and `i`, so a resume armed by the
   // palette's close must not outlive them.
   it("vim landing fence regression: after a palette round trip from composer NORMAL, Escape then i enters the composer in INSERT", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp({ vimMode: true });
     await focusComposer();
@@ -600,7 +597,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   // Review P1-2: entering the chat by a pane chord lands in NORMAL even when
   // the chat was left in VISUAL.
   it("vim landing fence regression: Ctrl+L from the sidebar after leaving the chat in VISUAL lands in NORMAL", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp({ vimMode: true });
     await press(key("v"));
@@ -614,7 +611,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("vim landing fence regression: Ctrl+K from the terminal drawer after leaving the chat in VISUAL lands in NORMAL", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp({ vimMode: true });
     await press(key("v"));
@@ -631,7 +628,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("vim landing fence: Vim mode off behaves as upstream", () => {
   it("vim landing fence guard: closing the palette focuses the composer with Vim mode off", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp({ vimMode: false });
     await openPalette();
@@ -640,7 +637,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("vim landing fence guard: Ctrl+K from the terminal drawer enters the composer with Vim mode off", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp({ vimMode: false });
     const terminal = mountTerminalDrawer();
@@ -651,7 +648,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("vim landing fence guard: Ctrl+L from the sidebar enters the composer with Vim mode off", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp({ vimMode: false });
     await act(async () => sidebarRow().focus());
@@ -664,7 +661,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 // The close callback waits for React to clear inert. Later owners must retain focus.
 describe("vim landing fence: deferred focus guards", () => {
   it("vim landing fence guard: reopening the palette before close focus runs keeps focus in the reopened palette", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp({ vimMode: true });
     await focusComposer();
@@ -691,7 +688,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("vim landing fence guard: unmounting the app after close preserves focus in another owner", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp({ vimMode: true });
     await openPalette();

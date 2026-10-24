@@ -103,11 +103,15 @@ function dispatchCommand(command: unknown, value: unknown) {
 }
 
 const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("./state/presentation", async (original) =>
+  (await fenceMocks()).mockPresentation(original),
+);
+vi.mock("./connection/runtime", async () => (await fenceMocks()).mockConnectionRuntime());
 vi.mock("./state/entities", async (original) => (await fenceMocks()).mockEntities(original));
 vi.mock("./state/environments", async (original) =>
   (await fenceMocks()).mockEnvironments(original),
 );
-vi.mock("./state/query", async () => (await fenceMocks()).mockQuery());
+vi.mock("./state/query", async (original) => (await fenceMocks()).mockQuery(original));
 vi.mock("./state/queries", async (original) => (await fenceMocks()).mockQueries(original));
 vi.mock("./state/threads", async (original) => (await fenceMocks()).mockThreads(original));
 vi.mock("@t3tools/client-runtime/state/session", async (original) =>
@@ -303,9 +307,6 @@ function makeThreadProjection(): OrchestrationV2ThreadProjection {
 }
 
 async function setupBrowserFixture0() {
-
-
-
   fixture.projection = makeThreadProjection();
   appRootFence.openThreadId = threadId;
   installFenceFontEvents();
@@ -342,23 +343,21 @@ async function setupBrowserFixture0() {
   container = document.createElement("div");
   document.body.append(container);
 
-return {async [Symbol.asyncDispose]() {
-
-  await act(async () => root?.[Symbol.asyncDispose]());
-  root = undefined;
-  container.remove();
-  setDictationMediaBackend(null);
-  useComposerDraftStore.getState().clearComposerContent(onScreenTarget);
-  useComposerDraftStore.getState().clearComposerContent(offScreenTarget);
-  usePendingUserInputDraftStore.setState({ requests: {} });
-  Reflect.deleteProperty(navigator, "clipboard");
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      await act(async () => root?.[Symbol.asyncDispose]());
+      root = undefined;
+      container.remove();
+      setDictationMediaBackend(null);
+      useComposerDraftStore.getState().clearComposerContent(onScreenTarget);
+      useComposerDraftStore.getState().clearComposerContent(offScreenTarget);
+      usePendingUserInputDraftStore.setState({ requests: {} });
+      Reflect.deleteProperty(navigator, "clipboard");
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    },
+  };
 }
-
-
 
 let router: ReturnType<typeof createRouter> | undefined;
 
@@ -645,7 +644,7 @@ function slotsIn(prompt: string | null) {
 
 describe("dictation phase 4 fence", () => {
   it("dictation phase 4 AC1: the microphone button and the toggle command record with MediaRecorder behind the shipped strip controls", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp();
 
@@ -691,7 +690,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 4 AC2: Alt+S, Alt+I and Alt+Enter select the mode while recording and while the last job transcribes", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Keep this draft");
     await mountApp();
@@ -729,7 +728,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 4 AC3: stopping drops the marker at the composer caret, then uploads and starts the job", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Hello world");
     await mountApp();
@@ -771,7 +770,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 4 AC3: a composer without a caret gets the marker at the end", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Existing draft");
     await mountApp();
@@ -794,7 +793,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 4 regression: selecting an inline Tiptap chip gives dictation no text caret and appends the marker", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const original = "Existing @AGENTS.md draft";
     useComposerDraftStore.getState().setPrompt(onScreenTarget, original);
@@ -827,7 +826,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 4 AC4: the marker draws six stepped wave bars and the mode icon, and holds still under reduced motion", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp();
     await startRecordingFromMicrophone();
@@ -848,7 +847,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 4 AC5: a completed job replaces its marker on screen and in a draft that is not on screen", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     // A marker this client did not drop: another device's job, which only that device fills.
     const foreignJobId = "6f1c2a9e-0d3b-4c8e-9a51-2b7d4e8f0a13";
@@ -902,7 +901,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 4 AC6: a completed job whose marker was deleted keeps its text in the Transcriptions list with one notice", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Draft");
     await mountApp();
@@ -926,7 +925,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 4 AC7: save mode drops no marker and copies the text when it arrives", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Untouched");
     await mountApp();
@@ -954,7 +953,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 4 AC8: a second recording starts while the first job is still transcribing", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp();
     await startRecordingFromMicrophone();
@@ -979,7 +978,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("dictation phase 4 regressions", () => {
   it("dictation phase 4 regression: after a page reload the mode keys steer the job that is still transcribing", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Before the reload");
     await mountApp();
@@ -1000,7 +999,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 4 regression: two transcripts landing together keep the caret where the user left it", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Hello big world");
     await mountApp();
@@ -1024,7 +1023,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("dictation phase 4 guards", () => {
   it("dictation phase 4 guard: typing into the composer and pressing Send still starts a turn with the text", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp();
     const editor = composerEditorElement();
@@ -1175,7 +1174,7 @@ const attachedFile: ComposerFileAttachment = {
 
 describe("dictation phase 5 fence", () => {
   it("dictation phase 5 AC1: a recording finished in send mode sends its draft once no marker remains", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Hello big world");
     await mountApp();
@@ -1207,7 +1206,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 5 AC1: an armed draft stays armed across a page reload", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Before the reload");
     await mountApp();
@@ -1221,7 +1220,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 5 AC2: pressing Send while a marker is pending arms the draft and shows the banner", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Draft");
     await mountApp();
@@ -1243,7 +1242,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 5 AC3: Don't send disarms the draft and keeps its text", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Draft");
     await mountApp();
@@ -1261,7 +1260,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 5 AC4: an armed draft whose thread is not on screen sends through the directed path with its files and is cleared", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Read the notes");
     // Attached as the composer attaches it: the file's chip goes into the prompt.
@@ -1297,7 +1296,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 5 AC5: a message with dictated parts carries one [voiced] prefix, and a typed one carries none", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Hello big world");
     await mountApp();
@@ -1333,7 +1332,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 5 AC6: a failed marker keeps the draft armed and unsent until a retry fills it", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Hello world");
     await mountApp();
@@ -1355,7 +1354,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 5 AC6: discarding the failed marker sends what the draft holds", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Hello world");
     await mountApp();
@@ -1372,7 +1371,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 5 AC7: a recording stopped while a question card has focus fills the card's answer, and send mode submits it", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.projection = withOpenQuestion(makeThreadProjection());
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Composer draft");
@@ -1408,7 +1407,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("dictation phase 5 guards", () => {
   it("dictation phase 5 guard: a filled send-mode draft is not sent while a button approval is pending", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.projection = withPendingApproval(makeThreadProjection());
     const [request] = fixture.projection.runtimeRequests;
@@ -1451,7 +1450,7 @@ describe("dictation phase 5 rework regressions", () => {
   }
 
   it("dictation phase 5 regression: what the user writes while an armed send is acknowledged stays in the draft", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Draft");
     await mountApp();
@@ -1476,7 +1475,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 5 regression: an edit made while an armed draft's files upload goes out with it", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Read the notes");
     useComposerDraftStore
@@ -1511,7 +1510,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 5 regression: an armed send the server refuses puts the draft back and stays unsent", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Draft");
     await mountApp();
@@ -1529,7 +1528,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 5 regression: a failed upload keeps the marker and the armed draft until Retry starts the job", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Must wait");
     fixture.failingUploads = 1;
@@ -1552,7 +1551,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 5 regression: a send-mode answer is submitted with its voiced tag while its thread is not on screen", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.projection = withOpenQuestion(makeThreadProjection());
     await mountApp();
@@ -1576,7 +1575,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 5 regression: Submit with a pending answer marker shows the banner, and Don't send keeps the answer unsent", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.projection = withOpenQuestion(makeThreadProjection());
     await mountApp();
@@ -1597,7 +1596,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 5 regression: the answer's marker goes at the field's caret", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.projection = withOpenQuestion(makeThreadProjection());
     await mountApp();
@@ -1622,7 +1621,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 5 regression: a dictated draft that goes to the queue keeps its voiced tag", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     // An open question makes Send queue the message.
     fixture.projection = withOpenQuestion(makeThreadProjection());
@@ -1640,7 +1639,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 5 regression: a file sent off screen carries its context record, so its reference resolves", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     useComposerDraftStore.getState().setPrompt(onScreenTarget, "Read the notes");
     useComposerDraftStore
@@ -1715,27 +1714,23 @@ async function mountWidgetPage() {
 describe("dictation phase 6 fence", () => {
   // The widget draws module state an earlier test's stopped recording may have left behind.
   async function setupBrowserFixture1() {
-
-
     useDictationSessionStore.setState({ session: null, lastJob: null });
     useDictationWidgetActivityStore.setState({ transcribing: {}, delivered: null, failed: null });
-  
-return {async [Symbol.asyncDispose]() {
 
-    await act(async () => widgetRoot?.[Symbol.asyncDispose]());
-    widgetRoot = undefined;
-    widgetContainer?.remove();
-    widgetContainer = undefined;
-    Reflect.deleteProperty(window, "mesuraDictationBridge");
-  
-}};
-}
-
-  
+    return {
+      async [Symbol.asyncDispose]() {
+        await act(async () => widgetRoot?.[Symbol.asyncDispose]());
+        widgetRoot = undefined;
+        widgetContainer?.remove();
+        widgetContainer = undefined;
+        Reflect.deleteProperty(window, "mesuraDictationBridge");
+      },
+    };
+  }
 
   it("dictation phase 6 AC1: a forwarded toggle records in the running app, and a second one stops into the composer", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     const desktop = installLoopbackDesktopBridge();
     await mountApp();
@@ -1752,8 +1747,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   });
 
   it("dictation phase 6 AC2: forwarded mode, pause, restart and cancel steer the recording like the in-window keys", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     const desktop = installLoopbackDesktopBridge();
     await mountApp();
@@ -1782,8 +1777,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   });
 
   it("dictation phase 6 AC1: with the thread off screen, a forwarded stop drops the marker into the last composer shown", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     const desktop = installLoopbackDesktopBridge();
     await mountApp();
@@ -1796,8 +1791,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   });
 
   it("dictation phase 6 AC3: the widget page draws the timer, the waveform, the mode and the target of the recording", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     const desktop = installLoopbackDesktopBridge();
     await mountApp();
@@ -1825,8 +1820,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   });
 
   it("dictation phase 6 AC3: a stopped recording publishes its transcription, and the widget says it is transcribing", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     const desktop = installLoopbackDesktopBridge();
     await mountApp();
@@ -1842,8 +1837,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   });
 
   it("dictation phase 6 AC4: a delivered transcript publishes its delivery time, and the widget shows the result", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     const desktop = installLoopbackDesktopBridge();
     await mountApp();
@@ -1863,23 +1858,19 @@ await using _browserFixture1 = await setupBrowserFixture1();
 
 describe("dictation phase 6 regressions", () => {
   async function setupBrowserFixture2() {
-
-
     useDictationSessionStore.setState({ session: null, lastJob: null });
     useDictationWidgetActivityStore.setState({ transcribing: {}, delivered: null, failed: null });
-  
-return {async [Symbol.asyncDispose]() {
 
-    Reflect.deleteProperty(window, "mesuraDictationBridge");
-  
-}};
-}
-
-  
+    return {
+      async [Symbol.asyncDispose]() {
+        Reflect.deleteProperty(window, "mesuraDictationBridge");
+      },
+    };
+  }
 
   it("dictation phase 6 regression: a stop goes straight from recording to transcribing, with no idle frame that would hide the widget", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture2 = await setupBrowserFixture2();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture2 = await setupBrowserFixture2();
 
     const desktop = installLoopbackDesktopBridge();
     await mountApp();
@@ -1905,23 +1896,19 @@ await using _browserFixture2 = await setupBrowserFixture2();
 
 describe("dictation phase 6 fence: a failed transcription", () => {
   async function setupBrowserFixture3() {
-
-
     useDictationSessionStore.setState({ session: null, lastJob: null });
     useDictationWidgetActivityStore.setState({ transcribing: {}, delivered: null, failed: null });
-  
-return {async [Symbol.asyncDispose]() {
 
-    await act(async () => widgetRoot?.[Symbol.asyncDispose]());
-    widgetRoot = undefined;
-    widgetContainer?.remove();
-    widgetContainer = undefined;
-    Reflect.deleteProperty(window, "mesuraDictationBridge");
-  
-}};
-}
-
-  
+    return {
+      async [Symbol.asyncDispose]() {
+        await act(async () => widgetRoot?.[Symbol.asyncDispose]());
+        widgetRoot = undefined;
+        widgetContainer?.remove();
+        widgetContainer = undefined;
+        Reflect.deleteProperty(window, "mesuraDictationBridge");
+      },
+    };
+  }
 
   async function recordAndFail(desktop: ReturnType<typeof installLoopbackDesktopBridge>) {
     await desktop.forward("dictation.toggle");
@@ -1935,8 +1922,8 @@ return {async [Symbol.asyncDispose]() {
   }
 
   it("dictation phase 6 failure: this device's failed job reaches the widget with the target", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture3 = await setupBrowserFixture3();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture3 = await setupBrowserFixture3();
 
     const desktop = installLoopbackDesktopBridge();
     await mountApp();
@@ -1952,8 +1939,8 @@ await using _browserFixture3 = await setupBrowserFixture3();
   });
 
   it("dictation phase 6 failure: a new recording replaces the failure in the widget", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture3 = await setupBrowserFixture3();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture3 = await setupBrowserFixture3();
 
     const desktop = installLoopbackDesktopBridge();
     await mountApp();
@@ -1968,8 +1955,8 @@ await using _browserFixture3 = await setupBrowserFixture3();
   });
 
   it("dictation phase 6 failure: a failed job this device did not start is not a widget failure", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture3 = await setupBrowserFixture3();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture3 = await setupBrowserFixture3();
 
     const desktop = installLoopbackDesktopBridge();
     await mountApp();
@@ -1987,27 +1974,23 @@ await using _browserFixture3 = await setupBrowserFixture3();
 
 describe("dictation phase 6 rework", () => {
   async function setupBrowserFixture4() {
-
-
     useDictationSessionStore.setState({ session: null, lastJob: null });
     useDictationWidgetActivityStore.setState({ transcribing: {}, delivered: null, failed: null });
-  
-return {async [Symbol.asyncDispose]() {
 
-    await act(async () => widgetRoot?.[Symbol.asyncDispose]());
-    widgetRoot = undefined;
-    widgetContainer?.remove();
-    widgetContainer = undefined;
-    Reflect.deleteProperty(window, "mesuraDictationBridge");
-  
-}};
-}
-
-  
+    return {
+      async [Symbol.asyncDispose]() {
+        await act(async () => widgetRoot?.[Symbol.asyncDispose]());
+        widgetRoot = undefined;
+        widgetContainer?.remove();
+        widgetContainer = undefined;
+        Reflect.deleteProperty(window, "mesuraDictationBridge");
+      },
+    };
+  }
 
   it("dictation phase 6 rework: a retried job that fails again reports the new failure", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture4 = await setupBrowserFixture4();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture4 = await setupBrowserFixture4();
 
     const desktop = installLoopbackDesktopBridge();
     await mountApp();
@@ -2038,9 +2021,9 @@ await using _browserFixture4 = await setupBrowserFixture4();
   });
 
   it("dictation phase 6 rework: level samples are published only while the window does not have focus", async () => {
-using _timers = fakeTimers();
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture4 = await setupBrowserFixture4();
+    using _timers = fakeTimers();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture4 = await setupBrowserFixture4();
 
     const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
     const desktop = installLoopbackDesktopBridge();
@@ -2065,27 +2048,23 @@ await using _browserFixture4 = await setupBrowserFixture4();
 
 describe("dictation phase 6 repair: Retry from the marker", () => {
   async function setupBrowserFixture5() {
-
-
     useDictationSessionStore.setState({ session: null, lastJob: null });
     useDictationWidgetActivityStore.setState({ transcribing: {}, delivered: null, failed: null });
-  
-return {async [Symbol.asyncDispose]() {
 
-    await act(async () => widgetRoot?.[Symbol.asyncDispose]());
-    widgetRoot = undefined;
-    widgetContainer?.remove();
-    widgetContainer = undefined;
-    Reflect.deleteProperty(window, "mesuraDictationBridge");
-  
-}};
-}
-
-  
+    return {
+      async [Symbol.asyncDispose]() {
+        await act(async () => widgetRoot?.[Symbol.asyncDispose]());
+        widgetRoot = undefined;
+        widgetContainer?.remove();
+        widgetContainer = undefined;
+        Reflect.deleteProperty(window, "mesuraDictationBridge");
+      },
+    };
+  }
 
   it("dictation phase 6 repair: the marker's Retry that fails again shows a new failure, with no transcribing in between", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture5 = await setupBrowserFixture5();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture5 = await setupBrowserFixture5();
 
     const desktop = installLoopbackDesktopBridge();
     await mountApp();
@@ -2136,7 +2115,7 @@ await using _browserFixture5 = await setupBrowserFixture5();
 // Symmetria Shell's session. The phase 5 AC7 test covers the question card.
 describe("dictation phase 8 guards", () => {
   it("dictation phase 8 guard: the composer strip shows a Mesura recording's phase, timer and mode", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp();
     await startRecordingFromMicrophone();

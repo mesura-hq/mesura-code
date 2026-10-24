@@ -1,3 +1,7 @@
+import { isCommandPaletteOpen } from "../commandPaletteBus";
+import { isEditableFocused } from "../lib/editableFocus";
+import { isPreviewFocused } from "../lib/previewFocus";
+import { getTerminalFocusOwner } from "../lib/terminalFocus";
 import {
   AuthPreviewOperateScope,
   AuthTerminalOperateScope,
@@ -9,7 +13,11 @@ import { closePreviewSession } from "../components/preview/closePreviewSession";
 import { useThreadTerminalActions } from "../components/terminal/useThreadTerminalActions";
 import { confirmTerminalClose } from "../lib/terminalCloseConfirm";
 import { readLocalApi } from "../localApi";
-import { setActivePreviewTab, useThreadPreviewState } from "../previewStateStore";
+import {
+  readThreadPreviewState,
+  setActivePreviewTab,
+  useThreadPreviewState,
+} from "../previewStateStore";
 import {
   selectActiveRightPanelSurface,
   selectThreadRightPanelState,
@@ -30,8 +38,10 @@ import { useStableCallback } from "./useStableCallback";
 export function useRightPanelSurfaceClose(input: {
   readonly threadRef: ScopedThreadRef | null;
   readonly terminalLabelsById: ReadonlyMap<string, string>;
+  readonly scheduleComposerFocus: (options?: { readonly canFocus?: () => boolean }) => void;
+  readonly isCurrentThread: (ref: ScopedThreadRef) => boolean;
 }) {
-  const { threadRef, terminalLabelsById } = input;
+  const { threadRef, terminalLabelsById, scheduleComposerFocus, isCurrentThread } = input;
   const closePreview = useAtomCommand(previewEnvironment.close, "preview close");
   const canOperatePreview = useEnvironmentScope(
     threadRef?.environmentId ?? null,
@@ -48,13 +58,17 @@ export function useRightPanelSurfaceClose(input: {
     // Without preview access only the local surface goes away. The
     // server record is in-memory bookkeeping, not a live view, and stays
     // listed until a client with the scope closes it or the server restarts.
+    let previewClose = Promise.resolve(true);
     if (canOperatePreview && surface.kind === "preview" && surface.resourceId) {
-      void closePreviewSession({
+      previewClose = closePreviewSession({
         closePreview,
         snapshot: previewState.sessions[surface.resourceId] ?? null,
         tabId: surface.resourceId,
         threadRef: ref,
-      });
+      }).then(
+        (result) => result._tag === "Success",
+        () => false,
+      );
     }
     if (
       surface.kind === "terminal" &&
@@ -65,6 +79,7 @@ export function useRightPanelSurfaceClose(input: {
         terminalActions.closeTerminalSession(terminalId);
       }
     }
+    return previewClose;
   };
   const closeAfterAgentBrowserConfirmation = (
     toClose: readonly RightPanelSurface[],
@@ -89,12 +104,30 @@ export function useRightPanelSurfaceClose(input: {
     if (!threadRef) return;
     const store = useRightPanelStore.getState();
     const activeId = selectThreadRightPanelState(store.byThreadKey, threadRef).activeSurfaceId;
+    const closingRef = threadRef;
+    const activeTarget = toClose.find((surface) => surface.id === activeId);
+    const snapshot =
+      activeTarget?.kind === "preview" && activeTarget.resourceId
+        ? readThreadPreviewState(closingRef).sessions[activeTarget.resourceId]
+        : undefined;
+    const returnToComposer =
+      canOperatePreview &&
+      isCurrentThread(closingRef) &&
+      snapshot?.purpose === "thread-link" &&
+      snapshot.runtime === "server";
+    let targetClose: Promise<boolean> | undefined;
+    // Confirmation owns the captured thread. A delayed confirmation must not reset another route.
+    if (activeTarget) {
+      store.consumeMaximizeRequest(closingRef);
+      store.setMaximized(closingRef, false);
+    }
     const ordered = toClose.toSorted(
       (left, right) => Number(left.id === activeId) - Number(right.id === activeId),
     );
     for (const surface of ordered) {
-      releaseSurfaceResources(threadRef, surface);
-      store.closeSurface(threadRef, surface.id);
+      const closed = releaseSurfaceResources(closingRef, surface);
+      if (surface.id === activeId) targetClose = closed;
+      store.closeSurface(closingRef, surface.id);
     }
     const nextActiveSurface = selectActiveRightPanelSurface(
       useRightPanelStore.getState().byThreadKey,
@@ -102,6 +135,29 @@ export function useRightPanelSurfaceClose(input: {
     );
     if (nextActiveSurface?.kind === "preview" && nextActiveSurface.resourceId) {
       setActivePreviewTab(threadRef, nextActiveSurface.resourceId);
+    }
+    if (returnToComposer && targetClose) {
+      const revision = store.getUserActionRevision(closingRef);
+      // Restore focus only after server acceptance. A later route or panel action owns focus.
+      void targetClose.then((accepted) => {
+        if (!accepted) return;
+        scheduleComposerFocus({
+          canFocus: () => {
+            const active = document.activeElement;
+            return (
+              isCurrentThread(closingRef) &&
+              useRightPanelStore.getState().getUserActionRevision(closingRef) === revision &&
+              getTerminalFocusOwner() === null &&
+              !isCommandPaletteOpen() &&
+              document.querySelector(
+                '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]',
+              ) === null &&
+              !isEditableFocused(active) &&
+              (active === null || active === document.body || isPreviewFocused())
+            );
+          },
+        });
+      });
     }
   };
   const labelFor = (terminalId: string) =>

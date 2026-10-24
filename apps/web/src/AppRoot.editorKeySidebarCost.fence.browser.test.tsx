@@ -37,6 +37,7 @@ import { act, type Screen, fakeTimers } from "../test/render";
  * and the sortable ids were a new array, which dnd-kit reads as a reorder.
  */
 import { type ReactNode } from "react";
+import { PromiseClipboardItem } from "./test/promiseClipboardItem";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 // Before anything imports react-dom: the commit counter is React's DevTools hook.
@@ -62,6 +63,9 @@ vi.mock(
 );
 
 const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("./state/presentation", async (original) =>
+  (await fenceMocks()).mockPresentation(original),
+);
 const nvimHarness = vi.hoisted(() => () => import("./test/nvimEditorHarness"));
 // Neovim's side of the editor session: every `editorSession.*` call reaches
 // the harness's transport, which answers it and streams what the test emits.
@@ -78,43 +82,76 @@ vi.mock("@t3tools/client-runtime/state/session", async (original) =>
  * them the same arrays so a render reads the same value it read before.
  */
 const sidebarLists = vi.hoisted(() => ({
-  threads: [] as unknown[],
+  threads: [] as import("@t3tools/client-runtime/state/models").EnvironmentThreadShell[],
   projects: [] as unknown[],
   /** Readers of the thread list, told when a test replaces it (`updateThreadShell`). */
   listeners: new Set<() => void>(),
 }));
 vi.mock("./state/entities", async (original) => {
-  const { useSyncExternalStore } = await import("react");
-  const subscribe = (listener: () => void) => {
-    sidebarLists.listeners.add(listener);
-    return () => {
-      sidebarLists.listeners.delete(listener);
-    };
-  };
+  const mocks = await fenceMocks();
+  const { Atom } = await import("effect/reactivity");
+  const { useAtomValue } = await import("@effect/atom-react");
+  const { createEnvironmentThreadShellAtoms } =
+    await import("@t3tools/client-runtime/state/threads");
+  const { PrimaryConnectionTarget } = await import("@t3tools/client-runtime/connection");
+  const { EnvironmentId } = await import("@t3tools/contracts");
+  const Option = await import("effect/Option");
+  const { environmentServerConfigsAtom } = await import("./state/server");
+  const environmentId = EnvironmentId.make(mocks.FENCE_ENVIRONMENT_ID);
+  const catalogValueAtom = Atom.make({
+    isReady: true,
+    entries: new Map([
+      [
+        environmentId,
+        {
+          enabled: true,
+          profile: Option.none(),
+          target: new PrimaryConnectionTarget({
+            environmentId,
+            label: "Editor fence",
+            httpBaseUrl: "https://editor-fence.invalid",
+            wsBaseUrl: "wss://editor-fence.invalid",
+          }),
+        },
+      ],
+    ]),
+  });
+  const snapshotAtom = Atom.family((id: typeof environmentId) =>
+    Atom.make((get) => {
+      const read = (): import("@t3tools/contracts").OrchestrationV2ShellSnapshot => ({
+        schemaVersion: 1,
+        snapshotSequence: 0,
+        threads: sidebarLists.threads
+          .filter((thread) => thread.environmentId === id)
+          .map((thread) => thread.source),
+        archivedThreads: [],
+        projects: [],
+      });
+      const listener = () => get.setSelf(read());
+      sidebarLists.listeners.add(listener);
+      get.addFinalizer(() => sidebarLists.listeners.delete(listener));
+      return read();
+    }).pipe(Atom.setIdleTTL(0)),
+  );
+  // Keep the production quiet/live derivations in this render-cost fence.
+  const shells = createEnvironmentThreadShellAtoms({ catalogValueAtom, snapshotAtom });
+  const emptyShell = Atom.make(null);
   return {
-    ...(await (await fenceMocks()).mockEntities(original)),
-    useThreadShells: () => useSyncExternalStore(subscribe, () => sidebarLists.threads),
+    ...(await mocks.mockEntities(original)),
+    useThreadShells: () => useAtomValue(shells.threadShellsAtom),
+    useQuietThreadShells: () => useAtomValue(shells.quietThreadShellsAtom),
+    useThreadShell: (ref: import("@t3tools/contracts").ScopedThreadRef | null) =>
+      useAtomValue(ref === null ? emptyShell : shells.threadShellAtom(ref)),
+    useQuietThreadShell: (ref: import("@t3tools/contracts").ScopedThreadRef | null) =>
+      useAtomValue(ref === null ? emptyShell : shells.quietThreadShellAtom(ref)),
+    useServerConfigs: () => useAtomValue(environmentServerConfigsAtom),
     useProjects: () => sidebarLists.projects,
-  };
-});
-// The sidebar reads its thread list through this hook (phase 6); the same
-// store drives it, synchronously, since these specs count renders, not priority.
-vi.mock("./state/threadShellsTransition", async () => {
-  const { useSyncExternalStore } = await import("react");
-  const subscribe = (listener: () => void) => {
-    sidebarLists.listeners.add(listener);
-    return () => {
-      sidebarLists.listeners.delete(listener);
-    };
-  };
-  return {
-    useThreadShellsInTransition: () => useSyncExternalStore(subscribe, () => sidebarLists.threads),
   };
 });
 vi.mock("./state/environments", async (original) =>
   (await fenceMocks()).mockEnvironments(original),
 );
-vi.mock("./state/query", async () => (await fenceMocks()).mockQuery());
+vi.mock("./state/query", async (original) => (await fenceMocks()).mockQuery(original));
 vi.mock("./state/queries", async (original) => (await fenceMocks()).mockQueries(original));
 vi.mock("./state/threads", async (original) => (await fenceMocks()).mockThreads(original));
 // The editor session's commands run for real, against the harness; every
@@ -250,7 +287,9 @@ vi.mock("./components/DiffWorkerPoolProvider", () => ({
   DiffWorkerPoolProvider: ({ children }: { children?: ReactNode }) => children,
 }));
 
-import type { ThreadId } from "@t3tools/contracts";
+import { MessageId, RunId, type ThreadId } from "@t3tools/contracts";
+import { presentThreadShell } from "@t3tools/client-runtime/state/models";
+import * as DateTime from "effect/DateTime";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 
 import { useFileTreeStore } from "./components/files/mesuraTree/fileTreeStore";
@@ -286,10 +325,8 @@ let container: HTMLDivElement;
 const openedThreads: ThreadId[] = [];
 
 async function setupBrowserFixture0() {
-
   installKeyEngine();
   await import("./components/files/FilePreviewPanel");
-
 
   const _timers = fakeTimers();
   editorTransport.reset();
@@ -310,16 +347,7 @@ async function setupBrowserFixture0() {
     ]),
   );
 
-  vi.stubGlobal(
-    "ClipboardItem",
-    class {
-      readonly types: ReadonlyArray<string>;
-      constructor(items: Record<string, Promise<unknown>>) {
-        this.types = Object.keys(items);
-        for (const item of Object.values(items)) Promise.resolve(item).catch(() => {});
-      }
-    },
-  );
+  vi.stubGlobal("ClipboardItem", PromiseClipboardItem);
   useFileTreeStore.setState({ explorerOpen: true });
   container = document.createElement("div");
   document.body.append(container);
@@ -329,38 +357,34 @@ async function setupBrowserFixture0() {
     return makeFenceClientRects([this.getBoundingClientRect()]);
   });
 
-return {async [Symbol.asyncDispose]() {
+  return {
+    async [Symbol.asyncDispose]() {
+      editorTransport.autoReplyAll();
+      await act(async () => root?.[Symbol.asyncDispose]());
+      // The unmounted surface writes what it still had and then clears its flag;
+      // let that finish here, so it cannot clear the next test's flag instead.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SAVE_SETTLED_MS);
+      });
+      useFileSurfacePendingStore.setState({ pendingByProject: new Map() });
+      root = undefined;
+      container.remove();
+      for (const threadId of openedThreads.splice(0)) {
+        useRightPanelStore.getState().removeThread(scopeThreadRef(environmentId, threadId));
+      }
+      fixture.threads.clear();
+      fixture.threadStates.clear();
+      sidebarLists.threads = [];
+      sidebarLists.projects = [];
+      window.localStorage.clear();
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
 
-  editorTransport.autoReplyAll();
-  await act(async () => root?.[Symbol.asyncDispose]());
-  // The unmounted surface writes what it still had and then clears its flag;
-  // let that finish here, so it cannot clear the next test's flag instead.
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(SAVE_SETTLED_MS);
-  });
-  useFileSurfacePendingStore.setState({ pendingByProject: new Map() });
-  root = undefined;
-  container.remove();
-  for (const threadId of openedThreads.splice(0)) {
-    useRightPanelStore.getState().removeThread(scopeThreadRef(environmentId, threadId));
-  }
-  fixture.threads.clear();
-  fixture.threadStates.clear();
-  sidebarLists.threads = [];
-  sidebarLists.projects = [];
-  window.localStorage.clear();
-  vi.useRealTimers();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-
-
-_timers[Symbol.dispose]();
-}};
+      _timers[Symbol.dispose]();
+    },
+  };
 }
-
-
-
-
 
 /** Runs `SETTLE_FRAMES` frames on the fake clock, with what each one brings. */
 async function settle(): Promise<void> {
@@ -445,7 +469,9 @@ function describeFocus(): string {
  * file from the Files tree and leaves the tree for the editor, as the
  * developer does: `Space p f`, `j`, Enter, Escape.
  */
-async function mountWithEditorFocused(): Promise<void> {
+async function mountWithEditorFocused({
+  backgroundStreaming = false,
+}: { readonly backgroundStreaming?: boolean } = {}): Promise<void> {
   const threads = Array.from({ length: THREAD_COUNT }, (_, index) => {
     const id = `editor-key-cost-${index + 1}`;
     const threadId = addFenceThread(id, `Editor key cost ${index + 1}`, [
@@ -454,6 +480,20 @@ async function mountWithEditorFocused(): Promise<void> {
     openedThreads.push(threadId);
     return threadId;
   });
+  if (backgroundStreaming) {
+    const backgroundId = threads[3]!;
+    const shell = fixture.threads.get(backgroundId)!;
+    const runId = RunId.make("editor-cost-background-run");
+    fixture.threads.set(
+      backgroundId,
+      presentThreadShell(environmentId, {
+        ...shell.source,
+        latestRunId: runId,
+        activeRunId: runId,
+        status: "running",
+      }),
+    );
+  }
   sidebarLists.threads = [...fixture.threads.values()];
   sidebarLists.projects = [fixture.project];
   ({ root } = await renderFenceApp(container, threads[0]!, { vimMode: true }));
@@ -497,7 +537,7 @@ function countOutsideFilePanel(rendered: ReadonlyArray<RenderedComponent>, name:
 
 describe("editor keys and the sidebar (phase 4, criterion 2)", () => {
   it("editor key sidebar cost guard: the real sidebar shows every thread's row", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     commitCounter.start();
     await mountWithEditorFocused();
@@ -506,18 +546,21 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("background sync spec: a shell update for one thread re-renders that thread's row only", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountWithEditorFocused();
     await settle();
-    const threads = sidebarLists.threads as ReadonlyArray<{ readonly id: string }>;
+    const threads = sidebarLists.threads;
     const changed = threads[3]!;
     commitCounter.start();
     // A running thread's shell, as the shell stream delivers it every few
     // seconds: something on the row changed, its place in the list did not.
     sidebarLists.threads = threads.map((thread) =>
       thread === changed
-        ? { ...thread, title: "Editor key cost 4, retitled by its agent" }
+        ? presentThreadShell(environmentId, {
+            ...thread.source,
+            title: "Editor key cost 4, retitled by its agent",
+          })
         : thread,
     );
     await act(async () => {
@@ -531,8 +574,54 @@ await using _browserFixture0 = await setupBrowserFixture0();
     expect(countByName(rendered, "SortableThreadRow"), "row drag wrappers re-rendered").toBe(1);
   });
 
+  it("background sync spec: a streaming tick updates its row without re-rendering Sidebar", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    await mountWithEditorFocused({ backgroundStreaming: true });
+    await settle();
+    const background = sidebarLists.threads[3]!;
+    expect(background.runtime?.status, "precondition: the background thread is running").toBe(
+      "running",
+    );
+    const at = DateTime.add(background.source.updatedAt, { seconds: 1 });
+    const streamed = presentThreadShell(environmentId, {
+      ...background.source,
+      updatedAt: at,
+      itemCount: background.source.itemCount + 1,
+      visibleItemCount: background.source.visibleItemCount + 1,
+      latestVisibleMessage: {
+        id: MessageId.make("editor-cost-background-stream"),
+        role: "assistant",
+        text: "The background agent is streaming.",
+        updatedAt: at,
+      },
+    });
+    commitCounter.start();
+    sidebarLists.threads = sidebarLists.threads.map((thread) =>
+      thread === background ? streamed : thread,
+    );
+    await act(async () => {
+      for (const listener of Array.from(sidebarLists.listeners)) listener();
+    });
+    await settle();
+    const rendered = commitCounter.stop();
+    expect(
+      {
+        Sidebar: countByName(rendered, "Sidebar"),
+        SortableThreadRow: countByName(rendered, "SortableThreadRow"),
+        SidebarThreadRow: countByName(rendered, "SidebarThreadRow"),
+      },
+      "renders for one background streaming tick",
+    ).toEqual({
+      Sidebar: 0,
+      SortableThreadRow: 1,
+      SidebarThreadRow: 1,
+    });
+    expect(editorHasFocus(), `focus is on ${describeFocus()}`).toBe(true);
+  });
+
   it("editor key sidebar cost guard: plain normal and insert keys re-render no sidebar row", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountWithEditorFocused();
 
@@ -549,7 +638,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("editor key sidebar cost spec: Ctrl-d and Ctrl-u in the editor re-render no sidebar row", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountWithEditorFocused();
 
@@ -576,7 +665,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("editor key sidebar cost guard: holding the jump modifier in the editor still shows the thread jump hints", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountWithEditorFocused();
     // As the sidebar labels its first row.
@@ -674,18 +763,14 @@ describe("the first edit of a typing burst (phase 4, criterion 2)", () => {
   }
 
   async function setupBrowserFixture1() {
-
-
     firstLine = SOURCE_FILE.lines[0]!;
-  
-return {async [Symbol.asyncDispose]() {
 
-}};
-}
+    return { async [Symbol.asyncDispose]() {} };
+  }
 
   it("editor key sidebar cost spec: the first insert-mode character after a clean open re-renders nothing outside the file panel", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     await mountWithEditorFocused();
     await enterInsertMode();
@@ -703,8 +788,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   });
 
   it("editor key sidebar cost spec: later characters of one typing burst leave the unsaved dot alone", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     await mountWithEditorFocused();
     await enterInsertMode();
@@ -731,8 +816,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   });
 
   it("editor key sidebar cost spec: the first character after a save completed re-renders nothing outside the file panel", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     await mountWithEditorFocused();
     await enterInsertMode();
@@ -755,7 +840,7 @@ await using _browserFixture1 = await setupBrowserFixture1();
 
 describe("the first key after opening a file (phase 4, criterion 2)", () => {
   it("editor key sidebar cost spec: the first plain key after a file opened with Ctrl+P re-renders nothing outside the file panel", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountWithEditorFocused();
     // Open the file again the way the developer does: Ctrl+P from the editor,

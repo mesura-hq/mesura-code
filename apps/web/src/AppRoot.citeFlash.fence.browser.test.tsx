@@ -43,11 +43,15 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 
 // The boundaries the fixture replaces: see `test/appRootFenceMocks.tsx`.
 const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("./state/presentation", async (original) =>
+  (await fenceMocks()).mockPresentation(original),
+);
+vi.mock("./connection/runtime", async () => (await fenceMocks()).mockConnectionRuntime());
 vi.mock("./state/entities", async (original) => (await fenceMocks()).mockEntities(original));
 vi.mock("./state/environments", async (original) =>
   (await fenceMocks()).mockEnvironments(original),
 );
-vi.mock("./state/query", async () => (await fenceMocks()).mockQuery());
+vi.mock("./state/query", async (original) => (await fenceMocks()).mockQuery(original));
 vi.mock("./state/queries", async (original) => (await fenceMocks()).mockQueries(original));
 vi.mock("./state/threads", async (original) => (await fenceMocks()).mockThreads(original));
 vi.mock("./state/use-atom-command", async () => (await fenceMocks()).mockAtomCommand());
@@ -107,9 +111,7 @@ let flashObserver: MutationObserver;
 let flashesAdded = 0;
 
 async function setupBrowserFixture0() {
-
   installKeyEngine();
-
 
   // Every timer and frame runs on test time, so a flash's 1100 ms removal
   // fires only when a test advances the clock that far.
@@ -141,28 +143,28 @@ async function setupBrowserFixture0() {
     document.querySelector(`[data-testid="${FENCE_SCROLLER_TESTID}"]`),
   );
 
-return {async [Symbol.asyncDispose]() {
+  return {
+    async [Symbol.asyncDispose]() {
+      vi.useRealTimers();
+      flashObserver.disconnect();
+      await act(() => stopFlash());
+      await act(async () => {
+        await probeRoot?.[Symbol.asyncDispose]();
+        await root?.[Symbol.asyncDispose]();
+      });
+      probeRoot = undefined;
+      root = undefined;
+      container.remove();
+      document.querySelectorAll(FLASH_SELECTOR).forEach((anchor) => anchor.remove());
+      window.getSelection()?.removeAllRanges();
+      fixture.threads.clear();
+      fixture.threadStates.clear();
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
 
-  vi.useRealTimers();
-  flashObserver.disconnect();
-  await act(() => stopFlash());
-  await act(async () => {
-    await probeRoot?.[Symbol.asyncDispose]();
-    await root?.[Symbol.asyncDispose]();
-  });
-  probeRoot = undefined;
-  root = undefined;
-  container.remove();
-  document.querySelectorAll(FLASH_SELECTOR).forEach((anchor) => anchor.remove());
-  window.getSelection()?.removeAllRanges();
-  fixture.threads.clear();
-  fixture.threadStates.clear();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-
-
-_timers[Symbol.dispose]();
-}};
+      _timers[Symbol.dispose]();
+    },
+  };
 }
 
 /**
@@ -204,10 +206,6 @@ function FlashProbe() {
   });
   return null;
 }
-
-
-
-
 
 /** Longer than any startup timer the app sets on mount. */
 const APP_STARTUP_MS = 5_000;
@@ -360,7 +358,7 @@ async function citeLineByKeys(): Promise<void> {
 
 describe("cite flash fence: the mouse Cite button", () => {
   it("cite flash fence spec: clicking Cite selection in composer flashes the cited text in its timeline row", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const thread = addReplyThread("mouse", CITED_SENTENCE);
     await mountApp(thread, { vimMode: false });
@@ -387,7 +385,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("cite flash fence: each keyboard cite flashes once", () => {
   it("cite flash fence spec: a visual-mode cite flashes the cited text exactly once", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const thread = addReplyThread("visual", CITED_SENTENCE);
     await mountApp(thread, { vimMode: true });
@@ -400,7 +398,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("cite flash fence spec: a flash cite through its two picks flashes the cited text exactly once", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const thread = addReplyThread("pick", CITED_SENTENCE);
     await mountApp(thread, { vimMode: true });
@@ -422,7 +420,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 // Already true at the base, and must stay so: guards.
 describe("cite flash fence: a refused cite flashes nothing", () => {
   it("cite flash fence guard: the too-long mouse selection's disabled button cites and flashes nothing", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const thread = addReplyThread("long-mouse", TOO_LONG_PARAGRAPH);
     await mountApp(thread, { vimMode: false });
@@ -437,7 +435,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("cite flash fence guard: a too-long visual-mode cite is refused and flashes nothing", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const thread = addReplyThread("long-keys", TOO_LONG_PARAGRAPH);
     await mountApp(thread, { vimMode: true });
@@ -452,7 +450,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 // Already true at the base for the keyboard cites, and must stay so: guards.
 describe("cite flash fence: the flash boxes go away", () => {
   it("cite flash fence guard: a cite's flash boxes are removed when their animation ends", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const thread = addReplyThread("animationend", CITED_SENTENCE);
     await mountApp(thread, { vimMode: true });
@@ -468,7 +466,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("cite flash fence guard: a cite's flash boxes are removed after 1100 ms when no animation runs", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const thread = addReplyThread("fallback", CITED_SENTENCE);
     await mountApp(thread, { vimMode: true });
@@ -487,7 +485,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 // Already true at the base, and must stay so: a guard.
 describe("cite flash fence: the mouse cite in Vim mode", () => {
   it("cite flash fence guard: with Vim mode on the mouse cite lands the composer in insert mode after the chip", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const thread = addReplyThread("vim-mouse", CITED_SENTENCE);
     await mountApp(thread, { vimMode: true });

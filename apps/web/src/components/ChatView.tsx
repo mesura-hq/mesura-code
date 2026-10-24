@@ -1882,8 +1882,9 @@ export default function ChatView(props: ChatViewProps) {
   };
   const onInterruptStable = useStableCallback(onInterrupt);
   useEffect(() => subscribeSnapShotComposerFocus(focusComposerStable), [focusComposerStable]);
-  const scheduleComposerFocus = () => {
+  const scheduleComposerFocus = (options?: { readonly canFocus?: () => boolean }) => {
     window.requestAnimationFrame(() => {
+      if (options?.canFocus?.() === false) return;
       focusComposer();
     });
   };
@@ -2038,12 +2039,13 @@ export default function ChatView(props: ChatViewProps) {
     visiblePullRequestCount,
     onDiffPanelOpen,
   });
+  const pendingMaximizeThreadKey = useRightPanelStore((state) => state.pendingMaximizeThreadKey);
   useEffect(() => {
-    if (!canMaximizeRightPanel) return;
+    if (!canMaximizeRightPanel || pendingMaximizeThreadKey !== routeThreadKey) return;
     if (useRightPanelStore.getState().consumeMaximizeRequest(routeThreadRef)) {
       useRightPanelStore.getState().setMaximized(routeThreadRef, true);
     }
-  }, [canMaximizeRightPanel, routeThreadRef]);
+  }, [canMaximizeRightPanel, pendingMaximizeThreadKey, routeThreadKey, routeThreadRef]);
   const {
     closeSurface: closeRightPanelSurface,
     closeOtherSurfaces: closeOtherRightPanelSurfacesStable,
@@ -2052,6 +2054,8 @@ export default function ChatView(props: ChatViewProps) {
   } = useRightPanelSurfaceClose({
     threadRef: activeThreadRef,
     terminalLabelsById: activeTerminalLabelsById,
+    scheduleComposerFocus: scheduleComposerFocusStable,
+    isCurrentThread: (ref) => currentRouteThreadKeyRef.current === scopedThreadKey(ref),
   });
   const closeRightPanelSurfaceStable = closeRightPanelSurface;
   const persistThreadSettingsForNextTurn = async (input: {
@@ -2936,8 +2940,15 @@ export default function ChatView(props: ChatViewProps) {
     return window.desktopBridge?.onMenuAction((action) => {
       if (action === "rightPanel.toggle") toggleRightPanelStable();
       else if (action === "rightPanel.toggleMaximized") toggleRightPanelMaximizedStable();
+      else if (action === "rightPanel.close" && activeRightPanelSurface)
+        closeRightPanelSurface(activeRightPanelSurface);
     });
-  }, [toggleRightPanelStable, toggleRightPanelMaximizedStable]);
+  }, [
+    activeRightPanelSurface,
+    closeRightPanelSurface,
+    toggleRightPanelStable,
+    toggleRightPanelMaximizedStable,
+  ]);
 
   usePasteToFocusComposer(activeThreadId, composerRef);
   const {

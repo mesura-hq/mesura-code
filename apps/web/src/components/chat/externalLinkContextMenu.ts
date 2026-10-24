@@ -1,4 +1,5 @@
 import type { ContextMenuItem } from "@t3tools/contracts";
+import { readLinkClient, resolveLinkTarget } from "~/browser/browserLinkTarget";
 
 export type ExternalLinkContextMenuAction =
   | "open-in-preview"
@@ -97,10 +98,20 @@ export async function showExternalLinkContextMenu({
   updateThreadLink,
   reportFailure,
 }: ShowExternalLinkContextMenuOptions): Promise<void> {
+  // Explicit app selection overrides the saved destination, but never the
+  // phone policy. A native menu can remain open while the device changes.
+  const canOpenLinkInPreview = () =>
+    resolveLinkTarget({
+      url: href,
+      event: { metaKey: false, ctrlKey: false },
+      preference: "app",
+      canOpenInApp: canOpenInPreview,
+      linkClient: readLinkClient(),
+    }) === "app";
   let action: ExternalLinkContextMenuAction | null;
   try {
     action = await showContextMenu(
-      externalLinkContextMenuItems({ canOpenInPreview, threadLinkAction }),
+      externalLinkContextMenuItems({ canOpenInPreview: canOpenLinkInPreview(), threadLinkAction }),
       position,
     );
   } catch (cause) {
@@ -110,7 +121,11 @@ export async function showExternalLinkContextMenu({
 
   try {
     if (action === "open-in-preview") {
-      await openInPreview(href);
+      if (canOpenLinkInPreview()) await openInPreview(href);
+      else {
+        action = "open-external";
+        await openExternal(href);
+      }
     } else if (action === "open-external") {
       await openExternal(href);
     } else if (action === "copy-link") {

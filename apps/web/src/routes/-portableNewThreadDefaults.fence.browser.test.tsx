@@ -193,7 +193,10 @@ vi.mock("../state/entities", () => ({
 vi.mock("../state/environments", () => ({
   useEnvironments: () => ({ environments: [], isReady: true }),
 }));
-vi.mock("../state/server", () => ({ environmentServerConfigsAtom: "configs", serverEnvironment: { providersValueAtom: () => "providers" } }));
+vi.mock("../state/server", () => ({
+  environmentServerConfigsAtom: "configs",
+  serverEnvironment: { providersValueAtom: () => "providers" },
+}));
 vi.mock("../threadRoutes", () => ({
   resolveThreadRouteTarget: () =>
     state.openDraft
@@ -240,15 +243,22 @@ vi.mock("../state/presentation", () => ({
 }));
 vi.mock("../rpc/atomRegistry", async () => {
   const { useAtomValue } = await import("@effect/atom-react");
-  return ({
-  appAtomRegistry: {
-    get: (atom: unknown) => atom === "configs" ? useAtomValue("configs" as never) : atom === "providers" ? (useAtomValue("configs" as never) as unknown as Map<string, { providers: unknown[] }>).get("remote-environment")!.providers : ({ connection: { phase: state.phase } }),
-    subscribe: (_atom: unknown, listener: () => void) => {
-      state.connectionListeners.add(listener);
-      return () => state.connectionListeners.delete(listener);
+  return {
+    appAtomRegistry: {
+      get: (atom: unknown) =>
+        atom === "configs"
+          ? useAtomValue("configs" as never)
+          : atom === "providers"
+            ? (
+                useAtomValue("configs" as never) as unknown as Map<string, { providers: unknown[] }>
+              ).get("remote-environment")!.providers
+            : { connection: { phase: state.phase } },
+      subscribe: (_atom: unknown, listener: () => void) => {
+        state.connectionListeners.add(listener);
+        return () => state.connectionListeners.delete(listener);
+      },
     },
-  },
-});
+  };
 });
 vi.mock("../components/NoProjectsHero", () => ({ NoProjectsHero: () => null }));
 vi.mock("../components/WorkspacePageHeader", () => ({ WorkspacePageHeader: () => null }));
@@ -267,18 +277,17 @@ import { readRepositoryDefaults } from "../lib/t3ProjectFileDefaults";
 describe("phase 2 web index route", () => {
   let renderer: Screen | undefined;
   async function setupBrowserFixture0() {
-
-return {async [Symbol.asyncDispose]() {
-
-    if (renderer) await renderer[Symbol.asyncDispose]();
-    renderer = undefined;
-    vi.unstubAllGlobals();
-  
-}};
-}
+    return {
+      async [Symbol.asyncDispose]() {
+        if (renderer) await renderer[Symbol.asyncDispose]();
+        renderer = undefined;
+        vi.unstubAllGlobals();
+      },
+    };
+  }
 
   it("P2 RED index entry waits for the selected remote checkout before creating an implicit workspace draft", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     state.reset();
     await Promise.all(state.routeLoads);
@@ -287,7 +296,8 @@ await using _browserFixture0 = await setupBrowserFixture0();
       renderer = await render(
         <Suspense>
           <Entry />
-        </Suspense>, { router: false },
+        </Suspense>,
+        { router: false },
       );
     });
     expect(state.setLogicalProjectDraftThreadId).not.toHaveBeenCalled();
@@ -302,7 +312,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("P2 GUARD an explicit draft model survives opening its project from the index route", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     state.reset();
     state.useExistingDraft();
@@ -312,7 +322,8 @@ await using _browserFixture0 = await setupBrowserFixture0();
       renderer = await render(
         <Suspense>
           <Entry />
-        </Suspense>, { router: false },
+        </Suspense>,
+        { router: false },
       );
     });
     await act(async () => state.finishRead());
@@ -326,7 +337,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
     expect(state.setModelSelection).not.toHaveBeenCalled();
   });
   it("P2 implementation index entry seeds the repository model instead of the machine-local model", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     state.reset();
     state.repositoryContents =
@@ -337,7 +348,8 @@ await using _browserFixture0 = await setupBrowserFixture0();
       renderer = await render(
         <Suspense>
           <Entry />
-        </Suspense>, { router: false },
+        </Suspense>,
+        { router: false },
       );
     });
     expect(state.setModelSelection).not.toHaveBeenCalled();
@@ -358,12 +370,13 @@ await using _browserFixture0 = await setupBrowserFixture0();
       renderer = await render(
         <Suspense>
           <Entry />
-        </Suspense>, { router: false },
+        </Suspense>,
+        { router: false },
       );
     });
   }
   it("P2 rework web replaces an unavailable repository model with a usable catalog fallback", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     state.reset();
     state.repositoryContents =
@@ -377,7 +390,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
     );
   });
   it("P2 rework web clears an unsafe model without restoring carry or sticky state", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     state.reset();
     state.models = [];
@@ -392,7 +405,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
     expect(state.sticky).not.toHaveBeenCalled();
   });
   it("P2 rework web abandons an empty draft changed during the repository read", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     state.reset();
     state.useExistingDraft();
@@ -404,7 +417,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
     expect(state.setModelSelection).not.toHaveBeenCalled();
   });
   it("P2 rework web reuses the open draft without repository RPCs", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     state.reset();
     state.useExistingDraft();
@@ -415,7 +428,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
     expect(state.setModelSelection).not.toHaveBeenCalled();
   });
   it("P2 rework web preserves an explicit workspace on an empty reopened draft", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     state.reset();
     state.useExistingDraft();
@@ -426,7 +439,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
     expect(state.setLogicalProjectDraftThreadId).toHaveBeenCalled();
   });
   it("P2 rework web creates a draft during reconnect without waiting for repository RPCs", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     state.reset();
     state.phase = "reconnecting";
@@ -436,7 +449,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("P2 rework web finishes draft creation when the owning connection drops during a file read", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     state.reset();
     await mountEntry();
@@ -455,7 +468,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("P2 rework web does not seed an ambiguous portable model from a custom instance", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     state.reset();
     state.ambiguous = true;
@@ -469,7 +482,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
     expect(state.sticky).not.toHaveBeenCalled();
   });
   it("P2 regression web creation shares its checkout result and a new draft reads changed file bytes", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     state.reset();
     await mountEntry();
@@ -494,7 +507,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("P2 regression reopening an implicit empty draft clears an unsafe model without sticky reseeding", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     state.reset();
     state.useExistingDraft();

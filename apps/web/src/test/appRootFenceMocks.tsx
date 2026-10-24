@@ -242,10 +242,38 @@ export async function mockEntities(
     ...(await importOriginal()),
     readThreadShell: threadFor,
     useThreadShell: useFixtureThread,
+    useQuietThreadShell: useFixtureThread,
     useThreadRefs: () => appRootFence.empty,
     useThreadShells: () => appRootFence.empty,
+    useQuietThreadShells: () => appRootFence.empty,
     useProjects: () => appRootFence.empty,
     useProject: () => appRootFence.project,
+  };
+}
+
+/** Unmocked runtime reads wait without opening real environment connections. */
+export async function mockConnectionRuntime() {
+  const { Atom } = await import("effect/reactivity");
+  const Effect = await import("effect/Effect");
+  const Layer = await import("effect/Layer");
+  return { connectionAtomRuntime: Atom.runtime(Layer.effectDiscard(Effect.never)) };
+}
+
+/** File permissions read the same connected environment as the chat fixture. */
+export async function mockPresentation(
+  importOriginal: ImportOriginal<typeof import("../state/presentation")>,
+  environments: ReadonlyArray<{
+    readonly environmentId: string;
+    readonly connection: { readonly phase: string };
+  }> = appRootFence.environments,
+) {
+  return {
+    ...(await importOriginal()),
+    useEnvironmentPresentation: (environmentId: EnvironmentId | null) => ({
+      isReady: true,
+      presentation:
+        environments.find((environment) => environment.environmentId === environmentId) ?? null,
+    }),
   };
 }
 
@@ -274,7 +302,8 @@ export async function mockEnvironments(
 }
 
 /** Await this factory so the shell bootstrap read uses the real shell atom identities. */
-export async function mockQuery() {
+export async function mockQuery(importOriginal: ImportOriginal<typeof import("../state/query")>) {
+  const actual = await importOriginal();
   const { environmentShell } = await import("../state/shell");
   const { EnvironmentId, ProjectId, ProviderInstanceId } = await import("@t3tools/contracts");
   const { Atom, AsyncResult } = await import("effect/reactivity");
@@ -288,6 +317,7 @@ export async function mockQuery() {
     ]),
   );
   return {
+    ...actual,
     useEnvironmentQuery: (atom?: object | null) => {
       // Session atoms remain real subscriptions so the filesystem-access hook reads its grant.
       const isSession = atom != null && appRootFence.queryAtoms.has(atom);

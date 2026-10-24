@@ -50,7 +50,6 @@ const fixture = vi.hoisted(() => ({
   commands: new Map<unknown, unknown>(),
   noopCommand: vi.fn(async () => ({ _tag: "Success", value: { providers: [] } })),
   startTurn: vi.fn(async (_input: unknown) => ({ _tag: "Success", value: undefined })),
-  refresh: vi.fn(),
   empty: [],
   threadListeners: new Set<() => void>(),
   factorySnapshots: {} as Record<string, string>,
@@ -77,11 +76,22 @@ const fixture = vi.hoisted(() => ({
 vi.mock("@t3tools/client-runtime/state/session", async (importOriginal) =>
   (await import("../test/appRootFenceMocks")).mockRuntimeSession(importOriginal),
 );
+vi.mock("../connection/runtime", async () =>
+  (await import("../test/appRootFenceMocks")).mockConnectionRuntime(),
+);
+vi.mock("../state/presentation", async (importOriginal) =>
+  (await import("../test/appRootFenceMocks")).mockPresentation(
+    importOriginal,
+    fixture.environments,
+  ),
+);
 vi.mock("../state/entities", async (importOriginal) => {
   const { factoryThreadFixtureReads } = await import("./factoryTestFixtures");
+  const threadReads = factoryThreadFixtureReads(fixture);
   return {
     ...(await importOriginal<typeof import("../state/entities")>()),
-    ...factoryThreadFixtureReads(fixture),
+    ...threadReads,
+    useQuietThreadShell: threadReads.useThreadShell,
     useThreadRefs: () => fixture.empty,
     useProjects: () => fixture.empty,
     useProject: () => ({
@@ -98,18 +108,20 @@ vi.mock("../state/entities", async (importOriginal) => {
 vi.mock("../state/environments", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../state/environments")>()),
   useEnvironments: () => ({ environments: fixture.environments, isReady: true }),
-  useEnvironmentProviders: () => new Map(),
+  useEnvironment: (environmentId: EnvironmentId | null) =>
+    fixture.environments.find((environment) => environment.environmentId === environmentId) ?? null,
+  useEnvironmentProviders: () =>
+    new Map(
+      fixture.environments.map((environment) => [
+        environment.environmentId,
+        environment.serverConfig.providers,
+      ]),
+    ),
   usePrimaryEnvironment: () => null,
 }));
-vi.mock("../state/query", () => ({
-  useEnvironmentQuery: () => ({
-    data: null,
-    error: null,
-    isPending: false,
-    isSuccess: false,
-    refresh: fixture.refresh,
-  }),
-}));
+vi.mock("../state/query", async (original) =>
+  (await import("../test/appRootFenceMocks")).mockQuery(original),
+);
 vi.mock("../state/threads", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../state/threads")>();
   const { EMPTY_ENVIRONMENT_THREAD_STATE } = await import("@t3tools/client-runtime/state/threads");
@@ -196,7 +208,7 @@ vi.mock("@legendapp/list/react", () => ({
 }));
 
 const { AppRoot } = await import("../AppRoot");
-const { ChatView } = await import("../components/ChatView");
+const { default: ChatView } = await import("../components/ChatView");
 const { SidebarProvider } = await import("../components/ui/sidebar");
 import { threadEnvironment } from "../state/threads";
 import { useComposerDraftStore } from "../composerDraftStore";
@@ -291,7 +303,9 @@ async function setupBrowserFixture0() {
       await root?.[Symbol.asyncDispose]();
       root = undefined;
       container.remove();
-      useComposerDraftStore.getState().clearComposerContent(scopeThreadRef(environmentId, threadId));
+      useComposerDraftStore
+        .getState()
+        .clearComposerContent(scopeThreadRef(environmentId, threadId));
       restoreDocumentFonts();
       appRootFence.sessions.delete(environmentId);
       vi.restoreAllMocks();

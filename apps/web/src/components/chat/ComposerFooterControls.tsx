@@ -32,6 +32,8 @@ const supervisedRuntimeModeOption = {
 };
 export const ComposerFooterModeControls = memo(function ComposerFooterModeControls(props: {
   showInteractionModeToggle: boolean;
+  /** Access lives in the combined picker when false. */
+  showRuntimeMode?: boolean;
   interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
   runtimeModeOptions: ReadonlyArray<RuntimeModeOption>;
@@ -89,6 +91,7 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
       </Tooltip>
     </>
   ) : null;
+  if (props.showRuntimeMode === false) return interactionModeToggle;
 
   return (
     <>

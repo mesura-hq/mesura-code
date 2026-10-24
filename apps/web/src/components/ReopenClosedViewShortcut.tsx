@@ -47,6 +47,7 @@ const PREVIEW_FORWARDED_LAYOUT_COMMANDS = [
   "sidebar.toggle",
   "rightPanel.toggle",
   "rightPanel.toggleMaximized",
+  "rightPanel.close",
 ] as const;
 
 const isGlobalPullRequests = (ref: ScopedThreadRef) =>
@@ -71,6 +72,9 @@ export function ReopenClosedViewShortcut() {
   );
   const previewOpen = useRightPanelStore(
     (state) => selectActiveRightPanel(state.byThreadKey, threadRef) === "preview",
+  );
+  const canCloseRightPanel = useRightPanelStore(
+    (state) => selectActiveRightPanel(state.byThreadKey, threadRef) !== null,
   );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const hasHistory = useClosedViewStore((state) => state.entries.length > 0);
@@ -198,7 +202,9 @@ export function ReopenClosedViewShortcut() {
     // sends each command back as a menu action.
     const commands = [
       ...(hasHistory ? (["view.reopenClosed"] as const) : []),
-      ...PREVIEW_FORWARDED_LAYOUT_COMMANDS,
+      ...PREVIEW_FORWARDED_LAYOUT_COMMANDS.filter(
+        (command) => command !== "rightPanel.close" || canCloseRightPanel,
+      ),
     ];
     void preview
       .setForwardedShortcuts(
@@ -213,7 +219,7 @@ export function ReopenClosedViewShortcut() {
     return () => {
       void preview.setForwardedShortcuts?.([]).catch(() => undefined);
     };
-  }, [hasHistory, keybindings, terminalOpen]);
+  }, [canCloseRightPanel, hasHistory, keybindings, terminalOpen]);
 
   return null;
 }

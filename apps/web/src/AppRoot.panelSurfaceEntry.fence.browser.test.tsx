@@ -94,6 +94,10 @@ vi.mock(
 );
 
 const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("./state/presentation", async (original) =>
+  (await fenceMocks()).mockPresentation(original),
+);
+vi.mock("./connection/runtime", async () => (await fenceMocks()).mockConnectionRuntime());
 vi.mock("@t3tools/client-runtime/state/session", async (original) =>
   (await fenceMocks()).mockRuntimeSession(original),
 );
@@ -188,9 +192,11 @@ const pullRequestDetail = vi.hoisted(() => ({
     },
   },
 }));
-vi.mock("./state/query", async () => {
-  const { useEnvironmentQuery } = await (await fenceMocks()).mockQuery();
+vi.mock("./state/query", async (original) => {
+  const common = await (await fenceMocks()).mockQuery(original);
+  const { useEnvironmentQuery } = common;
   return {
+    ...common,
     useEnvironmentQuery: (query?: object | null) => {
       const data = !(query instanceof Object)
         ? null
@@ -329,6 +335,7 @@ vi.mock("./assets/assetUrls", async (original) => ({
 }));
 
 import { useFileTreeStore } from "./components/files/mesuraTree/fileTreeStore";
+import { PromiseClipboardItem } from "./test/promiseClipboardItem";
 import { installKeyEngine } from "./keys/keyEngine";
 import { isFileTreeFocused } from "./lib/focusTargets";
 import { ACTIVE_TAB_TITLE_SELECTOR } from "./lib/panelSurfaceFocus";
@@ -362,7 +369,6 @@ const openedThreads: ThreadId[] = [];
 // request page its Code tab; load them before any spec
 // waits on them, under a hook timeout sized for a cold compile.
 async function setupBrowserFixture0() {
-
   installKeyEngine();
   await Promise.all([
     import("./components/files/FilePreviewPanel"),
@@ -370,7 +376,6 @@ async function setupBrowserFixture0() {
     import("./components/device/DevicePanel"),
     import("./components/pullRequest/PullRequestCodeTab"),
   ]);
-
 
   // Every timer and animation frame runs on test time: `settle` moves it.
   const _timers = fakeTimers();
@@ -389,16 +394,7 @@ async function setupBrowserFixture0() {
 
   // A browser's ClipboardItem owns the promises it is given. Monaco hands it one
   // on every click and cancels it on the next; happy-dom's leaves it unhandled.
-  vi.stubGlobal(
-    "ClipboardItem",
-    class {
-      readonly types: ReadonlyArray<string>;
-      constructor(items: Record<string, Promise<unknown>>) {
-        this.types = Object.keys(items);
-        for (const item of Object.values(items)) Promise.resolve(item).catch(() => {});
-      }
-    },
-  );
+  vi.stubGlobal("ClipboardItem", PromiseClipboardItem);
   const capabilities = fixture.environments[0]!.serverConfig.environment.capabilities as Record<
     string,
     boolean
@@ -426,36 +422,35 @@ async function setupBrowserFixture0() {
     });
   });
 
-return {async [Symbol.asyncDispose]() {
+  return {
+    async [Symbol.asyncDispose]() {
+      await act(async () => root?.[Symbol.asyncDispose]());
+      root = undefined;
+      container.remove();
+      for (const threadId of openedThreads.splice(0)) {
+        useRightPanelStore.getState().removeThread(scopeThreadRef(environmentId, threadId));
+      }
+      fixture.threads.clear();
+      fixture.threadStates.clear();
+      window.localStorage.clear();
+      await setViewport(DEFAULT_VIEWPORT);
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
 
-  await act(async () => root?.[Symbol.asyncDispose]());
-  root = undefined;
-  container.remove();
-  for (const threadId of openedThreads.splice(0)) {
-    useRightPanelStore.getState().removeThread(scopeThreadRef(environmentId, threadId));
-  }
-  fixture.threads.clear();
-  fixture.threadStates.clear();
-  window.localStorage.clear();
-  await setViewport(DEFAULT_VIEWPORT);
-  vi.useRealTimers();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-
-
-_timers[Symbol.dispose]();
-}};
+      _timers[Symbol.dispose]();
+    },
+  };
 }
-
-
-
-
 
 /** happy-dom's default window, and a Pixel 7's, where the panel lays out as the phone's sheet. */
 const DEFAULT_VIEWPORT = { width: 1024, height: 768 };
 const PIXEL_7_VIEWPORT = { width: 412, height: 915 };
 
-async function setViewport(size: { readonly width: number; readonly height: number }): Promise<void> {
+async function setViewport(size: {
+  readonly width: number;
+  readonly height: number;
+}): Promise<void> {
   await page.viewport(size.width, size.height);
 }
 
@@ -682,7 +677,7 @@ async function expectHalfPageScroll(region: HTMLElement): Promise<void> {
 describe("panel surface entry fence: a launcher letter lands in the surface", () => {
   // Upstream removed the Agents surface in v2. The launcher must not offer its obsolete route.
   it("panel entry fence guard: the v2 launcher omits the removed Agents surface", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp(addSurfaceThread());
     await press({ key: " ", code: "Space" });
@@ -697,7 +692,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("panel entry fence spec: Space p l lands in the linked pull request list", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp(addSurfaceThread());
     await openFromLauncher("l");
@@ -706,7 +701,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("panel entry fence spec: Space p p lands in the pull request's content", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp(addSurfaceThread());
     await openFromLauncher("p");
@@ -715,7 +710,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("panel entry fence spec: Space p s lands in Software Factory's scrolling content", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp(addSurfaceThread());
     await openFromLauncher("s");
@@ -735,7 +730,7 @@ describe("panel surface entry fence: returning to a pull request surface", () =>
   // The Code tab is the page's own state, so a remount (`Ctrl+Tab` away and
   // back) shows Summary again: the way back into Code is a pane move.
   it("panel entry fence spec: Ctrl+L back into a pull request on its Code tab lands in its diff", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp(addSurfaceThread());
     await openFromLauncher("p");
@@ -760,7 +755,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("panel entry fence spec: Ctrl+Tab back to the pull request list lands in it after its last link goes", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const threadId = addSurfaceThread();
     await mountApp(threadId);
@@ -823,7 +818,7 @@ describe("panel surface entry fence: a previewed file takes focus in its scroll 
   }
 
   it("panel entry fence spec: a rendered Markdown file takes focus in its scroll region", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await openFileThenCycleBack("docs/guide.md");
     const heading = [...surfaceContent().querySelectorAll("h1")].find(
@@ -836,7 +831,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("panel entry fence spec: an image file takes focus in its scroll region", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await openFileThenCycleBack("docs/diagram.png");
     const image = surfaceContent().querySelector('img[alt="docs/diagram.png"]');
@@ -847,7 +842,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("panel entry fence spec: a rendered Markdown attachment takes focus in its scroll region", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await openAttachmentThenCycleBack("notes.md", "text/markdown");
     const heading = [...surfaceContent().querySelectorAll("h1")].find(
@@ -860,7 +855,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("panel entry fence spec: an image attachment takes focus in its scroll region", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await openAttachmentThenCycleBack("photo.png", "image/png");
     const image = surfaceContent().querySelector('img[alt="photo.png"]');
@@ -873,7 +868,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("panel surface entry fence: native surfaces keep their tab title", () => {
   it("panel entry fence guard: Space p m keeps focus on the Device tab title", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountApp(addSurfaceThread());
     await openFromLauncher("m");
@@ -906,7 +901,7 @@ describe("panel surface entry fence: the phone's +", () => {
   }
 
   it("panel entry fence guard: at a phone's width, tapping + then a row opens it with no text entry focused", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await setViewport(PIXEL_7_VIEWPORT);
     const threadId = addSurfaceThread();
@@ -966,7 +961,7 @@ describe("panel surface entry fence: leaving the Files tree lands in the open fi
   it.each(LEAVE_KEYS)(
     "panel entry fence spec: %s from the tree lands in a rendered Markdown file's scroll region",
     async (_label, chord) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+      await using _browserFixture0 = await setupBrowserFixture0();
 
       await openFromTree("guide.md");
       await press(chord);
@@ -984,7 +979,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   it.each(LEAVE_KEYS)(
     "panel entry fence spec: %s from the tree lands in an image's scroll region",
     async (_label, chord) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+      await using _browserFixture0 = await setupBrowserFixture0();
 
       await openFromTree("diagram.png");
       await press(chord);
@@ -999,7 +994,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   it.each(LEAVE_KEYS)(
     "panel entry fence guard: %s from the tree lands in the editor",
     async (_label, chord) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+      await using _browserFixture0 = await setupBrowserFixture0();
 
       await openFromTree("index.ts");
       await press(chord);

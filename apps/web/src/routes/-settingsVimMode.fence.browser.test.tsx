@@ -15,7 +15,12 @@ import { act, render as renderBrowser, type Screen } from "../../test/render";
  * Phase 4 of the modal keys production cycle, criterion 2: Settings shows the
  * Vim mode switch on, with no reset control, for a client that never changed it.
  */
-import { createMemoryHistory, createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+} from "@tanstack/react-router";
 
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -108,7 +113,6 @@ async function settleRouter(): Promise<void> {
 }
 
 async function mountAppearanceSettings(): Promise<void> {
-
   __resetClientSettingsPersistenceForTests();
   container = document.createElement("div");
   document.body.append(container);
@@ -126,18 +130,16 @@ async function mountAppearanceSettings(): Promise<void> {
 }
 
 async function setupBrowserFixture0() {
-
-
-return {async [Symbol.asyncDispose]() {
-
-  await act(async () => root?.[Symbol.asyncDispose]());
-  root = undefined;
-  container?.remove();
-  container = undefined;
-  fixture.storedClientSettings = null;
-  vi.unstubAllGlobals();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      await act(async () => root?.[Symbol.asyncDispose]());
+      root = undefined;
+      container?.remove();
+      container = undefined;
+      fixture.storedClientSettings = null;
+      vi.unstubAllGlobals();
+    },
+  };
 }
 
 const VIM_SWITCH_SELECTOR = '[aria-label="Use Vim mode across the app"]';
@@ -155,7 +157,7 @@ function isSwitchOn(element: HTMLElement): boolean {
 
 describe("vim mode settings fence: the default is on", () => {
   it("vim mode settings fence spec: a client that never changed it sees the Vim mode switch on with no reset", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountAppearanceSettings();
     expect(isSwitchOn(vimSwitch())).toBe(true);
@@ -163,7 +165,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("vim mode settings fence guard: a client that stored Vim mode off sees the switch off", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.storedClientSettings = { vimMode: false };
     await mountAppearanceSettings();

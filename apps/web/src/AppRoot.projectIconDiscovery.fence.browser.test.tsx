@@ -23,13 +23,22 @@ import { act, render as renderBrowser, type Screen } from "../test/render";
  *   `AppRoot.treeDiff.fence.test.tsx` does.
  */
 
-import { createMemoryHistory, createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+} from "@tanstack/react-router";
 import { expect, it, vi } from "vite-plus/test";
 import { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import type { AppRouter } from "./router";
 
 import { appRootFence, makeFenceSession } from "./test/appRootFenceMocks";
 const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("./state/presentation", async (original) =>
+  (await fenceMocks()).mockPresentation(original, fixture.environments),
+);
+vi.mock("./connection/runtime", async () => (await fenceMocks()).mockConnectionRuntime());
 vi.mock("@t3tools/client-runtime/state/session", async (original) =>
   (await fenceMocks()).mockRuntimeSession(original),
 );
@@ -168,8 +177,6 @@ vi.mock("./components/preview/PreviewAutomationHosts", () => ({
 vi.mock("./browser/ElectronBrowserHost", () => ({ ElectronBrowserHost: () => null }));
 vi.mock("./components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }));
 
-
-
 import {
   closeProjectIconDiscoveryDialog,
   openProjectIconDiscoveryDialog,
@@ -255,9 +262,6 @@ async function pushDiscovery(
 const submitted = () => fixture.discoverRequests.map((request) => request.input.projectId);
 
 async function setupBrowserFixture0() {
-
-
-
   for (const environment of fixture.environments) {
     appRootFence.sessions.set(environment.environmentId, makeFenceSession());
   }
@@ -280,20 +284,18 @@ async function setupBrowserFixture0() {
   container = document.createElement("div");
   document.body.append(container);
 
-return {async [Symbol.asyncDispose]() {
-
-  // The dialog's target lives in the app-wide atom registry, which outlives a
-  // mounted app; close it so the next spec starts with no dialog open.
-  closeProjectIconDiscoveryDialog();
-  await act(async () => root?.[Symbol.asyncDispose]());
-  root = undefined;
-  container.remove();
-  vi.unstubAllGlobals();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      // The dialog's target lives in the app-wide atom registry, which outlives a
+      // mounted app; close it so the next spec starts with no dialog open.
+      closeProjectIconDiscoveryDialog();
+      await act(async () => root?.[Symbol.asyncDispose]());
+      root = undefined;
+      container.remove();
+      vi.unstubAllGlobals();
+    },
+  };
 }
-
-
 
 async function mountApp() {
   const route = createRootRoute({
@@ -355,7 +357,7 @@ async function click(element: HTMLElement) {
 }
 
 it("icon discovery dialog guard: opening the batch previews one environment and starts nothing", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await openBatch();
   expect(fixture.previewRequests).toEqual([{ environmentId, input: {} }]);
@@ -364,7 +366,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("icon discovery dialog fence: the batch submits the next project only after the previous outcome", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await openBatch();
   await click(button("Find icons for 2 projects"));
@@ -390,7 +392,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("icon discovery dialog fence: a project eligible after confirmation is not added", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await openBatch();
   await click(button("Find icons for 2 projects"));
@@ -403,7 +405,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("icon discovery dialog fence: an outcome for another job token does not advance the batch", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await openBatch();
   await click(button("Find icons for 2 projects"));
@@ -414,7 +416,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("icon discovery dialog fence: Stop after this project submits nothing further", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await openBatch();
   await click(button("Find icons for 2 projects"));
@@ -427,7 +429,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("icon discovery dialog fence: closing the client leaves later projects unstarted", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await openBatch();
   await click(button("Find icons for 2 projects"));
@@ -442,7 +444,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("icon discovery dialog fence: an unavailable outcome is shown and the batch ends", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   fixture.previews = [preview("alpha", "Alpha", "ready", 3)];
   await openBatch();
@@ -458,7 +460,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("icon discovery dialog fence: a dropped connection never submits the remaining projects", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await openBatch();
   await click(button("Find icons for 2 projects"));
@@ -472,7 +474,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("icon discovery dialog fence: a newer job on the project ends the replaced search", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await openBatch();
   await click(button("Find icons for 2 projects"));
@@ -491,7 +493,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("icon discovery dialog regression: a shown outcome survives later changes to its project", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await openBatch();
   await click(button("Find icons for 2 projects"));
@@ -516,7 +518,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 });
 
 it("icon discovery dialog regression: one outcome advances the batch once", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   await openBatch();
   await click(button("Find icons for 2 projects"));

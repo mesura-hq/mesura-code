@@ -247,6 +247,21 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
     }),
   );
 
+  it.effect("keeps a paired session for a year, then expires it", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore.SessionStore;
+      const issued = yield* sessions.issue({ subject: "phone" });
+
+      yield* TestClock.adjust(Duration.days(364));
+      expect((yield* sessions.verify(issued.token)).subject).toBe("phone");
+
+      yield* TestClock.adjust(Duration.days(2));
+      expect((yield* Effect.flip(sessions.verify(issued.token)))._tag).toBe(
+        "SessionTokenExpiredError",
+      );
+    }).pipe(Effect.provide(Layer.merge(layerSessionStore(), TestClock.layer()))),
+  );
+
   it.effect("carries a runtime-mode ceiling only on sessions issued with one", () =>
     Effect.gen(function* () {
       const sessions = yield* SessionStore.SessionStore;

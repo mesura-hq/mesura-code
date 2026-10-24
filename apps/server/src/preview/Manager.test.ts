@@ -3,6 +3,8 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import { type PreviewEvent, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import { expect } from "vite-plus/test";
@@ -45,6 +47,319 @@ const layer = PreviewManager.layer.pipe(
 );
 
 it.layer(layer)("PreviewManager", (it) => {
+  it.effect(
+    "thread-link allocation guard keeps ordinary open registration before publication",
+    () =>
+      Effect.gen(function* () {
+        const threadId = freshThreadId();
+        const manager = yield* PreviewManager.PreviewManager;
+        const subscription = yield* manager.subscribeEvents;
+        const registrations = new Map<string, string>();
+        const opener = yield* manager
+          .open({
+            threadId,
+            runtime: "server",
+            automationOwner: "ordinary-agent",
+            reveal: true,
+            profileId: "work",
+            url: "localhost:5173",
+            beforePublish: (snapshot) => registrations.set(snapshot.tabId, "registered"),
+          })
+          .pipe(Effect.forkChild);
+        const event = yield* PubSub.take(subscription);
+        expect(registrations.get(event.tabId)).toBe("registered");
+        const snapshot = yield* Fiber.join(opener);
+        expect(snapshot).toMatchObject({
+          automationOwner: "ordinary-agent",
+          reveal: true,
+          profileId: "work",
+          navStatus: { _tag: "Loading", url: "http://localhost:5173/", title: "" },
+        });
+        expect(snapshot).not.toHaveProperty("purpose");
+        expect(event).toMatchObject({ type: "opened", snapshot });
+      }),
+  );
+
+  it.effect(
+    "thread-link allocator gives concurrent clients one Idle target and one opened event",
+    () =>
+      Effect.gen(function* () {
+        const threadId = freshThreadId();
+        const manager = yield* PreviewManager.PreviewManager;
+        const collector = yield* collectEvents;
+        const before = yield* manager.list({ threadId });
+        const start = yield* Deferred.make<void>();
+        const clients = yield* Effect.forEach(Array.from({ length: 12 }), () =>
+          Deferred.await(start).pipe(
+            Effect.andThen(manager.openLinkTarget({ threadId, profileId: "work" })),
+            Effect.forkChild,
+          ),
+        );
+        yield* Deferred.succeed(start, undefined);
+        const allocations = yield* Effect.forEach(clients, Fiber.join);
+        const listed = yield* manager.list({ threadId });
+        expect(new Set(allocations.map((result) => result.selectedTabId)).size).toBe(1);
+        expect(listed.sessions).toHaveLength(1);
+        expect(listed.revision).toBe(before.revision + 1);
+        expect(listed.sessions[0]).toMatchObject({
+          tabId: allocations[0]?.selectedTabId,
+          purpose: "thread-link",
+          runtime: "server",
+          profileId: "work",
+          viewport: { _tag: "fill" },
+          navStatus: { _tag: "Idle" },
+          canGoBack: false,
+          canGoForward: false,
+        });
+        expect(listed.sessions[0]).not.toHaveProperty("automationOwner");
+        expect(listed.sessions[0]).not.toHaveProperty("reveal");
+        for (const result of allocations) {
+          expect(result).toEqual({ ...listed, selectedTabId: listed.sessions[0]?.tabId });
+        }
+        expect(yield* collector.drain).toEqual([
+          expect.objectContaining({
+            type: "opened",
+            serverEpoch: listed.serverEpoch,
+            revision: listed.revision,
+            snapshot: listed.sessions[0],
+          }),
+        ]);
+      }),
+  );
+
+  it.effect("thread-link allocator isolates threads and never adopts ordinary or agent tabs", () =>
+    Effect.gen(function* () {
+      const threadId = freshThreadId();
+      const otherThreadId = freshThreadId();
+      const manager = yield* PreviewManager.PreviewManager;
+      const manual = yield* manager.open({ threadId, runtime: "server" });
+      const desktop = yield* manager.open({ threadId });
+      const agent = yield* manager.open({
+        threadId,
+        runtime: "server",
+        automationOwner: "agent-session",
+        reveal: true,
+      });
+      const result = yield* manager.openLinkTarget({ threadId });
+      const other = yield* manager.openLinkTarget({ threadId: otherThreadId });
+      expect(result.sessions).toHaveLength(4);
+      expect(result.sessions).toEqual(expect.arrayContaining([manual, desktop, agent]));
+      expect([manual.tabId, desktop.tabId, agent.tabId, other.selectedTabId]).not.toContain(
+        result.selectedTabId,
+      );
+      expect(other.sessions).toHaveLength(1);
+      expect(other.sessions[0]?.threadId).toBe(otherThreadId);
+      for (const snapshot of [manual, desktop, agent]) {
+        expect(snapshot).not.toHaveProperty("purpose");
+      }
+      const nextManual = yield* manager.open({ threadId, runtime: "server" });
+      expect(nextManual.tabId).not.toBe(result.selectedTabId);
+      expect(nextManual).not.toHaveProperty("purpose");
+    }),
+  );
+
+  it.effect(
+    "thread-link reuse preserves the full browser state and emits no navigation or reveal",
+    () =>
+      Effect.gen(function* () {
+        const threadId = freshThreadId();
+        const manager = yield* PreviewManager.PreviewManager;
+        const initial = yield* manager.openLinkTarget({
+          threadId,
+          profileId: "work",
+          viewport: { _tag: "freeform", width: 1024, height: 768 },
+        });
+        yield* manager.reportStatus({
+          threadId,
+          tabId: initial.selectedTabId,
+          serverControlled: true,
+          navStatus: { _tag: "Success", url: "https://example.com/history", title: "History" },
+          canGoBack: true,
+          canGoForward: true,
+        });
+        yield* manager.adjust({
+          threadId,
+          tabId: initial.selectedTabId,
+          colorScheme: "dark",
+          zoomFactor: 1.25,
+        });
+        const before = yield* manager.list({ threadId });
+        const collector = yield* collectEvents;
+        const reused = yield* manager.openLinkTarget({
+          threadId,
+          profileId: "personal",
+          viewport: { _tag: "fill" },
+        });
+        expect(reused).toEqual({ ...before, selectedTabId: initial.selectedTabId });
+        expect(yield* manager.list({ threadId })).toEqual(before);
+        expect(yield* collector.drain).toEqual([]);
+        expect(
+          yield* manager
+            .navigate({
+              threadId,
+              tabId: reused.selectedTabId,
+              url: "https://example.com/forbidden",
+            })
+            .pipe(Effect.flip),
+        ).toMatchObject({ _tag: "PreviewControlRequiredError" });
+        expect(
+          yield* manager
+            .reportStatus({
+              threadId,
+              tabId: reused.selectedTabId,
+              navStatus: { _tag: "Idle" },
+              canGoBack: false,
+              canGoForward: false,
+            })
+            .pipe(Effect.flip),
+        ).toMatchObject({ _tag: "PreviewControlRequiredError" });
+        expect(yield* manager.list({ threadId })).toEqual(before);
+        expect(yield* collector.drain).toEqual([]);
+      }),
+  );
+
+  it.effect(
+    "thread-link close releases only the designated tab and reopen takes new defaults",
+    () =>
+      Effect.gen(function* () {
+        const threadId = freshThreadId();
+        const manager = yield* PreviewManager.PreviewManager;
+        const first = yield* manager.openLinkTarget({ threadId, profileId: "work" });
+        const manual = yield* manager.open({ threadId, runtime: "server" });
+        yield* manager.close({ threadId, tabId: manual.tabId });
+        expect((yield* manager.openLinkTarget({ threadId })).selectedTabId).toBe(
+          first.selectedTabId,
+        );
+        const survivor = yield* manager.open({ threadId, runtime: "server" });
+        const collector = yield* collectEvents;
+        yield* manager.close({ threadId, tabId: first.selectedTabId });
+        const reopened = yield* manager.openLinkTarget({ threadId, profileId: "personal" });
+        expect(reopened.selectedTabId).not.toBe(first.selectedTabId);
+        expect(reopened.sessions).toEqual([
+          survivor,
+          expect.objectContaining({
+            tabId: reopened.selectedTabId,
+            profileId: "personal",
+            purpose: "thread-link",
+            navStatus: { _tag: "Idle" },
+          }),
+        ]);
+        const events = yield* collector.drain;
+        expect(events.map((event) => event.type)).toEqual(["closed", "opened"]);
+        expect(events[1]?.revision).toBe((events[0]?.revision ?? 0) + 1);
+        expect(reopened.revision).toBe(events[1]?.revision);
+        yield* manager.close({ threadId });
+        expect((yield* manager.list({ threadId })).sessions).toEqual([]);
+        expect((yield* manager.openLinkTarget({ threadId })).selectedTabId).not.toBe(
+          reopened.selectedTabId,
+        );
+      }),
+  );
+
+  it.effect(
+    "thread-link racing close and allocation returns a state consistent with published order",
+    () =>
+      Effect.gen(function* () {
+        const threadId = freshThreadId();
+        const manager = yield* PreviewManager.PreviewManager;
+        const initial = yield* manager.openLinkTarget({ threadId });
+        const collector = yield* collectEvents;
+        const start = yield* Deferred.make<void>();
+        const closer = yield* Deferred.await(start).pipe(
+          Effect.andThen(manager.close({ threadId, tabId: initial.selectedTabId })),
+          Effect.forkChild,
+        );
+        const allocator = yield* Deferred.await(start).pipe(
+          Effect.andThen(manager.openLinkTarget({ threadId })),
+          Effect.forkChild,
+        );
+        yield* Deferred.succeed(start, undefined);
+        yield* Fiber.join(closer);
+        const result = yield* Fiber.join(allocator);
+        const events = yield* collector.drain;
+        const listed = yield* manager.list({ threadId });
+        if (result.selectedTabId === initial.selectedTabId) {
+          expect(result).toEqual(initial);
+          expect(events.map((event) => event.type)).toEqual(["closed"]);
+          expect(listed.sessions).toEqual([]);
+          expect(listed.revision).toBe(result.revision + 1);
+        } else {
+          expect(events.map((event) => event.type)).toEqual(["closed", "opened"]);
+          expect(result).toEqual({ ...listed, selectedTabId: listed.sessions[0]?.tabId });
+          expect(result.revision).toBe(initial.revision + 2);
+        }
+      }),
+  );
+
+  it.effect(
+    "thread-link close publication is a milestone before allocation captures the replacement",
+    () =>
+      Effect.gen(function* () {
+        const threadId = freshThreadId();
+        const manager = yield* PreviewManager.PreviewManager;
+        const initial = yield* manager.openLinkTarget({ threadId });
+        const subscription = yield* manager.subscribeEvents;
+        const closer = yield* manager.close({ threadId }).pipe(Effect.forkChild);
+        const closed = yield* PubSub.take(subscription);
+        const replacement = yield* manager.openLinkTarget({ threadId });
+        yield* Fiber.join(closer);
+        const opened = yield* PubSub.take(subscription);
+        expect(closed).toMatchObject({ type: "closed", tabId: initial.selectedTabId });
+        expect(opened).toMatchObject({
+          type: "opened",
+          tabId: replacement.selectedTabId,
+          revision: closed.revision + 1,
+        });
+        expect(replacement.selectedTabId).not.toBe(initial.selectedTabId);
+        expect(replacement).toEqual({
+          ...(yield* manager.list({ threadId })),
+          selectedTabId: replacement.selectedTabId,
+        });
+      }),
+  );
+
+  it.effect(
+    "thread-link opened publication is a milestone before close removes the allocation",
+    () =>
+      Effect.gen(function* () {
+        const threadId = freshThreadId();
+        const manager = yield* PreviewManager.PreviewManager;
+        const subscription = yield* manager.subscribeEvents;
+        const allocator = yield* manager.openLinkTarget({ threadId }).pipe(Effect.forkChild);
+        const opened = yield* PubSub.take(subscription);
+        yield* manager.close({ threadId, tabId: opened.tabId });
+        const result = yield* Fiber.join(allocator);
+        const closed = yield* PubSub.take(subscription);
+        expect(result.sessions).toHaveLength(1);
+        expect(result.selectedTabId).toBe(opened.tabId);
+        expect(result.revision).toBe(opened.revision);
+        expect(closed).toMatchObject({
+          type: "closed",
+          tabId: result.selectedTabId,
+          revision: result.revision + 1,
+        });
+        expect((yield* manager.list({ threadId })).sessions).toEqual([]);
+      }),
+  );
+
+  it.effect(
+    "thread-link allocation resets its in-memory designation and epoch on manager restart",
+    () =>
+      Effect.gen(function* () {
+        const threadId = freshThreadId();
+        const create = PreviewManager.make.pipe(Effect.provide(NodeCrypto.layer));
+        const firstManager = yield* create;
+        const first = yield* firstManager.openLinkTarget({ threadId });
+        const restartedManager = yield* create;
+        expect((yield* restartedManager.list({ threadId })).sessions).toEqual([]);
+        const restarted = yield* restartedManager.openLinkTarget({ threadId });
+        expect(restarted.serverEpoch).not.toBe(first.serverEpoch);
+        expect(restarted.selectedTabId).not.toBe(first.selectedTabId);
+        expect(restarted.selectedTabId.endsWith(`_${restarted.serverEpoch}`)).toBe(true);
+        expect(restarted.revision).toBe(1);
+      }),
+  );
+
   it.effect("opens a session and emits opened with normalized URL", () =>
     Effect.gen(function* () {
       const threadId = freshThreadId();

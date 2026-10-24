@@ -1,4 +1,8 @@
-import type { ResolvedKeybindingsConfig, ScopedThreadRef } from "@t3tools/contracts";
+import type {
+  PreviewForwardedShortcut,
+  ResolvedKeybindingsConfig,
+  ScopedThreadRef,
+} from "@t3tools/contracts";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
@@ -12,7 +16,9 @@ const state = vi.hoisted(() => ({
   workspaceAvailable: true,
   navigate: vi.fn(),
   openPreview: vi.fn(),
-  setShortcuts: vi.fn(async () => undefined),
+  setShortcuts: vi.fn<(shortcuts: ReadonlyArray<PreviewForwardedShortcut>) => Promise<void>>(
+    async () => undefined,
+  ),
   toast: vi.fn(),
 }));
 
@@ -129,6 +135,7 @@ async function renderShortcut() {
       environment.defer(() => element.remove());
       return element;
     },
+    unmount: () => environment.disposeAsync(),
     [Symbol.asyncDispose]: () => environment.disposeAsync(),
   };
 }
@@ -263,4 +270,33 @@ describe("root reopen shortcut", () => {
       expect(useClosedViewStore.getState().entries).toEqual([]);
     },
   );
+});
+
+it("thread link integration fence: configured panel close enters and leaves actual guest forwarding registration", async () => {
+  setup();
+  state.params = { ...ref };
+  useRightPanelStore.getState().openBrowser(ref, "active-target");
+  const shortcut = {
+    key: "y",
+    ctrlKey: true,
+    shiftKey: true,
+    metaKey: false,
+    altKey: false,
+    modKey: false,
+  };
+  state.keybindings = [{ command: "rightPanel.close", shortcut }];
+  await using view = await renderShortcut();
+  expect(state.setShortcuts.mock.lastCall?.[0]).toContainEqual({
+    command: "rightPanel.close",
+    shortcut,
+  });
+  await act(() => useRightPanelStore.getState().toggleVisibility(ref));
+  expect(state.setShortcuts).toHaveBeenLastCalledWith([]);
+  await act(() => useRightPanelStore.getState().toggleVisibility(ref));
+  expect(state.setShortcuts.mock.lastCall?.[0]).toContainEqual({
+    command: "rightPanel.close",
+    shortcut,
+  });
+  await view.unmount();
+  expect(state.setShortcuts).toHaveBeenLastCalledWith([]);
 });
