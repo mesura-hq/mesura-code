@@ -36,6 +36,7 @@
  * were rebuilt with each sidebar render, which renews every row's listeners,
  * and the sortable ids were a new array, which dnd-kit reads as a reorder.
  */
+import { PromiseClipboardItem } from "./test/promiseClipboardItem";
 import { act, type ReactNode } from "react";
 import type { Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -311,16 +312,7 @@ beforeEach(() => {
     ]),
   );
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  vi.stubGlobal(
-    "ClipboardItem",
-    class {
-      readonly types: ReadonlyArray<string>;
-      constructor(items: Record<string, Promise<unknown>>) {
-        this.types = Object.keys(items);
-        for (const item of Object.values(items)) Promise.resolve(item).catch(() => {});
-      }
-    },
-  );
+  vi.stubGlobal("ClipboardItem", PromiseClipboardItem);
   useFileTreeStore.setState({ explorerOpen: true });
   container = document.createElement("div");
   document.body.append(container);

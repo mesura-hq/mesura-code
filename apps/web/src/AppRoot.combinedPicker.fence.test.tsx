@@ -24,7 +24,8 @@
  * Boundaries the fixture replaces, and nothing else: the ones listed in
  * `test/appRootFenceMocks.tsx`. The providers are this file's catalog.
  */
-import { act } from "react";
+import { PromiseClipboardItem } from "./test/promiseClipboardItem";
+import { act, type ReactNode } from "react";
 import type { Root } from "react-dom/client";
 import {
   afterAll,
@@ -84,6 +85,11 @@ vi.mock("./components/files/mesuraFileManager/MesuraFileManagerLayer", async () 
 );
 vi.mock("./keys/highlights", async () => (await fenceMocks()).mockHighlights());
 vi.mock("@legendapp/list/react", async () => (await fenceMocks()).mockLegendList());
+// The picker does not exercise diff workers. Importing their worker entry in
+// happy-dom registers it on the main window and feeds DOM errors back to it.
+vi.mock("./components/DiffWorkerPoolProvider", () => ({
+  DiffWorkerPoolProvider: ({ children }: { children?: ReactNode }) => children,
+}));
 vi.mock("@t3tools/client-runtime/state/session", async (original) =>
   (await fenceMocks()).mockRuntimeSession(original),
 );
@@ -219,10 +225,13 @@ let threadRef = scopeThreadRef(environmentId, ThreadId.make("combined-picker-uns
 let root: Root | undefined;
 let container: HTMLDivElement;
 
-beforeAll(() => {
+// ChatView lazy-loads the file panel during the first mount. Compile it in setup,
+// as the other AppRoot fences do, so a cold compile cannot time out the first spec.
+beforeAll(async () => {
   installKeyEngine();
   serverConfig.providers = CATALOG;
-});
+  await import("./components/files/FilePreviewPanel");
+}, 120_000);
 
 afterAll(() => {
   serverConfig.providers = originalProviders;
@@ -247,7 +256,10 @@ function seedThread(runtimeMode: RuntimeMode): ThreadId {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  // happy-dom does not consume the promises Monaco passes to ClipboardItem.
+  vi.stubGlobal("ClipboardItem", PromiseClipboardItem);
   fixture.vimMode = false;
   // Each test starts without another test's remembered model choices.
   useComposerDraftStore.setState({
@@ -264,12 +276,13 @@ afterEach(async () => {
   root = undefined;
   container.remove();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 async function settle(): Promise<void> {
-  for (let round = 0; round < 5; round += 1) {
+  for (let round = 0; round < 12; round += 1) {
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await vi.advanceTimersByTimeAsync(16);
     });
   }
 }
