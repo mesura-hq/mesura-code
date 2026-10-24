@@ -1,6 +1,6 @@
 import type { DictationJob, EnvironmentId } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import { useMemo, useState } from "react";
 
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";

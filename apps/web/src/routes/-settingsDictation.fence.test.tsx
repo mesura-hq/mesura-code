@@ -65,6 +65,9 @@ vi.mock("~/components/settings/SettingsScopeContext", () => {
   const scope = {
     scope: { kind: "environment", environmentId: fixture.environmentId, label: "Laptop" },
     search: {},
+    groups: [],
+    singleEnvironment: true,
+    selectScope: () => undefined,
     environment,
     environments: [environment],
     target: null,

@@ -20,8 +20,18 @@
  *
  * "Picker" in the exported names is historical: every target was one when the
  * bus was written. Read it as "a chat control a keybinding has to reach".
+ *
+ * The `runContext.*` actions reach the run context drawer in BranchToolbar,
+ * which owns the machine and workspace handlers the quick toggles call.
  */
-export type PickerAction = "traits" | "workspace" | "branch" | "question";
+export type PickerAction =
+  | "traits"
+  | "workspace"
+  | "branch"
+  | "question"
+  | "runContext.toggle"
+  | "runContext.cycleMachine"
+  | "runContext.toggleWorkspace";
 
 const EVENT_NAME = "t3code:picker-action";
 

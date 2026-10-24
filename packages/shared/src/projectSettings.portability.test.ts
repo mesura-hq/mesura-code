@@ -115,3 +115,25 @@ it("uses only the second environment's fallback when its catalog lacks the porta
   expect(resolved.settings.defaultThreadEnvMode).toBe("worktree");
   expect(resolved.sources.defaultThreadEnvMode).toBe("mesura");
 });
+
+it("feeds a legacy t3.json through upstream's file tier, below Mesura fields", () => {
+  const environment = makeEnvironment("desktop", false);
+  const unset = { ...environment.settings, defaultThreadEnvMode: null, worktreeSubmodules: null };
+  const legacy = { defaultThreadEnvMode: "worktree" as const, worktreeSubmodules: "none" as const };
+  const resolved = resolveProjectSettings(unset, projectId, null, {
+    repositoryDefaults: resolveRepositoryDefaults(null, legacy),
+    providers: environment.providers,
+  });
+  expect(resolved.settings.defaultThreadEnvMode).toBe("worktree");
+  expect(resolved.sources.defaultThreadEnvMode).toBe("t3.json");
+  expect(resolved.settings.worktreeSubmodules).toBe("none");
+  expect(resolved.sources.worktreeSubmodules).toBe("t3.json");
+
+  // An environment value outranks t3.json, as upstream orders the tiers.
+  const environmentSet = resolveProjectSettings(environment.settings, projectId, null, {
+    repositoryDefaults: resolveRepositoryDefaults(null, legacy),
+    providers: environment.providers,
+  });
+  expect(environmentSet.settings.defaultThreadEnvMode).toBe("local");
+  expect(environmentSet.sources.defaultThreadEnvMode).toBe("environment");
+});

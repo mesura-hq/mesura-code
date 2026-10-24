@@ -1,22 +1,25 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import type { EditorSessionEvent } from "@t3tools/contracts";
-import type * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
-import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
-import { Packr, Unpackr } from "msgpackr";
 
-import { NvimAdapter, type NvimProcess, type NvimSpawnInput } from "./NvimAdapter.ts";
 import * as EditorSessionManager from "./Manager.ts";
+import {
+  FakeNvim,
+  attachUntilEnd,
+  collect,
+  createManager,
+  fakeAdapterLayer,
+  scratchConfig,
+} from "./Manager.testkit.ts";
 
 /**
  * The manager, driven against a Neovim that is not there.
@@ -29,175 +32,6 @@ import * as EditorSessionManager from "./Manager.ts";
  * second implementation of it, and the tests would agree with whichever of the
  * two was wrong.
  */
-
-const packr = new Packr({ useRecords: false });
-const unpackr = new Unpackr({ useRecords: false });
-
-/** What the fake answers for a method, beyond the handful it always knows. */
-type Responder = (method: string, params: ReadonlyArray<unknown>) => unknown;
-
-class FakeNvim {
-  readonly spawns: NvimSpawnInput[] = [];
-  readonly calls: Array<{ method: string; params: ReadonlyArray<unknown> }> = [];
-  readonly killed: string[] = [];
-  #outbound: Queue.Queue<Uint8Array, Cause.Done> | null = null;
-  #responder: Responder = () => null;
-  /** The buffer the fake pretends the window is on, as `mesura.open` returns. */
-  #nextBufferNumber = 1;
-  lines: string[] = [];
-
-  respondWith(responder: Responder): void {
-    this.#responder = responder;
-  }
-
-  /** Ends the current process's output, which is how Neovim exiting looks. */
-  crash(): void {
-    if (this.#outbound !== null) Queue.endUnsafe(this.#outbound);
-  }
-
-  /** Pushes a notification at the host, the way a real Neovim would. */
-  notify(method: string, params: ReadonlyArray<unknown>): void {
-    if (this.#outbound === null) return;
-    Queue.offerUnsafe(this.#outbound, packr.pack([2, method, params]));
-  }
-
-  #answer(method: string, params: ReadonlyArray<unknown>): unknown {
-    switch (method) {
-      case "nvim_get_api_info":
-        return [1, { version: { major: 0, minor: 12, patch: 4 } }];
-      case "nvim_buf_get_lines":
-        return this.lines;
-      case "nvim_replace_termcodes":
-        return params[0];
-      case "nvim_exec_lua": {
-        const code = String(params[0]);
-        if (code.includes("nvim_get_current_buf")) return 1;
-        if (code.includes("nvim_win_get_cursor")) {
-          return { line: 1, col: 1, mode: "n", window: 1000 };
-        }
-        if (code.includes("mesura.open")) {
-          this.#nextBufferNumber += 1;
-          return this.#nextBufferNumber;
-        }
-        if (code.includes("mesura_settled")) {
-          // The settle marker goes back as a notification, exactly as the real
-          // host plugin sends it, so the bridge's own barrier is exercised.
-          const marker = (params[1] as ReadonlyArray<unknown>)[0];
-          this.notify("mesura_settled", [marker]);
-          return null;
-        }
-        return this.#responder(method, params);
-      }
-      default:
-        return this.#responder(method, params);
-    }
-  }
-
-  spawn(input: NvimSpawnInput): Effect.Effect<NvimProcess, never, Scope.Scope> {
-    this.spawns.push(input);
-    // The pieces this needs are taken out here rather than reaching back
-    // through `this` inside the generator, which cannot see it.
-    const { calls, killed } = this;
-    const answer = (method: string, params: ReadonlyArray<unknown>) => this.#answer(method, params);
-    const setOutbound = (queue: Queue.Queue<Uint8Array, Cause.Done>) => {
-      this.#outbound = queue;
-    };
-
-    return Effect.gen(function* () {
-      // Typed to end, so `crash` can close it the way a dead process closes stdout.
-      const outbound = yield* Queue.make<Uint8Array, Cause.Done>();
-      setOutbound(outbound);
-      return {
-        pid: 4242,
-        write: (bytes: Uint8Array) => {
-          unpackr.unpackMultiple(bytes, (frame) => {
-            const [kind, messageId, method, params] = frame as [
-              number,
-              number,
-              string,
-              ReadonlyArray<unknown>,
-            ];
-            if (kind !== 0) return;
-            calls.push({ method, params });
-            Queue.offerUnsafe(outbound, packr.pack([1, messageId, null, answer(method, params)]));
-          });
-        },
-        stdout: Stream.fromQueue(outbound),
-        stderr: Stream.empty,
-        exitCode: Effect.succeed(0),
-        kill: (signal?: string) =>
-          Effect.sync(() => {
-            killed.push(signal ?? "SIGTERM");
-          }),
-      } satisfies NvimProcess;
-    });
-  }
-}
-
-const fakeAdapterLayer = (fake: FakeNvim) =>
-  Layer.succeed(NvimAdapter, NvimAdapter.of({ spawn: (input) => fake.spawn(input) }));
-
-/** A configuration directory that exists, so the real launch resolution runs. */
-const scratchConfig = Effect.fn("scratchConfig")(function* () {
-  const fs = yield* FileSystem.FileSystem;
-  const root = yield* fs.makeTempDirectoryScoped({ prefix: "editor-manager-" });
-  const configDirectory = `${root}/config`;
-  yield* fs.makeDirectory(configDirectory, { recursive: true });
-  yield* fs.writeFileString(`${configDirectory}/init.lua`, "-- a configuration\n");
-  return { root, configDirectory };
-});
-
-interface Fixture {
-  readonly manager: EditorSessionManager.EditorSessionManager["Service"];
-  readonly fake: FakeNvim;
-  readonly root: string;
-}
-
-const createManager = (options: { readonly maxSessions?: number } = {}) =>
-  Effect.gen(function* () {
-    const { root, configDirectory } = yield* scratchConfig();
-    const fake = new FakeNvim();
-    const manager = yield* EditorSessionManager.makeWithOptions({
-      configDirectory,
-      stateDir: root,
-      ...(options.maxSessions === undefined ? {} : { maxSessions: options.maxSessions }),
-    }).pipe(Effect.provide(fakeAdapterLayer(fake)));
-    return { manager, fake, root } satisfies Fixture;
-  });
-
-/**
- * Attaches through the websocket layer's stream and collects until it ends.
- * Returns once the attachment has its snapshot, so what follows happens to a
- * live attachment.
- */
-const attachUntilEnd = (
-  manager: EditorSessionManager.EditorSessionManager["Service"],
-  threadId: string,
-) =>
-  Effect.gen(function* () {
-    const attached = yield* Deferred.make<void>();
-    const collecting = yield* Stream.runCollect(
-      EditorSessionManager.attachEventStream(manager, { threadId }).pipe(
-        Stream.tap(() => Deferred.succeed(attached, undefined)),
-      ),
-    ).pipe(
-      Effect.map((events) => [...events]),
-      Effect.forkChild,
-    );
-    yield* Deferred.await(attached);
-    return collecting;
-  });
-
-/** Collects everything an attachment reports, for the life of the scope. */
-const collect = (manager: EditorSessionManager.EditorSessionManager["Service"], threadId: string) =>
-  Effect.gen(function* () {
-    const events = yield* Ref.make<ReadonlyArray<EditorSessionEvent>>([]);
-    const unsubscribe = yield* manager.attachStream({ threadId }, (event) =>
-      Ref.update(events, (all) => [...all, event]),
-    );
-    yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
-    return events;
-  });
 
 const layer = NodeServices.layer;
 
@@ -689,6 +523,222 @@ it.layer(layer, { excludeTestServices: true })("EditorSessionManager", (it) => {
       assert.strictEqual(outcome.failure.reason, "config-missing");
       assert.lengthOf(fake.spawns, 0, "nothing was spawned");
       assert.isFalse(yield* manager.hasSessionForTest({ threadId: "thread-1" }));
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("applies a re-sent input batch once when its sequence was already applied", () =>
+    Effect.gen(function* () {
+      const { manager, fake, root } = yield* createManager();
+      yield* manager.open({ threadId: "thread-seq", cwd: root, relativePath: "a.ts", lines: [""] });
+      const inputs = () => fake.calls.filter((call) => call.method === "nvim_input");
+
+      // The client lost the reply to batch 1 and sends it again, as it does
+      // after a reconnect. Neovim already has those keys.
+      yield* manager.input({
+        threadId: "thread-seq",
+        keys: "dw",
+        sequence: { lane: "L", index: 1 },
+      });
+      yield* manager.input({
+        threadId: "thread-seq",
+        keys: "dw",
+        sequence: { lane: "L", index: 1 },
+      });
+      yield* manager.input({
+        threadId: "thread-seq",
+        keys: "x",
+        sequence: { lane: "L", index: 2 },
+      });
+
+      assert.deepStrictEqual(
+        inputs().map((call) => call.params[0]),
+        ["dw", "x"],
+        "a batch the session already applied was given to Neovim a second time",
+      );
+
+      // Another client lane (a reload, a second window) starts its own count,
+      // and is never held behind the first lane's numbers.
+      yield* manager.input({
+        threadId: "thread-seq",
+        keys: "u",
+        sequence: { lane: "M", index: 0 },
+      });
+      // A request without a sequence is applied as before.
+      yield* manager.input({ threadId: "thread-seq", keys: "j" });
+      assert.deepStrictEqual(
+        inputs().map((call) => call.params[0]),
+        ["dw", "x", "u", "j"],
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("applies a batch once when another window's input lands between its retries", () =>
+    Effect.gen(function* () {
+      const { manager, fake, root } = yield* createManager();
+      yield* manager.open({ threadId: "thread-two", cwd: root, relativePath: "a.ts", lines: [""] });
+      const inputs = () =>
+        fake.calls.filter((call) => call.method === "nvim_input").map((call) => call.params[0]);
+
+      // Window A lost its reply to batch 1; window B typed meanwhile.
+      yield* manager.input({
+        threadId: "thread-two",
+        keys: "x",
+        sequence: { lane: "A", index: 1 },
+      });
+      yield* manager.input({
+        threadId: "thread-two",
+        keys: "y",
+        sequence: { lane: "B", index: 1 },
+      });
+      yield* manager.input({
+        threadId: "thread-two",
+        keys: "x",
+        sequence: { lane: "A", index: 1 },
+      });
+
+      assert.deepStrictEqual(inputs(), ["x", "y"], "window A's batch was applied twice");
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("records a batch Neovim accepted even when the request is interrupted", () =>
+    Effect.gen(function* () {
+      const { manager, fake, root } = yield* createManager();
+      yield* manager.open({ threadId: "thread-cut", cwd: root, relativePath: "a.ts", lines: [""] });
+      const inputs = () => fake.calls.filter((call) => call.method === "nvim_input");
+
+      // The socket closes after Neovim has the keys and before its answer
+      // comes back: the request's fiber is interrupted mid-call.
+      fake.holdReplies((method) => method === "nvim_input");
+      const first = yield* manager
+        .input({ threadId: "thread-cut", keys: "x", sequence: { lane: "A", index: 1 } })
+        .pipe(Effect.forkChild);
+      while (inputs().length === 0) yield* Effect.yieldNow;
+      const interrupting = yield* Fiber.interrupt(first).pipe(Effect.forkChild);
+      yield* Effect.yieldNow;
+      fake.releaseReplies();
+      yield* Fiber.join(interrupting);
+
+      // The client re-sends the batch it never heard back about.
+      yield* manager.input({
+        threadId: "thread-cut",
+        keys: "x",
+        sequence: { lane: "A", index: 1 },
+      });
+      assert.lengthOf(inputs(), 1, "the re-sent batch was given to Neovim a second time");
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("sends the rest of a batch Neovim accepted only part of", () =>
+    Effect.gen(function* () {
+      const { manager, fake, root } = yield* createManager();
+      yield* manager.open({
+        threadId: "thread-part",
+        cwd: root,
+        relativePath: "a.ts",
+        lines: [""],
+      });
+      // A full input buffer: Neovim takes three bytes, then the rest.
+      let first = true;
+      fake.respondWith((method, params) => {
+        if (method !== "nvim_input") return null;
+        const length = new TextEncoder().encode(String(params[0])).length;
+        if (first) {
+          first = false;
+          return 3;
+        }
+        return length;
+      });
+      yield* manager.input({
+        threadId: "thread-part",
+        keys: "abcdef",
+        sequence: { lane: "A", index: 1 },
+      });
+      assert.deepStrictEqual(
+        fake.calls.filter((call) => call.method === "nvim_input").map((call) => call.params[0]),
+        ["abcdef", "def"],
+        "the keys Neovim did not take were dropped",
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("reports a re-sent batch from before a Neovim restart as lost, not applied", () =>
+    Effect.gen(function* () {
+      const { manager, fake, root } = yield* createManager();
+      fake.lines = ["one"];
+      yield* manager.open({
+        threadId: "thread-gen",
+        cwd: root,
+        relativePath: "a.ts",
+        lines: ["one"],
+      });
+      const restarted = yield* Deferred.make<void>();
+      const unsubscribe = yield* manager.attachStream({ threadId: "thread-gen" }, (event) =>
+        event.type === "message" && event.text.includes("restarted")
+          ? Deferred.succeed(restarted, undefined).pipe(Effect.asVoid)
+          : Effect.void,
+      );
+      yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
+
+      // Neovim accepted batch 1 and exited before running it; the reply was lost.
+      yield* manager.input({
+        threadId: "thread-gen",
+        keys: "dd",
+        sequence: { lane: "A", index: 1 },
+      });
+      fake.crash();
+      yield* Deferred.await(restarted);
+      const before = fake.calls.filter((call) => call.method === "nvim_input").length;
+
+      const outcome = yield* manager
+        .input({ threadId: "thread-gen", keys: "dd", sequence: { lane: "A", index: 1 } })
+        .pipe(Effect.result);
+      assert.isTrue(Result.isFailure(outcome), "the retry claimed the keys were applied");
+      if (Result.isFailure(outcome)) {
+        assert.strictEqual(outcome.failure._tag, "EditorSessionInputLostError");
+      }
+      assert.strictEqual(
+        fake.calls.filter((call) => call.method === "nvim_input").length,
+        before,
+        "and nothing was typed into the new Neovim",
+      );
+      // A new batch goes to the new Neovim as usual.
+      yield* manager.input({
+        threadId: "thread-gen",
+        keys: "j",
+        sequence: { lane: "A", index: 2 },
+      });
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("never sends an attachment a held insertion its snapshot already contains", () =>
+    Effect.gen(function* () {
+      const { manager, fake, root } = yield* createManager();
+      fake.lines = ["old"];
+      yield* manager.open({
+        threadId: "thread-late",
+        cwd: root,
+        relativePath: "a.ts",
+        lines: ["old"],
+      });
+
+      // An insertion arrives and is held for its frame.
+      fake.notify("nvim_buf_lines_event", [2, 7, 0, 0, ["inserted"], false]);
+      yield* manager.settleForTest({ threadId: "thread-late" }).pipe(Effect.ignore);
+      // A window attaches in the meantime; its snapshot holds the insertion.
+      const events = yield* collect(manager, "thread-late");
+      fake.notify("redraw", [["flush"]]);
+      yield* manager.settleForTest({ threadId: "thread-late" });
+
+      const seen = yield* Ref.get(events);
+      assert.deepStrictEqual(seen[0]?.type === "snapshot" ? seen[0].snapshot.lines : null, [
+        "inserted",
+        "old",
+      ]);
+      assert.deepStrictEqual(
+        seen.filter((event) => event.type === "lines"),
+        [],
+        "the insertion was delivered again after the snapshot that holds it",
+      );
     }).pipe(Effect.scoped),
   );
 

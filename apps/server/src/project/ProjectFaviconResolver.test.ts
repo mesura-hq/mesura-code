@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import { TestClock } from "effect/testing";
@@ -13,7 +14,7 @@ import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as ProjectFaviconResolver from "./ProjectFaviconResolver.ts";
 import * as T3ProjectFileLoader from "./T3ProjectFileLoader.ts";
 
-const TestLayer = Layer.empty.pipe(
+const layerTest = Layer.empty.pipe(
   Layer.provideMerge(
     ProjectFaviconResolver.layer.pipe(
       Layer.provide(WorkspacePaths.layer),
@@ -55,7 +56,7 @@ const makeResolverWithFileSystem = (fileSystem: FileSystem.FileSystem) =>
     Effect.provideService(FileSystem.FileSystem, fileSystem),
   );
 
-it.layer(TestLayer)("ProjectFaviconResolverLive", (it) => {
+it.layer(layerTest)("ProjectFaviconResolverLive", (it) => {
   describe("resolvePath", () => {
     it.effect(
       "logs a stale Mesura icon and falls through saved and legacy icons to discovery",
@@ -232,6 +233,13 @@ it.layer(TestLayer)("ProjectFaviconResolverLive", (it) => {
         const configPath = path.join(cwd, ".mesura.json");
         yield* writeTextFile(cwd, "brand/icon.svg", "<svg/>");
         yield* writeTextFile(cwd, ".mesura.json", '{ "version": 1, "iconPath": "brand/icon.svg" }');
+        // A configuration changed moments ago is compared by content, because a
+        // second save in the same timestamp tick would leave its metadata alone.
+        // A minute later both its mtime and its ctime are settled.
+        const saved = yield* fileSystem.stat(configPath);
+        yield* TestClock.setTime(
+          Option.getOrThrow(saved.mtime).getTime() + Duration.toMillis(Duration.minutes(1)),
+        );
         let configReads = 0;
         const resolver = yield* makeResolverWithFileSystem(
           FileSystem.FileSystem.of({
@@ -246,6 +254,30 @@ it.layer(TestLayer)("ProjectFaviconResolverLive", (it) => {
           expect(yield* resolver.resolvePath(cwd)).toBe(path.join(cwd, "brand/icon.svg"));
         }
         expect(configReads).toBe(1);
+      }),
+    );
+
+    it.effect("follows a same-length Mesura save that restores its modification time", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
+        const cwd = yield* makeTempDir;
+        const configPath = path.join(cwd, ".mesura.json");
+        yield* writeTextFile(cwd, "brand/old.svg", "<svg/>");
+        yield* writeTextFile(cwd, "brand/new.svg", "<svg/>");
+        // The clock reads the time of these writes, so only a recent ctime can
+        // make the configuration count as changed.
+        const now = yield* fileSystem.stat(path.join(cwd, "brand/new.svg"));
+        yield* TestClock.setTime(Option.getOrThrow(now.mtime).getTime());
+        // Saves rapid enough to share a ctime tick, as in the test above, each
+        // putting back an old mtime.
+        for (let save = 0; save < 80; save += 1) {
+          const iconPath = save % 2 === 0 ? "brand/old.svg" : "brand/new.svg";
+          yield* fileSystem.writeFileString(configPath, `{"version":1,"iconPath":"${iconPath}"}`);
+          yield* fileSystem.utimes(configPath, 1000, 1000);
+          expect(yield* resolver.resolvePath(cwd)).toBe(path.join(cwd, iconPath));
+        }
       }),
     );
 
@@ -600,6 +632,75 @@ it.layer(TestLayer)("ProjectFaviconResolverLive", (it) => {
       }),
     );
 
+    it.effect("probes well-known candidates concurrently", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const cwd = yield* makeTempDir;
+        let inFlight = 0;
+        let peakInFlight = 0;
+        const resolver = yield* makeResolverWithFileSystem(
+          FileSystem.FileSystem.of({
+            ...fileSystem,
+            stat: (filePath) =>
+              Effect.suspend(() => {
+                inFlight += 1;
+                peakInFlight = Math.max(peakInFlight, inFlight);
+                return Effect.yieldNow.pipe(Effect.andThen(fileSystem.stat(filePath)));
+              }).pipe(Effect.ensuring(Effect.sync(() => (inFlight -= 1)))),
+          }),
+        );
+
+        expect(yield* resolver.resolvePath(cwd)).toBeNull();
+        expect(peakInFlight).toBeGreaterThan(1);
+      }),
+    );
+
+    it.effect("returns a found favicon without waiting for lower-ranked probes", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "favicon.svg", "<svg>root</svg>");
+        const stuckPath = path.join(cwd, "favicon.ico");
+        const resolver = yield* makeResolverWithFileSystem(
+          FileSystem.FileSystem.of({
+            ...fileSystem,
+            stat: (filePath) => (filePath === stuckPath ? Effect.never : fileSystem.stat(filePath)),
+          }),
+        );
+
+        expect(yield* resolver.resolvePath(cwd)).toBe(path.join(cwd, "favicon.svg"));
+      }),
+    );
+
+    it.effect("ignores a failing candidate that ranks below a found favicon", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "favicon.svg", "<svg>root</svg>");
+        const failingPath = path.join(cwd, "favicon.ico");
+        const resolver = yield* makeResolverWithFileSystem(
+          FileSystem.FileSystem.of({
+            ...fileSystem,
+            stat: (filePath) =>
+              filePath === failingPath
+                ? Effect.fail(
+                    PlatformError.systemError({
+                      _tag: "PermissionDenied",
+                      module: "FileSystem",
+                      method: "stat",
+                      pathOrDescriptor: failingPath,
+                    }),
+                  )
+                : fileSystem.stat(filePath),
+          }),
+        );
+
+        expect(yield* resolver.resolvePath(cwd)).toBe(path.join(cwd, "favicon.svg"));
+      }),
+    );
+
     it.effect("preserves icon source read failures", () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
@@ -663,4 +764,27 @@ it.layer(TestLayer)("ProjectFaviconResolverLive", (it) => {
       }),
     );
   });
+});
+
+// Mesura: a Luna icon search must not save an image over a favicon that
+// appeared after the resolver cached a miss for the same root.
+it.layer(layerTest)("ProjectFaviconResolver fresh resolution", (it) => {
+  it.effect(
+    "icon discovery regression: a fresh resolution sees a favicon behind a cached miss",
+    () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
+        const cwd = yield* makeTempDir;
+        expect(yield* resolver.resolvePath(cwd)).toBeNull();
+        yield* writeTextFile(cwd, "favicon.svg", "<svg/>");
+        expect(yield* resolver.resolvePath(cwd), "the miss is still cached").toBeNull();
+        expect(yield* resolver.resolvePath(cwd, undefined, { fresh: true })).toBe(
+          path.join(cwd, "favicon.svg"),
+        );
+        expect(yield* resolver.resolvePath(cwd), "the fresh walk refreshed the cache").toBe(
+          path.join(cwd, "favicon.svg"),
+        );
+      }).pipe(Effect.scoped),
+  );
 });

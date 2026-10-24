@@ -6,6 +6,7 @@ import "./index.css";
 // This fork's overrides, after upstream's so a tie on specificity goes to ours.
 import "./mesura.css";
 
+import { prepareProviderAuthDelivery } from "./providerAuthDelivery";
 import { isElectron } from "./env";
 import { hasCloudPublicConfig } from "./cloud/publicConfig";
 import { getRouter } from "./router";
@@ -15,6 +16,16 @@ import {
 } from "./lib/windowControlsOverlay";
 import { AppRoot } from "./AppRoot";
 import { clearChunkReloadGuard, reloadOnceForChunkLoadError } from "./lib/chunkReloadGuard";
+import { installKeyEngine } from "./keys/keyEngine";
+import { installNativeFocus } from "./keys/nativeFocus";
+
+// Mesura: before any component registers a key listener, so the modal key
+// engine runs first in the capture phase. Inert until Vim mode is on.
+installKeyEngine();
+// Mesura: `Tab` no longer walks the tab order (`keys/nativeFocus.ts`).
+installNativeFocus();
+
+prepareProviderAuthDelivery();
 
 // Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
 const history = isElectron ? createHashHistory() : createBrowserHistory();

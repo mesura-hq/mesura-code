@@ -37,6 +37,7 @@ export type ModelPickerJumpKeybindingCommand =
 const THREAD_KEYBINDING_COMMANDS = [
   "thread.stop",
   "thread.steerQueuedMessage",
+  "thread.editQueuedMessage",
   "thread.previous",
   "thread.next",
   // The sidebar's page step, five threads at a time. Separate commands
@@ -51,6 +52,7 @@ const THREAD_KEYBINDING_COMMANDS = [
   // are unified, which is follow-up work, not part of the merge.
   "thread.toggleSettled",
   "thread.pin",
+  "thread.undo",
   ...THREAD_JUMP_KEYBINDING_COMMANDS,
 ] as const;
 export type ThreadKeybindingCommand = (typeof THREAD_KEYBINDING_COMMANDS)[number];
@@ -100,14 +102,22 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "pane.focusUp",
   "pane.focusDown",
   "sidebar.toggle",
+  "navigation.back",
+  "navigation.forward",
   "terminal.toggle",
   "terminal.split",
   "terminal.splitVertical",
   "terminal.new",
   "terminal.close",
   "rightPanel.toggle",
+  "rightPanel.new",
+  "threadPanel.toggle",
   "rightPanel.toggleMaximized",
   "rightPanel.close",
+  "rightPanel.nextTab",
+  "rightPanel.newTab",
+  "rightPanel.previousTab",
+  "view.reopenClosed",
   "pullRequest.copyNumber",
   "diff.toggle",
   "preview.toggle",
@@ -132,9 +142,16 @@ export const STATIC_KEYBINDING_COMMANDS = [
   // find a thread from its project plus a word of its title. The rename
   // warning below applies to this id too.
   "threadSearch.toggle",
+  "usage.open",
+  "theme.select",
+  "appearance.cycle",
   "themeEditor.toggle",
   "composer.stash",
+  "composer.sendAlternate",
+  "composer.sendBackground",
+  "composer.sendAndNewThread",
   "composer.host",
+  "composer.cycleHost",
   "composer.effort",
   "composer.mode",
   "composer.workspace",
@@ -153,11 +170,19 @@ export const STATIC_KEYBINDING_COMMANDS = [
   // RENAMED_KEYBINDING_COMMANDS in packages/shared.
   "fileTree.toggle",
   "fileTree.miller",
+  // The Diff surface's Tree diff mode: the working tree's changed files.
+  // Opens the surface on that mode, or closes it when that mode is showing.
+  "treeDiff.toggle",
+  // Opens the Diff surface's mode menu (Tree diff, Files diff, Branch changes,
+  // Latest turn, Turn).
+  "diff.modeMenu",
   "usage.peek",
   // Held like usage.peek, and opens the sidebar's Hosts dock instead.
   "hosts.peek",
   "chat.new",
   "chat.newLocal",
+  "chat.newWithoutProject",
+  "chat.find",
   "editor.openFavorite",
   "traitsPicker.toggle",
   // Both open a branch-toolbar control. The workspace one exists only while
@@ -165,6 +190,12 @@ export const STATIC_KEYBINDING_COMMANDS = [
   // once a thread owns a worktree.
   "workspacePicker.toggle",
   "branchPicker.toggle",
+  // The run context drawer: machine, workspace and branch in one keyboard-first
+  // surface under the composer. The two quick toggles change the draft without
+  // opening it. The rename warning below applies to these ids too.
+  "runContext.toggle",
+  "runContext.cycleMachine",
+  "runContext.toggleWorkspace",
   // Folds the agent's question prompt into its header so the thread behind it
   // is readable while the answer is still being composed. Reachable by click
   // from that header too; the shortcut exists because the question arrives
@@ -187,6 +218,13 @@ export const STATIC_KEYBINDING_COMMANDS = [
   // open thread's lifecycle and is dispatched by the chat view. The rename
   // warning above applies to this id too.
   ...CHAT_SCROLL_KEYBINDING_COMMANDS,
+  "usage.cost",
+  "usage.tokens",
+  "usage.limits",
+  "usage.period.day",
+  "usage.period.week",
+  "usage.period.month",
+  "usage.period.quarter",
   ...MODEL_PICKER_KEYBINDING_COMMANDS,
   ...THREAD_KEYBINDING_COMMANDS,
   ...DICTATION_KEYBINDING_COMMANDS,
@@ -237,6 +275,12 @@ export const KeybindingShortcut = Schema.Struct({
   modKey: Schema.Boolean,
 });
 export type KeybindingShortcut = typeof KeybindingShortcut.Type;
+
+export const PreviewForwardedShortcut = Schema.Struct({
+  command: KeybindingCommand,
+  shortcut: KeybindingShortcut,
+});
+export type PreviewForwardedShortcut = typeof PreviewForwardedShortcut.Type;
 
 const KeybindingWhenNodeRef = Schema.suspend(
   (): Schema.Codec<KeybindingWhenNode> => KeybindingWhenNode,

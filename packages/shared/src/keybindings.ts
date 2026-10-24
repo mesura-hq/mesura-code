@@ -10,6 +10,108 @@ import {
   THREAD_JUMP_KEYBINDING_COMMANDS,
 } from "@t3tools/contracts";
 
+export interface ShortcutEventLike {
+  getModifierState?: (key: "AltGraph") => boolean;
+  type?: string;
+  code?: string;
+  key: string;
+  repeat?: boolean;
+  metaKey: boolean;
+  ctrlKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
+}
+
+export interface ShortcutModifierStateLike {
+  metaKey: boolean;
+  ctrlKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
+}
+
+const EVENT_CODE_SHORTCUT_KEYS: Readonly<Record<string, string>> = {
+  Backquote: "`",
+  Backslash: "\\",
+  BracketLeft: "[",
+  BracketRight: "]",
+  Comma: ",",
+  Digit0: "0",
+  Digit1: "1",
+  Digit2: "2",
+  Digit3: "3",
+  Digit4: "4",
+  Digit5: "5",
+  Digit6: "6",
+  Digit7: "7",
+  Digit8: "8",
+  Digit9: "9",
+  Equal: "=",
+  Minus: "-",
+  Period: ".",
+  Quote: "'",
+  Semicolon: ";",
+  Slash: "/",
+};
+
+export function isMacPlatform(platform: string): boolean {
+  return /mac|iphone|ipad|ipod/i.test(platform);
+}
+
+export function normalizeEventKey(key: string): string {
+  const normalized = key.toLowerCase();
+  if (normalized === "esc") return "escape";
+  return normalized;
+}
+
+export function shortcutKeyFromEvent(event: Pick<ShortcutEventLike, "key" | "code">): string {
+  const layoutKey = normalizeEventKey(event.key);
+  if (/^[a-z]$/.test(layoutKey)) return layoutKey;
+  const physicalKey = event.code ? EVENT_CODE_SHORTCUT_KEYS[event.code] : undefined;
+  return physicalKey ?? layoutKey;
+}
+
+export function resolveEventKeys(event: ShortcutEventLike): Set<string> {
+  const layoutKey = normalizeEventKey(event.key);
+  const keys = new Set([layoutKey]);
+  const letterCode = event.code?.match(/^Key([A-Z])$/)?.[1];
+  if (letterCode && !/^[a-z]$/.test(layoutKey)) {
+    keys.add(letterCode.toLowerCase());
+  }
+  keys.add(shortcutKeyFromEvent(event));
+  return keys;
+}
+
+export function matchesKeybindingShortcutModifiers(
+  event: ShortcutModifierStateLike,
+  shortcut: KeybindingShortcut,
+  platform: string,
+): boolean {
+  const useMetaForMod = isMacPlatform(platform);
+  const expectedMeta = shortcut.metaKey || (shortcut.modKey && useMetaForMod);
+  const expectedCtrl = shortcut.ctrlKey || (shortcut.modKey && !useMetaForMod);
+  return (
+    event.metaKey === expectedMeta &&
+    event.ctrlKey === expectedCtrl &&
+    event.shiftKey === shortcut.shiftKey &&
+    event.altKey === shortcut.altKey
+  );
+}
+
+export function matchesKeybindingShortcut(
+  event: ShortcutEventLike,
+  shortcut: KeybindingShortcut,
+  platform: string,
+): boolean {
+  if (
+    !isMacPlatform(platform) &&
+    event.getModifierState?.("AltGraph") &&
+    !/^[a-z0-9]$/i.test(event.key)
+  )
+    return false;
+  if (!matchesKeybindingShortcutModifiers(event, shortcut, platform)) return false;
+  return resolveEventKeys(event).has(shortcut.key);
+}
+
 type WhenToken =
   | { type: "identifier"; value: string }
   | { type: "not" }
@@ -20,6 +122,8 @@ type WhenToken =
 
 export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+b", command: "sidebar.toggle" },
+  { key: "mod+[", command: "navigation.back", when: "!terminalFocus" },
+  { key: "mod+]", command: "navigation.forward", when: "!terminalFocus" },
   // Two rules share mod+j, and BOTH the context and the order are
   // load-bearing. Each was got wrong once, so both are spelled out.
   //
@@ -41,11 +145,20 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+j", command: "pane.focusDown", when: "chatFocus" },
   { key: "mod+j", command: "terminal.toggle" },
   { key: "mod+alt+b", command: "rightPanel.toggle" },
+  { key: "mod+shift+b", command: "threadPanel.toggle", when: "!terminalFocus" },
+  { key: "mod+t", command: "rightPanel.new", when: "rightPanelOpen && !terminalFocus" },
   { key: "mod+d", command: "terminal.split", when: "terminalFocus" },
   { key: "mod+shift+d", command: "terminal.splitVertical", when: "terminalFocus" },
   { key: "mod+n", command: "terminal.new", when: "terminalFocus" },
+  // Mesura: Ctrl+Q closes what Ctrl+W closes, as Super+Q closes the focused
+  // window on Hyprland. Literal ctrl, not mod: Cmd+Q stays macOS's quit. The
+  // desktop app gives the chord up on Linux (DesktopWindow.ts). Placed first
+  // so the label each command shows stays mod+w (last wins).
+  { key: "ctrl+q", command: "terminal.close", when: "terminalFocus" },
+  { key: "ctrl+q", command: "rightPanel.close", when: "!terminalFocus" },
   { key: "mod+w", command: "terminal.close", when: "terminalFocus" },
   { key: "mod+w", command: "rightPanel.close", when: "!terminalFocus" },
+  { key: "mod+shift+t", command: "view.reopenClosed" },
   // Moved off mod+d so the reading scroll can take the vim pair mod+u/mod+d.
   // The move reaches existing configs through RETIRED_KEYBINDING_DEFAULTS
   // below, which startup applies before it backfills missing defaults.
@@ -70,9 +183,34 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // shipped and ADDED_KEYBINDING_DEFAULTS for a second default on a command a
   // config already binds, and this is neither.
   { key: "mod+alt+k", command: "threadSearch.toggle", when: "!terminalFocus" },
+  // Mesura: upstream binds usage.open to mod+u and theme.select to mod+alt+a.
+  // mod+u is the chat's vim half-page scroll and Neovim's own key in the
+  // editor, where a `!terminalFocus` rule would steal it, so usage.open takes
+  // mod+alt+u, beside alt+u's usage peek. mod+alt+a is composer.attachFiles,
+  // the chord that reaches the app past the developer's global Hyprland
+  // ALT+A, so theme.select ships unbound; the command palette opens it.
+  { key: "mod+alt+u", command: "usage.open", when: "!terminalFocus" },
+  { key: "mod+alt+shift+a", command: "appearance.cycle", when: "!terminalFocus" },
   { key: "mod+alt+shift+t", command: "themeEditor.toggle" },
   { key: "mod+s", command: "composer.stash", when: "!terminalFocus" },
   { key: "mod+shift+enter", command: "thread.steerQueuedMessage", when: "!terminalFocus" },
+  { key: "alt+arrowup", command: "thread.editQueuedMessage", when: "composerFocus" },
+  { key: "mod+enter", command: "composer.sendAlternate", when: "composerFocus && turnRunning" },
+  {
+    key: "mod+enter",
+    command: "composer.sendBackground",
+    when: "composerFocus && draftThreadRoute",
+  },
+  {
+    key: "mod+alt+enter",
+    command: "composer.sendBackground",
+    when: "composerFocus && draftThreadRoute",
+  },
+  {
+    key: "mod+alt+enter",
+    command: "composer.sendAndNewThread",
+    when: "composerFocus && !draftThreadRoute",
+  },
   // Two chords, and the label shows the last. The developer's Hyprland binds
   // ALT+A globally, so alt+a never reaches the app on that machine; mod+alt+a
   // matches the mod+alt family (mod+alt+r renames the thread). alt+a stays for
@@ -89,6 +227,14 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // Monitor, so mod+alt+e stays as the chord a browser lets through.
   { key: "mod+alt+e", command: "fileTree.miller", when: "!terminalFocus" },
   { key: "mod+shift+e", command: "fileTree.miller", when: "!terminalFocus" },
+  // Fork addition: the Diff surface's Tree diff mode and its mode menu.
+  // Symmetria IDE used mod+shift+g, which composer.branch holds here. alt+g and
+  // alt+c are free in the app and in the developer's Hyprland config, whose G
+  // and C binds all use Super; alt+d was not taken because browsers keep it for
+  // the address bar. New commands, so the per-command startup backfill
+  // installs them.
+  { key: "alt+g", command: "treeDiff.toggle", when: "!terminalFocus" },
+  { key: "alt+c", command: "diff.modeMenu", when: "!terminalFocus" },
   { key: "alt+u", command: "usage.peek" },
   // Fork addition: the Hosts dock's held peek, on a free chord, so the
   // per-command startup backfill installs it; no RETIRED or ADDED entry. No
@@ -108,12 +254,16 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+n", command: "chat.newLocal", when: "!terminalFocus" },
+  { key: "mod+alt+n", command: "chat.newWithoutProject", when: "!terminalFocus" },
+  { key: "mod+f", command: "chat.find", when: "!terminalFocus && !previewFocus" },
   // Order matters for the label, not for matching: shortcutLabelForCommand
   // reports the last binding that wins, so the everywhere-works chord goes
   // last and alt+m stays the alternate.
   { key: "alt+m", command: "modelPicker.toggle", when: "!terminalFocus" },
   { key: "mod+shift+m", command: "modelPicker.toggle", when: "!terminalFocus" },
-  { key: "mod+shift+h", command: "composer.host", when: "!terminalFocus" },
+  // The host chord now cycles machines; composer.host stays, unbound, and its
+  // strip chip opens the run context drawer on its Host tab.
+  { key: "mod+shift+h", command: "runContext.cycleMachine", when: "!terminalFocus" },
   // Fork: upstream's `mod+shift+e` for composer.effort is withdrawn; the chord
   // is fileTree.miller's, and alt+e (traitsPicker.toggle) opens the same
   // picker. The command stays, unbound, for anyone who wants it back.
@@ -125,7 +275,14 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+arrowup", command: "modelPicker.previousProvider", when: "modelPickerOpen" },
   { key: "mod+shift+arrowdown", command: "modelPicker.nextProvider", when: "modelPickerOpen" },
   { key: "alt+e", command: "traitsPicker.toggle", when: "!terminalFocus" },
-  { key: "alt+w", command: "workspacePicker.toggle", when: "!terminalFocus" },
+  // alt+w opens the whole run context drawer. workspacePicker.toggle stays,
+  // unbound, and opens the drawer on its Workspace tab when bound.
+  { key: "alt+w", command: "runContext.toggle", when: "!terminalFocus" },
+  // Two chords, and the label shows the last. Browsers keep mod+shift+w to
+  // close the window and never deliver it to the page, so alt+shift+w is the
+  // chord a browser lets through; mod+shift+w reaches the desktop app.
+  { key: "alt+shift+w", command: "runContext.toggleWorkspace", when: "!terminalFocus" },
+  { key: "mod+shift+w", command: "runContext.toggleWorkspace", when: "!terminalFocus" },
   { key: "alt+b", command: "branchPicker.toggle", when: "!terminalFocus" },
   // A new command, so no existing config mentions it and the ordinary
   // per-command startup backfill installs it. No ADDED_KEYBINDING_DEFAULTS
@@ -188,18 +345,40 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "ctrl+tab", command: "thread.next", when: "!terminalFocus" },
   { key: "mod+shift+[", command: "thread.previous" },
   { key: "mod+shift+]", command: "thread.next" },
+  // Mesura: inside the right panel the same chords walk its tabs. After the
+  // thread rules on purpose: resolution is last-wins, so with the panel
+  // focused these answer. New commands, so the per-command backfill installs
+  // them. A terminal tab keeps ctrl+tab, as the thread rules leave it.
+  {
+    key: "ctrl+shift+tab",
+    command: "rightPanel.previousTab",
+    when: "panelFocus && !terminalFocus",
+  },
+  { key: "ctrl+tab", command: "rightPanel.nextTab", when: "panelFocus && !terminalFocus" },
+  // Mesura: a new tab is the panel launcher, as Ctrl+T is in a browser.
+  // Desktop only in practice: a browser keeps Ctrl+T for its own tabs.
+  { key: "mod+t", command: "rightPanel.newTab", when: "panelFocus && !terminalFocus" },
   { key: "mod+shift+c", command: "thread.copyReference", when: "!terminalFocus" },
   { key: "mod+shift+s", command: "thread.settle", when: "!terminalFocus" },
   { key: "mod+shift+p", command: "thread.pin", when: "!terminalFocus" },
+  { key: "mod+z", command: "thread.undo", when: "!terminalFocus && !editableFocus" },
   ...THREAD_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
     key: `mod+${index + 1}`,
     command,
+    when: "isDesktop",
   })),
   ...MODEL_PICKER_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
     key: `mod+${index + 1}`,
     command,
-    when: "modelPickerOpen",
+    when: "modelPickerOpen && isDesktop",
   })),
+  { key: "c", command: "usage.cost", when: "usagePageOpen" },
+  { key: "t", command: "usage.tokens", when: "usagePageOpen" },
+  { key: "l", command: "usage.limits", when: "usagePageOpen" },
+  { key: "mod+shift+1", command: "usage.period.day", when: "usagePageOpen" },
+  { key: "mod+shift+2", command: "usage.period.week", when: "usagePageOpen" },
+  { key: "mod+shift+3", command: "usage.period.month", when: "usagePageOpen" },
+  { key: "mod+shift+4", command: "usage.period.quarter", when: "usagePageOpen" },
 ];
 
 /**
@@ -365,6 +544,17 @@ export const ADDED_KEYBINDING_DEFAULTS: ReadonlyArray<AddedKeybindingDefault> = 
     id: "2026-09-attach-files-mod-alt-a",
     rule: { key: "mod+alt+a", command: "composer.attachFiles", when: "!terminalFocus" },
   },
+  // Before mod+w, so mod+w stays the label of both commands.
+  {
+    id: "2026-10-terminal-close-ctrl-q",
+    rule: { key: "ctrl+q", command: "terminal.close", when: "terminalFocus" },
+    insertBefore: { key: "mod+w", command: "terminal.close", when: "terminalFocus" },
+  },
+  {
+    id: "2026-10-right-panel-close-ctrl-q",
+    rule: { key: "ctrl+q", command: "rightPanel.close", when: "!terminalFocus" },
+    insertBefore: { key: "mod+w", command: "rightPanel.close", when: "!terminalFocus" },
+  },
 ];
 
 /**
@@ -390,6 +580,17 @@ export const WITHDRAWN_KEYBINDING_DEFAULTS: ReadonlyArray<WithdrawnKeybindingDef
   {
     id: "2026-09-withdraw-composer-effort-mod-shift-e",
     rule: { key: "mod+shift+e", command: "composer.effort", when: "!terminalFocus" },
+  },
+  // The run context drawer takes both chords for new commands. Withdrawing
+  // the old rules first frees them, so the per-command backfill installs
+  // runContext.cycleMachine and runContext.toggle in the same startup.
+  {
+    id: "2026-10-withdraw-composer-host-mod-shift-h",
+    rule: { key: "mod+shift+h", command: "composer.host", when: "!terminalFocus" },
+  },
+  {
+    id: "2026-10-withdraw-workspace-picker-alt-w",
+    rule: { key: "alt+w", command: "workspacePicker.toggle", when: "!terminalFocus" },
   },
 ];
 

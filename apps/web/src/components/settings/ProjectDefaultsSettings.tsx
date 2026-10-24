@@ -1,13 +1,12 @@
 import {
   DEFAULT_SERVER_SETTINGS,
-  EnvironmentId,
   type ModelSelection,
   type ProviderInstanceId,
+  type WorktreeSubmodules,
 } from "@t3tools/contracts";
-import { createModelSelection } from "@t3tools/shared/model";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { useNavigate } from "@tanstack/react-router";
 
-import { useT3ProjectFileState } from "../../hooks/useT3ProjectFileScripts";
 import { getCustomModelOptionsByInstance } from "../../modelSelection";
 import {
   applyProviderInstanceSettings,
@@ -17,23 +16,17 @@ import {
 } from "../../providerInstances";
 import { useEnvironments } from "../../state/environments";
 import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
-import { resolveEnvModeLabel } from "../BranchToolbar.logic";
-import { ProviderModelPicker } from "../chat/ProviderModelPicker";
-import { runtimeModeConfig, runtimeModeOptions } from "../chat/runtimeModeConfig";
+import { resolveEnvModeLabel, WORKTREE_SUBMODULES_LABELS } from "../BranchToolbar.logic";
+import { runtimeModeConfig } from "../chat/runtimeModeConfig";
 import { PULL_REQUEST_MERGE_METHOD_LABELS } from "../pullRequest/pullRequestDetail.logic";
-import { TraitsPicker } from "../chat/TraitsPicker";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
 import { Switch } from "../ui/switch";
+import { CombinedPickerSettings, type SettingsPickerChange } from "./CombinedPickerSettings";
 import type { ProjectSettingsCategory } from "./ProjectSettingsPanel";
 import { searchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
-import {
-  SETTINGS_PICKER_TRIGGER_CLASSNAME,
-  SettingResetButton,
-  SettingsRow,
-  SettingsSection,
-} from "./settingsLayout";
+import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
 import {
   useScopedSettings,
   useScopedSettingsMixed,
@@ -46,6 +39,11 @@ import {
  * environment defaults at an environment scope and project overrides at a
  * project or checkout scope; the scoped hooks route the write.
  */
+const WORKTREE_SUBMODULES_OPTIONS = ["recursive", "top-level", "none"] as const;
+function isWorktreeSubmodules(value: string | null): value is WorktreeSubmodules {
+  return value !== null && (WORKTREE_SUBMODULES_OPTIONS as readonly string[]).includes(value);
+}
+
 export function ProjectDefaultsSettings({ category }: { category: ProjectSettingsCategory }) {
   const { scope, target, targets, connectedEnvironments } = useSettingsScope();
   const settings = useScopedSettings();
@@ -69,31 +67,23 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   const activeEntry = entries.find((entry) => entry.instanceId === selection?.instanceId);
   const mixedModel = useScopedSettingsMixed(["defaultModelSelection"]);
   const mixedPermissions = useScopedSettingsMixed(["defaultRuntimeMode"]);
-  const PermissionIcon = runtimeModeConfig[settings.defaultRuntimeMode].icon;
   const mixedWorkspace = useScopedSettingsMixed(["defaultThreadEnvMode"]);
+  const mixedSubmodules = useScopedSettingsMixed(["worktreeSubmodules"]);
   const mixedBrowser = useScopedSettingsMixed(["enableAgentBrowserAccess"]);
   const mixedAutoPull = useScopedSettingsMixed(["defaultAutoPull"]);
+  const mixedAgentCredits = useScopedSettingsMixed(["removeAgentCreditsOnMerge"]);
   const mixedMergeMethod = useScopedSettingsMixed(["pullRequestMergeMethod"]);
   const modelSource = useScopedSettingSource(["defaultModelSelection"]);
-  const workspaceSource = useScopedSettingSource(["defaultThreadEnvMode"]);
   const isProjectScope = scope.kind === "project" || scope.kind === "checkout";
   const unavailable = connectedEnvironments.length === 0;
-
-  // A checkout's t3.json wins over the environment default when the project
-  // has no override of its own; show which one "inherit" resolves to.
-  const checkout = scope.kind === "checkout" ? scope.checkout : null;
-  // The query is disabled without a checkout, so any id satisfies the hook.
-  const t3File = useT3ProjectFileState(
-    checkout?.environmentId ?? EnvironmentId.make("none"),
-    category === "general" && checkout ? checkout.workspaceRoot : null,
-  );
-  const repositoryEnvMode = t3File.file?.defaultThreadEnvMode ?? null;
-  const inheritedEnvModeLabel =
-    workspaceSource === "project"
-      ? null
-      : repositoryEnvMode
-        ? `${resolveEnvModeLabel(repositoryEnvMode)} (t3.json)`
-        : null;
+  // File-backed keys show their effective value; the target already carries
+  // the checkout's t3.json, and a null file here only fills the built-in.
+  // The reset arrow beside the title clears the tier (SettingsRow handles a
+  // project override, the environment value is cleared here), so the picker
+  // has no "inherit" item.
+  const effective = target
+    ? resolveProjectSettings(target.settings, null, null, null).settings
+    : null;
 
   function modelDisabledReason(instanceId: ProviderInstanceId, model: string): string | null {
     const sourceEntry = entries.find((entry) => entry.instanceId === instanceId);
@@ -131,98 +121,146 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
     }
     updateSettings({ defaultModelSelection: value });
   };
+  // Mesura: the Model and Permissions rows open the same combined picker.
+  // Each write carries only the fields that opening changed, so a model choice
+  // keeps every target's access and an access edit keeps a Mixed or inherited
+  // model. The picker has already checked a changed model against every target.
+  const newThreadPickerProps = {
+    kind: "new-thread-defaults",
+    instanceEntries: entries,
+    modelOptionsByInstance: modelOptions,
+    planModeEnabled: settings.planModeEnabled,
+    mixedModel,
+    runtimeMode: settings.defaultRuntimeMode,
+    runtimeModeMixed: mixedPermissions,
+    rejectedTitle: "Default model not saved",
+    getModelDisabledReason: modelDisabledReason,
+    ...(representative
+      ? {
+          onOpenProviderSetup: (instanceId: ProviderInstanceId) =>
+            void navigate({
+              to: "/settings/providers",
+              search: { environmentId: representative.environmentId, instanceId },
+            }),
+        }
+      : {}),
+    onChange: ({ modelSelection, runtimeMode }: SettingsPickerChange) =>
+      updateSettings({
+        ...(modelSelection ? { defaultModelSelection: modelSelection } : {}),
+        ...(runtimeMode ? { defaultRuntimeMode: runtimeMode } : {}),
+      }),
+  } as const;
+
+  const modelRow = (
+    <SettingsRow
+      serverScoped
+      settingKeys={["defaultModelSelection"]}
+      mixed={mixedModel}
+      id="default-model"
+      title="Model"
+      description={
+        isProjectScope
+          ? "Model for new threads in this project."
+          : "Default model for new threads. Projects can override it."
+      }
+      status={
+        unavailable || mixedModel || modelSource === "project"
+          ? undefined
+          : settings.defaultModelSelection === null
+            ? "Automatic"
+            : undefined
+      }
+      resetAction={
+        settings.defaultModelSelection !== null ? (
+          <SettingResetButton label="default model" onClick={() => setModel(null)} />
+        ) : null
+      }
+      control={
+        selection && activeEntry ? (
+          <CombinedPickerSettings
+            {...newThreadPickerProps}
+            selection={selection}
+            triggerAriaLabel="Default model"
+          />
+        ) : (
+          <span className="text-sm text-muted-foreground">No providers available</span>
+        )
+      }
+    />
+  );
+  const workspaceRow = (
+    <SettingsRow
+      serverScoped
+      settingKeys={["defaultThreadEnvMode"]}
+      mixed={mixedWorkspace}
+      id={searchableSetting("new-threads").id}
+      title="Workspace"
+      description={
+        isProjectScope
+          ? "Where new threads in this project start."
+          : "Where new threads start. Projects and their t3.json can override it."
+      }
+      resetAction={
+        !isProjectScope && settings.defaultThreadEnvMode !== null ? (
+          <SettingResetButton
+            label="default workspace"
+            onClick={() => updateSettings({ defaultThreadEnvMode: null })}
+          />
+        ) : null
+      }
+      control={
+        <Select
+          value={mixedWorkspace ? null : (effective?.defaultThreadEnvMode ?? null)}
+          onValueChange={(value) => {
+            if (value === "local" || value === "worktree")
+              updateSettings({ defaultThreadEnvMode: value });
+          }}
+        >
+          <SelectTrigger size="sm" aria-label="Default workspace">
+            <SelectValue>
+              {(value: string | null) =>
+                value === "local" || value === "worktree"
+                  ? resolveEnvModeLabel(value)
+                  : unavailable
+                    ? "Unavailable"
+                    : "Mixed"
+              }
+            </SelectValue>
+          </SelectTrigger>
+          <SelectPopup align="end" alignItemWithTrigger={false}>
+            <SelectItem value="local">{resolveEnvModeLabel("local")}</SelectItem>
+            <SelectItem value="worktree">{resolveEnvModeLabel("worktree")}</SelectItem>
+          </SelectPopup>
+        </Select>
+      }
+    />
+  );
 
   return (
     <SettingsSection
       id={
-        category === "general"
+        category === "general" || category === "project"
           ? "project-defaults"
           : category === "integrations"
             ? "browser-access"
             : "source-control-defaults"
       }
       title={
-        category === "general"
+        category === "general" || category === "project"
           ? "New threads"
           : category === "integrations"
             ? "Browser"
             : "Repositories"
       }
     >
-      {category === "general" ? (
+      {category === "project" ? (
         <>
-          <SettingsRow
-            serverScoped
-            settingKeys={["defaultModelSelection"]}
-            mixed={mixedModel}
-            id="default-model"
-            title="Model"
-            description={
-              isProjectScope
-                ? "Model for new threads in this project."
-                : "Default model for new threads. Projects can override it."
-            }
-            status={
-              unavailable || mixedModel || modelSource === "project"
-                ? undefined
-                : settings.defaultModelSelection === null
-                  ? "Automatic"
-                  : undefined
-            }
-            resetAction={
-              settings.defaultModelSelection !== null ? (
-                <SettingResetButton label="default model" onClick={() => setModel(null)} />
-              ) : null
-            }
-            control={
-              selection && activeEntry ? (
-                <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
-                  <ProviderModelPicker
-                    activeInstanceId={selection.instanceId}
-                    model={selection.model}
-                    lockedProvider={null}
-                    instanceEntries={entries}
-                    modelOptionsByInstance={modelOptions}
-                    triggerVariant="outline"
-                    triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                    {...(mixedModel ? { triggerLabel: "Mixed" } : {})}
-                    getModelDisabledReason={modelDisabledReason}
-                    onOpenProviderSetup={(instanceId) => {
-                      if (representative)
-                        void navigate({
-                          to: "/settings/providers",
-                          search: { environmentId: representative.environmentId, instanceId },
-                        });
-                    }}
-                    onInstanceModelChange={(instanceId, model) =>
-                      setModel(createModelSelection(instanceId, model))
-                    }
-                  />
-                  {!mixedModel ? (
-                    <TraitsPicker
-                      provider={activeEntry.driverKind}
-                      models={activeEntry.models}
-                      model={selection.model}
-                      prompt=""
-                      onPromptChange={() => {}}
-                      modelOptions={selection.options ?? []}
-                      allowPromptInjectedEffort={false}
-                      planModeEnabled={settings.planModeEnabled}
-                      triggerVariant="outline"
-                      triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                      onModelOptionsChange={(options) =>
-                        setModel(
-                          createModelSelection(selection.instanceId, selection.model, options),
-                        )
-                      }
-                    />
-                  ) : null}
-                </div>
-              ) : (
-                <span className="text-sm text-muted-foreground">No providers available</span>
-              )
-            }
-          />
+          {modelRow}
+          {workspaceRow}
+        </>
+      ) : category === "general" ? (
+        <>
+          {modelRow}
           <SettingsRow
             serverScoped
             settingKeys={["defaultRuntimeMode"]}
@@ -246,83 +284,51 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
               ) : null
             }
             control={
-              <Select
-                value={mixedPermissions ? null : settings.defaultRuntimeMode}
-                onValueChange={(value) => {
-                  if (value) updateSettings({ defaultRuntimeMode: value });
-                }}
-              >
-                <SelectTrigger size="sm" aria-label="Default permissions">
-                  {!mixedPermissions && (
-                    <PermissionIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                  )}
-                  <SelectValue>
-                    {mixedPermissions
-                      ? "Mixed"
-                      : runtimeModeConfig[settings.defaultRuntimeMode].label}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  {runtimeModeOptions.map((mode) => {
-                    const option = runtimeModeConfig[mode];
-                    const Icon = option.icon;
-                    return (
-                      <SelectItem key={mode} value={mode} className="min-w-64 py-2">
-                        <div className="grid gap-0.5">
-                          <span className="inline-flex items-center gap-1.5 font-medium">
-                            <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-                            {option.label}
-                          </span>
-                          <span className="text-xs leading-4 text-muted-foreground">
-                            {option.description}
-                          </span>
-                        </div>
-                      </SelectItem>
-                    );
-                  })}
-                </SelectPopup>
-              </Select>
+              // Mesura: access is edited in the shared picker's More options,
+              // opened expanded. It does not depend on a selectable provider:
+              // with none, the picker still applies an access-only edit.
+              <CombinedPickerSettings
+                {...newThreadPickerProps}
+                selection={selection && activeEntry ? selection : null}
+                triggerLabel={
+                  mixedPermissions ? "Mixed" : runtimeModeConfig[settings.defaultRuntimeMode].label
+                }
+                triggerAriaLabel="Default permissions"
+                opensOnExtras
+              />
             }
           />
+          {workspaceRow}
           <SettingsRow
             serverScoped
-            settingKeys={["defaultThreadEnvMode"]}
-            mixed={mixedWorkspace}
-            id={searchableSetting("new-threads").id}
-            title="Workspace"
+            settingKeys={["worktreeSubmodules"]}
+            mixed={mixedSubmodules}
+            {...searchableSetting("worktree-submodules")}
             description={
               isProjectScope
-                ? "Where new threads in this project start. A t3.json preference applies when the project has no override."
-                : "Where new threads start, unless overridden by the project or t3.json."
-            }
-            status={
-              inheritedEnvModeLabel ? `Repository default: ${inheritedEnvModeLabel}` : undefined
+                ? "How new worktrees in this project populate git submodules."
+                : "How new worktrees populate git submodules. Projects and their t3.json can override it."
             }
             resetAction={
-              settings.defaultThreadEnvMode !== DEFAULT_SERVER_SETTINGS.defaultThreadEnvMode ? (
+              !isProjectScope && settings.worktreeSubmodules !== null ? (
                 <SettingResetButton
-                  label="default workspace"
-                  onClick={() =>
-                    updateSettings({
-                      defaultThreadEnvMode: DEFAULT_SERVER_SETTINGS.defaultThreadEnvMode,
-                    })
-                  }
+                  label="worktree submodules"
+                  onClick={() => updateSettings({ worktreeSubmodules: null })}
                 />
               ) : null
             }
             control={
               <Select
-                value={mixedWorkspace ? null : settings.defaultThreadEnvMode}
+                value={mixedSubmodules ? null : (effective?.worktreeSubmodules ?? null)}
                 onValueChange={(value) => {
-                  if (value === "local" || value === "worktree")
-                    updateSettings({ defaultThreadEnvMode: value });
+                  if (isWorktreeSubmodules(value)) updateSettings({ worktreeSubmodules: value });
                 }}
               >
-                <SelectTrigger size="sm" aria-label="Default workspace">
+                <SelectTrigger size="sm" aria-label="Worktree submodules">
                   <SelectValue>
                     {(value: string | null) =>
-                      value === "local" || value === "worktree"
-                        ? resolveEnvModeLabel(value)
+                      isWorktreeSubmodules(value)
+                        ? WORKTREE_SUBMODULES_LABELS[value]
                         : unavailable
                           ? "Unavailable"
                           : "Mixed"
@@ -330,8 +336,11 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
                   </SelectValue>
                 </SelectTrigger>
                 <SelectPopup align="end" alignItemWithTrigger={false}>
-                  <SelectItem value="local">{resolveEnvModeLabel("local")}</SelectItem>
-                  <SelectItem value="worktree">{resolveEnvModeLabel("worktree")}</SelectItem>
+                  {WORKTREE_SUBMODULES_OPTIONS.map((option) => (
+                    <SelectItem key={option} value={option}>
+                      {WORKTREE_SUBMODULES_LABELS[option]}
+                    </SelectItem>
+                  ))}
                 </SelectPopup>
               </Select>
             }
@@ -365,6 +374,32 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
                 mixed={mixedAutoPull}
                 checked={mixedAutoPull ? false : settings.defaultAutoPull}
                 onCheckedChange={(enabled) => updateSettings({ defaultAutoPull: enabled })}
+              />
+            }
+          />
+          <SettingsRow
+            serverScoped
+            settingKeys={["removeAgentCreditsOnMerge"]}
+            mixed={mixedAgentCredits}
+            {...searchableSetting("remove-agent-credits-on-merge")}
+            description="Remove recognized agent credit lines from GitHub merge and squash messages, keeping human co-authors. Includes auto-merge. Excludes merge queues, stack merges, and existing commits."
+            resetAction={
+              settings.removeAgentCreditsOnMerge ? (
+                <SettingResetButton
+                  label="agent credit removal"
+                  tooltip="Keep agent credits"
+                  onClick={() => updateSettings({ removeAgentCreditsOnMerge: false })}
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                aria-label="Remove agent credits when merging"
+                mixed={mixedAgentCredits}
+                checked={mixedAgentCredits ? false : settings.removeAgentCreditsOnMerge}
+                onCheckedChange={(enabled) =>
+                  updateSettings({ removeAgentCreditsOnMerge: enabled })
+                }
               />
             }
           />

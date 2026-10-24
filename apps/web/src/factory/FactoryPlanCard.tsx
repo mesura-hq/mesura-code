@@ -72,7 +72,10 @@ function FactoryPlanApprovalSection({
   threadRef: ScopedThreadRef;
   plan: FactoryPlanActivityPayload;
 }) {
-  const { state, providers, approve, sending } = useFactoryPlanApproval(threadRef, plan);
+  const { state, providers, approve, canApprove, sending } = useFactoryPlanApproval(
+    threadRef,
+    plan,
+  );
   // Untouched rows follow the provider lists as they load; the first edit
   // takes them over.
   const [edited, setEdited] = useState<FactoryRouteSlots | null>(null);
@@ -124,7 +127,7 @@ function FactoryPlanApprovalSection({
       <div className="flex justify-end">
         <Button
           size="xs"
-          disabled={routes === null || sending}
+          disabled={!canApprove || routes === null || sending}
           onClick={() => {
             if (routes !== null) void approve(routes);
           }}
@@ -160,7 +163,7 @@ export const FactoryPlanCard = memo(function FactoryPlanCard({
   const { copyToClipboard, isCopied } = useCopyToClipboard({ target: "plan path" });
 
   return (
-    <div className="rounded-[24px] border border-border/80 bg-card/70 p-4 sm:p-5">
+    <div className="rounded-3xl border border-border/80 bg-card/70 p-4 sm:p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <Badge variant="secondary">Factory plan</Badge>

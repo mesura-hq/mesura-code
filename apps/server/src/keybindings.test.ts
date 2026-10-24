@@ -17,8 +17,8 @@ import {
   dropWithdrawnKeybindingDefaults,
   migrateRetiredKeybindingDefaults,
 } from "@t3tools/shared/keybindings";
-import { KeybindingsConfigError } from "@t3tools/contracts";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { KeybindingsConfigError, MAX_KEYBINDINGS_COUNT } from "@t3tools/contracts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 
 const KeybindingsConfigJson = Schema.fromJsonString(KeybindingsConfig);
 const encodeKeybindingsConfigJson = Schema.encodeEffect(KeybindingsConfigJson);
@@ -29,7 +29,7 @@ const encodeResolvedKeybindingFromConfig = Schema.encodeEffect(
 const decodeResolvedKeybindingFromConfigExit = Schema.decodeUnknownExit(
   Keybindings.ResolvedKeybindingFromConfig,
 );
-const makeKeybindingsLayer = () => {
+const layerKeybindings = () => {
   return Keybindings.layer.pipe(
     Layer.provideMerge(
       Layer.fresh(
@@ -191,7 +191,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
 
       const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
       assert.deepEqual(persisted, Keybindings.DEFAULT_KEYBINDINGS);
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("ships configurable thread navigation defaults", () =>
@@ -239,7 +239,13 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.equal(soleKeyFor("modelPicker.jump.1"), "mod+1");
       assert.equal(soleKeyFor("modelPicker.jump.9"), "mod+9");
       assert.equal(soleKeyFor("traitsPicker.toggle"), "alt+e");
-      assert.equal(soleKeyFor("workspacePicker.toggle"), "alt+w");
+      // alt+w opens the whole run context drawer; the workspace picker
+      // command stays, unbound, and lands on the drawer's Workspace tab.
+      assert.deepEqual(keysFor("workspacePicker.toggle"), []);
+      assert.equal(soleKeyFor("runContext.toggle"), "alt+w");
+      assert.equal(soleKeyFor("runContext.cycleMachine"), "mod+shift+h");
+      assert.deepEqual(keysFor("composer.host"), []);
+      assert.deepEqual(keysFor("runContext.toggleWorkspace"), ["alt+shift+w", "mod+shift+w"]);
       assert.equal(soleKeyFor("branchPicker.toggle"), "alt+b");
       assert.equal(soleKeyFor("question.toggleCollapse"), "alt+q");
       // Upstream's thread.settle owns this chord since the 2026-W35 sync; the
@@ -280,7 +286,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         },
       ]);
       assert.equal(yield* fs.readFileString(keybindingsConfigPath), "{ not-json");
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("ignores invalid entries in runtime and reports them as issues", () =>
@@ -289,7 +295,6 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
       yield* fs.writeFileString(
         keybindingsConfigPath,
-        // @effect-diagnostics-next-line preferSchemaOverJson:off
         JSON.stringify([
           { key: "mod+j", command: "terminal.toggle" },
           { key: "mod+shift+d+o", command: "terminal.new" },
@@ -318,7 +323,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
           message: configState.issues[1]?.message ?? "",
         },
       ]);
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect(
@@ -327,21 +332,25 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       Effect.gen(function* () {
         const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
         yield* writeKeybindingsConfig(keybindingsConfigPath, [
-          { key: "mod+shift+t", command: "terminal.toggle" },
+          { key: "mod+shift+y", command: "terminal.toggle" },
           { key: "mod+shift+r", command: "script.run-tests.run" },
+          { key: "mod+shift+b", command: "script.custom-panel.run" },
+          {
+            key: "mod+shift+b",
+            command: "script.custom-composer.run",
+            when: "composerFocus",
+          },
         ]);
 
-        yield* Effect.gen(function* () {
-          const keybindings = yield* Keybindings.Keybindings;
-          yield* keybindings.syncDefaultKeybindingsOnStartup;
-        });
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
 
         const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
         const byCommand = new Map(persisted.map((entry) => [entry.command, entry]));
 
         const persistedToggle = byCommand.get("terminal.toggle");
         assert.isNotNull(persistedToggle);
-        assert.equal(persistedToggle?.key, "mod+shift+t");
+        assert.equal(persistedToggle?.key, "mod+shift+y");
         assert.isFalse(
           persisted.some((entry) => entry.command === "terminal.toggle" && entry.key === "mod+j"),
         );
@@ -350,7 +359,85 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
           assert.isTrue(byCommand.has(defaultRule.command), `expected ${defaultRule.command}`);
         }
         assert.isTrue(byCommand.has("script.run-tests.run"));
-      }).pipe(Effect.provide(makeKeybindingsLayer())),
+
+        const configState = yield* keybindings.loadConfigState;
+        assert.deepEqual(
+          configState.keybindings
+            .filter((entry) => entry.shortcut.key === "b" && entry.shortcut.shiftKey)
+            .map((entry) => entry.command),
+          ["threadPanel.toggle", "script.custom-panel.run", "script.custom-composer.run"],
+        );
+      }).pipe(Effect.provide(layerKeybindings())),
+  );
+
+  it.effect("adds a late default to an existing command once", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      const keybindings = yield* Keybindings.Keybindings;
+      const when = "composerFocus && draftThreadRoute";
+      const existing = { key: "mod+alt+enter", command: "composer.sendBackground", when } as const;
+      const backgroundRules = Effect.map(readKeybindingsConfig(keybindingsConfigPath), (rules) =>
+        rules.filter((entry) => entry.command === "composer.sendBackground"),
+      );
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [existing]);
+
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      assert.deepStrictEqual(yield* backgroundRules, [
+        { key: "mod+enter", command: "composer.sendBackground", when },
+        existing,
+      ]);
+
+      // Removing the added rule later must survive the next startup.
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [existing]);
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      assert.deepStrictEqual(yield* backgroundRules, [existing]);
+    }).pipe(Effect.provide(layerKeybindings())),
+  );
+
+  it.effect("leaves a customized command without the late default", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      const keybindings = yield* Keybindings.Keybindings;
+      const custom = {
+        key: "alt+b",
+        command: "composer.sendBackground",
+        when: "composerFocus && draftThreadRoute",
+      } as const;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [custom]);
+
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepStrictEqual(
+        persisted.filter((entry) => entry.command === "composer.sendBackground"),
+        [custom],
+      );
+    }).pipe(Effect.provide(layerKeybindings())),
+  );
+
+  it.effect("keeps a late default pending while the config is full", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      const keybindings = yield* Keybindings.Keybindings;
+      const when = "composerFocus && draftThreadRoute";
+      const existing = { key: "mod+alt+enter", command: "composer.sendBackground", when } as const;
+      const fillers = Array.from({ length: MAX_KEYBINDINGS_COUNT - 1 }, (_, index) => ({
+        key: "mod+alt+f1",
+        command: `script.filler-${index}.run` as const,
+      }));
+      const hasModEnter = Effect.map(readKeybindingsConfig(keybindingsConfigPath), (rules) =>
+        rules.some(
+          (entry) => entry.command === "composer.sendBackground" && entry.key === "mod+enter",
+        ),
+      );
+
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [existing, ...fillers]);
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      assert.isFalse(yield* hasModEnter);
+
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [existing]);
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      assert.isTrue(yield* hasModEnter);
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("keeps every retired default entry consistent with the shipped defaults", () =>
@@ -413,19 +500,16 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         appliedIds: new Set(),
       });
       assert.deepEqual(exact.config, [other]);
-      assert.deepEqual(
-        exact.results.map((entry) => entry.outcome),
-        ["dropped"],
-      );
+      // Keyed by the rule, not by position: the list grows as defaults move.
+      const outcomeFor = (results: typeof exact.results) =>
+        results.find((entry) => entry.rule.command === withdrawn.command)?.outcome;
+      assert.equal(outcomeFor(exact.results), "dropped");
 
       // No `when` is a different rule, and so the user's own.
       const edited = { key: "mod+shift+e", command: "composer.effort" } as const;
       const kept = dropWithdrawnKeybindingDefaults({ config: [edited], appliedIds: new Set() });
       assert.deepEqual(kept.config, [edited]);
-      assert.deepEqual(
-        kept.results.map((entry) => entry.outcome),
-        ["absent"],
-      );
+      assert.equal(outcomeFor(kept.results), "absent");
 
       const recorded = dropWithdrawnKeybindingDefaults({
         config: [withdrawn],
@@ -471,7 +555,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         persisted.filter((entry) => entry.command === "diff.toggle").map((entry) => entry.key),
         ["mod+shift+d"],
       );
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("moves the content search off mod+shift+f and backfills the project scope picker", () =>
@@ -507,7 +591,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
           .map((entry) => entry.key),
         ["mod+shift+f"],
       );
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("installs the hosts peek on alt+s in a config written before it existed", () =>
@@ -534,7 +618,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         persisted.filter((entry) => entry.command === "usage.peek").map((entry) => entry.key),
         ["alt+u"],
       );
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("leaves an already-migrated config untouched on the next startup", () =>
@@ -562,7 +646,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       // backfill that forgot its ledger would append the same rule twice. Both
       // failures look like a working migration until someone boots twice.
       assert.deepEqual(afterSecondStartup, afterFirstStartup);
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("keeps a retired default when its new key is already taken", () =>
@@ -590,7 +674,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
           (entry) => entry.command === "preview.toggle" && entry.key === "mod+shift+d",
         ),
       );
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("rewrites when a same-command rule differs only by its when clause", () =>
@@ -620,7 +704,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.isFalse(
         persisted.some((entry) => entry.key === "mod+d" && entry.command === "diff.toggle"),
       );
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("collapses a retired default that appears twice into one rule", () =>
@@ -641,7 +725,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         persisted.filter((entry) => entry.command === "diff.toggle").map((entry) => entry.key),
         ["mod+shift+d"],
       );
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("adds a default introduced for a command the config already binds", () =>
@@ -665,7 +749,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.isTrue(
         persisted.some((entry) => entry.command === "thread.next" && entry.key === "ctrl+tab"),
       );
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("offers an introduced default once, so deleting it makes it stay deleted", () =>
@@ -701,7 +785,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.isTrue(
         yield* fs.exists(`${keybindingsConfigPath.replace(/\.json$/, "")}.applied.json`),
       );
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("never lets an introduced default take a key the user already bound", () =>
@@ -722,7 +806,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         persisted.filter((entry) => entry.key === "alt+m").map((entry) => entry.command),
         ["preview.toggle"],
       );
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("does not let an addition suppress that command's other defaults", () =>
@@ -740,11 +824,18 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       });
 
       const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      // Upstream prepends backfilled defaults so persisted custom rules keep
+      // last-wins priority. The introduced j and ctrl+tab rules are already
+      // persisted here; backfilling mod+shift+] must precede those rules.
       assert.deepEqual(
-        persisted.filter((entry) => entry.command === "thread.next").map((entry) => entry.key),
-        ["j", "ctrl+tab", "mod+shift+]"],
+        persisted.filter((entry) => entry.command === "thread.next"),
+        [
+          { key: "mod+shift+]", command: "thread.next" },
+          { key: "j", command: "thread.next", when: "sidebarFocus && !sidebarSearchFocus" },
+          { key: "ctrl+tab", command: "thread.next", when: "!terminalFocus" },
+        ],
       );
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("stays within the entry cap instead of failing the write", () =>
@@ -768,7 +859,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
 
       const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
       assert.isAtMost(persisted.length, 256);
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("keeps a deleted shortcut deleted when the ledger cannot be read", () =>
@@ -789,7 +880,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
 
       const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
       assert.isFalse(persisted.some((entry) => entry.key === "alt+m"));
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("seeds the ledger on a fresh install so nothing is re-offered", () =>
@@ -821,7 +912,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
 
       const afterDelete = yield* readKeybindingsConfig(keybindingsConfigPath);
       assert.isFalse(afterDelete.some((entry) => entry.key === "alt+m"));
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("keeps every introduced default consistent with the shipped defaults", () =>
@@ -881,7 +972,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
           (entry) => entry.command === "chat.scrollHalfPageDown" && entry.key === "mod+d",
         ),
       );
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("ships the half-page scroll pair scoped to the chat pane", () =>
@@ -917,7 +1008,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         persisted.filter((entry) => entry.command === "chat.scrollHalfPageUp"),
         [{ key: "mod+u", command: "chat.scrollHalfPageUp", when: "chatFocus" }],
       );
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("reports a context move on the rewrite, so the startup log can say so", () =>
@@ -978,7 +1069,37 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.isTrue(
         persisted.some((entry) => entry.command === "traitsPicker.toggle" && entry.key === "alt+e"),
       );
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
+  );
+
+  it.effect("hands mod+shift+h and alt+w to the run context drawer in one startup", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      // An install from before the drawer: the host menu and the workspace
+      // picker hold the two chords the drawer's commands ship on.
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+shift+h", command: "composer.host", when: "!terminalFocus" },
+        { key: "alt+w", command: "workspacePicker.toggle", when: "!terminalFocus" },
+        { key: "alt+b", command: "branchPicker.toggle", when: "!terminalFocus" },
+      ]);
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      const keysFor = (command: string) =>
+        persisted.filter((entry) => entry.command === command).map((entry) => entry.key);
+      assert.deepEqual(keysFor("runContext.cycleMachine"), ["mod+shift+h"]);
+      assert.deepEqual(keysFor("runContext.toggle"), ["alt+w"]);
+      assert.deepEqual(keysFor("runContext.toggleWorkspace"), ["alt+shift+w", "mod+shift+w"]);
+      // The old commands no longer ship a default, so nothing brings them back.
+      assert.deepEqual(keysFor("composer.host"), []);
+      assert.deepEqual(keysFor("workspacePicker.toggle"), []);
+      // The branch chord is untouched; it now opens the drawer's branch tab.
+      assert.deepEqual(keysFor("branchPicker.toggle"), ["alt+b"]);
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("drops and adds once, so a later choice of the user's stands", () =>
@@ -1010,7 +1131,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         persisted.filter((entry) => entry.key === "mod+shift+e"),
         [{ key: "mod+shift+e", command: "composer.effort", when: "!terminalFocus" }],
       );
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("keeps an effort binding the user chose", () =>
@@ -1030,7 +1151,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         persisted.filter((entry) => entry.command === "composer.effort"),
         [{ key: "mod+alt+r", command: "composer.effort", when: "!terminalFocus" }],
       );
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("moves the palette onto the key the favourite editor vacates", () =>
@@ -1065,7 +1186,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.isTrue(
         persisted.some((entry) => entry.command === "pane.focusUp" && entry.key === "mod+k"),
       );
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("keeps the two mod+j defaults in the one order that works", () =>
@@ -1152,7 +1273,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         persisted.filter((entry) => entry.command === "chat.scrollHalfPageUp"),
         [{ key: "mod+u", command: "chat.scrollHalfPageUp", when: "terminalOpen" }],
       );
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("leaves a rule that only partly matches a retired default alone", () =>
@@ -1174,7 +1295,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         persisted.filter((entry) => entry.command === "diff.toggle"),
         [{ key: "mod+d", command: "diff.toggle", when: "terminalOpen" }],
       );
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("rewrites a retired default only once", () =>
@@ -1195,7 +1316,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         persisted.filter((entry) => entry.command === "diff.toggle").map((entry) => entry.key),
         ["mod+shift+d"],
       );
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("skips conflicting default keybindings on startup and logs a detailed warning", () => {
@@ -1226,10 +1347,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       );
     }).pipe(
       Effect.provide(
-        Layer.mergeAll(
-          makeKeybindingsLayer(),
-          Logger.layer([logger], { mergeWithExisting: false }),
-        ),
+        Layer.mergeAll(layerKeybindings(), Logger.layer([logger], { mergeWithExisting: false })),
       ),
     );
   });
@@ -1257,7 +1375,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         { key: "mod+shift+r", command: "script.run-tests.run" },
       ]);
       assert.isTrue(resolved.some((entry) => entry.command === "script.run-tests.run"));
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("appends additional custom keybindings for the same command", () =>
@@ -1280,7 +1398,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         { key: "mod+r", command: "script.run-tests.run" },
         { key: "mod+shift+r", command: "script.run-tests.run" },
       ]);
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("replaces only the targeted custom keybinding", () =>
@@ -1305,7 +1423,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         { key: "mod+shift+r", command: "script.run-tests.run" },
         { key: "mod+alt+r", command: "script.run-tests.run" },
       ]);
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("replacing with a rule that already exists elsewhere does not duplicate it", () =>
@@ -1327,7 +1445,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
       const persistedView = persisted.map(({ key, command }) => ({ key, command }));
       assert.deepEqual(persistedView, [{ key: "mod+alt+r", command: "script.run-tests.run" }]);
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("removes only the targeted custom keybinding", () =>
@@ -1348,7 +1466,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
       const persistedView = persisted.map(({ key, command }) => ({ key, command }));
       assert.deepEqual(persistedView, [{ key: "mod+shift+r", command: "script.run-tests.run" }]);
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("refuses to overwrite malformed keybindings config", () =>
@@ -1368,7 +1486,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
 
       const persistedRaw = yield* fs.readFileString(keybindingsConfigPath);
       assert.equal(persistedRaw, "{ not-json");
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("reports non-array config parse errors without duplicate prefix", () =>
@@ -1397,11 +1515,11 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         });
       }).pipe(toDetailResult);
       assertFailure(secondResult, "expected JSON array");
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   // chmod cannot make a directory unwritable on Windows, so the write succeeds.
-  it.effect.skipIf(HostProcessPlatform.defaultValue() === "win32")(
+  it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
     "fails when config directory is not writable",
     () =>
       Effect.gen(function* () {
@@ -1427,7 +1545,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
         const persistedView = persisted.map(({ key, command }) => ({ key, command }));
         assert.deepEqual(persistedView, [{ key: "mod+j", command: "terminal.toggle" }]);
-      }).pipe(Effect.provide(makeKeybindingsLayer())),
+      }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("caches loaded resolved config across repeated reads", () =>
@@ -1446,7 +1564,29 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
 
       assert.deepEqual(first, second);
       assert.isTrue(second.some((entry) => entry.command === "terminal.toggle"));
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
+  );
+
+  it.effect("retries a failed config read instead of keeping the failure", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      // A directory where the file should be makes the read itself fail.
+      yield* fileSystem.makeDirectory(keybindingsConfigPath, { recursive: true });
+
+      const keybindings = yield* Keybindings.Keybindings;
+      const failed = yield* toDetailResult(keybindings.loadConfigState);
+      assertFailure(failed, "failed to read keybindings config");
+
+      yield* fileSystem.remove(keybindingsConfigPath, { recursive: true });
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+j", command: "terminal.toggle" },
+      ]);
+
+      const configState = yield* keybindings.loadConfigState;
+      assert.deepEqual(configState.issues, []);
+      assert.isTrue(configState.keybindings.some((entry) => entry.command === "terminal.toggle"));
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("updates cached resolved config after upsert", () =>
@@ -1468,7 +1608,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
 
       assert.isTrue(loadedAfterUpsert.some((entry) => entry.command === "script.run-tests.run"));
       assert.isTrue(loadedAfterUpsert.some((entry) => entry.command === "terminal.toggle"));
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 
   it.effect("serializes concurrent upserts to avoid lost updates", () =>
@@ -1482,13 +1622,13 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       );
       yield* Effect.gen(function* () {
         const keybindings = yield* Keybindings.Keybindings;
-        yield* Effect.all(
-          commands.map((command, index) =>
+        yield* Effect.forEach(
+          commands,
+          (command, index) =>
             keybindings.upsertKeybindingRule({
               key: `mod+${String.fromCharCode(97 + index)}`,
               command,
             }),
-          ),
           { concurrency: "unbounded", discard: true },
         );
       });
@@ -1498,7 +1638,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       for (const command of commands) {
         assert.isTrue(persistedCommands.has(command), `expected persisted command ${command}`);
       }
-    }).pipe(Effect.provide(makeKeybindingsLayer())),
+    }).pipe(Effect.provide(layerKeybindings())),
   );
 });
 

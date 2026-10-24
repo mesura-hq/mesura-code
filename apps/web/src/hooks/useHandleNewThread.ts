@@ -23,7 +23,7 @@ import {
   selectProjectGroupingSettings,
 } from "../logicalProject";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { readProjects, readThreadShell, useProjects, useThread } from "../state/entities";
+import { readProjects, readThreadShell, useProjects, useThreadShell } from "../state/entities";
 import {
   applyImplicitDraftModelDefaults,
   resolveNewDraftStartFromOrigin,
@@ -128,11 +128,14 @@ export function useNewThreadHandler() {
           candidate.environmentId === projectRef.environmentId,
       );
       // The resolver applies project overrides and, until the server has
-      // folded them, the aggregate's own legacy fields.
+      // folded them, the aggregate's own legacy fields. The null project file
+      // fills file-backed keys with built-in defaults, so the env mode is
+      // concrete before the repository defaults below replace this.
       let projectSettings = resolveProjectSettings(
         targetServerSettings,
         project?.id ?? null,
         project,
+        null,
       );
       const defaultRuntimeMode = projectSettings.settings.defaultRuntimeMode;
       const resolveModelSelectionOverride = (destinationDraftId: DraftId) =>
@@ -428,7 +431,7 @@ export function useHandleNewThread() {
   });
   const routeThreadRef = routeTarget?.kind === "server" ? routeTarget.threadRef : null;
   const routeDraftId = routeTarget?.kind === "draft" ? routeTarget.draftId : null;
-  const activeThread = useThread(routeThreadRef);
+  const activeThread = useThreadShell(routeThreadRef);
   const getDraftThread = useComposerDraftStore((store) => store.getDraftThread);
   const activeDraftThread = useComposerDraftStore(() =>
     routeTarget

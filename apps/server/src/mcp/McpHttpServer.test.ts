@@ -1,23 +1,43 @@
+import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
+import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import { expect, it } from "@effect/vitest";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { EnvironmentId, PreviewTabId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  OrchestratorMcpFailure,
+  PreviewTabId,
+  ProviderInstanceId,
+  ProviderInteractionMode,
+  RuntimeMode,
+  ThreadId,
+} from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import { McpProtocol, McpSchema, McpServer } from "effect/unstable/ai";
-import { HttpBody, HttpClient, HttpRouter, HttpServerResponse } from "effect/unstable/http";
+import { McpSchema, McpServer, Tool, Toolkit } from "effect/ai";
+import {
+  HttpBody,
+  HttpClient,
+  HttpClientRequest,
+  HttpRouter,
+  HttpServerResponse,
+} from "effect/http";
 
-import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProjectService from "../project/ProjectService.ts";
 import * as ServerConfig from "../config.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
+import * as McpToolAccess from "./McpToolAccess.ts";
+import * as McpToolAccessTestkit from "./McpToolAccess.testkit.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
+import * as McpSessionRegistry from "./McpSessionRegistry.ts";
+import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
 
 const environmentId = EnvironmentId.make("environment-mcp-test");
@@ -27,9 +47,13 @@ const alternateTabId = PreviewTabId.make("tab-mcp-alternate");
 const decodeJsonText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 const invocation = {
   environmentId,
-  threadId,
-  providerSessionId: "provider-session-mcp-test",
-  providerInstanceId: ProviderInstanceId.make("codex"),
+  requestNamespace: "provider-session-mcp-test",
+  thread: {
+    threadId,
+    providerSessionId: "provider-session-mcp-test",
+    providerInstanceId: ProviderInstanceId.make("codex"),
+  },
+  client: undefined,
   capabilities: new Set(["preview"] as const),
   issuedAt: 1,
 };
@@ -45,20 +69,21 @@ const client = McpSchema.McpServerClient.of({
   },
   getClient: Effect.die("unused"),
 });
-const TestLayer = McpHttpServer.PreviewToolkitRegistrationLive.pipe(
+const layerTest = McpHttpServer.layerPreviewToolkit.pipe(
   Layer.provideMerge(McpServer.McpServer.layer),
+  Layer.provideMerge(McpToolAccessTestkit.liveThreadsLayer),
   Layer.provideMerge(PreviewAutomationBroker.layer),
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-mcp-http-server-test-" })),
   Layer.provideMerge(NodeServices.layer),
 );
-const PullRequestsTestLayer = McpHttpServer.PullRequestsToolkitRegistrationLive.pipe(
+const layerPullRequestsTest = McpHttpServer.layerPullRequestsToolkit.pipe(
   Layer.provideMerge(McpServer.McpServer.layer),
+  Layer.provideMerge(McpToolAccessTestkit.liveThreadsLayer),
   Layer.provide(
     Layer.mergeAll(
-      Layer.mock(ProjectionSnapshotQuery)({
-        getThreadShellById: () => Effect.succeed(Option.none()),
-      }),
-      Layer.mock(OrchestrationEngineService)({}),
+      Layer.mock(ProjectService.ProjectService)({}),
+      Layer.mock(Orchestrator.OrchestratorV2)({}),
+      Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
       NodeServices.layer,
     ),
   ),
@@ -162,23 +187,75 @@ it.effect.each([{}, { includeImage: false }])(
             Effect.provideService(McpSchema.McpServerClient, client),
           );
 
+        const message = "Preview automation snapshot failed on client mcp-failure-client.";
         expect(snapshot.isError).toBe(true);
         expect(snapshot.content).toEqual([
-          { type: "text", text: "Preview snapshot failed: PreviewAutomationExecutionError." },
+          { type: "text", text: `Preview snapshot failed: ${message}` },
         ]);
         expect(snapshot.structuredContent).toEqual({
           error: {
             _tag: "PreviewAutomationExecutionError",
             operation: "snapshot",
             failureCount: 1,
+            message,
           },
         });
       }),
-    ).pipe(Effect.provide(TestLayer)),
+    ).pipe(Effect.provide(layerTest)),
 );
 
 it.effect.each([
-  { mode: "default", input: {}, images: true },
+  { args: {}, advice: "No active preview tab was found for snapshot. Call preview_open first." },
+  {
+    args: { tabId: alternateTabId },
+    advice: `Preview tab ${alternateTabId} was not found for snapshot. Omit tabId to use the current tab, or call preview_open.`,
+  },
+])("tells the agent to open a tab when the snapshot has none $args", ({ args, advice }) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
+      const connected = yield* Deferred.make<void>();
+      const events = yield* broker.connect({ clientId: "mcp-no-tab-client", environmentId });
+      yield* Stream.runForEach(events, (event) =>
+        event.type === "connected"
+          ? Deferred.succeed(connected, undefined)
+          : broker.respond({
+              clientId: "mcp-no-tab-client",
+              connectionId: event.connectionId,
+              requestId: event.request.requestId,
+              ok: false,
+              error: { _tag: "PreviewAutomationTabNotFoundError", message: "no tab" },
+            }),
+      ).pipe(Effect.forkScoped);
+      yield* Deferred.await(connected);
+
+      const snapshot = yield* callSnapshot(args);
+
+      expect(snapshot.isError).toBe(true);
+      expect(snapshot.content).toEqual([
+        { type: "text", text: `Preview snapshot failed: ${advice}` },
+      ]);
+    }),
+  ).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("tells the agent how to fall back when no desktop app can run the snapshot", () =>
+  Effect.gen(function* () {
+    const snapshot = yield* callSnapshot({});
+
+    expect(snapshot.isError).toBe(true);
+    const [text] = snapshot.content;
+    expect(text?.type === "text" ? text.text : "").toContain(
+      "use a headless browser from the shell",
+    );
+    expect(snapshot.structuredContent).toMatchObject({
+      error: { _tag: "PreviewAutomationNoAvailableHostError" },
+    });
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect.each([
+  { mode: "default", input: {}, images: false },
   { mode: "explicit image", input: { includeImage: true }, images: true },
   { mode: "text only", input: { includeImage: false }, images: false },
 ])("returns fresh $mode snapshots on repeated MCP calls", ({ input, images }) =>
@@ -249,7 +326,10 @@ it.effect.each([
         const metadata = { ...page, title: `Snapshot ${call}`, screenshot };
         const { accessibilityTree: _tree, ...boundedMetadata } = metadata;
         expect(snapshot.isError).toBe(false);
-        expect(snapshot.structuredContent).toEqual(metadata);
+        expect(snapshot.structuredContent).toEqual({
+          ...boundedMetadata,
+          omitted: ["accessibilityTree (use interactiveElements locators or preview_evaluate)"],
+        });
         const [identity, text, ...rest] = snapshot.content;
         expect(identity?.type === "text" ? decodeJsonText(identity.text) : null).toEqual({
           url: page.url,
@@ -282,16 +362,34 @@ it.effect.each([
           Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
           Effect.provideService(McpSchema.McpServerClient, client),
         );
-      expect(nextDefault.content.map((content) => content.type)).toEqual([
-        "text",
-        "text",
-        "text",
-        "image",
-      ]);
-      expect(nextDefault.structuredContent).toEqual({ ...page, title: "Snapshot 7", screenshot });
+      expect(nextDefault.content.map((content) => content.type)).toEqual(["text", "text", "text"]);
+      expect(nextDefault.structuredContent).toMatchObject({ title: "Snapshot 7", screenshot });
+      expect(nextDefault.structuredContent).not.toHaveProperty("accessibilityTree");
       expect(requests).toBe(7);
     }),
-  ).pipe(Effect.provide(TestLayer)),
+  ).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("refuses preview tools to a client outside a thread before they run", () =>
+  Effect.gen(function* () {
+    const server = yield* McpServer.McpServer;
+    const readOnly = {
+      ...invocation,
+      thread: undefined,
+      requestNamespace: "client:session-1",
+      client: { sessionId: "session-1", label: "Claude Code", access: "read-only" as const },
+    };
+    const click = yield* server
+      .callTool({ name: "preview_click", arguments: { locator: "text=Send" } })
+      .pipe(
+        Effect.provideService(McpInvocationContext.McpInvocationContext, readOnly),
+        Effect.provideService(McpSchema.McpServerClient, client),
+      );
+    expect(click.isError).toBe(true);
+    expect(click.content).toEqual([
+      { type: "text", text: expect.stringContaining("needs an agent running inside Mesura Code") },
+    ]);
+  }).pipe(Effect.provide(layerTest)),
 );
 
 it.effect("rejects non-boolean snapshot image options before selecting a browser host", () =>
@@ -313,7 +411,7 @@ it.effect("rejects non-boolean snapshot image options before selecting a browser
         error: { _tag: "AiError", operation: "snapshot", failureCount: 1 },
       });
     }
-  }).pipe(Effect.provide(TestLayer)),
+  }).pipe(Effect.provide(layerTest)),
 );
 
 it.effect("saves the snapshot PNG on request and reports its path", () =>
@@ -324,11 +422,12 @@ it.effect("saves the snapshot PNG on request and reports its path", () =>
       const path = yield* Path.Path;
       const inputs = yield* serveSnapshots("mcp-save-client", snapshotResult);
 
-      const snapshot = yield* callSnapshot({ save: true });
+      const snapshot = yield* callSnapshot({ save: true, includeImage: true });
 
       expect(snapshot.isError).toBe(false);
       // The browser never receives the server-only `save` flag.
       expect(inputs).toEqual([{}]);
+      expect(snapshot.content.map((content) => content.type)).toContain("image");
       const structured = snapshot.structuredContent as { readonly screenshotPath?: string };
       const screenshotPath = structured.screenshotPath;
       expect(typeof screenshotPath).toBe("string");
@@ -342,8 +441,17 @@ it.effect("saves the snapshot PNG on request and reports its path", () =>
 
       const unsaved = yield* callSnapshot({});
       expect(unsaved.structuredContent).not.toHaveProperty("screenshotPath");
+
+      // A save without the image skips the page dump.
+      const pathOnly = yield* callSnapshot({ save: true });
+      const saved = pathOnly.structuredContent as { readonly screenshotPath: string };
+      expect(saved).toEqual({ url: snapshotResult.url, screenshotPath: expect.any(String) });
+      expect(Buffer.from(yield* fileSystem.readFile(saved.screenshotPath)).toString()).toBe("png");
+      const [only, ...others] = pathOnly.content;
+      expect(others).toEqual([]);
+      expect(only?.type === "text" ? decodeJsonText(only.text) : null).toEqual(saved);
     }),
-  ).pipe(Effect.provide(TestLayer)),
+  ).pipe(Effect.provide(layerTest)),
 );
 
 it.effect("reports a tagged error when the screenshot cannot be saved", () =>
@@ -365,7 +473,7 @@ it.effect("reports a tagged error when the screenshot cannot be saved", () =>
         error: { _tag: "PreviewScreenshotSaveError", operation: "snapshot", failureCount: 1 },
       });
     }),
-  ).pipe(Effect.provide(TestLayer)),
+  ).pipe(Effect.provide(layerTest)),
 );
 
 it.effect(
@@ -397,7 +505,46 @@ it.effect(
       expect(denied.content).toEqual([
         { type: "text", text: "MCP credential does not grant the pull-requests capability." },
       ]);
-    }).pipe(Effect.provide(PullRequestsTestLayer)),
+    }).pipe(Effect.provide(layerPullRequestsTest)),
+);
+
+it.effect("returns server ARIA refs to agents in text and structured results", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const accessibilityTree =
+        '- button "delete" [ref=t3-snapshot-e1]\n- iframe [ref=t3-snapshot-e2]:\n  - textbox "child" [ref=t3-snapshot-f1e1]';
+      yield* serveSnapshots("mcp-server-refs", { ...snapshotResult, accessibilityTree });
+      const result = yield* callSnapshot({ includeImage: false });
+      expect(result.isError).toBe(false);
+      expect(result.structuredContent).toMatchObject({ accessibilityTree });
+      expect(
+        result.content.some(
+          (entry) => entry.type === "text" && entry.text.includes("t3-snapshot-f1e1"),
+        ),
+      ).toBe(true);
+    }),
+  ).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("bounds large ARIA trees without dropping every server locator", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const accessibilityTree = Array.from(
+        { length: 2_000 },
+        (_, index) => `- button "删除 ${index}" [ref=t3-snapshot-e${index}]`,
+      ).join("\n");
+      yield* serveSnapshots("mcp-large-server-refs", { ...snapshotResult, accessibilityTree });
+      const result = yield* callSnapshot({ includeImage: false });
+      expect(result.isError).toBe(false);
+      const metadata = result.structuredContent as { accessibilityTree: string };
+      expect(metadata.accessibilityTree).toContain("[ref=t3-snapshot-e0]");
+      expect(metadata.accessibilityTree.length).toBeLessThan(accessibilityTree.length);
+      const body = result.content[1];
+      expect(Buffer.byteLength(body?.type === "text" ? body.text : "", "utf8")).toBeLessThanOrEqual(
+        McpHttpServer.MAX_SNAPSHOT_TEXT_BYTES,
+      );
+    }),
+  ).pipe(Effect.provide(layerTest)),
 );
 
 it.effect("keeps the snapshot text under the agent's output ceiling", () =>
@@ -461,12 +608,13 @@ it.effect("keeps the snapshot text under the agent's output ceiling", () =>
       expect(parsed.consoleEntries[0]?.text).toBe("entry 60");
       expect(notice?.type === "text" ? notice.text : "").toContain("accessibilityTree");
       expect(notice?.type === "text" ? notice.text : "").toContain("60 older console entries");
-      // The structured result is untouched; only the text the agent reads is bounded.
-      expect(snapshot.structuredContent).toMatchObject({
-        accessibilityTree: oversized.accessibilityTree,
+      // Claude Code shows the model structuredContent instead of the text, so it is bounded too.
+      expect(snapshot.structuredContent).toEqual({
+        ...parsed,
+        omitted: expect.arrayContaining(["60 older console entries"]),
       });
     }),
-  ).pipe(Effect.provide(TestLayer)),
+  ).pipe(Effect.provide(layerTest)),
 );
 
 it.effect("bounds the snapshot text even when nothing but logs and the title are large", () =>
@@ -498,7 +646,46 @@ it.effect("bounds the snapshot text even when nothing but logs and the title are
       expect(noticeText).toContain("url or title after 2048 characters");
       expect(noticeText).toContain("console entries text after 500 characters");
     }),
-  ).pipe(Effect.provide(TestLayer)),
+  ).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("bounds page text made of wide characters before dropping locators", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      // The character caps alone leave 8,000 three-byte characters, about 24 KB.
+      yield* serveSnapshots("mcp-wide-text-client", {
+        ...snapshotResult,
+        visibleText: "界".repeat(9_000),
+        interactiveElements: Array.from({ length: 20 }, (_, i) => ({
+          tag: "button",
+          role: "button",
+          name: `Button ${i}`,
+          selector: `#button-${i}`,
+          x: 0,
+          y: 0,
+          width: 10,
+          height: 10,
+        })),
+      });
+
+      const snapshot = yield* callSnapshot({ includeImage: false });
+
+      const [, text, notice] = snapshot.content;
+      const body = text?.type === "text" ? text.text : "";
+      expect(Buffer.byteLength(body, "utf8")).toBeLessThanOrEqual(
+        McpHttpServer.MAX_SNAPSHOT_TEXT_BYTES,
+      );
+      const parsed = decodeJsonText(body) as {
+        readonly visibleText: string;
+        readonly interactiveElements: ReadonlyArray<unknown>;
+      };
+      expect(parsed.visibleText).toMatch(/^界+…$/);
+      expect(parsed.interactiveElements).toHaveLength(20);
+      expect(notice?.type === "text" ? notice.text : "").toContain(
+        "visibleText after 4000 characters",
+      );
+    }),
+  ).pipe(Effect.provide(layerTest)),
 );
 
 it.effect("sheds log entries before locators when every list is full", () =>
@@ -564,23 +751,44 @@ it.effect("sheds log entries before locators when every list is full", () =>
       expect(noticeText).toContain("40 of 40 actionTimeline");
       expect(noticeText).not.toMatch(/\d+ of \d+ interactiveElements/);
     }),
-  ).pipe(Effect.provide(TestLayer)),
+  ).pipe(Effect.provide(layerTest)),
 );
 
 it.effect("terminates HTTP MCP sessions with DELETE", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const serverLayer = McpServer.layerHttp({
-        name: "MCP termination test",
-        version: "1.0.0",
-        path: "/mcp",
-        protocols: [McpProtocol.v2025_06_18],
-      });
-      yield* HttpRouter.serve(serverLayer, {
+      const token = "providerTokenWithoutDots";
+      const scope: McpInvocationContext.McpInvocationScope = {
+        environmentId,
+        requestNamespace: "provider-session",
+        thread: {
+          threadId: ThreadId.make("thread-provider"),
+          providerSessionId: "provider-session",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+        },
+        client: undefined,
+        capabilities: new Set(["orchestration"]),
+        issuedAt: 1,
+      };
+      const layerServer = McpHttpServer.layerMcpTransport.pipe(
+        Layer.provide(
+          Layer.mock(McpSessionRegistry.McpSessionRegistry)({
+            resolve: (presented) =>
+              Effect.succeed(
+                presented === token
+                  ? (scope as McpInvocationContext.McpThreadInvocationScope)
+                  : undefined,
+              ),
+          }),
+        ),
+      );
+      yield* HttpRouter.serve(layerServer, {
         disableListenLog: true,
         disableLogger: true,
       }).pipe(Layer.build);
-      const httpClient = yield* HttpClient.HttpClient;
+      const httpClient = (yield* HttpClient.HttpClient).pipe(
+        HttpClient.mapRequest(HttpClientRequest.bearerToken(token)),
+      );
 
       const initializeResponse = yield* httpClient.post("/mcp", {
         headers: { accept: "application/json, text/event-stream" },
@@ -671,8 +879,8 @@ it.effect("registers annotated tools and preserves authenticated request context
       expect(statusTool?.tool.annotations?.destructiveHint).toBe(false);
 
       const snapshotTool = server.tools.find(({ tool }) => tool.name === "preview_snapshot");
-      expect(snapshotTool?.tool.annotations?.readOnlyHint).toBe(true);
-      expect(snapshotTool?.tool.annotations?.idempotentHint).toBe(true);
+      expect(snapshotTool?.tool.annotations?.readOnlyHint).toBe(false);
+      expect(snapshotTool?.tool.annotations?.idempotentHint).toBe(false);
       expect(snapshotTool?.tool.annotations?.openWorldHint).toBe(true);
 
       const clickTool = server.tools.find(({ tool }) => tool.name === "preview_click");
@@ -681,7 +889,7 @@ it.effect("registers annotated tools and preserves authenticated request context
       expect(clickTool?.tool.annotations?.openWorldHint).toBe(true);
       expect(clickTool?.tool.outputSchema).toMatchObject({
         type: "object",
-        additionalProperties: false,
+        additionalProperties: true,
         description: "The preview action completed successfully.",
       });
 
@@ -711,7 +919,10 @@ it.effect("registers annotated tools and preserves authenticated request context
       expect(malformed._tag).toBe("InvalidParams");
 
       const snapshot = yield* server
-        .callTool({ name: "preview_snapshot", arguments: { tabId: alternateTabId } })
+        .callTool({
+          name: "preview_snapshot",
+          arguments: { tabId: alternateTabId, includeImage: true },
+        })
         .pipe(
           Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
           Effect.provideService(McpSchema.McpServerClient, client),
@@ -764,5 +975,377 @@ it.effect("registers annotated tools and preserves authenticated request context
         expect(text?.type === "text" ? decodeJsonText(text.text) : null).toEqual({ toolIcon });
       }
     }),
-  ).pipe(Effect.provide(TestLayer)),
+  ).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("admits provider and OAuth client credentials and points only clients at OAuth", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const providerToken = "providerTokenWithoutDots";
+      const clientToken = "client-payload.client-signature";
+      const providerScope: McpInvocationContext.McpInvocationScope = {
+        environmentId,
+        requestNamespace: "provider-session",
+        thread: {
+          threadId: ThreadId.make("thread-provider"),
+          providerSessionId: "provider-session",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+        },
+        client: undefined,
+        capabilities: new Set(["orchestration"]),
+        issuedAt: 1,
+      };
+      const clientScope: McpInvocationContext.McpInvocationScope = {
+        environmentId,
+        requestNamespace: "client:session-1",
+        thread: undefined,
+        client: { sessionId: "session-1", label: "Claude Code", access: "auto" },
+        capabilities: new Set(["orchestration"]),
+        issuedAt: 1,
+      };
+      const seen: Array<McpInvocationContext.McpInvocationScope> = [];
+      const ProbeToolkit = Toolkit.make(
+        Tool.make("probe", {
+          description: "Reports the caller.",
+          success: Schema.Struct({ ok: Schema.Boolean }),
+          failure: OrchestratorMcpFailure,
+          failureMode: "return",
+          dependencies: [McpInvocationContext.McpInvocationContext],
+        }),
+      );
+      const serverLayer = McpHttpServer.toolkitRegistration(
+        ProbeToolkit,
+        McpToolAccess.toLayer(ProbeToolkit, {
+          probe: McpToolAccess.reads(() =>
+            McpInvocationContext.McpInvocationContext.pipe(
+              Effect.tap((scope) => Effect.sync(() => seen.push(scope))),
+              Effect.as({ ok: true }),
+            ),
+          ),
+        }),
+      ).pipe(
+        Layer.provideMerge(McpHttpServer.layerMcpTransport),
+        Layer.provide(
+          Layer.mock(McpSessionRegistry.McpSessionRegistry)({
+            resolve: (token) =>
+              Effect.succeed(
+                token === providerToken
+                  ? (providerScope as McpInvocationContext.McpThreadInvocationScope)
+                  : undefined,
+              ),
+          }),
+        ),
+        Layer.provide(
+          Layer.succeed(McpHttpServer.McpClientAuthenticator, {
+            authenticate: (request) =>
+              Effect.succeed(
+                request.headers.authorization === `Bearer ${clientToken}` ? clientScope : undefined,
+              ),
+          }),
+        ),
+      );
+      yield* HttpRouter.serve(serverLayer, { disableListenLog: true, disableLogger: true }).pipe(
+        Layer.build,
+      );
+      const httpClient = yield* HttpClient.HttpClient;
+      const call = (token: string | undefined) =>
+        Effect.gen(function* () {
+          const headers = {
+            accept: "application/json, text/event-stream",
+            ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
+          };
+          const initialize = yield* httpClient.post("/mcp", {
+            headers,
+            body: HttpBody.text(
+              `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"probe","version":"1.0.0"}}}`,
+              "application/json",
+            ),
+          });
+          if (initialize.status !== 200) return initialize;
+          return yield* httpClient.post("/mcp", {
+            headers: {
+              ...headers,
+              "mcp-session-id": initialize.headers["mcp-session-id"]!,
+              "mcp-protocol-version": "2025-06-18",
+            },
+            body: HttpBody.text(
+              `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"probe","arguments":{}}}`,
+              "application/json",
+            ),
+          });
+        });
+
+      expect((yield* call(providerToken)).status).toBe(200);
+      expect((yield* call(clientToken)).status).toBe(200);
+      expect(seen.map((scope) => scope.requestNamespace)).toEqual([
+        "provider-session",
+        "client:session-1",
+      ]);
+
+      const missing = yield* call(undefined);
+      expect(missing.status).toBe(401);
+      expect(missing.headers["www-authenticate"]).toMatch(
+        /^Bearer resource_metadata="http:\/\/[^"]+\/\.well-known\/oauth-protected-resource\/mcp"$/,
+      );
+
+      const expiredClient = yield* call("stale-payload.stale-signature");
+      expect(expiredClient.headers["www-authenticate"]).toContain("resource_metadata=");
+      expect(expiredClient.headers["www-authenticate"]).toContain('error="invalid_token"');
+
+      const deadProvider = yield* call("deadProviderToken");
+      expect(deadProvider.status).toBe(401);
+      expect(deadProvider.headers["www-authenticate"]).toBe('Bearer error="invalid_token"');
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect(
+  "narrows an OAuth client's modes to the T3-Mode-Limit it sends, and never widens them",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const clientToken = "client-payload.client-signature";
+        const clientScope: McpInvocationContext.McpInvocationScope = {
+          environmentId,
+          requestNamespace: "client:linked",
+          thread: undefined,
+          client: { sessionId: "linked", label: "Mesura Code · laptop", access: "auto" },
+          capabilities: new Set(["orchestration"]),
+          issuedAt: 1,
+        };
+        // Starts a thread at the modes the gate hands it, so the outcome is those modes.
+        const StartsToolkit = Toolkit.make(
+          Tool.make("starts", {
+            description: "Reports the modes a started thread would run with.",
+            parameters: Schema.Struct({
+              runtimeMode: Schema.optional(RuntimeMode),
+              interactionMode: Schema.optional(ProviderInteractionMode),
+            }),
+            success: Schema.Struct({ modes: Schema.String }),
+            failure: OrchestratorMcpFailure,
+            failureMode: "return",
+            dependencies: [
+              McpInvocationContext.McpInvocationContext,
+              ThreadManagementService.ThreadManagementService,
+            ],
+          }),
+        );
+        const serverLayer = McpHttpServer.toolkitRegistration(
+          StartsToolkit,
+          McpToolAccess.toLayer(StartsToolkit, {
+            starts: McpToolAccess.startsThreads(
+              (input) => input,
+              (_, modes) =>
+                Effect.succeed({ modes: `${modes.runtimeMode}/${modes.interactionMode}` }),
+              "stamped",
+            ),
+          }),
+        ).pipe(
+          Layer.provideMerge(McpHttpServer.layerMcpTransport),
+          Layer.provide(McpToolAccessTestkit.liveThreadsLayer),
+          Layer.provide(
+            Layer.mock(McpSessionRegistry.McpSessionRegistry)({
+              resolve: () => Effect.succeed(undefined),
+            }),
+          ),
+          Layer.provide(
+            Layer.succeed(McpHttpServer.McpClientAuthenticator, {
+              authenticate: (request) =>
+                Effect.succeed(
+                  request.headers.authorization === `Bearer ${clientToken}`
+                    ? clientScope
+                    : undefined,
+                ),
+            }),
+          ),
+        );
+        yield* HttpRouter.serve(serverLayer, { disableListenLog: true, disableLogger: true }).pipe(
+          Layer.build,
+        );
+        const httpClient = yield* HttpClient.HttpClient;
+        const decodeOutcome = Schema.decodeUnknownEffect(
+          Schema.fromJsonString(
+            Schema.Struct({
+              result: Schema.Struct({
+                content: Schema.Array(Schema.Struct({ text: Schema.String })),
+              }),
+            }),
+          ),
+        );
+        const decodeText = Schema.decodeUnknownEffect(
+          Schema.fromJsonString(
+            Schema.Union([
+              Schema.Struct({ modes: Schema.String }),
+              Schema.Struct({ code: Schema.String }),
+            ]),
+          ),
+        );
+        /** Starts a thread as the client, with `limit` as T3-Mode-Limit; the HTTP status or the outcome. */
+        const start = (limit: string | undefined, args: Record<string, string> = {}) =>
+          Effect.gen(function* () {
+            const headers = {
+              accept: "application/json, text/event-stream",
+              authorization: `Bearer ${clientToken}`,
+              ...(limit === undefined ? {} : { "t3-mode-limit": limit }),
+            };
+            const initialize = yield* httpClient.post("/mcp", {
+              headers,
+              body: HttpBody.text(
+                `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"probe","version":"1.0.0"}}}`,
+                "application/json",
+              ),
+            });
+            if (initialize.status !== 200) return initialize.status;
+            const response = yield* httpClient.post("/mcp", {
+              headers: {
+                ...headers,
+                "mcp-session-id": initialize.headers["mcp-session-id"]!,
+                "mcp-protocol-version": "2025-06-18",
+              },
+              body: HttpBody.text(
+                JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: 2,
+                  method: "tools/call",
+                  params: { name: "starts", arguments: args },
+                }),
+                "application/json",
+              ),
+            });
+            const body = yield* decodeOutcome(yield* response.text);
+            const outcome = yield* decodeText(
+              body.result.content.map((part) => part.text).join(""),
+            );
+            return "code" in outcome ? outcome.code : outcome.modes;
+          });
+
+        // Approved for auto: without the header the client keeps its ceiling.
+        expect(yield* start(undefined)).toBe("auto/default");
+        // The header narrows both modes, and asking above it is refused.
+        expect(yield* start("approval-required/plan")).toBe("approval-required/plan");
+        expect(yield* start("approval-required/plan", { runtimeMode: "auto" })).toBe(
+          "runtime_mode_escalation_denied",
+        );
+        expect(yield* start("auto-accept-edits/plan", { interactionMode: "default" })).toBe(
+          "interaction_mode_escalation_denied",
+        );
+        // A broader header changes nothing: the approved ceiling still holds.
+        expect(yield* start("full-access/default")).toBe("auto/default");
+        expect(yield* start("full-access/default", { runtimeMode: "full-access" })).toBe(
+          "runtime_mode_escalation_denied",
+        );
+        // A malformed header is refused before anything runs.
+        expect(yield* start("auto")).toBe(400);
+        expect(yield* start("auto/default/extra")).toBe(400);
+        expect(yield* start("root/default")).toBe(400);
+      }),
+    ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+// Phase 2 of project icons, acceptance criterion 3: the production icon tool
+// registration, served over HTTP with a credential the session registry issued,
+// lists `set_project_icon` with no prototype flag and no dev URL. (Before the v2
+// merge this served the whole `McpHttpServer.layer`; under v2 that layer needs
+// three dozen services, so the test serves the exported registration `layer`
+// composes.)
+it.effect("project icon tool fence: the production MCP registration lists set_project_icon", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const previousFlag = process.env.T3CODE_PROJECT_ICON_PROTOTYPE;
+      delete process.env.T3CODE_PROJECT_ICON_PROTOTYPE;
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          if (previousFlag !== undefined) process.env.T3CODE_PROJECT_ICON_PROTOTYPE = previousFlag;
+        }),
+      );
+      const registry = yield* McpSessionRegistry.McpSessionRegistry;
+      const issued = yield* registry.issue({
+        threadId,
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        capabilities: new Set(),
+      });
+      const mocked = Layer.mergeAll(
+        Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(ProjectFaviconResolver.ProjectFaviconResolver)({}),
+        ServerConfig.layerTest(process.cwd(), { prefix: "t3-mcp-icon-registration-test-" }),
+      );
+      yield* HttpRouter.serve(
+        McpHttpServer.layerProjectIconsToolkit.pipe(
+          Layer.provideMerge(McpHttpServer.layerMcpTransport),
+          Layer.provide(mocked),
+          Layer.provide(Layer.succeed(McpSessionRegistry.McpSessionRegistry, registry)),
+        ),
+        { disableListenLog: true, disableLogger: true },
+      ).pipe(Layer.build);
+      const httpClient = yield* HttpClient.HttpClient;
+      const headers = {
+        accept: "application/json, text/event-stream",
+        authorization: issued.config.authorizationHeader,
+      };
+      const initialized = yield* httpClient.post("/mcp", {
+        headers,
+        body: HttpBody.text(
+          `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"mcp-test","version":"1.0.0"}}}`,
+          "application/json",
+        ),
+      });
+      expect(initialized.status).toBe(200);
+      const sessionHeaders = {
+        ...headers,
+        "mcp-session-id": initialized.headers["mcp-session-id"]!,
+        "mcp-protocol-version": "2025-06-18",
+      };
+      yield* httpClient.post("/mcp", {
+        headers: sessionHeaders,
+        body: HttpBody.text(
+          `{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+          "application/json",
+        ),
+      });
+      const listed = yield* httpClient.post("/mcp", {
+        headers: sessionHeaders,
+        body: HttpBody.text(
+          `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
+          "application/json",
+        ),
+      });
+      const text = yield* listed.text;
+      expect(listed.status, text).toBe(200);
+      const payload = text.includes("data:")
+        ? text
+            .split("\n")
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => line.slice("data:".length).trim())
+            .join("")
+        : text;
+      const tools = (
+        decodeJsonText(payload) as {
+          result: { tools: Array<{ name: string; description?: string }> };
+        }
+      ).result.tools;
+      const tool = tools.find((candidate) => candidate.name === "set_project_icon");
+      expect(tool, `listed: ${tools.map((candidate) => candidate.name).join(", ")}`).toBeDefined();
+      // The search is explicit now; the agent must not be told one runs on its own.
+      expect(tool?.description).not.toMatch(/automatic/i);
+      expect(tool?.description).toMatch(/null/);
+      expect(tool?.description).toMatch(/no agent search starts/i);
+    }),
+  ).pipe(
+    Effect.provide(
+      McpSessionRegistry.layer.pipe(
+        Layer.provide(
+          Layer.succeed(
+            ServerEnvironment.ServerEnvironment,
+            ServerEnvironment.ServerEnvironment.of({
+              getEnvironmentId: Effect.succeed(environmentId),
+              getDescriptor: Effect.die("unused"),
+            }),
+          ),
+        ),
+        Layer.provideMerge(NodeHttpServer.layerTest),
+        Layer.provideMerge(NodeServices.layer),
+      ),
+    ),
+  ),
 );

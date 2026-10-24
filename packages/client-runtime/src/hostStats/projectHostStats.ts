@@ -24,7 +24,7 @@ import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 
 import type { EnvironmentPresentation } from "../connection/presentation.ts";
 import {

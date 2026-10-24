@@ -76,7 +76,7 @@ export function ProjectScopePicker(props: { readonly setOpen: (open: boolean) =>
         },
       }}
       mode="none"
-      panelClassName="max-h-[min(34rem,76vh)]"
+      panelSize="tall-list"
       testId="project-scope-picker"
       value={query}
       onItemHighlighted={(value) => {

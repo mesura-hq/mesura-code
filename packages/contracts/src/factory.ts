@@ -112,6 +112,12 @@ export const factoryRunActivityId = (threadId: string, runId: string) =>
   `factory-run:${threadId}:${runId}`;
 export const factoryReportActivityId = (threadId: string, runId: string) =>
   `factory-report:${threadId}:${runId}`;
+/**
+ * One plan card per plan file in a thread: the id derives from a digest of the
+ * plan's path, not its bytes, so presenting the same file again updates it.
+ */
+export const factoryPlanCardId = (threadId: string, planPathDigest: string) =>
+  `factory-plan:${threadId}:${planPathDigest.slice(0, 16)}`;
 
 export const FactoryRunRole = Schema.Literals(["implementer", "verifier", "reviewer"]);
 export type FactoryRunRole = typeof FactoryRunRole.Type;
@@ -519,6 +525,20 @@ export const FactoryReportActivityPayload = Schema.Struct({
   writtenAt: IsoDateTime,
 });
 export type FactoryReportActivityPayload = typeof FactoryReportActivityPayload.Type;
+
+/**
+ * One Software Factory card in a thread's timeline. Under orchestrator v2 the
+ * cards are `factory_card` turn items (orchestrationV2.ts), recorded by the
+ * server with the internal `factory_card.record` command and upserted by
+ * turn item id: `factoryPlanCardId`, `factoryRunActivityId`,
+ * `factoryReportActivityId`.
+ */
+export const FactoryThreadCard = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("plan"), payload: FactoryPlanActivityPayload }),
+  Schema.Struct({ kind: Schema.Literal("run"), payload: FactoryRunActivityPayload }),
+  Schema.Struct({ kind: Schema.Literal("report"), payload: FactoryReportActivityPayload }),
+]);
+export type FactoryThreadCard = typeof FactoryThreadCard.Type;
 
 /** Live progress of one role dispatch, read from its output file while a pane is open. */
 export const FactoryRoleProgress = Schema.Struct({

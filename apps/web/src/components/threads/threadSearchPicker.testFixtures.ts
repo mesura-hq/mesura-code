@@ -11,13 +11,8 @@
  * factories and the mutable state they read. It must not import application
  * modules: the factories load it while the application graph is loading.
  */
-import {
-  EnvironmentId,
-  ProjectId,
-  ProviderInstanceId,
-  ThreadId,
-  type OrchestrationThreadShell,
-} from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { presentThreadShell } from "@t3tools/client-runtime/state/shell";
 import type {
   AgentThreadSearchInput,
   AgentThreadSearchMatch,
@@ -28,10 +23,13 @@ import type {
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/models";
 import * as Cause from "effect/Cause";
+import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import { useSyncExternalStore } from "react";
+
+import { appRootFence, makeFenceSession } from "../../test/appRootFenceMocks";
 
 export const LAPTOP_ENVIRONMENT_ID = EnvironmentId.make("thread-search-laptop");
 export const VIGILIA_ENVIRONMENT_ID = EnvironmentId.make("thread-search-vigilia");
@@ -64,29 +62,40 @@ export function threadShell(input: {
   readonly title: string;
   readonly updatedAt?: string;
 }): EnvironmentThreadShell {
-  const shell: OrchestrationThreadShell = {
-    id: ThreadId.make(input.id),
+  const id = ThreadId.make(input.id);
+  const providerInstanceId = ProviderInstanceId.make("codex");
+  const at = DateTime.makeUnsafe(input.updatedAt ?? NOW);
+  return presentThreadShell(input.environmentId, {
+    id,
     projectId: input.projectId,
     title: input.title,
-    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+    providerInstanceId,
+    modelSelection: { instanceId: providerInstanceId, model: "gpt-5.4" },
     runtimeMode: "full-access",
     interactionMode: "default",
     branch: null,
     worktreePath: null,
-    pullRequests: [],
-    latestTurn: null,
-    createdAt: input.updatedAt ?? NOW,
-    updatedAt: input.updatedAt ?? NOW,
+    activeProviderThreadId: null,
+    lineage: { rootThreadId: id, parentThreadId: null, relationshipToParent: null },
+    forkedFrom: null,
+    createdBy: "user",
+    creationSource: "web",
+    latestRunId: null,
+    activeRunId: null,
+    status: "idle",
+    pendingRuntimeRequest: null,
+    latestVisibleMessage: null,
+    latestUserMessageAt: at,
+    hasActionableProposedPlan: false,
+    itemCount: 0,
+    visibleItemCount: 0,
+    createdAt: at,
+    updatedAt: at,
     archivedAt: null,
     settledOverride: null,
     settledAt: null,
-    session: null,
-    latestUserMessageAt: input.updatedAt ?? NOW,
-    hasPendingApprovals: false,
-    hasPendingUserInput: false,
-    hasActionableProposedPlan: false,
-  } as OrchestrationThreadShell;
-  return { ...shell, environmentId: input.environmentId };
+    deletedAt: null,
+  });
 }
 
 /** Two active threads the lexical picker lists, one per environment. */
@@ -228,6 +237,10 @@ function findThreadShell(ref: {
 }
 
 export function resetThreadSearchFixture(): void {
+  appRootFence.sessions.clear();
+  for (const environmentId of [LAPTOP_ENVIRONMENT_ID, VIGILIA_ENVIRONMENT_ID]) {
+    appRootFence.sessions.set(environmentId, makeFenceSession());
+  }
   threadSearchFixture.environments = [
     connectedEnvironment(LAPTOP_ENVIRONMENT_ID, "Laptop", "PrimaryConnectionTarget"),
     connectedEnvironment(VIGILIA_ENVIRONMENT_ID, "Vigilia", "BearerConnectionTarget"),

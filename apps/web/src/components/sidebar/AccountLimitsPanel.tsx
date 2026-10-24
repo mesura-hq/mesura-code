@@ -119,17 +119,17 @@ function AccountLimitRowView(props: {
               {row.providerLabel}
             </span>
             {row.plan ? (
-              <span className="truncate font-mono text-[10px] text-muted-foreground/65">
+              <span className="truncate font-mono text-caption text-muted-foreground/65">
                 {row.plan}
               </span>
             ) : null}
           </div>
           {row.subtitle ? (
-            <div className="truncate text-[10px] text-muted-foreground/60">{row.subtitle}</div>
+            <div className="truncate text-caption text-muted-foreground/60">{row.subtitle}</div>
           ) : null}
         </div>
         {ageLabel ? (
-          <span className="shrink-0 font-mono text-[9px] text-muted-foreground/55">
+          <span className="shrink-0 font-mono text-micro text-muted-foreground/55">
             {ageLabel.replace("Updated ", "")}
           </span>
         ) : null}
@@ -143,7 +143,7 @@ function AccountLimitRowView(props: {
             const remaining = resetRemaining(window.resetsAt, rowWindow.environmentNowMs);
             return (
               <div key={accountLimitsWindowKey(window)}>
-                <div className="mb-1 flex items-center justify-between gap-3 font-mono text-[10px]">
+                <div className="mb-1 flex items-center justify-between gap-3 font-mono text-caption">
                   <span className="text-muted-foreground">{window.label}</span>
                   <span className="flex items-center gap-1">
                     {remaining ? (
@@ -175,23 +175,23 @@ function AccountLimitRowView(props: {
           })}
         </div>
       ) : (
-        <div className="mt-2 text-[11px] text-muted-foreground">
+        <div className="mt-2 text-search-label text-muted-foreground">
           {row.state === "missing" ? "No reading yet" : "No visible limits reported"}
         </div>
       )}
 
       {row.state === "stale" || row.state === "stale-refresh-failed" ? (
-        <div className="mt-2 text-[10px] text-muted-foreground/65">Reading may be stale</div>
+        <div className="mt-2 text-caption text-muted-foreground/65">Reading may be stale</div>
       ) : null}
       {row.state === "refresh-failed" || row.state === "stale-refresh-failed" ? (
-        <div className="mt-1 text-[10px] text-muted-foreground/65">
+        <div className="mt-1 text-caption text-muted-foreground/65">
           Refresh failed{row.windows.length > 0 ? " · showing the last reading" : ""}
         </div>
       ) : null}
       {/* Replaces the refresh-failed line rather than stacking with it: the two
           say contradictory things about whose fault the failure is. */}
       {row.state === "not-understood" ? (
-        <div className="mt-1 text-[10px] text-muted-foreground/65">
+        <div className="mt-1 text-caption text-muted-foreground/65">
           Reading not understood — update Mesura Code
           {row.windows.length > 0 ? " · showing the last reading" : ""}
         </div>
@@ -240,19 +240,19 @@ export function AccountLimitsPanelContent(props: {
     // checks, which is why nothing asserts its presence.
     <div
       aria-labelledby={headingId}
-      className="border-border/60 border-y bg-foreground/[0.035] dark:bg-[color-mix(in_srgb,var(--background)_45%,transparent)]"
+      className="border-border/60 border-y bg-foreground/[0.035] dark:bg-sidebar-recess"
       data-usage-limits-panel
       role="group"
     >
       <header className="flex items-center justify-between gap-2 px-3 py-1.5">
         <span
-          className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70"
+          className="text-caption font-medium uppercase tracking-wide text-muted-foreground/70"
           id={headingId}
         >
           Usage limits
         </span>
         {shortcutLabel ? (
-          <kbd className="rounded border border-border/60 bg-muted/40 px-1 py-px font-mono text-[9px] text-muted-foreground/80">
+          <kbd className="rounded border border-border/60 bg-muted/40 px-1 py-px font-mono text-micro text-muted-foreground/80">
             {shortcutLabel}
           </kbd>
         ) : null}
@@ -270,30 +270,29 @@ export function AccountLimitsPanelContent(props: {
           whose chrome makes `vh` overstate the space by its height.
           `scrollFade` is the sidebar list's own affordance and masks only the
           edge that actually overflows, so a panel that fits gets no mask. */}
-      <ScrollArea
-        className="max-h-[min(55dvh,calc(100dvh-20rem))] border-border/40 border-t"
-        scrollFade
-      >
-        {view.isPending ? (
-          <div className="px-3 py-4 text-center text-[11px] text-muted-foreground">
-            Checking limits…
-          </div>
-        ) : view.rows.length === 0 ? (
-          <div className="px-3 py-4 text-center text-[11px] text-muted-foreground">
-            {emptyMessage}
-          </div>
-        ) : (
-          view.rows.map((row, index) => (
-            <AccountLimitRowView index={index} key={row.key} open={open} row={row} />
-          ))
-        )}
+      <div className="border-border/40 border-t">
+        <ScrollArea className="max-h-[min(55dvh,calc(100dvh-20rem))]" scrollFade>
+          {view.isPending ? (
+            <div className="px-3 py-4 text-center text-search-label text-muted-foreground">
+              Checking limits…
+            </div>
+          ) : view.rows.length === 0 ? (
+            <div className="px-3 py-4 text-center text-search-label text-muted-foreground">
+              {emptyMessage}
+            </div>
+          ) : (
+            view.rows.map((row, index) => (
+              <AccountLimitRowView index={index} key={row.key} open={open} row={row} />
+            ))
+          )}
 
-        {view.isPartial || disconnected.length > 0 ? (
-          <footer className="border-border/50 border-t px-3 py-1.5 text-[9px] text-muted-foreground/55">
-            Some environments are unavailable
-          </footer>
-        ) : null}
-      </ScrollArea>
+          {view.isPartial || disconnected.length > 0 ? (
+            <footer className="border-border/50 border-t px-3 py-1.5 text-micro text-muted-foreground/55">
+              Some environments are unavailable
+            </footer>
+          ) : null}
+        </ScrollArea>
+      </div>
     </div>
   );
 }

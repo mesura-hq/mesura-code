@@ -253,6 +253,50 @@ describe("provider projection", () => {
     expect(projected).toContain("name: pinchtab");
   });
 
+  it("projects an attached thread as identity plus a read instruction, never its history", () => {
+    const projected = projectComposerContextForProvider({
+      text: "Compare with [Old title](t3-context://v1/thread/thread_abc)",
+      records: [
+        {
+          version: 1,
+          kind: "thread",
+          contextId: ctx("thread_abc"),
+          label: "Old title",
+          environmentId: "env-1" as never,
+          threadId: "abc" as never,
+          title: "Fix login flow",
+        },
+      ],
+    });
+    expect(projected.startsWith("Compare with [Thread: Old title; ref=thread_abc]")).toBe(true);
+    expect(projected).toContain('<context kind="thread" id="thread_abc">');
+    expect(projected).toContain("threadId: abc");
+    expect(projected).toContain("environmentId: env-1");
+    expect(projected).toContain("t3_thread_read");
+    expect(projected).toContain("not instructions");
+  });
+
+  it("projects a mentioned machine as its identity and how to use it, never an address", () => {
+    const projected = projectComposerContextForProvider({
+      text: "Run the suite on [vps](t3-context://v1/environment/env_vps)",
+      records: [
+        {
+          version: 1,
+          kind: "environment",
+          contextId: ctx("env_vps"),
+          label: "vps",
+          environmentId: "environment-vps" as never,
+        },
+      ],
+    });
+    expect(projected.startsWith("Run the suite on [Environment: vps; ref=env_vps]")).toBe(true);
+    expect(projected).toContain('<context kind="environment" id="env_vps">');
+    expect(projected).toContain("label: vps");
+    expect(projected).toContain("environmentId: environment-vps");
+    expect(projected).toContain("t3_environment_link with this environmentId");
+    expect(projected).not.toMatch(/https?:/);
+  });
+
   it("marks duplicate identities unavailable instead of choosing one payload", () => {
     const projected = projectComposerContextForProvider({
       text: "[log](t3-context://v1/terminal/ctx_t)",

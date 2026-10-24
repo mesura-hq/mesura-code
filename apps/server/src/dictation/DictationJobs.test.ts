@@ -35,11 +35,11 @@ import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientResponse } from "effect/http";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ServerSettingsModule from "../serverSettings.ts";
 import * as DictationJobsModule from "./DictationJobs.ts";
 
@@ -116,7 +116,7 @@ const startDictationJobs = (options: HarnessOptions = {}) =>
 
     const settingsLayer = ServerSettingsModule.layer.pipe(
       Layer.provide(ServerSecretStore.layer),
-      Layer.provideMerge(Layer.fresh(SqlitePersistenceMemory)),
+      Layer.provideMerge(Layer.fresh(SqlitePersistence.layerMemory)),
       Layer.provideMerge(Layer.fresh(ServerConfig.layerTest(process.cwd(), baseDir))),
     );
     const settingsReads = yield* Queue.unbounded<void>();

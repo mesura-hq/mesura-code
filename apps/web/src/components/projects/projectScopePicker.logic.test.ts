@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
+
+// Default mod+number bindings belong to Electron; web browsers own these chords.
+vi.mock("../../env", () => ({ isElectron: true }));
 
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { findJumpTargetItem } from "../CommandPalette.logic";
@@ -31,7 +34,7 @@ const build = (groups: ReadonlyArray<ProjectScopeGroup>) =>
 describe("buildProjectScopeItems", () => {
   it("lists the projects in the order given, with All projects last", () => {
     const items = build([
-      group({ projectKey: "k-a", displayName: "aguamadre-agente" }),
+      group({ projectKey: "k-a", displayName: "client-agent" }),
       group({ projectKey: "k-b", displayName: "mesura-code" }),
     ]);
 
@@ -101,7 +104,7 @@ describe("buildProjectScopeItems", () => {
 
   it("scopes to a project's logical key when its row runs", async () => {
     scoped.length = 0;
-    const items = build([group({ projectKey: "k-a", displayName: "aguamadre-agente" })]);
+    const items = build([group({ projectKey: "k-a", displayName: "client-agent" })]);
 
     await items[0]!.run();
 
@@ -110,7 +113,7 @@ describe("buildProjectScopeItems", () => {
 
   it("clears the filter when the All projects row runs", async () => {
     scoped.length = 0;
-    const items = build([group({ projectKey: "k-a", displayName: "aguamadre-agente" })]);
+    const items = build([group({ projectKey: "k-a", displayName: "client-agent" })]);
 
     await items[items.length - 1]!.run();
 

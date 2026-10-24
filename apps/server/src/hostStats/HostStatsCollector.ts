@@ -1,14 +1,14 @@
 // @effect-diagnostics nodeBuiltinImport:off - Effect has no free-space query; `statfs` fills that gap.
 import * as NodeFSP from "node:fs/promises";
 import type { HostStatsGpu, HostStatsSample } from "@t3tools/contracts";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 
 import { ServerConfig } from "../config.ts";
 import {
@@ -159,7 +159,7 @@ export const make = Effect.fn("makeHostStatsCollector")(function* (
 ) {
   const fs = yield* FileSystem.FileSystem;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const platform = yield* HostProcessPlatform;
+  const platform = yield* HostProcess.Platform;
   const hostOs = yield* HostOs;
   const roots = { procRoot: options.procRoot, sysRoot: options.sysRoot };
   const previousCounters = yield* Ref.make<CounterReading | null>(null);

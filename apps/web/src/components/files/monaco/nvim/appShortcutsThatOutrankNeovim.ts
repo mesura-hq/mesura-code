@@ -26,4 +26,8 @@ export const APP_SHORTCUTS_THAT_OUTRANK_NEOVIM: ReadonlySet<string> = new Set([
   "filePicker.toggle",
   "fileTree.toggle",
   "fileTree.miller",
+  // A file opened from Tree diff leaves the keyboard in the editor; the way
+  // back to the list has to work from there.
+  "treeDiff.toggle",
+  "diff.modeMenu",
 ]);

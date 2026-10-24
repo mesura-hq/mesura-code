@@ -1,6 +1,6 @@
-import { derivePendingRequests } from "@t3tools/client-runtime/pending-requests";
 import { runAtomCommand } from "@t3tools/client-runtime/state/runtime";
-import type { ApprovalRequestId, EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { derivePendingThreadRequests } from "@t3tools/client-runtime/state/thread-requests";
+import type { EnvironmentId, RuntimeRequestId, ThreadId } from "@t3tools/contracts";
 import { countPendingDictationSlots } from "@t3tools/shared/dictationSlots";
 import { useEffect } from "react";
 
@@ -27,7 +27,7 @@ import { disarmQuestionSendWhenReady, useSendWhenReadyStore } from "./sendWhenRe
  */
 
 type QuestionResponder = (
-  requestId: ApprovalRequestId,
+  requestId: RuntimeRequestId,
   answers: Record<string, unknown>,
 ) => Promise<boolean>;
 
@@ -52,13 +52,13 @@ const submitting = new Set<string>();
 
 function parseRequestKey(
   key: string,
-): { environmentId: EnvironmentId; threadId: ThreadId; requestId: ApprovalRequestId } | null {
+): { environmentId: EnvironmentId; threadId: ThreadId; requestId: RuntimeRequestId } | null {
   try {
     const [environmentId, threadId, requestId] = JSON.parse(key) as [string, string, string];
     return {
       environmentId: environmentId as EnvironmentId,
       threadId: threadId as ThreadId,
-      requestId: requestId as ApprovalRequestId,
+      requestId: requestId as RuntimeRequestId,
     };
   } catch {
     return null;
@@ -139,7 +139,7 @@ function findOpenRequest(ids: NonNullable<ReturnType<typeof parseRequestKey>>) {
   const thread = readThread({ environmentId: ids.environmentId, threadId: ids.threadId });
   if (!thread) return null;
   return (
-    derivePendingRequests(thread.activities).userInputs.find(
+    derivePendingThreadRequests(thread.projection).userInputs.find(
       (entry) => entry.requestId === ids.requestId,
     ) ?? null
   );

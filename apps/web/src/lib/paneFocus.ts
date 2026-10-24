@@ -68,10 +68,8 @@ const PANE_ENTRY_SELECTORS: Record<PaneId, ReadonlyArray<string>> = {
     '[data-chat-column-maximized-away] [contenteditable="true"]',
     "[data-chat-column-maximized-away] textarea",
   ],
-  // Asked in type order rather than document order, deliberately: the Files
-  // surface renders its refresh button before its search box, and the search
-  // box is where someone arriving by keyboard wants to be. A single combined
-  // selector would give document order and land on the refresh button.
+  // The fallback only: the mounted panel registers `enterPanel`
+  // (`panelSurfaceFocus.ts`), which lands in the active surface's content.
   panel: [
     "[data-preview-panel-mode] input",
     "[data-preview-panel-mode] textarea",
@@ -113,13 +111,29 @@ export function getFocusedPane(): PaneId | null {
   if (!(activeElement instanceof HTMLElement)) return null;
   if (!activeElement.isConnected) return null;
 
+  const pane = paneContaining(activeElement);
+  if (pane !== null) lastFocusedPane = pane;
+  return pane;
+}
+
+/** The innermost pane whose root contains `element`. */
+function paneContaining(element: Element): PaneId | null {
   for (const pane of CONTAINMENT_ORDER) {
-    if (activeElement.closest(PANE_ROOT_SELECTOR[pane]) !== null) {
-      lastFocusedPane = pane;
-      return pane;
-    }
+    if (element.closest(PANE_ROOT_SELECTOR[pane]) !== null) return pane;
   }
   return null;
+}
+
+/**
+ * Records a pointer press as entering the pane it lands in. A click on a
+ * pane's plain text focuses nothing, so focus falls to <body> and no focus
+ * event names the pane, yet the keys that follow are meant for it: a click
+ * on the chat's text after the sidebar hands the keys to the chat.
+ */
+export function notePointerPane(target: EventTarget | null): void {
+  if (!(target instanceof Element)) return;
+  const pane = paneContaining(target);
+  if (pane !== null) lastFocusedPane = pane;
 }
 
 /** The last pane that held focus, for when nothing holds it now. */

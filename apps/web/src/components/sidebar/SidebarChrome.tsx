@@ -1,29 +1,28 @@
 import {
   ArrowLeftIcon,
   ChartNoAxesColumnIcon,
-  GitPullRequestIcon,
+  CircleDotIcon,
   ServerIcon,
   SettingsIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { memo, useCallback } from "react";
-import { Link, useCanGoBack, useLocation, useNavigate } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
-import { useEnvironments } from "../../state/environments";
+import { useEnvironments, usePullRequestsSupported } from "../../state/environments";
+import { parseIssueSearch, someEnvironmentHasIssues } from "../issues/issues.logic";
 import { MesuraWordmark } from "../MesuraWordmark";
 import {
   resolveEnvironmentIdentificationPillLabel,
   resolveSidebarStageBackdropVariant,
-  resolveSidebarStageFocusRingOffsetClass,
   SidebarStageBackdrop,
   useEnvironmentStageLabel,
 } from "../SidebarStageBackdrop";
 import { Badge } from "../ui/badge";
 import {
   SidebarFooter,
-  SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -32,8 +31,12 @@ import {
 } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { readPullRequestListPreferences } from "../pullRequest/pullRequestListPreferences";
+import { isSidebarUtilityPage, useNavigateToMainApp } from "./mainAppLocation";
+import { SidebarThreadUndoNotice } from "./SidebarThreadUndoNotice";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
+import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
+import { observeResize } from "~/lib/observeResize";
 import { AccountLimitsDock, useAccountLimitsPanelController } from "./AccountLimitsPanel";
 import { HostsDock } from "./HostsPanel";
 import { useSidebarDockController } from "./sidebarDockController";
@@ -55,59 +58,93 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
       : null;
 
   return (
-    <SidebarHeader
+    // The titlebar row, not a padded SidebarHeader: it aligns to the window controls.
+    <div
       className={cn(
-        "@container/sidebar-header relative h-[var(--workspace-topbar-height)] shrink-0 flex-row items-center px-3 py-0 md:px-0",
+        "relative flex h-[var(--workspace-topbar-height)] shrink-0 flex-row items-center gap-2 px-3 md:pl-0",
         isElectron && "drag-region",
       )}
     >
       {backdropVariant ? <SidebarStageBackdrop variant={backdropVariant} /> : null}
       <SidebarTrigger
-        className={cn(
-          "relative z-10 md:hidden",
-          backdropVariant &&
-            "focus-visible:ring-white/90 [&_svg]:stroke-white/90! [&_svg]:opacity-100! [&_svg]:hover:stroke-white! [:hover,[data-pressed]]:bg-white/15",
-          backdropVariant && resolveSidebarStageFocusRingOffsetClass(backdropVariant),
-        )}
+        // Over the stage artwork: the media viewer's control-on-imagery treatment.
+        variant={backdropVariant ? "media-navigation" : "ghost"}
+        className="relative top-auto z-10 translate-y-0 md:hidden"
       />
-      <SidebarBrand onBackdrop={backdropVariant !== null} />
-      {pillLabel ? (
-        <Badge
-          className="relative z-10 ml-1 hidden rounded-full px-1.5 text-muted-foreground @[15rem]/sidebar-header:inline-flex"
-          data-environment-identification="pill"
-          size="sm"
-          variant="secondary"
-        >
-          {pillLabel}
-        </Badge>
-      ) : null}
-    </SidebarHeader>
+      {/* One visible line: the pill wraps onto the clipped second line once it no longer fits.
+          The padding keeps the brand's focus ring inside the clip. */}
+      <div className="relative z-10 flex h-8 min-w-0 flex-1 flex-wrap content-start items-center gap-x-2 overflow-hidden py-0.5">
+        <SidebarBrand onBackdrop={backdropVariant !== null} />
+        {pillLabel ? (
+          <div className="ml-1 flex h-7 items-center">
+            <Badge data-environment-identification="pill" size="sm" variant="secondary">
+              {pillLabel}
+            </Badge>
+          </div>
+        ) : null}
+      </div>
+    </div>
   );
 });
+
+// Measures the brand at its titlebar inset, plus the header's right padding and the
+// sidebar border, so the sidebar minimum follows font size, zoom and macOS window controls.
+export function SidebarBrandWidthProbe({
+  onWidthChange,
+}: {
+  onWidthChange: (width: number) => void;
+}) {
+  const observeWidth = useCallback(
+    (probe: HTMLDivElement) => {
+      return observeResize(probe, ([entry]) => {
+        if (entry) onWidthChange(entry.borderBoxSize[0]?.inlineSize ?? probe.offsetWidth);
+      });
+    },
+    [onWidthChange],
+  );
+
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none invisible fixed top-0 left-0 flex w-max border-r border-transparent pr-3"
+      ref={observeWidth}
+    >
+      <div className="ml-[var(--workspace-titlebar-content-left)] flex">
+        <SidebarBrandMark onBackdrop={false} />
+      </div>
+    </div>
+  );
+}
 
 function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
   return (
     <Link
       aria-label="Go to threads"
       className={cn(
-        "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 md:flex",
+        "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 focus-visible:ring-inset md:flex",
         onBackdrop ? "text-white" : "text-foreground",
       )}
       to="/"
     >
-      {/* Center the visible capitals, without the font's ascender/descender space. */}
-      <span className="inline-flex min-w-0 items-baseline gap-1 text-sm font-medium tracking-tight">
-        <MesuraWordmark className="h-[1cap] w-auto shrink-0" />
-        <span
-          className={cn(
-            "truncate [text-box:trim-both_cap_alphabetic]",
-            onBackdrop ? "text-white/70" : "text-muted-foreground",
-          )}
-        >
-          Code
-        </span>
-      </span>
+      <SidebarBrandMark onBackdrop={onBackdrop} />
     </Link>
+  );
+}
+
+function SidebarBrandMark({ onBackdrop }: { onBackdrop: boolean }) {
+  return (
+    // Center the visible capitals, without the font's ascender/descender space.
+    <span className="inline-flex min-w-0 items-baseline gap-1 text-sm font-medium tracking-tight">
+      <MesuraWordmark className="h-[1cap] w-auto shrink-0" />
+      <span
+        className={cn(
+          "truncate [text-box:trim-both_cap_alphabetic]",
+          onBackdrop ? "text-white/70" : "text-muted-foreground",
+        )}
+      >
+        Code
+      </span>
+    </span>
   );
 }
 
@@ -150,25 +187,15 @@ function SidebarUtilityItem({
 
 export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const navigate = useNavigate();
-  const canGoBack = useCanGoBack();
+  const navigateToMainApp = useNavigateToMainApp();
   const { isMobile, setOpenMobile } = useSidebar();
-  const currentFooterPage = useLocation({
-    select: (location) =>
-      /^\/settings(?:\/|$)/.test(location.pathname)
-        ? "settings"
-        : /^\/projects\/[^/]+\/?$/.test(location.pathname)
-          ? "project-settings"
-          : location.pathname === "/usage"
-            ? "usage"
-            : location.pathname === "/pull-requests"
-              ? "pull-requests"
-              : null,
+  const isOnUtilityPage = useLocation({
+    select: (location) => isSidebarUtilityPage(location.pathname),
   });
-  const { environments } = useEnvironments();
   // The dock takes sidebar height, so it only exists where the Usage entry that
   // opens it does. On a settings or usage page the row shows Back instead, and
   // a keyboard-only panel there would have no way to say it was there.
-  const accountLimitsEnabled = !isMobile && currentFooterPage === null;
+  const accountLimitsEnabled = !isMobile && !isOnUtilityPage;
   const accountLimitsController = useAccountLimitsPanelController(accountLimitsEnabled);
   // Fork: the Hosts dock shares the usage dock's gate and its controller.
   const hostsController = useSidebarDockController({
@@ -176,11 +203,10 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     command: "hosts.peek",
     enabled: accountLimitsEnabled,
   });
-  // The page reads every connected server, so one of them offering pull requests is enough for
-  // the link to lead somewhere.
-  const pullRequestsSupported = environments.some(
-    (environment) => environment.serverConfig?.environment.capabilities.pullRequests === true,
-  );
+  const pullRequestsSupported = usePullRequestsSupported();
+  // Mesura: the Issues entry shows once any connected server can list issues.
+  const { environments } = useEnvironments();
+  const issuesSupported = someEnvironmentHasIssues(environments);
   const closeMobileSidebar = useCallback(() => {
     if (isMobile) {
       setOpenMobile(false);
@@ -208,12 +234,8 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
 
   const handleBackClick = useCallback(() => {
     closeMobileSidebar();
-    if (canGoBack) {
-      window.history.back();
-      return;
-    }
-    void navigate({ to: "/" });
-  }, [canGoBack, closeMobileSidebar, navigate]);
+    void navigateToMainApp();
+  }, [closeMobileSidebar, navigateToMainApp]);
 
   return (
     // The dock and the row it opens from share a column of their own rather
@@ -228,14 +250,14 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     // touched this exact block, so expect roughly one whitespace conflict a
     // month here, each resolved by taking upstream's line and re-indenting it.
     // The cheaper shape — dock in `SidebarChromeFooter`, controller passed
-    // down — was measured and rejected: `currentFooterPage` is computed here,
+    // down — was measured and rejected: the utility-page gate is computed here,
     // so the footer would need its own copy of the route test, and two copies
     // of a gate drift. A recurring whitespace conflict is the smaller cost.
     <div className="flex flex-col">
       {accountLimitsEnabled ? <AccountLimitsDock controller={accountLimitsController} /> : null}
       {accountLimitsEnabled ? <HostsDock controller={hostsController} /> : null}
       <SidebarMenu className="flex-row items-center">
-        {currentFooterPage ? (
+        {isOnUtilityPage ? (
           <SidebarMenuItem className="min-w-0 flex-1">
             <SidebarMenuButton onClick={handleBackClick}>
               <ArrowLeftIcon />
@@ -251,9 +273,19 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             />
             {pullRequestsSupported ? (
               <SidebarUtilityItem
-                icon={<GitPullRequestIcon />}
+                icon={<PullRequestGlyph.pullRequest />}
                 label="Pull Requests"
                 onClick={handlePullRequestsClick}
+              />
+            ) : null}
+            {issuesSupported ? (
+              <SidebarUtilityItem
+                icon={<CircleDotIcon />}
+                label="Issues"
+                onClick={() => {
+                  closeMobileSidebar();
+                  void navigate({ to: "/issues", search: parseIssueSearch({}) });
+                }}
               />
             ) : null}
             <SidebarUtilityItem
@@ -282,7 +314,8 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
 
 export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   return (
-    <SidebarFooter className="px-[var(--sidebar-content-inset)] py-1">
+    <SidebarFooter>
+      <SidebarThreadUndoNotice />
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />
       <SidebarUtilityMenu />

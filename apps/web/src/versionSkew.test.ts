@@ -9,12 +9,14 @@ vi.mock("./branding", () => branding);
 
 import { APP_VERSION } from "./branding";
 import {
+  appendVersionMismatchHint,
   buildVersionMismatchDismissalKey,
   dismissServerUpdateFailure,
   dismissVersionMismatch,
   isServerUpdateFailureDismissed,
   isVersionMismatchDismissed,
   manualServerUpdateCommand,
+  manualServerUpdateCommandForPackage,
   resolveServerConfigVersionMismatch,
   resolveServerSelfUpdateCapability,
   resolveVersionMismatch,
@@ -26,6 +28,35 @@ const MISMATCH_HINT =
   "Version mismatch. Try syncing the client and server to the same Mesura Code version.";
 
 describe("versionSkew", () => {
+  // Mesura: upstream's cases run against a named package, because this fork
+  // publishes none and `manualServerUpdateCommand` answers null (guard below).
+  it("updates only the proven npm prefix and safely quotes its path", () => {
+    expect(
+      manualServerUpdateCommandForPackage("t3", "0.0.45", {
+        kind: "npm-global",
+        prefix: "/opt/node",
+      }),
+    ).toBe("npm install --global --prefix '/opt/node' t3@0.0.45");
+    expect(
+      manualServerUpdateCommandForPackage("t3", "0.0.45", {
+        kind: "npm-global",
+        prefix: "/opt/maria's node",
+      }),
+    ).toBe("npm install --global --prefix '/opt/maria'\\''s node' t3@0.0.45");
+  });
+
+  it("keeps runner and unknown commands as relaunches", () => {
+    expect(manualServerUpdateCommandForPackage("t3", "0.0.45")).toBe("npx t3@0.0.45");
+    expect(manualServerUpdateCommandForPackage("t3", "0.0.45", { kind: "npx" })).toBe(
+      "npx t3@0.0.45",
+    );
+    expect(manualServerUpdateCommandForPackage("t3", "0.0.45", { kind: "pnpm-dlx" })).toBe(
+      "pnpm dlx t3@0.0.45",
+    );
+    expect(manualServerUpdateCommandForPackage("t3", "0.0.45", { kind: "bunx" })).toBe(
+      "bunx t3@0.0.45",
+    );
+  });
   beforeEach(() => {
     branding.APP_VERSION = "0.0.34";
   });
@@ -174,6 +205,14 @@ describe("versionSkew", () => {
         }),
       ),
     ).toBe(false);
+  });
+
+  it("appends a hint to connection errors when the server is behind", () => {
+    const mismatch = resolveVersionMismatch("0.0.33");
+
+    expect(appendVersionMismatchHint("Socket closed.", mismatch)).toBe(
+      `Socket closed. Hint: ${MISMATCH_HINT}`,
+    );
   });
 
   it("reads desktop-managed update capabilities from config descriptors", () => {

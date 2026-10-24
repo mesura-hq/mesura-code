@@ -1,12 +1,15 @@
 import { openPath } from "@symmetria/fm-ui/bridge";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import type { EnvironmentThread } from "@t3tools/client-runtime/state/models";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
+import { isCommandPaletteOpen } from "~/commandPaletteBus";
+import { useComposerHandleContext } from "~/composerHandleContext";
+import { captureComposerFocusReturn } from "~/keys/composer/composerSurface";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { useProject } from "~/state/entities";
 import { useEnvironmentHttpBaseUrl } from "~/state/environments";
@@ -32,7 +35,7 @@ const FileManagerApp = lazy(() =>
 
 interface MesuraFileManagerLayerProps {
   readonly routeThreadRef: ScopedThreadRef | null;
-  readonly activeThread: EnvironmentThread | null;
+  readonly activeThread: EnvironmentThreadShell | null;
 }
 
 /**
@@ -80,6 +83,7 @@ interface OpenFileManagerProps {
 }
 
 function OpenFileManager({ routeThreadRef, environmentId, cwd }: OpenFileManagerProps) {
+  const composerRef = useComposerHandleContext();
   const host = useEnvironmentQuery(fileManagerHost({ environmentId, input: {} }));
   const httpBaseUrl = useEnvironmentHttpBaseUrl(environmentId);
   const latest = useRef({ httpBaseUrl });
@@ -127,14 +131,48 @@ function OpenFileManager({ routeThreadRef, environmentId, cwd }: OpenFileManager
   // The dialog takes focus on mount and hands it back on unmount, the way
   // the file manager's own dialogs do (`useDialogFocus`).
   const root = useRef<HTMLDivElement | null>(null);
+  const focusReturn = useRef<{
+    origin: Element | null;
+    restoreComposer: ReturnType<typeof captureComposerFocusReturn>;
+  } | null>(null);
   useEffect(() => {
-    const origin = document.activeElement;
-    root.current?.focus({ preventScroll: true });
+    const owner = root.current;
+    // StrictMode replays this effect while the dialog already owns focus.
+    // Capture once per open instance, so that replay cannot replace the origin.
+    if (focusReturn.current === null) {
+      const origin = document.activeElement;
+      focusReturn.current = {
+        origin,
+        restoreComposer: composerRef
+          ? captureComposerFocusReturn(origin, (cursor) => composerRef.current?.focusAt(cursor))
+          : null,
+      };
+    }
+    const { origin, restoreComposer } = focusReturn.current;
+    owner?.focus({ preventScroll: true });
     return () => {
-      if (origin instanceof HTMLElement && origin.isConnected)
-        origin.focus({ preventScroll: true });
+      // Wait for portal removal and the route's effects before returning. A
+      // replacement file manager or another focus owner keeps the keyboard.
+      queueMicrotask(() => {
+        const active = document.activeElement;
+        if (
+          !(origin instanceof HTMLElement) ||
+          !origin.isConnected ||
+          useFileManagerStore.getState().open ||
+          isCommandPaletteOpen() ||
+          document.querySelector(
+            '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]',
+          ) ||
+          (active !== null && active !== document.body && !owner?.contains(active))
+        )
+          return;
+        // Phone blur hides the editor. Direct DOM focus cannot reveal it;
+        // the composer handle restores the captured caret through expansion.
+        if (restoreComposer) restoreComposer();
+        else origin.focus({ preventScroll: true });
+      });
     };
-  }, []);
+  }, [composerRef]);
 
   const onOpenFile = (absolutePath: string) => {
     const decision = decideOpenFromFileManager(cwd, absolutePath);
@@ -184,7 +222,7 @@ function OpenFileManager({ routeThreadRef, environmentId, cwd }: OpenFileManager
           />
         </Suspense>
       ) : (
-        <p className="mesura-file-manager-notice">{host.error ?? "Opening the file manager…"}</p>
+        <p data-mesura-file-manager-notice>{host.error ?? "Opening the file manager…"}</p>
       )}
     </div>,
     document.body,

@@ -3,6 +3,7 @@ import type { ScopedThreadRef } from "@t3tools/contracts";
 import { useEffect, useRef } from "react";
 
 import { isCommandPaletteOpen } from "~/commandPaletteBus";
+import { useCommandHandlers } from "~/commands/commandRegistry";
 import { resolveShortcutCommand } from "~/keybindings";
 import { isPreviewFocused } from "~/lib/previewFocus";
 import { isTerminalFocused } from "~/lib/terminalFocus";
@@ -62,4 +63,9 @@ export function useFileTreeShortcut(routeThreadRef: ScopedThreadRef | null): voi
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, []);
+
+  useCommandHandlers({
+    "fileTree.toggle": () => runFileTreeToggle(latest.current.routeThreadRef),
+    "fileTree.miller": () => runFileManagerToggle(latest.current.routeThreadRef),
+  });
 }

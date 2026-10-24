@@ -11,7 +11,7 @@ import {
   EnvironmentId,
   OrchestrationSearchThreadsError,
   OrchestrationThreadSearchReasoningInput,
-  ORCHESTRATION_WS_METHODS,
+  THREAD_SEARCH_WS_METHODS,
   THREAD_SEARCH_REASONING_MAX_INPUT_BYTES,
   TextGenerationError,
   type OrchestrationThreadSearchEvidenceInput,
@@ -27,7 +27,7 @@ import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import { Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { Atom, AtomRegistry } from "effect/reactivity";
 
 import { EnvironmentRegistry } from "../connection/registry.ts";
 import {
@@ -46,7 +46,7 @@ import {
   type FakeReason,
 } from "./threadSearchEnvironmentFakes.testFixtures.ts";
 
-const METHODS = ORCHESTRATION_WS_METHODS;
+const METHODS = THREAD_SEARCH_WS_METHODS;
 const decodeReasoningInput = Schema.decodeUnknownExit(OrchestrationThreadSearchReasoningInput);
 const encodeReasoningInputJson = Schema.encodeUnknownSync(
   Schema.fromJsonString(OrchestrationThreadSearchReasoningInput),

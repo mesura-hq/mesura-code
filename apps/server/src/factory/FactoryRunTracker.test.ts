@@ -1,9 +1,12 @@
 // Entry points: the `attach_factory_run` MCP tool, driven through `FactoryToolkit.handle` with the
 // real `FactoryRunTracker` behind it; the tracker's `stream`, which the `subscribeFactoryRun` RPC
-// returns as is; `ProjectionSnapshotQuery`, which `subscribeShell` reads a thread's shell from; and
-// `reattachFactoryRuns`, which server startup runs. The run directory is a real temporary
-// directory, and lines are appended while the tail runs. Tests wait on the tracker's own `drain`
-// or on emitted snapshots, never on sleeps.
+// returns as is; `FactoryRunShellSummaries`, which the V2 projection store labels a thread's shell
+// from; and `reattachFactoryRuns`, which server startup runs. The orchestrator and the card query
+// are test doubles over one in-memory card store, so a card the tracker records is the card a
+// restarted tracker reads. The run directory is a real temporary directory, and lines are appended
+// while the tail runs. Tests wait on the tracker's own `drain` or on emitted snapshots, never on
+// sleeps.
+// @effect-diagnostics-next-line nodeBuiltinImport:off - hashes report fixtures synchronously to compare digests.
 import * as NodeCrypto from "node:crypto";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -13,10 +16,10 @@ import {
   FACTORY_RUN_ACTIVITY_KIND,
   ProviderInstanceId,
   ThreadId,
-  type OrchestrationCommand,
-  type OrchestrationThreadActivity,
+  type OrchestrationV2ServerCommand,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -29,19 +32,15 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as ServerConfig from "../config.ts";
 import * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
-import { FactoryToolkitHandlersLive } from "../mcp/toolkits/factory/handlers.ts";
+import * as McpToolAccess from "../mcp/McpToolAccess.ts";
+import * as McpToolAccessTestkit from "../mcp/McpToolAccess.testkit.ts";
+import * as FactoryHandlers from "../mcp/toolkits/factory/handlers.ts";
 import { FactoryToolkit } from "../mcp/toolkits/factory/tools.ts";
-import { OrchestrationProjectionSnapshotQueryLive } from "../orchestration/Layers/ProjectionSnapshotQuery.ts";
-import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import * as ThreadBackgroundLiveness from "../orchestration/ThreadBackgroundLiveness.ts";
-import * as ThreadPlanProgress from "../orchestration/ThreadPlanProgress.ts";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
-import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import * as FactoryCardQuery from "../orchestration-v2/FactoryCardQuery.ts";
+import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ServerRuntimeStartup from "../serverRuntimeStartup.ts";
 import * as FactoryRunShellSummaries from "./FactoryRunShellSummaries.ts";
 import * as FactoryRunTracker from "./FactoryRunTracker.ts";
@@ -94,14 +93,32 @@ const runStartedLine = (runId = RUN_ID) =>
     phases: PHASES,
   });
 
+/** A thread caller on the `codex` instance, the one `McpToolAccessTestkit` keeps live. */
 const invocation: McpInvocationContext.McpInvocationScope = {
   environmentId: EnvironmentId.make("environment-1"),
-  threadId: THREAD_ID,
-  providerSessionId: "provider-session-1",
-  providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+  requestNamespace: "provider-session-1",
+  thread: {
+    threadId: THREAD_ID,
+    providerSessionId: "provider-session-1",
+    providerInstanceId: ProviderInstanceId.make("codex"),
+  },
+  client: undefined,
   capabilities: new Set<McpInvocationContext.McpCapability>(["pull-requests", "factory"]),
   issuedAt: 1,
 };
+
+type CardRecordCommand = Extract<
+  OrchestrationV2ServerCommand,
+  { readonly type: "factory_card.record" }
+>;
+
+/** The activity kind a card used to be recorded as, so the assertions read as before. */
+const kindOfCard = (card: CardRecordCommand["card"]) =>
+  card.kind === "run"
+    ? FACTORY_RUN_ACTIVITY_KIND
+    : card.kind === "report"
+      ? FACTORY_REPORT_ACTIVITY_KIND
+      : "factory.plan";
 
 /** One Claude stream-json assistant message carrying one `tool_use` block. */
 const claudeToolUseLine = (name: string, timestamp: string) =>
@@ -131,40 +148,68 @@ const codexItemLine = (type: "item.started" | "item.completed", id: string) =>
   })}\n`;
 
 const makeHarness = Effect.fn("makeFactoryRunTrackerHarness")(function* (
-  options: { readonly shellProjection?: boolean } = {},
+  options: {
+    /** Cards a previous process recorded, as the card query returns them after a restart. */
+    readonly cards?: ReadonlyArray<FactoryCardQuery.FactoryCardRecord>;
+  } = {},
 ) {
-  const commands = yield* Ref.make<ReadonlyArray<OrchestrationCommand>>([]);
-  // What a `subscribeShell` client reads when the run activity's thread event reaches it.
+  const commands = yield* Ref.make<ReadonlyArray<CardRecordCommand>>([]);
+  // The newest card per turn item id, as the projection holds them.
+  const cards = yield* Ref.make<ReadonlyArray<FactoryCardQuery.FactoryCardRecord>>(
+    options.cards ?? [],
+  );
+  // What the projection store labels the thread's shell with when the run card's event reaches it.
   const shellsSeenAtDispatch = yield* Ref.make<ReadonlyArray<unknown>>([]);
   let readShellAtDispatch: (threadId: ThreadId) => Effect.Effect<void> = () => Effect.void;
 
-  const engine = Layer.mock(OrchestrationEngineService)({
-    readEvents: () => Stream.empty,
+  const orchestrator = Layer.mock(Orchestrator.OrchestratorV2)({
     dispatch: (command) =>
-      Ref.update(commands, (recorded) => [...recorded, command]).pipe(
-        Effect.andThen(
-          command.type === "thread.activity.append" &&
-            command.activity.kind === FACTORY_RUN_ACTIVITY_KIND
-            ? readShellAtDispatch(command.threadId)
-            : Effect.void,
-        ),
-        Effect.as({ sequence: 1 }),
-      ),
-    streamDomainEvents: Stream.empty,
-    latestSequence: Effect.succeed(0),
+      Effect.gen(function* () {
+        if (command.type !== "factory_card.record") return yield* Effect.die("unexpected command");
+        yield* Ref.update(commands, (recorded) => [...recorded, command]);
+        // The card's kind and the record's kind are the same value; TypeScript cannot
+        // correlate them across the union, hence the assertion.
+        const record = {
+          turnItemId: command.turnItemId,
+          threadId: command.threadId,
+          card: command.card,
+          updatedAt: yield* DateTime.now,
+        } as FactoryCardQuery.FactoryCardRecord;
+        yield* Ref.update(cards, (stored) => [
+          ...stored.filter((card) => card.turnItemId !== command.turnItemId),
+          record,
+        ]);
+        if (command.card.kind === "run") yield* readShellAtDispatch(command.threadId);
+        return { sequence: 1 } as never;
+      }),
   });
-  const shellProjection = options.shellProjection
-    ? OrchestrationProjectionSnapshotQueryLive.pipe(
-        Layer.provide(ThreadBackgroundLiveness.layer),
-        Layer.provide(ThreadPlanProgress.layer),
-        Layer.provideMerge(RepositoryIdentityResolver.layer),
-        Layer.provideMerge(SqlitePersistenceMemory),
-      )
-    : Layer.empty;
+  const cardQuery = Layer.mock(FactoryCardQuery.FactoryCardQuery)({
+    listByKind: (kind) =>
+      Ref.get(cards).pipe(
+        Effect.map(
+          (stored) =>
+            stored.filter((record) => record.card.kind === kind) as unknown as ReadonlyArray<
+              FactoryCardQuery.FactoryCardRecord<typeof kind>
+            >,
+        ),
+      ),
+    get: (turnItemId) =>
+      Ref.get(cards).pipe(
+        Effect.map((stored) =>
+          Option.fromNullishOr(stored.find((record) => record.turnItemId === turnItemId)),
+        ),
+      ),
+  });
   const context = yield* Layer.build(
-    Layer.mergeAll(FactoryRunTracker.layer, shellProjection).pipe(
+    FactoryRunTracker.layer.pipe(
       Layer.provideMerge(
-        Layer.mergeAll(engine, FactorySnapshotStore.layer, FactoryRunShellSummaries.layer),
+        Layer.mergeAll(
+          orchestrator,
+          cardQuery,
+          McpToolAccessTestkit.liveThreadsLayer,
+          FactorySnapshotStore.layer,
+          FactoryRunShellSummaries.layer,
+        ),
       ),
       Layer.provideMerge(
         ServerConfig.layerTest(process.cwd(), { prefix: "t3-factory-run-tracker-test-" }),
@@ -173,24 +218,16 @@ const makeHarness = Effect.fn("makeFactoryRunTrackerHarness")(function* (
     ),
   );
 
-  if (options.shellProjection) {
-    const query = yield* ProjectionSnapshotQuery.pipe(Effect.provide(context));
-    readShellAtDispatch = (threadId) =>
-      query.getThreadShellById(threadId).pipe(
-        Effect.flatMap((shell) =>
-          Ref.update(shellsSeenAtDispatch, (seen) => [
-            ...seen,
-            Option.getOrThrow(shell).factoryRun ?? null,
-          ]),
-        ),
-        Effect.orDie,
-      );
-  }
+  const summaries = yield* FactoryRunShellSummaries.FactoryRunShellSummaries.pipe(
+    Effect.provide(context),
+  );
+  readShellAtDispatch = (threadId) =>
+    Ref.update(shellsSeenAtDispatch, (seen) => [...seen, summaries.get(threadId)]);
 
   const tracker = yield* FactoryRunTracker.FactoryRunTracker.pipe(Effect.provide(context));
   const snapshots = yield* FactorySnapshotStore.FactorySnapshotStore.pipe(Effect.provide(context));
   const toolkit = yield* FactoryToolkit.pipe(
-    Effect.provide(FactoryToolkitHandlersLive),
+    Effect.provide(McpToolAccess.HandlersLayer.layer(FactoryHandlers.layer)),
     Effect.provide(context),
   );
   const fileSystem = yield* FileSystem.FileSystem;
@@ -220,12 +257,21 @@ const makeHarness = Effect.fn("makeFactoryRunTrackerHarness")(function* (
       Effect.provide(context),
     );
 
+  /** Every card recorded in this process, oldest first, read as the activities they replaced. */
   const activities = (kind: string) =>
     Ref.get(commands).pipe(
       Effect.map((recorded) =>
         recorded.flatMap((command) =>
-          command.type === "thread.activity.append" && command.activity.kind === kind
-            ? [{ commandId: command.commandId, threadId: command.threadId, ...command.activity }]
+          kindOfCard(command.card) === kind
+            ? [
+                {
+                  commandId: command.commandId,
+                  threadId: command.threadId,
+                  id: command.turnItemId as string,
+                  kind,
+                  payload: command.card.payload,
+                },
+              ]
             : [],
         ),
       ),
@@ -234,6 +280,7 @@ const makeHarness = Effect.fn("makeFactoryRunTrackerHarness")(function* (
   return {
     append,
     activities,
+    cards: Ref.get(cards),
     fileSystem,
     attachRun,
     commands,
@@ -242,6 +289,7 @@ const makeHarness = Effect.fn("makeFactoryRunTrackerHarness")(function* (
     path,
     shellsSeenAtDispatch,
     snapshots,
+    summaries,
     tracker,
   };
 });
@@ -275,9 +323,6 @@ it.layer(NodeServices.layer)("factory run tracker", (it) => {
             id: RUN_ACTIVITY_ID,
             threadId: THREAD_ID,
             kind: FACTORY_RUN_ACTIVITY_KIND,
-            turnId: null,
-            // The run's start, so the card keeps the run's place in the timeline.
-            createdAt: at(0),
             payload: {
               runId: RUN_ID,
               runDir,
@@ -439,18 +484,7 @@ it.layer(NodeServices.layer)("factory run tracker", (it) => {
     "the thread shell carries the run's factoryRun summary when the run event reaches subscribeShell clients",
     () =>
       Effect.gen(function* () {
-        const harness = yield* makeHarness({ shellProjection: true });
-        const sql = yield* SqlClient.SqlClient.pipe(Effect.provide(harness.context));
-        const query = yield* ProjectionSnapshotQuery.pipe(Effect.provide(harness.context));
-        yield* sql`INSERT INTO projection_projects
-          (project_id, title, workspace_root, scripts_json, created_at, updated_at, deleted_at)
-          VALUES ('project-1', 'Project', '/project', '[]', ${at(0)}, ${at(0)}, NULL)`;
-        yield* sql`INSERT INTO projection_threads
-          (thread_id, project_id, title, model_selection_json, runtime_mode, interaction_mode, created_at, updated_at)
-          VALUES
-          (${THREAD_ID}, 'project-1', 'Run thread', '{"instanceId":"claudeAgent","model":"claude-opus-5-5"}', 'full-access', 'default', ${at(0)}, ${at(0)}),
-          (${PLAIN_THREAD_ID}, 'project-1', 'Plain thread', '{"instanceId":"claudeAgent","model":"claude-opus-5-5"}', 'full-access', 'default', ${at(0)}, ${at(0)})`;
-
+        const harness = yield* makeHarness();
         const runDir = yield* harness.makeRunDir(RUN_ID, [
           runStartedLine(),
           eventLine(1, "phase.started", { phase: 1 }),
@@ -468,23 +502,19 @@ it.layer(NodeServices.layer)("factory run tracker", (it) => {
         );
         yield* harness.tracker.drain(THREAD_ID, RUN_ID);
 
-        // The shell a client refetches on the run activity's thread event already carries it.
+        // The label a client's shell refetch reads on the run card's event already carries it.
         expect(yield* Ref.get(harness.shellsSeenAtDispatch)).toEqual([
           { status: "running", phaseIndex: 1, phaseCount: 2, node: "fence" },
           { status: "waiting", phaseIndex: 1, phaseCount: 2, node: "fence" },
         ]);
 
-        const snapshot = yield* query.getShellSnapshot();
-        const shellOf = (threadId: ThreadId) =>
-          snapshot.threads.find((thread) => thread.id === threadId);
-        expect(shellOf(THREAD_ID)?.factoryRun).toEqual({
+        expect(harness.summaries.get(THREAD_ID)).toEqual({
           status: "waiting",
           phaseIndex: 1,
           phaseCount: 2,
           node: "fence",
         });
-        expect(shellOf(PLAIN_THREAD_ID)).toBeDefined();
-        expect(shellOf(PLAIN_THREAD_ID)?.factoryRun ?? null).toBeNull();
+        expect(harness.summaries.get(PLAIN_THREAD_ID)).toBeNull();
       }),
   );
 
@@ -750,17 +780,9 @@ it.layer(NodeServices.layer)("factory run tracker", (it) => {
           eventLine(1, "node.entered", { phase: 1, node: "fence" }),
         ]);
         yield* before.attachRun(runDir);
-        const recorded = yield* before.activities(FACTORY_RUN_ACTIVITY_KIND);
-        const { commandId: _commandId, threadId: _threadId, ...persisted } = recorded.at(-1)!;
 
-        const after = yield* makeHarness();
-        yield* ServerRuntimeStartup.reattachFactoryRuns.pipe(
-          Effect.provideService(ProjectionSnapshotQuery, {
-            listActivitiesByKind: (kind: string) =>
-              Effect.succeed(kind === FACTORY_RUN_ACTIVITY_KIND ? [persisted] : []),
-          } as unknown as ProjectionSnapshotQuery["Service"]),
-          Effect.provide(after.context),
-        );
+        const after = yield* makeHarness({ cards: yield* before.cards });
+        yield* ServerRuntimeStartup.reattachFactoryRuns.pipe(Effect.provide(after.context));
         yield* after.tracker.drain(THREAD_ID, "quiet-run");
 
         // The record already says what the run says: nothing to replace.
@@ -770,31 +792,13 @@ it.layer(NodeServices.layer)("factory run tracker", (it) => {
   );
 
   describe("review rework", () => {
-    /** A recorded activity as the projection returns it: no command fields. */
-    const persistedOf = (
-      activity: {
-        readonly commandId: unknown;
-        readonly threadId: unknown;
-      } & OrchestrationThreadActivity,
-    ): OrchestrationThreadActivity => {
-      const { commandId: _commandId, threadId: _threadId, ...persisted } = activity;
-      return persisted;
-    };
-
-    const reattachWith = (
-      harness: Harness,
-      list: (
-        kind: string,
-        options?: { readonly includeArchived?: boolean },
-      ) => ReadonlyArray<OrchestrationThreadActivity>,
-    ) =>
-      ServerRuntimeStartup.reattachFactoryRuns.pipe(
-        Effect.provideService(ProjectionSnapshotQuery, {
-          listActivitiesByKind: (kind: string, options?: { readonly includeArchived?: boolean }) =>
-            Effect.succeed(list(kind, options)),
-        } as unknown as ProjectionSnapshotQuery["Service"]),
-        Effect.provide(harness.context),
-      );
+    /** Starts the startup reattach in a new process that holds `cards` from the last one. */
+    const restartWith = (cards: ReadonlyArray<FactoryCardQuery.FactoryCardRecord>) =>
+      Effect.gen(function* () {
+        const after = yield* makeHarness({ cards });
+        yield* ServerRuntimeStartup.reattachFactoryRuns.pipe(Effect.provide(after.context));
+        return after;
+      });
 
     it.effect("an attachment made before events.jsonl exists survives a restart", () =>
       Effect.gen(function* () {
@@ -804,10 +808,7 @@ it.layer(NodeServices.layer)("factory run tracker", (it) => {
         const recorded = yield* before.activities(FACTORY_RUN_ACTIVITY_KIND);
         expect(recorded).toHaveLength(1);
 
-        const after = yield* makeHarness();
-        yield* reattachWith(after, (kind) =>
-          kind === FACTORY_RUN_ACTIVITY_KIND ? recorded.map(persistedOf) : [],
-        );
+        const after = yield* restartWith(yield* before.cards);
         yield* after.append(
           after.path.join(runDir, "events.jsonl"),
           runStartedLine("early-run") + eventLine(1, "phase.started", { phase: 1 }),
@@ -864,17 +865,10 @@ it.layer(NodeServices.layer)("factory run tracker", (it) => {
             eventLine(5, "run.finished", { status: "done" }),
           ]);
           yield* before.attachRun(runDir);
-          const recorded = yield* before.activities(FACTORY_RUN_ACTIVITY_KIND);
 
-          const after = yield* makeHarness();
-          yield* reattachWith(after, (kind) =>
-            kind === FACTORY_RUN_ACTIVITY_KIND ? [persistedOf(recorded.at(-1)!)] : [],
-          );
+          const after = yield* restartWith(yield* before.cards);
 
-          const summaries = yield* FactoryRunShellSummaries.FactoryRunShellSummaries.pipe(
-            Effect.provide(after.context),
-          );
-          expect(summaries.get(THREAD_ID)).toEqual({
+          expect(after.summaries.get(THREAD_ID)).toEqual({
             status: "done",
             phaseIndex: 2,
             phaseCount: 2,
@@ -885,7 +879,9 @@ it.layer(NodeServices.layer)("factory run tracker", (it) => {
         }),
     );
 
-    it.effect("after a restart unfinished runs in archived threads are followed again too", () =>
+    // Archived threads' cards are in the card query's answer (FactoryCardQuery.test.ts covers
+    // the SQL); the tracker follows every unfinished run that answer holds.
+    it.effect("after a restart every unfinished run the card query returns is followed again", () =>
       Effect.gen(function* () {
         const before = yield* makeHarness();
         const runDir = yield* before.makeRunDir("shelved-run", [
@@ -893,13 +889,8 @@ it.layer(NodeServices.layer)("factory run tracker", (it) => {
           eventLine(1, "phase.started", { phase: 1 }),
         ]);
         yield* before.attachRun(runDir);
-        const recorded = (yield* before.activities(FACTORY_RUN_ACTIVITY_KIND)).map(persistedOf);
 
-        const after = yield* makeHarness();
-        // The query leaves archived threads out unless asked.
-        yield* reattachWith(after, (kind, options) =>
-          kind === FACTORY_RUN_ACTIVITY_KIND && options?.includeArchived === true ? recorded : [],
-        );
+        const after = yield* restartWith(yield* before.cards);
         expect(yield* after.tracker.isAttached(THREAD_ID, "shelved-run")).toBe(true);
       }),
     );
@@ -954,6 +945,46 @@ it.layer(NodeServices.layer)("factory run tracker", (it) => {
       }),
     );
 
+    it.effect("a role's output replaced while no pane is open is read again from its start", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness();
+        const runDir = yield* harness.makeRunDir(RUN_ID, null);
+        const output = harness.path.join(runDir, "implementer-1.jsonl");
+        const readLine = claudeToolUseLine("Read", "2026-09-28T09:03:00.000Z");
+        const grepLine = claudeToolUseLine("Grep", "2026-09-28T09:04:00.000Z");
+        yield* harness.append(output, readLine);
+        yield* harness.append(
+          harness.path.join(runDir, "events.jsonl"),
+          runStartedLine() +
+            eventLine(1, "phase.started", { phase: 1 }) +
+            eventLine(2, "dispatch.started", {
+              phase: 1,
+              role: "implementer",
+              turn: 1,
+              harness: "claude",
+              model: "claude-opus-5-5",
+              promptFile: `${runDir}/implementer-prompt-1.md`,
+              outputFile: output,
+            }),
+        );
+        yield* harness.attachRun(runDir);
+        const roleOfFirstItem = harness.tracker.stream(THREAD_ID, RUN_ID).pipe(
+          Stream.runHead,
+          Effect.map((item) => Option.getOrThrow(item).roles[0]!),
+        );
+        expect(yield* roleOfFirstItem).toMatchObject({ toolCalls: 1, lastTool: "Read" });
+
+        // With the pane closed, another file of the same length takes the path:
+        // ext4 may give it the deleted file's inode number unless the role's
+        // tail still holds that file. Read from the old offset, nothing is new
+        // and the pane would still show `Read`.
+        yield* harness.fileSystem.remove(output);
+        yield* harness.append(output, grepLine);
+        expect(grepLine.length).toBe(readLine.length);
+        expect(yield* roleOfFirstItem).toMatchObject({ toolCalls: 1, lastTool: "Grep" });
+      }),
+    );
+
     it.effect(
       "a finished run with no subscriber is dropped from memory and rebuilt from its record for the next pane",
       () =>
@@ -978,16 +1009,10 @@ it.layer(NodeServices.layer)("factory run tracker", (it) => {
           expect(yield* harness.tracker.tailedFiles).toEqual([]);
 
           const recorded = yield* harness.activities(FACTORY_RUN_ACTIVITY_KIND);
-          const item = yield* FactoryRunTracker.subscribeFactoryRun(
-            harness.tracker,
-            {
-              listActivitiesByKind: (kind: string) =>
-                Effect.succeed(
-                  kind === FACTORY_RUN_ACTIVITY_KIND ? [persistedOf(recorded.at(-1)!)] : [],
-                ),
-            } as unknown as ProjectionSnapshotQuery["Service"],
-            { threadId: THREAD_ID, runId: RUN_ID },
-          ).pipe(Stream.runHead, Effect.map(Option.getOrThrow));
+          const item = yield* FactoryRunTracker.subscribeFactoryRun(harness.tracker, {
+            threadId: THREAD_ID,
+            runId: RUN_ID,
+          }).pipe(Stream.runHead, Effect.map(Option.getOrThrow));
           expect(item.state.status).toBe("stopped");
           // Rebuilding reads the record; it records nothing new.
           expect(yield* harness.activities(FACTORY_RUN_ACTIVITY_KIND)).toHaveLength(
@@ -998,7 +1023,7 @@ it.layer(NodeServices.layer)("factory run tracker", (it) => {
   });
 
   it.effect(
-    "after a restart every factory.run activity whose run is not finished is attached again from its run directory",
+    "after a restart every run card whose run is not finished is attached again from its run directory",
     () =>
       Effect.gen(function* () {
         const before = yield* makeHarness();
@@ -1017,39 +1042,22 @@ it.layer(NodeServices.layer)("factory run tracker", (it) => {
         ]);
         yield* before.attachRun(liveDir);
         yield* before.attachRun(doneDir);
-        // What the projection holds: the newest activity per id.
-        const persisted = new Map<string, OrchestrationThreadActivity>();
-        for (const {
-          commandId: _commandId,
-          threadId: _threadId,
-          ...activity
-        } of yield* before.activities(FACTORY_RUN_ACTIVITY_KIND)) {
-          persisted.set(activity.id, activity);
-        }
-        expect([...persisted.keys()].toSorted()).toEqual([
+        // What the projection holds: the newest card per id.
+        const cards = yield* before.cards;
+        expect(cards.map((card) => card.turnItemId as string).toSorted()).toEqual([
           `factory-run:${THREAD_ID}:done-run`,
           `factory-run:${THREAD_ID}:live-run`,
         ]);
 
         // A new process: a fresh tracker that follows nothing yet.
-        const after = yield* makeHarness();
-        const attached: Array<{ readonly threadId: ThreadId; readonly runDir: string }> = [];
-        yield* ServerRuntimeStartup.reattachFactoryRuns.pipe(
-          Effect.provideService(ProjectionSnapshotQuery, {
-            listActivitiesByKind: (kind: string) =>
-              Effect.succeed(kind === FACTORY_RUN_ACTIVITY_KIND ? [...persisted.values()] : []),
-          } as unknown as ProjectionSnapshotQuery["Service"]),
-          Effect.provideService(FactoryRunTracker.FactoryRunTracker, {
-            ...after.tracker,
-            attach: (threadId: ThreadId, runDir: string) => {
-              attached.push({ threadId, runDir });
-              return after.tracker.attach(threadId, runDir);
-            },
-          }),
-          Effect.provide(after.context),
-        );
+        const after = yield* makeHarness({ cards });
+        yield* ServerRuntimeStartup.reattachFactoryRuns.pipe(Effect.provide(after.context));
 
-        expect(attached).toEqual([{ threadId: THREAD_ID, runDir: liveDir }]);
+        expect(yield* after.tracker.isAttached(THREAD_ID, "live-run")).toBe(true);
+        expect(yield* after.tracker.isAttached(THREAD_ID, "done-run")).toBe(false);
+        expect(yield* after.tracker.tailedFiles).toEqual([
+          after.path.join(liveDir, "events.jsonl"),
+        ]);
         yield* after.append(
           after.path.join(liveDir, "events.jsonl"),
           eventLine(20, "node.entered", { phase: 1, node: "implement" }),

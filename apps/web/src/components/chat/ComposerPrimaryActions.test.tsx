@@ -17,19 +17,22 @@ vi.mock("../SidebarStageBackdrop", () => ({
 
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 
-function renderRunningActions(hasSendableContent: boolean) {
+// Mesura: questions are answered in the chat feed, so the composer has no pending-answer action.
+function renderIdleActions(isRunning: boolean) {
   return renderToStaticMarkup(
     createElement(ComposerPrimaryActions, {
       compact: true,
-      isRunning: true,
+      canOperateThread: true,
+      isRunning,
+      canInterrupt: isRunning,
       showPlanFollowUpPrompt: false,
-      promptHasText: hasSendableContent,
+      promptHasText: false,
       isSendBusy: false,
       sendDisabledReason: null,
       isConnecting: false,
       isEnvironmentUnavailable: false,
       isPreparingWorktree: false,
-      hasSendableContent,
+      hasSendableContent: false,
       onInterrupt: () => {},
       onImplementPlanInNewThread: () => {},
     }),
@@ -40,7 +43,9 @@ function renderSendButton(sendDisabledReason: string | null = null) {
   return renderToStaticMarkup(
     createElement(ComposerPrimaryActions, {
       compact: true,
+      canOperateThread: true,
       isRunning: false,
+      canInterrupt: false,
       showPlanFollowUpPrompt: false,
       promptHasText: true,
       isSendBusy: false,
@@ -68,6 +73,14 @@ describe("ComposerPrimaryActions", () => {
     expect(markup).toContain('aria-label="Sending feedback"');
   });
 
+  it("offers Stop generation while a turn is running", () => {
+    expect(renderIdleActions(true)).toContain('aria-label="Stop generation"');
+  });
+
+  it("does not offer Stop generation without a running turn", () => {
+    expect(renderIdleActions(false)).not.toContain('aria-label="Stop generation"');
+  });
+
   it("renders stage artwork inside the send button when artwork identification is active", () => {
     stageArtworkState.mode = "artwork";
     stageArtworkState.variant = "nightly";
@@ -83,20 +96,5 @@ describe("ComposerPrimaryActions", () => {
     const markup = renderSendButton();
 
     expect(markup).not.toContain("stage-nightly");
-  });
-
-  it("renders a queue action alongside stop while running with a sendable draft", () => {
-    const markup = renderRunningActions(true);
-
-    expect(markup).toContain('aria-label="Stop generation"');
-    expect(markup).toContain('aria-label="Queue message"');
-    expect(markup).toContain('type="submit"');
-  });
-
-  it("keeps stop as the only action while running with an empty composer", () => {
-    const markup = renderRunningActions(false);
-
-    expect(markup).toContain('aria-label="Stop generation"');
-    expect(markup).not.toContain('aria-label="Queue message"');
   });
 });

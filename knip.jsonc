@@ -21,14 +21,29 @@
     ".": {
       // Keep vendored reference repositories outside the root project.
       "project": ["*.{js,mjs,cjs,ts,mts,cts}", ".github/**/*.cjs"],
-      "entry": [".github/scripts/thread-transfer-report.cjs"],
+      "entry": [
+        // CodeRabbit loads its configuration by filename.
+        ".coderabbit.config.ts",
+        ".github/scripts/thread-transfer-report.cjs",
+      ],
       "vite": { "entry": [".github/**/*.test.cjs"] },
       "vitest": { "entry": [".github/**/*.test.cjs"] },
     },
     "scripts": {
       // Knip loads its preprocessor through a CLI option. The upstream sync runs
-      // remove-native-mobile.ts directly (ADR-008).
-      "entry": ["knip-schemas.ts", "remove-native-mobile.ts"],
+      // remove-native-mobile.ts directly (ADR-008). Agents run mesura-checks.ts
+      // (AGENTS.md's Deterministic Checks) and mesura-browser.ts directly; worktree
+      // setup (from t3.json) runs setup-worktree.ts.
+      "entry": [
+        "knip-schemas.ts",
+        "remove-native-mobile.ts",
+        "mesura-checks.ts",
+        "mesura-browser.ts",
+        "setup-worktree.ts",
+        // Chromium fixture builders load these Vite library entries by path.
+        "lib/mesura-panel.launcher.fixture.mjs",
+        "lib/mesura-timeline.find.fixture.mjs",
+      ],
     },
     "apps/server": {
       // Vite+ pack entries and the launcher used by installed background services.
@@ -37,11 +52,28 @@
         "src/claude-history-worker.ts!",
         "scripts/cli.ts",
         "scripts/evaluate-thread-titles.ts",
+        "scripts/measure-pr-preview.ts",
+        "scripts/probe-claude-fork-local-rollback-replay.ts",
+        "scripts/update-test-shard-weights.ts",
+        "scripts/verify-background-live.ts",
         "src/provider/testFixtures/*.mjs",
       ],
+      // Retain upstream helpers and fallback layers that currently have no callers.
+      // Exempt only export/duplicate reports; keep dependency analysis for these modules.
+      "ignoreIssues": {
+        "src/orchestration-v2/Orchestrator.ts": ["exports", "nsExports", "duplicates"],
+        "src/orchestration-v2/Adapters/CodexAdapterV2.ts": ["exports", "nsExports", "duplicates"],
+        "src/orchestration-v2/Adapters/ClaudeAdapterV2.ts": ["exports", "nsExports", "duplicates"],
+        "src/orchestration-v2/ProviderAdapterRegistry.ts": ["exports", "nsExports", "duplicates"],
+        "src/scheduledTasks/Schedule.ts": ["exports", "nsExports", "duplicates"],
+        "src/usage/UsageService.ts": ["exports", "nsExports", "duplicates"],
+        "src/orchestration-v2/EffectWorker.ts": ["exports", "nsExports", "duplicates"],
+      },
       // Keep the transitive Effect runtime pinned for standalone npm installs.
-      // Native msgpack acceleration and the Vite+ web build prerequisite.
-      "ignoreDependencies": ["@effect/platform-node-shared", "msgpackr-extract", "@t3tools/web"],
+      // The Vite+ web build prerequisite.
+      // Native and disk-loaded provider packages stay external to the bundle; the
+      // CLI archive and desktop sidecar stage them from this manifest.
+      "ignoreDependencies": ["@effect/platform-node-shared", "@t3tools/web", "@napi-rs/keyring"],
     },
     "apps/desktop": {
       // Electron loads these bundles by filename rather than importing them.
@@ -51,6 +83,8 @@
         "src/snapShot/GlobalShiftShortcutWorker.ts!",
         "src/snapShot/RegionSnapShotWorker.ts!",
         "src/snapShot/SnapShotAccessibilityWorker.ts!",
+        "src/boot.ts!",
+        "src/compileCache.ts!",
         "src/main.ts!",
         "src/preload.ts!",
         "src/preview-pick-preload.ts!",
@@ -63,23 +97,29 @@
       "ignoreDependencies": ["playwright-core", "electron-builder"],
     },
     "apps/web": {
-      // Worktree setup invokes this directly from t3.json.
+      // Vitest loads this through the per-file @vitest-environment directive.
+      "ignoreDependencies": ["jsdom"],
+      // Worktree setup (scripts/setup-worktree.ts) runs this directly.
       "entry": ["scripts/warm-dep-cache.ts"],
       // UI component modules are copied and adapted as cohesive sets. Keep their
       // named subcomponents even before they have callers; the file audit still
       // reports an entire component module when nothing imports it.
       "ignoreIssues": { "src/components/ui/*.tsx": ["exports", "nsExports", "duplicates"] },
-      // Mesura: upstream renders these three; this fork does not, and keeping the
+      // Mesura: upstream renders these; this fork does not, and keeping the
       // files is deliberate. `GitActionsControl` and the `StartTruncatedPath` it
       // uses were the chat header's git quick action, which this fork moved out of
       // the header; `useDirectoryEntries` belongs to upstream's file explorer,
-      // which this fork replaced with the Symmetria tree. Deleting them would be
-      // the change most likely to conflict at the next sync — upstream still edits
-      // all three — so they stay, unrendered, and knip is told why.
+      // which this fork replaced with the Symmetria tree. The two
+      // `BranchToolbar*Selector` files were the strip's host and workspace menus,
+      // which the run context drawer replaced. Deleting them would be the change
+      // most likely to conflict at the next sync — upstream still edits all of
+      // them — so they stay, unrendered, and knip is told why.
       "ignore": [
         "src/components/GitActionsControl.tsx",
         "src/components/StartTruncatedPath.tsx",
         "src/components/files/useDirectoryEntries.ts",
+        "src/components/BranchToolbarEnvironmentSelector.tsx",
+        "src/components/BranchToolbarEnvModeSelector.tsx",
       ],
     },
     "infra/relay": {

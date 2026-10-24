@@ -11,6 +11,7 @@ import {
   shouldOpenPullRequestExternally,
 } from "./openPullRequestLink";
 import { ProjectId, type RepositoryIdentity } from "@t3tools/contracts";
+import { normalizeGitRemoteUrl } from "@t3tools/shared/git";
 
 function repositoryIdentity(
   provider: string,
@@ -222,6 +223,13 @@ describe("shouldOpenPullRequestExternally", () => {
 
   it("keeps an unmodified click in the pull request view", () => {
     expect(shouldOpenPullRequestExternally({ metaKey: false, ctrlKey: false })).toBe(false);
+  });
+
+  it("issues phase 3 regression: uses the browser for shift-click and alt-click too", () => {
+    const plain = { metaKey: false, ctrlKey: false, shiftKey: false, altKey: false };
+    expect(shouldOpenPullRequestExternally({ ...plain, shiftKey: true })).toBe(true);
+    expect(shouldOpenPullRequestExternally({ ...plain, altKey: true })).toBe(true);
+    expect(shouldOpenPullRequestExternally(plain)).toBe(false);
   });
 });
 
@@ -498,6 +506,32 @@ describe("findProjectForChangeRequest", () => {
     ).toBeUndefined();
   });
 
+  it("matches an Azure repository cloned over SSH, whose remote shares no part with its URL", () => {
+    // Azure alone addresses one repository under two names: `ssh.dev.azure.com` and `v3/...` over
+    // SSH against `dev.azure.com` and `.../_git/...` everywhere a person sees it. The identity is
+    // recorded in the spelling a link arrives in, so both halves of this comparison line up.
+    //
+    // Derived from the SSH remote the way the server derives it rather than written out, so the
+    // day that normalization stops reaching the web spelling this fails here too.
+    const canonicalKey = normalizeGitRemoteUrl("git@ssh.dev.azure.com:v3/T3Tools/Platform/T3Code");
+    const projects = [
+      project({
+        canonicalKey,
+        provider: "azure-devops",
+        displayName: canonicalKey.split("/").slice(1).join("/"),
+        owner: "t3tools",
+        name: "t3code",
+      }),
+    ];
+    expect(
+      findProjectForChangeRequest(projects, {
+        host: "dev.azure.com",
+        repository: "t3tools/platform/_git/t3code",
+        number: 1,
+      }),
+    ).toBe(projects[0]);
+  });
+
   it("claims nothing for a lookalike host, which is what keeps a link a link", () => {
     const projects = [
       project({
@@ -514,5 +548,42 @@ describe("findProjectForChangeRequest", () => {
         number: 1,
       }),
     ).toBeUndefined();
+  });
+});
+
+describe("findProjectForChangeRequest with GitHub identities (issues phase 3 repair)", () => {
+  const project = (identity: Record<string, unknown>) =>
+    ({ id: "p1", repositoryIdentity: identity }) as never;
+  const locator = { source: "git-remote", remoteName: "upstream", remoteUrl: "x" };
+
+  it("issues phase 3 repair: a canonical-only GitHub identity claims its own pull requests", () => {
+    const projects = [
+      project({ canonicalKey: "github.com/pingdotgg/t3code", provider: "github", locator }),
+    ];
+    expect(
+      findProjectForChangeRequest(projects, {
+        host: "github.com",
+        repository: "pingdotgg/t3code",
+        number: 17404,
+      }),
+    ).toBe(projects[0]);
+  });
+
+  it("issues phase 3 repair: a GitHub identity naming two repositories claims neither", () => {
+    const projects = [
+      project({
+        canonicalKey: "github.com/pingdotgg/t3code",
+        provider: "github",
+        owner: "mesura-hq",
+        name: "mesura-code",
+        locator,
+      }),
+    ];
+    for (const repository of ["pingdotgg/t3code", "mesura-hq/mesura-code"]) {
+      expect(
+        findProjectForChangeRequest(projects, { host: "github.com", repository, number: 1 }),
+        repository,
+      ).toBeUndefined();
+    }
   });
 });

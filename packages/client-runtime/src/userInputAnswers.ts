@@ -53,8 +53,14 @@ export function resolvePendingUserInputAnswer(
   draft: PendingUserInputDraftAnswer | undefined,
 ): string | string[] | null {
   if (draft?.attachmentsBlocked) return null;
+  // A prefilled editor answer (`initialAnswer`) is sent verbatim, whitespace and all, and an
+  // emptied one is still an answer; free-form notes are trimmed and optional.
   const customAnswer =
-    question.allowCustomAnswer === false ? null : normalizeDraftAnswer(draft?.customAnswer);
+    question.allowCustomAnswer === false
+      ? null
+      : question.initialAnswer !== undefined
+        ? (draft?.customAnswer ?? null)
+        : normalizeDraftAnswer(draft?.customAnswer);
   const selectedOptionValues = selectedValues(question, draft);
   const choices = question.multiSelect ? selectedOptionValues : selectedOptionValues.slice(0, 1);
   if (choices.length > 0) {

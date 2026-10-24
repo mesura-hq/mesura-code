@@ -163,22 +163,23 @@ const TIMESTAMP_PROPERTIES = [
 ] as const;
 
 describe("upstream-derived free-text fields carry their constraint into the artifact", () => {
-  for (const property of FREE_TEXT_PROPERTIES) {
-    it(`${property} emits a minimum length and a non-blank pattern`, () => {
-      const constraints = stringConstraints(stringSchemaFor(property));
-      expect(constraints.minLength).toBe(1);
-      expect(constraints.pattern).toBeDefined();
-      expect(new RegExp(constraints.pattern as string).test("   ")).toBe(false);
-    });
+  it.each(FREE_TEXT_PROPERTIES)("%s emits a minimum length and a non-blank pattern", (property) => {
+    const constraints = stringConstraints(stringSchemaFor(property));
+    expect(constraints.minLength).toBe(1);
+    expect(constraints.pattern).toBeDefined();
+    expect(new RegExp(constraints.pattern as string).test("   ")).toBe(false);
+  });
 
-    it(`${property}'s emitted constraint refuses the empty string`, () => {
-      expect(emittedSchemaRefuses(stringSchemaFor(property), "")).toBe(true);
-    });
+  it.each(FREE_TEXT_PROPERTIES)("%s's emitted constraint refuses the empty string", (property) => {
+    expect(emittedSchemaRefuses(stringSchemaFor(property), "")).toBe(true);
+  });
 
-    it(`${property}'s emitted constraint refuses a whitespace-only string`, () => {
+  it.each(FREE_TEXT_PROPERTIES)(
+    "%s's emitted constraint refuses a whitespace-only string",
+    (property) => {
       expect(emittedSchemaRefuses(stringSchemaFor(property), "   ")).toBe(true);
-    });
-  }
+    },
+  );
 
   it("the artifact and the decoder refuse the same titles", () => {
     for (const candidate of ["", "   ", "\t\n"]) {
@@ -212,11 +213,9 @@ describe("projected timestamps stay as loose as the model they project", () => {
   // check to restore, and inventing one would make this projection refuse
   // timestamps the fork itself accepts. If a reader arrives here intending to
   // "finish" issue #2 by constraining timestamps, that is the edit this refuses.
-  for (const property of TIMESTAMP_PROPERTIES) {
-    it(`${property} emits no string constraint`, () => {
-      expect(stringConstraints(stringSchemaFor(property))).toEqual({});
-    });
-  }
+  it.each(TIMESTAMP_PROPERTIES)("%s emits no string constraint", (property) => {
+    expect(stringConstraints(stringSchemaFor(property))).toEqual({});
+  });
 
   it("the decoder accepts a timestamp the emitted document accepts", () => {
     expect(decoderRefuses("2026-08-22T00:00:00.000Z")).toBe(false);

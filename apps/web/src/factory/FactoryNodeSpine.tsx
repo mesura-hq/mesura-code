@@ -33,7 +33,7 @@ export const FactoryNodeSpine = memo(function FactoryNodeSpine({
     <div className="space-y-2">
       {spine.stages.map((stage) => (
         <div key={stage.stage} className="flex flex-wrap items-center gap-1.5">
-          <span className="w-14 shrink-0 text-[.65rem] font-medium uppercase tracking-wide text-muted-foreground">
+          <span className="w-14 shrink-0 text-phase-label font-medium uppercase tracking-wide text-muted-foreground">
             {stage.stage}
           </span>
           <ol className="flex flex-wrap items-center gap-1" aria-label={`${stage.stage} nodes`}>

@@ -21,7 +21,6 @@ import {
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 import {
   EnvironmentId,
-  MessageId,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -32,19 +31,24 @@ import {
   FACTORY_OTHER_PLAN_DIGEST,
   FACTORY_PLAN_DIGEST,
   FACTORY_REVISED_PLAN_DIGEST,
-  makeFactoryPlanActivity,
+  makeFactoryCardTurnItem,
   makeFactoryPlanPayload,
   makeFactoryRouteProviders,
   readFactoryApprovalMessage,
   writeFactoryApprovalMessage,
 } from "@t3tools/client-runtime/factory/testing";
-import type { Thread } from "../types";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+import type { OrchestrationV2TurnItem } from "@t3tools/contracts";
+import { makeFenceThreadShell } from "../test/fenceThreadShell";
+import { appRootFence, installFenceFontEvents, makeFenceSession } from "../test/appRootFenceMocks";
+import { makeFactoryMessageItem } from "./factoryTestFixtures";
 import type { AppRouter } from "../router";
 
 const fixture = vi.hoisted(() => ({
-  thread: null as Thread | null,
+  thread: null as EnvironmentThreadShell | null,
+  turnItems: [] as OrchestrationV2TurnItem[],
   commands: new Map<unknown, unknown>(),
-  noopCommand: vi.fn(async () => ({ _tag: "Success", value: undefined })),
+  noopCommand: vi.fn(async () => ({ _tag: "Success", value: { providers: [] } })),
   startTurn: vi.fn(async (_input: unknown) => ({ _tag: "Success", value: undefined })),
   refresh: vi.fn(),
   empty: [],
@@ -70,23 +74,14 @@ const fixture = vi.hoisted(() => ({
   ],
 }));
 
+vi.mock("@t3tools/client-runtime/state/session", async (importOriginal) =>
+  (await import("../test/appRootFenceMocks")).mockRuntimeSession(importOriginal),
+);
 vi.mock("../state/entities", async (importOriginal) => {
-  const { useSyncExternalStore } = await import("react");
-  const useFixtureThread = () =>
-    useSyncExternalStore(
-      (listener) => {
-        fixture.threadListeners.add(listener);
-        return () => {
-          fixture.threadListeners.delete(listener);
-        };
-      },
-      () => fixture.thread,
-    );
+  const { factoryThreadFixtureReads } = await import("./factoryTestFixtures");
   return {
     ...(await importOriginal<typeof import("../state/entities")>()),
-    useThread: useFixtureThread,
-    readThread: () => fixture.thread,
-    useThreadShell: useFixtureThread,
+    ...factoryThreadFixtureReads(fixture),
     useThreadRefs: () => fixture.empty,
     useProjects: () => fixture.empty,
     useProject: () => ({
@@ -125,10 +120,10 @@ vi.mock("../state/use-atom-command", () => ({
 vi.mock("../state/use-atom-query-runner", () => ({
   useAtomQueryRunner: () => fixture.noopCommand,
 }));
-// The plan body a `factory.plan` activity names by digest, as the server's
+// The plan body a `factory_card` turn item names by digest, as the server's
 // factoryReadSnapshot RPC would answer it; an unknown digest stays loading.
 vi.mock("../state/factory", async () => {
-  const { AsyncResult, Atom } = await import("effect/unstable/reactivity");
+  const { AsyncResult, Atom } = await import("effect/reactivity");
   return {
     factoryEnvironment: {
       factorySnapshot: ({ input }: { input: { digest: string } }) => {
@@ -162,14 +157,12 @@ vi.mock("../hooks/useSettings", async (importOriginal) => {
 });
 vi.mock("../hooks/useHandleNewThread", () => ({ useNewThreadHandler: () => fixture.noopCommand }));
 vi.mock("../hooks/useThreadActions", () => ({
+  useAcknowledgeThreadWoke: () => fixture.noopCommand,
   useThreadActions: () => ({
     settleThread: fixture.noopCommand,
     pinThread: fixture.noopCommand,
     confirmAndUnpinThread: fixture.noopCommand,
   }),
-}));
-vi.mock("../components/preview/PreviewAutomationHosts", () => ({
-  PreviewAutomationHosts: () => null,
 }));
 vi.mock("../browser/ElectronBrowserHost", () => ({ ElectronBrowserHost: () => null }));
 vi.mock("../components/QuitHoldOverlay", () => ({ QuitHoldOverlay: () => null }));
@@ -207,8 +200,7 @@ import ChatView from "../components/ChatView";
 import { SidebarProvider } from "../components/ui/sidebar";
 import { threadEnvironment } from "../state/threads";
 import { useComposerDraftStore } from "../composerDraftStore";
-import { useQueuedMessageStore } from "../queuedMessageStore";
-import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 
 const environmentId = EnvironmentId.make("factory-approval-environment");
 const threadId = ThreadId.make("factory-approval-thread");
@@ -222,6 +214,7 @@ const threadModelSelection = {
 };
 let root: Root | undefined;
 let container: HTMLDivElement;
+let restoreDocumentFonts: () => void;
 
 // A workspace snapshot for the project's folder, so the composer does not ask
 // the server to refresh its provider list.
@@ -238,7 +231,12 @@ function setProviders(providers: ReadonlyArray<ServerProvider>) {
         providers: providers.map((provider) => ({
           ...provider,
           workspaceSnapshots: [
-            { cwd: "/tmp/factory-approval", checkedAt: now, skills: [], slashCommands: [] },
+            {
+              cwd: "/tmp/factory-approval",
+              checkedAt: new Date().toISOString(),
+              skills: [],
+              slashCommands: [],
+            },
           ],
         })),
       },
@@ -247,51 +245,45 @@ function setProviders(providers: ReadonlyArray<ServerProvider>) {
 }
 
 function setThreadMessages(texts: ReadonlyArray<string>) {
-  fixture.thread = {
-    ...fixture.thread!,
-    messages: texts.map((text, index) => ({
-      id: MessageId.make(`factory-approval-message-${index}`),
-      role: "user" as const,
-      text,
-      turnId: null,
-      streaming: false,
-      createdAt: now,
-      updatedAt: now,
-    })),
-  };
+  fixture.turnItems = [
+    ...texts.map((text, index) =>
+      makeFactoryMessageItem({
+        id: `factory-approval-message-${index}`,
+        role: "user",
+        text,
+        createdAt: now,
+        threadId,
+      }),
+    ),
+    ...fixture.turnItems.filter((item) => item.type === "factory_card"),
+  ];
 }
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  restoreDocumentFonts = installFenceFontEvents();
+  appRootFence.sessions.set(environmentId, makeFenceSession());
   fixture.startTurn.mockClear();
   fixture.commands.set(threadEnvironment.startTurn, fixture.startTurn);
   fixture.factorySnapshots = { [FACTORY_PLAN_DIGEST]: PLAN_MARKDOWN };
   fixture.factorySnapshotAtoms.clear();
   setProviders(makeFactoryRouteProviders());
-  fixture.thread = {
+  fixture.thread = makeFenceThreadShell({
     id: threadId,
     environmentId,
     projectId: ProjectId.make("factory-approval-project"),
     title: "Factory approval",
     modelSelection: threadModelSelection,
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    session: null,
-    messages: [],
-    proposedPlans: [],
-    checkpoints: [],
-    pullRequests: [],
     createdAt: now,
-    updatedAt: now,
-    archivedAt: null,
-    settledOverride: null,
-    settledAt: null,
-    deletedAt: null,
-    latestTurn: null,
-    branch: null,
-    worktreePath: null,
-    activities: [makeFactoryPlanActivity({ id: "factory-plan:plan-md", createdAt: now })],
-  } as Thread;
+  });
+  fixture.turnItems = [
+    makeFactoryCardTurnItem({
+      id: "factory-plan:plan-md",
+      threadId,
+      createdAt: now,
+      card: { kind: "plan", payload: makeFactoryPlanPayload() },
+    }),
+  ];
   container = document.createElement("div");
   document.body.append(container);
 });
@@ -301,7 +293,8 @@ afterEach(async () => {
   root = undefined;
   container.remove();
   useComposerDraftStore.getState().clearComposerContent(scopeThreadRef(environmentId, threadId));
-  useQueuedMessageStore.getState().drain(scopedThreadKey(scopeThreadRef(environmentId, threadId)));
+  restoreDocumentFonts();
+  appRootFence.sessions.delete(environmentId);
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -605,16 +598,13 @@ it("phase4 web guard sends the composer's own message beside a plan card", async
   const target = scopeThreadRef(environmentId, threadId);
   useComposerDraftStore.getState().setPrompt(target, "A normal follow-up");
   await mountApp();
-  const send = container.querySelector<HTMLButtonElement>('button[aria-label="Send message"]');
+  const send = container.querySelector<HTMLButtonElement>('button[aria-label="Submit message"]');
   expect(send).not.toBeNull();
+  expect(send!.disabled).toBe(false);
   await act(async () => send!.click());
-  const queued = useQueuedMessageStore.getState().queuesByThreadKey[scopedThreadKey(target)] ?? [];
-  const sentTexts = [
-    ...fixture.startTurn.mock.calls.map(
-      (call) => (call[0] as { input: { message: { text: string } } }).input.message.text,
-    ),
-    ...queued.map((entry) => JSON.stringify(entry)),
-  ];
+  const sentTexts = fixture.startTurn.mock.calls.map(
+    (call) => (call[0] as { input: { message: { text: string } } }).input.message.text,
+  );
   expect(sentTexts.some((text) => text.includes("A normal follow-up"))).toBe(true);
   expect(sentTexts.some((text) => text.includes("Approve plan sha256:"))).toBe(false);
 });
@@ -685,4 +675,30 @@ it("phase4 web P1-4 says an approval's unreadable routes block could not be read
   await mountApp();
   expect(approveButton()).toBeUndefined();
   expect(planRow().textContent).toContain("The approval's routes block could not be read.");
+});
+
+it("Factory v2 approval remains unavailable on a read-only connection", async () => {
+  appRootFence.sessions.set(
+    environmentId,
+    makeFenceSession(["orchestration:read", "filesystem:read"]),
+  );
+  await mountApp();
+  expect(approveButton()?.disabled).toBe(true);
+  await act(async () => approveButton()?.click());
+  expect(fixture.startTurn).not.toHaveBeenCalled();
+});
+
+it("Factory v2 approval disables when the destination operate grant is revoked", async () => {
+  await mountApp();
+  expect(approveButton()?.disabled).toBe(false);
+  await act(async () => {
+    appRootFence.sessions.set(
+      environmentId,
+      makeFenceSession(["orchestration:read", "filesystem:read"]),
+    );
+    for (const listener of appRootFence.threadListeners) listener();
+  });
+  expect(approveButton()?.disabled).toBe(true);
+  await act(async () => approveButton()?.click());
+  expect(fixture.startTurn).not.toHaveBeenCalled();
 });

@@ -9,7 +9,9 @@ import {
 
 describe("contextPresentationRegistry", () => {
   it("defines presentation capabilities for every known context kind", () => {
-    expect([...CONTEXT_PRESENTATION_DEFINITIONS.keys()]).toEqual(COMPOSER_CONTEXT_KINDS);
+    expect(new Set(CONTEXT_PRESENTATION_DEFINITIONS.keys())).toEqual(
+      new Set(COMPOSER_CONTEXT_KINDS),
+    );
     expect(contextPresentationDefinition("terminal").capabilities).toEqual({
       details: "popover",
       expanded: "none",

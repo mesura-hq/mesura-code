@@ -5,7 +5,7 @@
  * The fixture replaces environment reads, RPC commands, and unrelated chrome;
  * clicks must travel through the application's selection and submit handlers.
  */
-import { act, type ReactNode } from "react";
+import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
   createMemoryHistory,
@@ -18,114 +18,49 @@ import {
   EnvironmentId,
   ThreadId,
   ProjectId,
-  ProviderInstanceId,
-  EventId,
+  type OrchestrationV2ThreadProjection,
   ApprovalRequestId,
-  type UserInputQuestion,
 } from "@t3tools/contracts";
-import type { Thread } from "./types";
+import {
+  makeFenceThreadProjection,
+  makeFenceThreadShell,
+  makeFenceUserInput,
+  FENCE_USER_INPUT_QUESTIONS,
+  readFenceUserInputItem,
+} from "./test/fenceThreadShell";
+import {
+  appRootFence,
+  FENCE_ENVIRONMENT_ID,
+  FENCE_PROJECT_ID,
+  installFenceFontEvents,
+} from "./test/appRootFenceMocks";
+import { publishFenceThreadProjection } from "./test/appRootFenceApp";
 import type { AppRouter } from "./router";
 
 const fixture = vi.hoisted(() => ({
-  thread: null as Thread | null,
+  projection: null as OrchestrationV2ThreadProjection | null,
   commands: new Map<unknown, unknown>(),
-  noopCommand: vi.fn(async () => ({ _tag: "Success", value: undefined })),
+  noopCommand: vi.fn(async () => ({ _tag: "Success", value: { providers: [] } })),
   respond: vi.fn(async () => ({ _tag: "Success", value: undefined })),
-  refresh: vi.fn(),
-  empty: [],
-  threadListeners: new Set<() => void>(),
-  environments: [
-    {
-      environmentId: "phase-one-environment",
-      label: "Fence environment",
-      connection: { phase: "connected" },
-      serverConfig: {
-        environment: { capabilities: {} },
-        providers: [
-          {
-            instanceId: "codex",
-            driver: "codex",
-            enabled: true,
-            installed: true,
-            status: "ready",
-            version: null,
-            auth: { status: "authenticated" },
-            checkedAt: "2026-09-22T12:00:00.000Z",
-            models: [],
-            slashCommands: [],
-            skills: [],
-          },
-        ],
-      },
-    },
-  ],
 }));
 
-vi.mock("./state/entities", async (importOriginal) => {
-  const { useSyncExternalStore } = await import("react");
-  const useFixtureThread = () =>
-    useSyncExternalStore(
-      (listener) => {
-        fixture.threadListeners.add(listener);
-        return () => {
-          fixture.threadListeners.delete(listener);
-        };
-      },
-      () => fixture.thread,
-    );
-  return {
-    ...(await importOriginal<typeof import("./state/entities")>()),
-    useThread: useFixtureThread,
-    readThread: () => fixture.thread,
-    useThreadShell: useFixtureThread,
-    useThreadRefs: () => fixture.empty,
-    useProjects: () => fixture.empty,
-    useProject: () => null,
-  };
-});
-vi.mock("./state/environments", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./state/environments")>()),
-  useEnvironments: () => ({ environments: fixture.environments, isReady: true }),
-  usePrimaryEnvironment: () => null,
-}));
-vi.mock("./state/query", () => ({
-  useEnvironmentQuery: () => ({
-    data: null,
-    error: null,
-    isPending: false,
-    isSuccess: false,
-    refresh: fixture.refresh,
-  }),
-}));
-vi.mock("./state/threads", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./state/threads")>();
-  const { EMPTY_ENVIRONMENT_THREAD_STATE } = await import("@t3tools/client-runtime/state/threads");
-  return { ...actual, useEnvironmentThread: () => EMPTY_ENVIRONMENT_THREAD_STATE };
-});
+const fenceMocks = vi.hoisted(() => () => import("./test/appRootFenceMocks"));
+vi.mock("@t3tools/client-runtime/state/session", async (original) =>
+  (await fenceMocks()).mockRuntimeSession(original),
+);
+vi.mock("./state/entities", async (original) => (await fenceMocks()).mockEntities(original));
+vi.mock("./state/environments", async (original) =>
+  (await fenceMocks()).mockEnvironments(original),
+);
+vi.mock("./state/query", async () => (await fenceMocks()).mockQuery());
+vi.mock("./state/threads", async (original) => (await fenceMocks()).mockThreads(original));
 vi.mock("./state/use-atom-command", () => ({
   useAtomCommand: (command: unknown) => fixture.commands.get(command) ?? fixture.noopCommand,
 }));
 vi.mock("./state/use-atom-query-runner", () => ({ useAtomQueryRunner: () => fixture.noopCommand }));
-vi.mock("./hooks/useSettings", async (importOriginal) => {
-  const { DEFAULT_SERVER_SETTINGS } = await import("@t3tools/contracts");
-  const { DEFAULT_CLIENT_SETTINGS } = await import("@t3tools/contracts/settings");
-  const settings = { ...DEFAULT_CLIENT_SETTINGS, ...DEFAULT_SERVER_SETTINGS };
-  return {
-    ...(await importOriginal<typeof import("./hooks/useSettings")>()),
-    useEnvironmentSettings: () => settings,
-    useClientSettings: (select?: (value: typeof DEFAULT_CLIENT_SETTINGS) => unknown) =>
-      select ? select(DEFAULT_CLIENT_SETTINGS) : DEFAULT_CLIENT_SETTINGS,
-    useClientSettingsHydrated: () => true,
-  };
-});
+vi.mock("./hooks/useSettings", async (original) => (await fenceMocks()).mockSettings(original));
 vi.mock("./hooks/useHandleNewThread", () => ({ useNewThreadHandler: () => fixture.noopCommand }));
-vi.mock("./hooks/useThreadActions", () => ({
-  useThreadActions: () => ({
-    settleThread: fixture.noopCommand,
-    pinThread: fixture.noopCommand,
-    confirmAndUnpinThread: fixture.noopCommand,
-  }),
-}));
+vi.mock("./hooks/useThreadActions", async () => (await fenceMocks()).mockThreadActions());
 vi.mock("./components/preview/PreviewAutomationHosts", () => ({
   PreviewAutomationHosts: () => null,
 }));
@@ -136,27 +71,7 @@ vi.mock("./components/BranchToolbar", () => ({ BranchToolbar: () => null }));
 
 // happy-dom has no layout. Keep application routing and timeline projection
 // real, and replace only the virtual list's measurement boundary.
-vi.mock("@legendapp/list/react", () => ({
-  LegendList: ({
-    data,
-    renderItem,
-    ListHeaderComponent,
-    ListFooterComponent,
-  }: {
-    data: Array<{ id: string }>;
-    renderItem: (input: { item: { id: string } }) => ReactNode;
-    ListHeaderComponent?: ReactNode;
-    ListFooterComponent?: ReactNode;
-  }) => (
-    <div>
-      {ListHeaderComponent}
-      {data.map((item) => (
-        <div key={item.id}>{renderItem({ item })}</div>
-      ))}
-      {ListFooterComponent}
-    </div>
-  ),
-}));
+vi.mock("@legendapp/list/react", async () => (await fenceMocks()).mockLegendList());
 import { usePendingUserInputDraftStore } from "./pendingUserInputDraftStore";
 
 import { AppRoot } from "./AppRoot";
@@ -167,7 +82,7 @@ import { useComposerDraftStore } from "./composerDraftStore";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { questionAttachmentDraftId, useQuestionAttachmentPreparation } from "./questionAttachments";
 
-const environmentId = EnvironmentId.make("phase-one-environment");
+const environmentId = EnvironmentId.make(FENCE_ENVIRONMENT_ID);
 const threadId = ThreadId.make("phase-one-thread");
 const requestId = "phase-one-request";
 const now = "2026-09-22T12:00:00.000Z";
@@ -179,58 +94,29 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   fixture.respond.mockClear();
   fixture.commands.set(threadEnvironment.respondToUserInput, fixture.respond);
-  fixture.thread = {
+  installFenceFontEvents();
+  Object.assign(appRootFence.environments[0]!.serverConfig.environment.capabilities, {
+    questionAttachments: true,
+    attachmentUploads: true,
+    fileAttachments: { maxUploadBytes: 1048576 },
+  });
+  const shell = makeFenceThreadShell({
     id: threadId,
     environmentId,
-    projectId: ProjectId.make("phase-one-project"),
+    projectId: ProjectId.make(FENCE_PROJECT_ID),
     title: "Question fence",
-    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    session: null,
-    messages: [],
-    proposedPlans: [],
-    checkpoints: [],
-    pullRequests: [],
     createdAt: now,
-    updatedAt: now,
-    archivedAt: null,
-    settledOverride: null,
-    settledAt: null,
-    deletedAt: null,
-    latestTurn: null,
-    branch: null,
-    worktreePath: null,
-    activities: [
-      {
-        id: EventId.make("phase-one-requested"),
-        kind: "user-input.requested",
-        summary: "User input requested",
-        tone: "info",
-        turnId: null,
-        createdAt: now,
-        payload: {
-          requestId,
-          questions: [
-            {
-              id: "scope",
-              header: "Scope",
-              question: "Which scope first?",
-              multiSelect: true,
-              options: [{ label: "Workspace", description: "Current workspace" }],
-            },
-            {
-              id: "timing",
-              header: "Timing",
-              question: "When should it run?",
-              multiSelect: true,
-              options: [{ label: "Now", description: "Run now" }],
-            },
-          ],
-        },
-      },
-    ],
-  };
+  });
+  const { request, item } = makeFenceUserInput({
+    threadId,
+    requestId,
+    createdAt: now,
+    questions: FENCE_USER_INPUT_QUESTIONS,
+  });
+  fixture.projection = makeFenceThreadProjection(shell, {
+    runtimeRequests: [request],
+    turnItems: [item],
+  });
   container = document.createElement("div");
   document.body.append(container);
 });
@@ -239,12 +125,15 @@ afterEach(async () => {
   await act(async () => root?.unmount());
   root = undefined;
   container.remove();
+  appRootFence.threads.clear();
+  appRootFence.threadStates.clear();
   useComposerDraftStore.getState().clearComposerContent(scopeThreadRef(environmentId, threadId));
   useQuestionAttachmentPreparation.setState({ counts: {} });
   vi.unstubAllGlobals();
 });
 
 async function mountApp() {
+  publishFenceThreadProjection(fixture.projection!, environmentId);
   const route = createRootRoute({
     component: () => (
       <SidebarProvider>
@@ -263,6 +152,8 @@ async function mountApp() {
     root.render(<AppRoot router={router as unknown as AppRouter} />);
   });
 }
+
+const questionItem = () => readFenceUserInputItem(fixture.projection!);
 
 function button(text: string) {
   const match = [...container.querySelectorAll("button")].find((entry) =>
@@ -286,9 +177,11 @@ it("AppRoot selection submits the same scoped request draft", async () => {
 });
 
 it("AppRoot submits a selected final question from its scoped draft", async () => {
-  const activity = fixture.thread!.activities[0]!;
-  const payload = activity.payload as { questions: unknown[] };
-  payload.questions.splice(1);
+  const item = questionItem();
+  fixture.projection = {
+    ...fixture.projection!,
+    turnItems: [{ ...item, questions: item.questions.slice(0, 1) }],
+  };
   await mountApp();
   await act(async () => button("Workspace").click());
   expect(button("Submit").disabled).toBe(false);
@@ -309,8 +202,11 @@ it("AppRoot keeps an unanswered request unsent and a selected option visible", a
 });
 
 it("AppRoot keeps a visible selection and its note through submission", async () => {
-  const payload = fixture.thread!.activities[0]!.payload as { questions: unknown[] };
-  payload.questions.splice(1);
+  const item = questionItem();
+  fixture.projection = {
+    ...fixture.projection!,
+    turnItems: [{ ...item, questions: item.questions.slice(0, 1) }],
+  };
   await mountApp();
   await act(async () => button("Workspace").click());
   await pasteQuestionNote("Keep the files");
@@ -347,8 +243,11 @@ async function pasteQuestionNote(note: string) {
 }
 
 it("AppRoot selecting an option keeps the prior note out of the normal thread draft", async () => {
-  const payload = fixture.thread!.activities[0]!.payload as { questions: UserInputQuestion[] };
-  payload.questions.splice(1);
+  const item = questionItem();
+  fixture.projection = {
+    ...fixture.projection!,
+    turnItems: [{ ...item, questions: item.questions.slice(0, 1) }],
+  };
   const target = scopeThreadRef(environmentId, threadId);
   useComposerDraftStore.getState().setPrompt(target, "A separate follow-up");
   await mountApp();
@@ -368,10 +267,11 @@ it("AppRoot selecting an option keeps the prior note out of the normal thread dr
 });
 
 it("AppRoot clears optimistic selection after a noted draft is confirmed during attachment preparation", async () => {
-  const activity = fixture.thread!.activities[0]!;
-  const payload = activity.payload as { questions: UserInputQuestion[] };
-  payload.questions.splice(1);
-  payload.questions[0] = { ...payload.questions[0]!, multiSelect: false };
+  const item = questionItem();
+  fixture.projection = {
+    ...fixture.projection!,
+    turnItems: [{ ...item, questions: [{ ...item.questions[0]!, multiSelect: false }] }],
+  };
   await mountApp();
   const attachmentKey = questionAttachmentDraftId(
     environmentId,
@@ -389,16 +289,11 @@ it("AppRoot clears optimistic selection after a noted draft is confirmed during 
   // A refreshed request allows multiple choices. Its toggle updates the draft
   // without replacing the previous single-choice optimistic state.
   await act(async () => {
-    fixture.thread = {
-      ...fixture.thread!,
-      activities: [
-        {
-          ...activity,
-          payload: { ...payload, questions: [{ ...payload.questions[0]!, multiSelect: true }] },
-        },
-      ],
+    fixture.projection = {
+      ...fixture.projection!,
+      turnItems: [{ ...item, questions: [{ ...item.questions[0]!, multiSelect: true }] }],
     };
-    for (const listener of fixture.threadListeners) listener();
+    publishFenceThreadProjection(fixture.projection!, environmentId);
   });
   await act(async () => button("Workspace").click());
   expect(button("Workspace").querySelector("svg")).toBeNull();

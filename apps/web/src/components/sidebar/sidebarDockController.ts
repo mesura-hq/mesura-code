@@ -10,7 +10,7 @@
  */
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { shortcutLabelForCommand } from "../../keybindings";

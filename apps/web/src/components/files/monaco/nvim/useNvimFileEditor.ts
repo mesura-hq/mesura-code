@@ -1,25 +1,28 @@
-import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
+import { RegistryContext, useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import type { EditorTextEdit, EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import * as Option from "effect/Option";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import type * as monaco from "monaco-editor";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { resolveShortcutCommand } from "~/keybindings";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { useAtomCommand } from "~/state/use-atom-command";
 import {
+  editorKeyLane,
+  editorKeysDeliveryAtom,
   editorSessionAttach,
-  editorSessionInput,
   editorSessionOpen,
   editorSessionReplaceText,
   editorSessionSetCursor,
   editorSessionViewport,
   EMPTY_EDITOR_SESSION_STATE,
+  type EditorKeysDelivery,
   type EditorSessionState,
 } from "~/state/editorSession";
 import { fallbackFromCause, isSessionMissing, type NvimFallback } from "./nvimFallback.ts";
 import { decideSessionRecovery } from "./nvimSessionRecovery.ts";
+import type { NvimViewport } from "./nvimViewport.ts";
 import { useNvimDriver, type NvimDriverResult } from "./useNvimDriver.ts";
 import { APP_SHORTCUTS_THAT_OUTRANK_NEOVIM } from "./appShortcutsThatOutrankNeovim";
 
@@ -42,6 +45,19 @@ export interface NvimFileEditorResult extends NvimDriverResult {
   readonly fallback: NvimFallback | null;
   /** Tries again, after the setting that broke it has been fixed. */
   readonly retry: () => void;
+  /** Whether typed keys are reaching Neovim; see `editorKeyLane`. */
+  readonly keysDelivery: EditorKeysDelivery;
+  /**
+   * Whether an Escape typed now is Neovim's rather than the panel's.
+   *
+   * The panel takes it only when Neovim is known to rest in plain normal mode:
+   * nothing pending and the last batch's answer saying so (`restsInNormalMode`),
+   * and the attach stream not showing another mode or a flash label either. The
+   * stream alone lags the keys by a round trip — `A x Escape` on a remote host
+   * released the editor on a NORMAL from before the `A`, and left Neovim in
+   * insert mode with the keyboard elsewhere.
+   */
+  readonly escapeGoesToNeovim: () => boolean;
 }
 
 export interface NvimFileEditorInput {
@@ -89,13 +105,13 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
 
   // Not subscribed at all while modal editing is off, so a developer who does
   // not use it never starts a Neovim.
-  const atom = enabled
-    ? editorSessionAttach({ environmentId, input: { threadId } })
-    : IDLE_SESSION_ATOM;
+  const atom = useMemo(
+    () =>
+      enabled ? editorSessionAttach({ environmentId, input: { threadId } }) : IDLE_SESSION_ATOM,
+    [enabled, environmentId, threadId],
+  );
   const result = useAtomValue(atom);
-  const state =
-    (Option.getOrNull(AsyncResult.value(result)) as EditorSessionState | null) ??
-    EMPTY_EDITOR_SESSION_STATE;
+  const state = sessionStateOf(result);
 
   // Recovering a session that is gone: see `nvimSessionRecovery.ts` for what
   // is decided, and why in that order. What follows is the bookkeeping.
@@ -175,7 +191,23 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
   );
 
   const openCommand = useAtomCommand(editorSessionOpen, "editor session open");
-  const inputCommand = useAtomCommand(editorSessionInput, "editor session input");
+  // Keys, clicks and an agent's edits share one lane per thread: see
+  // `editorKeyLane` for the coalescing and the re-sends.
+  const registry = useContext(RegistryContext);
+  // The driver applies text and caret from here, as each event arrives.
+  const stateSource = useMemo(
+    () => ({
+      get: () => sessionStateOf(registry.get(atom)),
+      subscribe: (listener: (state: EditorSessionState) => void) =>
+        registry.subscribe(atom, (next) => listener(sessionStateOf(next))),
+    }),
+    [registry, atom],
+  );
+  const keyLane = useMemo(
+    () => editorKeyLane(registry, { environmentId, threadId }),
+    [registry, environmentId, threadId],
+  );
+  const keysDelivery = useAtomValue(editorKeysDeliveryAtom({ environmentId, threadId }));
   const setCursorCommand = useAtomCommand(editorSessionSetCursor, "editor session set cursor");
   const viewportCommand = useAtomCommand(editorSessionViewport, "editor session viewport");
   const replaceTextCommand = useAtomCommand(
@@ -186,12 +218,16 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
   const openFile = useCallback(
     (lines: ReadonlyArray<string>) => {
       opensInFlightRef.current += 1;
-      void openCommand({
+      const openMark = keyLane.openBegins();
+      return openCommand({
         environmentId,
         input: { threadId, cwd, relativePath, lines: [...lines] },
       }).then((result) => {
         opensInFlightRef.current -= 1;
-        if (!mountedRef.current) return;
+        // The lane belongs to the thread, not this view, so the answer is
+        // taken even if the view went away meanwhile.
+        if (result._tag === "Success") keyLane.takeOpenAnswer(openMark, result.value.escape);
+        if (!mountedRef.current) return null;
         // After the open, not alongside it: an attachment that reaches the
         // server first finds no session and fails again. Refreshed whether or
         // not the open worked — one that failed leaves an attach that fails
@@ -200,13 +236,15 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
           reattachPendingRef.current = false;
           refreshAttachRef.current();
         }
-        if (result._tag !== "Failure") return;
-        const failure = fallbackFromCause(result.cause);
-        if (failure === null) return;
-        setFallback(failure);
+        if (result._tag === "Success") return result.value.lines;
+        if (result._tag === "Failure") {
+          const failure = fallbackFromCause(result.cause);
+          if (failure !== null) setFallback(failure);
+        }
+        return null;
       });
     },
-    [openCommand, environmentId, threadId, cwd, relativePath],
+    [openCommand, keyLane, environmentId, threadId, cwd, relativePath],
   );
 
   const retry = useCallback(() => {
@@ -216,25 +254,26 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
     setOpenGeneration((generation) => generation + 1);
   }, []);
 
-  const sendKeys = useCallback(
-    (keys: string) => {
-      void inputCommand({ environmentId, input: { threadId, keys } });
-    },
-    [inputCommand, environmentId, threadId],
-  );
+  const sendKeys = useCallback((keys: string) => keyLane.keys(keys), [keyLane]);
 
   const setCursor = useCallback(
     (line: number, col: number) => {
-      void setCursorCommand({ environmentId, input: { threadId, line, col } });
+      keyLane.call(() => setCursorCommand({ environmentId, input: { threadId, line, col } }));
     },
-    [setCursorCommand, environmentId, threadId],
+    [keyLane, setCursorCommand, environmentId, threadId],
   );
 
   const sendViewport = useCallback(
-    (viewport: { topline: number; rows: number; cols: number }) => {
+    (viewport: NvimViewport) => {
       void viewportCommand({
         environmentId,
-        input: { threadId, topline: viewport.topline, rows: viewport.rows, cols: viewport.cols },
+        input: {
+          threadId,
+          topline: viewport.topline,
+          rows: viewport.rows,
+          cols: viewport.cols,
+          ...(viewport.source === undefined ? {} : { source: viewport.source }),
+        },
       });
     },
     [viewportCommand, environmentId, threadId],
@@ -242,9 +281,11 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
 
   const replaceText = useCallback(
     (edits: ReadonlyArray<EditorTextEdit>) => {
-      void replaceTextCommand({ environmentId, input: { threadId, edits: [...edits] } });
+      keyLane.call(() =>
+        replaceTextCommand({ environmentId, input: { threadId, edits: [...edits] } }),
+      );
     },
-    [replaceTextCommand, environmentId, threadId],
+    [keyLane, replaceTextCommand, environmentId, threadId],
   );
 
   const driverState = useMemo(
@@ -263,6 +304,8 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
       writeRequests: state.writeRequests,
       latestEvent: state.latestEvent,
       sequence: state.sequence,
+      snapshots: state.snapshots,
+      snapshotLines: state.snapshotLines,
     }),
     [state],
   );
@@ -285,7 +328,19 @@ export function useNvimFileEditor(input: NvimFileEditorInput): NvimFileEditorRes
     replaceText,
     isAppShortcut,
     state: driverState,
+    stateSource,
   });
 
-  return { ...driver, fallback, retry };
+  const escapeGoesToNeovim = useCallback(
+    () => !keyLane.restsInNormalMode() || driver.mode !== "n" || driver.jumping,
+    [keyLane, driver.mode, driver.jumping],
+  );
+
+  return { ...driver, fallback, retry, keysDelivery, escapeGoesToNeovim };
+}
+
+function sessionStateOf(
+  result: AsyncResult.AsyncResult<EditorSessionState, unknown>,
+): EditorSessionState {
+  return Option.getOrNull(AsyncResult.value(result)) ?? EMPTY_EDITOR_SESSION_STATE;
 }

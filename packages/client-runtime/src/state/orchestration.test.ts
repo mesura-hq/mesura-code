@@ -4,11 +4,11 @@
  * Agent thread search adds a separate path; these pin that the lexical picker
  * still reaches only `orchestration.searchThreads` in the environment it names.
  */
-import { EnvironmentId, ORCHESTRATION_WS_METHODS } from "@t3tools/contracts";
+import { EnvironmentId, ORCHESTRATION_V2_WS_METHODS } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 
 import { EnvironmentRegistry } from "../connection/registry.ts";
 import { executeAtomQuery } from "./runtime.ts";
@@ -87,7 +87,7 @@ it.effect(
         expect(fakes.calls).toEqual([
           {
             environmentId: "env-laptop",
-            method: ORCHESTRATION_WS_METHODS.searchThreads,
+            method: ORCHESTRATION_V2_WS_METHODS.searchThreads,
             input: { query: "needle" },
           },
         ]);
@@ -125,7 +125,7 @@ it.effect(
         );
 
         expect(fakes.calls.map((call) => [call.environmentId, call.method])).toEqual([
-          ["env-server", ORCHESTRATION_WS_METHODS.searchThreads],
+          ["env-server", ORCHESTRATION_V2_WS_METHODS.searchThreads],
         ]);
         expect(AsyncResult.isSuccess(result)).toBe(true);
         if (AsyncResult.isSuccess(result)) {

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { isEditableFocused } from "./lib/editableFocus";
 
 export interface ShortcutModifierState {
   metaKey: boolean;
@@ -26,24 +27,39 @@ export function areShortcutModifierStatesEqual(
   );
 }
 
-export function useShortcutModifierState(): ShortcutModifierState {
+/**
+ * `enabled` false keeps following the keyboard but stops re-rendering for it,
+ * and reports nothing held, so a caller that only needs the modifiers in some
+ * state does not re-render on every modifier press outside it. Enabling it
+ * reports what is held at that moment: a Ctrl pressed before is not lost.
+ */
+export function useShortcutModifierState(
+  ignoreEditable = false,
+  enabled = true,
+): ShortcutModifierState {
   const [state, setState] = useState(EMPTY_SHORTCUT_MODIFIER_STATE);
-  const stateRef = useRef(state);
+  const stateRef = useRef(EMPTY_SHORTCUT_MODIFIER_STATE);
+  const enabledRef = useRef(enabled);
 
   useEffect(() => {
-    // Schedules nothing when no modifier changed. A functional `setState`
-    // that returned the current state did not skip the render: every keydown
-    // and keyup anywhere in the app re-rendered the whole sidebar, which made
-    // a held arrow key in the file tree drop frames. React only skips a
-    // same-value update before rendering when the component has no pending
-    // work, so the comparison has to happen here.
-    const publish = (next: ShortcutModifierState) => {
-      if (next === stateRef.current) return;
+    enabledRef.current = enabled;
+    if (enabled) setState(stateRef.current);
+  }, [enabled]);
+
+  useEffect(() => {
+    const updateState = (next: ShortcutModifierState) => {
+      // Even a no-op state dispatch can cost work in the sidebar's large tree.
+      // Ordinary typing must return before dispatching a React update.
+      if (areShortcutModifierStatesEqual(stateRef.current, next)) return;
       stateRef.current = next;
-      setState(next);
+      if (enabledRef.current) setState(next);
     };
     const onKeyboardEvent = (event: KeyboardEvent) => {
-      publish(shortcutModifierStateAfterKeyboardEvent(stateRef.current, event));
+      updateState(
+        ignoreEditable && isEditableFocused(event.target)
+          ? EMPTY_SHORTCUT_MODIFIER_STATE
+          : shortcutModifierStateAfterKeyboardEvent(stateRef.current, event),
+      );
     };
     // Dictation tools (Wispr Flow) paste with a synthetic ⌘V whose Meta keyup
     // never reaches the page, so the tracked state stays "⌘ held" forever and
@@ -51,26 +67,27 @@ export function useShortcutModifierState(): ShortcutModifierState {
     // treat it like a blur and reset. A physically held modifier re-registers
     // on the next real key event.
     const onResetEvent = () => {
-      publish(
-        areShortcutModifierStatesEqual(stateRef.current, EMPTY_SHORTCUT_MODIFIER_STATE)
-          ? stateRef.current
-          : EMPTY_SHORTCUT_MODIFIER_STATE,
-      );
+      updateState(EMPTY_SHORTCUT_MODIFIER_STATE);
     };
 
+    const onFocus = (event: FocusEvent) => {
+      if (ignoreEditable && isEditableFocused(event.target)) onResetEvent();
+    };
+    window.addEventListener("focusin", onFocus);
     window.addEventListener("keydown", onKeyboardEvent, true);
     window.addEventListener("keyup", onKeyboardEvent, true);
     window.addEventListener("paste", onResetEvent, true);
     window.addEventListener("blur", onResetEvent);
     return () => {
+      window.removeEventListener("focusin", onFocus);
       window.removeEventListener("keydown", onKeyboardEvent, true);
       window.removeEventListener("keyup", onKeyboardEvent, true);
       window.removeEventListener("paste", onResetEvent, true);
       window.removeEventListener("blur", onResetEvent);
     };
-  }, []);
+  }, [ignoreEditable]);
 
-  return state;
+  return enabled ? state : EMPTY_SHORTCUT_MODIFIER_STATE;
 }
 
 function normalizeModifierKey(key: string): keyof ShortcutModifierState | null {

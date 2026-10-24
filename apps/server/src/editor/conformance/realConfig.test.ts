@@ -1,15 +1,16 @@
 // @effect-diagnostics nodeBuiltinImport:off - reads the developer's own config directory.
-import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 
 import { NodeNvimAdapter } from "../NodeNvimAdapter.ts";
 import { NvimBridge } from "../NvimBridge.ts";
+import { nvimAvailable, reportMissingNvim } from "./nvimOnPath.ts";
 
 /**
  * The developer's own configuration, driven.
@@ -36,15 +37,6 @@ const configDirectory = (() => {
     return NodeFS.statSync(expanded).isDirectory() ? expanded : null;
   } catch {
     return null;
-  }
-})();
-
-const nvimAvailable = (() => {
-  try {
-    NodeChildProcess.execFileSync("nvim", ["--version"], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
   }
 })();
 
@@ -93,7 +85,9 @@ const assertMirrored = (bridge: NvimBridge.Session) =>
     assert.deepStrictEqual(bridge.lines, lines, "the mirror equals the buffer");
   });
 
-if (!enabled) {
+if (configDirectory !== null && !nvimAvailable) reportMissingNvim("real-configuration harness");
+
+if (configDirectory === null) {
   it("skips the real-configuration harness", () => {
     // Said out loud rather than silently absent: a harness that vanishes looks
     // the same as a harness that passed.
@@ -106,6 +100,44 @@ if (!enabled) {
 
 if (enabled)
   it.layer(layer, { excludeTestServices: true })("the developer's configuration, driven", (it) => {
+    it.effect("pushes the cursor for insert-mode keys under the developer's configuration", () =>
+      withRealConfig(["hello"], "notes.txt", (bridge) =>
+        Effect.gen(function* () {
+          /** Sends a key and waits for the plugin's push that puts the caret at `col`. */
+          const pressAndAwaitPush = (key: string, col: number) =>
+            Effect.gen(function* () {
+              const pushed = yield* Deferred.make<void>();
+              const stop = bridge.subscribe((event) => {
+                if (
+                  event.kind === "cursor" &&
+                  event.source === "push" &&
+                  bridge.cursor.col === col
+                ) {
+                  Deferred.doneUnsafe(pushed, Effect.void);
+                }
+              });
+              yield* bridge.input(key);
+              yield* Deferred.await(pushed);
+              stop();
+            });
+
+          yield* pressAndAwaitPush("i", 1);
+          yield* bridge.settle;
+          // The plugins that run on every inserted character are loaded here,
+          // and the caret still comes from the push, never from a read.
+          const before = bridge.metrics.cursorReads;
+          for (const [index, key] of [..."abcde"].entries()) {
+            yield* pressAndAwaitPush(key, index + 2);
+          }
+          assert.strictEqual(
+            bridge.metrics.cursorReads - before,
+            0,
+            "cursor reads for five insert-mode keys",
+          );
+        }).pipe(Effect.orDie),
+      ),
+    );
+
     it.effect("starts, loads the configuration and reports the host flag", () =>
       withRealConfig(["const value = 1;"], "probe.ts", (bridge) =>
         Effect.gen(function* () {

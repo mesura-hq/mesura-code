@@ -28,7 +28,7 @@ import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import type { ConnectionCatalogEntry } from "../connection/catalog.ts";
@@ -452,11 +452,12 @@ describe("host stats ages: the host clock offset (criterion 3)", () => {
     latest: sample(T0 - 30 * SECOND),
   });
 
-  for (const [direction, skew] of [
+  it.each([
     ["ahead of", 10 * MINUTE],
     ["behind", -10 * MINUTE],
-  ] as const) {
-    it(`host stats age is correct for a host whose clock is 10 minutes ${direction} ours`, () => {
+  ] as const)(
+    "host stats age is correct for a host whose clock is 10 minutes %s ours",
+    (_direction, skew) => {
       const receivedAtLocal = T0 - skew;
       const history = applyHostStatsMessage(null, message, receivedAtLocal);
       expect(history!.offsetMs).toBe(skew);
@@ -469,8 +470,8 @@ describe("host stats ages: the host clock offset (criterion 3)", () => {
       expect(view.state).toBe("live");
       expect(view.lastReadingAgeMs).toBe(50 * SECOND);
       expect(view.uptimeMs).toBe(26 * HOUR + 20 * SECOND);
-    });
-  }
+    },
+  );
 
   it("host stats offset follows the latest message's serverNow", () => {
     const history = applyAll([FIRST_SNAPSHOT]);
@@ -525,8 +526,9 @@ describe("host stats offline hosts (criterion 5)", () => {
     latest: sample(T0 - 10 * SECOND, { cpuPercent: 45 }),
   });
 
-  for (const phase of ["reconnecting", "offline", "error"] as const) {
-    it(`host stats keeps the last history of a host in phase ${phase} and labels it offline`, () => {
+  it.each(["reconnecting", "offline", "error"] as const)(
+    "host stats keeps the last history of a host in phase %s and labels it offline",
+    (phase) => {
       const view = onlyHost(
         project(
           [{ presentation: presentation({ id: "a", phase }), history: applyAll([message]) }],
@@ -539,8 +541,8 @@ describe("host stats offline hosts (criterion 5)", () => {
       expect(rows.cpu.value).toBe(45);
       expect(rows.cpu.series).not.toBeNull();
       expect(rows.cpu.series!.filter((slot) => slot !== null)).toEqual([44]);
-    });
-  }
+    },
+  );
 
   it("host stats shows a host never read this session as offline with no values", () => {
     const view = onlyHost(

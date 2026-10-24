@@ -8,10 +8,12 @@
  *
  * @module browserLinkTarget
  */
-import type { BrowserLinkTarget } from "@t3tools/contracts";
+import type { BrowserLinkTarget, ScopedThreadRef } from "@t3tools/contracts";
 
 import { ensureClientSettingsHydrated, getClientSettings } from "~/hooks/useSettings";
-import { isPreviewSupportedInRuntime } from "~/previewStateStore";
+import { appAtomRegistry } from "~/rpc/atomRegistry";
+import { environmentServerConfigsAtom } from "~/state/server";
+import { previewEnvironment } from "~/state/preview";
 
 export interface ResolveLinkTargetInput {
   readonly url: string;
@@ -20,6 +22,21 @@ export interface ResolveLinkTargetInput {
   readonly preference: BrowserLinkTarget;
   /** Whether this client has an in-app browser and a thread to open it beside. */
   readonly canOpenInApp: boolean;
+  readonly linkClient: LinkClient;
+}
+
+export interface LinkClient {
+  readonly viewportWidth: number;
+  readonly primaryPointerCoarse: boolean;
+}
+
+/** Read at activation, not render: a pending menu can outlive a viewport change. */
+export function readLinkClient(): LinkClient {
+  return {
+    viewportWidth: typeof window === "undefined" ? Infinity : window.innerWidth,
+    primaryPointerCoarse:
+      typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches === true,
+  };
 }
 
 /**
@@ -30,6 +47,10 @@ export interface ResolveLinkTargetInput {
  * already treat it.
  */
 export function resolveLinkTarget(input: ResolveLinkTargetInput): BrowserLinkTarget {
+  // User links stay system-only on phones and touch-first tablets. Manual and
+  // agent preview operations use their own entry points and keep their policy.
+  if (input.linkClient.viewportWidth < 768 || input.linkClient.primaryPointerCoarse)
+    return "system";
   if (input.event.metaKey || input.event.ctrlKey) return "system";
   if (input.preference !== "app") return "system";
   if (!input.canOpenInApp) return "system";
@@ -62,7 +83,15 @@ export async function resolveBrowserLinkTargetPreference(): Promise<BrowserLinkT
   return getClientSettings().browserLinkTarget;
 }
 
-/** Whether the in-app target is available at all in this client. */
-export function canOpenLinksInApp(hasThread: boolean): boolean {
-  return hasThread && isPreviewSupportedInRuntime();
+/** Whether this thread's environment has an in-app browser available to this client. */
+export function canOpenLinksInApp(threadRef: ScopedThreadRef | null | undefined): boolean {
+  if (!threadRef || threadRef.threadId.length === 0) return false;
+  const capabilities = appAtomRegistry
+    .get(environmentServerConfigsAtom)
+    .get(threadRef.environmentId)?.environment.capabilities;
+  return (
+    capabilities?.serverBrowser === true &&
+    capabilities.threadLinkPreview === true &&
+    appAtomRegistry.get(previewEnvironment.openLinkTarget.permissionAtom(threadRef.environmentId))
+  );
 }

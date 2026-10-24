@@ -1,213 +1,70 @@
 # CI on this fork
 
-This fork's CI runs on hardware the operator owns, and two of the three things
-that make it work are **not visible in `.github/workflows/`**. Both are GitHub
-repository settings, which is why they are written down here: the code cannot
-tell you about them, and a reader who does not know them will draw the wrong
-conclusion from what the code does say.
+This fork's CI runs on [Blacksmith](https://blacksmith.sh), like upstream's, and
+the workflow files are upstream's with almost no edits. Two facts that decide
+what CI does are **not visible in `.github/workflows/`**: which runners exist,
+and which workflows are disabled. Both live in GitHub and Blacksmith settings,
+which is why they are written down here.
 
-## The runners
+## Where jobs run
 
-Two self-hosted runners on `vigilia-home`, the operator's home server. **The box
-runs Arch Linux**, which the labels below deny and which matters more than it
-looks — see "The labels stop at the operating system". They run as the user
-`ci`, which has no sudo, and they carry these labels:
+The repository is `mesura-hq/mesura-code`, an organization repository, and the
+Blacksmith GitHub App is installed on `mesura-hq` with access to `mesura-code`
+only. Every `runs-on: blacksmith-*` label in upstream's workflows therefore
+resolves to a real Blacksmith runner, with no edit to any workflow file — the
+fork's first principle (`AGENTS.md`, "Upstream keeps moving, and we keep
+pulling") applied to CI.
 
-```
-blacksmith-8vcpu-ubuntu-2404
-blacksmith-4vcpu-ubuntu-2404
-blacksmith-2vcpu-ubuntu-2404
-```
+Blacksmith bills by the minute, and the operating system of the runner sets the
+rate. Linux jobs are the normal cost. A `blacksmith-*-macos-*` or
+`blacksmith-*-windows-*` label is also served, and costs more: a workflow that
+requests one runs and is billed, it does not queue.
 
-**Those labels are deliberate and they are a lie about the hardware.** Upstream
-contracts [Blacksmith](https://blacksmith.sh) for the `pingdotgg` organization,
-so every `runs-on:` in the workflows names a Blacksmith runner. Blacksmith is
-unavailable here for a reason no amount of money fixes: it is limited to GitHub
-organizations, and this repository belongs to a user account.
+`CI` runs on every pull request and on pushes to `main` and to `dev`. This
+fork's edits to `ci.yml` each carry a `# Mesura:` comment: the `dev` trigger
+(`dev` is where pull requests land and are tested together, so a merge result
+needs its own run) and the Neovim setup for the editor conformance tests. The
+native mobile jobs were deleted with the app, in `69c16ab7cb`.
 
-GitHub treats any non-reserved `runs-on:` label as a self-hosted runner label.
-Naming our own runners after Blacksmith's therefore makes every job run **with
-zero changes to any workflow file** — which is the fork's first principle
-(`AGENTS.md`, "Upstream keeps moving, and we keep pulling") applied to CI. The
-alternative, rewriting seven `runs-on:` lines, would conflict on every sync that
-touches `ci.yml`; upstream touched it twice in the 29 commits of the first sync
-alone.
+The repository is public. Workflows from a fork's pull request need approval
+for every outside contributor (repository setting, `all_external_contributors`),
+so a stranger's pull request cannot spend Blacksmith minutes.
 
-Consequence to expect: if the repository is ever moved into an organization,
-installing Blacksmith's GitHub App migrates every job with no edit at all,
-because the labels already match.
+### Why not self-hosted runners
 
-### Resource isolation
+Until 2026-10, CI ran on two self-hosted runners on `vigilia-home`, the
+operator's home server, labelled as Blacksmith runners. That box also hosts the
+Mesura Code server and every agent session, and CI competed with them for its
+30G of memory; the jobs were also about 6x slower than on Blacksmith. Do not
+bring CI back onto that box.
 
-The runners are members of `ci.slice`, a systemd slice that carries ONE budget
-for all CI on the box — present and future, this project and any other. The
-reasoning, and why `AllowedCPUs` rather than `CPUQuota`, is in the slice unit
-itself at `/etc/systemd/system/ci.slice` on `vigilia-home`.
+## Eight workflows are disabled, and only GitHub knows
 
-Each runner also has its own `HOME`. That is not tidiness: both execute as the
-same user, so they shared `~/.vite-plus` and the pnpm store, and `Setup Vite+`
-failed four attempts in ten seconds the first time two jobs installed
-concurrently. The same installer succeeds when run alone. **Isolating CPU and
-memory is not enough; the filesystem needs isolating too.**
-
-## Ten workflows are disabled, and only GitHub knows
-
-`gh workflow disable` was run against every workflow that publishes, deploys, or
-belongs to upstream's own organization:
+`gh workflow disable` was run against every workflow that publishes, deploys,
+belongs to upstream's own organization, or would bill macOS minutes:
 
 ```
-Deploy T3 Connect relay      Mobile EAS Preview       Mobile EAS Production
-Mobile Showcase Screenshots  Mobile Fingerprint Check Publish AUR package
-Release                      Web Preview              PR Vouch
-Thread Transfer Report
+Deploy T3 Connect relay   PR Vouch                Publish AUR package
+Release                   Thread Transfer Report  Web Preview
+Desktop macOS Preview     Desktop macOS Preview Publish
 ```
 
-Only `CI`, `PR Size` and `Issue Labels` remain active.
+**Read this before re-enabling any of them.** `Release` carries
+`schedule: cron "0 */3 * * *"` and creates nightly tags: re-enabling it starts
+tagging this fork every three hours, silently, forever. The two `Desktop macOS
+Preview` workflows trigger on pull requests and run on macOS runners, so
+re-enabling them bills macOS minutes on every pull request.
 
-**Read this before re-enabling any of them.** While no runner existed these
-workflows were harmless, because nothing executed them. Turning on a runner made
-every one of them real at once, and the queue that had accumulated since the fork
-detached contained three `Release` runs, a `Deploy T3 Connect relay`, and a
-`Mobile EAS Production`. `Release` carries `schedule: cron "0 */3 * * *"` and
-creates nightly tags: re-enabling it starts tagging this fork every three hours,
-silently, forever.
+The active workflows are `CI`, `PR Size`, `Issue Labels`, `Forward to Cursor
+hygiene` (upstream's, on GitHub-hosted runners), `Windows Tests` (manual
+dispatch only, on a Blacksmith Windows runner) and `Release desktop build`
+(`workflow_call` only: it runs only when a caller does, and both of its callers
+are disabled).
 
 Disabling through repository settings rather than by editing or deleting the
-workflow files is the same trade the runner labels make — it costs nothing at
-merge time. The price is exactly this invisibility, which is what this section
-buys back.
-
-## The labels stop at the operating system
-
-The label trick above works because a `runs-on:` label is just a string. It
-keeps working only while the workflow steps stay indifferent to the operating
-system underneath, and v0.0.42 is where upstream stopped being indifferent.
-
-Upstream `#7261` made the desktop resolve Chromium cookie keys on Linux, which
-needs `libsecret`. So `ci.yml` gained a step that runs `sudo apt-get install -y
-libsecret-1-dev pkg-config`, preceded by `./.github/actions/setup-apt-mirrors`,
-which writes an Ubuntu mirror list into `/etc/apt`. On `vigilia-home` there is no
-`apt-get` and no `/etc/apt`, so both fail.
-
-**The first reading of the failure is wrong and costs real time.** The log says:
-
-```
-sudo: a terminal is required to read the password
-sudo: a password is required
-```
-
-which reads as a missing sudoers entry for `ci`. Granting it fixes nothing. The
-very next command writes to a directory Arch does not have, and `apt-get` is not
-installed either. The sudo message is simply the first of three obstacles, and
-it is the only one that looks like a configuration mistake.
-
-Nothing is actually missing. `libsecret` 0.21.7 and `pkgconf` are installed on
-the host, and `pkg-config --exists libsecret-1` succeeds, so the step is pure
-overhead here rather than a dependency this fork lacks.
-
-### This is the first exception to "never edit a workflow file"
-
-Every other CI problem on this fork was solved outside `.github/` — labels for
-the runners, repository settings for the ten disabled workflows. This one cannot
-be. The only fix that needs no workflow edit is to put no-op `sudo` and
-`apt-get` shims on the runner's PATH, which would disarm every future privileged
-step in every workflow and turn a genuinely missing dependency into a pass.
-
-So the guard lives in the workflow, in the cheapest shape available:
-
-- `.github/actions/setup-apt-mirrors/action.yml` exits early when `apt-get` is
-  absent and writes `APT_MIRRORS_CONFIGURED=0` to `$GITHUB_ENV`. That file has
-  taken **one** upstream commit ever, the one that created it.
-- The two `Install browser secret helper build libraries` steps in `ci.yml` carry
-  `if: env.APT_MIRRORS_CONFIGURED != '0'`. One line each, in the file upstream
-  moves most — 15 commits in three months.
-
-The condition is written `!= '0'` rather than `== '1'` on purpose: if the action
-never runs, the variable is unset and the install still goes ahead. The guard
-fails toward doing the work, which is the behaviour upstream expects everywhere
-else.
-
-Three other workflows use the same action — `release.yml`, `release-desktop.yml`
-and `desktop-macos-preview.yml`. They are left alone because they are disabled,
-so nothing executes them. **Re-enabling any of them means applying the same
-`if:` to their install steps**, or they will fail exactly the way `Check` and
-`Test` did.
-
-## The macOS job will hang if it ever fires
-
-`Mobile Native Static Analysis` requests `blacksmith-6vcpu-macos-26`. There is no
-macOS runner here and there will not be one, so the job cannot be served.
-
-It normally skips, because its gate resolves to `'false'` when no native mobile
-sources changed. Note the gate's actual shape:
-
-```yaml
-if: ${{ !cancelled() && needs.mobile_native_changes.outputs.changed != 'false' }}
-```
-
-It skips only on an explicit `'false'`. Upstream wrote it that way on purpose —
-their comment says a gate job that failed or errored leaves the output empty, and
-that must run the lint rather than silently skip it. **On this fork that
-fail-safe inverts into a hang**: the job fires, finds no runner, and queues until
-GitHub eventually cancels it.
-
-It is left alone deliberately. Mac is not a surface this fork is used on (see
-`AGENTS.md`, "Surfaces, and which two matter here"), so the fix — a line inside
-`ci.yml` — would buy a rare, self-limiting annoyance in exchange for a recurring
-merge conflict in the file upstream moves most.
-
-## Verifying the runners
-
-From a machine on the same LAN or tailnet:
-
-```sh
-gh api repos/CaceresCallieri/mesura-code/actions/runners \
-  -q '.runners[] | "\(.name) \(.status) busy=\(.busy)"'
-
-ssh dev@vigilia-home 'systemctl status ci.slice'
-```
-
-A job stuck in `queued` with no runner `busy` means no runner is online. A job
-stuck in `queued` while runners are idle means its `runs-on:` label matches
-nothing here — the macOS job is the only one in that state by design.
-
-## Each runner has its own TMPDIR, and that is load-bearing
-
-`vigilia-home` is a shared box. The operator's own work and other agents run
-there as `dev`, and several of those leave a `node_modules` directory under
-`/tmp` — a Vitest cache writes `node_modules/.vite/vitest/` relative to whatever
-root it is given, so a run with a `/tmp` cwd creates `/tmp/node_modules`.
-
-That breaks the desktop artifact test. `scripts/build-desktop-artifact.ts`
-probes the packaged bundle for self-containment and refuses to report success
-when a `node_modules` is visible from the probe directory, because a bare import
-could then resolve outside the packaged tree. The probe is right to refuse. The
-failure reads as a bundling defect and is not one:
-
-```
-Refusing to report success: /tmp/node_modules is visible from the probe
-directory, so bare imports could resolve outside the packaged tree.
-```
-
-So each runner gets a private temporary directory, set in the runner's own
-`.env` rather than in a workflow:
-
-```
-/home/ci/actions-runner/.env     TMPDIR=/home/ci/tmp-r1
-/home/ci/actions-runner-2/.env   TMPDIR=/home/ci/tmp-r2
-```
-
-Both directories are `0700` and owned by `ci`. The runner applies `.env` to job
-processes, not to its own listener, so `TMPDIR` is absent from the listener's
-`/proc/<pid>/environ` and that is not a fault — a job is what proves it.
-
-**Set it here rather than in a workflow on purpose.** A workflow change is a line
-inside a file upstream owns, which is a merge conflict every week forever. The
-runner's `.env` is ours alone and costs the repository nothing. Deleting
-`/tmp/node_modules` by hand is not a fix either: the box keeps making new ones.
-
-Changing `.env` needs a runner restart, and a restart during a job kills that
-job. Check `busy=false` on both runners first, with the `gh api` command above.
+workflow files costs nothing at merge time. The price is exactly this
+invisibility, which is what this section buys back. List the current state with
+`gh workflow list --all --repo mesura-hq/mesura-code`.
 
 ## Building the server package without the web client
 

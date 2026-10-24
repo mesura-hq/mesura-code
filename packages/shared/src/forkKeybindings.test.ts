@@ -13,7 +13,9 @@ import { DEFAULT_KEYBINDINGS } from "./keybindings.ts";
  * reaches the Symmetria file tree in the files surface and leaves it again;
  * `fileTree.miller` opens the file manager's Miller columns over the window.
  * `thread.rename` opens the header's title rename, which upstream reaches only
- * by double-click and the thread menu.
+ * by double-click and the thread menu. `treeDiff.toggle` opens the Diff
+ * surface on Tree diff and closes it there; `diff.modeMenu` opens that
+ * surface's mode menu from the keyboard.
  *
  * Each is cheap to carry and easy to lose: a sync that takes upstream's
  * command list wholesale drops the command, and the shortcut then resolves to
@@ -29,34 +31,36 @@ const FORK_BINDINGS = [
   // Firefox and Zen keep mod+shift+e. The last one is the label.
   { command: "fileTree.miller", keys: ["mod+alt+e", "mod+shift+e"] },
   { command: "thread.rename", keys: ["mod+alt+r"] },
+  // The Diff surface's Tree diff mode and its mode menu. mod+shift+g, the
+  // chord Symmetria IDE used, is composer.branch here.
+  { command: "treeDiff.toggle", keys: ["alt+g"] },
+  { command: "diff.modeMenu", keys: ["alt+c"] },
 ] as const;
 
 describe("fork keybindings", () => {
-  for (const { command, keys } of FORK_BINDINGS) {
-    describe(command, () => {
-      it(`binds ${keys.join(" and ")} outside the terminal, in that order`, () => {
-        const bindings = DEFAULT_KEYBINDINGS.filter((binding) => binding.command === command);
+  describe.each(FORK_BINDINGS)("$command", ({ command, keys }) => {
+    it(`binds ${keys.join(" and ")} outside the terminal, in that order`, () => {
+      const bindings = DEFAULT_KEYBINDINGS.filter((binding) => binding.command === command);
 
-        // Order matters: the last binding is the label.
-        expect(bindings.map((binding) => binding.key)).toEqual(keys);
-        // Not while a terminal owns the keyboard, where the chord belongs to the shell.
-        for (const binding of bindings) expect(binding.when).toBe("!terminalFocus");
-      });
-
-      it("registers the command so a user can rebind it", () => {
-        expect(STATIC_KEYBINDING_COMMANDS).toContain(command);
-      });
-
-      it(`leaves ${keys.join(" and ")} free of any other command`, () => {
-        const collisions = DEFAULT_KEYBINDINGS.filter(
-          (binding) =>
-            (keys as ReadonlyArray<string>).includes(binding.key) && binding.command !== command,
-        );
-
-        expect(collisions).toEqual([]);
-      });
+      // Order matters: the last binding is the label.
+      expect(bindings.map((binding) => binding.key)).toEqual(keys);
+      // Not while a terminal owns the keyboard, where the chord belongs to the shell.
+      for (const binding of bindings) expect(binding.when).toBe("!terminalFocus");
     });
-  }
+
+    it("registers the command so a user can rebind it", () => {
+      expect(STATIC_KEYBINDING_COMMANDS).toContain(command);
+    });
+
+    it(`leaves ${keys.join(" and ")} free of any other command`, () => {
+      const collisions = DEFAULT_KEYBINDINGS.filter(
+        (binding) =>
+          (keys as ReadonlyArray<string>).includes(binding.key) && binding.command !== command,
+      );
+
+      expect(collisions).toEqual([]);
+    });
+  });
 });
 
 // The Hosts dock peeks on alt+s the way the usage dock peeks on alt+u: held,

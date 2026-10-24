@@ -50,6 +50,18 @@ const nativeChoiceQuestion = {
 } as const;
 
 describe("resolvePendingUserInputAnswer", () => {
+  it("preserves exact editor text, including a deliberately cleared answer", () => {
+    const question = { ...singleSelectQuestion, initialAnswer: "  Proposed message\n" };
+    expect(resolvePendingUserInputAnswer(question, { customAnswer: question.initialAnswer })).toBe(
+      question.initialAnswer,
+    );
+    expect(resolvePendingUserInputAnswer(question, { customAnswer: "  Edited message\n\n" })).toBe(
+      "  Edited message\n\n",
+    );
+    expect(resolvePendingUserInputAnswer(question, { customAnswer: "" })).toBe("");
+    expect(resolvePendingUserInputAnswer(question, { customAnswer: " \n" })).toBe(" \n");
+  });
+
   it("keeps a custom answer with selected options", () => {
     expect(
       resolvePendingUserInputAnswer(singleSelectQuestion, {

@@ -1,0 +1,214 @@
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  Outlet,
+} from "@tanstack/react-router";
+import {
+  EnvironmentId,
+  MessageId,
+  ProjectId,
+  ThreadId,
+  TurnItemId,
+  type OrchestrationV2ConversationMessage,
+  type OrchestrationV2TurnItem,
+  type OrchestrationV2ThreadProjection,
+} from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
+import * as Option from "effect/Option";
+import { EMPTY_ENVIRONMENT_THREAD_STATE } from "@t3tools/client-runtime/state/threads";
+
+import { AppRoot } from "../AppRoot";
+import { AppSidebarLayout } from "../components/AppSidebarLayout";
+import { CommandPalette } from "../components/CommandPalette";
+import type { AppRouter } from "../router";
+import { Route as ChatLayoutRoute } from "../routes/_chat";
+import {
+  appRootFence,
+  FENCE_ENVIRONMENT_ID,
+  FENCE_PROJECT_ID,
+  installFenceFontEvents,
+} from "./appRootFenceMocks";
+import { makeFenceThreadProjection, makeFenceThreadShell } from "./fenceThreadShell";
+
+/**
+ * Mounting the real app over `appRootFenceMocks.tsx`. Import it statically
+ * from a fence that wires up those mocks: it loads the app, which must find
+ * every mock in place.
+ */
+
+export const fenceEnvironmentId = EnvironmentId.make(FENCE_ENVIRONMENT_ID);
+const now = "2026-10-08T12:00:00.000Z";
+
+export function makeMessage(id: string, role: "user" | "assistant", text: string) {
+  return {
+    id: MessageId.make(id),
+    role,
+    text,
+    turnId: null,
+    streaming: false,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+/** Registers a v2 shell and detail with local message turn items, and returns its id. */
+export function addFenceThread(
+  id: string,
+  title: string,
+  messages: ReadonlyArray<ReturnType<typeof makeMessage>>,
+): ThreadId {
+  const threadId = ThreadId.make(id);
+  const shell = makeFenceThreadShell({
+    id: threadId,
+    environmentId: fenceEnvironmentId,
+    projectId: ProjectId.make(FENCE_PROJECT_ID),
+    title,
+    createdAt: now,
+    overrides: { itemCount: messages.length, visibleItemCount: messages.length },
+  });
+  const conversationMessages = messages.map((message): OrchestrationV2ConversationMessage => ({
+    id: message.id,
+    threadId,
+    runId: null,
+    nodeId: null,
+    role: message.role,
+    text: message.text,
+    attachments: [],
+    streaming: message.streaming,
+    createdBy: message.role === "user" ? "user" : "agent",
+    creationSource: "web",
+    createdAt: DateTime.makeUnsafe(message.createdAt),
+    updatedAt: DateTime.makeUnsafe(message.updatedAt),
+  }));
+  const turnItems = conversationMessages.map((message, ordinal): OrchestrationV2TurnItem => {
+    const base = {
+      id: TurnItemId.make(`message:${message.id}`),
+      threadId,
+      runId: message.runId,
+      nodeId: message.nodeId,
+      providerThreadId: null,
+      providerTurnId: null,
+      nativeItemRef: null,
+      parentItemId: null,
+      ordinal,
+      status: "completed" as const,
+      title: null,
+      startedAt: message.createdAt,
+      completedAt: message.updatedAt,
+      updatedAt: message.updatedAt,
+      messageId: message.id,
+      text: message.text,
+      attachments: message.attachments,
+    };
+    return message.role === "user"
+      ? {
+          ...base,
+          type: "user_message",
+          createdBy: message.createdBy,
+          creationSource: message.creationSource,
+          inputIntent: "turn_start",
+        }
+      : { ...base, type: "assistant_message", streaming: message.streaming };
+  });
+  const projection = makeFenceThreadProjection(shell, {
+    messages: conversationMessages,
+    turnItems,
+    visibleTurnItems: turnItems.map((item, position) => ({
+      item,
+      position,
+      visibility: "local",
+      sourceThreadId: threadId,
+      sourceItemId: item.id,
+    })),
+  });
+  publishFenceThreadProjection(projection);
+  return threadId;
+}
+
+/**
+ * A memory router whose root renders the real CommandPalette around the real
+ * AppSidebarLayout, as `routes/__root.tsx` does, and whose chat layout is the
+ * real `_chat.tsx` route component. That layout reads the thread params and
+ * mounts ThreadRouteView. The leaf route renders nothing, as the real thread
+ * route does, so navigation keeps one ChatView mounted across thread changes.
+ */
+export function createFenceRouter(firstThreadId: ThreadId) {
+  const route = createRootRoute({
+    component: () => (
+      <CommandPalette>
+        <AppSidebarLayout>
+          <Outlet />
+        </AppSidebarLayout>
+      </CommandPalette>
+    ),
+  });
+  const chatLayout = createRoute({
+    getParentRoute: () => route,
+    id: "_chat",
+    component: ChatLayoutRoute.options.component!,
+  });
+  const thread = createRoute({
+    getParentRoute: () => chatLayout,
+    path: "/$environmentId/$threadId",
+    component: () => null,
+  });
+  return createRouter({
+    routeTree: route.addChildren([chatLayout.addChildren([thread])]),
+    history: createMemoryHistory({
+      initialEntries: [`/${fenceEnvironmentId}/${firstThreadId}`],
+    }),
+  });
+}
+
+export type FenceRouter = ReturnType<typeof createFenceRouter>;
+
+/**
+ * Renders AppRoot on `threadId` into `container`, with Vim mode as given.
+ * The caller settles the app afterwards, on its own clock.
+ */
+export async function renderFenceApp(
+  container: HTMLElement,
+  threadId: ThreadId,
+  { vimMode }: { vimMode: boolean },
+): Promise<{ root: Root; router: FenceRouter }> {
+  // The shared browser fixture lasts for this test environment, as document does.
+  installFenceFontEvents();
+  appRootFence.vimMode = vimMode;
+  appRootFence.openThreadId = threadId;
+  const router = createFenceRouter(threadId);
+  await router.load();
+  const root = createRoot(container);
+  await act(async () => {
+    root.render(<AppRoot router={router as unknown as AppRouter} />);
+  });
+  return { root, router };
+}
+
+/** Publishes a detail projection and its corresponding shell through both fixture sources. */
+export function publishFenceThreadProjection(
+  projection: OrchestrationV2ThreadProjection,
+  environmentId = fenceEnvironmentId,
+) {
+  const threadId = projection.thread.id;
+  // Detail threads omit shell summary fields. The shared shell fixture supplies
+  // those defaults and preserves the projection's supplied metadata and summaries.
+  appRootFence.threads.set(
+    threadId,
+    makeFenceThreadShell({
+      environmentId,
+      id: threadId,
+      projectId: projection.thread.projectId,
+      overrides: projection.thread,
+    }),
+  );
+  appRootFence.threadStates.set(threadId, {
+    ...EMPTY_ENVIRONMENT_THREAD_STATE,
+    status: "live",
+    data: Option.some(projection),
+  });
+  for (const listener of appRootFence.threadListeners) listener();
+}

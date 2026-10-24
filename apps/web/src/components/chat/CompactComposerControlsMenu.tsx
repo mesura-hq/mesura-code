@@ -16,7 +16,13 @@ import { useComposerMenuState } from "./useComposerMenuState";
 export const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(props: {
   interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
+  runtimeModeOptions: ReadonlyArray<{
+    readonly mode: RuntimeMode;
+    readonly label: string;
+  }>;
   showInteractionModeToggle: boolean;
+  /** Mesura: false where access lives in the combined model picker. */
+  showRuntimeMode?: boolean;
   traitsMenuContent?: ReactNode;
   size?: "sm" | "xs";
   /**
@@ -38,8 +44,7 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
         render={
           <ComposerControl
             size={size}
-            variant="ghost"
-            className={size === "xs" ? "shrink-0" : "shrink-0 px-2"}
+            className="shrink-0"
             aria-label="More composer controls"
             data-composer-shortcut={
               props.traitsMenuContent ? "composer.mode composer.effort" : "composer.mode"
@@ -69,22 +74,27 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
               <MenuRadioItem value="default">Chat</MenuRadioItem>
               <MenuRadioItem value="plan">Plan</MenuRadioItem>
             </MenuRadioGroup>
-            <MenuDivider />
+            {props.showRuntimeMode !== false ? <MenuDivider /> : null}
           </>
         ) : null}
-        <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Access</div>
-        <MenuRadioGroup
-          value={props.runtimeMode}
-          onValueChange={(value) => {
-            if (!value || value === props.runtimeMode) return;
-            props.onRuntimeModeChange(value as RuntimeMode);
-          }}
-        >
-          <MenuRadioItem value="approval-required">Supervised</MenuRadioItem>
-          <MenuRadioItem value="auto-accept-edits">Auto-accept edits</MenuRadioItem>
-          <MenuRadioItem value="auto">Auto</MenuRadioItem>
-          <MenuRadioItem value="full-access">Full access</MenuRadioItem>
-        </MenuRadioGroup>
+        {props.showRuntimeMode !== false ? (
+          <>
+            <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Access</div>
+            <MenuRadioGroup
+              value={props.runtimeMode}
+              onValueChange={(value) => {
+                if (!value || value === props.runtimeMode) return;
+                props.onRuntimeModeChange(value as RuntimeMode);
+              }}
+            >
+              {props.runtimeModeOptions.map((option) => (
+                <MenuRadioItem key={option.mode} value={option.mode}>
+                  {option.label}
+                </MenuRadioItem>
+              ))}
+            </MenuRadioGroup>
+          </>
+        ) : null}
       </MenuPopup>
     </Menu>
   );

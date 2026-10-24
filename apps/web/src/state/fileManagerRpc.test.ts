@@ -106,7 +106,7 @@ describe("following a session", () => {
 
 describe("watching an atom", () => {
   it("computes the atom on subscribe, so a runtime atom's effect starts", async () => {
-    const { Atom, AtomRegistry } = await import("effect/unstable/reactivity");
+    const { Atom, AtomRegistry } = await import("effect/reactivity");
     const { watchAtom } = await import("./fileManagerRpc");
     let computed = 0;
     const atom = Atom.make(() => {

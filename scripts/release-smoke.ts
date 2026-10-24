@@ -24,12 +24,30 @@ const workspaceFiles = [
   "packages/shared/package.json",
   "packages/ssh/package.json",
   "packages/tailscale/package.json",
+  "packages/provider-core/package.json",
+  "packages/provider-testing/package.json",
+  "packages/provider-pi/package.json",
+  "packages/provider-acp/package.json",
+  "packages/provider-acp-registry/package.json",
+  "packages/provider-cursor/package.json",
+  "packages/provider-grok/package.json",
+  "packages/provider-muse/package.json",
+  "packages/provider-opencode/package.json",
+  "packages/source-control-azure-devops/package.json",
+  "packages/source-control-bitbucket/package.json",
+  "packages/source-control-core/package.json",
+  "packages/source-control-forgejo/package.json",
+  "packages/source-control-github/package.json",
+  "packages/source-control-gitlab/package.json",
+  "packages/source-control-testing/package.json",
   "packages/effect-acp/package.json",
   "packages/effect-codex-app-server/package.json",
   // Fork-owned, and required here because `apps/desktop` depends on it: this
   // fixture copies MANIFESTS ONLY, so a workspace dependency whose manifest is
   // absent makes the regenerated lockfile fail to resolve.
   "packages/symmetria-broker-contract/package.json",
+  // Same rule: `apps/web` depends on the fork's modal key engine.
+  "packages/keys/package.json",
   // Same rule, for the vendored file manager. All four are workspace members
   // and all four are depended on — `apps/web` takes every one, `apps/server`
   // takes fm-core and fm-main — so every manifest has to be here or the
@@ -196,6 +214,12 @@ function assertMissing(path: string, message: string): void {
 const tempRoot = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-release-smoke-"));
 
 try {
+  NodeChildProcess.execFileSync(
+    process.execPath,
+    ["--test", NodePath.resolve(repoRoot, ".github/scripts/relay-state-output.test.cjs")],
+    { stdio: "inherit" },
+  );
+
   copyWorkspaceManifestFixture(tempRoot);
 
   NodeChildProcess.execFileSync(

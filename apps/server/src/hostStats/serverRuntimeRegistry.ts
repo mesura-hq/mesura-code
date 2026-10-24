@@ -7,11 +7,7 @@
  * discovery cannot read a file descriptor. `server-runtime.json` stays where
  * it is; this is a second, fork-owned record beside it.
  */
-import {
-  HostProcessEnvironment,
-  HostProcessPlatform,
-  HostProcessUserId,
-} from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -24,7 +20,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
-import { writeFileStringAtomically } from "../atomicWrite.ts";
+import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import { ServerConfig } from "../config.ts";
 import { isProcessAlive } from "../serverRuntimeState.ts";
 
@@ -82,7 +78,7 @@ export function serverRuntimeRegistryDirectories(
 /** This process's registry location, from its environment. */
 export const currentRegistryLocation = (uid: number) =>
   Effect.gen(function* () {
-    const environment = yield* HostProcessEnvironment;
+    const environment = yield* HostProcess.Environment;
     return {
       xdgRuntimeDir: environment.XDG_RUNTIME_DIR,
       tmpDir: NodeOS.tmpdir(),
@@ -128,7 +124,7 @@ const lstatOrNull = (path: string) =>
  */
 const registryDirectoryProblem = (directory: string, options: { readonly create: boolean }) =>
   Effect.gen(function* () {
-    const uid = yield* HostProcessUserId;
+    const uid = yield* HostProcess.UserId;
     if (uid === undefined || !NodePath.posix.isAbsolute(directory)) return "not a POSIX path";
     const names = directory.split("/").filter((name) => name.length > 0);
     let current = "/";
@@ -266,8 +262,8 @@ export const register = (options: RegisterOptions) =>
 /** Registers this server for as long as it runs. Linux only: discovery is Linux only. */
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
-    const uid = yield* HostProcessUserId;
-    if ((yield* HostProcessPlatform) !== "linux" || uid === undefined) return;
+    const uid = yield* HostProcess.UserId;
+    if ((yield* HostProcess.Platform) !== "linux" || uid === undefined) return;
     const config = yield* ServerConfig;
     yield* register({
       directory: serverRuntimeRegistryDirectory(yield* currentRegistryLocation(uid)),

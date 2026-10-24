@@ -10,7 +10,7 @@ const decodeStreamItem = Schema.decodeUnknownResult(SymmetriaStreamItem);
 const READ_MODEL: ProjectableReadModel = {
   projects: [
     { id: "prj_vigilia", title: "vigilia" },
-    { id: "prj_kosmos", title: "kosmos-app" },
+    { id: "prj_storefront", title: "storefront-app" },
   ],
   threads: [
     {
@@ -37,7 +37,7 @@ const READ_MODEL: ProjectableReadModel = {
     },
     {
       id: "thr_idle",
-      projectId: "prj_kosmos",
+      projectId: "prj_storefront",
       title: "Offline voice outbox",
       branch: null,
       worktreePath: null,
@@ -79,7 +79,7 @@ describe("projectReadModel", () => {
   it("gives every project a non-empty name taken from the source", () => {
     expect(projectReadModel(READ_MODEL, 1).projects).toEqual([
       { projectId: "prj_vigilia", name: "vigilia" },
-      { projectId: "prj_kosmos", name: "kosmos-app" },
+      { projectId: "prj_storefront", name: "storefront-app" },
     ]);
   });
 

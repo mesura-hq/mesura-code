@@ -4,17 +4,13 @@
  *
  * Entry point: `ServerRuntimeRegistry.layer`, the layer the server's host
  * stats block builds, over `ServerConfig.layerTest` and a
- * `HostProcessEnvironment` whose `XDG_RUNTIME_DIR` is a temp directory. The
+ * `HostProcess.Environment` whose `XDG_RUNTIME_DIR` is a temp directory. The
  * pure directory rule and the dead-entry sweep are reached through the same
  * module's `serverRuntimeRegistryDirectory` and `register`. The round trip
  * reads what `register` wrote through `MesuraServerDiscovery.make`.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import {
-  HostProcessEnvironment,
-  HostProcessPlatform,
-  HostProcessUserId,
-} from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -105,8 +101,8 @@ it.layer(NodeServices.layer)("server runtime registry", (it) => {
           ServerRuntimeRegistry.layer.pipe(Layer.provide(ServerConfig.layerTest(baseDir, baseDir))),
           scope,
         ).pipe(
-          Effect.provideService(HostProcessEnvironment, { XDG_RUNTIME_DIR: runtimeDir }),
-          Effect.provideService(HostProcessPlatform, "linux"),
+          Effect.provideService(HostProcess.Environment, { XDG_RUNTIME_DIR: runtimeDir }),
+          Effect.provideService(HostProcess.Platform, "linux"),
         );
 
         const entry = yield* readEntry(entryPath);
@@ -135,8 +131,8 @@ it.layer(NodeServices.layer)("server runtime registry", (it) => {
               Layer.provide(ServerConfig.layerTest(baseDir, baseDir)),
             ),
           ).pipe(
-            Effect.provideService(HostProcessEnvironment, { XDG_RUNTIME_DIR: runtimeDir }),
-            Effect.provideService(HostProcessPlatform, platform),
+            Effect.provideService(HostProcess.Environment, { XDG_RUNTIME_DIR: runtimeDir }),
+            Effect.provideService(HostProcess.Platform, platform),
           ),
         );
       }
@@ -222,7 +218,7 @@ it.layer(NodeServices.layer)("server runtime registry", (it) => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const uid = yield* HostProcessUserId;
+        const uid = yield* HostProcess.UserId;
         if (uid === undefined) return;
         const directory = path.join(
           yield* fs.makeTempDirectoryScoped({ prefix: "mesura-registry-" }),
@@ -241,7 +237,7 @@ it.layer(NodeServices.layer)("server runtime registry", (it) => {
           }),
         );
         // Seen as another user, the directory (and its parent) belong to someone else.
-        const asAnotherUser = Effect.provideService(HostProcessUserId, uid + 1);
+        const asAnotherUser = Effect.provideService(HostProcess.UserId, uid + 1);
         yield* registerOnce(directory).pipe(asAnotherUser);
         assert.deepStrictEqual(yield* fs.readDirectory(directory), ["1234.json"]);
         assert.strictEqual((yield* fs.stat(directory)).mode & 0o777, 0o755);
@@ -357,7 +353,7 @@ it.layer(NodeServices.layer)("server runtime registry", (it) => {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         // Reads the real /proc of this test process: nothing to read without one.
-        const uid = yield* HostProcessUserId;
+        const uid = yield* HostProcess.UserId;
         if (uid === undefined || !(yield* fs.exists("/proc/self/stat"))) return;
         // A /proc holding only this test process, read from the real one.
         const procRoot = yield* fs.makeTempDirectoryScoped({ prefix: "mesura-registry-proc-" });
@@ -379,7 +375,7 @@ it.layer(NodeServices.layer)("server runtime registry", (it) => {
           uid,
           defaultStateHome: path.join(directory, "no-home"),
           self: { pid: -1, dev: false },
-        }).pipe(Effect.provideService(HostProcessPlatform, "linux"));
+        }).pipe(Effect.provideService(HostProcess.Platform, "linux"));
 
         // The counting server (not this process) always counts itself as one installed server.
         assert.deepStrictEqual(yield* discovery.discover, { installed: 1, dev: 0 });

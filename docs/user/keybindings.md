@@ -3,10 +3,103 @@
 Customize shortcuts in **Settings → Keybindings** on web and desktop. That page
 also lists the command IDs and defaults available in your version.
 
-The same configuration lives in `~/.mesura-code/userdata/keybindings.json` on the machine running
-the server, if you prefer editing it directly. Mesura Code writes the built-in defaults into that
-file on first run, and adds any new defaults on later startups unless a rule of yours already
-claims the command or the shortcut.
+To drive the app with Vim-style modes and a Space leader instead of chords, see
+[Vim mode](./vim-mode.md). It also covers citing part of an answer by typing the labels at its
+sentences.
+
+## Composer controls
+
+In **Settings → General → Send shortcut**, choose whether Enter sends, requires
+`mod+Enter` for multiline prompts, or always requires `mod+Enter`. `Shift+Enter`
+inserts a new line. This applies to the web and desktop composer at desktop widths.
+
+**Follow-up behavior** chooses Queue or Steer while the agent runs. Use
+`mod+Enter` to do the opposite for one message, even when the send shortcut
+requires a modifier. `mod+Alt+Enter` sends, keeps that thread running in the
+background, and opens a fresh new-thread composer. In a new thread, `mod+Enter`
+does the same. Change these shortcuts in **Settings → Keybindings** under
+**Composer: Opposite Queue or Steer Action**, **Composer: Start in Background**,
+or **Composer: Send and Start New Thread**. These bindings take priority over the
+send shortcut. Click the send button to use the configured follow-up behavior.
+
+When an active turn has queued messages, `mod+Shift+Enter` sends the first as a
+steer. Change it under **Queue: Send First Queued Message as Steer** in Keybindings.
+
+Use `mod+shift+m` to choose a model and its effort. `alt+e` opens the model
+picker on **More options**, which holds the model's other settings and the
+access mode; `mod+shift+a` opens the same model picker. Use `alt+w` to open the run
+context drawer: host, workspace, and Git branch together (see
+[Run context](#run-context)). `mod+shift+h` cycles directly to the next machine
+without opening the drawer; `mod+shift+x` opens the drawer on its Workspace tab
+and `mod+shift+g` opens it on its Git branch tab. Use `mod+shift+l` to reuse the
+previous worktree directly.
+Use `mod+alt+a` to attach files. `alt+a` does the same where your desktop
+does not keep `Alt+A` for itself.
+
+In the model picker, Tab and Shift+Tab move to the next or previous provider,
+including Favorites. Up/Down highlight a model, and Left/Right change that
+model's effort without choosing it. Enter or a click uses the highlighted model
+with its effort. `alt+e` opens or closes **More options**, which holds the
+highlighted model's other settings and the access mode. This screen replaces
+model search. **Back to models** returns to search and keeps pending edits. Tab
+moves through the options normally. Escape or a click outside closes the picker
+and discards pending edits.
+`mod+shift+up` and `mod+shift+down` also switch providers and clear the search.
+These provider shortcuts can also be changed in Settings.
+
+These shortcuts run inside the focused web or desktop client. `mod` uses Command
+on macOS and Ctrl on Windows and Linux, including GNOME, KDE Plasma, Niri, and
+Hyprland. If a custom desktop shortcut takes the same keys, choose another binding
+in Settings.
+
+## Copy pull request references
+
+With a PR open in the right panel or on the Pull Requests page, use `mod+shift+c`
+to copy its URL and `mod+shift+k` to copy its number with a `#` prefix.
+Both shortcuts can be changed in Settings. Search for “Copy Link or Thread ID”
+or “Copy Number”. They copy the selected PR and leave terminal input alone.
+
+## Find in a diff
+
+Click into a diff in the Diff panel or a pull request's Code tab, then press
+`mod+f` to search every file in it, including folded files and unchanged lines
+hidden between changes. Enter and `Shift+Enter` move between matches, and a
+match in a folded file opens it. Escape closes the search. This shortcut is not
+configurable. A very large uncommitted diff loads its files as you scroll, and
+find only searches the files loaded so far.
+
+## iPad
+
+With a hardware keyboard, use `Cmd+1` through `Cmd+9` to open the first nine
+displayed threads. The shortcuts follow the current list filters and order.
+`Cmd+K` opens the command palette to search commands, projects, and threads.
+Use the arrow keys and Return to choose a result, or `Cmd+1` through `Cmd+9` to
+choose directly. Escape or `Cmd+K` closes the palette. Start a search with `>`
+to show only actions.
+
+In a new thread, `Cmd+Shift+H` moves the draft to the next machine.
+
+In the composer, Return sends and `Shift+Return` inserts a new line. `Cmd+Return`
+also sends. To make Return insert a new line instead, change the Return key
+behavior in Settings → Keyboard.
+
+## Edit the configuration file
+
+Keybindings live on the environment's machine, in
+`~/.mesura-code/userdata/keybindings.json` by default. You can edit this file directly.
+It is a JSON array of rules:
+
+```json
+[
+  { "key": "mod+g", "command": "terminal.toggle" },
+  { "key": "mod+shift+g", "command": "terminal.new", "when": "terminalFocus" }
+]
+```
+
+Mesura Code creates the file with its defaults and adds new defaults on later startups.
+New defaults do not replace commands you customized. If a new default overlaps one
+of your shortcuts, [rule order](#precedence) decides which runs.
+Invalid rules are ignored; if the file cannot be parsed, Mesura Code uses defaults.
 
 New defaults reach an existing file two ways, and both run once.
 
@@ -24,64 +117,6 @@ Either way, when the key involved already belongs to a rule of yours, nothing is
 two commands on one chord would quietly disable one of them, so the server leaves your rule alone
 and logs a warning instead.
 
-## Composer controls
-
-Use `mod+shift+m` to choose a model and `mod+shift+h` to choose a host.
-Use `alt+e` for effort, `mod+shift+a` for access mode, `mod+shift+x` for the
-workspace, and `mod+shift+g` for the Git branch. The workspace menu includes the
-current checkout, a new worktree, and the previous worktree when available.
-Use `mod+shift+l` to reuse the previous worktree directly.
-Use `mod+alt+a` to attach files. `alt+a` does the same where your desktop
-does not keep `Alt+A` for itself.
-
-In the model picker, press Left in an empty search field or Shift+Tab to reach
-the provider list. Use Up/Down to move and Enter to choose. Right returns to
-model search. `mod+shift+up` and `mod+shift+down` switch providers directly and clear the
-search. These provider shortcuts can also be changed in Settings.
-
-These shortcuts run inside the focused web or desktop client. `mod` uses Command
-on macOS and Ctrl on Windows and Linux, including GNOME, KDE Plasma, Niri, and
-Hyprland. If a custom desktop shortcut takes the same keys, choose another binding
-in Settings.
-
-## Copy pull request references
-
-With a PR open in the right panel or on the Pull Requests page, use `mod+shift+c`
-to copy its URL and `mod+shift+k` to copy its number with a `#` prefix.
-Both shortcuts can be changed in Settings. Search for “Copy Link or Thread ID”
-or “Copy Number”. They copy the selected PR and leave terminal input alone.
-
-## iPad
-
-With a hardware keyboard, use `Cmd+1` through `Cmd+9` to open the first nine
-displayed threads. The shortcuts follow the current list filters and order.
-`Cmd+K` opens the command palette to search commands, projects, and threads.
-Use the arrow keys and Return to choose a result, or `Cmd+1` through `Cmd+9` to
-choose directly. Escape or `Cmd+K` closes the palette. Start a search with `>`
-to show only actions.
-
-In the composer, Return sends and `Shift+Return` inserts a new line. `Cmd+Return`
-also sends. To make Return insert a new line instead, change the Return key
-behavior in Settings → Keyboard.
-
-## Edit the configuration file
-
-Keybindings live on the environment's machine, in
-`~/.t3/userdata/keybindings.json` by default. You can edit this file directly.
-It is a JSON array of rules:
-
-```json
-[
-  { "key": "mod+g", "command": "terminal.toggle" },
-  { "key": "mod+shift+g", "command": "terminal.new", "when": "terminalFocus" }
-]
-```
-
-T3 Code creates the file with its defaults and adds new defaults on later startups.
-New defaults do not replace commands you customized. If a new default overlaps one
-of your shortcuts, [rule order](#precedence) decides which runs.
-Invalid rules are ignored; if the file cannot be parsed, T3 Code uses defaults.
-
 ## Rule shape
 
 Each rule requires a `key` shortcut and a `command` ID. An optional `when`
@@ -96,12 +131,26 @@ Join modifiers and a key with `+`, such as `mod+shift+d` or `ctrl+l`.
 `cmd` / `meta`, `ctrl` / `control`, `alt` / `option`, and `shift`.
 
 `tab` is usable as a key, but only with a modifier. The recorder in **Settings** → **Keybindings**
-passes a bare `Tab` and `Shift+Tab` through so they keep moving focus; a `Tab` held with Ctrl, Alt,
+passes a bare `Tab` and `Shift+Tab` through without recording them; a `Tab` held with Ctrl, Alt,
 or Cmd records normally.
 
 Shortcuts on `tab` reach the desktop app but not the web app. Browsers keep `Ctrl+Tab` and
 `Ctrl+Shift+Tab` for switching their own tabs and never deliver them to a page, so a rule using
 them works in the desktop app and stays silent in a browser.
+
+Available context keys include `terminalFocus`, `terminalOpen`, `previewFocus`,
+`previewOpen`, `modelPickerOpen`, `usagePageOpen`, `composerFocus`, `composerDraft`,
+`turnRunning`, `editableFocus`, `isWeb`, and `isDesktop`, plus this fork's own
+`chatFocus`, `dictationActive`, `draftThreadRoute`, `panelFocus`, `rightPanelOpen`,
+`sidebarFocus`, and `sidebarSearchFocus`.
+`editableFocus` is true while a text field, the composer, or another editor has
+the keyboard. `isWeb` is true in a browser tab. `isDesktop` is true in the
+desktop app. Unknown keys evaluate to `false`.
+
+`mod+1` through `mod+9` jump to the first nine threads, and to models while the
+model picker is open. Those defaults use `isDesktop` so they do not steal the
+browser's tab-switch shortcuts. Remove that condition in Settings if you want
+the same jumps in a browser.
 
 ## Commands
 
@@ -167,12 +216,12 @@ case-insensitive matching.
 ### Composer pickers and question prompts
 
 `modelPicker.toggle` opens the model picker from the composer and defaults to `mod+shift+m`, and
-additionally to `alt+m`. While it is open, `mod+1` through `mod+9` select a model directly.
+additionally to `alt+m`. On the model search screen, `mod+1` through `mod+9` select a model directly.
 
-`traitsPicker.toggle` opens the composer control that holds reasoning effort, thinking, fast mode,
-context window, and agent. It defaults to `alt+e`. Two cases make it do nothing, both by design:
-a provider that exposes none of those traits does not render the control at all, and a narrow
-composer folds the traits into its compact controls menu, which has no separate picker to open.
+`traitsPicker.toggle` opens the model picker's **More options** screen: thinking, fast mode,
+context window, agent, and the access mode. While the picker is open it switches between options
+and model search. It defaults to `alt+e`. `composer.effort` does the same and has no default binding.
+`composer.mode` (`mod+shift+a`) opens the model search screen.
 
 `question.toggleCollapse` defaults to `alt+q`. On web and desktop it jumps to the first pending
 request in the conversation and focuses its first unanswered field or option. If all answers are
@@ -182,27 +231,50 @@ Number keys typed in a text field remain text.
 
 The shortcut does nothing when no question is pending or when the terminal has focus.
 
-Six defaults sit on `Alt` with a letter: `alt+e`, `alt+w`, `alt+b`, `alt+m`, `alt+q`, and `alt+u`.
+Several defaults sit on `Alt` with a letter, among them `alt+e`, `alt+w`, `alt+b`, `alt+m`,
+`alt+q`, `alt+u`, `alt+g`, and `alt+c`. **Settings** → **Keybindings** lists all of them.
 The app claims those chords before the character reaches the composer, which matters on two
 platforms. On macOS `Option` composes characters — `Option+E` starts an acute accent, `Option+Q`
 types `œ`, and the others type symbols like `∑` and `µ` — so a default may be swallowed or may
 suppress a character you wanted. Firefox uses `Alt` with a letter for menu access keys. Rebind any
-of them in **Settings** → **Keybindings**.
+of them there.
 
 On a Latin American layout, `AltGr+Q` types `@`. That is a different chord — the app sees `AltGr`
 as `Ctrl+Alt` — so `alt+q` never eats it.
 
-### Branch toolbar
+### Run context
 
-`branchPicker.toggle` opens the branch menu above the composer and defaults to `alt+b`. Note that
+`runContext.toggle` opens the run context drawer under the composer and defaults to `alt+w`. The
+drawer has three tabs, in order: **Host**, **Workspace**, and **Branch**. Each tab shows its current
+choice, so the tab bar is also a summary.
+
+- Tab and Shift+Tab move between the tabs. Left and Right do the same on Host and Workspace.
+- Up and Down choose in the open tab, and 1–9 choose directly. A host or workspace choice applies
+  at once.
+- Typing a letter opens the branch search with that letter. Enter on a branch selects it, which can
+  check it out, and closes the drawer.
+- Enter closes the drawer, and Escape closes it too.
+
+The usual pass is `alt+w`, a host, Tab, a workspace, Enter. Tapping any of the three choices under
+the composer opens the drawer on that tab, which is how it works on a phone.
+
+**Host** lists the machines you can reach; a machine that is offline leaves the list until it
+reconnects. With a single machine, Host is a locked summary. Automatic routing is a setting rather
+than a host: with load balancing on, a new draft shows **Auto balance** until you choose a machine. **Workspace**
+offers the current checkout and a new worktree. It reads **Current worktree** while the draft
+points at an existing worktree, for example after you choose a branch that is checked out there.
+
+Once a thread has started, its host and workspace are fixed: the drawer shows them locked and
+opens on **Branch**.
+
+Two shortcuts change the draft without opening the drawer. `runContext.cycleMachine` moves to the
+next host and defaults to `mod+shift+h`. `runContext.toggleWorkspace` switches between the current
+checkout and a new worktree and defaults to `mod+shift+w` and `alt+shift+w`. Browsers keep
+`mod+shift+w` to close the window, so in a browser use `alt+shift+w`.
+
+`branchPicker.toggle` (`alt+b`) and `composer.branch` (`mod+shift+g`) open the drawer on its
+**Branch** tab, and `composer.workspace` (`mod+shift+x`) opens it as well. Note that
 `mod+alt+b` is a different shortcut: it toggles the right panel.
-
-`workspacePicker.toggle` opens the workspace control beside it — the one choosing between the
-current checkout and a new worktree — and defaults to `alt+w`. Three situations make it do nothing.
-The choice can no longer change, because the thread already owns a worktree and the control has
-become plain text; the project exposes no git controls at all; or the window is narrow enough that
-the toolbar collapses into its compact layout, which uses a different control the shortcut does not
-reach.
 
 An explicit workspace choice in a new-thread draft takes priority. Otherwise, `defaultThreadEnvMode`
 in the checkout's root `.mesura.json` wins, followed by the machine-local project setting,
@@ -239,20 +311,40 @@ wheel. Without that, the next chunk of a streaming reply would pull you back to 
 
 `diff.toggle` defaults to `mod+shift+d`, which leaves `mod+d` to the pair above.
 
+`treeDiff.toggle` opens the Diff panel on Tree diff and defaults to `alt+g`. Pressed while Tree
+diff is already showing, it closes the panel. `diff.modeMenu` opens the Diff panel's menu of modes
+and defaults to `alt+c`; type a mode's first letter and press `Enter` to choose it. Both work from
+the file editor, and neither runs while the terminal has focus. See
+[Tree diff and Files diff](./file-panel.md#tree-diff-and-files-diff).
+
 ### Moving between threads
 
 `thread.next` and `thread.previous` default to `mod+shift+]` and `mod+shift+[`, and additionally to
 `ctrl+tab` and `ctrl+shift+tab`. The bracket pair works everywhere and is the one the app reports as
 the shortcut. The tab pair is desktop-only, because browsers keep those two chords for their own tab
 strip; it is also inactive while the terminal has focus, since the terminal encodes `ctrl+tab`
-itself. `mod+1` through `mod+9` jump straight to a thread by position.
+itself. `mod+1` through `mod+9` jump straight to a thread: hold `mod` and the threads on screen in
+the sidebar show their numbers, counted from the top of what you see. With the sidebar hidden, they
+count from the top of the list.
 
 With the sidebar focused, the list also walks under your fingers: `j` opens the next thread and
-`k` the previous one, and `mod+d` and `mod+u` step five at a time, stopping at the ends rather
-than wrapping. These are the only single letters the app binds to anything, so they apply in the
+`k` the previous one. `mod+d` and `mod+u` scroll the list half a page and open nothing, so you can
+look further down and then jump with a number; the numbers already show where the scroll will stop.
+The arrow keys move over the threads without opening them, showing each one's details as a mouse
+hover does, and `Enter` opens the one you are on. These are the only single letters the app binds to anything, so they apply in the
 sidebar and nowhere else — typed in the composer, in a terminal or in the file editor they are
 letters. Inside the sidebar's own search box they are letters too, so you can still search for a
 thread whose name has a `j` in it.
+
+With the right panel focused, `Ctrl+Tab` and `Ctrl+Shift+Tab` move between its tabs instead, in
+the desktop app; a terminal tab keeps the pair for itself, as it does for threads. `mod+t` there
+opens the panel's launcher, the list behind its `+` button, to open a new tab by its letter.
+
+However the keyboard reaches the right panel — `mod+l`, a launcher letter, `Ctrl+Tab`, closing a
+tab — it lands in the tab's content, not on the tab's title: the file tree, the diff, the editor, a
+preview or a list. The arrow keys move there and `Ctrl+D` and `Ctrl+U` move half a page, with no
+click first. A Browser or Device tab is the exception: the keyboard stays on its title until you
+click into the page or the screen.
 
 Focus stays in the sidebar as you walk, on the row of the thread you just opened, so you can keep
 going. Clicking a thread with the mouse still puts the cursor in the composer, as before.
@@ -268,6 +360,10 @@ The app claims these four everywhere, including inside a terminal and inside the
 each one means the same thing wherever you type it. That is the point of them: leaving the editor
 used to mean `Escape` and then the mouse. The editor's own window commands are unaffected, since
 a chord starting with `Ctrl+W` is never claimed.
+
+These chords are how focus moves. `Tab` and `Shift+Tab` do not walk from control to control as
+they do on a web page, and no focus outline is drawn: the focused pane and row show it instead. A
+place that uses `Tab` for itself keeps it, such as a terminal or the composer's suggestion menu.
 
 `mod+j` and `mod+k` keep whatever else they do in panes with no vertical neighbour. In the sidebar
 and the right panel there is nothing above or below, so the chord falls through untouched — which
@@ -321,11 +417,15 @@ un-settle.
 
 ### Closing terminals and windows
 
-`terminal.close` defaults to `mod+w` while the terminal has focus. Anywhere else that key does
-nothing on Linux and Windows: the desktop window there is the whole application, so closing it
-would quit Mesura Code. Quit from **File** → **Quit**, the titlebar, or your window manager
-instead. On macOS `Cmd+W` closes a window without quitting the app, as it does everywhere else on
-that platform.
+`terminal.close` defaults to `mod+w` while the terminal has focus, and `rightPanel.close` to `mod+w`
+elsewhere, which closes the right panel's active tab. `Ctrl+Q` does the same two things, as
+`Super+Q` closes the focused window in a tiling window manager, except in the Windows desktop app,
+where it stays the quit shortcut. Closing a terminal asks first, and `Enter` confirms.
+
+`mod+w` never closes the desktop window on Linux and Windows: the window there is the whole
+application, so closing it would quit Mesura Code. In the Linux desktop app `Ctrl+Q` does not quit
+either. Quit from **File** → **Quit**, the titlebar, or your window manager instead. On macOS
+`Cmd+W` closes a window without quitting the app, as it does everywhere else on that platform.
 
 ### If you upgraded from an older build
 
@@ -336,7 +436,7 @@ which is also what frees `mod+d` for the reading scroll in the same run.
 
 `Ctrl+W` used to close the desktop window, and off macOS that quit the whole application. That one
 is a change to the native menu rather than to a keybinding, so it needs nothing from your config:
-the key now closes a focused terminal and does nothing otherwise.
+the key now closes a focused terminal or the active right-panel tab, and does nothing otherwise.
 
 The command palette, open-in-favourite-editor and the preview's address bar move to `mod+o`,
 `alt+o` and `mod+alt+l`, because `mod+k` and `mod+l` are now pane chords. Those three rules are
@@ -394,6 +494,14 @@ Examples:
 - `"when": "terminalOpen && !terminalFocus"`
 - `"when": "!terminalFocus"`
 
+## Find in the current thread
+
+`chat.find` searches conversation messages and proposed plans in the active thread. Entering a
+query searches the entire thread, including older messages. Thread search requires server support;
+update an older server to enable it. Select **Retry** if a search fails. It defaults to
+`mod+f` outside terminals and previews. Press **Enter** or **Shift+Enter** to move between matches,
+and **Escape** to close find.
+
 ## Precedence
 
 The last rule whose key and condition both match wins, even if it belongs to a
@@ -405,26 +513,49 @@ a shortcut.
 `thread.stop` interrupts the running turn in the focused thread. It has no default
 shortcut; assign one in **Settings → Keybindings**.
 
+`thread.undo` (`mod+z` by default) reverses the actions shown in the notice at the
+bottom of the sidebar, such as unpin, settle, snooze, archive, or discarding a
+draft. Consecutive
+actions of the same kind undo together. The notice remains available for five
+seconds after the latest action. The default shortcut skips text fields and
+terminals so native undo keeps working there.
+
+`navigation.back` (`mod+[` by default) and `navigation.forward` (`mod+]`) move
+through the pages you have visited, like a browser's back and forward buttons.
+
 `chat.new` may ask you to choose a project when there is more than one.
 `chat.newLocal` skips that chooser. Both use your
-[new-thread defaults](./thread-sidebar.md#start-a-thread).
+[new-thread defaults](./thread-sidebar.md#start-a-thread). `chat.newWithoutProject`
+(`mod+alt+n`) starts a thread [without a project](./thread-sidebar.md#start-without-a-project).
 
 ## Reserved shortcuts
 
 In the desktop app, `mod+w` closes the focused terminal or the active right-panel
-tab. When nothing remains to close, it closes the window. In a browser, `mod+w`
+tab. When nothing remains to close, it closes the window on macOS and does nothing on Linux and
+Windows. In a browser, `mod+w`
 closes the browser tab; rebind `rightPanel.close` and `terminal.close` to an available
-shortcut such as `alt+w`.
+shortcut such as `alt+z`.
+
+`mod+shift+t` reopens the last closed tab across the app, including files,
+diffs, pull requests, browsers, and devices, in the order you closed them.
+A browser opens in a fresh session without its old page history. Incognito tabs
+can reopen until you reload or quit the app. This shortcut does not undo deleted work.
+Browsers also use it to reopen browser tabs; choose another binding in Settings
+if the browser takes it first.
 
 Many defaults include `!terminalFocus` so they do not intercept terminal input.
 Keep that condition when remapping them if you want the same behavior.
 
 ## Desktop quit shortcut
 
-Use `Cmd+Q` on macOS or `Ctrl+Q` on Windows and Linux. In the default **Hold** mode,
+Use `Cmd+Q` on macOS or `Ctrl+Q` on Windows. In the default **Hold** mode,
 hold for 1.2 seconds or press twice within 500 milliseconds. Holding requires
 keyboard repeat; if repeat is disabled, use two presses or the application menu.
 
 Change **Settings → General → Confirmations → Quit shortcut** to **Direct** for a
 single press or **Double press** for two presses only. Choosing **Quit** from the
 application menu always quits immediately.
+
+The Linux desktop app has no quit shortcut, because `Ctrl+Q` closes a tab or a terminal there (see
+[Closing terminals and windows](#closing-terminals-and-windows)). Quit from **File** → **Quit** or
+your window manager.

@@ -1,4 +1,5 @@
 import { pullRequestHostOf, type SourceControlProviderKind } from "@t3tools/contracts";
+import { FileSurfacePendingMarker } from "./files/fileSurfacePendingStore";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { useProjects, useServerConfigs, useThreadShells } from "~/state/entities";
 import {
@@ -11,10 +12,11 @@ import type {
   PreviewSessionSnapshot,
   ProjectId,
   PullRequestState,
+  ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import {
-  Bot,
+  CircleDot,
   Smartphone,
   ChevronDown,
   ChevronLeft,
@@ -22,21 +24,20 @@ import {
   Factory,
   FileDiff,
   Files,
-  GitPullRequest,
-  GitPullRequestArrow,
   Globe2,
   Plus,
   TerminalSquare,
-  Volume2,
-  VolumeOff,
 } from "lucide-react";
+import { Volume2, VolumeOff } from "lucide";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
-  type ReactElement,
   type ReactNode,
   useCallback,
   useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -45,50 +46,73 @@ import { isElectron } from "~/env";
 import type { DesktopPreviewOverlay } from "~/previewStateStore";
 import type { RightPanelSurface } from "~/rightPanelStore";
 import { cn } from "~/lib/utils";
+import { resolveShortcutCommand, type ShortcutMatchContext } from "~/keybindings";
 import { readLocalApi } from "~/localApi";
 import { Button } from "~/components/ui/button";
+import { MorphIcon } from "~/components/MorphIcon";
 import { AndroidIcon, AppleIcon } from "~/components/Icons";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { Kbd } from "~/components/ui/kbd";
-import {
-  Menu,
-  MenuItem,
-  MenuPopup,
-  MenuShortcut,
-  MenuSub,
-  MenuSubPopup,
-  MenuSubTrigger,
-  MenuTrigger,
-} from "~/components/ui/menu";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "~/components/ui/menu";
 import { useBrowserDefaults } from "~/browser/browserDefaults";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { PanelTabCloseButton } from "~/components/ui/panel-tab-close-button";
 import { faviconUrlForOrigin } from "~/lib/favicon";
 import { useTheme } from "~/hooks/useTheme";
-import { pullRequestEnvironment } from "~/state/pullRequests";
+import { useDeviceState } from "~/state/device";
+import type { PreviewPanelInlineSize } from "~/hooks/usePreviewPanelInlineSize";
+import {
+  newestPullRequestSummary,
+  pullRequestEnvironment,
+  useSharedPullRequestSummary,
+} from "~/state/pullRequests";
 import { useEnvironmentQuery } from "~/state/query";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
+import {
+  activatePanelSurfaceFromLauncher,
+  isPanelSurfaceKeyboardActivation,
+  usePanelSurfaceKeys,
+} from "~/lib/panelSurfaceFocus";
+import { useRightPanelTabCycling } from "~/lib/rightPanelTabCycling";
+import {
+  closePanelLauncher,
+  dismissPanelLauncher,
+  isPanelLauncherKeyboardAvailable,
+  openPanelLauncher,
+  panelLauncherActions,
+  registerLauncherKeyHandler,
+  reportUnavailable,
+  runPanelLauncherAction,
+  usePanelLauncherOwner,
+  type PanelLauncherAction,
+} from "~/lib/panelLauncher";
 
 import { PreviewPanelShell, type PreviewPanelMode } from "./preview/PreviewPanelShell";
 import { FaviconImage } from "./preview/PreviewFaviconIcon";
 import { previewBridge } from "./preview/previewBridge";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import { resolvePullRequestState } from "./pullRequest/pullRequestPresentation";
+import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
+import { observeResize } from "~/lib/observeResize";
 
 interface RightPanelTabsProps {
   mode: PreviewPanelMode;
   maximized?: boolean;
   open?: boolean;
+  keybindings: ResolvedKeybindingsConfig;
+  getShortcutContext: () => ShortcutMatchContext;
   /** Forwarded to PreviewPanelShell so this surface persists its own width. */
   widthStorageKey?: string;
   /** Forwarded to PreviewPanelShell as the initial width before a user resize. */
   defaultWidth?: number;
+  inlineSize?: PreviewPanelInlineSize;
   layoutControls?: ReactNode;
   surfaces: readonly RightPanelSurface[];
   /** Fallback environment for surfaces that do not carry their own. */
   environmentId: EnvironmentId | null;
   activeSurfaceId: string | null;
-  pendingSurfaceIds: ReadonlySet<string>;
+  /** Mesura: the project the pending-save flags are kept under; see `fileSurfacePendingStore`. */
+  pendingProjectKey: string | null;
   previewSessions: Readonly<Record<string, PreviewSessionSnapshot>>;
   desktopByTabId: Readonly<Record<string, DesktopPreviewOverlay>>;
   /**
@@ -117,7 +141,7 @@ interface RightPanelTabsProps {
   onAddFiles: () => void;
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
-  onAddAgents: () => void;
+  onAddIssues?: (() => void) | undefined;
   onAddDevice: () => void;
   /** Opens the Software Factory surface; absent while the thread has nothing to show there. */
   onAddFactory?: (() => void) | undefined;
@@ -127,11 +151,8 @@ interface RightPanelTabsProps {
   filesAvailable: boolean;
   pullRequestAvailable: boolean;
   pullRequestsAvailable: boolean;
-  agentsAvailable: boolean;
   deviceAvailable: boolean;
   pullRequestStatusSeeds?: Readonly<Record<string, PullRequestTabStatusSeed>>;
-  /** Running + waiting subagents; badges the Agents card in the empty state. */
-  liveAgentCount: number;
   children: ReactNode;
 }
 
@@ -153,31 +174,16 @@ export function shouldOpenDefaultBrowserProfileFromMenuClick(
 
 const NOOP = () => {};
 
-const SURFACE_DISABLED_REASONS = {
-  browser: "Browser previews are only available in the Mesura Code desktop app.",
-  terminal: "Terminal surfaces are only available from a project thread.",
-  files: "Files are only available when a project is open.",
-  diff: "Diff is only available for server threads in Git repositories.",
-  pullRequest: "This thread's branch has no pull request yet.",
-  pullRequests: "No linked pull requests are available for this thread.",
-  agents: "Agents are only available from a thread.",
-  device: "Devices are only available from a thread.",
-  factory: "The Software Factory opens once a plan is presented in this thread.",
-} as const;
-
-/** Overlays that must win over the launcher's letter shortcuts. */
-const LAUNCHER_SHORTCUT_BLOCKING_LAYERS = [
-  '[data-slot="dialog-popup"]',
-  '[data-slot="alert-dialog-popup"]',
-  '[data-slot="command-dialog-popup"]',
-  '[data-slot="menu-popup"]',
-  '[data-slot="select-popup"]',
-  '[data-slot="popover-popup"]',
-  '[data-slot="combobox-popup"]',
-  '[data-slot="autocomplete-popup"]',
-  // Fork addition: the file manager over the window (`MesuraFileManagerLayer`).
-  "[data-mesura-file-manager]",
-].join(",");
+function issuesSurfaceAction(onAddIssues: (() => void) | undefined) {
+  return {
+    label: "Issues",
+    icon: CircleDot,
+    shortcut: "I",
+    available: onAddIssues !== undefined,
+    disabledReason: "Issues need a GitHub project on a server that supports them.",
+    onClick: onAddIssues ?? NOOP,
+  } as const;
+}
 
 /** One-line unavailability hints for the empty-state rows. */
 const SURFACE_UNAVAILABLE_HINTS = {
@@ -187,7 +193,6 @@ const SURFACE_UNAVAILABLE_HINTS = {
   diff: "Available for Git repositories.",
   pullRequest: "No pull request on this branch yet.",
   pullRequests: "No linked pull requests available.",
-  agents: "Available from a thread.",
   device: "Available from a thread.",
   factory: "Available once a plan is presented.",
 } as const;
@@ -281,37 +286,6 @@ export function surfaceShortcutTargetsTypingContext(
   );
 }
 
-function DisabledReasonTooltip(props: { reason: string; trigger: ReactElement }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger render={props.trigger} />
-      <TooltipPopup side="top">{props.reason}</TooltipPopup>
-    </Tooltip>
-  );
-}
-
-function SurfaceMenuItem(props: {
-  available: boolean;
-  disabledReason?: string;
-  shortcut: string;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  const item = (
-    <MenuItem
-      className={!props.available ? "data-disabled:pointer-events-auto" : undefined}
-      onClick={props.onClick}
-      disabled={!props.available}
-      aria-keyshortcuts={props.shortcut}
-    >
-      {props.children}
-      <MenuShortcut>{props.shortcut}</MenuShortcut>
-    </MenuItem>
-  );
-  if (props.available || !props.disabledReason) return item;
-  return <DisabledReasonTooltip reason={props.disabledReason} trigger={item} />;
-}
-
 /**
  * List launcher shown when the right panel has no surfaces. Keyboard-first
  * without palette chrome: a surface's letter opens it directly from anywhere
@@ -320,6 +294,8 @@ function SurfaceMenuItem(props: {
  * surfaces stay visible with a one-line reason.
  */
 function RightPanelEmptyState(props: {
+  panelOpen: boolean;
+  launcherOpen: boolean;
   onAddBrowser: () => void;
   onAddBrowserInProfile: (profileId: string) => void;
   browserProfiles: ReadonlyArray<{ readonly id: string; readonly name: string }>;
@@ -328,7 +304,7 @@ function RightPanelEmptyState(props: {
   onAddFiles: () => void;
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
-  onAddAgents: () => void;
+  onAddIssues?: (() => void) | undefined;
   onAddDevice: () => void;
   /** Opens the Software Factory surface; absent while the thread has nothing to show there. */
   onAddFactory?: (() => void) | undefined;
@@ -338,9 +314,9 @@ function RightPanelEmptyState(props: {
   filesAvailable: boolean;
   pullRequestAvailable: boolean;
   pullRequestsAvailable: boolean;
-  agentsAvailable: boolean;
   deviceAvailable: boolean;
-  liveAgentCount: number;
+  /** Mesura: the panel actions under the surfaces (`lib/panelLauncher.ts`). */
+  panelActions?: readonly PanelLauncherAction[];
 }) {
   // -1 means no highlight: it only appears on hover or arrow use.
   const [highlight, setHighlight] = useState(-1);
@@ -353,7 +329,6 @@ function RightPanelEmptyState(props: {
       available: props.browserAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.browser,
       onClick: props.onAddBrowser,
-      badgeCount: 0,
     },
     {
       label: "Terminal",
@@ -362,7 +337,6 @@ function RightPanelEmptyState(props: {
       available: props.terminalAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.terminal,
       onClick: props.onAddTerminal,
-      badgeCount: 0,
     },
     {
       label: "Files",
@@ -371,7 +345,6 @@ function RightPanelEmptyState(props: {
       available: props.filesAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.files,
       onClick: props.onAddFiles,
-      badgeCount: 0,
     },
     {
       label: "Diff",
@@ -380,35 +353,24 @@ function RightPanelEmptyState(props: {
       available: props.diffAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.diff,
       onClick: props.onAddDiff,
-      badgeCount: 0,
     },
     {
       label: "Pull request",
-      icon: GitPullRequest,
+      icon: PullRequestGlyph.pullRequest,
       shortcut: "P",
       available: props.pullRequestAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.pullRequest,
       onClick: props.onAddPullRequest,
-      badgeCount: 0,
     },
     {
       label: "Linked pull requests",
-      icon: GitPullRequestArrow,
+      icon: PullRequestGlyph.link,
       shortcut: "L",
       available: props.pullRequestsAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.pullRequests,
       onClick: props.onAddPullRequests,
-      badgeCount: 0,
     },
-    {
-      label: "Agents",
-      icon: Bot,
-      shortcut: "A",
-      available: props.agentsAvailable,
-      disabledReason: SURFACE_UNAVAILABLE_HINTS.agents,
-      onClick: props.onAddAgents,
-      badgeCount: props.liveAgentCount,
-    },
+    issuesSurfaceAction(props.onAddIssues),
     {
       label: "Device",
       description: "Watch an iOS Simulator or Android Emulator.",
@@ -417,7 +379,6 @@ function RightPanelEmptyState(props: {
       available: props.deviceAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.device,
       onClick: props.onAddDevice,
-      badgeCount: 0,
     },
     {
       label: "Software Factory",
@@ -426,13 +387,26 @@ function RightPanelEmptyState(props: {
       available: props.onAddFactory !== undefined,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.factory,
       onClick: props.onAddFactory ?? NOOP,
-      badgeCount: 0,
     },
   ] as const;
 
   type SurfaceAction = (typeof actions)[number];
 
   const availableActions = actions.filter((action) => action.available);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  // Mesura: every row runs through here, so a launcher shown over the panel's
+  // tabs closes once a row is chosen.
+  const runAction = (action: SurfaceAction, keyboard: boolean) => {
+    const panel = rootRef.current?.closest("[data-preview-panel-mode]");
+    const activate = () => {
+      closePanelLauncher();
+      action.onClick();
+    };
+    if (panel) activatePanelSurfaceFromLauncher(panel, activate, keyboard);
+    else activate();
+  };
+  const panelActions = props.panelActions ?? [];
+  const launcherOpen = props.launcherOpen;
   const highlightIndex =
     availableActions.length === 0 ? -1 : Math.min(highlight, availableActions.length - 1);
 
@@ -440,26 +414,78 @@ function RightPanelEmptyState(props: {
   // is focused; focus moves around too easily (stray clicks) to carry them.
   // Capture phase so app-level key handlers cannot swallow the event first;
   // typing contexts and already-handled events are left alone.
-  const shortcutActionsRef = useRef(availableActions);
-  useEffect(() => {
-    shortcutActionsRef.current = availableActions;
+  // Mesura: unavailable rows and the panel actions answer their letters too,
+  // the first with the reason they cannot run (`lib/panelLauncher.ts`).
+  const shortcutActionsRef = useRef({
+    actions,
+    runAction,
+    panelActions,
+    panelOpen: props.panelOpen,
+  });
+  useLayoutEffect(() => {
+    shortcutActionsRef.current = { actions, runAction, panelActions, panelOpen: props.panelOpen };
   });
   useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      const action = surfaceShortcutActionForKey(shortcutActionsRef.current, event);
-      if (!action) return;
-      if (document.querySelector(LAUNCHER_SHORTCUT_BLOCKING_LAYERS)) return;
-      const target = event.target;
-      if (target instanceof Element && surfaceShortcutTargetsTypingContext(target)) return;
+    const handler = (event: KeyboardEvent): boolean => {
+      if (event.defaultPrevented) return false;
+      const current = shortcutActionsRef.current;
+      const action = surfaceShortcutActionForKey(
+        current.actions.map((entry) => ({ ...entry, available: true })),
+        event,
+      );
+      const panelAction = action
+        ? null
+        : surfaceShortcutActionForKey(
+            current.panelActions.map((entry) => ({ ...entry, available: true })),
+            event,
+          );
+      if (!action && !panelAction) return false;
+      if (
+        !isPanelLauncherKeyboardAvailable(
+          current.panelOpen,
+          rootRef.current?.closest("[data-preview-panel-mode]"),
+        )
+      )
+        return false;
+      // The composed path starts at the real target, which may sit inside a shadow root.
+      const target = event.composedPath()[0] ?? event.target;
+      if (target instanceof Element && surfaceShortcutTargetsTypingContext(target)) return false;
       event.preventDefault();
       event.stopPropagation();
-      action.onClick();
+      if (panelAction) {
+        const chosen = current.panelActions.find(
+          (entry) => entry.shortcut === panelAction.shortcut,
+        );
+        if (chosen) runPanelLauncherAction(chosen);
+        return true;
+      }
+      const chosen = current.actions.find((entry) => entry.shortcut === action!.shortcut);
+      if (!chosen) return true;
+      if (!chosen.available) {
+        closePanelLauncher();
+        reportUnavailable(chosen.label, chosen.disabledReason);
+        return true;
+      }
+      current.runAction(chosen, true);
+      return true;
     };
-    window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
+    const unregister = registerLauncherKeyHandler(handler);
+    const listener = (event: KeyboardEvent) => void handler(event);
+    window.addEventListener("keydown", listener, true);
+    return () => {
+      unregister();
+      window.removeEventListener("keydown", listener, true);
+    };
   }, []);
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (
+      !isPanelLauncherKeyboardAvailable(
+        props.panelOpen,
+        rootRef.current?.closest("[data-preview-panel-mode]"),
+      )
+    )
+      return;
     if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
     if (availableActions.length === 0) return;
     if (event.key === "ArrowDown" || event.key === "ArrowRight") {
@@ -482,15 +508,26 @@ function RightPanelEmptyState(props: {
       const action = availableActions[highlightIndex];
       if (!action) return;
       event.preventDefault();
-      action.onClick();
+      runAction(action, true);
+      return;
+    }
+    if (event.key === "Escape" && launcherOpen) {
+      event.preventDefault();
+      dismissPanelLauncher();
     }
   };
 
   // Stable identity so React only runs this callback ref on mount/unmount;
   // an inline arrow would re-attach and re-focus on every render.
   const focusOnMount = useCallback((node: HTMLDivElement | null) => {
+    rootRef.current = node;
     node?.focus();
   }, []);
+  // Mesura: `Space p` or `Ctrl+T` on an empty panel finds the launcher
+  // already mounted; it takes the keys again.
+  useEffect(() => {
+    if (launcherOpen) rootRef.current?.focus({ preventScroll: true });
+  }, [launcherOpen]);
 
   const isHighlighted = (action: SurfaceAction) =>
     highlightIndex !== -1 && availableActions[highlightIndex] === action;
@@ -500,14 +537,6 @@ function RightPanelEmptyState(props: {
     return (
       <span className="relative inline-flex shrink-0">
         <Icon className={iconClassName} />
-        {action.badgeCount > 0 ? (
-          <span
-            aria-hidden
-            className="absolute -top-1.5 -right-2 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-info px-1 text-[9px] font-semibold tabular-nums text-white"
-          >
-            {action.badgeCount}
-          </span>
-        ) : null}
       </span>
     );
   };
@@ -518,15 +547,17 @@ function RightPanelEmptyState(props: {
       tabIndex={0}
       onKeyDown={handleKeyDown}
       aria-label="Open a surface"
+      // Mesura: the modal key layer leaves the launcher's letters to it.
+      data-key-passthrough
       data-surface-launcher-keys={availableActions.map((action) => action.shortcut).join("")}
       className={cn(
-        "flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 pt-6 outline-none",
+        "scrollbar-gutter-both flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 outline-none",
         // The panel topbar sits above this container; matching bottom padding
         // keeps the list centered against the full panel, not the leftover.
-        "pb-[calc(var(--workspace-topbar-height)+--spacing(6))]",
+        "pb-(--workspace-topbar-height)",
       )}
     >
-      <div className="w-full max-w-xs">
+      <div className="w-full max-w-xs py-6">
         <h3 className="mb-3 text-center font-medium text-foreground text-sm">Open a surface</h3>
         <div className="flex flex-col gap-0.5">
           {actions.map((action) =>
@@ -547,9 +578,9 @@ function RightPanelEmptyState(props: {
               >
                 <button
                   type="button"
-                  onClick={action.onClick}
+                  onClick={(event) => runAction(action, isPanelSurfaceKeyboardActivation(event))}
                   className={cn(
-                    "flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-[var(--control-radius)] px-2.5 text-left text-sm transition-colors group-hover:bg-accent/60",
+                    "flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-(--control-radius) px-2.5 text-left text-sm transition-colors group-hover:bg-accent/60",
                     isHighlighted(action) && "bg-accent/60",
                   )}
                 >
@@ -575,7 +606,7 @@ function RightPanelEmptyState(props: {
                       render={
                         <Button
                           aria-label="Open browser in a profile"
-                          className="absolute top-1/2 right-8 -translate-y-1/2 [--control-icon-color:currentColor]"
+                          className="absolute top-1/2 right-8 -translate-y-1/2"
                           size="icon-xs"
                           variant="ghost-muted"
                         />
@@ -583,16 +614,21 @@ function RightPanelEmptyState(props: {
                     >
                       <ChevronDown className="size-3.5" />
                     </MenuTrigger>
-                    <MenuPopup
-                      align="end"
-                      side="bottom"
-                      sideOffset={6}
-                      className="min-w-40 max-w-56"
-                    >
+                    <MenuPopup align="end" side="bottom" sideOffset={6} className="max-w-56">
                       {props.browserProfiles.map((profile) => (
                         <MenuItem
                           key={profile.id}
-                          onClick={() => props.onAddBrowserInProfile(profile.id)}
+                          onClick={(event) =>
+                            // Mesura: a profile is the Browser row with another target,
+                            // so it closes the launcher the same way.
+                            runAction(
+                              {
+                                ...action,
+                                onClick: () => props.onAddBrowserInProfile(profile.id),
+                              },
+                              isPanelSurfaceKeyboardActivation(event),
+                            )
+                          }
                         >
                           <span className="min-w-0 truncate">{profile.name}</span>
                         </MenuItem>
@@ -602,26 +638,77 @@ function RightPanelEmptyState(props: {
                 ) : null}
               </div>
             ) : (
-              <DisabledReasonTooltip
+              // Mesura: the reason is on the row, not behind a hover.
+              <UnavailableLauncherRow
                 key={action.label}
+                icon={actionIcon(action, "size-4")}
+                label={action.label}
                 reason={action.disabledReason}
-                trigger={
-                  <div
-                    tabIndex={0}
-                    aria-disabled="true"
-                    className="flex h-8 w-full cursor-default items-center gap-2.5 rounded-[var(--control-radius)] px-2.5 text-left text-sm opacity-50"
-                  >
-                    {actionIcon(action, "size-4")}
-                    <span className="min-w-0 flex-1 truncate">{action.label}</span>
-                    <Kbd>{action.shortcut}</Kbd>
-                  </div>
-                }
+                shortcut={action.shortcut}
+                onClick={() => reportUnavailable(action.label, action.disabledReason)}
               />
             ),
           )}
         </div>
+        {panelActions.length > 0 ? (
+          <>
+            <h3 className="mt-4 mb-1.5 px-2.5 font-medium text-muted-foreground text-xs">Panel</h3>
+            <div className="flex flex-col gap-0.5">
+              {panelActions.map((action) =>
+                action.unavailableReason === null ? (
+                  <button
+                    key={action.shortcut}
+                    type="button"
+                    onClick={() => runPanelLauncherAction(action)}
+                    className="flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-(--control-radius) px-2.5 text-left text-sm transition-colors hover:bg-accent/60"
+                  >
+                    <action.icon className="size-4 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">{action.label}</span>
+                    <Kbd>{action.shortcut}</Kbd>
+                  </button>
+                ) : (
+                  <UnavailableLauncherRow
+                    key={action.shortcut}
+                    icon={<action.icon className="size-4 shrink-0" />}
+                    label={action.label}
+                    reason={action.unavailableReason}
+                    shortcut={action.shortcut}
+                    onClick={() => runPanelLauncherAction(action)}
+                  />
+                ),
+              )}
+            </div>
+          </>
+        ) : null}
       </div>
     </div>
+  );
+}
+
+/** Mesura: a launcher row that cannot run here, with its reason on the row. */
+function UnavailableLauncherRow(props: {
+  icon: ReactNode;
+  label: string;
+  reason: string;
+  shortcut: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-disabled="true"
+      onClick={props.onClick}
+      className="flex w-full cursor-default items-center gap-2.5 rounded-(--control-radius) px-2.5 py-1 text-left text-sm"
+    >
+      <span className="opacity-50">{props.icon}</span>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate opacity-50">{props.label}</span>
+        <span className="truncate text-muted-foreground text-xs">{props.reason}</span>
+      </span>
+      <span className="opacity-50">
+        <Kbd>{props.shortcut}</Kbd>
+      </span>
+    </button>
   );
 }
 
@@ -648,8 +735,8 @@ function surfaceTitle(
       return `#${surface.number}`;
     case "pull-requests":
       return "Pull requests";
-    case "agents":
-      return "Agents";
+    case "issues":
+      return "Issues";
     case "factory":
       return "Software Factory";
     case "device":
@@ -734,9 +821,9 @@ function SurfaceIcon({
         />
       );
     case "pull-requests":
-      return <GitPullRequestArrow className="size-3 shrink-0" />;
-    case "agents":
-      return <Bot className="size-3 shrink-0" />;
+      return <PullRequestGlyph.link className="size-3 shrink-0" />;
+    case "issues":
+      return <CircleDot className="size-3 shrink-0" />;
     case "factory":
       return <Factory className="size-3 shrink-0" />;
     case "device":
@@ -825,18 +912,26 @@ function PullRequestSurfaceIcon({
           },
         }),
   ).data;
-  // Only state and draft reach the tab. A list seed cannot know mergeability, so feeding the
-  // full detail would flip an open tab to the conflict glyph the moment its read lands.
-  const status =
-    linkedSnapshot !== null
-      ? linkedSnapshot
-      : detail === null
-        ? (seed ?? null)
-        : { state: detail.state, isDraft: detail.isDraft };
+  const reference = useMemo(
+    () => ({
+      projectId: surface.projectId as ProjectId,
+      repository: surface.repository,
+      number: surface.number,
+    }),
+    [surface.projectId, surface.repository, surface.number],
+  );
+  const sharedSummary = useSharedPullRequestSummary(resolvedEnvironmentId, reference, null);
+  // The compact tab intentionally shows lifecycle and draft state only. Conflict warnings have
+  // their own presentation on surfaces that have mergeability, while this tab stays stable as
+  // detail data arrives.
+  const status = linkedSnapshot ?? newestPullRequestSummary(detail, sharedSummary) ?? seed ?? null;
   if (status === null) {
-    return <GitPullRequest className="size-3 shrink-0 text-muted-foreground" />;
+    return <PullRequestGlyph.pullRequest className="size-3 shrink-0 text-muted-foreground" />;
   }
-  const presentation = resolvePullRequestState({ state: status.state, isDraft: status.isDraft });
+  const presentation = resolvePullRequestState({
+    state: status.state,
+    isDraft: status.isDraft ?? detail?.isDraft ?? seed?.isDraft ?? false,
+  });
   return <presentation.Icon className={cn("size-3 shrink-0", presentation.toneClassName)} />;
 }
 
@@ -845,13 +940,48 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   const browserProfiles = useBrowserDefaults().profiles;
   const { resolvedTheme } = useTheme();
   const tabListRef = useRef<HTMLDivElement>(null);
+  const launcherOpen = usePanelLauncherOwner(tabListRef, props.open !== false);
+  const panelActions = panelLauncherActions({
+    hasActiveTab: props.activeSurfaceId !== null,
+    maximized: props.maximized === true,
+  });
+  // Mesura: Ctrl+Tab / Ctrl+Shift+Tab walk these tabs while the panel has focus.
+  useRightPanelTabCycling({
+    tabBarRef: tabListRef,
+    panelOpen: props.open !== false,
+    surfaces: props.surfaces,
+    activeSurfaceId: props.activeSurfaceId,
+    onActivate: props.onActivate,
+  });
+  // Mesura: a pane move or a tab change lands in the active surface's content.
+  usePanelSurfaceKeys(tabListRef, props.activeSurfaceId);
   const [renamingDevice, setRenamingDevice] = useState<string | null>(null);
-  const [addSurfaceMenuOpen, setAddSurfaceMenuOpen] = useState(false);
   const [tabScrollState, setTabScrollState] = useState({
     hasOverflow: false,
     canScrollLeft: false,
     canScrollRight: false,
   });
+
+  // Mesura: upstream's `rightPanel.new` (Mod+T while the panel is open) opens
+  // the panel launcher, this fork's one menu for new tabs, instead of a dropdown.
+  const onNewSurfaceKeyDown = useEffectEvent((event: KeyboardEvent) => {
+    if (event.defaultPrevented || event.isComposing) return;
+    if (
+      resolveShortcutCommand(event, props.keybindings, {
+        context: { ...props.getShortcutContext(), rightPanelOpen: true },
+      }) !== "rightPanel.new"
+    )
+      return;
+    if (!isPanelLauncherKeyboardAvailable(props.open !== false)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!event.repeat) openPanelLauncher(tabListRef.current?.closest("[data-preview-panel-mode]"));
+  });
+  useEffect(() => {
+    if (props.open === false) return;
+    document.addEventListener("keydown", onNewSurfaceKeyDown, true);
+    return () => document.removeEventListener("keydown", onNewSurfaceKeyDown, true);
+  }, [props.open]);
 
   const updateTabScrollState = useCallback(() => {
     const viewport = tabScrollViewport(tabListRef.current);
@@ -883,90 +1013,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       behavior: reduceMotion ? "auto" : "smooth",
     });
   }, []);
-
-  const addSurfaceActions = [
-    {
-      label: "Browser",
-      icon: Globe2,
-      shortcut: "B",
-      available: props.browserAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.browser,
-      onClick: props.onAddBrowser,
-    },
-    {
-      label: "Terminal",
-      icon: TerminalSquare,
-      shortcut: "T",
-      available: props.terminalAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.terminal,
-      onClick: props.onAddTerminal,
-    },
-    {
-      label: "Files",
-      icon: Files,
-      shortcut: "F",
-      available: props.filesAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.files,
-      onClick: props.onAddFiles,
-    },
-    {
-      label: "Diff",
-      icon: FileDiff,
-      shortcut: "D",
-      available: props.diffAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.diff,
-      onClick: props.onAddDiff,
-    },
-    {
-      label: "Pull request",
-      icon: GitPullRequest,
-      shortcut: "P",
-      available: props.pullRequestAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.pullRequest,
-      onClick: props.onAddPullRequest,
-    },
-    {
-      label: "Linked pull requests",
-      icon: GitPullRequestArrow,
-      shortcut: "L",
-      available: props.pullRequestsAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.pullRequests,
-      onClick: props.onAddPullRequests,
-    },
-    {
-      label: "Agents",
-      icon: Bot,
-      shortcut: "A",
-      available: props.agentsAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.agents,
-      onClick: props.onAddAgents,
-    },
-    {
-      label: "Device",
-      icon: Smartphone,
-      shortcut: "M",
-      available: props.deviceAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.device,
-      onClick: props.onAddDevice,
-    },
-    {
-      label: "Software Factory",
-      icon: Factory,
-      shortcut: "S",
-      available: props.onAddFactory !== undefined,
-      disabledReason: SURFACE_DISABLED_REASONS.factory,
-      onClick: props.onAddFactory ?? NOOP,
-    },
-  ] as const;
-
-  const handleAddSurfaceMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const action = surfaceShortcutActionForKey(addSurfaceActions, event.nativeEvent);
-    if (!action) return;
-    event.preventDefault();
-    event.stopPropagation();
-    setAddSurfaceMenuOpen(false);
-    action.onClick();
-  };
 
   const handleTabContextMenu = useCallback(
     async (event: ReactMouseEvent, surface: RightPanelSurface) => {
@@ -1088,14 +1134,15 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     if (!viewport) return;
 
     const content = viewport.firstElementChild;
-    const resizeObserver = new ResizeObserver(updateTabScrollState);
-    resizeObserver.observe(viewport);
-    if (content) resizeObserver.observe(content);
+    const stopObserving = observeResize(
+      content ? [viewport, content] : viewport,
+      updateTabScrollState,
+    );
     viewport.addEventListener("scroll", updateTabScrollState, { passive: true });
     updateTabScrollState();
 
     return () => {
-      resizeObserver.disconnect();
+      stopObserving();
       viewport.removeEventListener("scroll", updateTabScrollState);
     };
   }, [updateTabScrollState]);
@@ -1129,6 +1176,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       {...(props.open !== undefined ? { open: props.open } : {})}
       {...(props.widthStorageKey !== undefined ? { widthStorageKey: props.widthStorageKey } : {})}
       {...(props.defaultWidth !== undefined ? { defaultWidth: props.defaultWidth } : {})}
+      {...(props.inlineSize ? { inlineSize: props.inlineSize } : {})}
     >
       <div
         className={cn(
@@ -1138,25 +1186,22 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           // controls a few pixels higher and the cluster jumps on open.
           props.mode === "inline" && !props.layoutControls ? "pr-28" : "pr-3",
           ownsDesktopTitleBar && "drag-region",
-          ownsDesktopTitleBar &&
-            (props.layoutControls
-              ? "wco:pr-[var(--workspace-native-controls-inset)]"
-              : "wco:pr-[calc(var(--workspace-native-controls-inset)+6rem)]"),
+          ownsDesktopTitleBar && "wco:pr-(--workspace-native-controls-inset)",
           props.mode === "inline" && props.maximized && COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
         )}
         data-right-panel-tabbar
       >
         <ScrollArea
+          radius="none"
           ref={tabListRef}
           hideScrollbars
           scrollFade
-          className="min-w-0 flex-1 rounded-none"
+          className="min-w-0 flex-1"
           data-right-panel-tab-list
         >
           <div className="flex h-full w-max min-w-full items-center gap-1">
             {props.surfaces.map((surface) => {
               const active = surface.id === props.activeSurfaceId;
-              const pending = props.pendingSurfaceIds.has(surface.id);
               const title = surfaceTitle(surface, props.previewSessions, props.terminalLabelsById);
               const previewTabId = previewTabIdOf(surface, props.previewSessions);
               // Desktop state is keyed by the session id, but desktop actions
@@ -1194,12 +1239,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                       environmentId={props.environmentId}
                       pullRequestStatusSeeds={props.pullRequestStatusSeeds}
                     />
-                    {pending ? (
-                      <span
-                        className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-current"
-                        aria-hidden
-                      />
-                    ) : null}
+                    <FileSurfacePendingMarker
+                      projectKey={props.pendingProjectKey}
+                      surfaceId={surface.id}
+                    />
                   </PanelTabCloseButton>
                   {audio === "none" || !audioRuntimeTabId ? null : (
                     <Tooltip>
@@ -1218,11 +1261,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                                 .catch(() => undefined);
                             }}
                           >
-                            {audio === "muted" ? (
-                              <VolumeOff className="size-3" />
-                            ) : (
-                              <Volume2 className="size-3" />
-                            )}
+                            <MorphIcon
+                              className="size-3"
+                              icon={audio === "muted" ? VolumeOff : Volume2}
+                            />
                           </button>
                         }
                       />
@@ -1232,7 +1274,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                   {renamingDevice === surface.id ? (
                     <input
                       aria-label="Device tab name"
-                      className="w-24 min-w-0 rounded-sm bg-background px-1 outline-none ring-1 ring-ring"
+                      className="w-24 min-w-0 rounded-sm bg-background px-1 outline-none ring-1 ring-inset ring-ring"
                       defaultValue={title}
                       ref={(element) => {
                         element?.focus();
@@ -1268,99 +1310,36 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                           </button>
                         }
                       />
-                      <TooltipPopup>{title}</TooltipPopup>
+                      <TooltipPopup>
+                        {surface.kind === "device" ? (
+                          <DeviceTabTooltip
+                            surface={surface}
+                            environmentId={props.environmentId}
+                            title={title}
+                          />
+                        ) : (
+                          title
+                        )}
+                      </TooltipPopup>
                     </Tooltip>
                   )}
                 </div>
               );
             })}
             {props.surfaces.length > 0 ? (
-              <Menu open={addSurfaceMenuOpen} onOpenChange={setAddSurfaceMenuOpen}>
-                <MenuTrigger
-                  render={
-                    <Button
-                      aria-label="Add panel surface"
-                      className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
-                      size="icon-xs"
-                      variant="ghost"
-                    />
-                  }
-                >
-                  <Plus className="size-3.5" />
-                </MenuTrigger>
-                <MenuPopup
-                  align="start"
-                  side="bottom"
-                  sideOffset={6}
-                  className="min-w-44"
-                  onKeyDownCapture={handleAddSurfaceMenuKeyDown}
-                >
-                  {addSurfaceActions.map((action) => {
-                    const Icon = action.icon;
-                    // Browser collapses into one row: clicking the trigger opens
-                    // the default profile (the common case stays one click),
-                    // while hover or arrow reveals the profiles. The choice
-                    // lives at open time because a tab's profile is fixed then —
-                    // Electron only honours a partition before attach.
-                    if (action.label === "Browser" && action.available) {
-                      return (
-                        <MenuSub key={action.label}>
-                          <MenuSubTrigger
-                            className="[&>svg:last-child]:ms-0"
-                            aria-keyshortcuts={action.shortcut}
-                            onClick={(event) => {
-                              const pointerType =
-                                "pointerType" in event.nativeEvent &&
-                                typeof event.nativeEvent.pointerType === "string"
-                                  ? event.nativeEvent.pointerType
-                                  : undefined;
-                              // Touch has no hover path to the profile choices:
-                              // its first tap opens the submenu, then a profile
-                              // is selected there. Mouse click keeps the common
-                              // default-profile action at one click.
-                              if (!shouldOpenDefaultBrowserProfileFromMenuClick(pointerType))
-                                return;
-                              setAddSurfaceMenuOpen(false);
-                              action.onClick();
-                            }}
-                          >
-                            <Icon />
-                            {action.label}
-                            <MenuShortcut>{action.shortcut}</MenuShortcut>
-                          </MenuSubTrigger>
-                          {/*
-                            Capped and truncated: profile names are user-supplied
-                            and run to 48 characters, which would otherwise widen
-                            the popup to fit-content and wrap.
-                          */}
-                          <MenuSubPopup className="min-w-40 max-w-56">
-                            {browserProfiles.map((profile) => (
-                              <MenuItem
-                                key={profile.id}
-                                onClick={() => props.onAddBrowserInProfile(profile.id)}
-                              >
-                                <span className="min-w-0 truncate">{profile.name}</span>
-                              </MenuItem>
-                            ))}
-                          </MenuSubPopup>
-                        </MenuSub>
-                      );
-                    }
-                    return (
-                      <SurfaceMenuItem
-                        key={action.label}
-                        available={action.available}
-                        disabledReason={action.disabledReason}
-                        shortcut={action.shortcut}
-                        onClick={action.onClick}
-                      >
-                        <Icon />
-                        {action.label}
-                      </SurfaceMenuItem>
-                    );
-                  })}
-                </MenuPopup>
-              </Menu>
+              // Mesura: "+" opens the panel launcher, the one menu for new tabs and
+              // panel actions (`lib/panelLauncher.ts`), in place of a second list.
+              <Button
+                aria-label="Add panel surface"
+                className="shrink-0"
+                size="icon-xs"
+                variant="ghost-muted"
+                onClick={() =>
+                  openPanelLauncher(tabListRef.current?.closest("[data-preview-panel-mode]"))
+                }
+              >
+                <Plus className="size-3.5" />
+              </Button>
             ) : null}
           </div>
         </ScrollArea>
@@ -1409,6 +1388,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           </div>
         ) : null}
         {props.layoutControls}
+        {ownsDesktopTitleBar && !props.layoutControls ? (
+          // Keeps the tabs clear of the window controls when the layout toggles live elsewhere.
+          <span aria-hidden className="hidden w-24 shrink-0 wco:block" />
+        ) : null}
         {ownsDesktopTitleBar ? (
           <span
             aria-hidden
@@ -1416,9 +1399,11 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           />
         ) : null}
       </div>
-      <div className="flex min-h-0 flex-1 flex-col" data-right-panel-surface-content>
+      <div className="relative flex min-h-0 flex-1 flex-col" data-right-panel-surface-content>
         {props.activeSurfaceId === null ? (
           <RightPanelEmptyState
+            panelOpen={props.open !== false}
+            launcherOpen={launcherOpen}
             onAddBrowser={props.onAddBrowser}
             onAddBrowserInProfile={props.onAddBrowserInProfile}
             browserProfiles={browserProfiles}
@@ -1427,7 +1412,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddFiles={props.onAddFiles}
             onAddPullRequest={props.onAddPullRequest}
             onAddPullRequests={props.onAddPullRequests}
-            onAddAgents={props.onAddAgents}
+            onAddIssues={props.onAddIssues}
             onAddDevice={props.onAddDevice}
             onAddFactory={props.onAddFactory}
             browserAvailable={props.browserAvailable}
@@ -1436,14 +1421,67 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             filesAvailable={props.filesAvailable}
             pullRequestAvailable={props.pullRequestAvailable}
             pullRequestsAvailable={props.pullRequestsAvailable}
-            agentsAvailable={props.agentsAvailable}
             deviceAvailable={props.deviceAvailable}
-            liveAgentCount={props.liveAgentCount}
+            panelActions={panelActions}
           />
         ) : (
-          props.children
+          <>
+            {props.children}
+            {/* Mesura: the launcher over the open tabs, which stay mounted under it. */}
+            {launcherOpen ? (
+              <div className="absolute inset-0 z-20 flex flex-col bg-background">
+                <RightPanelEmptyState
+                  panelOpen={props.open !== false}
+                  launcherOpen={launcherOpen}
+                  onAddBrowser={props.onAddBrowser}
+                  onAddBrowserInProfile={props.onAddBrowserInProfile}
+                  browserProfiles={browserProfiles}
+                  onAddTerminal={props.onAddTerminal}
+                  onAddDiff={props.onAddDiff}
+                  onAddFiles={props.onAddFiles}
+                  onAddPullRequest={props.onAddPullRequest}
+                  onAddPullRequests={props.onAddPullRequests}
+                  onAddIssues={props.onAddIssues}
+                  onAddDevice={props.onAddDevice}
+                  onAddFactory={props.onAddFactory}
+                  browserAvailable={props.browserAvailable}
+                  terminalAvailable={props.terminalAvailable}
+                  diffAvailable={props.diffAvailable}
+                  filesAvailable={props.filesAvailable}
+                  pullRequestAvailable={props.pullRequestAvailable}
+                  pullRequestsAvailable={props.pullRequestsAvailable}
+                  deviceAvailable={props.deviceAvailable}
+                  panelActions={panelActions}
+                />
+              </div>
+            ) : null}
+          </>
         )}
       </div>
     </PreviewPanelShell>
+  );
+}
+
+function DeviceTabTooltip(props: {
+  surface: Extract<RightPanelSurface, { kind: "device" }>;
+  environmentId: EnvironmentId | null;
+  title: string;
+}) {
+  const target = props.surface.target;
+  const { state } = useDeviceState(target ? props.environmentId : null);
+  const device = target
+    ? state.devices.find((entry) => entry.hostId === target.hostId && entry.id === target.deviceId)
+    : undefined;
+  const host = target ? state.hosts.find((entry) => entry.id === target.hostId) : undefined;
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span>{props.title}</span>
+      {target ? (
+        <span className="text-muted-foreground">
+          {host?.label ?? "Device host"} ·{" "}
+          {device?.version ?? (target.platform === "ios" ? "iOS" : "Android")}
+        </span>
+      ) : null}
+    </div>
   );
 }

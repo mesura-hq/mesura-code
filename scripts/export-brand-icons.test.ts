@@ -33,6 +33,12 @@ describe("cross-platform brand icon export", () => {
     expect(() => assertPinnedImageRenderer()).not.toThrow();
   });
 
+  it("reproduces every committed generated asset byte for byte", async () => {
+    const generated = await collectGeneratedBrandAssets(REPOSITORY_ROOT);
+
+    expect(await findStaleGeneratedAssetPaths(REPOSITORY_ROOT, generated)).toEqual([]);
+  });
+
   it("keeps the deferred macOS handoff free of an unreachable native exporter", () => {
     const exporterSource = NodeFS.readFileSync(
       NodePath.join(REPOSITORY_ROOT, "scripts/export-brand-icons.ts"),
