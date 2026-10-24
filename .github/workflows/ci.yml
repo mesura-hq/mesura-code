@@ -165,7 +165,7 @@ jobs:
       - uses: ./.github/actions/setup-apt-mirrors
 
       # The desktop tests compile the browser secret helper. The install runs in
-      # the background while Vite+ installs; the step before the tests waits for it.
+      # the background while Vite+ installs; the step before Chromium installation waits for it.
       - name: Start installing browser secret helper build libraries
         run: |
           sudo sed -i 's|http://|https://|g' /etc/apt/blacksmith-ubuntu-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources
@@ -188,18 +188,18 @@ jobs:
       - name: Test preview artifact validation
         run: python3 -B .github/scripts/stage-preview-bundle.test.py
 
-      - name: Install Chromium for script browser tests
-        run: node apps/server/node_modules/playwright-core/cli.js install --with-deps --only-shell chromium
-
-      - name: Test nightly release checks
-        run: node --test .github/scripts/check-nightly-release.test.cjs
-
       - name: Finish installing browser secret helper build libraries
         timeout-minutes: 5
         run: |
           until test -s "$RUNNER_TEMP/apt-status"; do sleep 1; done
           cat "$RUNNER_TEMP/apt.log"
           exit "$(cat "$RUNNER_TEMP/apt-status")"
+
+      - name: Install Chromium for script browser tests
+        run: node apps/server/node_modules/playwright-core/cli.js install --with-deps --only-shell chromium
+
+      - name: Test nightly release checks
+        run: node --test .github/scripts/check-nightly-release.test.cjs
 
       - name: Test
         run: vp run --parallel --concurrency-limit 4 --filter '!t3' --filter '!@t3tools/monorepo' --filter '!@t3tools/web' test

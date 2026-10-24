@@ -12,6 +12,8 @@ vi.mock("~/hooks/useSettings", () => ({
   getClientSettings: () => settings,
 }));
 
+const desktop = { viewportWidth: 1280, primaryPointerCoarse: false };
+
 const click = { metaKey: false, ctrlKey: false };
 
 describe("resolveLinkTarget", () => {
@@ -22,6 +24,7 @@ describe("resolveLinkTarget", () => {
         event: click,
         preference: "system",
         canOpenInApp: true,
+        linkClient: desktop,
       }),
     ).toBe("system");
   });
@@ -33,6 +36,7 @@ describe("resolveLinkTarget", () => {
         event: click,
         preference: "app",
         canOpenInApp: true,
+        linkClient: desktop,
       }),
     ).toBe("app");
   });
@@ -46,6 +50,7 @@ describe("resolveLinkTarget", () => {
         event: click,
         preference: "app",
         canOpenInApp: false,
+        linkClient: desktop,
       }),
     ).toBe("system");
   });
@@ -57,6 +62,7 @@ describe("resolveLinkTarget", () => {
         event: { metaKey: true, ctrlKey: false },
         preference: "app",
         canOpenInApp: true,
+        linkClient: desktop,
       }),
     ).toBe("system");
     expect(
@@ -65,15 +71,22 @@ describe("resolveLinkTarget", () => {
         event: { metaKey: false, ctrlKey: true },
         preference: "app",
         canOpenInApp: true,
+        linkClient: desktop,
       }),
     ).toBe("system");
   });
 
   it("leaves non-web schemes to the shell", () => {
     for (const url of ["mailto:someone@example.com", "vscode://file/x", "not a url"]) {
-      expect(resolveLinkTarget({ url, event: click, preference: "app", canOpenInApp: true })).toBe(
-        "system",
-      );
+      expect(
+        resolveLinkTarget({
+          url,
+          event: click,
+          preference: "app",
+          canOpenInApp: true,
+          linkClient: desktop,
+        }),
+      ).toBe("system");
     }
   });
 });
@@ -90,4 +103,38 @@ describe("resolveBrowserLinkTargetPreference", () => {
       await expect(resolveBrowserLinkTargetPreference()).resolves.toBe(preference);
     },
   );
+});
+
+it.each([
+  [767, false, "system"],
+  [1280, true, "system"],
+  [768, false, "app"],
+] as const)(
+  "link policy boundary: width %s coarse %s chooses %s",
+  (viewportWidth, primaryPointerCoarse, target) => {
+    expect(
+      resolveLinkTarget({
+        url: "https://example.com",
+        event: click,
+        preference: "app",
+        canOpenInApp: true,
+        linkClient: { viewportWidth, primaryPointerCoarse },
+      }),
+    ).toBe(target);
+  },
+);
+
+it("link policy hydration: reads the saved choice only after hydration completes", async () => {
+  settings.browserLinkTarget = "system";
+  let release = () => {};
+  vi.mocked(ensureClientSettingsHydrated).mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+  );
+  const reading = resolveBrowserLinkTargetPreference();
+  settings.browserLinkTarget = "app";
+  release();
+  await expect(reading).resolves.toBe("app");
 });

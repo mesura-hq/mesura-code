@@ -111,6 +111,18 @@ Added by the public-readiness preparation (2026-10-08):
   these tests type (`sales`, `/home/jc/w`, `wo`) match the same single entry as before. Test
   fixtures only; no product code changed.
 
+Added by the editor latency work (2026-10-19):
+
+- `packages/fm-ui/src/tree/useTreeWidth.ts`: text widths are cached per font and text, with one
+  canvas context per font. It measured every row with `measureText` in a layout effect each time
+  `rows` changed, and Mesura Code re-projects the rows on every listing refetch, which follows
+  every save: 129–242 ms long tasks on a few hundred rows. Now a refetch of an unchanged listing
+  measures nothing, and a new row measures only itself. The cache is dropped only when the fonts
+  change: a different computed font, a `loadingdone`, or `fonts.ready` when fonts were still loading
+  at mount. Font events are followed once per viewport, not per rows change. The width it computes
+  is unchanged.
+- `packages/fm-ui/test/renderer/tree-width-cost.test.tsx` (new): the tests for that.
+
 Every edit is written so that the file manager's own `App.tsx` and its existing tests need no
 change. A maintainer of the file manager should be able to accept the branch as is.
 

@@ -656,7 +656,11 @@ export const BranchToolbar = memo(function BranchToolbar({
     () => (canUsePreviousWorktree && activeProjectRef ? [activeProjectRef] : []),
     [canUsePreviousWorktree, activeProjectRef],
   );
-  const projectThreads = useThreadShellsForProjectRefs(projectRefsForWorktreeLookup);
+  // Mesura: re-read at most once a second, off the message task; the seed only
+  // needs the latest worktree (phase 6).
+  const projectThreads = useThreadShellsForProjectRefs(projectRefsForWorktreeLookup, {
+    throttled: true,
+  });
   const previousWorktreeSeed = useMemo(
     () =>
       canUsePreviousWorktree

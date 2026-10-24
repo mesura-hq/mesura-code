@@ -26,6 +26,7 @@ export function NvimStatusStrip({
   message,
   fallback,
   onRetry,
+  keysDelivery,
 }: {
   readonly mode: string;
   readonly jumping: boolean;
@@ -33,6 +34,8 @@ export function NvimStatusStrip({
   readonly message: { readonly kind: string; readonly text: string } | null;
   readonly fallback: NvimFallback | null;
   readonly onRetry: () => void;
+  /** Keys that are not reaching Neovim; see `editorKeyLane`. */
+  readonly keysDelivery: "retrying" | "lost" | null;
 }) {
   if (fallback !== null) {
     // The panel still edits — it is the plain editor it was before modal
@@ -78,6 +81,13 @@ export function NvimStatusStrip({
       ) : (
         <span className="font-mono font-medium tracking-wide text-foreground">
           {describeMode(mode)}
+        </span>
+      )}
+      {keysDelivery === null ? null : (
+        // Said, not hidden: a key that did not arrive changes what the next
+        // one does, so the developer has to know before they type on.
+        <span data-nvim-input-lost className="shrink-0 font-mono text-destructive">
+          {keysDelivery === "retrying" ? "KEYS NOT SENT, RETRYING" : "KEYS LOST"}
         </span>
       )}
       {cmdline === null ? null : <NvimCmdlineText cmdline={cmdline} />}

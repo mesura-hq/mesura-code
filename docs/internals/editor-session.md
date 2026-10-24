@@ -7,16 +7,19 @@ in a client. It exists so the developer's own Neovim — their configuration, th
 remapped keys — is what edits the file, while [Monaco](../user/file-panel.md) stays the thing on
 screen.
 
-The parts, and the file that owns each:
+The server half lives in `apps/server/src/editor/` (`Manager.ts` owns sessions, the per-thread lock
+and key receipts; `NvimBridge.ts` the session itself), the contract in
+`packages/contracts/src/editorSession.ts`, and the client's key lane in
+`apps/web/src/state/editorSession.ts`.
 
-| Part                                                                     | File                                                          |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------- |
-| msgpack-RPC framing over the process's pipes                             | `apps/server/src/editor/NvimRpc.ts`                           |
-| Spawning, behind a service so sessions build without an operating system | `apps/server/src/editor/NvimAdapter.ts`, `NodeNvimAdapter.ts` |
-| Deciding argv and environment before anything spawns                     | `apps/server/src/editor/NvimLaunch.ts`                        |
-| The Lua the host forces on every session                                 | `apps/server/src/editor/hostPlugin.ts`                        |
-| The session: the mirrored buffer, the cursor, the mode, the grid         | `apps/server/src/editor/NvimBridge.ts`                        |
-| Reading the drawn screen back against the buffer                         | `apps/server/src/editor/GridModel.ts`                         |
+## Where Neovim runs
+
+Neovim runs on the environment's host, never on the client. The developer's real setup is a remote
+host: they edit from the laptop's desktop app, whose environment is vigilia-home's live server, so
+Neovim runs on vigilia-home and every key crosses the tailnet (a direct LAN path, about 4 ms round
+trip). The phone uses the web client against the same host. A design that is correct only at zero
+link delay is therefore wrong for the one user this fork has; the key lane, the caret delivered with
+its text and Escape decided by the input answer all exist because of the round trip.
 
 ## The process and its launch
 
@@ -85,21 +88,32 @@ The host also picks the grid of the window the developer is in. Taking the most 
 `win_pos` looks equivalent and is not: a real configuration opens a file tree and a symbol list, and
 a sidebar read against the file's lines is virtual text on every column.
 
+### The grid width, and the window's `leftcol`
+
+With `nowrap`, a cursor that reaches the grid's last column scrolls the window sideways, and every
+cell after that is read against the wrong buffer character. Typing at the end of a long Markdown
+line did it on every key: 882 phantom overlays and 35.5 KB of editor events per key. Two rules hold
+the equality, and with both the same typing draws no overlay and costs about 1.26 KB per key.
+
+- **The host owns the grid width, not the client.** Only the host sees every key; a client sizes
+  its request to what it shows and sends one only when it scrolls, so its `cols` is a floor. The
+  host gives Neovim the widest line the cursor can reach (the window and one window either side)
+  plus 128 spare columns, bounded at 2,048 (`gridWidth.ts`). It grows the grid **before** a key
+  batch that would bring the widest line near the edge, because Neovim sends a change and the
+  scroll it caused in one burst: a host that grows on hearing of the change is already too late.
+  Keys whose expansion the host cannot predict — a put, `.`, a macro, `J`, an Ex command, a
+  counted insert — reserve the whole 2,048 columns for the next 20 batches.
+- **`GridModel` classifies against the window's `leftcol`**, which the host plugin pushes with the
+  cursor, using one width model that matches Neovim's drawing (`<200b>` spellings of unprintable
+  characters, the `<` marker for a cut wide character, tabs). A line wider than the bound still
+  scrolls the window; it is then read correctly, at the cost of every row redrawing.
+
 ## The wire
 
-Seven methods, all in `packages/contracts/src/editorSession.ts` and `rpc.ts`. Every one of them
-carries a `threadId`, because a session belongs to a thread rather than to a file: the developer
-switches file inside one Neovim, the way they would in a terminal.
-
-| Method                      | Carries                                 | Answers                 |
-| --------------------------- | --------------------------------------- | ----------------------- |
-| `editorSession.open`        | `cwd`, `relativePath`, the file's lines | `EditorSessionSnapshot` |
-| `editorSession.attach`      | nothing but the thread                  | a **stream** of events  |
-| `editorSession.input`       | `keys`, in Neovim notation              | nothing                 |
-| `editorSession.viewport`    | `topline`, `rows`, `cols`               | nothing                 |
-| `editorSession.setCursor`   | `line`, `col`                           | nothing                 |
-| `editorSession.replaceText` | `edits`, each a range and its text      | nothing                 |
-| `editorSession.close`       | nothing but the thread                  | nothing                 |
+The methods and their payloads are defined in `packages/contracts/src/editorSession.ts` and
+`rpc.ts`; read them there. Every one carries a `threadId`, because a session belongs to a thread
+rather than to a file: the developer switches file inside one Neovim, the way they would in a
+terminal.
 
 `open` hands Neovim the **lines**, never the path. Neovim is told the name so `:w`, `%` and the
 status line say something true, and it never reads or writes the file itself — the host owns the
@@ -110,36 +124,75 @@ Both text-carrying payloads are bounded: `keys` at 1024 characters, `edits` at a
 and each entry's `text` at a megabyte, which is where the file-read path truncates and therefore the
 largest replacement that can honestly arrive.
 
-Errors are the union of `EditorSessionError` and `EnvironmentAuthorizationError`. Authorization is
-the terminal's `AuthTerminalOperateScope`, for all seven — a session is a subprocess on the
+Errors are the union of `EditorSessionError` and `EnvironmentAuthorizationError`.
+`EditorSessionInputLostError` is the one a client must not retry; see **Keys, and how they travel**.
+Authorization is
+the terminal's `AuthTerminalOperateScope`, for every method — a session is a subprocess on the
 developer's machine reading and writing their files, which is the authority the terminal already
 carries rather than a new one to invent.
 
 ### The event union
 
-`attach` streams `EditorSessionEvent`, a union of twelve tagged members. The client folds them into
-absolute state in `apps/web/src/state/editorSessionFold.ts`; nothing downstream may read "the last
-event", for the reason under **Traps** below.
-
-| Event            | What it says                                                             |
-| ---------------- | ------------------------------------------------------------------------ |
-| `snapshot`       | the whole session: path, lines, cursor, mode, topline, highlight defs    |
-| `lines`          | one `nvim_buf_lines_event`: zero-based, half-open, `last === -1` for all |
-| `cursor`         | where the caret is                                                       |
-| `mode`           | the short mode name Neovim reports                                       |
-| `viewport`       | the top line Neovim is showing                                           |
-| `visual`         | the selection, or `null` outside visual mode                             |
-| `decorations`    | everything drawn over the text, by row                                   |
-| `hlDefs`         | the colours those drawings refer to, by highlight id                     |
-| `cmdline`        | the command line Neovim is showing, or `null` when it closed             |
-| `message`        | the last message Neovim wrote, and its kind                              |
-| `writeRequested` | Neovim asked the host to write the file — this is what `:w` becomes      |
-| `exited`         | the session is gone, and why; the stream ends after it                   |
+`attach` streams `EditorSessionEvent`, a tagged union defined in the contract. Every event other
+than `snapshot` is a delta. The client folds them into absolute state in
+`apps/web/src/state/editorSessionFold.ts`; nothing downstream may read "the last event", for the
+reason under **Traps** below. `writeRequested` is what `:w` becomes, because the host, not Neovim,
+writes the file.
 
 **`rows` on a decorations event is not a hint, it is the erase list.** It names the rows this event
 replaces, so the client drops what it held for those rows and takes these instead. Without it a
 decoration that went away sends nothing at all, and a flash label stays on screen after the jump it
 belonged to is over.
+
+## Keys, and how they travel
+
+A client that sends one `input` per key pays one round trip per key, and keys typed faster than
+the round trip queue behind each other. At 60 ms one-way delay with keys 80 ms apart, that put
+insert-mode keystroke-to-paint at a p95 of 4,964 ms. The rules below brought it to 247 ms, with the
+text always ending correct.
+
+- **One lane per thread, one request in flight.** `editorKeyLane` is the only sender of a thread's
+  keys. Keys typed while a request is in flight go out together as the next batch, split in order
+  at the contract's 1,024-character bound and only between keys (`<Es` then `c>` is five letters,
+  not Escape). A click or an agent's edit takes its place in the same lane, so it lands between the
+  keys around it. The lane is module-level per registry, because the panel remounts per file and
+  the keys in flight belong to the thread.
+- **A batch is applied once.** Each carries a `sequence`, a lane id and an index counting upwards.
+  The server keeps one receipt per lane and skips a batch it already applied, answering it as a
+  success: a disconnect may have lost only the reply. It records the submission uninterruptibly,
+  and when Neovim's input buffer takes only part of a batch it resumes from where it stopped.
+  Receipts are kept for at most 16 lanes per session (`MAX_INPUT_LANES`), the oldest evicted first.
+  A lane is one client registry's stream for the thread, so a window or a reload is a new lane; a
+  lane evicted by sixteen newer ones loses its receipt, and a re-send from it is applied again as
+  a new batch rather than skipped.
+- **A receipt belongs to one Neovim.** It records which generation of the session's Neovim took
+  the batch. A re-send of a batch that a since-replaced Neovim took fails with
+  `EditorSessionInputLostError`: taking a key is not running it, so the restored text may or may not
+  hold it, and sending it again could type it twice.
+- **Keys are never dropped silently.** After a transport failure the lane waits for the session to
+  come back and re-sends the unacknowledged batch first, under the same sequence number. A session
+  gone for 60 s, six failures in a row that the server answered, or an `EditorSessionInputLostError`
+  drop the queued keys, and the status strip says `KEYS LOST` (and `KEYS NOT SENT, RETRYING` while it
+  retries), because a key that did not arrive changes what the next one does.
+- **The text and the caret arrive together.** The host plugin pushes the cursor, the mode and
+  `leftcol` with `rpcnotify` (`mesura:cursor`) from `CursorMoved`, `CursorMovedI`, `ModeChanged` and
+  `WinScrolled`. Neovim runs those after the key and before the redraw, and not while typeahead is
+  pending, so a batch pushes once and ahead of its frame. The manager sends a lines event, its
+  cursor and its drawing in one attach-stream chunk, so a key no longer costs a cursor read and the
+  caret paints in the frame that paints the letter. A cursor read stays as the fallback for what
+  moves the cursor without those autocommands.
+- **Escape is decided by the input answer, not by the attach stream.** Each `input` answers with
+  where Neovim is after it consumed the batch: the mode from `nvim_get_mode`, which Neovim orders
+  behind pending input (neovim#6247); `blocking` when a command waits for a key (`f`, `r`, a count,
+  a mapping prefix, or a plugin's `getcharstr()`, which shows only in `state()`); and `jumping` while
+  flash labels targets. The client releases the editor on Escape only when its lane is empty and
+  the last answer said plain `n`, not blocking, not jumping. The stream's own `mode` event can arrive
+  after that answer, and a client that read it released on a NORMAL older than the keys. On the
+  bench at 60 ms one-way, Escape stranded Neovim in insert mode in 2 tries of 8 at `288064922e`, with
+  4 probe keys reaching the chat composer instead; after the fix 0 of 8, with none. The
+  investigation's own repro script, run before the developer's configuration was fixed, had
+  stranded it 8 tries of 8. `open` answers with the
+  same state, so Escape right after opening a file releases; a snapshot never confirms a mode.
 
 ## Who owns what
 
@@ -219,9 +272,24 @@ Each of these was found the expensive way, and each looks like a correct piece o
 - **Edits handed to `nvim_buf_set_text` must be applied last-first, and sorted.** Out-of-order
   edits that change length corrupt each other's positions. `APPLY_EDITS_LUA` sorts before it walks
   backwards.
-- **`nvim_input` is asynchronous and nothing in the protocol says when a key was consumed.** Code
-  that has to know uses the session's `type`, which feeds keys with `nvim_feedkeys`'s `x` flag — at
-  the cost of aborting an incomplete command, so it takes whole sequences only.
+- **`nvim_input` is asynchronous and nothing in the protocol says when a key was consumed.** A
+  `nvim_get_mode` sent after it is the one call Neovim orders behind pending input, so its answer
+  comes once the keys ran, or at once with `blocking` set when a command waits for a key; that is
+  how `input` answers. The tests also use the session's `type`, which feeds keys with
+  `nvim_feedkeys`'s `x` flag — at the cost of aborting an incomplete command, so it takes whole
+  sequences only.
+- **While Neovim waits for the rest of a command, a non-fast request never answers.** After `g`,
+  `Z` or an operator, `nvim_get_mode().blocking` is true and Neovim defers every non-fast request,
+  `nvim_exec_lua` included, until the key arrives. That request holds the thread's lock, and the key
+  arrives through `input`, which takes the same lock, so the thread stopped taking keys for good
+  ("2 requests waiting longer than 15s", every later key lost). So when the last batch left Neovim
+  waiting, `open` and `replaceText` first cancel the pending command with `<Esc>` through
+  `nvim_input` (which Neovim takes while it waits), because a refusal would lose a file or an
+  agent's write; `setCursor` and `viewport` refuse instead (`cancelPendingCommand` and
+  `refuseWhileWaitingForKey` in `Manager.ts`). Nothing retries a refused call: the key lane
+  finishes a queued call on failure as on success. A click while a command is pending is dropped,
+  and Neovim's window stays where it was until the next viewport change sends a fresh viewport.
+  That is a known limitation, accepted because the half-typed command is still waiting for its key.
 - **The editor sits under the app's own overlays and must stay there.** Monaco's widgets take a
   z-index of their own, and the command palette, the file picker and the dialogs are the app's.
   Meta never reaches Neovim (`nvimKeymap.ts` returns null for it) for the same reason: an editor
@@ -307,77 +375,96 @@ an edit somebody reads.
 
 ## Insert mode
 
-The question: do keys typed in insert mode go to Neovim like every other key (**naive**), or does
-Monaco edit locally and hand the result over when insert mode ends (**delegated**)?
+The question: do keys typed in insert mode go to Neovim like every other key (**naive**, the hybrid
+this fork runs), or does Monaco edit locally and hand the result over when insert mode ends
+(**delegated**, vscode-neovim's design)?
 
-It is a question about time, so it is answered with measurements. The rule was fixed before the
-numbers were read, so it could not be argued afterwards:
+**Every key goes to Neovim.** Neovim answers an insert key in about a millisecond and the
+developer's link is a LAN round trip of about 4 ms, so the cost of a key is the round trip, and the
+key lane pays it once per batch rather than once per key. Delegated insert would stop every
+per-character plugin for the length of an insert (see below) to save those few milliseconds.
 
-> Predicted keystroke-to-paint = measured server-side p95 + 6.4 ms browser share. At or under
-> 16.7 ms — one frame at 60 Hz — **naive**. Over it, **delegated**.
+**Revisit the decision when either of these holds:**
 
-The browser share is a constant from the prototype (7.0 ms end to end for insert-mode typing, minus the 0.60 ms insert-mode floor; the 0.50 ms figure often quoted beside it is the normal-mode one), not
-re-measured here.
+- On the developer's real link, insert keystroke-to-paint p95 stays above two round trips plus one
+  frame (about 25 ms at a 4 ms round trip) with the key lane and the fixes below in place.
+- The developer works over a high-latency link.
 
-### Measured
+Delegated insert mode is then the candidate. Optimistic local echo — Monaco paints the character
+at once and reconciles when Neovim's version of the line arrives — is the smaller step between the
+two. Neither is built.
+
+### Measured end to end
+
+On a bench outside the repository (`/home/dev/projects/factory-runs/editor-latency-fixes/bench/` on
+vigilia-home, method in its `METHOD.md`): the production client in headless Chromium against a copy
+of the developer's home, the developer's Neovim configuration, a TCP proxy that adds a one-way
+delay, and keys 80 ms apart. Keystroke-to-paint is keydown to the frame that painted the key's text.
+
+| condition                                                 | before                         | after                             |
+| --------------------------------------------------------- | ------------------------------ | --------------------------------- |
+| insert typing at 60 ms one-way, p95                       | 4,964 ms                       | 247 ms, text always correct       |
+| insert typing with no added delay, p95                    |                                | 12.2 ms                           |
+| Escape at 60 ms one-way: Neovim stranded in insert mode   | 2 of 8, 4 keys to the composer | 0 of 8, none                      |
+| typing at the end of a long Markdown line                 | 882 overlays, 35.5 KB per key  | 0 overlays, about 1.26 KB per key |
+| insert typing beside ten streaming agents, p95, streaming | about 37 ms                    | 25–28 ms                          |
+| the same, after the streams settle, p95                   | 36.4 ms                        | about 14 ms                       |
+
+What a key cost besides Neovim was most of the difference in the last two rows. One editor key now
+renders only the file panel — sidebar rows and tooltips no longer commit per key, and the file tree
+measures no text while typing (`AppRoot.editorKeySidebarCost.fence.test.tsx` holds it) — and the
+pull-request sweep no longer runs git against unchanged repositories (311 git processes per steady
+sweep on a copy of the developer's database, now 0). The streams' remaining cost is the server's
+SQLite commit `fsync` on the event loop, about 2 ms per commit under the default
+`synchronous = FULL`. `NORMAL` measured about 15 ms, but whether to trade that durability is an
+open decision, not a settled one.
+
+### Neovim's own share
 
 `apps/server/src/editor/conformance/insertModeLatency.test.ts`, gated on `MESURA_NVIM_CONFIG_DIR`.
-Neovim 0.12.4, the developer's configuration with 55 plugins, a 300-line TypeScript buffer, second
-run of two so lazy.nvim's first-start work is not in the numbers.
+Neovim 0.12.4, the developer's configuration at `~/.neovim` commit `c730dae`, a 300-line TypeScript
+buffer, the second of two runs. The time is from a key to the frame that showed it, inside the
+server, with no client and no link.
 
 | run                            | n   | p50 ms | p95 ms | max ms | median cells | median buffer events |
 | ------------------------------ | --- | ------ | ------ | ------ | ------------ | -------------------- |
-| insert characters, 25 ms apart | 200 | 1.77   | 2.84   | 32.56  | 3            | 1                    |
-| normal mode `j`/`k`            | 50  | 0.46   | 0.63   | 0.65   | 476          | 0                    |
-| flash `s`+`e`, to the labels   | 20  | 2.20   | 3.06   | 3.06   | 88           | 0                    |
+| insert characters, 25 ms apart | 200 | 1.12   | 1.67   | 2.35   | 3            | 1                    |
+| normal mode `j`/`k`            | 50  | 0.43   | 0.79   | 0.97   | 585          | 0                    |
+| flash `s`+`e`, to the labels   | 20  | 5.43   | 9.86   | 9.86   | 4,896        | 0                    |
 
-Predicted keystroke-to-paint, from the insert p95 of 2.84 ms:
+The test still prints the verdict of the rule this decision was first taken by — predicted local
+keystroke-to-paint, the server p95 plus a 6.4 ms browser share from the prototype, at or under one
+frame means naive. The end-to-end numbers above replace that prediction, which assumed a link with
+no delay.
 
-| one-way link delay                 | predicted ms |
-| ---------------------------------- | ------------ |
-| 0 (local)                          | 9.24         |
-| 5.6 (tailnet minimum)              | 20.44        |
-| 50 (tailnet average)               | 109.24       |
-| 250 (tailnet under sustained load) | 509.24       |
-
-**How much to trust these.** Under this configuration Neovim flushes about every four
-milliseconds whether or not anything is happening — 114 frames in 500 idle milliseconds, nearly all
-of them drawing nothing. A bench that timed "the next frame after a key" would therefore be timing
-that stream and not the key, and an earlier version of this one did exactly that: it reported a p50
-of 1.73 ms, which is about half the gap between two empty frames. The bench now waits for a frame in
-which a cell was drawn **or** the cursor moved, and it publishes its own error bar: of the 200 gaps
-between keys, **33 saw something happen with no key in flight**. That is the rate at which a timing
-could still be somebody else's frame.
-
-### What the tailnet numbers mean, and why they do not change the verdict
-
-At the tailnet minimum a keystroke is predicted at 20.44 ms — already over one frame — and under
-sustained load from the phone it is half a second. That is a real number for a remote browser and it
-does not move this decision, because the two surfaces this fork is used on are the desktop host,
-where the link delay is zero, and the Android app, which has no modal input this cycle.
-
-If a remote browser later gets modal editing, this is the number that cycle starts from, and
-optimistic local echo is the candidate mechanism: Monaco paints the character immediately and
-reconciles when Neovim's version of the line arrives. That is not built here.
+**How much to trust these.** The bench waits for a frame in which a cell was drawn **or** the
+cursor moved, never for "the next frame", and it publishes its own error bar: the 25 ms gaps
+between keys in which something happened with no key in flight. Now 0 of 200. That matters because
+a configuration can flush with nothing to draw. Before the developer's configuration stopped
+loading plugins under Mesura that raised errors and redrew constantly (cmp-nvim-lsp, lspconfig),
+Neovim flushed about every 4 ms while idle — 114 frames in 500 ms — and 33 of 200 gaps saw
+something happen; an earlier version of the bench that timed the next frame reported a p50 of
+1.73 ms, about half the gap between two empty frames. With commit `c730dae`, an idle Neovim emits no
+frame at all: none in 15 s in normal mode and none in 10 s in insert mode.
 
 ### The plugins that run on every inserted character
 
-Read out of a live session, from inside insert mode, rather than from the plugin list:
+Read out of a live session under Mesura, from inside insert mode, rather than from the plugin list:
 
-| event           | groups                                              |
-| --------------- | --------------------------------------------------- |
-| `InsertCharPre` | `autopairs_insert_1`                                |
-| `TextChangedI`  | `matchparen`, `___cmp___`                           |
-| `CursorMovedI`  | `lualine_stl_refresh`, `matchparen`, `___cmp___`    |
-| `InsertEnter`   | `cmp_nvim_lsp`, `___cmp___`                         |
-| `InsertLeave`   | `lint`, `nvim-ts-autotag-1`, `___cmp___`, `luasnip` |
+| event           | groups                      |
+| --------------- | --------------------------- |
+| `InsertCharPre` | `autopairs_insert_1`        |
+| `TextChangedI`  | `matchparen`                |
+| `CursorMovedI`  | `matchparen`, `MesuraHost`  |
+| `InsertEnter`   | `flash_char`                |
+| `InsertLeave`   | `lint`, `nvim-ts-autotag-1` |
 
-Under **naive**, which is what was chosen, the developer keeps all of them: autopairs inserts the
-closing bracket, nvim-cmp offers completions, LuaSnip expands, nvim-ts-autotag closes the tag,
-nvim-lint runs on leaving insert. Under **delegated** they would all stop running for the duration of
-an insert, because Neovim would never see the individual characters — that is the price the
-delegated branch pays for typing that feels local at any link delay, and the numbers said it did not
-have to be paid.
+Under **naive** the developer keeps all of them: autopairs inserts the closing bracket,
+nvim-ts-autotag closes the tag, nvim-lint runs on leaving insert. Under **delegated** they would all
+stop running for the length of an insert, because Neovim would never see the individual characters.
+nvim-cmp and its sources are absent because the configuration leaves them out under Mesura
+(`vim.g.mesura`, `~/.neovim/lua/jc/mesura.lua`): its menu is a float this host never draws, so it
+inserted completions nobody saw. `MesuraHost` is the host plugin's own cursor push.
 
 One consequence of autopairs worth recording, because it broke the bench twice: **many inserted
 characters draw no cells at all.** Typing the `)` that autopairs already inserted only moves the
@@ -393,10 +480,10 @@ than argued.
 
 - **Shift is a modifier for a named key and never for a printable one.** On a Latin-American layout
   `/` is `Shift+7` and `event.key` already says `/`, so sending `<S-/>` would mean nothing while `/`
-  means search. `Tab` is `Tab` however it was typed, and his configuration maps `<S-Tab>` and
+  means search. `Tab` is `Tab` however it was typed, and their configuration maps `<S-Tab>` and
   `<Tab>` to `vim.snippet.jump` backwards and forwards — two different commands. Escape is the one
   named key Shift is dropped for: nothing maps `<S-Esc>`, and a Shift held a moment too long would
-  otherwise leave him in insert mode.
+  otherwise leave them in insert mode.
 - **The pane chords never reach Neovim, and are not on the list below.**
   `Ctrl+H` and `Ctrl+L` are claimed on the window in the capture phase by
   `apps/web/src/lib/usePaneNavigation.ts`, so Monaco is never offered them and
@@ -408,9 +495,9 @@ than argued.
   vertical neighbour, so neither chord is claimed while the editor has focus.
   The whole model is in [Pane focus](./pane-focus.md).
 - **One application shortcut outranks Neovim among the keys Monaco does
-  receive: the file picker.** `<C-p>` is unmapped in his
+  receive: the file picker.** `<C-p>` is unmapped in their
   configuration, so the picker costs Neovim nothing. Every other collision goes the other way, and
-  the measurements are why — `<C-k>` is `TmuxNavigateUp`, `<C-b>` is Telescope, `<C-f>` is his file
+  the measurements are why — `<C-k>` is `TmuxNavigateUp`, `<C-b>` is Telescope, `<C-f>` is their file
   finder, `<C-u>` and `<C-d>` are half the scrolling. The application's own version of those is
   reached by leaving the editor first — Escape in normal mode releases it to the panel, and
   `Ctrl+H` from there reaches the chat, which is the pane `Ctrl+U` and `Ctrl+D` scroll. They are
@@ -418,12 +505,14 @@ than argued.
   [Pane focus](./pane-focus.md).
 - **Escape in plain normal mode belongs to the panel**, and in every other mode to Neovim. Leaving
   insert, visual or an operator is what Escape is for, and a host that blurred the editor instead
-  would strand him in that mode with the keyboard elsewhere. In normal mode there is nothing to
-  leave, and `<Esc>` is unmapped there in his configuration, so it dismisses as it always did —
+  would strand them in that mode with the keyboard elsewhere. In normal mode there is nothing to
+  leave, and `<Esc>` is unmapped there in their configuration, so it dismisses as it always did —
   except while flash waits for a label. Neovim reports plain `n` then, so the session reads flash's
   own extmark namespace alongside the mode and sends `jumping`; without it Escape was taken as a
   dismissal and the labels stayed up. The same flag drives the strip's FLASH label and fades every
-  highlight with no background (flash's backdrop) so the labels stand out.
+  highlight with no background (flash's backdrop) so the labels stand out. Which mode Neovim is in
+  is read from the last `input` answer with the key lane empty, never from the attach stream; see
+  **Keys, and how they travel**.
 
 **The session state the client holds is absolute, not the last event.** Every event other than
 `snapshot` is a delta, and a client that kept only the latest one would be correct exactly as long
@@ -446,7 +535,7 @@ the initial snapshot `nvim_buf_attach` sends.
 
 ## The window, and who decides where it is
 
-Monaco owns the scrolling a pointer or a wheel caused; Neovim owns the scrolling a key caused. Three
+Monaco owns the scrolling a pointer or a wheel caused; Neovim owns the scrolling a key caused. Four
 things in that exchange were measured rather than reasoned about, and each one was wrong first.
 
 - **`winrestview({ topline })` on its own does not hold.** Neovim will not keep a window that hides
@@ -454,9 +543,17 @@ things in that exchange were measured rather than reasoned about, and each one w
   value from inside the same Lua call, which is what makes it look like it worked. The cursor
   therefore moves into the window, and only when it would otherwise be outside it. That is what
   Vim's own mouse wheel does.
+- **Only a pointer scroll moves the cursor.** A viewport request carries its `source`. `pointer` (a
+  wheel, a scrollbar, a touch) is a scroll Neovim never saw, so the cursor follows it. `keys`, or no
+  source, is the client following a scroll a key made, and the request can be older than keys
+  Neovim already ran over the link, so a cursor pulled back by it undoes typing.
 - **The grid to resize is the buffer's, not the outer one.** With `ext_multigrid` the outer grid is
   the whole screen, and resizing it leaves the window inside it the size it was. The id is assigned
-  by the redraw stream rather than fixed, so the bridge reports it and the manager uses that.
+  by the redraw stream rather than fixed, so the bridge reports it and the manager uses that. Its
+  width is the host's, not the request's; see **The grid width, and the window's `leftcol`**.
+- **Under word wrap, Monaco does not follow a Neovim topline that would hide the caret.** Neovim
+  never wraps and Monaco may, so Neovim's N rows can be more than Monaco shows, and Neovim's
+  topline can put the caret below Monaco's window (`followingHidesCaret` in `nvimViewport.ts`).
 - **An echo is a topline either side sent recently, not the last one it sent.** A wheel produces
   scrolls faster than the round trip answers them, so a developer can scroll away and back before
   the first answer lands; with one slot remembered, the stale echo scrolls the editor back to a
@@ -531,24 +628,26 @@ asking what just happened instead of what is true.
   `nvimSessionRecovery.ts`. Neovim state (undo, registers, marks) does not survive a reopen. The
   attach stream is `attachEventStream`, and it must not be `Stream.callback`: that runs its
   registration on a fiber nothing watches, so a failed attach left the client on a silent stream.
-- **A visual selection assumes `selection=inclusive`.** His configuration uses the default, measured,
+- **A visual selection assumes `selection=inclusive`.** Their configuration uses the default, measured,
   and `virtualedit` is empty. Under `selection=exclusive` the drawn selection would be one character
   too long, and under `virtualedit=block` a block past the end of a short line would be clipped where
   Vim would not clip it. Neither is plumbed through, deliberately: the option would have to be read
-  per buffer and carried on the wire for a setting he does not use.
-- **`/` does not leave a search highlight under his configuration.** flash owns the key and clears
+  per buffer and carried on the wire for a setting they do not use.
+- **`/` does not leave a search highlight under their configuration.** flash owns the key and clears
   `hlsearch` when its jump finishes, so a search that moved the cursor leaves nothing marked. The
   run-reporting path is real and is exercised by setting the search register directly; what is
-  absent is Vim's own after-the-fact highlight, and it is absent because he replaced it.
+  absent is Vim's own after-the-fact highlight, and it is absent because they replaced it.
 - **The command-line window is not drawn in the strip.** `q:` and `<C-f>` from the command line open
   a real window, and `ext_cmdline` reports it as the command line closing. The text is visible
   because the window draws like any other, but the strip shows nothing while the developer edits a
   command in it.
-- **A `flush` does not mean something changed.** Under the developer's configuration Neovim emits
-  roughly 230 flushes a second while completely idle, nearly all of them drawing no cells at all.
-  Anything downstream that reacts per frame — pushing state over the wire, recomputing a delta —
-  must key off whether the drawing actually changed, not off the frame arriving. `GridModel` keeps
-  per-row hashes and cell and cursor counters for exactly this.
+- **A `flush` does not mean something changed.** With the developer's configuration at `~/.neovim`
+  commit `c730dae`, an idle Neovim emits no frame at all (none in 25 s, normal and insert mode). An
+  earlier state of the same configuration, with plugins that raised errors and redrew under Mesura,
+  emitted roughly 230 flushes a second while idle, nearly all of them drawing no cells — and any
+  configuration can do that again. Anything downstream that reacts per frame — pushing state over
+  the wire, recomputing a delta — must key off whether the drawing actually changed, not off the
+  frame arriving. `GridModel` keeps per-row hashes and cell and cursor counters for exactly this.
 
 - **Floating windows are not drawn.** nvim-cmp's completion menu and which-key's popup report
   `win_float_pos` and are deliberately ignored, so they do not appear over Monaco. Completion is
@@ -557,14 +656,12 @@ asking what just happened instead of what is true.
   attached, a plain `SIGTERM` on the process id is caught and the exit path never finishes, because
   both leave libuv handles open. The spawner signals the process group, which does stop it, and
   `kill` passes `forceKillAfter` so a session that ends can end regardless.
-- **The configuration has no `vim.g.mesura` branch yet.** The host sets the flag from its first
-  `--cmd` so the configuration can turn off what it does not want under a GUI host — the update
-  checker above being the obvious candidate — in the way `vim.g.neovide` and `vim.g.symmetria_ide`
-  already are. That branch is the developer's to write; nothing here depends on it.
+- **What a configuration loads under Mesura is the configuration's choice.** The host sets
+  `vim.g.mesura` from its first `--cmd`, the way `vim.g.neovide` and `vim.g.symmetria_ide` are set.
+  The developer's configuration branches on it (`~/.neovim/lua/jc/mesura.lua`) and leaves out the
+  plugins this host never shows or that misbehave behind it: pickers whose invisible prompt
+  swallows the next keys, nvim-cmp, the status line, neo-tree. A configuration without such a
+  branch still works, and pays for those plugins on every key. Nothing here depends on it.
 - **A `dev = true` plugin whose directory is absent makes lazy open its own UI** over the buffer at
   every start, which no host can drive through. It is not a defect in this code, but it is the first
   thing to check when a session comes up showing something other than the file.
-- **`nvim_input` is asynchronous and nothing in the protocol says when a key has been consumed.**
-  Code that has to know uses the session's `type`, which feeds keys with `nvim_feedkeys`'s `x` flag
-  and answers only once they have run — at the cost of aborting an incomplete command, so it takes
-  whole sequences only.

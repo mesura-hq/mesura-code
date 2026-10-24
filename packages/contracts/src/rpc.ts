@@ -274,10 +274,11 @@ import {
   EditorSessionError,
   EditorSessionEvent,
   EditorSessionInputInput,
+  EditorSessionInputResult,
   EditorSessionOpenInput,
+  EditorSessionOpenResult,
   EditorSessionReplaceTextInput,
   EditorSessionSetCursorInput,
-  EditorSessionSnapshot,
   EditorSessionViewportInput,
 } from "./editorSession.ts";
 import {
@@ -308,6 +309,8 @@ import {
   PreviewReportProfilesInput,
   PreviewNavigateInput,
   PreviewOpenInput,
+  PreviewOpenLinkTargetInput,
+  PreviewOpenLinkTargetResult,
   PreviewRefreshInput,
   PreviewReportStatusInput,
   PreviewResizeInput,
@@ -533,6 +536,7 @@ export const WS_METHODS = {
 
   // Preview methods
   previewOpen: "preview.open",
+  previewOpenLinkTarget: "preview.openLinkTarget",
   previewNavigate: "preview.navigate",
   previewResize: "preview.resize",
   previewAdjust: "preview.adjust",
@@ -1651,7 +1655,7 @@ const EditorSessionRpcErrors = Schema.Union([EditorSessionError, EnvironmentAuth
 
 const WsEditorSessionOpenRpc = Rpc.make(WS_METHODS.editorSessionOpen, {
   payload: EditorSessionOpenInput,
-  success: EditorSessionSnapshot,
+  success: EditorSessionOpenResult,
   error: EditorSessionRpcErrors,
 });
 
@@ -1664,6 +1668,9 @@ const WsEditorSessionAttachRpc = Rpc.make(WS_METHODS.editorSessionAttach, {
 
 const WsEditorSessionInputRpc = Rpc.make(WS_METHODS.editorSessionInput, {
   payload: EditorSessionInputInput,
+  // Undefined is a host from before the answer carried the mode, which the
+  // client still has to type into; it takes the answer as unknown.
+  success: Schema.UndefinedOr(EditorSessionInputResult),
   error: EditorSessionRpcErrors,
 });
 
@@ -1737,6 +1744,12 @@ const WsPreviewOpenRpc = Rpc.make(WS_METHODS.previewOpen, {
   payload: PreviewOpenInput,
   success: PreviewSessionSnapshot,
   error: Schema.Union([PreviewError, EnvironmentAuthorizationError]),
+});
+
+const WsPreviewOpenLinkTargetRpc = Rpc.make(WS_METHODS.previewOpenLinkTarget, {
+  payload: PreviewOpenLinkTargetInput,
+  success: PreviewOpenLinkTargetResult,
+  error: EnvironmentAuthorizationError,
 });
 
 const WsPreviewNavigateRpc = Rpc.make(WS_METHODS.previewNavigate, {
@@ -2293,6 +2306,7 @@ const UpstreamWsRpcGroup = RpcGroup.make(
   WsSubscribeTerminalEventsRpc,
   WsSubscribeTerminalMetadataRpc,
   WsPreviewOpenRpc,
+  WsPreviewOpenLinkTargetRpc,
   WsPreviewNavigateRpc,
   WsPreviewResizeRpc,
   WsPreviewAdjustRpc,

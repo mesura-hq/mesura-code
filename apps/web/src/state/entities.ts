@@ -20,6 +20,10 @@ import {
   allEnvironmentShellsBootstrappedAtom,
 } from "./shell";
 import { environmentThreadDetails, environmentThreadShells } from "./threads";
+import {
+  throttledThreadShellsAtom,
+  throttledThreadShellsForProjectRefsAtom,
+} from "./throttledShells";
 import { waitForAtomValue } from "./waitForAtomValue";
 
 const EMPTY_THREAD_REFS: ReadonlyArray<ScopedThreadRef> = Object.freeze([]);
@@ -86,10 +90,19 @@ export function useServerConfigs(): ReadonlyMap<EnvironmentId, ServerConfig> {
 }
 
 /** Every thread shell. Pass `enabled: false` to read a stable empty list and
-    skip re-rendering on each shell update while the caller does not need them. */
-export function useThreadShells(enabled = true): ReadonlyArray<EnvironmentThreadShell> {
+    skip re-rendering on each shell update while the caller does not need them.
+    Mesura: `throttled` re-reads at most once a second, for views that do not
+    need every streamed update (`throttledShells.ts`). */
+export function useThreadShells(
+  enabled = true,
+  options?: { readonly throttled?: boolean },
+): ReadonlyArray<EnvironmentThreadShell> {
   return useAtomValue(
-    enabled ? environmentThreadShells.threadShellsAtom : EMPTY_THREAD_SHELLS_ATOM,
+    !enabled
+      ? EMPTY_THREAD_SHELLS_ATOM
+      : options?.throttled === true
+        ? throttledThreadShellsAtom
+        : environmentThreadShells.threadShellsAtom,
   );
 }
 
@@ -103,8 +116,13 @@ export function useAllEnvironmentProjectSnapshotsReady(): boolean {
 
 export function useThreadShellsForProjectRefs(
   refs: ReadonlyArray<ScopedProjectRef>,
+  options?: { readonly throttled?: boolean },
 ): ReadonlyArray<EnvironmentThreadShell> {
-  return useAtomValue(environmentThreadShells.threadShellsForProjectRefsAtom(refs));
+  return useAtomValue(
+    options?.throttled === true
+      ? throttledThreadShellsForProjectRefsAtom(refs)
+      : environmentThreadShells.threadShellsForProjectRefsAtom(refs),
+  );
 }
 
 export function useProject(ref: ScopedProjectRef | null): EnvironmentProject | null {

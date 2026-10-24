@@ -249,7 +249,7 @@ function renderBrowserPanel(
         surfaces={[{ id: "browser:tab-1", kind: "preview", resourceId: "tab-1" }]}
         environmentId={null}
         activeSurfaceId="browser:tab-1"
-        pendingSurfaceIds={new Set()}
+        pendingProjectKey={null}
         previewSessions={{}}
         desktopByTabId={{}}
         terminalLabelsById={new Map()}

@@ -49,6 +49,8 @@ const MAY_WAIT_ON_A_CLOCK: ReadonlyMap<string, string> = new Map([
   // let anything else land on that name, and it inherits a pass it never
   // asked for.
   ["conformance/insertModeLatency.test.ts", "MESURA_NVIM_CONFIG_DIR"],
+  // Pins the hold's time bound, which nothing but a clock can show.
+  ["Manager.cursorWait.test.ts", "TEXT_WAIT_MS"],
 ]);
 
 describe("the editor bridge's contract with the repository", () => {

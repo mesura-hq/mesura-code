@@ -1055,3 +1055,25 @@ describe("Issue references in agent messages: ordinary links keep their behavior
     expect(panelState().surfaces).toEqual([]);
   });
 });
+
+it.each([
+  [767, false],
+  [1280, true],
+] as const)(
+  "link policy precedence: width %s coarse %s retains the real Issues surface",
+  async (width, coarse) => {
+    vi.stubGlobal("innerWidth", width);
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query === "(pointer: coarse)" && coarse,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+    await mountTimeline([assistantEntry("See https://github.com/acme/alpha/issues/7")]);
+    const { followedAsLink } = await activate(anchorTo("https://github.com/acme/alpha/issues/7"));
+    expect(followedAsLink).toBe(false);
+    await settle(referenceRuns()[0], issueResolution(7));
+    expect(panelState().activeSurfaceId).toBe("issues");
+    expect(issuesSurface()).toMatchObject({ selection: { projectId: alpha.id, number: 7 } });
+    expect(fixture.openedExternally).toEqual([]);
+  },
+);

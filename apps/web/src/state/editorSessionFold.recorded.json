@@ -1,0 +1,1833 @@
+{
+  "source": "Recorded 2026-10-19 from EditorSessionManager.attachEventStream over nvim 0.12.4 with an empty init.lua; keys jj A ! x <Esc> dd u ggO top <Esc> :w<CR> vj <Esc>.",
+  "events": [
+    {
+      "type": "snapshot",
+      "snapshot": {
+        "relativePath": "notes.md",
+        "lines": ["# Notes", "", "first line", "second line"],
+        "cursor": {
+          "line": 1,
+          "col": 1
+        },
+        "mode": "n",
+        "jumping": false,
+        "topline": 1,
+        "hlDefs": {
+          "1": {
+            "reverse": true,
+            "groups": ["TermCursor"]
+          },
+          "2": {
+            "fg": 5198424,
+            "groups": ["NonText"]
+          },
+          "3": {
+            "fg": 9238775,
+            "groups": ["Directory"]
+          },
+          "4": {
+            "fg": 16761017,
+            "groups": ["ErrorMsg"]
+          },
+          "5": {
+            "fg": 15659512,
+            "bg": 7033600,
+            "groups": ["Search"]
+          },
+          "6": {
+            "fg": 460813,
+            "bg": 16572564,
+            "groups": ["CurSearch"]
+          },
+          "7": {
+            "fg": 9238775,
+            "groups": ["MoreMsg"]
+          },
+          "8": {
+            "fg": 11794112,
+            "groups": ["ModeMsg"]
+          },
+          "9": {
+            "fg": 5198424,
+            "groups": ["LineNr"]
+          },
+          "10": {
+            "bold": true,
+            "groups": ["CursorLineNr"]
+          },
+          "11": {
+            "fg": 9238775,
+            "groups": ["Question"]
+          },
+          "12": {
+            "fg": 14738154,
+            "bg": 5198424,
+            "groups": ["StatusLine"]
+          },
+          "13": {
+            "fg": 12895949,
+            "bg": 2895411,
+            "groups": ["StatusLineNC"]
+          },
+          "14": {
+            "fg": 14738154,
+            "bold": true,
+            "groups": ["Title"]
+          },
+          "15": {
+            "bg": 5198424,
+            "groups": ["Visual"]
+          },
+          "16": {
+            "fg": 16572564,
+            "groups": ["WarningMsg"]
+          },
+          "17": {
+            "fg": 10198692,
+            "bg": 460813,
+            "groups": ["Folded"]
+          },
+          "18": {
+            "fg": 15659512,
+            "bg": 21795,
+            "groups": ["DiffAdd"]
+          },
+          "19": {
+            "fg": 15659512,
+            "bg": 5198424,
+            "groups": ["DiffChange"]
+          },
+          "20": {
+            "fg": 16761017,
+            "bold": true,
+            "groups": ["DiffDelete"]
+          },
+          "21": {
+            "fg": 15659512,
+            "bg": 29555,
+            "groups": ["DiffText"]
+          },
+          "22": {
+            "fg": 5198424,
+            "groups": ["SignColumn"]
+          },
+          "23": {
+            "fg": 5198424,
+            "groups": ["Conceal"]
+          },
+          "24": {
+            "undercurl": true,
+            "groups": ["SpellBad"]
+          },
+          "25": {
+            "undercurl": true,
+            "groups": ["SpellCap"]
+          },
+          "26": {
+            "undercurl": true,
+            "groups": ["SpellRare"]
+          },
+          "27": {
+            "undercurl": true,
+            "groups": ["SpellLocal"]
+          },
+          "28": {
+            "bg": 2895411,
+            "groups": ["Pmenu"]
+          },
+          "29": {
+            "reverse": true,
+            "groups": ["PmenuSel"]
+          },
+          "30": {
+            "bold": true,
+            "groups": ["PmenuMatch"]
+          },
+          "31": {
+            "bold": true,
+            "groups": ["PmenuMatchSel"]
+          },
+          "32": {
+            "bg": 5198424,
+            "groups": ["PmenuThumb"]
+          },
+          "33": {
+            "bold": true,
+            "groups": ["TabLineSel"]
+          },
+          "34": {
+            "bg": 2895411,
+            "groups": ["CursorColumn"]
+          },
+          "35": {
+            "bg": 2895411,
+            "groups": ["CursorLine"]
+          },
+          "36": {
+            "bg": 5198424,
+            "groups": ["ColorColumn"]
+          },
+          "37": {
+            "fg": 9238775,
+            "groups": ["QuickFixLine"]
+          },
+          "38": {
+            "bg": 460813,
+            "groups": ["NormalFloat"]
+          },
+          "39": {
+            "fg": 10198692,
+            "bg": 460813,
+            "bold": true,
+            "groups": ["WinBar"]
+          },
+          "40": {
+            "fg": 10198692,
+            "bg": 460813,
+            "groups": ["WinBarNC"]
+          },
+          "41": {
+            "fg": 1316379,
+            "bg": 14738154,
+            "groups": ["Cursor"]
+          },
+          "42": {
+            "fg": 11794112,
+            "groups": ["OkMsg"]
+          },
+          "43": {
+            "reverse": true,
+            "groups": ["RedrawDebugNormal"]
+          },
+          "44": {
+            "underline": true,
+            "groups": ["Underlined"]
+          },
+          "45": {
+            "fg": 1316379,
+            "bg": 14738154,
+            "groups": ["lCursor"]
+          },
+          "46": {
+            "bg": 5198424,
+            "groups": ["FloatShadow"]
+          },
+          "47": {
+            "bg": 5198424,
+            "groups": ["FloatShadowThrough"]
+          },
+          "48": {
+            "fg": 11794112,
+            "groups": ["Added"]
+          },
+          "49": {
+            "fg": 14738154,
+            "bg": 1316379,
+            "groups": ["Normal"]
+          },
+          "50": {
+            "fg": 14738154,
+            "groups": ["Constant"]
+          },
+          "51": {
+            "fg": 14738154,
+            "bold": true,
+            "groups": ["Statement"]
+          },
+          "52": {
+            "fg": 14738154,
+            "groups": ["PreProc"]
+          },
+          "53": {
+            "fg": 14738154,
+            "groups": ["Type"]
+          },
+          "54": {
+            "fg": 9238775,
+            "groups": ["Special"]
+          },
+          "55": {
+            "fg": 16761017,
+            "groups": ["DiagnosticError"]
+          },
+          "56": {
+            "fg": 16572564,
+            "groups": ["DiagnosticWarn"]
+          },
+          "57": {
+            "fg": 9238775,
+            "groups": ["DiagnosticInfo"]
+          },
+          "58": {
+            "fg": 10935295,
+            "groups": ["DiagnosticHint"]
+          },
+          "59": {
+            "fg": 11794112,
+            "groups": ["DiagnosticOk"]
+          },
+          "60": {
+            "fg": 10198692,
+            "groups": ["Comment"]
+          },
+          "61": {
+            "fg": 14738154,
+            "groups": ["@variable"]
+          },
+          "62": {
+            "fg": 11794112,
+            "groups": ["String"]
+          },
+          "63": {
+            "fg": 10935295,
+            "groups": ["Identifier"]
+          },
+          "64": {
+            "fg": 9238775,
+            "groups": ["Function"]
+          },
+          "65": {
+            "fg": 14738154,
+            "groups": ["Operator"]
+          },
+          "66": {
+            "fg": 14738154,
+            "groups": ["Delimiter"]
+          },
+          "67": {
+            "fg": 14738154,
+            "bold": true,
+            "groups": ["Todo"]
+          },
+          "68": {
+            "bold": true,
+            "groups": ["@markup.strong"]
+          },
+          "69": {
+            "italic": true,
+            "groups": ["@markup.italic"]
+          },
+          "70": {
+            "groups": ["@markup.strikethrough"]
+          },
+          "71": {
+            "underline": true,
+            "groups": ["@markup.underline"]
+          },
+          "72": {
+            "fg": 16761017,
+            "groups": ["Removed"]
+          },
+          "73": {
+            "fg": 9238775,
+            "groups": ["Changed"]
+          },
+          "74": {
+            "fg": 1316379,
+            "bg": 1316379,
+            "groups": ["@markup.heading.1.delimiter.vimdoc"]
+          },
+          "75": {
+            "fg": 1316379,
+            "bg": 1316379,
+            "underline": true,
+            "groups": ["@markup.heading.2.delimiter.vimdoc"]
+          },
+          "76": {
+            "groups": ["DiagnosticDeprecated"]
+          },
+          "77": {
+            "bg": 5198424,
+            "bold": true,
+            "groups": ["MatchParen"]
+          },
+          "78": {
+            "bg": 7033600,
+            "groups": ["RedrawDebugClear"]
+          },
+          "79": {
+            "bg": 21795,
+            "groups": ["RedrawDebugComposed"]
+          },
+          "80": {
+            "bg": 5832712,
+            "groups": ["RedrawDebugRecompose"]
+          },
+          "81": {
+            "fg": 15659512,
+            "bg": 5832712,
+            "groups": ["Error"]
+          },
+          "82": {
+            "underline": true,
+            "groups": ["DiagnosticUnderlineError"]
+          },
+          "83": {
+            "underline": true,
+            "groups": ["DiagnosticUnderlineWarn"]
+          },
+          "84": {
+            "underline": true,
+            "groups": ["DiagnosticUnderlineInfo"]
+          },
+          "85": {
+            "underline": true,
+            "groups": ["DiagnosticUnderlineHint"]
+          },
+          "86": {
+            "underline": true,
+            "groups": ["DiagnosticUnderlineOk"]
+          },
+          "87": {
+            "fg": 16711680,
+            "bg": 16711680,
+            "groups": ["NvimInternalError"]
+          },
+          "88": {
+            "fg": 9238775,
+            "groups": ["Special"]
+          },
+          "89": {
+            "fg": 5198424,
+            "groups": ["NonText"]
+          },
+          "90": {
+            "reverse": true,
+            "groups": ["TermCursor"]
+          },
+          "91": {
+            "fg": 5198424,
+            "groups": ["NonText"]
+          },
+          "92": {
+            "fg": 9238775,
+            "groups": ["Directory"]
+          },
+          "93": {
+            "fg": 16761017,
+            "groups": ["ErrorMsg"]
+          },
+          "94": {
+            "fg": 460813,
+            "bg": 16572564,
+            "groups": ["CurSearch"]
+          },
+          "95": {
+            "fg": 15659512,
+            "bg": 7033600,
+            "groups": ["Search"]
+          },
+          "96": {
+            "fg": 460813,
+            "bg": 16572564,
+            "groups": ["CurSearch"]
+          },
+          "97": {
+            "fg": 9238775,
+            "groups": ["MoreMsg"]
+          },
+          "98": {
+            "fg": 11794112,
+            "groups": ["ModeMsg"]
+          },
+          "99": {
+            "fg": 5198424,
+            "groups": ["LineNr"]
+          },
+          "100": {
+            "fg": 5198424,
+            "groups": ["LineNr"]
+          },
+          "101": {
+            "fg": 5198424,
+            "groups": ["LineNr"]
+          },
+          "102": {
+            "bold": true,
+            "groups": ["CursorLineNr"]
+          },
+          "103": {
+            "fg": 5198424,
+            "groups": ["SignColumn"]
+          },
+          "104": {
+            "fg": 5198424,
+            "groups": ["SignColumn"]
+          },
+          "105": {
+            "fg": 9238775,
+            "groups": ["Question"]
+          },
+          "106": {
+            "fg": 14738154,
+            "bg": 5198424,
+            "groups": ["StatusLine"]
+          },
+          "107": {
+            "fg": 12895949,
+            "bg": 2895411,
+            "groups": ["StatusLineNC"]
+          },
+          "108": {
+            "fg": 14738154,
+            "bg": 1316379,
+            "groups": ["Normal"]
+          },
+          "109": {
+            "fg": 14738154,
+            "bg": 1316379,
+            "groups": ["Normal"]
+          },
+          "110": {
+            "fg": 14738154,
+            "bold": true,
+            "groups": ["Title"]
+          },
+          "111": {
+            "bg": 5198424,
+            "groups": ["Visual"]
+          },
+          "112": {
+            "groups": ["VisualNC"]
+          },
+          "113": {
+            "fg": 16572564,
+            "groups": ["WarningMsg"]
+          },
+          "114": {
+            "reverse": true,
+            "groups": ["PmenuSel"]
+          },
+          "115": {
+            "fg": 10198692,
+            "bg": 460813,
+            "groups": ["Folded"]
+          },
+          "116": {
+            "fg": 5198424,
+            "groups": ["SignColumn"]
+          },
+          "117": {
+            "fg": 15659512,
+            "bg": 21795,
+            "groups": ["DiffAdd"]
+          },
+          "118": {
+            "fg": 15659512,
+            "bg": 5198424,
+            "groups": ["DiffChange"]
+          },
+          "119": {
+            "fg": 16761017,
+            "bold": true,
+            "groups": ["DiffDelete"]
+          },
+          "120": {
+            "fg": 15659512,
+            "bg": 29555,
+            "groups": ["DiffText"]
+          },
+          "121": {
+            "fg": 15659512,
+            "bg": 29555,
+            "groups": ["DiffText"]
+          },
+          "122": {
+            "fg": 5198424,
+            "groups": ["SignColumn"]
+          },
+          "123": {
+            "fg": 5198424,
+            "groups": ["Conceal"]
+          },
+          "124": {
+            "undercurl": true,
+            "groups": ["SpellBad"]
+          },
+          "125": {
+            "undercurl": true,
+            "groups": ["SpellCap"]
+          },
+          "126": {
+            "undercurl": true,
+            "groups": ["SpellRare"]
+          },
+          "127": {
+            "undercurl": true,
+            "groups": ["SpellLocal"]
+          },
+          "128": {
+            "bg": 2895411,
+            "groups": ["Pmenu"]
+          },
+          "129": {
+            "reverse": true,
+            "groups": ["PmenuSel"]
+          },
+          "130": {
+            "bold": true,
+            "groups": ["PmenuMatch"]
+          },
+          "131": {
+            "bold": true,
+            "groups": ["PmenuMatchSel"]
+          },
+          "132": {
+            "bg": 2895411,
+            "groups": ["Pmenu"]
+          },
+          "133": {
+            "reverse": true,
+            "groups": ["PmenuSel"]
+          },
+          "134": {
+            "bg": 2895411,
+            "groups": ["Pmenu"]
+          },
+          "135": {
+            "reverse": true,
+            "groups": ["PmenuSel"]
+          },
+          "136": {
+            "bg": 2895411,
+            "groups": ["Pmenu"]
+          },
+          "137": {
+            "bg": 5198424,
+            "groups": ["PmenuThumb"]
+          },
+          "138": {
+            "bg": 2895411,
+            "groups": ["Pmenu"]
+          },
+          "139": {
+            "fg": 12895949,
+            "bg": 2895411,
+            "groups": ["StatusLineNC"]
+          },
+          "140": {
+            "bold": true,
+            "groups": ["TabLineSel"]
+          },
+          "141": {
+            "fg": 12895949,
+            "bg": 2895411,
+            "groups": ["StatusLineNC"]
+          },
+          "142": {
+            "bg": 2895411,
+            "groups": ["CursorColumn"]
+          },
+          "143": {
+            "bg": 2895411,
+            "groups": ["CursorLine"]
+          },
+          "144": {
+            "bg": 5198424,
+            "groups": ["ColorColumn"]
+          },
+          "145": {
+            "fg": 9238775,
+            "groups": ["QuickFixLine"]
+          },
+          "146": {
+            "fg": 5198424,
+            "groups": ["NonText"]
+          },
+          "147": {
+            "fg": 14738154,
+            "bg": 5198424,
+            "groups": ["StatusLine"]
+          },
+          "148": {
+            "bg": 460813,
+            "groups": ["NormalFloat"]
+          },
+          "149": {
+            "groups": ["MsgArea"]
+          },
+          "150": {
+            "bg": 460813,
+            "groups": ["NormalFloat"]
+          },
+          "151": {
+            "fg": 10198692,
+            "bg": 460813,
+            "bold": true,
+            "groups": ["WinBar"]
+          },
+          "152": {
+            "fg": 10198692,
+            "bg": 460813,
+            "groups": ["WinBarNC"]
+          },
+          "153": {
+            "fg": 1316379,
+            "bg": 14738154,
+            "groups": ["Cursor"]
+          },
+          "154": {
+            "fg": 14738154,
+            "bold": true,
+            "groups": ["Title"]
+          },
+          "155": {
+            "fg": 14738154,
+            "bold": true,
+            "groups": ["Title"]
+          },
+          "156": {
+            "fg": 14738154,
+            "bg": 5198424,
+            "groups": ["StatusLine"]
+          },
+          "157": {
+            "fg": 12895949,
+            "bg": 2895411,
+            "groups": ["StatusLineNC"]
+          },
+          "158": {
+            "fg": 16761017,
+            "groups": ["ErrorMsg"]
+          },
+          "159": {
+            "groups": ["StdoutMsg"]
+          },
+          "160": {
+            "fg": 11794112,
+            "groups": ["OkMsg"]
+          },
+          "161": {
+            "fg": 11794112,
+            "groups": ["Added"]
+          },
+          "162": {
+            "bold": true,
+            "groups": ["htmlBold"]
+          },
+          "163": {
+            "bold": true,
+            "underline": true,
+            "groups": ["htmlBoldUnderline"]
+          },
+          "164": {
+            "bold": true,
+            "italic": true,
+            "groups": ["htmlBoldItalic"]
+          },
+          "165": {
+            "bold": true,
+            "italic": true,
+            "underline": true,
+            "groups": ["htmlBoldUnderlineItalic"]
+          },
+          "166": {
+            "underline": true,
+            "groups": ["htmlUnderline"]
+          },
+          "167": {
+            "italic": true,
+            "underline": true,
+            "groups": ["htmlUnderlineItalic"]
+          },
+          "168": {
+            "italic": true,
+            "groups": ["htmlItalic"]
+          },
+          "169": {
+            "groups": ["htmlStrike"]
+          }
+        }
+      }
+    },
+    {
+      "type": "decorations",
+      "overlays": [],
+      "highlightRuns": [],
+      "rows": [1, 3, 4]
+    },
+    {
+      "type": "cursor",
+      "line": 3,
+      "col": 1
+    },
+    {
+      "type": "cursor",
+      "line": 3,
+      "col": 11
+    },
+    {
+      "type": "mode",
+      "mode": "i",
+      "blocking": false,
+      "jumping": false
+    },
+    {
+      "type": "lines",
+      "relativePath": "notes.md",
+      "first": 2,
+      "last": 3,
+      "lines": ["first line!"]
+    },
+    {
+      "type": "decorations",
+      "overlays": [],
+      "highlightRuns": [],
+      "rows": [3]
+    },
+    {
+      "type": "cursor",
+      "line": 3,
+      "col": 12
+    },
+    {
+      "type": "lines",
+      "relativePath": "notes.md",
+      "first": 2,
+      "last": 3,
+      "lines": ["first line!x"]
+    },
+    {
+      "type": "decorations",
+      "overlays": [],
+      "highlightRuns": [],
+      "rows": [3]
+    },
+    {
+      "type": "cursor",
+      "line": 3,
+      "col": 13
+    },
+    {
+      "type": "cursor",
+      "line": 3,
+      "col": 12
+    },
+    {
+      "type": "mode",
+      "mode": "n",
+      "blocking": false,
+      "jumping": false
+    },
+    {
+      "type": "lines",
+      "relativePath": "notes.md",
+      "first": 2,
+      "last": 3,
+      "lines": []
+    },
+    {
+      "type": "decorations",
+      "overlays": [],
+      "highlightRuns": [],
+      "rows": [3, 4, 5]
+    },
+    {
+      "type": "cursor",
+      "line": 3,
+      "col": 11
+    },
+    {
+      "type": "lines",
+      "relativePath": "notes.md",
+      "first": 2,
+      "last": 2,
+      "lines": ["first line!x"]
+    },
+    {
+      "type": "message",
+      "kind": "undo",
+      "text": "1 more line; before #3  1 second ago"
+    },
+    {
+      "type": "decorations",
+      "overlays": [],
+      "highlightRuns": [],
+      "rows": [3, 4]
+    },
+    {
+      "type": "cursor",
+      "line": 3,
+      "col": 12
+    },
+    {
+      "type": "lines",
+      "relativePath": "notes.md",
+      "first": 0,
+      "last": 0,
+      "lines": [""]
+    },
+    {
+      "type": "decorations",
+      "overlays": [],
+      "highlightRuns": [],
+      "rows": [1, 2, 3, 4, 5]
+    },
+    {
+      "type": "cursor",
+      "line": 1,
+      "col": 1
+    },
+    {
+      "type": "mode",
+      "mode": "i",
+      "blocking": false,
+      "jumping": false
+    },
+    {
+      "type": "lines",
+      "relativePath": "notes.md",
+      "first": 0,
+      "last": 1,
+      "lines": ["top"]
+    },
+    {
+      "type": "decorations",
+      "overlays": [],
+      "highlightRuns": [],
+      "rows": [1]
+    },
+    {
+      "type": "cursor",
+      "line": 1,
+      "col": 4
+    },
+    {
+      "type": "cursor",
+      "line": 1,
+      "col": 3
+    },
+    {
+      "type": "mode",
+      "mode": "n",
+      "blocking": false,
+      "jumping": false
+    },
+    {
+      "type": "cmdline",
+      "cmdline": {
+        "content": "w",
+        "pos": 1,
+        "firstc": ":",
+        "prompt": ""
+      }
+    },
+    {
+      "type": "writeRequested",
+      "relativePath": "notes.md"
+    },
+    {
+      "type": "cmdline",
+      "cmdline": null
+    },
+    {
+      "type": "decorations",
+      "overlays": [],
+      "highlightRuns": [],
+      "rows": [1, 2]
+    },
+    {
+      "type": "cursor",
+      "line": 2,
+      "col": 3
+    },
+    {
+      "type": "mode",
+      "mode": "v",
+      "blocking": false,
+      "jumping": false
+    },
+    {
+      "type": "visual",
+      "visual": {
+        "anchor": {
+          "line": 1,
+          "col": 3
+        },
+        "cursor": {
+          "line": 2,
+          "col": 3
+        },
+        "kind": "v"
+      }
+    },
+    {
+      "type": "decorations",
+      "overlays": [],
+      "highlightRuns": [],
+      "rows": [1, 2]
+    },
+    {
+      "type": "mode",
+      "mode": "n",
+      "blocking": false,
+      "jumping": false
+    },
+    {
+      "type": "visual",
+      "visual": null
+    }
+  ],
+  "steps": [
+    {
+      "sequence": 1,
+      "relativePath": "notes.md",
+      "lines": ["# Notes", "", "first line", "second line"],
+      "cursor": {
+        "line": 1,
+        "col": 1
+      },
+      "mode": "n",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": null,
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "snapshot",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 2,
+      "relativePath": "notes.md",
+      "lines": ["# Notes", "", "first line", "second line"],
+      "cursor": {
+        "line": 1,
+        "col": 1
+      },
+      "mode": "n",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": null,
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "decorations",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 3,
+      "relativePath": "notes.md",
+      "lines": ["# Notes", "", "first line", "second line"],
+      "cursor": {
+        "line": 3,
+        "col": 1
+      },
+      "mode": "n",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": null,
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "cursor",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 4,
+      "relativePath": "notes.md",
+      "lines": ["# Notes", "", "first line", "second line"],
+      "cursor": {
+        "line": 3,
+        "col": 11
+      },
+      "mode": "n",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": null,
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "cursor",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 5,
+      "relativePath": "notes.md",
+      "lines": ["# Notes", "", "first line", "second line"],
+      "cursor": {
+        "line": 3,
+        "col": 11
+      },
+      "mode": "i",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": null,
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "mode",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 6,
+      "relativePath": "notes.md",
+      "lines": ["# Notes", "", "first line!", "second line"],
+      "cursor": {
+        "line": 3,
+        "col": 11
+      },
+      "mode": "i",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": null,
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "lines",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 7,
+      "relativePath": "notes.md",
+      "lines": ["# Notes", "", "first line!", "second line"],
+      "cursor": {
+        "line": 3,
+        "col": 11
+      },
+      "mode": "i",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": null,
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "decorations",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 8,
+      "relativePath": "notes.md",
+      "lines": ["# Notes", "", "first line!", "second line"],
+      "cursor": {
+        "line": 3,
+        "col": 12
+      },
+      "mode": "i",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": null,
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "cursor",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 9,
+      "relativePath": "notes.md",
+      "lines": ["# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 3,
+        "col": 12
+      },
+      "mode": "i",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": null,
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "lines",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 10,
+      "relativePath": "notes.md",
+      "lines": ["# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 3,
+        "col": 12
+      },
+      "mode": "i",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": null,
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "decorations",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 11,
+      "relativePath": "notes.md",
+      "lines": ["# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 3,
+        "col": 13
+      },
+      "mode": "i",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": null,
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "cursor",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 12,
+      "relativePath": "notes.md",
+      "lines": ["# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 3,
+        "col": 12
+      },
+      "mode": "i",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": null,
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "cursor",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 13,
+      "relativePath": "notes.md",
+      "lines": ["# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 3,
+        "col": 12
+      },
+      "mode": "n",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": null,
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "mode",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 14,
+      "relativePath": "notes.md",
+      "lines": ["# Notes", "", "second line"],
+      "cursor": {
+        "line": 3,
+        "col": 12
+      },
+      "mode": "n",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": null,
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "lines",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 15,
+      "relativePath": "notes.md",
+      "lines": ["# Notes", "", "second line"],
+      "cursor": {
+        "line": 3,
+        "col": 12
+      },
+      "mode": "n",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": null,
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "decorations",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 16,
+      "relativePath": "notes.md",
+      "lines": ["# Notes", "", "second line"],
+      "cursor": {
+        "line": 3,
+        "col": 11
+      },
+      "mode": "n",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": null,
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "cursor",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 17,
+      "relativePath": "notes.md",
+      "lines": ["# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 3,
+        "col": 11
+      },
+      "mode": "n",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": null,
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "lines",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 18,
+      "relativePath": "notes.md",
+      "lines": ["# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 3,
+        "col": 11
+      },
+      "mode": "n",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": {
+        "kind": "undo",
+        "text": "1 more line; before #3  1 second ago"
+      },
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "message",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 19,
+      "relativePath": "notes.md",
+      "lines": ["# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 3,
+        "col": 11
+      },
+      "mode": "n",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": {
+        "kind": "undo",
+        "text": "1 more line; before #3  1 second ago"
+      },
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "decorations",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 20,
+      "relativePath": "notes.md",
+      "lines": ["# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 3,
+        "col": 12
+      },
+      "mode": "n",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": {
+        "kind": "undo",
+        "text": "1 more line; before #3  1 second ago"
+      },
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "cursor",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 21,
+      "relativePath": "notes.md",
+      "lines": ["", "# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 3,
+        "col": 12
+      },
+      "mode": "n",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": {
+        "kind": "undo",
+        "text": "1 more line; before #3  1 second ago"
+      },
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "lines",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 22,
+      "relativePath": "notes.md",
+      "lines": ["", "# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 3,
+        "col": 12
+      },
+      "mode": "n",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": {
+        "kind": "undo",
+        "text": "1 more line; before #3  1 second ago"
+      },
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "decorations",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 23,
+      "relativePath": "notes.md",
+      "lines": ["", "# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 1,
+        "col": 1
+      },
+      "mode": "n",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": {
+        "kind": "undo",
+        "text": "1 more line; before #3  1 second ago"
+      },
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "cursor",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 24,
+      "relativePath": "notes.md",
+      "lines": ["", "# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 1,
+        "col": 1
+      },
+      "mode": "i",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": {
+        "kind": "undo",
+        "text": "1 more line; before #3  1 second ago"
+      },
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "mode",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 25,
+      "relativePath": "notes.md",
+      "lines": ["top", "# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 1,
+        "col": 1
+      },
+      "mode": "i",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": {
+        "kind": "undo",
+        "text": "1 more line; before #3  1 second ago"
+      },
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "lines",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 26,
+      "relativePath": "notes.md",
+      "lines": ["top", "# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 1,
+        "col": 1
+      },
+      "mode": "i",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": {
+        "kind": "undo",
+        "text": "1 more line; before #3  1 second ago"
+      },
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "decorations",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 27,
+      "relativePath": "notes.md",
+      "lines": ["top", "# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 1,
+        "col": 4
+      },
+      "mode": "i",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": {
+        "kind": "undo",
+        "text": "1 more line; before #3  1 second ago"
+      },
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "cursor",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 28,
+      "relativePath": "notes.md",
+      "lines": ["top", "# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 1,
+        "col": 3
+      },
+      "mode": "i",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": {
+        "kind": "undo",
+        "text": "1 more line; before #3  1 second ago"
+      },
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "cursor",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 29,
+      "relativePath": "notes.md",
+      "lines": ["top", "# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 1,
+        "col": 3
+      },
+      "mode": "n",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": {
+        "kind": "undo",
+        "text": "1 more line; before #3  1 second ago"
+      },
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "mode",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 30,
+      "relativePath": "notes.md",
+      "lines": ["top", "# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 1,
+        "col": 3
+      },
+      "mode": "n",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": {
+        "content": "w",
+        "pos": 1,
+        "firstc": ":",
+        "prompt": ""
+      },
+      "message": null,
+      "visual": null,
+      "writeRequests": 0,
+      "ended": null,
+      "latestEvent": "cmdline",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 31,
+      "relativePath": "notes.md",
+      "lines": ["top", "# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 1,
+        "col": 3
+      },
+      "mode": "n",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": {
+        "content": "w",
+        "pos": 1,
+        "firstc": ":",
+        "prompt": ""
+      },
+      "message": null,
+      "visual": null,
+      "writeRequests": 1,
+      "ended": null,
+      "latestEvent": "writeRequested",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 32,
+      "relativePath": "notes.md",
+      "lines": ["top", "# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 1,
+        "col": 3
+      },
+      "mode": "n",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": null,
+      "visual": null,
+      "writeRequests": 1,
+      "ended": null,
+      "latestEvent": "cmdline",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 33,
+      "relativePath": "notes.md",
+      "lines": ["top", "# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 1,
+        "col": 3
+      },
+      "mode": "n",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": null,
+      "visual": null,
+      "writeRequests": 1,
+      "ended": null,
+      "latestEvent": "decorations",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 34,
+      "relativePath": "notes.md",
+      "lines": ["top", "# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 2,
+        "col": 3
+      },
+      "mode": "n",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": null,
+      "visual": null,
+      "writeRequests": 1,
+      "ended": null,
+      "latestEvent": "cursor",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 35,
+      "relativePath": "notes.md",
+      "lines": ["top", "# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 2,
+        "col": 3
+      },
+      "mode": "v",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": null,
+      "visual": null,
+      "writeRequests": 1,
+      "ended": null,
+      "latestEvent": "mode",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 36,
+      "relativePath": "notes.md",
+      "lines": ["top", "# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 2,
+        "col": 3
+      },
+      "mode": "v",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": null,
+      "visual": {
+        "anchor": {
+          "line": 1,
+          "col": 3
+        },
+        "cursor": {
+          "line": 2,
+          "col": 3
+        },
+        "kind": "v"
+      },
+      "writeRequests": 1,
+      "ended": null,
+      "latestEvent": "visual",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 37,
+      "relativePath": "notes.md",
+      "lines": ["top", "# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 2,
+        "col": 3
+      },
+      "mode": "v",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": null,
+      "visual": {
+        "anchor": {
+          "line": 1,
+          "col": 3
+        },
+        "cursor": {
+          "line": 2,
+          "col": 3
+        },
+        "kind": "v"
+      },
+      "writeRequests": 1,
+      "ended": null,
+      "latestEvent": "decorations",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 38,
+      "relativePath": "notes.md",
+      "lines": ["top", "# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 2,
+        "col": 3
+      },
+      "mode": "n",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": null,
+      "visual": {
+        "anchor": {
+          "line": 1,
+          "col": 3
+        },
+        "cursor": {
+          "line": 2,
+          "col": 3
+        },
+        "kind": "v"
+      },
+      "writeRequests": 1,
+      "ended": null,
+      "latestEvent": "mode",
+      "decorationRows": [],
+      "hlDefIds": 169
+    },
+    {
+      "sequence": 39,
+      "relativePath": "notes.md",
+      "lines": ["top", "# Notes", "", "first line!x", "second line"],
+      "cursor": {
+        "line": 2,
+        "col": 3
+      },
+      "mode": "n",
+      "jumping": false,
+      "topline": 1,
+      "cmdline": null,
+      "message": null,
+      "visual": null,
+      "writeRequests": 1,
+      "ended": null,
+      "latestEvent": "visual",
+      "decorationRows": [],
+      "hlDefIds": 169
+    }
+  ],
+  "finalDecorations": {
+    "rows": []
+  }
+}

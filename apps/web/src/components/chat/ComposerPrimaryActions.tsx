@@ -86,7 +86,9 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     ? { onPointerDown: preventPointerFocus }
     : undefined;
   const environmentIdentificationMode = useEnvironmentIdentificationMode();
-  const shortcutModifiers = useShortcutModifierState();
+  // Mesura: the modifiers only matter while a turn runs (see `isQueuing`), so
+  // a Control chord elsewhere — in the modal editor — does not re-render this.
+  const shortcutModifiers = useShortcutModifierState(false, isRunning && !isEditingQueuedMessage);
   const isQueuing =
     !isEditingQueuedMessage &&
     resolveComposerDispatchMode({

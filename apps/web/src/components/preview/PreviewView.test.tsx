@@ -447,7 +447,7 @@ describe("PreviewView navigation", () => {
     );
 
     expect(mocks.submittedUrl).not.toBeNull();
-    mocks.submittedUrl?.(submitted);
+    await mocks.submittedUrl?.(submitted);
 
     await vi.waitFor(() =>
       expect(mocks.navigate).toHaveBeenCalledWith(TEST_RUNTIME_TAB_ID, expected),
@@ -473,7 +473,7 @@ describe("PreviewView navigation", () => {
       />,
     );
 
-    mocks.submittedUrl?.("localhost:3000/admin");
+    await mocks.submittedUrl?.("localhost:3000/admin");
     await vi.waitFor(() => {
       expect(mocks.recordVisitForThread).toHaveBeenCalledWith(
         expect.objectContaining({ threadId: expect.anything() }),
@@ -496,7 +496,7 @@ describe("PreviewView navigation", () => {
     );
 
     expect(mocks.emptyStateUrl).not.toBeNull();
-    mocks.emptyStateUrl?.("http://localhost:5173/app?mode=test#top");
+    await mocks.emptyStateUrl?.("http://localhost:5173/app?mode=test#top");
 
     await vi.waitFor(() =>
       expect(mocks.navigate).toHaveBeenCalledWith(

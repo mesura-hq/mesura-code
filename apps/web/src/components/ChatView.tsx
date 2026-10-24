@@ -251,6 +251,7 @@ import {
   type RightPanelSurface,
   useRightPanelStore,
 } from "../rightPanelStore";
+import { useFileSurfacePendingStore } from "./files/fileSurfacePendingStore";
 import { deriveFactoryTimelineItemsFromTurnItems } from "@t3tools/client-runtime/factory/plan-activities";
 import { deriveLatestFactoryRunItemFromTurnItems } from "@t3tools/client-runtime/factory/run-activities";
 import {
@@ -260,6 +261,7 @@ import {
 } from "../factory/factoryRightPanel";
 import {
   isPreviewSupportedInRuntime,
+  readThreadPreviewState,
   setActivePreviewTab,
   useThreadPreviewState,
 } from "../previewStateStore";
@@ -450,7 +452,7 @@ import {
   useThreadVisibleTurnItems,
   waitForThreadShell,
 } from "../state/entities";
-import { environmentShell } from "../state/shell";
+import { useEnvironmentShellBootstrapped } from "../state/shellBootstrapped";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { createPageScrollController, type PageScrollKey } from "./chat/pageScrollController";
 import { isTimelineScrollTarget } from "./chat/timelineScrollTarget";
@@ -730,7 +732,6 @@ const DevicePanel = lazy(() =>
 );
 const FilePreviewPanel = lazy(() => import("./files/FilePreviewPanel"));
 const FactoryPane = lazy(() => import("../factory/FactoryPane"));
-const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
 const TYPE_TO_FOCUS_EDITABLE_SELECTOR = [
   "input",
   "textarea",
@@ -2752,34 +2753,21 @@ export default function ChatView(props: ChatViewProps) {
       params: { projectKey: activeDraftLogicalProjectKey },
     });
   }, [activeDraftLogicalProjectKey, navigate]);
-  const activeEnvironmentShell = useEnvironmentQuery(
-    activeThread ? environmentShell.stateAtom(activeThread.environmentId) : null,
+  // Mesura: the flag alone; the whole shell state re-rendered this view per streamed update.
+  const activeEnvironmentBootstrapComplete = useEnvironmentShellBootstrapped(
+    activeThread?.environmentId ?? null,
   );
-  const activeEnvironmentBootstrapComplete = activeEnvironmentShell.data?.snapshot._tag === "Some";
   const activeProjectKey = activeProject
     ? `${activeProject.environmentId}:${activeProject.workspaceRoot}`
     : null;
-  const [pendingFileSurfaceIdsByProject, setPendingFileSurfaceIdsByProject] = useState<
-    ReadonlyMap<string, ReadonlySet<string>>
-  >(() => new Map());
-  const pendingFileSurfaceIds = activeProjectKey
-    ? (pendingFileSurfaceIdsByProject.get(activeProjectKey) ?? EMPTY_PENDING_FILE_SURFACE_IDS)
-    : EMPTY_PENDING_FILE_SURFACE_IDS;
+  // Mesura: the pending-save flags live in a store this view only writes, so a
+  // typing burst's first key and its save do not re-render the chat view.
   const handleFilePendingChange = useCallback(
     (relativePath: string, pending: boolean) => {
       if (!activeProjectKey) return;
-      setPendingFileSurfaceIdsByProject((currentByProject) => {
-        const current = currentByProject.get(activeProjectKey) ?? EMPTY_PENDING_FILE_SURFACE_IDS;
-        const surfaceId = `file:${relativePath}`;
-        if (current.has(surfaceId) === pending) return currentByProject;
-        const next = new Set(current);
-        if (pending) next.add(surfaceId);
-        else next.delete(surfaceId);
-        const nextByProject = new Map(currentByProject);
-        if (next.size === 0) nextByProject.delete(activeProjectKey);
-        else nextByProject.set(activeProjectKey, next);
-        return nextByProject;
-      });
+      useFileSurfacePendingStore
+        .getState()
+        .setPending(activeProjectKey, `file:${relativePath}`, pending);
     },
     [activeProjectKey],
   );
@@ -4645,11 +4633,15 @@ export default function ChatView(props: ChatViewProps) {
     }
   }, [activeThread, environmentId, interruptThreadTurn, setThreadError]);
   useEffect(() => subscribeSnapShotComposerFocus(focusComposer), [focusComposer]);
-  const scheduleComposerFocus = useCallback(() => {
-    window.requestAnimationFrame(() => {
-      focusComposer();
-    });
-  }, [focusComposer]);
+  const scheduleComposerFocus = useCallback(
+    (options?: { readonly canFocus?: () => boolean }) => {
+      window.requestAnimationFrame(() => {
+        if (options?.canFocus?.() === false) return;
+        focusComposer();
+      });
+    },
+    [focusComposer],
+  );
   const useArtifactTemplate = useCallback(
     (template: CodexArtifactTemplate) => {
       const composer = composerRef.current;
@@ -6224,9 +6216,10 @@ export default function ChatView(props: ChatViewProps) {
     if (!activeThreadRef) return;
     useRightPanelStore.getState().toggleThreadPanel(activeThreadRef, threadPanelPresentation);
   }, [activeThreadRef, threadPanelPresentation]);
-  // A thread started for a link the OS opened shows its browser maximized, like a browser window.
+  const pendingMaximizeThreadKey = useRightPanelStore((state) => state.pendingMaximizeThreadKey);
+  // OS links and designated user links request the same maximized browser layout.
   useEffect(() => {
-    if (!canMaximizeRightPanel) return;
+    if (!canMaximizeRightPanel || pendingMaximizeThreadKey !== routeThreadKey) return;
     if (useRightPanelStore.getState().consumeMaximizeRequest(routeThreadRef)) {
       // WORKAROUND: compiler flags synchronous state after external request consumption.
       // Keep the store one-time consume before updating local panel presentation.
@@ -6234,7 +6227,7 @@ export default function ChatView(props: ChatViewProps) {
       // oxlint-disable-next-line react/set-state-in-effect
       setMaximizedRightPanelThreadKey(routeThreadKey);
     }
-  }, [canMaximizeRightPanel, routeThreadKey, routeThreadRef]);
+  }, [canMaximizeRightPanel, pendingMaximizeThreadKey, routeThreadKey, routeThreadRef]);
   const toggleRightPanelMaximized = useCallback(() => {
     if (!canMaximizeRightPanel) return;
     setMaximizedRightPanelThreadKey((threadKey) =>
@@ -6243,18 +6236,24 @@ export default function ChatView(props: ChatViewProps) {
   }, [canMaximizeRightPanel, routeThreadKey]);
   const cleanupRightPanelSurfaces = useCallback(
     (surfaces: readonly RightPanelSurface[]) => {
-      if (!activeThreadRef) return;
+      const previewCloses: Promise<boolean>[] = [];
+      if (!activeThreadRef) return Promise.resolve(false);
       for (const surface of surfaces) {
         // Without preview access only the local surface goes away. The
         // server record is in-memory bookkeeping, not a live view, and stays
         // listed until a client with the scope closes it or the server restarts.
         if (canOperatePreview && surface.kind === "preview" && surface.resourceId) {
-          void closePreviewSession({
-            closePreview,
-            snapshot: activePreviewState.sessions[surface.resourceId] ?? null,
-            tabId: surface.resourceId,
-            threadRef: activeThreadRef,
-          });
+          previewCloses.push(
+            closePreviewSession({
+              closePreview,
+              snapshot: activePreviewState.sessions[surface.resourceId] ?? null,
+              tabId: surface.resourceId,
+              threadRef: activeThreadRef,
+            }).then(
+              (result) => result._tag === "Success",
+              () => false,
+            ),
+          );
         }
         if (
           surface.kind === "terminal" &&
@@ -6269,6 +6268,7 @@ export default function ChatView(props: ChatViewProps) {
           }
         }
       }
+      return Promise.all(previewCloses).then((results) => results.every(Boolean));
     },
     [
       activeThreadRef,
@@ -6318,16 +6318,71 @@ export default function ChatView(props: ChatViewProps) {
         store.byThreadKey,
         activeThreadRef,
       ).activeSurfaceId;
+      const closingThreadKey = scopedThreadKey(activeThreadRef);
+      const activeTarget = surfaces.find((surface) => surface.id === activeId);
+      const snapshot =
+        activeTarget?.kind === "preview" && activeTarget.resourceId
+          ? readThreadPreviewState(activeThreadRef).sessions[activeTarget.resourceId]
+          : undefined;
+      const returnToComposer =
+        canOperatePreview &&
+        currentRouteThreadKeyRef.current === closingThreadKey &&
+        activeTarget?.kind === "preview" &&
+        snapshot?.purpose === "thread-link" &&
+        snapshot.runtime === "server";
+      let targetClose: Promise<boolean> | undefined;
+      // Clear only the accepted close of the current target. A delayed old-route
+      // confirmation must not change the new route or a newly selected surface.
+      if (surfaces.some((surface) => surface.id === activeId)) {
+        store.consumeMaximizeRequest(activeThreadRef);
+        setMaximizedRightPanelThreadKey((current) =>
+          current === closingThreadKey ? null : current,
+        );
+      }
       const ordered = surfaces.toSorted(
         (left, right) => Number(left.id === activeId) - Number(right.id === activeId),
       );
       for (const surface of ordered) {
-        cleanupRightPanelSurfaces([surface]);
+        const closed = cleanupRightPanelSurfaces([surface]);
+        if (surface.id === activeId) targetClose = closed;
         store.closeSurface(activeThreadRef, surface.id);
       }
       syncActivePreviewSurface();
+      if (returnToComposer && targetClose) {
+        const revision = store.getUserActionRevision(activeThreadRef);
+        // Closing the designated link restores layout but panel entry can keep
+        // focus in a surviving tab. Return through the composer after commit,
+        // only after server acceptance and while this route still owns focus.
+        void targetClose.then((accepted) => {
+          if (!accepted) return;
+          scheduleComposerFocus({
+            canFocus: () => {
+              const active = document.activeElement;
+              // A surviving Browser URL input gains focus without a panel revision.
+              // Keep its draft instead of treating editable panel focus as a header.
+              return (
+                currentRouteThreadKeyRef.current === closingThreadKey &&
+                useRightPanelStore.getState().getUserActionRevision(activeThreadRef) === revision &&
+                getTerminalFocusOwner() === null &&
+                !isCommandPaletteOpen() &&
+                document.querySelector(
+                  '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]',
+                ) === null &&
+                !isEditableFocused(active) &&
+                (active === null || active === document.body || isPreviewFocused())
+              );
+            },
+          });
+        });
+      }
     },
-    [activeThreadRef, cleanupRightPanelSurfaces, syncActivePreviewSurface],
+    [
+      activeThreadRef,
+      canOperatePreview,
+      cleanupRightPanelSurfaces,
+      scheduleComposerFocus,
+      syncActivePreviewSurface,
+    ],
   );
   const closeRightPanelSurface = useCallback(
     (surface: RightPanelSurface) => {
@@ -8709,8 +8764,15 @@ export default function ChatView(props: ChatViewProps) {
     return window.desktopBridge?.onMenuAction((action) => {
       if (action === "rightPanel.toggle") toggleRightPanel();
       else if (action === "rightPanel.toggleMaximized") toggleRightPanelMaximized();
+      else if (action === "rightPanel.close" && activeRightPanelSurface)
+        closeRightPanelSurface(activeRightPanelSurface);
     });
-  }, [toggleRightPanel, toggleRightPanelMaximized]);
+  }, [
+    activeRightPanelSurface,
+    closeRightPanelSurface,
+    toggleRightPanel,
+    toggleRightPanelMaximized,
+  ]);
 
   // Paste-to-focus: the resting composer blurs on a click into the timeline,
   // so a paste that follows has no editable target and would be dropped.
@@ -11510,10 +11572,7 @@ export default function ChatView(props: ChatViewProps) {
           }
           onOpenFile={openFileSurface}
           onPendingChange={handleFilePendingChange}
-          selectedFilePending={
-            renderedRightPanelSurface.kind === "file" &&
-            pendingFileSurfaceIds.has(renderedRightPanelSurface.id)
-          }
+          pendingProjectKey={activeProjectKey}
           workspaceMutationId={workspaceMutationId}
           explorerHidden={
             renderedRightPanelSurface.kind === "file" &&
@@ -12373,7 +12432,7 @@ export default function ChatView(props: ChatViewProps) {
           surfaces={renderedRightPanelSurfaces}
           environmentId={activeThreadRef.environmentId}
           activeSurfaceId={renderedRightPanelSurface?.id ?? null}
-          pendingSurfaceIds={pendingFileSurfaceIds}
+          pendingProjectKey={activeProjectKey}
           previewSessions={activePreviewState.sessions}
           desktopByTabId={activePreviewState.desktopByTabId}
           previewRuntimeTabId={resolvePreviewRuntimeTabId}
@@ -12433,7 +12492,7 @@ export default function ChatView(props: ChatViewProps) {
             surfaces={renderedRightPanelSurfaces}
             environmentId={activeThreadRef.environmentId}
             activeSurfaceId={renderedRightPanelSurface?.id ?? null}
-            pendingSurfaceIds={pendingFileSurfaceIds}
+            pendingProjectKey={activeProjectKey}
             previewSessions={activePreviewState.sessions}
             desktopByTabId={activePreviewState.desktopByTabId}
             previewRuntimeTabId={resolvePreviewRuntimeTabId}
