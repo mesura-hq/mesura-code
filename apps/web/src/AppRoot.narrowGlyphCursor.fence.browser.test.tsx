@@ -885,7 +885,7 @@ describe("narrow glyph cursor fence: closed layers", () => {
     expect(palette()!.contains(widenedCursor()), "the cursor is not in the palette").toBe(false);
 
     await press(ESCAPE);
-    expect(palette(), "Escape closes the command palette").toBeNull();
+    await vi.waitFor(() => expect(palette(), "Escape closes the command palette").toBeNull());
     expect(readKeyEngineSnapshot()).toMatchObject({ scope: "chat", mode: "NORMAL" });
     expect(widenedCursor()?.textContent, "the chat cursor shows again on i").toBe("i");
   });

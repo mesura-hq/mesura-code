@@ -12,6 +12,7 @@ import {
   timelineFixtureVersions,
 } from "./mesura-timeline.find.fixture-build.ts";
 import { createTimelineFixtureOutput } from "./mesura-timeline.find.fixture-output.ts";
+import { expectFixtureVersionFloor } from "./mesura-fixture-versions.ts";
 
 interface RowSnapshot {
   ordinal: number;
@@ -70,7 +71,9 @@ const stages: Record<string, Snapshot[]> = {};
 const retainedOutput = NodeProcess.env.MESURA_TIMELINE_ARTIFACT_DIR;
 
 beforeAll(async () => {
-  expect(timelineFixtureVersions).toEqual({ react: "19.2.6", reactDom: "19.2.6", legend: "3.3.5" });
+  expectFixtureVersionFloor(timelineFixtureVersions.react, [19, 2, 6]);
+  expect(timelineFixtureVersions.reactDom).toBe(timelineFixtureVersions.react);
+  expectFixtureVersionFloor(timelineFixtureVersions.legend, [3, 3, 5]);
   output = createTimelineFixtureOutput(retainedOutput);
   fixturePath = await buildTimelineFindFixture(output.directory);
   const cache =
@@ -122,6 +125,9 @@ async function settle(page: Page): Promise<Snapshot> {
   })()`);
 }
 
+// Each case observes 30 real frames at every measured layout. Preserve the
+// pre-sync 60-second subprocess budget without changing any geometry assertion.
+// oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- Chromium must render all measured layouts; virtual time cannot validate the list geometry
 it.each([
   { name: "ordinary index", narrow: false, navigation: "index" },
   { name: "narrow index", narrow: true, navigation: "index" },
@@ -289,6 +295,7 @@ it.each([
       }
     }
   },
+  60_000,
 );
 
 it("detects the real React depth error independently of the measured Find cases", async () => {

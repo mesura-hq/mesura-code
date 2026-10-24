@@ -14,6 +14,7 @@
           "type": "string"
         },
         "version": {
+          "maximum": 9007199254740991,
           "minimum": 0,
           "type": "integer"
         }
@@ -56,6 +57,7 @@
           "$ref": "#/$defs/SymmetriaDraft"
         },
         "currentVersion": {
+          "maximum": 9007199254740991,
           "minimum": 0,
           "type": "integer"
         },

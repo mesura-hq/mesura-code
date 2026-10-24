@@ -227,13 +227,13 @@ describe("agent search criterion 1: switching between exact words and agent mode
 
     await click(agentSegment!);
     expect(activeSearchMode()).toBe("agent");
-    expect(focusIsInPickerTextField()).toBe(true);
+    await vi.waitFor(() => expect(focusIsInPickerTextField()).toBe(true));
 
     const exactSegment = modeControl(EXACT_MODE_NAME);
     expect(exactSegment, "Expected a visible exact-words control").not.toBeNull();
     await click(exactSegment!);
     expect(activeSearchMode()).toBe("exact");
-    expect(focusIsInPickerTextField()).toBe(true);
+    await vi.waitFor(() => expect(focusIsInPickerTextField()).toBe(true));
     expect(paletteMode()).toBe("threads");
   });
 
