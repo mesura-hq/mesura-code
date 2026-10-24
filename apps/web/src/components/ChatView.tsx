@@ -417,6 +417,7 @@ type ChatViewProps =
     };
 
 const EMPTY_HELD_TURN_DIFF_SUMMARIES: readonly never[] = [];
+const EMPTY_MESSAGES: readonly never[] = [];
 const noopHeldTurnDiff = (_turnId: RunId, _filePath?: string) => {};
 const noopHeldRevert = (_targetTurnCount: number) => {};
 const noopHeldAttachment = (_attachment: ChatFileAttachment) => {};
@@ -2597,6 +2598,7 @@ export default function ChatView(props: ChatViewProps) {
   const {
     acknowledgeActiveThreadWoke,
     activeBranchMismatchKey,
+    agentSignalDockEntry,
     backgroundWorkBanner,
     childInputBanner,
     goalBanner,
@@ -3793,6 +3795,13 @@ export default function ChatView(props: ChatViewProps) {
                               isPreparingWorktree={isPreparingWorktree && !sendQueuesBehindSetup}
                               queuedRunsControl={queuedRunsControl}
                               bannerItems={composerBannerItems}
+                              pinnedActions={{
+                                factoryItems,
+                                messages: serverProjection?.messages ?? EMPTY_MESSAGES,
+                                pendingUserInput: inlinePendingUserInput,
+                                agentSignal: agentSignalDockEntry,
+                                onOpenFactoryPlan: openFactoryPlan,
+                              }}
                               resumeCompactionTokens={resumeCompactionTokens}
                               keepFullHistory={keepFullHistory}
                               onToggleKeepFullHistory={toggleKeepFullHistoryStable}

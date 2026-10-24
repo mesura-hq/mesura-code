@@ -174,15 +174,22 @@ async function mountApp() {
   });
 }
 
+// Phase 6 moves the agent's signal into the pinned action dock above the composer; the Woke
+// line stays a chat status line. Either is the line these specs read.
 function statusLine() {
-  const line = container.querySelector<HTMLElement>('[data-chat-thread-status-line="true"]');
+  const line = container.querySelector<HTMLElement>(
+    '[data-chat-thread-status-line="true"], [data-pinned-action-dock-item="agent-signal"]',
+  );
   expect(line, `Expected a chat status line; rendered: ${container.textContent}`).not.toBeNull();
   return line!;
 }
 
 function statusLineButton(line: HTMLElement, text: string) {
-  const match = [...line.querySelectorAll("button")].find((entry) =>
-    entry.textContent?.trim().startsWith(text),
+  // The dock's close control is an X whose accessible name starts with the action.
+  const match = [...line.querySelectorAll("button")].find(
+    (entry) =>
+      entry.textContent?.trim().startsWith(text) ||
+      entry.getAttribute("aria-label")?.startsWith(text),
   );
   expect(match, `Expected button ${text}; status line: ${line.textContent}`).toBeDefined();
   return match!;

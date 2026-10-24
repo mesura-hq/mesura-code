@@ -3,15 +3,8 @@ import type {
   FactoryPlanActivityPayload,
   ScopedThreadRef,
 } from "@t3tools/contracts";
-import {
-  defaultFactoryRoutes,
-  readyFactoryRoutes,
-  reconcileFactoryRouteSlots,
-  validateFactoryRoutes,
-  type FactoryRouteSlots,
-} from "@t3tools/client-runtime/factory/routes";
 import { EllipsisIcon, Maximize2Icon } from "lucide-react";
-import { memo, useMemo, useState } from "react";
+import { memo, useMemo } from "react";
 
 import ChatMarkdown from "../components/ChatMarkdown";
 import { Badge } from "../components/ui/badge";
@@ -26,7 +19,8 @@ import {
 } from "@t3tools/client-runtime/factory/plan-model";
 import { occurrenceKeys } from "@t3tools/client-runtime/factory/occurrence-keys";
 import { FactoryApprovedRoutes, FactoryRoutePicker } from "./FactoryRoutePicker";
-import { useFactoryPlanApproval } from "./useFactoryPlanApproval";
+import { factoryPlanRoutesKey, useFactoryPlanApproval } from "./useFactoryPlanApproval";
+import { useFactoryPlanRoutes } from "./useFactoryPlanRoutes";
 import { useFactorySnapshot } from "./useFactorySnapshot";
 
 function FactoryPlanContext({
@@ -63,7 +57,7 @@ function FactoryPlanContext({
 
 /**
  * The card's foot: the route per role and Approve, or the routes an approval
- * of these bytes carried. The rows are card-local until Approve sends them.
+ * of these bytes carried. The rows are shared with the pinned card in the composer dock.
  */
 function FactoryPlanApprovalSection({
   threadRef,
@@ -76,26 +70,10 @@ function FactoryPlanApprovalSection({
     threadRef,
     plan,
   );
-  // Untouched rows follow the provider lists as they load; the first edit
-  // takes them over.
-  const [edited, setEdited] = useState<FactoryRouteSlots | null>(null);
-  const defaults = useMemo(() => defaultFactoryRoutes(providers), [providers]);
-  // Edits are held to the provider lists as they are now, so Approve never
-  // sends a model or level the server stopped offering.
-  const slots = useMemo(
-    () => (edited === null ? defaults : reconcileFactoryRouteSlots(edited, providers)),
-    [edited, defaults, providers],
+  const { slots, routes, violations, setEdited } = useFactoryPlanRoutes(
+    factoryPlanRoutesKey(threadRef, plan.digest),
+    providers,
   );
-  const routes = readyFactoryRoutes(slots);
-  const { implementer, reviewer, verifier } = slots;
-  const violations =
-    implementer.status === "ready" && reviewer.status === "ready" && verifier.status === "ready"
-      ? validateFactoryRoutes({
-          implementer: implementer.route,
-          reviewer: reviewer.route,
-          verifier: verifier.route,
-        })
-      : [];
 
   if (state.kind === "approved") {
     return (

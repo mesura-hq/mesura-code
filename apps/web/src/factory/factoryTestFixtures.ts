@@ -4,6 +4,7 @@ import {
   ThreadId,
   TurnItemId,
   type OrchestrationV2ProjectedTurnItem,
+  type OrchestrationV2ThreadProjection,
   type OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
 import type {
@@ -109,14 +110,21 @@ export function projectFactoryTurnItems(
   });
 }
 
+/** Projection records a fixture adds beside its turn items: requests, plans and runs. */
+export type FactoryProjectionExtras = Partial<
+  Pick<OrchestrationV2ThreadProjection, "runtimeRequests" | "plans" | "runs">
+>;
+
 export function makeFactoryThreadProjection(
   shell: EnvironmentThreadShell,
   items: ReadonlyArray<OrchestrationV2TurnItem>,
+  extras: FactoryProjectionExtras = {},
 ): EnvironmentThread {
   return {
     environmentId: shell.environmentId,
     projection: {
       ...makeFenceThreadProjection(shell),
+      ...extras,
       turnItems: items,
       visibleTurnItems: projectFactoryTurnItems(items),
       messages: items.flatMap((item) =>
@@ -146,9 +154,13 @@ export function makeFactoryThreadProjection(
 interface FactoryThreadFixture {
   readonly thread: EnvironmentThreadShell | null;
   readonly turnItems: ReadonlyArray<OrchestrationV2TurnItem>;
+  /** Pending requests, plans or runs; most Factory fixtures have none. */
+  readonly projectionExtras?: FactoryProjectionExtras;
   readonly threadListeners: Set<() => void>;
 }
 type FactoryFixtureSubscribe = (listener: () => void) => () => void;
+
+const NO_PROJECTION_EXTRAS: FactoryProjectionExtras = {};
 
 // Keep hooks at module scope. A nested hook factory lets React Compiler hoist
 // fixture reads outside their closure, which produced "fixture is not defined".
@@ -165,9 +177,13 @@ function useFactoryFixtureThreadProjection(
 ) {
   const shell = useFactoryFixtureThreadShell(fixture, subscribe);
   const items = useSyncExternalStore(subscribe, () => fixture.turnItems);
+  const extras = useSyncExternalStore(
+    subscribe,
+    () => fixture.projectionExtras ?? NO_PROJECTION_EXTRAS,
+  );
   return useMemo(
-    () => (shell === null ? null : makeFactoryThreadProjection(shell, items)),
-    [shell, items],
+    () => (shell === null ? null : makeFactoryThreadProjection(shell, items, extras)),
+    [shell, items, extras],
   );
 }
 

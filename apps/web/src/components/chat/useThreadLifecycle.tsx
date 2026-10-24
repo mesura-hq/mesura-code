@@ -48,7 +48,7 @@ import { vcsEnvironment } from "../../state/vcs";
 import { useChildThreadInputs, readThreadShell, waitForThreadShell } from "../../state/entities";
 import { environmentShell } from "../../state/shell";
 import { ThreadStatusLine } from "./ThreadStatusLine";
-import { AgentSignalStatusLine } from "./AgentSignalStatusLine";
+import type { AgentSignalDockEntry } from "./PinnedActionDock";
 import { formatRelativeTimeLabel, formatRelativeTimeUntilLabel } from "../../timestampFormat";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { readEnvironmentScope } from "../../state/session";
@@ -589,15 +589,17 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
       actionLabel="Dismiss"
       onAction={acknowledgeActiveThreadWokeStable}
     />
-  ) : activeAgentSignal ? (
-    <AgentSignalStatusLine
-      signal={activeAgentSignal}
-      settleSupported={supportsSettlement}
-      actionsDisabled={!canOperateThread}
-      onDismiss={clearActiveAgentSignalStable}
-      onSettle={settleActiveThreadStable}
-    />
   ) : null;
+  // Mesura: the agent's signal sits in the composer's pinned action dock, not in this footer.
+  const agentSignalDockEntry: AgentSignalDockEntry | null = activeAgentSignal
+    ? {
+        signal: activeAgentSignal,
+        settleSupported: supportsSettlement,
+        actionsDisabled: !canOperateThread,
+        onDismiss: clearActiveAgentSignalStable,
+        onSettle: settleActiveThreadStable,
+      }
+    : null;
   const shortcuts = {
     "thread.settle": () => {
       if (!readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) return false;
@@ -624,6 +626,7 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
     shortcuts,
     acknowledgeActiveThreadWoke,
     activeBranchMismatchKey,
+    agentSignalDockEntry,
     backgroundWorkBanner,
     childInputBanner,
     goalBanner,
