@@ -3,6 +3,7 @@ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import {
   CommandId,
+  factoryRunHoldsCompletion,
   type ThreadId,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ThreadShell,
@@ -19,6 +20,7 @@ import * as Schedule from "effect/Schedule";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
+import { FactoryRunShellSummaries } from "../factory/FactoryRunShellSummaries.ts";
 import * as GitManager from "../git/GitManager.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
@@ -157,7 +159,8 @@ function pullRequestSettles(
 }
 
 export function isAutoSettlementCandidate(
-  thread: Omit<ProjectionStore.ProjectionSettlementCandidate, "latestUserAuthoredMessageAt">,
+  thread: Omit<ProjectionStore.ProjectionSettlementCandidate, "latestUserAuthoredMessageAt"> &
+    Pick<OrchestrationV2ThreadShell, "factoryRun">,
   nowMs: number,
 ): boolean {
   if (thread.archivedAt !== null || thread.settledOverride !== null) return false;
@@ -165,6 +168,8 @@ export function isAutoSettlementCandidate(
   if (thread.pendingRuntimeRequest !== null) return false;
   if (thread.activityRunStatus != null) return false;
   if (backgroundWorkHoldsCompletion(thread.pendingBackgroundTasks ?? [])) return false;
+  // Mesura: a running Software Factory run will wake its coordinator again.
+  if (factoryRunHoldsCompletion(thread.factoryRun)) return false;
   if (threadHasQueuedTurnStart(thread, nowMs)) return false;
   // Interrupted runs must keep the same snooze protection the sidebar shows.
   return !isSnoozed(thread, nowMs);
@@ -193,7 +198,8 @@ export function isSnoozed(
 }
 
 export function resolveAutoSettlementAt(input: {
-  readonly thread: ProjectionStore.ProjectionSettlementCandidate;
+  readonly thread: ProjectionStore.ProjectionSettlementCandidate &
+    Pick<OrchestrationV2ThreadShell, "factoryRun">;
   readonly pullRequest: SettlementPullRequest | null;
   readonly nowMs: number;
   readonly autoSettleAfterDays: number | null;
@@ -302,6 +308,7 @@ export const make = Effect.gen(function* () {
   // Settling a settled thread re-emits thread.settled with the same settledAt,
   // so this keeps the settle action to one run per settlement.
   const settleActionRunAt = new Map<ThreadId, number>();
+  const factoryRunSummaries = yield* FactoryRunShellSummaries;
 
   const sweep = Effect.fn("ThreadSettlementServiceV2.sweep")(function* (
     mergedPullRequest: PullRequestService.PullRequestMergeEvent | null,
@@ -311,7 +318,11 @@ export const make = Effect.gen(function* () {
     if (!autoSettlementConfigured(settings)) {
       return;
     }
-    const threads = yield* projections.getSettlementCandidates(threadId);
+    // Mesura: the settlement query carries no `factoryRun`; the run tracker keeps it here.
+    const threads = (yield* projections.getSettlementCandidates(threadId)).map((thread) => ({
+      ...thread,
+      factoryRun: factoryRunSummaries.get(thread.id),
+    }));
     if (threads.length === 0) return;
     const projectShells = yield* projectStore.listShells();
     const nowMs = DateTime.toEpochMillis(yield* DateTime.now);

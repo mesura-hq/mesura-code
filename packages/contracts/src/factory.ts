@@ -468,6 +468,11 @@ export const FactoryRunShellSummary = Schema.Struct({
 });
 export type FactoryRunShellSummary = typeof FactoryRunShellSummary.Type;
 
+/** A running run will wake its coordinator again, so its thread is not Done and not settled. */
+export const factoryRunHoldsCompletion = (
+  run: Pick<FactoryRunShellSummary, "status"> | null | undefined,
+) => run?.status === "running";
+
 /** The compact state a run card draws; replaced in place, and under 4 KiB for an 11-phase run. */
 export const FactoryRunSummary = Schema.Struct({
   runId: Schema.String,
