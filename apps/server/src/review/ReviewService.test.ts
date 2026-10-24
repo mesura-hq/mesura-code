@@ -3,7 +3,6 @@ import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as PlatformError from "effect/PlatformError";
 import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
 import * as Option from "effect/Option";
@@ -256,8 +255,8 @@ describe("ReviewService", () => {
       const gitCalls: Array<{ readonly cwd: string; readonly operation: string }> = [];
       yield* Effect.gen(function* () {
         const review = yield* ReviewService.ReviewService;
-        // These assertions inspect only failures. A heterogeneous success tuple
-        // breaks Effect.flip inference, so normalize unused successful values.
+        // These assertions inspect only failures. Normalize unused successful
+        // values so every attempt has the same success type.
         const attempts = [
           ["ReviewService.getDiffPreview", review.getDiffPreview({ cwd }).pipe(Effect.asVoid)],
           [
@@ -284,7 +283,11 @@ describe("ReviewService", () => {
           ],
         ] as const;
         for (const [operation, attempt] of attempts) {
-          const error = yield* attempt.pipe(Effect.flip);
+          const result = yield* Effect.result(attempt);
+          if (result._tag !== "Failure") {
+            assert.fail(`Expected ${operation} to deny ${scenario} before any repository read.`);
+          }
+          const error = result.failure;
           assert.strictEqual(error._tag, "VcsRepositoryDetectionError");
           if (error._tag !== "VcsRepositoryDetectionError") {
             assert.fail("Expected the workspace denial error before checking its cwd.");

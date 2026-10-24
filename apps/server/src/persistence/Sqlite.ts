@@ -24,14 +24,11 @@ const layerSetup = Layer.effectDiscard(
     }>`SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table'`;
     if (tables[0]?.count === 0) yield* sql`PRAGMA auto_vacuum = INCREMENTAL;`;
     yield* sql`PRAGMA journal_mode = WAL;`;
-    // FULL fsyncs the WAL on every commit, on the main thread. Every provider
-    // event is its own commit, so a slow or busy disk stalls the event loop
-    // and clients drop. In WAL mode NORMAL only fsyncs at checkpoints. It
-    // cannot corrupt the database and an app crash loses nothing; an OS crash
-    // or power loss can roll back commits since the last checkpoint.
-    yield* sql`PRAGMA synchronous = NORMAL;`;
-    // Checkpoints are now the only sync, and macOS fsync() does not flush the
-    // drive cache. F_FULLFSYNC makes them reach disk; other platforms ignore it.
+    // NORMAL reduced event-loop stalls, but it can lose acknowledged commands
+    // and outbox effects after power loss. Keep each committed command durable.
+    yield* sql`PRAGMA synchronous = FULL;`;
+    // macOS fsync() does not flush the drive cache. F_FULLFSYNC makes
+    // checkpoints reach disk; other platforms ignore it.
     yield* sql`PRAGMA checkpoint_fullfsync = ON;`;
     // PASSIVE checkpoints never shrink the -wal file, so it otherwise keeps its
     // largest size until the last connection closes.

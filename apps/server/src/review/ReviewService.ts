@@ -88,7 +88,12 @@ export const make = Effect.gen(function* () {
     ]);
     if (
       KnownWorkspaces.isWithinRoot(path, candidate, workspaceRoot) ||
-      (yield* knownWorkspaces.contains(candidate))
+      // contains also accepts missing roots for workspace creation. Review reads
+      // require assertContains so a missing registered root cannot grant access.
+      (yield* knownWorkspaces.assertContains(candidate).pipe(
+        Effect.as(true),
+        Effect.orElseSucceed(() => false),
+      ))
     ) {
       return;
     }
