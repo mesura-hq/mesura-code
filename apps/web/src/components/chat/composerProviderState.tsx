@@ -19,7 +19,13 @@ import type { ReactNode } from "react";
 import type { DraftId } from "../../composerDraftStore";
 import { getProviderModelCapabilities } from "../../providerModels";
 import type { ComposerControlSize } from "./ComposerControl";
-import { shouldRenderTraitsControls, TraitsMenuContent, TraitsPicker } from "./TraitsPicker";
+import {
+  getReasoningTraitStep,
+  shouldRenderTraitsControls,
+  TraitsMenuContent,
+  TraitsPicker,
+  type PromptUltrathink,
+} from "./TraitsPicker";
 
 export type ComposerProviderStateInput = {
   provider: ProviderDriverKind;
@@ -50,8 +56,8 @@ type TraitsRenderInput = {
   models: ReadonlyArray<ServerProviderModel>;
   modelOptions: ReadonlyArray<ProviderOptionSelection> | undefined;
   reportedModelSelection?: ModelSelection | null | undefined;
-  prompt: string;
-  onPromptChange: (prompt: string) => void;
+  promptUltrathink: PromptUltrathink;
+  onPromptEdit: (edit: (prompt: string) => string) => void;
   planModeEnabled: boolean;
   size?: ComposerControlSize;
   hidden?: boolean;
@@ -66,9 +72,6 @@ export function getComposerPromptInjectionState(prompt: string): ComposerPromptI
 /**
  * Cursor ACP can report `fastMode: true` as the provider default. T3 only
  * treats Fast as selected when the user chose it (draft/sticky/settings).
- * Otherwise inject an explicit `false` so new chats stay Normal and the
- * send path can overwrite a prior Fast session — descriptor defaults are
- * otherwise omitted by `buildExplicitProviderOptionSelectionsFromDescriptors`.
  */
 export function withImplicitFastModeDefault(
   caps: ModelCapabilities,
@@ -161,10 +164,60 @@ export function getComposerProviderState(input: ComposerProviderStateInput): Com
 }
 
 /**
- * Shared props for both traits renderings, or null when the control has
- * nothing to show. The two exported renderers differ by one prop, so they
- * build their own element off this rather than share a component parameter.
+ * `cursor` is an expanded caret in `prompt`; the result's `cursor` keeps it on
+ * the same character when the Ultrathink prefix is added or removed.
  */
+export function getComposerReasoningStep(input: {
+  provider: ProviderDriverKind;
+  instanceId: ProviderInstanceId;
+  model: string;
+  models: ReadonlyArray<ServerProviderModel>;
+  modelOptions: ReadonlyArray<ProviderOptionSelection> | null | undefined;
+  reportedModelSelection?: ModelSelection | null | undefined;
+  prompt: string;
+  cursor: number;
+  planModeEnabled: boolean;
+  direction: 1 | -1;
+}): {
+  prompt: string;
+  cursor: number;
+  modelOptions?: ReadonlyArray<ProviderOptionSelection>;
+} | null {
+  const { prompt, cursor } = input;
+  const { selections } = resolveComposerOptionSelections(
+    input.models,
+    input.model,
+    input.provider,
+    input.modelOptions,
+    input.planModeEnabled,
+  );
+  const step = getReasoningTraitStep({
+    provider: input.provider,
+    instanceId: input.instanceId,
+    model: input.model,
+    models: input.models,
+    modelOptions: selections,
+    reportedModelSelection: input.reportedModelSelection,
+    prompt,
+    planModeEnabled: input.planModeEnabled,
+    direction: input.direction,
+  });
+  if (!step) return null;
+  const modelOptions = "modelOptions" in step ? { modelOptions: step.modelOptions } : {};
+  if (step.prompt === prompt) return { prompt, cursor, ...modelOptions };
+  // Adding the prefix also trims the prompt, so the kept text starts right after the prefix.
+  const keptStart = "modelOptions" in step ? 0 : step.prompt.length - prompt.trim().length;
+  const offset =
+    "modelOptions" in step
+      ? step.prompt.length - prompt.length
+      : keptStart - (prompt.length - prompt.trimStart().length);
+  return {
+    prompt: step.prompt,
+    cursor: Math.min(step.prompt.length, Math.max(keptStart, cursor + offset)),
+    ...modelOptions,
+  };
+}
+
 function resolveTraitsControlProps(input: TraitsRenderInput) {
   const {
     provider,
@@ -175,8 +228,8 @@ function resolveTraitsControlProps(input: TraitsRenderInput) {
     models,
     modelOptions,
     reportedModelSelection,
-    prompt,
-    onPromptChange,
+    promptUltrathink,
+    onPromptEdit,
     planModeEnabled,
     size,
     hidden,
@@ -198,7 +251,7 @@ function resolveTraitsControlProps(input: TraitsRenderInput) {
       models,
       model,
       modelOptions: resolvedModelOptions,
-      prompt,
+      promptUltrathink,
       planModeEnabled,
     })
   ) {
@@ -213,8 +266,8 @@ function resolveTraitsControlProps(input: TraitsRenderInput) {
     model,
     modelOptions: resolvedModelOptions,
     reportedModelSelection,
-    prompt,
-    onPromptChange,
+    promptUltrathink,
+    onPromptEdit,
     planModeEnabled,
     ...(size !== undefined ? { size } : {}),
     ...(hidden !== undefined ? { hidden } : {}),

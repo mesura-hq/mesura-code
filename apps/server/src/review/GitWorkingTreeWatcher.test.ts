@@ -33,6 +33,8 @@ import type { GitWorkingTreeChangesResult } from "@t3tools/contracts";
 
 import * as ServerConfig from "../config.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
+import * as KnownWorkspaces from "../workspace/KnownWorkspaces.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
@@ -94,6 +96,7 @@ type Tuning = GitWorkingTreeWatcher.WatcherTuning;
 /** The real review stack, with `workspaceRoot` as the configured workspace root. */
 function makeLayer(workspaceRoot: string, tuning: Layer.Layer<never> = Layer.empty) {
   return ReviewService.layer.pipe(
+    Layer.provide(KnownWorkspaces.layer.pipe(Layer.provide(SqlitePersistence.layerMemory))),
     Layer.provide(
       Layer.mock(ProjectStore.ProjectStoreV2)({ listShells: () => Effect.succeed([]) }),
     ),

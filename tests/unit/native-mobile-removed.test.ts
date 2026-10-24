@@ -9,6 +9,7 @@ import {
   REMOVED_NATIVE_MOBILE_PREFIXES,
   isRemovedNativeMobilePath,
   pruneNativeMobileJobNeeds,
+  pruneNativeMobileBuilds,
   pruneNativeMobilePatches,
 } from "../../scripts/lib/native-mobile-removal.ts";
 import { repositoryRoot } from "./contractHarness.ts";
@@ -130,4 +131,26 @@ it("prunes native patch entries by package name, with their comments, and keeps 
       "  react-native-reanimated@4.6.0: patches/not-a-patch-entry",
     ].join("\n"),
   );
+});
+
+it("removes build permissions for native tarballs and keeps other build permissions", () => {
+  const input = [
+    "allowBuilds:",
+    '  "react-native-enriched-markdown@file:apps/mobile/deps/markdown.tgz": true',
+    "  esbuild: true",
+    "catalog:",
+    "  react: 19.3.0",
+    "",
+  ].join("\n");
+  const expected = input
+    .split("\n")
+    .filter((line) => !line.includes("@file:apps/mobile/"))
+    .join("\n");
+  assert.equal(pruneNativeMobileBuilds(input), expected);
+  assert.equal(pruneNativeMobileBuilds(expected), expected);
+  const workspace = NodeFS.readFileSync(
+    NodePath.join(repositoryRoot, "pnpm-workspace.yaml"),
+    "utf8",
+  );
+  assert.equal(pruneNativeMobileBuilds(workspace), workspace);
 });

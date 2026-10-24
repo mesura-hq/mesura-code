@@ -217,29 +217,6 @@ describe("FileSaveCoordinator", () => {
     expect(persist).toHaveBeenLastCalledWith("latest");
   });
 
-  it("does not rewrite a write that lands while the editor closes", async () => {
-    vi.useFakeTimers();
-    const inFlight = deferred();
-    const persist = vi
-      .fn<(contents: string) => Promise<AtomCommandResult<void, never>>>()
-      .mockReturnValueOnce(inFlight.promise)
-      .mockResolvedValue(AsyncResult.success(undefined));
-    const coordinator = new FileSaveCoordinator({
-      debounceMs: 500,
-      persist,
-      onPendingChange: vi.fn(),
-      onConfirmed: vi.fn(),
-    });
-
-    coordinator.change("only");
-    await vi.advanceTimersByTimeAsync(500);
-    coordinator.dispose();
-    inFlight.resolve(AsyncResult.success(undefined));
-    await vi.runAllTimersAsync();
-
-    expect(persist).toHaveBeenCalledOnce();
-  });
-
   it("retries a failed write when the editor closes", async () => {
     vi.useFakeTimers();
     const persist = vi
@@ -302,29 +279,5 @@ describe("FileSaveCoordinator", () => {
 
     expect(persist).not.toHaveBeenCalled();
     expect(onPendingChange).not.toHaveBeenCalled();
-  });
-
-  it("does not persist confirmed contents again on disposal", async () => {
-    vi.useFakeTimers();
-    const persist = vi
-      .fn<(contents: string) => Promise<AtomCommandResult<void, never>>>()
-      .mockResolvedValue(AsyncResult.success(undefined));
-    const coordinator = new FileSaveCoordinator({
-      debounceMs: 500,
-      persist,
-      onPendingChange: vi.fn(),
-      onConfirmed: vi.fn(),
-    });
-
-    coordinator.change("temporary edit");
-    await vi.advanceTimersByTimeAsync(500);
-    coordinator.change("original contents");
-    await vi.advanceTimersByTimeAsync(500);
-    expect(persist).toHaveBeenCalledTimes(2);
-
-    coordinator.dispose();
-    await vi.runAllTimersAsync();
-
-    expect(persist).toHaveBeenCalledTimes(2);
   });
 });

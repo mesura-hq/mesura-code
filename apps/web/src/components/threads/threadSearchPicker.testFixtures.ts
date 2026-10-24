@@ -271,9 +271,7 @@ function connectedEnvironment(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Mock factories. Each suite calls these from its own `vi.mock` lines.
-// ---------------------------------------------------------------------------
+// Each suite registers these factories through its own vi.mock calls.
 
 export function mockEntities<T extends object>(actual: T): T {
   return {
@@ -303,6 +301,7 @@ export function mockEnvironments<T extends object>(actual: T): T {
         presentationById: new Map(),
       };
     },
+    useEnvironmentProviders: () => new Map(),
     usePrimaryEnvironmentId: () => LAPTOP_ENVIRONMENT_ID,
     usePrimaryEnvironment: () => threadSearchFixture.environments[0] ?? null,
   };

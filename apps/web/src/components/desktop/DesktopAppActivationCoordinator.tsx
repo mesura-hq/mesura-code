@@ -9,7 +9,7 @@ import { newProjectId } from "../../lib/utils";
 import { readProjects, waitForProject } from "../../state/entities";
 import { usePrimaryEnvironment } from "../../state/environments";
 import { projectEnvironment } from "../../state/projects";
-import { useEnvironmentShellBootstrapped } from "../../state/shellBootstrapped";
+import { useEnvironmentShellHasSnapshot } from "../../state/shell";
 import { useAtomCommand } from "../../state/use-atom-command";
 
 export function DesktopAppActivationCoordinator() {
@@ -18,13 +18,14 @@ export function DesktopAppActivationCoordinator() {
   const openThread = useNewThreadHandler();
   const queueRef = useRef(Promise.resolve());
   const activation = window.desktopBridge?.appActivation;
-  // Mesura: the flag alone; the whole shell state re-rendered this per streamed update (phase 6).
-  const bootstrapped = useEnvironmentShellBootstrapped(primaryEnvironment?.environmentId ?? null);
+  const shellHasSnapshot = useEnvironmentShellHasSnapshot(
+    primaryEnvironment?.environmentId ?? null,
+  );
   const ready =
     activation !== undefined &&
     primaryEnvironment?.connection.phase === "connected" &&
     primaryEnvironment.serverConfig !== null &&
-    bootstrapped;
+    shellHasSnapshot;
 
   const processRequest = useEffectEvent(async (request: DesktopAppActivationRequest) =>
     handleDesktopAppActivationRequest(request, {

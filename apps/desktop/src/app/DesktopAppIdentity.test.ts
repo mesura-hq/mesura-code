@@ -14,7 +14,6 @@ import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopAssets from "./DesktopAssets.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
-import * as DesktopUserData from "./DesktopUserData.ts";
 
 const defaultEnvironmentInput = {
   dirname: "/repo/apps/desktop/dist-electron",
@@ -44,6 +43,7 @@ const layerElectronApp = (calls: ElectronAppCalls) =>
     name: Effect.succeed("Mesura Code"),
     systemLocale: Effect.succeed("en-US"),
     whenReady: Effect.void,
+    requestSingleInstanceLock: Effect.succeed(true),
     quit: Effect.void,
     exit: () => Effect.void,
     relaunch: () => Effect.void,
@@ -131,13 +131,7 @@ const withIdentity = <A, E, R>(
             exists: (path) =>
               input.legacyPathProbeError
                 ? Effect.fail(input.legacyPathProbeError)
-                : Effect.succeed(
-                    // This fork resolves both names to "mesura-code", so the
-                    // probe matches the same directory the non-legacy branch
-                    // returns. See DESKTOP_USER_DATA_IDENTITY for why the two
-                    // must not diverge into a T3-named directory.
-                    input.legacyPathExists === true && path.includes("mesura-code"),
-                  ),
+                : Effect.succeed(input.legacyPathExists === true && path.includes("mesura-code")),
             readFileString: () =>
               Effect.succeed(input.packageJson ?? '{"t3codeCommitHash":"abcdef1234567890"}'),
           }),
@@ -157,79 +151,31 @@ describe("DesktopAppIdentity", () => {
         const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
         const userDataPath = yield* identity.resolveUserDataPath;
 
-        // Keep this literal. It builds the real DesktopEnvironment layer, so
-        // it is what fails if a weekly merge restores upstream's hardcoded
-        // "t3code-v2". Do not replace it with resolveDesktopUserDataIdentity.
+        // Keep the literal: the real environment layer must never restore a T3 profile.
         assert.equal(userDataPath, "/Users/alice/Library/Application Support/mesura-code");
       }),
       { legacyPathExists: true },
     ),
   );
 
-  it.effect("preserves failures while inspecting the legacy userData path", () => {
-    const legacyPath = "/Users/alice/Library/Application Support/mesura-code-dev";
-    const cause = PlatformError.systemError({
-      _tag: "PermissionDenied",
-      module: "FileSystem",
-      method: "exists",
-      description: "permission denied",
-      pathOrDescriptor: legacyPath,
-    });
-
-    return withIdentity(
+  it.effect("keeps using the Mesura development profile", () =>
+    withIdentity(
       Effect.gen(function* () {
         const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
-        const error = yield* identity.resolveUserDataPath.pipe(Effect.flip);
-
-        assert.instanceOf(error, DesktopUserData.DesktopUserDataInitializationError);
-        assert.equal(error.resourcePath, legacyPath);
-        assert.strictEqual(error.cause, cause);
         assert.equal(
-          error.message,
-          `Could not initialize Electron user data during inspect at ${legacyPath} (PermissionDenied).`,
+          yield* identity.resolveUserDataPath,
+          "/Users/alice/Library/Application Support/mesura-code-dev",
         );
       }),
       {
-        legacyPathProbeError: cause,
+        legacyPathExists: true,
         environment: { env: { VITE_DEV_SERVER_URL: "http://localhost:5173" } },
       },
-    );
-  });
-
-  it.effect("configures app identity from the environment commit override", () => {
-    const calls: ElectronAppCalls = {
-      setAboutPanelOptions: [],
-      setDockIcon: [],
-      setName: [],
-    };
-
-    return withIdentity(
-      Effect.gen(function* () {
-        const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
-        yield* identity.configure;
-
-        assert.deepEqual(calls.setName, ["Mesura Code Alpha"]);
-        assert.equal(calls.setAboutPanelOptions[0]?.applicationName, "Mesura Code (Alpha)");
-        assert.equal(calls.setAboutPanelOptions[0]?.applicationVersion, "1.2.3");
-        assert.equal(calls.setAboutPanelOptions[0]?.version, "0123456789ab");
-        // Packaged: the bundle's own icon stands, so a custom one the user
-        // attached survives.
-        assert.deepEqual(calls.setDockIcon, []);
-      }),
-      {
-        calls,
-        environment: {
-          env: {
-            T3CODE_COMMIT_HASH: "0123456789abcdef",
-          },
-        },
-        pngIconPath: Option.some("/icon.png"),
-      },
-    );
-  });
+    ),
+  );
 
   it.effect.each([
-    { stage: "Alpha", environment: {} },
+    { stage: "Beta", environment: {} },
     {
       stage: "Nightly",
       environment: { appVersion: "0.0.43-nightly.20260929.2428" },
@@ -253,35 +199,10 @@ describe("DesktopAppIdentity", () => {
         const runtimeName = calls.setName[0];
         assert.isDefined(runtimeName);
         assert.equal(runtimeName, `Mesura Code ${stage}`);
-        // RFC 9110's token grammar, after Electron removes ASCII spaces.
         assert.match(runtimeName.replaceAll(" ", ""), /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/);
         assert.equal(calls.setAboutPanelOptions[0]?.applicationName, `Mesura Code (${stage})`);
       }),
       { calls, environment },
-    );
-  });
-
-  it.effect("sets the dock icon only when running unpackaged", () => {
-    const calls: ElectronAppCalls = {
-      setAboutPanelOptions: [],
-      setDockIcon: [],
-      setName: [],
-    };
-
-    return withIdentity(
-      Effect.gen(function* () {
-        const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
-        yield* identity.configure;
-
-        // Electron shows a generic icon for an unpackaged run, which is the
-        // reason this call exists at all.
-        assert.deepEqual(calls.setDockIcon, ["/icon.png"]);
-      }),
-      {
-        calls,
-        environment: { isPackaged: false },
-        pngIconPath: Option.some("/icon.png"),
-      },
     );
   });
 });

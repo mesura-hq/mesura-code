@@ -110,7 +110,7 @@ const make = Effect.gen(function* () {
       input.imagePath === null
         ? { faviconPath: null, imported: false }
         : yield* prepareImage(thread, project.value, input.imagePath);
-    const uuid = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
+    const uuid = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
     yield* projects
       .update({
         commandId: CommandId.make(`server:project-icon:${uuid}`),

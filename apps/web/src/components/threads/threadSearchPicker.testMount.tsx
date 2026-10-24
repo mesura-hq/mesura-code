@@ -1,3 +1,5 @@
+import { flushBrowserTasks } from "../../test/browserTasks";
+import { act, render as renderBrowser } from "../../../test/render";
 /**
  * Mounts the application entry point for the thread-search picker suites:
  * `AppRoot` with a memory router whose root route renders the real
@@ -20,15 +22,14 @@ import {
 } from "@tanstack/react-router";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
-import { act, type ReactNode } from "react";
+import { type ReactNode } from "react";
 
 /** A route body with no props, as `createRoute` accepts it. */
 type RouteComponent = () => ReactNode;
-import { createRoot, type Root } from "react-dom/client";
 import { expect, vi } from "vite-plus/test";
 
-import { AppRoot } from "../../AppRoot";
 import type { AppRouter } from "../../router";
+import { AppRoot } from "../../AppRoot";
 import { CommandPalette } from "../CommandPalette";
 import { ConfirmDialogHost } from "../ConfirmDialogHost";
 
@@ -81,21 +82,20 @@ function createAppRouter(HomeRoute: RouteComponent = DefaultHomeRoute) {
 export async function mountApp(
   options: { readonly homeRoute?: RouteComponent } = {},
 ): Promise<MountedApp> {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const container = document.createElement("div");
   document.body.append(container);
   const router = createAppRouter(options.homeRoute);
   await router.load();
-  let root: Root | undefined;
-  await act(async () => {
-    root = createRoot(container);
-    root.render(<AppRoot router={router as unknown as AppRouter} />);
+  // AppRoot owns this fixture's memory router.
+  const root = await renderBrowser(<AppRoot router={router as unknown as AppRouter} />, {
+    container,
+    router: false,
   });
   return {
     container,
     router,
     unmount: async () => {
-      await act(async () => root?.unmount());
+      await root[Symbol.asyncDispose]();
       container.remove();
       vi.unstubAllGlobals();
     },
@@ -106,7 +106,7 @@ export async function mountApp(
 export async function settle(): Promise<void> {
   for (let round = 0; round < 5; round += 1) {
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await flushBrowserTasks();
     });
   }
 }

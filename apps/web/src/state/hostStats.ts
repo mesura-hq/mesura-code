@@ -11,7 +11,7 @@ import {
 } from "@t3tools/client-runtime/host-stats";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
-import { useContext, useEffect, useMemo, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 
 import { environmentPresentations } from "./presentation";
 import { serverEnvironment } from "./server";
@@ -28,28 +28,24 @@ const hostStatsTarget = (environmentId: EnvironmentId) =>
 
 /**
  * Subscribes only while `enabled`, which the dock sets while it is open. A
- * closed dock keeps the last sources it read, so it never repaints as
- * "pending" behind its collapse; the atoms' five-minute idle TTL keeps a
+ * closed dock keeps the last readings and current connection status, so it
+ * does not replace readings with "pending". The atoms' five-minute idle TTL keeps a
  * re-peek instant without holding a stream for the whole session.
  */
+const hostStatsSourcesAtom = Atom.family((enabled: boolean) =>
+  Atom.make((get): HostStatsSources => {
+    const presentations = get(environmentPresentations.presentationsAtom);
+    if (!enabled) return { presentations, subscriptions: NO_SUBSCRIPTIONS };
+    const subscriptions = new Map<EnvironmentId, HostStatsSubscription>();
+    for (const environmentId of presentations.keys()) {
+      subscriptions.set(environmentId, readHostStatsSubscription(get(hostStatsTarget(environmentId))));
+    }
+    return { presentations, subscriptions };
+  }),
+);
+
 export function useHostStatsSources(enabled: boolean): HostStatsSources {
-  const sourcesAtom = useMemo(
-    () =>
-      Atom.make((get): HostStatsSources => {
-        const presentations = get(environmentPresentations.presentationsAtom);
-        if (!enabled) return { presentations, subscriptions: NO_SUBSCRIPTIONS };
-        const subscriptions = new Map<EnvironmentId, HostStatsSubscription>();
-        for (const environmentId of presentations.keys()) {
-          subscriptions.set(
-            environmentId,
-            readHostStatsSubscription(get(hostStatsTarget(environmentId))),
-          );
-        }
-        return { presentations, subscriptions };
-      }),
-    [enabled],
-  );
-  const sources = useAtomValue(sourcesAtom);
+  const sources = useAtomValue(hostStatsSourcesAtom(enabled));
   // A refused subscription ends its stream (`accumulateHostStatsMessages`) and
   // outlives a closed dock for its idle TTL. Opening the dock starts it again,
   // so a device paired again in Settings, where the dock does not exist, reads
@@ -68,5 +64,9 @@ export function useHostStatsSources(enabled: boolean): HostStatsSources {
   // set during render, which React applies before it paints.
   const [lastRead, setLastRead] = useState<HostStatsSources | null>(null);
   if (enabled && sources !== lastRead) setLastRead(sources);
-  return enabled || lastRead === null ? sources : lastRead;
+  // Keep the last readings while closed, but keep connection status current.
+  // Retaining the whole source object froze an initial offline presentation.
+  return enabled || lastRead === null
+    ? sources
+    : { presentations: sources.presentations, subscriptions: lastRead.subscriptions };
 }

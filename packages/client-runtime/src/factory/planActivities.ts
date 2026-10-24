@@ -133,9 +133,7 @@ export function findFactoryReportItem(
   return found;
 }
 
-// ---------------------------------------------------------------------------
 // Orchestrator v2: plan and report cards are `factory_card` turn items.
-// ---------------------------------------------------------------------------
 
 type FactoryCardTurnItem = Extract<OrchestrationV2TurnItem, { readonly type: "factory_card" }>;
 

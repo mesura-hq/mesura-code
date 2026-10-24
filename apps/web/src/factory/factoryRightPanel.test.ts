@@ -1,3 +1,4 @@
+import { RunId } from "@t3tools/contracts";
 /**
  * Phase 2 fence, acceptance criterion 3: Open shows the plan in the Factory
  * surface of the right panel, maximized; the surface never opens by itself.
@@ -98,7 +99,7 @@ describe("factory surface in the right panel (phase 2 fence)", () => {
     expect(
       useRightPanelStore
         .getState()
-        .openProactive(ref, { id: "diff", kind: "diff" }, revisionBeforeOpen),
+        .openProactive(ref, { kind: "diff", turnId: RunId.make("automatic-diff") }, revisionBeforeOpen),
     ).toBe(false);
     expect(panelState().activeSurfaceId).toBe("factory");
   });

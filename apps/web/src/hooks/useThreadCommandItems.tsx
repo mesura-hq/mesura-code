@@ -7,7 +7,6 @@ import {
 } from "@t3tools/client-runtime/state/thread-search";
 import { useNavigate } from "@tanstack/react-router";
 import { MessageSquareIcon } from "lucide-react";
-import { useMemo } from "react";
 
 import {
   buildThreadActionItems,
@@ -25,7 +24,7 @@ import {
   type ProviderInstanceEntry,
 } from "../providerInstances";
 import { useProjects, useThreadShells } from "../state/entities";
-import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
+import { useEnvironments, useEnvironmentProviders, usePrimaryEnvironmentId } from "../state/environments";
 import { primaryServerProvidersAtom } from "../state/server";
 import { buildThreadRouteParams } from "../threadRoutes";
 import type { Thread } from "../types";
@@ -62,6 +61,7 @@ export function useThreadCommandItems(input?: {
   const threads = useThreadShells();
   const clientSettings = useClientSettings();
   const { environments } = useEnvironments();
+  const providersByEnvironment = useEnvironmentProviders();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const providers = useAtomValue(primaryServerProvidersAtom);
 
@@ -72,36 +72,29 @@ export function useThreadCommandItems(input?: {
 
   // Keyed by environment as well as project id: two environments can both hold
   // a project of the same id, and the favicon is the project's own.
-  const projectByKey = useMemo(
-    () => new Map(projects.map((project) => [`${project.environmentId}:${project.id}`, project])),
-    [projects],
-  );
-  const projectTitleById = useMemo(
-    () => new Map(projects.map((project) => [project.id, project.title] as const)),
-    [projects],
-  );
-  const providerEntryByEnvironmentAndInstanceId = useMemo(() => {
+  const projectByKey = (() => new Map(projects.map((project) => [`${project.environmentId}:${project.id}`, project])))();
+  const projectTitleById = (() => new Map(projects.map((project) => [project.id, project.title] as const)))();
+  const providerEntryByEnvironmentAndInstanceId = (() => {
     const map = new Map<string, ProviderInstanceEntry>();
     for (const environment of environments) {
       const serverConfig = environment.serverConfig;
       const environmentProviders =
-        serverConfig?.providers ??
+        providersByEnvironment.get(environment.environmentId) ??
         (environment.environmentId === primaryEnvironmentId ? providers : []);
       const derived = deriveProviderInstanceEntries(environmentProviders);
       // Settings fill the ACP registry identity (agent id, icon URL) the
       // derived entries alone do not carry.
       const entries = serverConfig
-        ? applyProviderInstanceSettings(derived, serverConfig.settings)
+        ? applyProviderInstanceSettings(derived, serverConfig.settings, null)
         : derived;
       for (const entry of entries) {
         map.set(`${environment.environmentId}:${entry.instanceId}`, entry);
       }
     }
     return map;
-  }, [environments, primaryEnvironmentId, providers]);
+  })();
 
-  return useMemo(
-    () =>
+  return (() =>
       buildThreadActionItems({
         threads,
         ...(activeThreadId ? { activeThreadId } : {}),
@@ -155,30 +148,14 @@ export function useThreadCommandItems(input?: {
             params: buildThreadRouteParams(scopeThreadRef(thread.environmentId, thread.id)),
           });
         },
-      }),
-    [
-      activeThreadId,
-      clientSettings.sidebarThreadSortOrder,
-      contentMatchByKey,
-      contentQuery,
-      environmentLabelById,
-      navigate,
-      projectByKey,
-      projectTitleById,
-      providerEntryByEnvironmentAndInstanceId,
-      threads,
-    ],
-  );
+      }))();
 }
 
 /** The environments a thread search can reach: everything currently connected. */
 export function useConnectedEnvironmentIds() {
   const { environments } = useEnvironments();
-  return useMemo(
-    () =>
+  return (() =>
       environments
         .filter((environment) => environment.connection.phase === "connected")
-        .map((environment) => environment.environmentId),
-    [environments],
-  );
+        .map((environment) => environment.environmentId))();
 }

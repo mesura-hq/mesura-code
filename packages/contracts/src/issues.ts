@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 import { PositiveInt, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import type { RepositoryIdentity } from "./environment.ts";
 import { pullRequestHostOf } from "./pullRequest.ts";
+import { SourceControlProviderKind } from "./sourceControl.ts";
 
 export const IssueState = Schema.Literals(["open", "closed", "all"]);
 export type IssueState = typeof IssueState.Type;
@@ -95,7 +96,7 @@ export function issueRepositoryUrl(
     | undefined,
 ): string | null {
   if (!identity || (identity.provider !== undefined && identity.provider !== "github")) return null;
-  const host = pullRequestHostOf(identity, "github");
+  const host = pullRequestHostOf(identity, SourceControlProviderKind.make("github"));
   const paths: string[] = [];
   const canonicalPath = identity.canonicalKey.split("/").slice(1).join("/");
   if (canonicalPath) paths.push(canonicalPath);

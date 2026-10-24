@@ -5,7 +5,9 @@ import * as ServerConfig from "../../../config.ts";
 import { expect, it } from "@effect/vitest";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -41,7 +43,10 @@ import * as FactoryRunTracker from "../../../factory/FactoryRunTracker.ts";
 import * as FactorySnapshotStore from "../../../factory/FactorySnapshotStore.ts";
 import * as ProjectFaviconResolver from "../../../project/ProjectFaviconResolver.ts";
 
+import * as PullRequestReviewGuideService from "../../../pullRequest/PullRequestReviewGuideService.ts";
+
 const layerStubServices = Layer.mergeAll(
+  Layer.mock(PullRequestReviewGuideService.PullRequestReviewGuideService)({}),
   Layer.mock(Orchestrator.OrchestratorV2)({}),
   Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
   Layer.mock(DeviceService.DeviceService)({}),
@@ -96,31 +101,36 @@ const decodeToolsListPayload = Schema.decodeUnknownEffect(ToolsListPayload);
 it.effect("production mcp layer lists worktree tools over http", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const layerRoutes = McpHttpServer.layer.pipe(Layer.provide(McpSessionRegistry.layer));
+      const layerEnvironment = Layer.mock(ServerEnvironment.ServerEnvironment)({
+        getEnvironmentId: Effect.succeed(EnvironmentId.make("environment-scratch")),
+      });
+      const registryContext = yield* Layer.build(
+        McpSessionRegistry.layer.pipe(Layer.provide(layerEnvironment)),
+      );
+      const registry = Context.get(registryContext, McpSessionRegistry.McpSessionRegistry);
+      const layerRoutes = McpHttpServer.layer.pipe(
+        Layer.provide(Layer.succeed(McpSessionRegistry.McpSessionRegistry, registry)),
+      );
       yield* HttpRouter.serve(layerRoutes, {
         disableListenLog: true,
         disableLogger: true,
       }).pipe(
-        Layer.provide(
-          Layer.mock(ServerEnvironment.ServerEnvironment)({
-            getEnvironmentId: Effect.succeed("environment-scratch" as never),
-          }),
-        ),
+        Layer.provide(McpProviderSessions.layer),
+        Layer.provide(layerEnvironment),
         Layer.provide(PreviewAutomationBroker.layer),
         Layer.provide(PreviewBrowser.layer),
         Layer.provide(layerStubServices),
         Layer.build,
       );
 
-      const registry = McpSessionRegistry.issueActiveMcpCredential({
+      const credential = yield* registry.issue({
         threadId: ThreadId.make("thread-scratch"),
         providerInstanceId: ProviderInstanceId.make("claudeAgent"),
       });
-      const credential = yield* registry;
       expect(credential).toBeDefined();
 
       const httpClient = yield* HttpClient.HttpClient;
-      const auth = credential!.config.authorizationHeader;
+      const auth = credential.config.authorizationHeader;
       const initResponse = yield* httpClient.post("/mcp", {
         headers: {
           accept: "application/json, text/event-stream",

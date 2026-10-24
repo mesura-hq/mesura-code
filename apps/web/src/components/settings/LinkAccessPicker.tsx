@@ -54,8 +54,9 @@ export function LinkAccessPicker({
         </SelectPopup>
       </Select>
       <p className="text-xs text-muted-foreground">
-        {selected.description} An agent here never gets more there than its own mode here, and
-        threads it starts there cannot change that machine's own threads, projects or settings.
+        {selected.description} An agent never gets more access there than its own mode here. Below
+        full access, it can change only threads this link started, not that machine's own threads,
+        projects or settings.
       </p>
     </div>
   );

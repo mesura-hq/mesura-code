@@ -1,4 +1,3 @@
-// Native Grok's v1 model-selection wire contract, kept independent of the v2 mock.
 import * as NodeFS from "node:fs";
 import * as NodeReadline from "node:readline";
 
@@ -57,6 +56,16 @@ for await (const line of NodeReadline.createInterface({ input: process.stdin }))
       result = {};
       break;
     case "session/prompt":
+      if (process.env.T3_ACP_SESSION_PROBE_PORT) {
+        const { createConnection } = await import("node:net");
+        const probe = createConnection(
+          Number(process.env.T3_ACP_SESSION_PROBE_PORT),
+          "127.0.0.1",
+          () => {
+            probe.write(process.pid + "\n");
+          },
+        );
+      }
       // Mesura: a step cancelled mid-prompt; the process is killed, never answered.
       if (process.env.T3_ACP_HANG_PROMPT_FOREVER === "1") continue;
       write({

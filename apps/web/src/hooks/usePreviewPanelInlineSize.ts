@@ -33,7 +33,6 @@ export function usePreviewPanelInlineSize(
     readonly enabled?: boolean | undefined;
     readonly widthStorageKey?: string | undefined;
     readonly defaultWidth?: number | undefined;
-    /** Measure this row instead of the panel's parent. */
     readonly container?: HTMLElement | null | undefined;
   } = {},
 ): PreviewPanelInlineSize {
@@ -48,11 +47,6 @@ export function usePreviewPanelInlineSize(
   return { ...resizable, maxWidth };
 }
 
-/**
- * Keep the resizable panel's upper bound in sync with the window AND the row
- * it sits in. Resize-aware so dragging the OS window narrower (or expanding
- * the app sidebar) re-clamps the stored width on the next render.
- */
 function useViewportClampedMaxWidth(
   hostRef: RefObject<HTMLElement | null> | undefined,
   enabled: boolean,

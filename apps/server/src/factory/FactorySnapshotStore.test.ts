@@ -57,7 +57,7 @@ const listSnapshots = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const names = (yield* fileSystem.readDirectory(config.factorySnapshotsDir)).toSorted();
-  const entries: Array<{ name: string; ino: number | undefined; mtime: number | undefined }> = [];
+  const entries: Array<{ name: string; ino: bigint | undefined; mtime: number | undefined }> = [];
   for (const name of names) {
     const info = yield* fileSystem.stat(path.join(config.factorySnapshotsDir, name));
     entries.push({

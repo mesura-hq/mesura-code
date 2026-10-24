@@ -51,7 +51,7 @@ export const resolveUserDataDirectoryNames = (
   return { current: identity.userDataDirName, legacy: identity.legacyUserDataDirName };
 };
 
-/** Select Electron's profile independently of the server's T3 home. */
+/** Select Electron's profile independently of the server home. */
 export const resolveUserDataPath = Effect.fn("desktop.userData.resolveUserDataPath")(
   function* (input: {
     readonly appDataDirectory: string;

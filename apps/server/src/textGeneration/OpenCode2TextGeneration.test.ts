@@ -229,7 +229,6 @@ it.layer(layer)("OpenCode2TextGeneration", (it) => {
     Effect.gen(function* () {
       const [subscribe, connected, create, created] = OPENCODE2_TITLE_GENERATION;
       const sessionId = "ses_f0ec85cf6ffebfalpvV2E9nocu";
-      // The spike's `text_generation` recording: a deny-all session is refused this way.
       const refusal = {
         type: "provider.auth",
         message:

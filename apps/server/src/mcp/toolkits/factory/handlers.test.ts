@@ -220,7 +220,7 @@ const makeHarness = Effect.fn("makeFactoryToolkitHarness")(function* (
     const exists = yield* fileSystem.exists(config.factorySnapshotsDir);
     if (!exists) return [];
     const names = (yield* fileSystem.readDirectory(config.factorySnapshotsDir)).toSorted();
-    const entries: Array<{ name: string; ino: number | undefined; mtime: number | undefined }> = [];
+    const entries: Array<{ name: string; ino: bigint | undefined; mtime: number | undefined }> = [];
     for (const name of names) {
       const info = yield* fileSystem.stat(path.join(config.factorySnapshotsDir, name));
       entries.push({

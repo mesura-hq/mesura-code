@@ -12,11 +12,11 @@ import {
   type FactoryPlanApprovalState,
 } from "@t3tools/client-runtime/factory/plan-approval";
 import type { FactoryRoutes } from "@t3tools/client-runtime/factory/routes";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import { newCommandId, newMessageId } from "../lib/utils";
 import { readThreadShell, useThreadProjection } from "../state/entities";
-import { useEnvironments } from "../state/environments";
+import { useEnvironmentProviders } from "../state/environments";
 import { threadEnvironment } from "../state/threads";
 import { readEnvironmentScope, useEnvironmentScope } from "../state/session";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -35,16 +35,14 @@ export function useFactoryPlanApproval(
 ) {
   const thread = useThreadProjection(threadRef);
   const messages = thread?.projection.messages;
-  const approvals = useMemo(() => findPlanApprovals(messages ?? []), [messages]);
+  const approvals = (() => findPlanApprovals(messages ?? []))();
   // The thread changes with every streamed token; keep the state's identity
   // until what it says changes, so the rows below do not re-render.
   const stateKey = JSON.stringify(resolvePlanApprovalState(approvals, plan));
-  const state = useMemo(() => JSON.parse(stateKey) as FactoryPlanApprovalState, [stateKey]);
+  const state = (() => JSON.parse(stateKey) as FactoryPlanApprovalState)();
 
-  const { environments } = useEnvironments();
-  const providers =
-    environments.find((environment) => environment.environmentId === threadRef.environmentId)
-      ?.serverConfig?.providers ?? EMPTY_PROVIDERS;
+  const providersByEnvironment = useEnvironmentProviders();
+  const providers = providersByEnvironment.get(threadRef.environmentId) ?? EMPTY_PROVIDERS;
 
   const canApprove = useEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope);
   const startTurn = useAtomCommand(threadEnvironment.startTurn);
@@ -52,8 +50,7 @@ export function useFactoryPlanApproval(
   // the message comes back as an approval, and a failed send clears it.
   const [sentDigest, setSentDigest] = useState<string | null>(null);
   const inFlight = useRef(false);
-  const approve = useCallback(
-    async (routes: FactoryRoutes) => {
+  const approve = (async (routes: FactoryRoutes) => {
       // On orchestrator v2, title, model and runtime mode live on the thread shell.
       const current = readThreadShell(threadRef);
       if (
@@ -91,9 +88,7 @@ export function useFactoryPlanApproval(
       });
       inFlight.current = false;
       if (result._tag !== "Success") setSentDigest(null);
-    },
-    [plan.digest, plan.intentPath, plan.planPath, startTurn, threadRef],
-  );
+    });
 
   return { state, providers, approve, canApprove, sending: sentDigest === plan.digest };
 }

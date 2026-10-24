@@ -18,7 +18,6 @@ import { isLoopbackHost } from "@t3tools/shared/preview";
 import { CheckIcon, ChevronRightIcon, ExternalLinkIcon } from "lucide-react";
 import {
   Children,
-  useCallback,
   useEffect,
   useEffectEvent,
   useId,
@@ -65,7 +64,6 @@ interface CodexSetupSectionProps {
   readonly onSignInCancelled?: (() => void) | undefined;
 }
 
-/** Welcome and provider settings run the same environment-owned setup flow. */
 export function CodexSetupSection(props: CodexSetupSectionProps) {
   const [requested, setRequested] = useState(false);
   const existingState = getOnboardingProviderState(props.provider);
@@ -133,7 +131,7 @@ export function CodexSetupSection(props: CodexSetupSectionProps) {
           ) : null
         }
       />
-    ) : props.mode === "existing" ? null : props.provider?.setup === undefined ? (
+    ) : props.mode === "existing" ? null : !props.provider?.setup?.canAuthenticate ? (
       props.presentation === "onboarding" ? (
         <CodexWelcomeCard
           title={props.displayName || props.provider?.displayName || "Codex"}
@@ -166,7 +164,6 @@ export function CodexSetupSection(props: CodexSetupSectionProps) {
   return content;
 }
 
-/** All add-Codex entry points use the same managed account setup. */
 export function AddManagedCodexAccountDialog({
   environmentId,
   onClose,
@@ -293,20 +290,16 @@ function ManagedCodexSetup({
     installation?.source !== "local" &&
     installation?.version != null &&
     installation.version !== installation.installedVersion;
-  // Auth receipts and provider snapshots arrive independently. Keep the current
-  // attempt pending until its authenticated snapshot arrives, even after success.
   const finishingSignIn =
     awaitingProvider !== null &&
     !authenticated &&
     (auth?.phase === "succeeded" || awaitingProvider === "handoff");
-  useEffect(() => {
-    if (authenticated || auth?.phase === "failed" || auth?.phase === "cancelled") {
-      // WORKAROUND: the setter heuristic misses synchronization with external receipt transitions.
-      // A render reset clears a new request against the previous terminal receipt. Remove when the compiler recognizes external receipt synchronization.
-      // oxlint-disable-next-line react/set-state-in-effect -- reset only when the external auth receipt or authenticated snapshot changes
-      setAwaitingProvider(null);
-    }
-  }, [authenticated, auth?.phase]);
+  if (
+    awaitingProvider !== null &&
+    (authenticated || auth?.phase === "failed" || auth?.phase === "cancelled")
+  ) {
+    setAwaitingProvider(null);
+  }
   useEffect(() => {
     if (awaitingProvider && auth?.phase === "succeeded") {
       void refreshProviders({ environmentId, input: { instanceId } });
@@ -331,199 +324,159 @@ function ManagedCodexSetup({
     readOnly || !enabled || pending || authQuery.error !== null || installQuery.error !== null;
   const busy = pending || authInProgress || installActive;
 
-  const run = useCallback(
-    async <A, E>(
-      request: () => Promise<AtomCommandResult<A, E>>,
-      onSuccess?: (value: A) => void,
-    ) => {
-      if (pendingRef.current) return false;
-      pendingRef.current = true;
-      setPending(true);
-      setError(null);
-      let succeeded = false;
-      try {
-        const result = await request();
-        if (result._tag === "Failure") {
-          if (!isAtomCommandInterrupted(result)) {
-            const failure = squashAtomCommandFailure(result);
-            setError(failure instanceof Error ? failure.message : "Codex setup failed. Try again.");
-          }
-        } else {
-          succeeded = true;
-          onSuccess?.(result.value);
+  const run = async <A, E>(
+    request: () => Promise<AtomCommandResult<A, E>>,
+    onSuccess?: (value: A) => void,
+  ) => {
+    if (pendingRef.current) return false;
+    pendingRef.current = true;
+    setPending(true);
+    setError(null);
+    let succeeded = false;
+    try {
+      const result = await request();
+      if (result._tag === "Failure") {
+        if (!isAtomCommandInterrupted(result)) {
+          const failure = squashAtomCommandFailure(result);
+          setError(failure instanceof Error ? failure.message : "Codex setup failed. Try again.");
         }
-      } catch {
-        setError("Codex setup failed. Try again.");
+      } else {
+        succeeded = true;
+        onSuccess?.(result.value);
       }
-      pendingRef.current = false;
-      setPending(false);
-      return succeeded;
-    },
-    [],
-  );
+    } catch {
+      setError("Codex setup failed. Try again.");
+    }
+    pendingRef.current = false;
+    setPending(false);
+    return succeeded;
+  };
 
   const handoffId = useId();
   const handoffSequence = useRef(0);
   const importedAttempt = useRef<string | null>(null);
   const [transferFailed, setTransferFailed] = useState(false);
-  const transferProfile = useCallback(
-    async (profile: ChatGptTransferredProfile) => {
-      const succeeded = await run(() =>
-        importProfile({ environmentId, input: { instanceId, profile } }),
-      );
-      if (succeeded) {
-        setAwaitingProvider("handoff");
-        setHandoff(null);
-      }
-      setTransferFailed(!succeeded);
-    },
-    [run, importProfile, environmentId, instanceId],
+  const transferProfile = async (profile: ChatGptTransferredProfile) => {
+    const succeeded = await run(() =>
+      importProfile({ environmentId, input: { instanceId, profile } }),
+    );
+    if (succeeded) {
+      setAwaitingProvider("handoff");
+      setHandoff(null);
+    }
+    setTransferFailed(!succeeded);
+  };
+  const transferFinishedProfile = useEffectEvent((profile: ChatGptTransferredProfile) =>
+    transferProfile(profile),
   );
   useEffect(() => {
     if (!handoff || handoffQuery.data?.phase !== "finished") return;
     const attemptId = handoff.input.attemptId;
     if (importedAttempt.current === attemptId) return;
     importedAttempt.current = attemptId;
-    void transferProfile(handoffQuery.data.profile);
-  }, [handoff, handoffQuery.data, transferProfile]);
-  useEffect(() => {
-    if (!handoff) return;
-    if (
-      handoffQuery.error ||
+    void transferFinishedProfile(handoffQuery.data.profile);
+  }, [handoff, handoffQuery.data]);
+  if (
+    handoff &&
+    (handoffQuery.error ||
       (handoffQuery.data?.phase === "auth" &&
-        ["failed", "cancelled"].includes(handoffQuery.data.state.phase))
-    ) {
-      // WORKAROUND: the setter heuristic misses ordered external handoff synchronization.
-      // A render reset prevents the preceding effect from importing retained finished data on a query error. Remove when the compiler recognizes ordered receipt effects.
-      // oxlint-disable-next-line react/set-state-in-effect -- preserve import-before-disposal ordering when finished data and a query error coexist
-      setError(
-        handoffQuery.data?.phase === "auth"
-          ? (handoffQuery.data.state.message ?? "ChatGPT sign-in could not finish. Try again.")
-          : "ChatGPT sign-in on the primary environment was interrupted. Try again.",
-      );
-      setHandoff(null);
-    }
-  }, [handoff, handoffQuery.data, handoffQuery.error]);
-  const cancelSignIn = useCallback(() => {
+        ["failed", "cancelled"].includes(handoffQuery.data.state.phase)))
+  ) {
+    setError(
+      handoffQuery.data?.phase === "auth"
+        ? (handoffQuery.data.state.message ?? "ChatGPT sign-in could not finish. Try again.")
+        : "ChatGPT sign-in on the primary environment was interrupted. Try again.",
+    );
+    setHandoff(null);
+  }
+  const cancelSignIn = () => {
     setAwaitingProvider(null);
     if (handoff) {
       setHandoff(null);
       return Promise.resolve();
     }
     return run(() => cancelAuth({ environmentId, input: { instanceId, flowId: auth!.flowId! } }));
-  }, [handoff, run, cancelAuth, environmentId, instanceId, auth]);
+  };
 
-  const signIn = useCallback(
-    async (methodId = "chatgpt") => {
-      if (pendingRef.current) return;
-      openRequested.current = true;
-      setTransferFailed(false);
-      setRequestedMethodId(methodId);
-      const returnUrl = new URL(window.location.href);
-      if (returnUrl.pathname === "/welcome") returnUrl.hash = `agents:${environmentId}`;
-      if (returnUrl.pathname === "/settings/providers")
-        returnUrl.searchParams.set("instanceId", instanceId);
-      if (primaryAuthEnvironmentId) {
-        const attemptId = `${handoffId}:${++handoffSequence.current}`;
-        const succeeded = await run(
-          () => reconnectProfile({ environmentId, input: { instanceId, methodId } }),
-          (profile) =>
-            setHandoff({
-              environmentId: primaryAuthEnvironmentId,
-              input: {
-                instanceId,
-                environmentId,
-                attemptId,
-                returnUrl: returnUrl.toString(),
-                profile,
-              },
-            }),
-        );
-        if (!succeeded) openRequested.current = false;
-        return;
-      }
-      if (
-        !(await run(
-          () =>
-            startAuth({
+  const signIn = async (methodId = "chatgpt") => {
+    if (pendingRef.current) return;
+    openRequested.current = true;
+    setTransferFailed(false);
+    setRequestedMethodId(methodId);
+    const returnUrl = new URL(window.location.href);
+    if (returnUrl.pathname === "/welcome") returnUrl.hash = `agents:${environmentId}`;
+    if (returnUrl.pathname === "/settings/providers")
+      returnUrl.searchParams.set("instanceId", instanceId);
+    if (primaryAuthEnvironmentId) {
+      const attemptId = `${handoffId}:${++handoffSequence.current}`;
+      const succeeded = await run(
+        () => reconnectProfile({ environmentId, input: { instanceId, methodId } }),
+        (profile) =>
+          setHandoff({
+            environmentId: primaryAuthEnvironmentId,
+            input: {
+              instanceId,
               environmentId,
-              input: {
-                instanceId,
-                methodId,
-                returnUrl: returnUrl.toString(),
-                callbackMode: clientCallback ? "client" : "server",
-              },
-            }),
-          () => setAwaitingProvider("sign-in"),
-        ))
-      ) {
-        openRequested.current = false;
-      }
-    },
-    [
-      environmentId,
-      instanceId,
-      run,
-      startAuth,
-      clientCallback,
-      primaryAuthEnvironmentId,
-      reconnectProfile,
-      handoffId,
-    ],
-  );
-
-  const setup = useCallback(
-    async (methodId = "chatgpt") => {
-      if (unavailable || busy) return;
-      if (installed && !updateAvailable) {
-        await signIn(methodId);
-      } else {
-        continueWithSignIn.current = methodId;
-        if (!(await run(() => startInstall({ environmentId, input: { instanceId } })))) {
-          continueWithSignIn.current = null;
-        }
-      }
-    },
-    [
-      unavailable,
-      busy,
-      installed,
-      updateAvailable,
-      signIn,
-      run,
-      startInstall,
-      environmentId,
-      instanceId,
-    ],
-  );
-
-  useEffect(() => {
-    if (
-      !autoStart ||
-      autoStartHandled ||
-      unavailable ||
-      busy ||
-      installation === null ||
-      !provider?.setup?.canInstall
-    )
+              attemptId,
+              returnUrl: returnUrl.toString(),
+              profile,
+            },
+          }),
+      );
+      if (!succeeded) openRequested.current = false;
       return;
-    // WORKAROUND: the setter heuristic misses consumption of an external auto-start command.
-    // A ref alone does not update startingAutomatically UI state; pendingRef guards dispatch. Remove when the compiler recognizes external command synchronization.
-    // oxlint-disable-next-line react/set-state-in-effect -- consuming auto-start updates the rendered state while setup's pendingRef guards provider dispatch
+    }
+    if (
+      !(await run(
+        () =>
+          startAuth({
+            environmentId,
+            input: {
+              instanceId,
+              methodId,
+              returnUrl: returnUrl.toString(),
+              callbackMode: clientCallback ? "client" : "server",
+            },
+          }),
+        () => setAwaitingProvider("sign-in"),
+      ))
+    ) {
+      openRequested.current = false;
+    }
+  };
+
+  const setup = async (methodId = "chatgpt") => {
+    if (unavailable || busy) return;
+    if (installed && !updateAvailable) {
+      await signIn(methodId);
+    } else {
+      continueWithSignIn.current = methodId;
+      if (!(await run(() => startInstall({ environmentId, input: { instanceId } })))) {
+        continueWithSignIn.current = null;
+      }
+    }
+  };
+
+  if (
+    autoStart &&
+    !autoStartHandled &&
+    !unavailable &&
+    !busy &&
+    installation !== null &&
+    provider?.setup?.canInstall
+  ) {
     setAutoStartHandled(true);
+  }
+  const startAutomatically = useEffectEvent(() => {
     onAutoStartConsumed();
     void setup();
-  }, [
-    autoStart,
-    autoStartHandled,
-    unavailable,
-    busy,
-    installation,
-    provider?.setup?.canInstall,
-    onAutoStartConsumed,
-    setup,
-  ]);
+  });
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- Starting setup dispatches a server command, which marks itself pending before it awaits.
+    if (autoStartHandled) startAutomatically();
+  }, [autoStartHandled]);
 
+  const signInAfterInstall = useEffectEvent((methodId: string) => signIn(methodId));
   useEffect(() => {
     if (!continueWithSignIn.current || pending || installActive) return;
     if (installation?.phase === "failed" || installation?.phase === "cancelled") {
@@ -531,44 +484,39 @@ function ManagedCodexSetup({
     } else if (installed) {
       const methodId = continueWithSignIn.current;
       continueWithSignIn.current = null;
-      void signIn(methodId);
+      void signInAfterInstall(methodId);
     }
-  }, [pending, installActive, installation?.phase, installed, signIn]);
+  }, [pending, installActive, installation?.phase, installed]);
 
   const receivingCallback = useRef<string | null>(null);
   const flowId = auth?.flowId;
-  const openPage = useCallback(
-    async (authorizationUrl: string) => {
-      try {
-        const receive = window.desktopBridge?.receiveProviderAuthCallback;
-        if (receive && clientCallback && flowId) {
-          if (receivingCallback.current === authorizationUrl) {
-            await ensureLocalApi().shell.openExternal(authorizationUrl);
-            return;
-          }
-          receivingCallback.current = authorizationUrl;
-          const callbackUrl = await receive(authorizationUrl);
-          if (receivingCallback.current !== authorizationUrl) return;
-          receivingCallback.current = null;
-          await run(() =>
-            completeAuth({ environmentId, input: { instanceId, flowId, callbackUrl } }),
-          );
-        } else {
+  const openPage = async (authorizationUrl: string) => {
+    try {
+      const receive = window.desktopBridge?.receiveProviderAuthCallback;
+      if (receive && clientCallback && flowId) {
+        if (receivingCallback.current === authorizationUrl) {
           await ensureLocalApi().shell.openExternal(authorizationUrl);
+          return;
         }
-      } catch {
-        setError(
-          "Could not finish sign-in on this computer. Try again or paste the redirect URL below.",
+        receivingCallback.current = authorizationUrl;
+        const callbackUrl = await receive(authorizationUrl);
+        if (receivingCallback.current !== authorizationUrl) return;
+        receivingCallback.current = null;
+        await run(() =>
+          completeAuth({ environmentId, input: { instanceId, flowId, callbackUrl } }),
         );
+      } else {
+        await ensureLocalApi().shell.openExternal(authorizationUrl);
       }
-    },
-    [clientCallback, flowId, run, completeAuth, environmentId, instanceId],
-  );
-
-  // Keep the original callback for clicks and the effect's callback-identity trigger.
-  const openPageFromEffect = useEffectEvent((authorizationUrl: string, open: typeof openPage) =>
-    open(authorizationUrl),
-  );
+    } catch {
+      setError(
+        "Could not finish sign-in on this computer. Try again or paste the redirect URL below.",
+      );
+    }
+  };
+  const openPageForFlow = useEffectEvent((authorizationUrl: string) => {
+    void openPage(authorizationUrl);
+  });
 
   useEffect(() => {
     if (!clientCallback || !url || !window.desktopBridge?.cancelProviderAuthCallback) return;
@@ -589,8 +537,9 @@ function ManagedCodexSetup({
       return;
     openedFlow.current = auth.flowId;
     openRequested.current = false;
-    if (!remoteWeb) void openPageFromEffect(url, openPage);
-  }, [auth?.phase, auth?.flowId, url, openPage, remoteWeb]);
+    // oxlint-disable-next-line react/set-state-in-effect -- Opening the page may complete the flow through a server command, which marks itself pending.
+    if (!remoteWeb) openPageForFlow(url);
+  }, [auth?.phase, auth?.flowId, url, remoteWeb]);
 
   const runtimeDescription =
     installation?.phase === "downloading"
@@ -600,8 +549,8 @@ function ManagedCodexSetup({
         : installation?.phase === "verifying"
           ? "Checking Codex."
           : installed
-            ? `${installation?.source === "local" ? "Using your installed Codex" : "Managed by Mesura Code"}${installation?.installedVersion ? ` · v${installation.installedVersion}` : ""}.`
-            : (installation?.message ?? "Mesura Code downloads and manages Codex for you.");
+            ? `${installation?.source === "local" ? "Using your installed Codex" : "Managed by T3 Code"}${installation?.installedVersion ? ` · v${installation.installedVersion}` : ""}.`
+            : (installation?.message ?? "T3 Code downloads and manages Codex for you.");
   const accountDescription = finishingSignIn ? (
     "Finishing sign-in..."
   ) : installActive ? (
@@ -678,9 +627,7 @@ function ManagedCodexSetup({
   const callbackCompletion =
     !handoff && auth?.phase === "waiting" && url ? (
       <div className="flex w-full flex-col gap-3 text-xs leading-relaxed text-muted-foreground">
-        <p>
-          If sign-in doesn't return to Mesura Code, paste the URL from the final localhost page.
-        </p>
+        <p>If sign-in doesn't return to T3 Code, paste the URL from the final localhost page.</p>
         <form
           className="flex flex-col gap-2 sm:flex-row sm:items-center"
           onSubmit={(event) => {
@@ -1036,7 +983,6 @@ function ManagedCodexSetup({
   );
 }
 
-/** The server selects the executable for managed instances; local config cannot override it. */
 export function CodexManagedRuntimeFields({
   environmentId,
   instanceId,
@@ -1057,7 +1003,7 @@ export function CodexManagedRuntimeFields({
     <>
       <SettingsRow
         title="Binary path"
-        description="Selected by Mesura Code."
+        description="Selected by T3 Code."
         control={
           <div className="w-full sm:w-80">
             <Input
@@ -1135,7 +1081,6 @@ function CodexSignInDescription({
   );
 }
 
-/** A single, calm setup row for the first-run welcome screen. */
 function CodexWelcomeCard({
   title,
   description,

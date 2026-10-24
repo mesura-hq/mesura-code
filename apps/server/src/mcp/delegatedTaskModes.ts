@@ -1,4 +1,5 @@
 import {
+  type ModelSelection,
   OrchestratorMcpFailure,
   type OrchestratorMcpDelegateTaskInput,
   type OrchestratorMcpInteractionMode,
@@ -27,20 +28,47 @@ export function interactionModeRank(mode: ProviderInteractionMode): number {
   return mode === "plan" ? 0 : 1;
 }
 
-/** The mode a child runs at: the one asked for, never broader than its parent's. */
+/**
+ * The mode a child runs at: the one asked for, never broader than its parent's.
+ * An inherited mode the target provider does not offer steps down to the
+ * broadest one it does; an explicitly requested one is refused instead.
+ */
 export function resolveRuntimeMode(
   parentMode: RuntimeMode,
   requested: OrchestratorMcpRuntimeMode | undefined,
+  target?: {
+    readonly modelSelection: ModelSelection;
+    readonly supportedRuntimeModes: ReadonlyArray<RuntimeMode> | undefined;
+  },
 ): Effect.Effect<RuntimeMode, OrchestratorMcpFailure> {
-  const resolved = requested === undefined || requested === "inherit" ? parentMode : requested;
-  return runtimeModeRank(resolved) > runtimeModeRank(parentMode)
-    ? Effect.fail(
-        new OrchestratorMcpFailure({
-          code: "runtime_mode_escalation_denied",
-          message: `Child runtime mode ${resolved} is broader than parent mode ${parentMode}.`,
-        }),
-      )
-    : Effect.succeed(resolved);
+  const inherited = requested === undefined || requested === "inherit";
+  const resolved = inherited ? parentMode : requested;
+  if (runtimeModeRank(resolved) > runtimeModeRank(parentMode)) {
+    return Effect.fail(
+      new OrchestratorMcpFailure({
+        code: "runtime_mode_escalation_denied",
+        message: `Child runtime mode ${resolved} is broader than parent mode ${parentMode}.`,
+      }),
+    );
+  }
+  const supported = target?.supportedRuntimeModes;
+  if (supported === undefined || supported.length === 0 || supported.includes(resolved)) {
+    return Effect.succeed(resolved);
+  }
+  if (!inherited) {
+    return Effect.fail(
+      new OrchestratorMcpFailure({
+        code: "invalid_request",
+        message: `Provider ${target?.modelSelection.instanceId} does not offer runtime mode ${resolved}, so it would run as approval-required. Use one of: ${supported.join(", ")}.`,
+      }),
+    );
+  }
+  return Effect.succeed(
+    supported
+      .filter((mode) => runtimeModeRank(mode) <= runtimeModeRank(resolved))
+      .toSorted((left, right) => runtimeModeRank(right) - runtimeModeRank(left))[0] ??
+      "approval-required",
+  );
 }
 
 /** The same, for interaction modes. */

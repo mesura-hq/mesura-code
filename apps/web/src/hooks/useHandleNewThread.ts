@@ -1,4 +1,4 @@
-import { useAtomValue } from "@effect/atom-react";
+import { appAtomRegistry } from "../rpc/atomRegistry";
 import {
   scopedProjectKey,
   scopeProjectRef,
@@ -6,7 +6,6 @@ import {
 } from "@t3tools/client-runtime/environment";
 import { DEFAULT_SERVER_SETTINGS, type ScopedProjectRef, type ThreadId } from "@t3tools/contracts";
 import { useParams, useRouter } from "@tanstack/react-router";
-import { useCallback, useMemo } from "react";
 import {
   composerDraftHasUserContent,
   markPromotedDraftThreadByRef,
@@ -23,14 +22,14 @@ import {
   selectProjectGroupingSettings,
 } from "../logicalProject";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { readProjects, readThreadShell, useProjects, useThreadShell } from "../state/entities";
+import { readProjects, readThreadShell, useProjects, useQuietThreadShell } from "../state/entities";
 import {
   applyImplicitDraftModelDefaults,
   resolveNewDraftStartFromOrigin,
   resolveNewThreadModelSelectionOverride,
 } from "../lib/chatThreadActions";
 import { readRepositoryDefaults } from "../lib/t3ProjectFileDefaults";
-import { environmentServerConfigsAtom } from "../state/server";
+import { environmentServerConfigsAtom, serverEnvironment } from "../state/server";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings } from "./useSettings";
@@ -56,16 +55,14 @@ function pickExplicitWorkspaceOptions(options: NewThreadWorkspaceOptions | undef
 }
 
 export function useNewThreadHandler() {
-  const environmentServerConfigs = useAtomValue(environmentServerConfigsAtom);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const router = useRouter();
-  const getCurrentRouteTarget = useCallback(() => {
+  const getCurrentRouteTarget = (() => {
     const currentRouteParams = router.state.matches[router.state.matches.length - 1]?.params ?? {};
     return resolveThreadRouteTarget(currentRouteParams);
-  }, [router]);
+  });
 
-  return useCallback(
-    async (
+  return (async (
       projectRef: ScopedProjectRef,
       options?: {
         branch?: string | null;
@@ -79,6 +76,7 @@ export function useNewThreadHandler() {
       // up again and finding whichever draft it happens to hold.
     ): Promise<{ draftId: DraftId; threadId: ThreadId } | null> => {
       const projects = readProjects();
+      const environmentServerConfigs = appAtomRegistry.get(environmentServerConfigsAtom);
       const targetServerSettings =
         environmentServerConfigs.get(projectRef.environmentId)?.settings ?? DEFAULT_SERVER_SETTINGS;
       const {
@@ -222,7 +220,7 @@ export function useNewThreadHandler() {
         if (routeChangedSinceRequest()) return null;
         projectSettings = resolveProjectSettings(targetServerSettings, project.id, project, {
           repositoryDefaults,
-          providers: environmentServerConfigs.get(projectRef.environmentId)?.providers ?? [],
+          providers: appAtomRegistry.get(serverEnvironment.providersValueAtom(projectRef.environmentId)) ?? [],
         });
         if (projectSettings.modelDefaultWarning) console.warn(projectSettings.modelDefaultWarning);
       }
@@ -418,9 +416,7 @@ export function useNewThreadHandler() {
         });
         return { draftId, threadId };
       })();
-    },
-    [environmentServerConfigs, getCurrentRouteTarget, projectGroupingSettings, router],
-  );
+    });
 }
 
 export function useHandleNewThread() {
@@ -431,7 +427,7 @@ export function useHandleNewThread() {
   });
   const routeThreadRef = routeTarget?.kind === "server" ? routeTarget.threadRef : null;
   const routeDraftId = routeTarget?.kind === "draft" ? routeTarget.draftId : null;
-  const activeThread = useThreadShell(routeThreadRef);
+  const activeThread = useQuietThreadShell(routeThreadRef);
   const getDraftThread = useComposerDraftStore((store) => store.getDraftThread);
   const activeDraftThread = useComposerDraftStore(() =>
     routeTarget
@@ -441,7 +437,7 @@ export function useHandleNewThread() {
       : null,
   );
   const projects = useProjects();
-  const orderedProjects = useMemo(() => {
+  const orderedProjects = (() => {
     return orderItemsByPreferredIds({
       items: projects,
       preferredIds: projectOrder,
@@ -451,7 +447,7 @@ export function useHandleNewThread() {
         legacyProjectCwdPreferenceKey(project.workspaceRoot),
       ],
     });
-  }, [projectOrder, projects]);
+  })();
   const handleNewThread = useNewThreadHandler();
 
   return {

@@ -14,11 +14,18 @@ import {
   type RuntimeMode,
   RunId,
   ThreadId,
+  TurnItemId,
 } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as HttpServer from "effect/http/HttpServer";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -43,12 +50,17 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import * as CommandReceiptStore from "../orchestration-v2/CommandReceiptStore.ts";
+import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
+import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as PeerForwarding from "./PeerForwarding.ts";
 import * as PeerLinkRequests from "./PeerLinkRequests.ts";
 import * as PeerLinks from "./PeerLinks.ts";
 import {
   descriptorOf,
   layerLinkingEnvironment,
+  linkTo,
   servePeer,
   type ServedPeer,
 } from "./PeerLinks.testkit.ts";
@@ -135,7 +147,10 @@ const makeLaptop = Effect.gen(function* () {
       }),
     ),
   );
-  const layerThreads = ThreadManagement.layer.pipe(Layer.provideMerge(layerOrchestrator));
+  const layerThreads = ThreadManagement.layer.pipe(
+    Layer.provide(CommandReceiptStore.layer.pipe(Layer.provide(layerDatabase))),
+    Layer.provideMerge(Layer.merge(layerOrchestrator, ServerSettings.layerTest())),
+  );
   const layerHere = McpHttpServer.layerOrchestratorToolkit.pipe(
     Layer.provideMerge(McpServer.McpServer.layer),
     Layer.provideMerge(PeerLinkRequests.layer),
@@ -149,6 +164,8 @@ const makeLaptop = Effect.gen(function* () {
     Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
     Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
     Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
+    Layer.provide(Layer.mock(ThreadLaunch.ThreadLaunchService)({})),
+    Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
     Layer.provide(
       ServerConfig.layerTest(process.cwd(), { prefix: "t3-peer-link-requests-" }).pipe(
         Layer.provide(NodeServices.layer),
@@ -164,6 +181,7 @@ const makeLaptop = Effect.gen(function* () {
     requests: Context.get(here, PeerLinkRequests.PeerLinkRequests),
     orchestrator: Context.get(here, Orchestrator.OrchestratorV2),
     sink: Context.get(here, EventSink.EventSinkV2),
+    projections: Context.get(here, ProjectionStore.ProjectionStoreV2),
     sql: Context.get(database, SqlClient.SqlClient),
     call: (args: Record<string, unknown>, callScope = scope) =>
       server
@@ -332,6 +350,55 @@ const endRun = (a: Laptop) =>
     });
   });
 
+/** A steer restarts the agent's turn: its run gets a new root node. */
+const restartRun = (a: Laptop) =>
+  Effect.gen(function* () {
+    const projection = yield* a.orchestrator.getThreadProjection(threadId);
+    const run = projection.runs.find((candidate) => candidate.id === runId)!;
+    const node = projection.nodes.find((candidate) => candidate.id === rootNode)!;
+    const restarted = NodeId.make("node:laptop:root:2");
+    const now = yield* DateTime.now;
+    yield* a.sink.write({
+      commandId: CommandId.make("command:restart-run:laptop"),
+      events: [
+        {
+          id: EventId.make("event:restart-node"),
+          type: "node.updated",
+          threadId,
+          runId,
+          nodeId: restarted,
+          driver,
+          providerInstanceId: instanceId,
+          occurredAt: now,
+          payload: { ...node, id: restarted, rootNodeId: restarted, startedAt: now },
+        },
+        {
+          id: EventId.make("event:restart-run"),
+          type: "run.updated",
+          threadId,
+          runId,
+          nodeId: restarted,
+          providerInstanceId: instanceId,
+          occurredAt: now,
+          payload: { ...run, rootNodeId: restarted },
+        },
+      ],
+    });
+  });
+
+/** What `request` records for a new card, as if it read the run before anything changed. */
+const recordPendingCard = (a: Laptop, key: string) =>
+  a.orchestrator.dispatch({
+    type: "link_request.record",
+    commandId: CommandId.make(`command:pending:${key}`),
+    threadId,
+    runId,
+    nodeId: rootNode,
+    turnItemId: TurnItemId.make(`turn-item:link-request:${key}`),
+    reason: "",
+    linkStatus: "pending",
+  });
+
 /**
  * Every row of every table in the laptop's database, as text, to scan for
  * anything leaked: events, projections, receipts and outbox alike.
@@ -357,6 +424,26 @@ const errorOf = (result: McpSchema.CallToolResult) => {
   const text = result.content[0];
   return result.isError === true && text?.type === "text" ? JSON.parse(text.text) : undefined;
 };
+
+/** Runs `effect` a year from now, when every link made today has expired. */
+const afterLinksExpire = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.gen(function* () {
+    const clock = yield* Clock.Clock;
+    const ahead = Duration.days(365);
+    const later = () => clock.currentTimeMillisUnsafe() + Duration.toMillis(ahead);
+    const laterNanos = () => clock.currentTimeNanosUnsafe() + Duration.toNanosUnsafe(ahead);
+    return yield* effect.pipe(
+      Effect.provideService(Clock.Clock, {
+        currentTimeMillisUnsafe: later,
+        currentTimeMillis: Effect.sync(later),
+        currentTimeNanosUnsafe: laterNanos,
+        currentTimeNanos: Effect.sync(laterNanos),
+        monotonicTimeNanosUnsafe: () => clock.monotonicTimeNanosUnsafe(),
+        monotonicTimeNanos: clock.monotonicTimeNanos,
+        sleep: (duration) => clock.sleep(duration),
+      }),
+    );
+  });
 
 const withBoth = <A, E, R>(body: (a: Laptop, b: ServedPeer) => Effect.Effect<A, E, R>) =>
   Effect.scoped(
@@ -394,9 +481,18 @@ it.live("the agent asks without waiting, and the user links the box after its tu
         { kind: "user_input" },
       );
 
-      // The agent ends its turn; the card stays answerable.
+      // The agent ends its turn; the card stays answerable, and the thread still asks.
       yield* endRun(a);
       expect(yield* cardOf(a)).toMatchObject({ status: "waiting", linkStatus: "pending" });
+      expect((yield* a.orchestrator.getThreadShell(threadId))?.pendingRuntimeRequest).toMatchObject(
+        { kind: "user_input" },
+      );
+      expect(
+        ProjectionStore.threadShellFromProjection(
+          yield* a.orchestrator.getThreadProjection(threadId),
+        ).pendingRuntimeRequest,
+      ).toMatchObject({ kind: "user_input" });
+      expect(yield* a.projections.getSettlementCandidates(threadId)).toEqual([]);
 
       // The user's client mints a code on the box and picks more than the agent suggested.
       const pairing = yield* b.auth.issuePairingCredential();
@@ -470,6 +566,29 @@ it.live("a retry of a pending request returns pending and shows no second card",
   ),
 );
 
+it.live("a later provider session reusing a clientRequestId gets a card of its own", () =>
+  withBoth((a, b) =>
+    Effect.gen(function* () {
+      yield* seedThread(a);
+      const first = yield* a.call({ url: b.url, clientRequestId: "link" });
+      const later = yield* a.call(
+        { environmentId: box.environmentId, clientRequestId: "link" },
+        {
+          ...scope,
+          requestNamespace: "provider-session:laptop-2",
+          thread: { ...scope.thread!, providerSessionId: "provider-session:laptop-2" },
+        },
+      );
+      expect(later.structuredContent).toMatchObject({ status: "pending" });
+      expect(later.structuredContent).not.toEqual(first.structuredContent);
+      const cards = (yield* a.orchestrator.getThreadProjection(threadId)).turnItems.filter(
+        (item) => item.type === "link_request",
+      );
+      expect(cards).toHaveLength(2);
+    }),
+  ),
+);
+
 it.live("a declined request links nothing and tells the agent", () =>
   withBoth((a, b) =>
     Effect.gen(function* () {
@@ -535,6 +654,133 @@ it.live("stopping the thread closes its open card, which then takes no answer", 
       // The user stopped the thread: nothing wakes the agent.
       expect((yield* outcomeMessages(a)).messages).toHaveLength(0);
     }),
+  ),
+);
+
+it.live("a request that read the run before Stop shows no card once Stop lands", () =>
+  withBoth((a, b) =>
+    Effect.gen(function* () {
+      yield* seedThread(a);
+      yield* a.call({ url: b.url });
+      const open = yield* pendingCard(a);
+      yield* a.orchestrator.dispatch({
+        type: "thread.stop",
+        commandId: CommandId.make("command:stop:laptop"),
+        threadId,
+      });
+      const late = yield* recordPendingCard(a, "after-stop").pipe(Effect.flip);
+      expect(String(late.cause)).toContain("not active");
+      const cards = (yield* a.orchestrator.getThreadProjection(threadId)).turnItems.filter(
+        (item) => item.type === "link_request",
+      );
+      expect(cards.map((card) => card.id)).toEqual([open.id]);
+    }),
+  ),
+);
+
+it.live("a card shows up only while its run is going, and takes an answer after", () =>
+  withBoth((a, b) =>
+    Effect.gen(function* () {
+      yield* seedThread(a);
+      yield* a.call({ url: b.url });
+      const card = yield* pendingCard(a);
+      yield* endRun(a);
+      const late = yield* recordPendingCard(a, "after-end").pipe(Effect.flip);
+      expect(String(late.cause)).toContain("not active");
+      yield* a.requests.answer({ threadId, turnItemId: card.id, answer: { type: "decline" } });
+      expect(yield* cardOf(a)).toMatchObject({ linkStatus: "declined" });
+    }),
+  ),
+);
+
+it.live("a steer that restarts the turn leaves its open card answerable", () =>
+  withBoth((a, b) =>
+    Effect.gen(function* () {
+      yield* seedThread(a);
+      yield* a.call({ url: b.url });
+      const card = yield* pendingCard(a);
+      yield* restartRun(a);
+      const pairing = yield* b.auth.issuePairingCredential();
+      yield* a.requests.answer({
+        threadId,
+        turnItemId: card.id,
+        answer: { type: "link", urls: [b.url], access: "auto", pairingCode: pairing.credential },
+      });
+      // The card keeps the node it was asked from, and the agent hears the answer.
+      expect(yield* cardOf(a)).toMatchObject({
+        linkStatus: "linked",
+        nodeId: rootNode,
+        linkedEnvironmentId: box.environmentId,
+      });
+      expect((yield* outcomeMessages(a)).messages).toHaveLength(1);
+    }),
+  ),
+);
+
+it.live("a slow machine holds up only its own card's answer", () =>
+  withBoth((a, b) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // A machine that takes the descriptor request and answers when the test says.
+        const reached = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        const slow = yield* Layer.build(Layer.fresh(NodeHttpServer.layerTest));
+        const server = Context.get(slow, HttpServer.HttpServer);
+        yield* server.serve(
+          Deferred.succeed(reached, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.as(HttpServerResponse.empty({ status: 404 })),
+          ),
+        );
+        if (server.address._tag === "UnixPathAddress") return yield* Effect.die("expected TCP");
+        const slowUrl = `http://127.0.0.1:${server.address.port}`;
+
+        yield* seedThread(a);
+        // Recorded directly: asking would probe the slow machine before the answer does.
+        const slowCard = { id: TurnItemId.make("turn-item:link-request:slow") };
+        yield* a.orchestrator.dispatch({
+          type: "link_request.record",
+          commandId: CommandId.make("command:pending:slow"),
+          threadId,
+          runId,
+          nodeId: rootNode,
+          turnItemId: slowCard.id,
+          url: slowUrl,
+          reason: "",
+          linkStatus: "pending",
+        });
+        yield* a.call({ url: b.url, clientRequestId: "box" });
+        const boxCard = (yield* a.orchestrator.getThreadProjection(threadId)).turnItems.find(
+          (item) => item.type === "link_request" && item.url === b.url,
+        )!;
+
+        const slowAnswer = yield* a.requests
+          .answer({
+            threadId,
+            turnItemId: slowCard.id,
+            answer: { type: "link", urls: [slowUrl], access: "auto", pairingCode: "code" },
+          })
+          .pipe(Effect.forkChild);
+        yield* Deferred.await(reached);
+
+        // While the slow machine holds its card, the user answers the other one.
+        yield* a.requests.answer({ threadId, turnItemId: boxCard.id, answer: { type: "decline" } });
+        const items = (yield* a.orchestrator.getThreadProjection(threadId)).turnItems;
+        expect(items.find((item) => item.id === boxCard.id)).toMatchObject({
+          linkStatus: "declined",
+        });
+        expect(items.find((item) => item.id === slowCard.id)).toMatchObject({
+          linkStatus: "pending",
+        });
+
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.join(slowAnswer);
+        const failed = (yield* a.orchestrator.getThreadProjection(threadId)).turnItems.find(
+          (item) => item.id === slowCard.id,
+        );
+        expect(failed).toMatchObject({ linkStatus: "failed" });
+      }),
+    ),
   ),
 );
 
@@ -665,6 +911,29 @@ it.live("naming a machine that is already linked returns the link at once, with 
       // Not both: the address could name another machine than the id.
       const both = yield* a.call({ environmentId: box.environmentId, url: b.url });
       expect(errorOf(both)).toMatchObject({ code: "invalid_request" });
+    }),
+  ),
+);
+
+it.live("a link that expired goes through the card, so the user can link it again", () =>
+  withBoth((a, b) =>
+    Effect.gen(function* () {
+      yield* seedThread(a);
+      yield* linkTo(a.links, b, "read-only");
+      const asked = yield* a.call({ environmentId: box.environmentId }).pipe(afterLinksExpire);
+      expect(asked.structuredContent).toMatchObject({ status: "pending" });
+      const card = yield* pendingCard(a);
+
+      // Keeping the expired link is no answer: the card fails and says why.
+      yield* a.requests
+        .answer({
+          threadId,
+          turnItemId: card.id,
+          answer: { type: "use-existing", environmentId: box.environmentId },
+        })
+        .pipe(afterLinksExpire);
+      expect(yield* cardOf(a)).toMatchObject({ linkStatus: "failed" });
+      expect((yield* outcomeMessages(a)).messages[0]!.text).toContain("expired");
     }),
   ),
 );

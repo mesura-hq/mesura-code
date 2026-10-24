@@ -1,3 +1,4 @@
+import { toComposerContextId, toKindScopedComposerContextId } from "@t3tools/shared/composerContextReferences";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -9,8 +10,6 @@ import {
   inlineContextReferenceReplacement,
   removeInlineContextReference,
   stripInlineContextReferences,
-  toComposerContextId,
-  toKindScopedComposerContextId,
 } from "./composerContextReferences";
 
 const review = { kind: "review-comment", contextId: "rc-1", label: "a.ts L4" };
