@@ -103,7 +103,7 @@ describe("sidebar thread attention mapping", () => {
     expect(attention({ status: "failed", factoryRun: running })?.kind).toBe("failed");
   });
 
-  it.each(["waiting", "degraded", "stopped"] as const)(
+  it.each(["waiting", "stopped"] as const)(
     "sidebar attention AC5: a Factory run in status %s reads a loud Needs input",
     (status) => {
       expect(attention({ factoryRun: factoryRunAt(status) })).toEqual({
@@ -116,6 +116,26 @@ describe("sidebar thread attention mapping", () => {
       );
     },
   );
+
+  // The developer, 2026-10-24: a run that finished degraded is finished; the degraded phases
+  // belong in its report, not in a row label that never goes away.
+  it("sidebar attention: a Factory run that finished degraded reads like a done run, not Needs input", () => {
+    expect(attention({ factoryRun: factoryRunAt("degraded", null), isUnread: false })).toEqual({
+      kind: "ready_to_close",
+      text: "Ready to close",
+      emphasis: "calm",
+    });
+    expect(
+      attention({
+        factoryRun: factoryRunAt("degraded", null),
+        hasOpenPullRequest: true,
+        isUnread: true,
+      })?.kind,
+    ).toBe("done");
+    expect(
+      attention({ factoryRun: factoryRunAt("degraded", null), hasOpenPullRequest: true }),
+    ).toBeNull();
+  });
 
   it("sidebar attention AC5: a done Factory run reads Ready to close with no open pull request, otherwise Done", () => {
     expect(attention({ factoryRun: factoryRunAt("done", null), isUnread: false })).toEqual({

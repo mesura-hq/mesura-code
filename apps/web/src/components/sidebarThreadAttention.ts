@@ -60,12 +60,11 @@ const READY_TO_CLOSE: SidebarThreadAttention = {
   emphasis: "calm",
 };
 
-// A run that stopped on a question, degraded, or was stopped waits on the developer.
-const FACTORY_NEEDS_INPUT_STATUSES: ReadonlySet<string> = new Set([
-  "waiting",
-  "degraded",
-  "stopped",
-]);
+// A run that stopped on a question or was stopped waits on the developer.
+const FACTORY_NEEDS_INPUT_STATUSES: ReadonlySet<string> = new Set(["waiting", "stopped"]);
+// A run that finished degraded is still finished: its degraded phases live in the run's report,
+// not in a row label that never clears (developer, 2026-10-24).
+const FACTORY_FINISHED_STATUSES: ReadonlySet<string> = new Set(["done", "degraded"]);
 
 /** Precedence follows the prototype's `statusAfter`: what needs the developer first, then busy work, then finished. */
 export function resolveSidebarThreadAttention(
@@ -92,7 +91,9 @@ export function resolveSidebarThreadAttention(
   if (input.isWoke) return { kind: "woke", text: "Woke", emphasis: "calm" };
   if (
     agentSignal?.kind === "ready_to_close" ||
-    (factoryRun?.status === "done" && !input.hasOpenPullRequest)
+    (factoryRun != null &&
+      FACTORY_FINISHED_STATUSES.has(factoryRun.status) &&
+      !input.hasOpenPullRequest)
   ) {
     return READY_TO_CLOSE;
   }
