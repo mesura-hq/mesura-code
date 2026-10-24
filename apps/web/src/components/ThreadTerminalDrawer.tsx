@@ -88,6 +88,7 @@ import { previewEnvironment } from "../state/preview";
 import { readEnvironmentScope } from "../state/session";
 import { terminalEnvironment } from "../state/terminal";
 import { useEnvironmentScope } from "../state/session";
+import { useThreadLinkOwner } from "~/browser/useThreadLinkOwner";
 import { openTerminalLinkInPreview } from "./preview/openTerminalLinkInPreview";
 import { useAtomCommand } from "../state/use-atom-command";
 import { preventTerminalCloseShortcut } from "../lib/terminalCloseShortcut";
@@ -400,9 +401,10 @@ export function TerminalViewport({
     serverConfig?.availableEditors ?? [],
   );
   const openTerminalPath = useEffectEvent((target: string) => openInPreferredEditor(target));
-  const openPreview = useAtomCommand(previewEnvironment.open, {
+  const allocateLinkTarget = useAtomCommand(previewEnvironment.openLinkTarget, {
     reportFailure: false,
   });
+  const captureLinkOwner = useThreadLinkOwner(threadRef);
   const openTerminalPreviewLink = useEffectEvent(
     (url: string, forceBrowser: boolean, fallbackToBrowser: () => void) => {
       if (!readEnvironmentScope(threadRef.environmentId, AuthPreviewOperateScope)) {
@@ -412,9 +414,10 @@ export function TerminalViewport({
       void openTerminalLinkInPreview({
         url,
         threadRef,
-        openPreview,
+        allocate: allocateLinkTarget,
         fallbackToBrowser,
         forceBrowser,
+        ownerSignal: captureLinkOwner(),
       }).catch((error: unknown) => {
         toastManager.add(
           stackedThreadToast({

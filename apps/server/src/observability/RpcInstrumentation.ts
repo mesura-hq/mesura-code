@@ -185,6 +185,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.subscribeTerminalEvents]: "terminal",
   [WS_METHODS.subscribeTerminalMetadata]: "terminal",
   [WS_METHODS.previewOpen]: "preview",
+  [WS_METHODS.previewOpenLinkTarget]: "preview",
   [WS_METHODS.previewNavigate]: "preview",
   [WS_METHODS.previewResize]: "preview",
   [WS_METHODS.previewAdjust]: "preview",

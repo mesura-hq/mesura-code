@@ -32,6 +32,7 @@ import { capturePreviewAnnotationScreenshot } from "~/lib/previewAnnotation";
 import { ensureLocalApi } from "~/localApi";
 import {
   rememberPreviewUrl,
+  previewStateAtom,
   updatePreviewServerSnapshot,
   useThreadPreviewState,
 } from "~/previewStateStore";
@@ -52,6 +53,16 @@ import {
 } from "~/previewMiniPlayerStore";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 import { useRightPanelStore } from "~/rightPanelStore";
+
+import { appAtomRegistry } from "~/rpc/atomRegistry";
+import {
+  createPreviewNavigationTransport,
+  submitPreviewNavigation,
+} from "~/browser/previewNavigationTransport";
+import {
+  registerThreadLinkTransport,
+  notifyThreadLinkTransport,
+} from "~/browser/threadLinkNavigation";
 
 import { previewBridge } from "./previewBridge";
 import { subscribePreviewAction } from "./previewActionBus";
@@ -210,6 +221,7 @@ export function PreviewView({
   /** The server owns this tab's appearance, zoom, and size, whoever renders it. */
   const serverOwnsRendering = snapshot?.runtime === "server";
   const serverSurfaceRef = useRef<ServerBrowserHandle | null>(null);
+  const serverConnectionGenerationRef = useRef(0);
   const [serverAspectRatioLocked, setServerAspectRatioLocked] = useState(false);
   const serverBodyRef = useRef<HTMLDivElement | null>(null);
   const [serverToolbarWidth, setServerToolbarWidth] = useState(0);
@@ -265,17 +277,19 @@ export function PreviewView({
 
   const navigateToResolvedUrl = useCallback(
     async (resolvedUrl: string) => {
-      if (isServerTab && serverSurfaceRef.current) {
-        if (serverInputDisabled) return false;
-        serverSurfaceRef.current.navigate(resolvedUrl);
-        rememberPreviewUrl(threadRef, resolvedUrl);
-        return true;
-      }
-      if (runtimeTabId && previewBridge) {
-        // The bridge mirrors the resolved URL back to the server.
-        await previewBridge.navigate(runtimeTabId, resolvedUrl);
-        rememberPreviewUrl(threadRef, resolvedUrl);
-        return true;
+      if (runtimeTabId && (isServerTab || previewBridge)) {
+        if (isServerTab && serverInputDisabled) return false;
+        const accepted = await submitPreviewNavigation(
+          {
+            streamed: isServerTab,
+            surface: serverSurfaceRef.current,
+            bridge: previewBridge,
+            runtimeTabId,
+          },
+          resolvedUrl,
+        );
+        if (accepted) rememberPreviewUrl(threadRef, resolvedUrl);
+        return accepted;
       }
       const result = await openPreviewSession({ openPreview: open, threadRef, url: resolvedUrl });
       if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
@@ -292,6 +306,29 @@ export function PreviewView({
     },
     [isServerTab, open, runtimeTabId, serverInputDisabled, threadRef],
   );
+
+  const linkEpoch = previewState.serverEpoch;
+  const designatedLinkTarget = snapshot?.purpose === "thread-link" && snapshot.runtime === "server";
+  useEffect(() => {
+    if (!designatedLinkTarget || !linkEpoch || !tabId || !visible) return;
+    const target = { threadRef: threadRefRef.current, serverEpoch: linkEpoch, tabId };
+    const transport = createPreviewNavigationTransport({
+      target,
+      streamed: isServerTab,
+      surface: () => serverSurfaceRef.current,
+      connectionGeneration: () => serverConnectionGenerationRef.current,
+      bridge: previewBridge,
+    });
+    const unregister = registerThreadLinkTransport(target, transport);
+    const unsubscribe = appAtomRegistry.subscribe(
+      previewStateAtom(threadKey),
+      notifyThreadLinkTransport,
+    );
+    return () => {
+      unsubscribe();
+      unregister();
+    };
+  }, [designatedLinkTarget, isServerTab, linkEpoch, tabId, threadKey, visible]);
 
   const handleSubmitUrl = useCallback(
     async (next: string) => {
@@ -1074,9 +1111,16 @@ export function PreviewView({
                 tabId={snapshot.tabId}
                 visible={visible}
                 onFirstFrame={() => setServerFrameTabId(runtimeTabId)}
-                onControl={(control) =>
-                  setServerControlledTabId(control?.controller === "you" ? runtimeTabId : null)
-                }
+                onControl={(control) => {
+                  setServerControlledTabId(control?.controller === "you" ? runtimeTabId : null);
+                  notifyThreadLinkTransport();
+                }}
+                onDisconnected={() => {
+                  // Cap/StrictMode cleanup clears control while retaining this owner.
+                  // Only unexpected socket loss cancels a waiter before its first grant.
+                  // This local lease generation is not a causal request ID.
+                  serverConnectionGenerationRef.current += 1;
+                }}
                 onPopup={(popupTabId) => showPreviewPopup(threadRef, popupTabId, "panel")}
                 // Stays connected under the empty state so a URL picked there reaches the page.
                 className={cn(

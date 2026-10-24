@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   resolveExternalWebLinkHost,
@@ -220,4 +220,66 @@ describe("external chat link context menu", () => {
   ])("rejects unsafe external web-link href %s", (href) => {
     expect(resolveExternalWebLinkHref(href)).toBeNull();
   });
+});
+
+afterEach(() => vi.unstubAllGlobals());
+
+it.each([
+  [767, false],
+  [1280, true],
+] as const)(
+  "chat link menu policy: width %s coarse %s hides explicit app and rejects stale native selection",
+  async (innerWidth, coarse) => {
+    vi.stubGlobal("window", { innerWidth, matchMedia: () => ({ matches: coarse }) });
+    const harness = createHarness("open-in-preview");
+    const href = "https://example.com/docs";
+    await showExternalLinkContextMenu({ href, position: { x: 1, y: 2 }, ...harness });
+    expect(
+      harness.showContextMenu.mock.calls[0]?.[0].map((item: { id: string }) => item.id),
+    ).toEqual(["open-external", "copy-link"]);
+    expect(harness.openInPreview).not.toHaveBeenCalled();
+    expect(harness.openExternal).toHaveBeenCalledExactlyOnceWith(href);
+  },
+);
+
+it("chat link menu policy: a pending desktop app selection uses system after a viewport change", async () => {
+  let width = 1280;
+  vi.stubGlobal("window", {
+    get innerWidth() {
+      return width;
+    },
+    matchMedia: () => ({ matches: false }),
+  });
+  const harness = createHarness(null);
+  let choose = () => {};
+  harness.showContextMenu.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        choose = () => resolve("open-in-preview");
+      }),
+  );
+  const href = "https://example.com/docs";
+  const selecting = showExternalLinkContextMenu({ href, position: { x: 1, y: 2 }, ...harness });
+  expect(
+    harness.showContextMenu.mock.calls[0]?.[0].map((item: { id: string }) => item.id),
+  ).toContain("open-in-preview");
+  width = 767;
+  choose();
+  await selecting;
+  expect(harness.openInPreview).not.toHaveBeenCalled();
+  expect(harness.openExternal).toHaveBeenCalledExactlyOnceWith(href);
+});
+
+it("chat link menu policy: a rejected stale phone open reports the actual system operation", async () => {
+  vi.stubGlobal("window", { innerWidth: 767, matchMedia: () => ({ matches: false }) });
+  const harness = createHarness("open-in-preview");
+  const failure = new Error("System browser unavailable");
+  harness.openExternal.mockRejectedValueOnce(failure);
+  await showExternalLinkContextMenu({
+    href: "https://example.com",
+    position: { x: 1, y: 2 },
+    ...harness,
+  });
+  expect(harness.reportFailure).toHaveBeenCalledExactlyOnceWith("open-link-external", failure);
+  expect(harness.openInPreview).not.toHaveBeenCalled();
 });

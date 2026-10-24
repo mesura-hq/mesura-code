@@ -42,6 +42,12 @@ export function createPreviewEnvironmentAtoms<R, E>(
       scheduler: lifecycleScheduler,
       concurrency: lifecycleConcurrency,
     }),
+    openLinkTarget: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:preview:open-link-target",
+      tag: WS_METHODS.previewOpenLinkTarget,
+      scheduler: lifecycleScheduler,
+      concurrency: lifecycleConcurrency,
+    }),
     navigate: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:preview:navigate",
       tag: WS_METHODS.previewNavigate,

@@ -309,6 +309,8 @@ import {
   PreviewReportProfilesInput,
   PreviewNavigateInput,
   PreviewOpenInput,
+  PreviewOpenLinkTargetInput,
+  PreviewOpenLinkTargetResult,
   PreviewRefreshInput,
   PreviewReportStatusInput,
   PreviewResizeInput,
@@ -534,6 +536,7 @@ export const WS_METHODS = {
 
   // Preview methods
   previewOpen: "preview.open",
+  previewOpenLinkTarget: "preview.openLinkTarget",
   previewNavigate: "preview.navigate",
   previewResize: "preview.resize",
   previewAdjust: "preview.adjust",
@@ -1743,6 +1746,12 @@ const WsPreviewOpenRpc = Rpc.make(WS_METHODS.previewOpen, {
   error: Schema.Union([PreviewError, EnvironmentAuthorizationError]),
 });
 
+const WsPreviewOpenLinkTargetRpc = Rpc.make(WS_METHODS.previewOpenLinkTarget, {
+  payload: PreviewOpenLinkTargetInput,
+  success: PreviewOpenLinkTargetResult,
+  error: EnvironmentAuthorizationError,
+});
+
 const WsPreviewNavigateRpc = Rpc.make(WS_METHODS.previewNavigate, {
   payload: PreviewNavigateInput,
   success: PreviewSessionSnapshot,
@@ -2297,6 +2306,7 @@ const UpstreamWsRpcGroup = RpcGroup.make(
   WsSubscribeTerminalEventsRpc,
   WsSubscribeTerminalMetadataRpc,
   WsPreviewOpenRpc,
+  WsPreviewOpenLinkTargetRpc,
   WsPreviewNavigateRpc,
   WsPreviewResizeRpc,
   WsPreviewAdjustRpc,

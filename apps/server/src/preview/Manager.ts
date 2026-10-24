@@ -3,7 +3,8 @@
  *
  * Sessions are keyed by `(threadId, tabId)`; a single thread can host
  * multiple tabs (browser-style). `open` always creates a new tab — tab
- * lifecycle is owned by the renderer.
+ * lifecycle is owned by the renderer. `openLinkTarget` alone reuses the
+ * server-designated thread-link tab under the same lock as open and close.
  *
  * Events are published via Effect's `PubSub`, so subscriber failures are
  * isolated from the publishing call (a closed WS subscriber queue cannot
@@ -17,7 +18,11 @@ import {
   type PreviewListInput,
   type PreviewListResult,
   type PreviewNavigateInput,
+  type PreviewNavStatus,
   type PreviewOpenInput,
+  type PreviewOpenLinkTargetInput,
+  type PreviewOpenLinkTargetResult,
+  type PreviewSessionPurpose,
   type PreviewRefreshInput,
   type PreviewReportStatusInput,
   type PreviewResizeInput,
@@ -52,6 +57,9 @@ export class PreviewManager extends Context.Service<
         readonly beforePublish?: (snapshot: PreviewSessionSnapshot) => void;
       },
     ) => Effect.Effect<PreviewSessionSnapshot, PreviewError>;
+    readonly openLinkTarget: (
+      input: PreviewOpenLinkTargetInput,
+    ) => Effect.Effect<PreviewOpenLinkTargetResult>;
     readonly navigate: (
       input: PreviewNavigateInput,
     ) => Effect.Effect<PreviewSessionSnapshot, PreviewError>;
@@ -204,54 +212,118 @@ export const make = Effect.gen(function* PreviewManagerMake() {
     );
   };
 
+  const createSnapshot = Effect.fn("PreviewManager.createSnapshot")(function* (
+    input: PreviewOpenInput & { readonly automationOwner?: string },
+    navStatus: PreviewNavStatus,
+    purpose?: PreviewSessionPurpose,
+  ) {
+    const runtime = input.runtime;
+    // Persisted client surfaces must not bind to a different tab after a server restart.
+    const tabId = `${newPreviewTabId()}${runtime === "server" ? `_${serverEpoch}` : ""}`;
+    const updatedAt = yield* currentIsoTimestamp;
+    const snapshot: PreviewSessionSnapshot = {
+      threadId: input.threadId,
+      tabId,
+      navStatus,
+      canGoBack: false,
+      canGoForward: false,
+      viewport: input.viewport ?? FILL_PREVIEW_VIEWPORT,
+      ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
+      ...(runtime === undefined ? {} : { runtime }),
+      ...(purpose === undefined ? {} : { purpose }),
+      ...(runtime === "server" && input.automationOwner !== undefined
+        ? { automationOwner: input.automationOwner }
+        : {}),
+      ...(input.reveal === undefined ? {} : { reveal: input.reveal }),
+      updatedAt,
+    };
+    return snapshot;
+  });
+
+  /** Both open paths publish while holding stateRef's lock, preserving event order. */
+  const insertSession = Effect.fn("PreviewManager.insertSession")(function* (
+    state: ManagerState,
+    snapshot: PreviewSessionSnapshot,
+    beforePublish?: (snapshot: PreviewSessionSnapshot) => void,
+  ) {
+    const revision = state.revision + 1;
+    const sessions = new Map(state.sessions);
+    sessions.set(compositeKey(snapshot.threadId, snapshot.tabId), {
+      threadId: snapshot.threadId,
+      tabId: snapshot.tabId,
+      snapshot,
+    });
+    beforePublish?.(snapshot);
+    yield* PubSub.publish(eventsPubSub, {
+      type: "opened",
+      threadId: snapshot.threadId,
+      tabId: snapshot.tabId,
+      createdAt: snapshot.updatedAt,
+      serverEpoch,
+      revision,
+      snapshot,
+    });
+    return { sessions, revision } satisfies ManagerState;
+  });
+
+  const listResult = (state: ManagerState, threadId: string): PreviewListResult => ({
+    sessions: sessionsForThread(state, threadId)
+      .map((session) => session.snapshot)
+      .toSorted((a, b) => a.updatedAt.localeCompare(b.updatedAt)),
+    serverEpoch,
+    revision: state.revision,
+  });
+
   const open: PreviewManager["Service"]["open"] = Effect.fn("PreviewManager.open")(
     function* (input) {
-      const runtime = input.runtime;
-      // Persisted client surfaces must not bind to a different tab after a server restart.
-      const tabId = `${newPreviewTabId()}${runtime === "server" ? `_${serverEpoch}` : ""}`;
-      const updatedAt = yield* currentIsoTimestamp;
-      const snapshot: PreviewSessionSnapshot = {
-        threadId: input.threadId,
-        tabId,
-        navStatus: input.url
-          ? { _tag: "Loading", url: yield* normalizeUrl(input.url), title: "" }
-          : { _tag: "Idle" },
-        canGoBack: false,
-        canGoForward: false,
-        viewport: input.viewport ?? FILL_PREVIEW_VIEWPORT,
-        ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
-        ...(runtime === undefined ? {} : { runtime }),
-        ...(runtime === "server" && input.automationOwner !== undefined
-          ? { automationOwner: input.automationOwner }
-          : {}),
-        ...(input.reveal === undefined ? {} : { reveal: input.reveal }),
-        updatedAt,
-      };
-      yield* SynchronizedRef.modifyEffect(stateRef, (state) =>
-        Effect.gen(function* () {
-          const revision = state.revision + 1;
-          const sessions = new Map(state.sessions);
-          sessions.set(compositeKey(input.threadId, tabId), {
-            threadId: input.threadId,
-            tabId,
-            snapshot,
-          });
-          input.beforePublish?.(snapshot);
-          yield* PubSub.publish(eventsPubSub, {
-            type: "opened",
-            threadId: input.threadId,
-            tabId,
-            createdAt: snapshot.updatedAt,
-            serverEpoch,
-            revision,
-            snapshot,
-          });
-          return [snapshot, { sessions, revision }] as const;
-        }),
+      const navStatus: PreviewNavStatus = input.url
+        ? { _tag: "Loading", url: yield* normalizeUrl(input.url), title: "" }
+        : { _tag: "Idle" };
+      const snapshot = yield* createSnapshot(input, navStatus);
+      return yield* SynchronizedRef.modifyEffect(stateRef, (state) =>
+        insertSession(state, snapshot, input.beforePublish).pipe(
+          Effect.map((next) => [snapshot, next] as const),
+        ),
       );
-      return snapshot;
     },
   );
+
+  const openLinkTarget: PreviewManager["Service"]["openLinkTarget"] = Effect.fn(
+    "PreviewManager.openLinkTarget",
+  )(function* (input) {
+    // Preparing a candidate is harmless; only the winner inserts it under the shared lock.
+    const candidate = yield* createSnapshot(
+      {
+        threadId: input.threadId,
+        profileId: input.profileId,
+        viewport: input.viewport,
+        runtime: "server",
+      },
+      { _tag: "Idle" },
+      "thread-link",
+    );
+    return yield* SynchronizedRef.modifyEffect(stateRef, (state) =>
+      Effect.gen(function* () {
+        const existing = sessionsForThread(state, input.threadId).find(
+          ({ snapshot }) =>
+            snapshot.purpose === "thread-link" &&
+            snapshot.runtime === "server" &&
+            snapshot.automationOwner === undefined,
+        );
+        if (existing) {
+          return [
+            { ...listResult(state, input.threadId), selectedTabId: existing.tabId },
+            state,
+          ] as const;
+        }
+        const next = yield* insertSession(state, candidate);
+        return [
+          { ...listResult(next, input.threadId), selectedTabId: candidate.tabId },
+          next,
+        ] as const;
+      }),
+    );
+  });
 
   const navigate: PreviewManager["Service"]["navigate"] = Effect.fn("PreviewManager.navigate")(
     function* (input) {
@@ -457,13 +529,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
   const list: PreviewManager["Service"]["list"] = Effect.fn("PreviewManager.list")(
     function* (input) {
       return yield* SynchronizedRef.get(stateRef).pipe(
-        Effect.map((state): PreviewListResult => ({
-          sessions: sessionsForThread(state, input.threadId)
-            .map((s) => s.snapshot)
-            .toSorted((a, b) => a.updatedAt.localeCompare(b.updatedAt)),
-          serverEpoch,
-          revision: state.revision,
-        })),
+        Effect.map((state) => listResult(state, input.threadId)),
       );
     },
   );
@@ -501,6 +567,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
 
   return PreviewManager.of({
     open,
+    openLinkTarget,
     requestReveal,
     navigate,
     reportStatus,

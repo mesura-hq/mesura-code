@@ -1,4 +1,8 @@
-import type { ResolvedKeybindingsConfig, ScopedThreadRef } from "@t3tools/contracts";
+import type {
+  PreviewForwardedShortcut,
+  ResolvedKeybindingsConfig,
+  ScopedThreadRef,
+} from "@t3tools/contracts";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
@@ -13,7 +17,9 @@ const state = vi.hoisted(() => ({
   workspaceAvailable: true,
   navigate: vi.fn(),
   openPreview: vi.fn(),
-  setShortcuts: vi.fn(async () => undefined),
+  setShortcuts: vi.fn<(shortcuts: ReadonlyArray<PreviewForwardedShortcut>) => Promise<void>>(
+    async () => undefined,
+  ),
   toast: vi.fn(),
 }));
 
@@ -310,9 +316,7 @@ describe("root reopen shortcut", () => {
 
   it("forwards the chord to a focused desktop browser only while history exists", async () => {
     const forwardedCommands = () =>
-      (state.setShortcuts.mock.lastCall as unknown as [Array<{ command: string }>])[0].map(
-        ({ command }) => command,
-      );
+      state.setShortcuts.mock.lastCall?.[0].map(({ command }) => command);
     useClosedViewStore
       .getState()
       .remember({ kind: "panel-tab", threadRef: ref, surface: { kind: "diff", id: "diff" } });
@@ -332,4 +336,51 @@ describe("root reopen shortcut", () => {
       expect.objectContaining({ command: "rightPanel.toggle" }),
     ]);
   });
+});
+
+it("thread link integration fence: configured panel close enters and leaves actual guest forwarding registration", async () => {
+  state.params = { ...ref };
+  useRightPanelStore.getState().openBrowser(ref, "active-target");
+  state.keybindings = [
+    {
+      command: "rightPanel.close",
+      shortcut: {
+        key: "y",
+        ctrlKey: true,
+        shiftKey: true,
+        metaKey: false,
+        altKey: false,
+        modKey: false,
+      },
+    },
+  ];
+  await render();
+  expect(state.setShortcuts.mock.lastCall?.[0]).toContainEqual({
+    command: "rightPanel.close",
+    shortcut: {
+      key: "y",
+      ctrlKey: true,
+      shiftKey: true,
+      metaKey: false,
+      altKey: false,
+      modKey: false,
+    },
+  });
+  await act(() => useRightPanelStore.getState().toggleVisibility(ref));
+  expect(state.setShortcuts).toHaveBeenLastCalledWith([]);
+  await act(() => useRightPanelStore.getState().toggleVisibility(ref));
+  expect(state.setShortcuts.mock.lastCall?.[0]).toContainEqual({
+    command: "rightPanel.close",
+    shortcut: {
+      key: "y",
+      ctrlKey: true,
+      shiftKey: true,
+      metaKey: false,
+      altKey: false,
+      modKey: false,
+    },
+  });
+  await act(() => renderer?.unmount());
+  renderer = undefined;
+  expect(state.setShortcuts).toHaveBeenLastCalledWith([]);
 });

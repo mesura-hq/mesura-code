@@ -1,24 +1,52 @@
-import type { PreviewSessionSnapshot, ScopedThreadRef } from "@t3tools/contracts";
+import type { ScopedThreadRef } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  installThreadLinkEnvironment,
+  linkEnvelope,
+  mountThreadLinkStream,
+} from "~/test/threadLinkFixture";
+import { resetPreviewStateForTests } from "~/previewStateStore";
+import { useRightPanelStore } from "~/rightPanelStore";
+import {
   openTerminalLinkInPreview,
   TerminalLinkPreviewOpenError,
 } from "./openTerminalLinkInPreview";
 
-vi.mock("~/previewStateStore", () => ({
-  applyPreviewServerSnapshot: vi.fn(),
-  isPreviewSupportedInRuntime: () => true,
+vi.mock("~/assets/assetUrls", () => ({ resolveAssetUrl: vi.fn() }));
+vi.mock("~/browser/previewRuntime", () => ({
+  isPreviewAvailableFor: () => true,
+  previewRuntimeFor: () => undefined,
 }));
-
-vi.mock("~/rightPanelStore", () => ({
-  useRightPanelStore: {
-    getState: () => ({ openBrowser: vi.fn() }),
+vi.mock("~/state/server", async () => ({
+  environmentServerConfigsAtom: (await import("~/test/threadLinkFixture")).threadLinkFixture
+    .configs,
+}));
+vi.mock("~/connection/catalog", async () => {
+  const f = (await import("~/test/threadLinkFixture")).threadLinkFixture;
+  return { environmentCatalog: { catalogValueAtom: f.catalog, stateAtom: f.connection } };
+});
+vi.mock("~/state/preview", async () => ({
+  previewEnvironment: {
+    open: "open",
+    openLinkTarget: {
+      permissionAtom: (await import("~/test/threadLinkFixture")).threadLinkFixture.permission,
+    },
   },
 }));
-
+vi.mock("~/state/session", async () => {
+  const f = (await import("~/test/threadLinkFixture")).threadLinkFixture;
+  const { appAtomRegistry } = await import("~/rpc/atomRegistry");
+  const Option = await import("effect/Option");
+  return {
+    environmentSession: { preparedConnectionValueAtom: f.prepared },
+    readPreparedConnection: (id: import("@t3tools/contracts").EnvironmentId) =>
+      Option.getOrNull(appAtomRegistry.get(f.prepared(id))),
+    readEnvironmentScope: () => true,
+  };
+});
 const browserDefaultsMocks = vi.hoisted(() => ({
   resolve: vi.fn(),
 }));
@@ -30,13 +58,16 @@ vi.mock("~/browser/browserDefaults", () => ({
 }));
 
 const linkTargetMocks = vi.hoisted(() => ({
-  preference: vi.fn<() => "system" | "app">(),
+  preference: vi.fn<() => "system" | "app" | Promise<"system" | "app">>(),
 }));
 
-vi.mock("~/browser/browserLinkTarget", () => ({
-  resolveBrowserLinkTargetPreference: async () => linkTargetMocks.preference(),
-  isWebUrl: (url: string) => /^https?:/u.test(url),
+vi.mock("~/hooks/useSettings", () => ({
+  ensureClientSettingsHydrated: async () => {
+    savedTarget.value = await linkTargetMocks.preference();
+  },
+  getClientSettings: () => ({ browserLinkTarget: savedTarget.value }),
 }));
+const savedTarget = vi.hoisted(() => ({ value: "app" as "app" | "system" }));
 
 const hydratedDefaults = {
   viewport: { _tag: "fixed", width: 1280, height: 720 } as const,
@@ -48,23 +79,37 @@ const threadRef = {
   threadId: "thread-1" as ScopedThreadRef["threadId"],
 };
 
-const snapshot: PreviewSessionSnapshot = {
-  threadId: threadRef.threadId,
-  tabId: "tab-1",
-  navStatus: { _tag: "Idle" },
-  canGoBack: false,
-  canGoForward: false,
-  updatedAt: "2026-06-20T00:00:00.000Z",
-};
+let stopTransport: () => void;
+let viewportWidth = 1280;
+let primaryPointerCoarse = false;
 
 beforeEach(() => {
+  resetPreviewStateForTests();
+  useRightPanelStore.setState({
+    byThreadKey: {},
+    userActionRevisionByThreadKey: {},
+    closeRevisionByThreadKey: {},
+    pendingMaximizeThreadKey: null,
+  });
+  installThreadLinkEnvironment(threadRef);
+  stopTransport = mountThreadLinkStream(threadRef);
+  viewportWidth = 1280;
+  primaryPointerCoarse = false;
+  vi.stubGlobal("window", {
+    get innerWidth() {
+      return viewportWidth;
+    },
+    matchMedia: () => ({ matches: primaryPointerCoarse }),
+  });
   browserDefaultsMocks.resolve.mockReset();
   browserDefaultsMocks.resolve.mockResolvedValue(hydratedDefaults);
   linkTargetMocks.preference.mockReturnValue("app");
 });
 
 afterEach(() => {
+  stopTransport();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("openTerminalLinkInPreview", () => {
@@ -80,13 +125,13 @@ describe("openTerminalLinkInPreview", () => {
         browserDefaultsMocks.resolve.mockRejectedValueOnce(failure);
       }
       const fallbackToBrowser = vi.fn();
-      const openPreview = vi.fn(async () => AsyncResult.success(snapshot));
+      const openPreview = vi.fn(async () => AsyncResult.success(linkEnvelope(threadRef)));
 
       await expect(
         openTerminalLinkInPreview({
           url: "https://example.com/docs",
           threadRef,
-          openPreview,
+          allocate: openPreview,
           fallbackToBrowser,
           forceBrowser: false,
         }),
@@ -99,12 +144,12 @@ describe("openTerminalLinkInPreview", () => {
   it("opens in the system browser while that is the configured target", async () => {
     linkTargetMocks.preference.mockReturnValue("system");
     const fallbackToBrowser = vi.fn();
-    const openPreview = vi.fn(async () => AsyncResult.success(snapshot));
+    const openPreview = vi.fn(async () => AsyncResult.success(linkEnvelope(threadRef)));
 
     await openTerminalLinkInPreview({
       url: "http://localhost:3000/",
       threadRef,
-      openPreview,
+      allocate: openPreview,
       fallbackToBrowser,
       forceBrowser: false,
     });
@@ -115,12 +160,12 @@ describe("openTerminalLinkInPreview", () => {
 
   it("opens public URLs in-app too, not only local servers", async () => {
     const fallbackToBrowser = vi.fn();
-    const openPreview = vi.fn(async () => AsyncResult.success(snapshot));
+    const openPreview = vi.fn(async () => AsyncResult.success(linkEnvelope(threadRef)));
 
     await openTerminalLinkInPreview({
       url: "https://example.com/docs",
       threadRef,
-      openPreview,
+      allocate: openPreview,
       fallbackToBrowser,
       forceBrowser: false,
     });
@@ -137,12 +182,12 @@ describe("openTerminalLinkInPreview", () => {
           hydrate = resolve;
         }),
     );
-    const openPreview = vi.fn(async () => AsyncResult.success(snapshot));
+    const openPreview = vi.fn(async () => AsyncResult.success(linkEnvelope(threadRef)));
 
     const opening = openTerminalLinkInPreview({
       url: "http://localhost:3000/",
       threadRef,
-      openPreview,
+      allocate: openPreview,
       fallbackToBrowser: vi.fn(),
       forceBrowser: false,
     });
@@ -156,7 +201,6 @@ describe("openTerminalLinkInPreview", () => {
       environmentId: "local",
       input: {
         threadId: "thread-1",
-        url: "http://localhost:3000/",
         viewport: hydratedDefaults.viewport,
         profileId: hydratedDefaults.profileId,
       },
@@ -172,7 +216,7 @@ describe("openTerminalLinkInPreview", () => {
     await openTerminalLinkInPreview({
       url: "http://127.0.0.1:5173/",
       threadRef,
-      openPreview: async () => AsyncResult.failure(cause),
+      allocate: async () => AsyncResult.failure(cause),
       fallbackToBrowser,
       forceBrowser: false,
     });
@@ -197,7 +241,7 @@ describe("openTerminalLinkInPreview", () => {
     await openTerminalLinkInPreview({
       url: "http://localhost:5173/",
       threadRef,
-      openPreview: async () => AsyncResult.failure(Cause.interrupt()),
+      allocate: async () => AsyncResult.failure(Cause.interrupt()),
       fallbackToBrowser,
       forceBrowser: false,
     });
@@ -208,12 +252,12 @@ describe("openTerminalLinkInPreview", () => {
 
   it("opens in the system browser when Ctrl or Command is held", async () => {
     const fallbackToBrowser = vi.fn();
-    const openPreview = vi.fn(async () => AsyncResult.success(snapshot));
+    const openPreview = vi.fn(async () => AsyncResult.success(linkEnvelope(threadRef)));
 
     await openTerminalLinkInPreview({
       url: "https://example.com/docs",
       threadRef,
-      openPreview,
+      allocate: openPreview,
       fallbackToBrowser,
       forceBrowser: true,
     });
@@ -222,3 +266,69 @@ describe("openTerminalLinkInPreview", () => {
     expect(openPreview).not.toHaveBeenCalled();
   });
 });
+
+it.each([
+  [767, false],
+  [1280, true],
+] as const)(
+  "terminal link policy: width %s coarse %s never allocates a preview",
+  async (width, coarse) => {
+    viewportWidth = width;
+    primaryPointerCoarse = coarse;
+    const fallbackToBrowser = vi.fn();
+    const openPreview = vi.fn(async () => AsyncResult.success(linkEnvelope(threadRef)));
+    await openTerminalLinkInPreview({
+      url: "https://example.com/docs",
+      threadRef,
+      allocate: openPreview,
+      fallbackToBrowser,
+      forceBrowser: false,
+    });
+    expect(fallbackToBrowser).toHaveBeenCalledOnce();
+    expect(openPreview).not.toHaveBeenCalled();
+    expect(browserDefaultsMocks.resolve).not.toHaveBeenCalled();
+  },
+);
+
+it("terminal link policy: rechecks the viewport after saved target hydration", async () => {
+  let release = () => {};
+  linkTargetMocks.preference.mockImplementationOnce(
+    () =>
+      new Promise<"app">((resolve) => {
+        release = () => resolve("app");
+      }),
+  );
+  const fallbackToBrowser = vi.fn();
+  const openPreview = vi.fn(async () => AsyncResult.success(linkEnvelope(threadRef)));
+  const opening = openTerminalLinkInPreview({
+    url: "https://example.com/docs",
+    threadRef,
+    allocate: openPreview,
+    fallbackToBrowser,
+    forceBrowser: false,
+  });
+  viewportWidth = 767;
+  release();
+  await opening;
+  expect(fallbackToBrowser).toHaveBeenCalledOnce();
+  expect(openPreview).not.toHaveBeenCalled();
+});
+
+it.each(["mailto:hello@example.com", "vscode://file/work", "not a URL"])(
+  "terminal link policy: nonweb %s skips preview and unrelated settings",
+  async (url) => {
+    linkTargetMocks.preference.mockClear();
+    const fallbackToBrowser = vi.fn();
+    const openPreview = vi.fn(async () => AsyncResult.success(linkEnvelope(threadRef)));
+    await openTerminalLinkInPreview({
+      url,
+      threadRef,
+      allocate: openPreview,
+      fallbackToBrowser,
+      forceBrowser: false,
+    });
+    expect(fallbackToBrowser).toHaveBeenCalledOnce();
+    expect(openPreview).not.toHaveBeenCalled();
+    expect(linkTargetMocks.preference).not.toHaveBeenCalled();
+  },
+);
