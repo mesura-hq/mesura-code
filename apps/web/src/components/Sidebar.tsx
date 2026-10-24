@@ -62,6 +62,7 @@ import { FolderIcon, ListFilterIcon, PlusIcon, SettingsIcon } from "lucide-react
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useReducer,
   useRef,
   useState,
@@ -1704,17 +1705,34 @@ export default function Sidebar() {
           activeThreads,
           workingShelfEnabled,
         });
-  const sidebarSortingStrategy = createSidebarSortingStrategy({
-    items: sidebarListItems,
-    enabled: !isContextDrag,
-    boundaryLabelHeight: SIDEBAR_DRAG_LABEL_HEIGHT,
-    settledOrder: draggedSettledOrder,
-    ...(draggedActiveOrder === undefined ? {} : { activeOrder: draggedActiveOrder }),
-    settledExpanded: settledShelfExpanded,
-    settledVisibleCount,
-    routeThreadKey: routeRowThreadKey,
-    snoozedThreadCount: snoozedThreads.length,
-  });
+  // WORKAROUND: retain the strategy because the compiler recreates this factory
+  // result and re-renders every drag wrapper on title updates. Remove when the
+  // compiler preserves the factory identity and the editor render-cost fence passes.
+  // oxlint-disable-next-line t3code/no-manual-memo
+  const sidebarSortingStrategy = useMemo(
+    () =>
+      createSidebarSortingStrategy({
+        items: sidebarListItems,
+        enabled: !isContextDrag,
+        boundaryLabelHeight: SIDEBAR_DRAG_LABEL_HEIGHT,
+        settledOrder: draggedSettledOrder,
+        ...(draggedActiveOrder === undefined ? {} : { activeOrder: draggedActiveOrder }),
+        settledExpanded: settledShelfExpanded,
+        settledVisibleCount,
+        routeThreadKey: routeRowThreadKey,
+        snoozedThreadCount: snoozedThreads.length,
+      }),
+    [
+      sidebarListItems,
+      isContextDrag,
+      draggedSettledOrder,
+      draggedActiveOrder,
+      settledShelfExpanded,
+      settledVisibleCount,
+      routeRowThreadKey,
+      snoozedThreads.length,
+    ],
+  );
   const draggedThreadKey = dragState?.activeKey;
   const draggedFromSection = dragState?.activeSection;
   const dragActivationY = dragState?.activationY;

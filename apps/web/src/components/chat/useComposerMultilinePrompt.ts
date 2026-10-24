@@ -31,12 +31,22 @@ export function useComposerMultilinePrompt(body: HTMLElement | null): boolean {
       if (next !== null) setIsMultiline(next);
     };
     measure();
-    const editor = body.querySelector<HTMLElement>('[data-testid="composer-editor"]');
-    const stopObserving = observeResize(editor ? [body, editor] : body, measure);
-    const mutationObserver = new MutationObserver(measure);
+    const stopObservingBody = observeResize(body, measure);
+    let editor = body.querySelector<HTMLElement>('[data-testid="composer-editor"]');
+    let stopObservingEditor = editor ? observeResize(editor, measure) : undefined;
+    const mutationObserver = new MutationObserver(() => {
+      const nextEditor = body.querySelector<HTMLElement>('[data-testid="composer-editor"]');
+      if (nextEditor !== editor) {
+        stopObservingEditor?.();
+        editor = nextEditor;
+        stopObservingEditor = editor ? observeResize(editor, measure) : undefined;
+      }
+      measure();
+    });
     mutationObserver.observe(body, { childList: true, characterData: true, subtree: true });
     return () => {
-      stopObserving();
+      stopObservingEditor?.();
+      stopObservingBody();
       mutationObserver.disconnect();
     };
   }, [body]);

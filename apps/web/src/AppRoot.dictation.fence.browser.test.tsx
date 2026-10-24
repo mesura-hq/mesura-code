@@ -1449,6 +1449,28 @@ describe("dictation phase 5 rework regressions", () => {
     await stopRecordingFromStrip();
   }
 
+  it("dictation returns to the normal composer after a question field loses focus", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.projection = withOpenQuestion(makeThreadProjection());
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Normal draft");
+    await mountApp();
+    await focusQuestionAnswer();
+    const editor = container.querySelector<HTMLElement>('[data-testid="composer-editor"]');
+    expect(editor).not.toBeNull();
+    await act(async () => editor!.focus());
+    await placeCaretAfter("Normal draft");
+    await recordInMode("insert");
+    const { jobId } = startedJob(0).input;
+    expect(slotsIn(promptOf(onScreenTarget)).map((slot) => slot.jobId)).toEqual([jobId]);
+    expect(questionAnswerText()).toBe("");
+    await pushJobs([
+      job(jobId, { status: "completed", mode: "inject", text: "normal transcript" }),
+    ]);
+    expect(squash(promptOf(onScreenTarget))).toBe("Normal draft normal transcript");
+    expect(questionAnswerText()).toBe("");
+  });
+
   it("dictation phase 5 regression: what the user writes while an armed send is acknowledged stays in the draft", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 

@@ -155,7 +155,17 @@ function CombinedPicker(
   // ModelPickerContent reports visibility from an effect; a new callback
   // identity would make that effect update parent state after every render.
   const reportVisibleModels = useStableCallback((isVisible: (modelKey: string) => boolean) =>
-    setIsModelVisible(() => isVisible),
+    setIsModelVisible((previous: (modelKey: string) => boolean) => {
+      // The upstream list can rebuild its filter map without changing its contents.
+      // Storing every new predicate caused an effect/render loop when this picker opened.
+      for (const entry of instanceEntries) {
+        for (const model of entry.models) {
+          const key = modelPickerModelKey(entry.instanceId, model.slug);
+          if (previous(key) !== isVisible(key)) return isVisible;
+        }
+      }
+      return previous;
+    }),
   );
   const [effortAnnouncement, setEffortAnnouncement] = useState("");
   const extrasRegionId = useId();

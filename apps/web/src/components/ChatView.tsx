@@ -17,7 +17,10 @@ import { dispatchPickerAction } from "../lib/pickerActionBus";
 import { openPanelLauncher } from "../lib/panelLauncher";
 import { projectIssuesAvailability } from "./issues/issues.logic";
 import { useFileSurfacePendingStore } from "./files/fileSurfacePendingStore";
-import { allocateDiffModeMenuRequestId } from "./treeDiff/diffPanelCommandBridge";
+import {
+  allocateDiffModeMenuRequestId,
+  mountedDiffPanelDefaultsToTreeDiff,
+} from "./treeDiff/diffPanelCommandBridge";
 import { ScrollToEndButton, WorkspaceFileDropOverlay } from "./chat/TimelineOverlays";
 import { usePasteToFocusComposer } from "./chat/usePasteToFocusComposer";
 import {
@@ -136,7 +139,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { AsyncResult } from "effect/reactivity";
 import { isElectron } from "../env";
-import { useDiffPanelStore } from "../diffPanelStore";
+import { selectThreadDiffPanelSelection, useDiffPanelStore } from "../diffPanelStore";
 import { useActiveThreadRef } from "../hooks/useActiveThreadRef";
 import { composerRequiresModifier } from "../composer-logic";
 import {
@@ -1016,6 +1019,18 @@ export default function ChatView(props: ChatViewProps) {
   );
   const diffOpen = activeRightPanelKind === "diff";
   const explicitDiffOpenRef = useRef<ScopedThreadRef | null>(null);
+  useLayoutEffect(() => {
+    const explicitThreadRef = explicitDiffOpenRef.current;
+    explicitDiffOpenRef.current = null;
+    // Generic openings reset old turn selections. Resetting Git modes here broke
+    // stored Tree diff choices and the mounted dirty-tree default.
+    if (diffOpen && activeThreadRef && explicitThreadRef !== activeThreadRef) {
+      const state = useDiffPanelStore.getState();
+      if (selectThreadDiffPanelSelection(state.byThreadKey, activeThreadRef).kind === "turn") {
+        state.selectGitScope(activeThreadRef, "branch");
+      }
+    }
+  }, [activeThreadRef, diffOpen]);
   const rightPanelState = useRightPanelStore((state) =>
     selectThreadRightPanelState(state.byThreadKey, activeThreadRef),
   );
@@ -2556,9 +2571,20 @@ export default function ChatView(props: ChatViewProps) {
   };
   const [diffModeMenuRequestId, setDiffModeMenuRequestId] = useState(0);
   const toggleTreeDiff = () => {
-    if (!activeThreadRef) return;
+    if (!activeThreadRef || !isServerThread || !isGitRepo) return;
+    const selection = selectThreadDiffPanelSelection(
+      useDiffPanelStore.getState().byThreadKey,
+      activeThreadRef,
+      mountedDiffPanelDefaultsToTreeDiff(scopedThreadKey(activeThreadRef)) ??
+        gitStatusQuery.data?.hasWorkingTreeChanges === true,
+    );
+    if (diffOpen && rightPanelOpen && selection.kind === "tree") {
+      useRightPanelStore.getState().toggle(activeThreadRef, "diff");
+      return;
+    }
     useDiffPanelStore.getState().selectGitScope(activeThreadRef, "tree");
     useRightPanelStore.getState().open(activeThreadRef, "diff");
+    onDiffPanelOpen?.();
   };
   const openDiffModeMenu = () => {
     if (!activeThreadRef) return;
@@ -2845,7 +2871,15 @@ export default function ChatView(props: ChatViewProps) {
       ? { threadRef: activeThreadRef, settled: activeThreadShell?.settledOverride === "settled" }
       : null,
   );
+  const mesuraPickerCommands = {
+    "traitsPicker.toggle": () => dispatchPickerAction("traits"),
+    "workspacePicker.toggle": () => dispatchPickerAction("workspace"),
+    "branchPicker.toggle": () => dispatchPickerAction("branch"),
+    "composer.workspace": () => dispatchPickerAction("workspace"),
+    "question.toggleCollapse": () => dispatchPickerAction("question"),
+  };
   useCommandHandlers({
+    ...mesuraPickerCommands,
     "thread.copyReference": copyActiveThreadReference,
     "thread.settle": () => {
       toggleActiveThreadSettled();
@@ -2873,10 +2907,6 @@ export default function ChatView(props: ChatViewProps) {
     "modelPicker.toggle": () => composerRef.current?.toggleModelPicker(),
     "composer.host": () => composerRef.current?.openControl("composer.host"),
     "composer.mode": () => composerRef.current?.openControl("composer.mode"),
-    "traitsPicker.toggle": () => dispatchPickerAction("traits"),
-    "workspacePicker.toggle": () => dispatchPickerAction("workspace"),
-    "branchPicker.toggle": () => dispatchPickerAction("branch"),
-    "question.toggleCollapse": () => dispatchPickerAction("question"),
   });
   useChatShortcuts({
     enabled: activeThreadId !== null,
@@ -2891,11 +2921,11 @@ export default function ChatView(props: ChatViewProps) {
       focusComposerStable();
     },
     commands: {
+      ...mesuraPickerCommands,
       ...terminalShortcuts,
       ...rightPanelShortcuts,
       "treeDiff.toggle": toggleTreeDiff,
       "diff.modeMenu": openDiffModeMenu,
-      "question.toggleCollapse": () => dispatchPickerAction("question"),
       ...threadLifecycleShortcuts,
       "chat.scrollHalfPageUp": () => scrollTimelineForReading("up"),
       "chat.scrollHalfPageDown": () => scrollTimelineForReading("down"),

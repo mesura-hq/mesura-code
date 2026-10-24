@@ -62,7 +62,7 @@ export function MesuraRightPanelSurfaceContent(
     return (
       <Suspense fallback={null}>
         <DiffPanel
-          key={`${scopedThreadKey(threadRef)}:${props.initialGitScope}`}
+          key={scopedThreadKey(threadRef)}
           mode="embedded"
           composerDraftTarget={props.composerDraftTarget}
           workspaceMutationId={props.workspaceMutationId}

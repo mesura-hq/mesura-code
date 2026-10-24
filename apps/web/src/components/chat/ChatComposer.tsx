@@ -1,4 +1,6 @@
 import { useMesuraComposerInput } from "./useMesuraComposerInput";
+import { reclaimDictationComposer } from "../../dictation/dictationController";
+import { useMesuraComposerFocus } from "./useMesuraComposerFocus";
 import { useCommandHandlers } from "../../commands/commandRegistry";
 import { countPendingDictationSlots } from "@t3tools/shared/dictationSlots";
 import { armSendWhenReady } from "../../dictation/sendWhenReady";
@@ -2321,28 +2323,23 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onCompactContext();
   };
   const compactThreadContextStable = useStableCallback(compactThreadContext);
-  const expandMobileComposer = () => {
-    if (composerBlurFrameRef.current !== null) {
-      window.cancelAnimationFrame(composerBlurFrameRef.current);
-      composerBlurFrameRef.current = null;
-    }
-    if (mobileComposerExpandFrameRef.current !== null) {
-      window.cancelAnimationFrame(mobileComposerExpandFrameRef.current);
-    }
-    if (mobileComposerExpandReleaseFrameRef.current !== null) {
-      window.cancelAnimationFrame(mobileComposerExpandReleaseFrameRef.current);
-    }
-    mobileComposerExpandInFlightRef.current = true;
-    setIsComposerFocused(true);
-    mobileComposerExpandFrameRef.current = window.requestAnimationFrame(() => {
-      mobileComposerExpandFrameRef.current = null;
-      composerEditorRef.current?.focusAtEnd();
-      mobileComposerExpandReleaseFrameRef.current = window.requestAnimationFrame(() => {
-        mobileComposerExpandReleaseFrameRef.current = null;
-        mobileComposerExpandInFlightRef.current = false;
-      });
-    });
-  };
+  const {
+    expandMobileComposer,
+    focusComposerEditor,
+    scheduleComposerCollapseCheck: scheduleComposerCollapseCheckStable,
+  } = useMesuraComposerFocus({
+    isMobileViewport,
+    isComposerCollapsedMobile,
+    setIsComposerFocused,
+    composerDraftTargetKeyRef,
+    composerEditorRef,
+    composerSurfaceRef,
+    composerFormRef,
+    composerBlurFrameRef,
+    mobileComposerExpandFrameRef,
+    mobileComposerExpandReleaseFrameRef,
+    mobileComposerExpandInFlightRef,
+  });
   const expandMobileComposerStable = useStableCallback(expandMobileComposer);
 
   const { onComposerCommandKey } = useComposerCommandKey({
@@ -3130,36 +3127,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const handleImplementPlanInNewThreadPrimaryActionStable = useStableCallback(
     handleImplementPlanInNewThreadPrimaryAction,
   );
-  const scheduleComposerCollapseCheck = () => {
-    if (!isMobileViewport || mobileComposerExpandInFlightRef.current) {
-      return;
-    }
-    if (composerBlurFrameRef.current !== null) {
-      window.cancelAnimationFrame(composerBlurFrameRef.current);
-    }
-    composerBlurFrameRef.current = window.requestAnimationFrame(() => {
-      composerBlurFrameRef.current = null;
-      if (mobileComposerExpandInFlightRef.current) {
-        return;
-      }
-      const composerSurface = composerSurfaceRef.current;
-      const composerForm = composerFormRef.current;
-      const activeElement = document.activeElement;
-      if (isInsideRestingComposerControlScope(activeElement)) {
-        return;
-      }
-      if (
-        activeElement instanceof Node &&
-        ((composerSurface && composerSurface.contains(activeElement)) ||
-          (composerForm && composerForm.contains(activeElement)))
-      ) {
-        return;
-      }
-      setIsComposerFocused(false);
-    });
-  };
-  const scheduleComposerCollapseCheckStable = useStableCallback(scheduleComposerCollapseCheck);
-
   // Answering or dismissing a question unmounts the control that held focus,
   // and React fires no blur for a removed element.
   const activePendingUserInputRequestId = activePendingUserInput?.requestId ?? null;
@@ -3217,11 +3184,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     () => ({
       focusAtEnd: () => {
         cancelComposerNormalResume();
-        composerEditorRef.current?.focusAtEnd();
+        focusComposerEditor();
       },
-      focusAt: (cursor: number) => {
-        composerEditorRef.current?.focusAt(cursor);
-      },
+      focusAt: focusComposerEditor,
       restoreAfterTimelineReachedEnd,
       collapseForTimelineScrollKey: (key) => {
         const scrollNode = getTimelineScrollableNode();
@@ -3273,11 +3238,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return true;
       },
       citeAssistantText: (citation, sourceAnchor) =>
-        insertComposerTextStable(
-          formatAssistantCitationForComposer(citation, citation.comment),
-          "cursor",
-          { ensureLeadingBoundary: true, citationCommentAnchor: sourceAnchor },
-        ),
+        // Mesura: Vim citations append `<chip>: ` and enter INSERT in the composer.
+        // Opening the upstream comment popover instead steals that keyboard focus.
+        // Keep the popover for non-Vim citations and explicit chip editing.
+        settings.vimMode
+          ? insertComposerTextStable(
+              `${promptRef.current.length === 0 || promptRef.current.endsWith("\n") ? "" : "\n"}${formatAssistantCitationForComposer(citation, undefined).trimEnd()}: `,
+              "end",
+            )
+          : insertComposerTextStable(
+              formatAssistantCitationForComposer(citation, citation.comment),
+              "cursor",
+              { ensureLeadingBoundary: true, citationCommentAnchor: sourceAnchor },
+            ),
       openModelPicker: openModelPickerStable,
       stepReasoningEffort: (direction) => {
         if (
@@ -3575,6 +3548,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   return (
     <form
       ref={composerFormRef}
+      data-normal-composer
       onSubmit={submitComposerStable}
       onPointerDownCapture={(event) => {
         const target = event.target;
@@ -3599,6 +3573,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           activeElement instanceof Element &&
           activeElement.closest('[data-testid="composer-editor"]')
         ) {
+          // Returning from an inline question must restore dictation to this composer.
+          reclaimDictationComposer();
           onTypingGuardFocus();
         }
         if (composerControlsCollapsed && isInsideRestingComposerControlScope(activeElement)) {
@@ -3623,7 +3599,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         ) {
           onTypingGuardBlur();
         }
-        scheduleComposerCollapseCheck();
+        scheduleComposerCollapseCheckStable();
       }}
       onDragEnterCapture={(event) => {
         if (isInsideRestingComposerControlScope(event.target)) return;
