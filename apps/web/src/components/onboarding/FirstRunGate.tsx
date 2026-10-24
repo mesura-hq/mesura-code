@@ -19,11 +19,8 @@ import {
   transitionFirstRunGateState,
   type FirstRunGateState,
 } from "../../onboarding/firstRun.logic";
-import {
-  useAllEnvironmentShellsBootstrapped,
-  useProjects,
-  useThreadShells,
-} from "../../state/entities";
+import { useAllEnvironmentShellsBootstrapped, useProjects } from "../../state/entities";
+import { useFirstRunThreadEvidence } from "../../state/firstRunEvidence";
 import { useEnvironments } from "../../state/environments";
 import { environmentProjects } from "../../state/projects";
 import { primaryServerConfigAtom, primaryServerWelcomeAtom } from "../../state/server";
@@ -88,7 +85,8 @@ export function FirstRunGate({
   const bootstrapped = useAllEnvironmentShellsBootstrapped();
   const { environments, isReady: environmentCatalogReady } = useEnvironments();
   const projects = useProjects();
-  const threads = useThreadShells();
+  // Mesura: live, but only the evidence the decision reads (review finding P1-2).
+  const { threads, threadCount } = useFirstRunThreadEvidence();
   const serverConfig = useAtomValue(primaryServerConfigAtom);
   const serverWelcome = useAtomValue(primaryServerWelcomeAtom);
   const primaryShellLive = useAtomValue(primaryShellLiveAtom);
@@ -148,7 +146,7 @@ export function FirstRunGate({
         serverConfigAvailable: serverConfig !== null,
         workspaceFresh,
         projectCount: projects.length,
-        threadCount: threads.length,
+        threadCount,
       });
 
   useEffect(() => {

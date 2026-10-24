@@ -35,12 +35,13 @@ import {
 } from "../panelAnimations";
 import LegacyThreadSidebar from "./LegacySidebar";
 import { useThreadVisitedMigration } from "../hooks/useThreadVisitedMigration";
+import { useThreadShellsInTransition } from "../state/threadShellsTransition";
 import ThreadSidebar from "./Sidebar";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import { SidebarBrandWidthProbe, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { MainAppLocationTracker } from "./sidebar/mainAppLocation";
 import { useSidebarStageBackdropVariant } from "./SidebarStageBackdrop";
-import { useProjects, useThreadShells } from "../state/entities";
+import { useProjects } from "../state/entities";
 import { useThreadFeed } from "../symmetria/useThreadFeed";
 import { feedThreadFromShell } from "../symmetria/threadFeed";
 import { DictationJobDelivery } from "../dictation/DictationControls";
@@ -236,8 +237,17 @@ function ProjectProjectionRetention() {
 // sidebar because the bar must keep reporting while the user is on settings or
 // anywhere else — the two projections are the same subscription, so this costs
 // nothing beyond the comparison inside the hook.
+// Mesura: seeds server-side visited tracking from this browser's localStorage.
+// Its own component because the hook reads every thread shell: called from the
+// layout, each streamed shell update re-rendered the whole layout (phase 6).
+function ThreadVisitedMigration() {
+  useThreadVisitedMigration();
+  return null;
+}
+
 function SymmetriaThreadFeedRetention() {
-  const shells = useThreadShells();
+  // Mesura: as a transition, so the feed's rebuild leaves the message task (phase 6).
+  const shells = useThreadShellsInTransition();
   const threads = useMemo(() => shells.map(feedThreadFromShell), [shells]);
   useThreadFeed({ projects: useProjects(), threads });
   return null;
@@ -250,8 +260,6 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     usePanelAnimationSettings();
   // Settings routes show the settings nav in place of whichever thread
   // sidebar is active.
-  // Seeds server-side visited tracking from this browser's localStorage the
-  useThreadVisitedMigration();
   const pathname = useLocation({ select: (location) => location.pathname });
   const panelAnimationsSuppressed = usePanelNavigationSuppression(pathname);
   const routePanelAnimationsActive = panelAnimationsActive && !panelAnimationsSuppressed;
@@ -335,6 +343,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         <SidebarBrandWidthProbe onWidthChange={setBrandWidth} />
         <ProjectProjectionRetention />
         <SymmetriaThreadFeedRetention />
+        <ThreadVisitedMigration />
         <DictationJobDelivery />
         <Sidebar
           side="left"

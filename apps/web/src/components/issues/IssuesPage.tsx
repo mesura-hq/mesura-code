@@ -84,9 +84,7 @@ function IssueStatus({ state, className }: { state: IssueSummary["state"]; class
       aria-label={state === "OPEN" ? "Open issue" : "Closed issue"}
       className={cn(
         "size-4 shrink-0",
-        state === "OPEN"
-          ? "text-emerald-600 dark:text-emerald-400"
-          : "text-violet-500 dark:text-violet-400",
+        state === "OPEN" ? "text-issue-open" : "text-issue-closed",
         className,
       )}
     />
@@ -104,7 +102,7 @@ function IssueLabels({
     <div className="flex flex-wrap gap-1.5">
       {labels.map((label) => {
         const className =
-          "inline-flex items-center gap-1.5 rounded-md border border-border/70 bg-muted/30 px-2 py-0.5 text-[11px] text-muted-foreground";
+          "inline-flex items-center gap-1.5 rounded-md border border-border/70 bg-muted/30 px-2 py-0.5 text-search-label text-muted-foreground";
         const content = (
           <>
             <span
@@ -280,7 +278,7 @@ export function IssuesPage({
               <p className="truncate text-xs text-muted-foreground">{fixedProject.title}</p>
             ) : (
               <label className="block space-y-1.5">
-                <span className="text-[11px] font-medium text-muted-foreground">Project</span>
+                <span className="text-search-label font-medium text-muted-foreground">Project</span>
                 <select
                   aria-label="Issue project"
                   value={project ? projectKey(project) : ""}
@@ -314,7 +312,8 @@ export function IssuesPage({
                 placeholder="Search issues, or label:bug"
                 value={query}
                 onChange={(event) => setQuery(event.target.value.slice(0, 450))}
-                className="h-10 pl-9 pr-9 sm:h-9"
+                adornmentInset="both"
+                className="h-10 sm:h-9"
               />
               {query ? (
                 <Button
@@ -358,9 +357,9 @@ export function IssuesPage({
               </select>
             </div>
           </div>
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto pb-[env(safe-area-inset-bottom)]">
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto pb-safe-bottom">
             <div
-              className="flex items-center justify-between gap-3 px-4 py-3 text-[11px] text-muted-foreground sm:px-6"
+              className="flex items-center justify-between gap-3 px-4 py-3 text-search-label text-muted-foreground sm:px-6"
               aria-live="polite"
             >
               <span className="truncate">{listing.data?.repository ?? "GitHub issues"}</span>
@@ -438,7 +437,7 @@ export function IssuesPage({
                   aria-pressed={search.issue === issue.number}
                   onClick={() => selectIssue(issue.number)}
                   className={cn(
-                    "group flex w-full items-start gap-3 rounded-lg px-3 py-4 text-left outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring",
+                    "group flex w-full items-start gap-3 rounded-lg px-3 py-4 text-left outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                     search.issue === issue.number && "bg-accent/60",
                   )}
                 >
@@ -447,7 +446,7 @@ export function IssuesPage({
                     <p className="text-sm font-medium leading-relaxed text-foreground/90">
                       {issue.title}
                     </p>
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-search-label text-muted-foreground">
                       <span className="font-mono">#{issue.number}</span>
                       <span>by {authorLogin(issue.author)}</span>
                       <span>· {formatRelativeTimeLabel(issue.updatedAt)}</span>
@@ -568,7 +567,7 @@ function IssueDetailPane({
           <RefreshIcon refreshing={detail.isPending} />
         </Button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-6 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] sm:px-8">
+      <div className="scrollbar-gutter-both min-h-0 flex-1 overflow-y-auto px-5 pt-6 pb-safe-content sm:px-8">
         <div className="mx-auto max-w-3xl space-y-6">
           {issue ? (
             <>

@@ -12,6 +12,7 @@ import {
 } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -27,6 +28,8 @@ import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as Orchestrator from "./Orchestrator.ts";
+import { makeRepositoryConfigWatch, UseRepositoryStateMemo } from "../git/repositoryStateMemo.ts";
+import { classifyLookupFailure, makePullRequestLookupBackoff } from "./pullRequestLookupBackoff.ts";
 
 class ThreadPullRequestServiceV2 extends Context.Service<
   ThreadPullRequestServiceV2,
@@ -105,6 +108,10 @@ export const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const fileSystem = yield* FileSystem.FileSystem;
   const pendingBackfill = new Map<ThreadId, number>();
+  // Mesura: groups whose lookup cannot succeed wait between periodic sweeps.
+  const lookupBackoff = makePullRequestLookupBackoff();
+  // Mesura: a changed remote must not be judged against the old repository identity.
+  const repositoryConfigChanged = makeRepositoryConfigWatch();
 
   const finishBackfill = (threads: ReadonlyArray<Pick<OrchestrationV2ThreadShell, "id">>) => {
     for (const thread of threads) pendingBackfill.delete(thread.id);
@@ -177,17 +184,25 @@ export const make = Effect.gen(function* () {
     const groups = Map.groupBy(threads, (thread) =>
       JSON.stringify([thread.projectId, thread.worktreePath, thread.branch]),
     );
+    if (request.threadId === null) lookupBackoff.retainOnly(new Set(groups.keys()));
 
     yield* Effect.forEach(
-      groups.values(),
-      (group) =>
+      groups,
+      ([groupKey, group]) =>
         Effect.gen(function* () {
+          // Events still look a waiting group up at once; only periodic sweeps skip it.
+          if (
+            request.threadId === null &&
+            lookupBackoff.isWaiting(groupKey, yield* Clock.currentTimeMillis)
+          ) {
+            return;
+          }
           const first = group[0]!;
           const project = projects.get(first.projectId);
           if (project === undefined) return finishBackfill(group);
           const { project: resolvedProject, repository } =
             yield* resolveProjectForPullRequestDiscovery(project, repositoryIdentities, {
-              refresh: request.refresh,
+              refresh: repositoryConfigChanged(project.workspaceRoot) || request.refresh,
             });
           if (first.branch !== null && repository === null) return finishBackfill(group);
           const worktreeExists =
@@ -199,10 +214,18 @@ export const make = Effect.gen(function* () {
           const detected =
             first.branch === null
               ? null
-              : yield* git.branchPullRequest(
-                  { cwd, branch: first.branch },
-                  { refresh: request.refresh },
-                );
+              : yield* git
+                  .branchPullRequest(
+                    { cwd, branch: first.branch },
+                    {
+                      refresh: request.refresh,
+                      // Mesura: an event, or the sweep after a failure, asks the provider again.
+                      retryFailedLookup:
+                        request.threadId !== null || lookupBackoff.retriesCachedFailure(groupKey),
+                    },
+                  )
+                  .pipe(Effect.provideService(UseRepositoryStateMemo, true));
+          lookupBackoff.forget(groupKey);
           if (detected !== null && !pullRequestMatchesProject(detected, resolvedProject)) {
             return finishBackfill(group);
           }
@@ -341,7 +364,16 @@ export const make = Effect.gen(function* () {
               Effect.logWarning("thread branch pull request lookup failed", {
                 threadIds: group.map((thread) => thread.id),
                 cause: Cause.pretty(cause),
-              }).pipe(Effect.tap(() => Effect.sync(() => failBackfill(group)))),
+              }).pipe(
+                Effect.tap(() => Effect.sync(() => failBackfill(group))),
+                Effect.tap(() =>
+                  Clock.currentTimeMillis.pipe(
+                    Effect.map((now) =>
+                      lookupBackoff.recordFailure(groupKey, classifyLookupFailure(cause), now),
+                    ),
+                  ),
+                ),
+              ),
           ),
         ),
       // Wide enough that a sweep's GitHub branch lookups reach the GitHub provider together and share one

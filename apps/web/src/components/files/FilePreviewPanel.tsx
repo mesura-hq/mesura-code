@@ -1,4 +1,5 @@
 import { Spinner } from "~/components/ui/spinner";
+import { useFileSurfacePending } from "./fileSurfacePendingStore";
 import {
   AuthPreviewOperateScope,
   type EditorId,
@@ -103,7 +104,8 @@ interface FilePreviewPanelProps {
   revealRequestId: number;
   onOpenFile: (relativePath: string) => void;
   onPendingChange: (relativePath: string, pending: boolean) => void;
-  selectedFilePending: boolean;
+  /** Mesura: the project the pending-save flags are kept under; see `fileSurfacePendingStore`. */
+  pendingProjectKey: string | null;
   workspaceMutationId: string | null;
   /** Fork addition: this tab hides the explorer whatever the shared preference says. */
   explorerHidden?: boolean;
@@ -634,13 +636,17 @@ export default function FilePreviewPanel({
   revealRequestId,
   onOpenFile,
   onPendingChange,
-  selectedFilePending,
+  pendingProjectKey,
   workspaceMutationId,
   explorerHidden = false,
   onRevealExplorer,
 }: FilePreviewPanelProps) {
   const relativePath =
     attachment === undefined ? resolveFilePreviewPath(requestedPath, cwd) : requestedPath;
+  const selectedFilePending = useFileSurfacePending(
+    pendingProjectKey,
+    attachment === undefined && requestedPath !== null ? `file:${requestedPath}` : null,
+  );
   // A draft's composer target is its draft id; a thread the server knows is a ref.
   const draft = typeof composerDraftTarget === "string";
   const { resolvedTheme } = useTheme();

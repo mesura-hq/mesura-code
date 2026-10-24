@@ -274,10 +274,11 @@ import {
   EditorSessionError,
   EditorSessionEvent,
   EditorSessionInputInput,
+  EditorSessionInputResult,
   EditorSessionOpenInput,
+  EditorSessionOpenResult,
   EditorSessionReplaceTextInput,
   EditorSessionSetCursorInput,
-  EditorSessionSnapshot,
   EditorSessionViewportInput,
 } from "./editorSession.ts";
 import {
@@ -1651,7 +1652,7 @@ const EditorSessionRpcErrors = Schema.Union([EditorSessionError, EnvironmentAuth
 
 const WsEditorSessionOpenRpc = Rpc.make(WS_METHODS.editorSessionOpen, {
   payload: EditorSessionOpenInput,
-  success: EditorSessionSnapshot,
+  success: EditorSessionOpenResult,
   error: EditorSessionRpcErrors,
 });
 
@@ -1664,6 +1665,9 @@ const WsEditorSessionAttachRpc = Rpc.make(WS_METHODS.editorSessionAttach, {
 
 const WsEditorSessionInputRpc = Rpc.make(WS_METHODS.editorSessionInput, {
   payload: EditorSessionInputInput,
+  // Undefined is a host from before the answer carried the mode, which the
+  // client still has to type into; it takes the answer as unknown.
+  success: Schema.UndefinedOr(EditorSessionInputResult),
   error: EditorSessionRpcErrors,
 });
 

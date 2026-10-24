@@ -1,3 +1,8 @@
+@import "@symmetria/fm-ui/overview/styles.css";
+@import "@symmetria/fm-search/ui/styles.css";
+@import "../symmetriaIcons.css";
+@import "../symmetriaOverview.css";
+
 /*
  * The Symmetria tree inside the file panel.
  *
@@ -105,12 +110,4 @@
 /* `.file-tree` fills the aside the panel gives it. */
 [data-mesura-file-tree] .file-tree {
   width: 100%;
-}
-
-/* Shown under the tree when the server's listing was cut short. */
-[data-mesura-file-tree] .mesura-file-tree-notice {
-  margin: 0;
-  padding: 6px 16px;
-  color: var(--muted-foreground);
-  font-size: 11px;
 }

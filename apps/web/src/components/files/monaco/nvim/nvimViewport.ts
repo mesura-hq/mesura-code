@@ -18,6 +18,8 @@
  * target the developer cannot see.
  */
 
+import { EDITOR_VIEWPORT_MAX_COLS, type EditorViewportSource } from "@t3tools/contracts";
+
 /** A line range Monaco reports as visible, in Monaco's one-based terms. */
 export interface VisibleRange {
   readonly startLineNumber: number;
@@ -41,6 +43,8 @@ export interface NvimViewport {
   readonly topline: number;
   readonly rows: number;
   readonly cols: number;
+  /** Who moved the window; see `EditorViewportSource`. Absent means keys. */
+  readonly source?: EditorViewportSource;
 }
 
 export interface ViewportHistory {
@@ -118,7 +122,32 @@ export function viewportFromEditor(
     }
   }
 
-  return { topline, rows, cols: widest };
+  // Clamped to what the contract accepts: a request past it is refused whole,
+  // topline and rows included. The host widens the grid past the widest line
+  // itself, so the clamp costs no column the developer can see.
+  return { topline, rows, cols: Math.min(widest, EDITOR_VIEWPORT_MAX_COLS) };
+}
+
+/**
+ * Whether scrolling Monaco to `targetTop` would put the caret out of view.
+ *
+ * Neovim does not wrap and Monaco may: Neovim's window of N rows holds N
+ * buffer lines, Monaco's holds fewer when a line takes several rows. Following
+ * Neovim's topline then shows the top of Neovim's window and leaves the caret
+ * below Monaco's last row — measured on the bench's Markdown, `j` to line 8
+ * scrolled Neovim to topline 2, and Monaco at topline 2 showed lines 2 to 7.
+ * The caret wins: the smallest scroll that shows it has already happened.
+ */
+export function followingHidesCaret(input: {
+  readonly targetTop: number;
+  readonly caretTop: number;
+  readonly lineHeight: number;
+  readonly height: number;
+}): boolean {
+  return (
+    input.caretTop < input.targetTop ||
+    input.caretTop + input.lineHeight > input.targetTop + input.height
+  );
 }
 
 export function shouldEchoViewport(history: ViewportHistory, topline: number): boolean {

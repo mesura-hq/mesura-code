@@ -4,7 +4,6 @@ import { memo } from "react";
 
 import { Button } from "~/components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
-import { cn } from "~/lib/utils";
 import {
   cancelDictation,
   cycleDictationMode,
@@ -49,15 +48,12 @@ export const DictationStartButton = memo(function DictationStartButton(props: {
         render={
           <Button
             type="button"
-            size="icon-sm"
-            variant="ghost"
+            size={props.compact ? "icon-compact" : "icon-sm"}
+            shape={props.compact ? "default" : "round"}
+            variant={props.compact ? "ghost-muted-label" : "ghost-label"}
+            inactive={unavailable}
             aria-disabled={unavailable}
             aria-label={label}
-            className={cn(
-              "rounded-full text-secondary-label transition-colors",
-              props.compact && "size-7 rounded-md text-muted-foreground",
-              unavailable && "cursor-default opacity-45",
-            )}
             onClick={() => {
               if (unavailable) return;
               props.onBeforeStart?.();

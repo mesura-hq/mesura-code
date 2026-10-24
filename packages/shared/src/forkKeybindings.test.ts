@@ -38,31 +38,29 @@ const FORK_BINDINGS = [
 ] as const;
 
 describe("fork keybindings", () => {
-  for (const { command, keys } of FORK_BINDINGS) {
-    describe(command, () => {
-      it(`binds ${keys.join(" and ")} outside the terminal, in that order`, () => {
-        const bindings = DEFAULT_KEYBINDINGS.filter((binding) => binding.command === command);
+  describe.each(FORK_BINDINGS)("$command", ({ command, keys }) => {
+    it(`binds ${keys.join(" and ")} outside the terminal, in that order`, () => {
+      const bindings = DEFAULT_KEYBINDINGS.filter((binding) => binding.command === command);
 
-        // Order matters: the last binding is the label.
-        expect(bindings.map((binding) => binding.key)).toEqual(keys);
-        // Not while a terminal owns the keyboard, where the chord belongs to the shell.
-        for (const binding of bindings) expect(binding.when).toBe("!terminalFocus");
-      });
-
-      it("registers the command so a user can rebind it", () => {
-        expect(STATIC_KEYBINDING_COMMANDS).toContain(command);
-      });
-
-      it(`leaves ${keys.join(" and ")} free of any other command`, () => {
-        const collisions = DEFAULT_KEYBINDINGS.filter(
-          (binding) =>
-            (keys as ReadonlyArray<string>).includes(binding.key) && binding.command !== command,
-        );
-
-        expect(collisions).toEqual([]);
-      });
+      // Order matters: the last binding is the label.
+      expect(bindings.map((binding) => binding.key)).toEqual(keys);
+      // Not while a terminal owns the keyboard, where the chord belongs to the shell.
+      for (const binding of bindings) expect(binding.when).toBe("!terminalFocus");
     });
-  }
+
+    it("registers the command so a user can rebind it", () => {
+      expect(STATIC_KEYBINDING_COMMANDS).toContain(command);
+    });
+
+    it(`leaves ${keys.join(" and ")} free of any other command`, () => {
+      const collisions = DEFAULT_KEYBINDINGS.filter(
+        (binding) =>
+          (keys as ReadonlyArray<string>).includes(binding.key) && binding.command !== command,
+      );
+
+      expect(collisions).toEqual([]);
+    });
+  });
 });
 
 // The Hosts dock peeks on alt+s the way the usage dock peeks on alt+u: held,

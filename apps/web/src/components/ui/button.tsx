@@ -15,6 +15,10 @@ const buttonVariants = cva(
       variant: "default",
     },
     variants: {
+      inactive: {
+        false: null,
+        true: "cursor-default opacity-45",
+      },
       size: {
         compact:
           "h-7 gap-1 rounded-md px-[calc(--spacing(2)-1px)] text-xs before:rounded-[calc(var(--radius-md)-1px)] [&_svg:not([class*='size-'])]:size-3.5",
@@ -25,6 +29,7 @@ const buttonVariants = cva(
           "size-5 rounded-sm p-0 before:rounded-[calc(var(--radius-sm)-1px)] [&_svg:not([class*='size-'])]:size-3",
         "icon-tiny": "size-4 p-0 [&_svg:not([class*='size-'])]:size-3",
         "icon-sm": "size-8 sm:size-7",
+        "icon-compact": "size-7 rounded-md",
         "icon-xl":
           "size-11 sm:size-10 [&_svg:not([class*='size-'])]:size-5 sm:[&_svg:not([class*='size-'])]:size-4.5",
         "icon-xs":
@@ -51,6 +56,12 @@ const buttonVariants = cva(
           "[--control-icon-color:var(--contrast-muted-foreground)] border-transparent text-foreground data-pressed:bg-accent [:hover,[data-pressed]]:bg-accent",
         "ghost-muted":
           "[--control-icon-color:currentColor] border-transparent text-muted-foreground data-pressed:bg-accent [:hover,[data-pressed]]:bg-accent [:hover,[data-pressed]]:text-foreground",
+        "ghost-label":
+          "[--control-icon-color:var(--contrast-muted-foreground)] border-transparent text-secondary-label transition-colors data-pressed:bg-accent [:hover,[data-pressed]]:bg-accent",
+        "ghost-muted-label":
+          "[--control-icon-color:var(--contrast-muted-foreground)] border-transparent text-muted-foreground transition-colors data-pressed:bg-accent [:hover,[data-pressed]]:bg-accent",
+        "ghost-subtle":
+          "[--control-icon-color:var(--contrast-muted-foreground)] border-transparent font-normal text-xs! text-muted-foreground/70 data-pressed:bg-accent [:hover,[data-pressed]]:bg-accent not-data-readonly:hover:text-foreground/80 data-open:text-foreground/85",
         "ghost-destructive":
           "[--control-icon-color:currentColor] border-transparent text-muted-foreground data-pressed:bg-accent [:hover,[data-pressed]]:bg-accent [:hover,[data-pressed]]:text-destructive",
         glass:
@@ -68,6 +79,11 @@ const buttonVariants = cva(
         "warning-outline":
           "border-warning/32 bg-warning-surface text-warning-foreground shadow-xs/5 [:disabled,:active,[data-pressed]]:shadow-none [:hover,[data-pressed]]:border-warning/40 [:hover,[data-pressed]]:bg-warning/16 dark:[:hover,[data-pressed]]:bg-warning/24",
       },
+      // Explicit shape takes precedence over size and variant corner defaults.
+      shape: {
+        default: null,
+        round: "rounded-full",
+      },
     },
   },
 );
@@ -78,15 +94,17 @@ type ButtonSize = NonNullable<VariantProps<typeof buttonVariants>["size"]>;
 interface ButtonProps extends useRender.ComponentProps<"button"> {
   variant?: ButtonVariant;
   size?: ButtonSize;
+  shape?: VariantProps<typeof buttonVariants>["shape"];
+  inactive?: boolean;
 }
 
-function Button({ className, variant, size, render, ...props }: ButtonProps) {
+function Button({ className, variant, size, shape, inactive, render, ...props }: ButtonProps) {
   const typeValue: React.ButtonHTMLAttributes<HTMLButtonElement>["type"] = render
     ? undefined
     : "button";
 
   const defaultProps = {
-    className: cn(buttonVariants({ className, size, variant })),
+    className: cn(buttonVariants({ className, size, variant, shape, inactive })),
     "data-slot": "button",
     type: typeValue,
   };

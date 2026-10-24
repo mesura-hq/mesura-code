@@ -190,8 +190,10 @@ if (nvimAvailable)
           yield* bridge.type("<Esc>");
           yield* lua(bridge, "vim.cmd('write')");
 
+          // The plugin also pushes the cursor on this channel; only writes count.
+          const seen = (yield* lua(bridge, "return _G.mesura_seen")) as ReadonlyArray<string>;
           assert.deepStrictEqual(
-            yield* lua(bridge, "return _G.mesura_seen"),
+            seen.filter((entry) => entry.startsWith("mesura:write:")),
             [`mesura:write:${path}`],
             "one request, naming the file",
           );

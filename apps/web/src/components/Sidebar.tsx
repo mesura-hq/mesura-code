@@ -84,6 +84,7 @@ import {
   XIcon,
 } from "lucide-react";
 import {
+  cloneElement,
   memo,
   useCallback,
   useEffect,
@@ -95,6 +96,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
+  type ReactElement,
   type ReactNode,
 } from "react";
 import { useParams, useRouter } from "@tanstack/react-router";
@@ -110,12 +112,10 @@ import { isElectron } from "../env";
 import {
   resolveShortcutCommand,
   shortcutLabelForCommand,
-  shouldShowThreadJumpHintsForModifiers,
   threadJumpCommandForIndex,
   threadJumpIndexFromCommand,
   threadTraversalDirectionFromCommand,
 } from "../keybindings";
-import { useShortcutModifierState } from "../shortcutModifierState";
 import {
   readViewportThreadKeys,
   scrollThreadList,
@@ -143,7 +143,7 @@ import {
 import { useProjectScopeStore } from "../projectScopeStore";
 import { useAcknowledgeThreadWoke, useThreadActions } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
-import { useTerminalFocus } from "../hooks/useTerminalFocus";
+import { ThreadJumpHintModifierSync } from "./sidebar/ThreadJumpHintModifierSync";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { useCommandHandlers } from "../commands/commandRegistry";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
@@ -161,7 +161,6 @@ import {
   readThreadShell,
   useAllEnvironmentProjectSnapshotsReady,
   useProjects,
-  useThreadShells,
 } from "../state/entities";
 import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from "../state/server";
 import { vcsEnvironment } from "../state/vcs";
@@ -252,6 +251,14 @@ import {
   restrictBelowSidebarLabel,
 } from "./Sidebar.drag";
 import { SidebarDragLifecycle, SidebarPointerSensor } from "./Sidebar.pointer";
+import { useElapsedLabel } from "../hooks/useElapsedLabel";
+import { useThreadShellsInTransition } from "../state/threadShellsTransition";
+import {
+  NO_DRAGGED_ORDER,
+  sameSortableRowProps,
+  sidebarListItemsFromIdentityKey,
+  sidebarListItemsIdentityKey,
+} from "./sidebarRenderIdentity";
 import { createSidebarListMotion } from "./Sidebar.motion";
 import {
   ThreadPullRequestBadgeControl,
@@ -379,16 +386,12 @@ function JumpHintBadge(props: { label: string }) {
 }
 
 // Self-ticking so only this span re-renders each second, not the whole row.
+// Mesura: from one shared clock, so every working row ticks in one commit.
 function WorkingDuration(props: { startedAt: string | null }) {
   const startedMs = props.startedAt !== null ? Date.parse(props.startedAt) : Number.NaN;
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    if (Number.isNaN(startedMs)) return;
-    const id = window.setInterval(() => setTick((tick) => tick + 1), 1_000);
-    return () => window.clearInterval(id);
-  }, [startedMs]);
+  const label = useElapsedLabel(startedMs, formatWorkingDurationLabel);
   if (Number.isNaN(startedMs)) return null;
-  return <span className="tabular-nums">{formatWorkingDurationLabel(Date.now() - startedMs)}</span>;
+  return <span className="tabular-nums">{label}</span>;
 }
 
 function terminalProcessLabel(count: number): string {
@@ -662,12 +665,14 @@ type SortableThreadRowBag = Pick<
   "listeners" | "setNodeRef" | "transform" | "transition" | "isDragging"
 >;
 
-function SortableThreadRow(props: {
+// Mesura: memoized on the row it wraps (`sameSortableRowProps`), so a shell
+// update runs `useSortable` for the changed thread only, not for every row.
+const SortableThreadRow = memo(function SortableThreadRow(props: {
   id: string;
   disabled: boolean;
   contextDrag: boolean;
   environmentId: EnvironmentId;
-  children: (bag: SortableThreadRowBag) => ReactNode;
+  row: ReactElement<{ sortable?: SortableThreadRowBag | undefined }>;
 }) {
   const canOperateThread = useEnvironmentScope(props.environmentId, AuthOrchestrationOperateScope);
   const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -689,8 +694,8 @@ function SortableThreadRow(props: {
     }),
     [listeners, setNodeRef, transform, transition, isDragging, props.contextDrag],
   );
-  return props.children(bag);
-}
+  return cloneElement(props.row, { sortable: bag });
+}, sameSortableRowProps);
 
 // Unsent work shares one look: the new-thread draft rows and thread rows
 // with unsent composer text both use this tint and pen so they read alike.
@@ -2393,7 +2398,8 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
 export default function Sidebar() {
   const projects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
-  const threads = useThreadShells();
+  // Mesura: shell updates render this list as a transition (phase 6).
+  const threads = useThreadShellsInTransition();
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -3556,15 +3562,39 @@ export default function Sidebar() {
     },
     [contextDragThreads, pointerOutsideThreadList],
   );
-  const dndSensors = useSensors(
-    useSensor(SidebarPointerSensor, {
-      distance: SIDEBAR_DRAG_DISTANCE,
+  // Mesura: one options object for the sidebar's life, forwarding to the
+  // latest handlers. dnd-kit rebuilds every row's listeners when the options
+  // change, and these handlers change with the thread lists, so a single
+  // thread's shell update re-rendered every row and tooltip.
+  const dragHandlersRef = useRef({
+    onAttach: attachDragSensor,
+    onFinish: finishThreadDrag,
+    onMove: moveThreadContextDrag,
+    onDrop: dropThreadContextDrag,
+  });
+  useLayoutEffect(() => {
+    dragHandlersRef.current = {
       onAttach: attachDragSensor,
       onFinish: finishThreadDrag,
       onMove: moveThreadContextDrag,
       onDrop: dropThreadContextDrag,
+    };
+  });
+  const dragSensorOptions = useMemo(
+    () => ({
+      distance: SIDEBAR_DRAG_DISTANCE,
+      onAttach: (...args: Parameters<typeof attachDragSensor>) =>
+        dragHandlersRef.current.onAttach(...args),
+      onFinish: (...args: Parameters<typeof finishThreadDrag>) =>
+        dragHandlersRef.current.onFinish(...args),
+      onMove: (...args: Parameters<typeof moveThreadContextDrag>) =>
+        dragHandlersRef.current.onMove(...args),
+      onDrop: (...args: Parameters<typeof dropThreadContextDrag>) =>
+        dragHandlersRef.current.onDrop(...args),
     }),
+    [],
   );
+  const dndSensors = useSensors(useSensor(SidebarPointerSensor, dragSensorOptions));
   const sectionByThreadKey = useMemo(() => {
     const map = new Map<string, SidebarSection>();
     const add = (list: readonly EnvironmentThreadShell[], section: SidebarSection) => {
@@ -3808,7 +3838,7 @@ export default function Sidebar() {
   );
   // Include every visible row in the measured order. Older servers disable
   // pickup on their rows without changing where those rows render.
-  const sidebarListItems = useMemo((): readonly SidebarListItem[] => {
+  const computedSidebarListItems = useMemo((): readonly SidebarListItem[] => {
     const rowsOf = (
       list: readonly EnvironmentThreadShell[],
       section: SidebarSection,
@@ -3857,6 +3887,14 @@ export default function Sidebar() {
     visibleWorkingThreads,
     workingThreads.length,
   ]);
+  // Mesura: the same array while the list's structure is the same. A new array
+  // re-created the sorting strategy and dnd-kit's sortable context, which
+  // re-rendered every row's drag wrapper on any thread's shell update.
+  const sidebarListItemsKey = sidebarListItemsIdentityKey(computedSidebarListItems);
+  const sidebarListItems = useMemo(
+    () => sidebarListItemsFromIdentityKey(sidebarListItemsKey),
+    [sidebarListItemsKey],
+  );
   useEffect(() => {
     if (
       dragState !== null &&
@@ -3908,7 +3946,8 @@ export default function Sidebar() {
   const sortableIds = useMemo(() => sidebarListItems.map(sidebarListItemId), [sidebarListItems]);
   const draggedSettledOrder = useMemo(() => {
     const thread = dragState === null ? undefined : threadByKey.get(dragState.activeKey);
-    if (dragState === null || thread === undefined) return [];
+    // Mesura: one empty order, so a shell update does not rebuild the sorting strategy.
+    if (dragState === null || thread === undefined) return NO_DRAGGED_ORDER;
     const key = (candidate: EnvironmentThreadShell) =>
       scopedThreadKey(scopeThreadRef(candidate.environmentId, candidate.id));
     return sortSettledThreads([
@@ -4969,28 +5008,8 @@ export default function Sidebar() {
     openThreadByKey,
   ]);
 
-  // Same predicate as v1: hints show only while the held modifiers exactly
-  // match a thread-jump binding. Adding Shift (screenshots) or Alt no
-  // longer matches ⌘1..9, so the overlay hides for chords like ⌘⇧4.
-  const shortcutModifiers = useShortcutModifierState();
-  const terminalFocused = useTerminalFocus();
-  const shouldShowJumpHintsNow = shouldShowThreadJumpHintsForModifiers(
-    shortcutModifiers,
-    keybindings,
-    {
-      platform: navigator.platform,
-      context: {
-        terminalFocus: terminalFocused,
-        terminalOpen: routeTerminalOpen,
-        modelPickerOpen: isModelPickerOpen(),
-        isWeb: !isElectron,
-        isDesktop: isElectron,
-      },
-    },
-  );
-  useEffect(() => {
-    updateThreadJumpHintsVisibility(shouldShowJumpHintsNow);
-  }, [shouldShowJumpHintsNow, updateThreadJumpHintsVisibility]);
+  // Mesura: the held modifiers are followed by ThreadJumpHintModifierSync,
+  // below, so a modifier press does not re-render the sidebar.
 
   // New thread defaults to the project you're in (active thread's project,
   // falling back to the top project) — same resolution the command palette
@@ -5031,6 +5050,11 @@ export default function Sidebar() {
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
   return (
     <>
+      <ThreadJumpHintModifierSync
+        keybindings={keybindings}
+        terminalOpen={routeTerminalOpen}
+        onChange={updateThreadJumpHintsVisibility}
+      />
       <ThreadContextDragGhost />
       <SidebarChromeHeader isElectron={isElectron} />
       <SidebarContent
@@ -5440,9 +5464,8 @@ export default function Sidebar() {
                               !draggableThreadKeys.has(threadKey) ||
                               optimisticDrop !== null
                             }
-                          >
-                            {(bag) => renderThreadRowInner(thread, section, bag)}
-                          </SortableThreadRow>
+                            row={renderThreadRowInner(thread, section)}
+                          />
                         );
                       };
                       const from = isContextDrag ? null : (dragState?.activeSection ?? null);

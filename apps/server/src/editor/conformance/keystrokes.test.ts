@@ -635,22 +635,20 @@ if (nvimAvailable)
 
 if (nvimAvailable)
   it.layer(layer, { excludeTestServices: true })("conformance: the mirror equals Neovim", (it) => {
-    for (const keystrokeCase of KEYSTROKE_CASES) {
-      it.effect(keystrokeCase.name, () =>
-        withNvim(keystrokeCase.lines, (bridge) =>
-          Effect.gen(function* () {
-            for (const keys of keystrokeCase.keys) {
-              yield* send(bridge, keys);
-            }
-            const expected = yield* truth(bridge);
+    it.effect.each(KEYSTROKE_CASES)("$name", (keystrokeCase) =>
+      withNvim(keystrokeCase.lines, (bridge) =>
+        Effect.gen(function* () {
+          for (const keys of keystrokeCase.keys) {
+            yield* send(bridge, keys);
+          }
+          const expected = yield* truth(bridge);
 
-            assert.deepStrictEqual(bridge.lines, expected.lines, "mirrored lines");
-            assert.deepStrictEqual(bridge.cursor, expected.cursor, "cursor");
-            assert.strictEqual(bridge.mode, expected.mode, "mode");
-          }),
-        ),
-      );
-    }
+          assert.deepStrictEqual(bridge.lines, expected.lines, "mirrored lines");
+          assert.deepStrictEqual(bridge.cursor, expected.cursor, "cursor");
+          assert.strictEqual(bridge.mode, expected.mode, "mode");
+        }),
+      ),
+    );
 
     it.effect("finds overlaid virtual text as one overlay at the right column", () =>
       withNvim(["const value = 1;"], (bridge) =>

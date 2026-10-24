@@ -24,7 +24,7 @@ export const FactoryRunCard = memo(function FactoryRunCard({
 }) {
   const card = factoryRunCardModel(factoryRun.run);
   return (
-    <div className="rounded-[24px] border border-border/80 bg-card/70 p-4 sm:p-5">
+    <div className="rounded-report border border-border/80 bg-card/70 p-4 sm:p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <Badge variant="secondary">Factory run</Badge>
@@ -58,7 +58,7 @@ export const FactoryRunCard = memo(function FactoryRunCard({
               key={mark.index}
               aria-label={`Phase ${mark.index}: ${mark.status}`}
               className={cn(
-                "rounded-sm border px-1.5 py-0.5 font-mono text-[.65rem]",
+                "rounded-sm border px-1.5 py-0.5 font-mono text-phase-label",
                 FACTORY_MARK_CLASS_BY_TONE[factoryPhaseMarkTone(mark.status)],
               )}
             >

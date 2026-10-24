@@ -42,7 +42,7 @@ export function ContextWindowSegmentedRing(props: {
         cy="12"
         r={CONTEXT_WINDOW_RING_RADIUS}
         fill="none"
-        stroke="color-mix(in oklab, var(--color-muted-foreground) 24%, transparent)"
+        stroke="var(--color-context-track)"
         strokeWidth="3"
       />
       {arcs.map((arc) => (

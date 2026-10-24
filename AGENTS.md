@@ -165,6 +165,7 @@ An empty database is a bad test. Seed your worktree's `.t3` with a copy of real 
   A plain `cp` is only safe when no server has the source open, and must bring the `-wal` and `-shm` siblings along. A live file copy is a corrupt copy. The copy is several gigabytes: make it once per worktree, never while a typecheck or test run is going.
 
 - Bring `secrets`, `settings.json` and `attachments/` only if the flow under test needs them.
+- **A server started on a copy of a live database can resume that database's live provider sessions** with the developer's HOME, binaries and credentials. Never start a copied home before following [Isolating a copied home from live providers](docs/operations/development.md#isolating-a-copied-home-from-live-providers).
 - The orchestrator database is `statev2.sqlite`. The server builds it from `state.sqlite` only when `statev2.sqlite` is missing, so once the source home has a `statev2.sqlite`, snapshot that file instead, the same way. `vp run migrate-dev-db` does this for you with your dev server stopped; never point its source at `~/.t3`.
 - Copy in, never symlink. Data flows one way: into your sandbox, never back out.
 

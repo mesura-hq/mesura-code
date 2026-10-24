@@ -1,3 +1,5 @@
+import { EditorSessionViewportInput } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -77,6 +79,28 @@ describe("viewportFromEditor", () => {
   it("never reports fewer than one row", () => {
     const viewport = viewportFromEditor([], { height: 0, lineHeight: 20 }, model);
     expect(viewport.rows).toBe(1);
+  });
+});
+
+describe("viewportFromEditor against the viewport contract", () => {
+  it("asks for a viewport the contract accepts whatever the length of a visible line", () => {
+    // Phase 2 of the editor latency cycle, criterion 5. The contract bounds
+    // `cols`, and a visible line can be longer than any bound: the bench's
+    // Markdown has 1,087-character paragraphs, a minified file has megabyte
+    // lines. A request the contract refuses is a viewport that never reaches
+    // Neovim, topline and rows included.
+    const accepts = Schema.is(EditorSessionViewportInput);
+    for (const length of [1087, 1_000_000]) {
+      const wide = {
+        getLineCount: () => 300,
+        getLineContent: (line: number) => "x".repeat(line === 231 ? length : 600),
+      };
+      const viewport = viewportFromEditor([range(228, 234)], { height: 140, lineHeight: 20 }, wide);
+      expect(
+        accepts({ threadId: "thread", ...viewport }),
+        `a visible line of ${length} characters asks for cols ${viewport.cols}`,
+      ).toBe(true);
+    }
   });
 });
 

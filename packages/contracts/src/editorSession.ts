@@ -21,8 +21,16 @@ const EditorColumnSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 const EditorRowsSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).check(
   Schema.isLessThanOrEqualTo(500),
 );
+/**
+ * The widest viewport a client may ask for.
+ *
+ * A request, not the grid: the host sizes Neovim's grid itself, past the
+ * widest line the cursor can reach (`apps/server/src/editor/gridWidth.ts`), so
+ * a client clamps what it measures to this and loses nothing by it.
+ */
+export const EDITOR_VIEWPORT_MAX_COLS = 1000;
 const EditorColsSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).check(
-  Schema.isLessThanOrEqualTo(1000),
+  Schema.isLessThanOrEqualTo(EDITOR_VIEWPORT_MAX_COLS),
 );
 
 /**
@@ -58,18 +66,69 @@ export type EditorSessionOpenInput = Schema.Codec.Encoded<typeof EditorSessionOp
 export const EditorSessionAttachInput = EditorSessionThreadInput;
 export type EditorSessionAttachInput = Schema.Codec.Encoded<typeof EditorSessionAttachInput>;
 
+/**
+ * Which batch of keys this is, so a batch sent again is applied once.
+ *
+ * `lane` names one client's stream of keys for a thread and `index` counts its
+ * batches upwards. The server skips a batch whose `index` is not above the
+ * last one it applied for the same `lane`, and answers it as a success: a
+ * client that lost the reply re-sends the batch, and Neovim already has it.
+ */
+export const EditorInputSequence = Schema.Struct({
+  lane: Schema.String.check(Schema.isMaxLength(64)),
+  index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+export type EditorInputSequence = typeof EditorInputSequence.Type;
+
 export const EditorSessionInputInput = Schema.Struct({
   ...EditorSessionThreadInput.fields,
   /** Neovim key notation: `<C-w>v`, `<Esc>`, plain text. */
   keys: Schema.String.check(Schema.isMaxLength(1024)),
+  sequence: Schema.optional(EditorInputSequence),
 });
 export type EditorSessionInputInput = Schema.Codec.Encoded<typeof EditorSessionInputInput>;
+
+/**
+ * Where Neovim is once it has consumed a batch: the answer to `input`.
+ *
+ * Read after the keys ran, not before, so a batch that changes nothing (`l`
+ * at the end of a line) still says so. The client decides Escape by it: the
+ * editor is released only when the last batch answered plain normal mode, not
+ * blocking and with no flash label waiting, and no batch is still pending. The
+ * attach stream's own `mode` event can arrive after this answer, so a client
+ * that read it alone released the editor on a NORMAL that predated the keys.
+ *
+ * `blocking`: Neovim is waiting for a key a command asked for (`f`, `r`, a
+ * count, a mapping prefix), which an Escape has to reach. `nvim_get_mode` says
+ * so for a native wait; a plugin's `getcharstr()` wait (flash's `f`) leaves
+ * the mode at `n` and shows only in `state()`.
+ */
+export const EditorSessionInputResult = Schema.Struct({
+  mode: Schema.String,
+  blocking: Schema.Boolean,
+  /** flash is labelling jump targets; Neovim's own mode says `n` meanwhile. */
+  jumping: Schema.Boolean,
+});
+export type EditorSessionInputResult = typeof EditorSessionInputResult.Type;
+
+/**
+ * Who moved the window a viewport request describes.
+ *
+ * `pointer`: a wheel, a scrollbar, a touch — a scroll Neovim never saw, so the
+ * host moves the cursor into the new window, as Vim's own wheel does.
+ * `keys`, or absent: the client following a scroll a key made. The host never
+ * moves the cursor for one, because the request can be older than keys
+ * Neovim has already run.
+ */
+export const EditorViewportSource = Schema.Literals(["pointer", "keys"]);
+export type EditorViewportSource = typeof EditorViewportSource.Type;
 
 export const EditorSessionViewportInput = Schema.Struct({
   ...EditorSessionThreadInput.fields,
   topline: EditorLineSchema,
   rows: EditorRowsSchema,
   cols: EditorColsSchema,
+  source: Schema.optional(EditorViewportSource),
 });
 export type EditorSessionViewportInput = Schema.Codec.Encoded<typeof EditorSessionViewportInput>;
 
@@ -158,6 +217,22 @@ export const EditorSessionSnapshot = Schema.Struct({
   hlDefs: EditorHighlightDefinitions,
 });
 export type EditorSessionSnapshot = typeof EditorSessionSnapshot.Type;
+
+/**
+ * The answer to `open`: the snapshot, and where Neovim is for Escape, read
+ * under the thread's lock as `input` reads it after a batch.
+ *
+ * `escape` is the one confirmation a client has before its first batch, so
+ * Escape right after opening a file releases the editor. Only `open` carries
+ * it: an attach snapshot can be older than the last batch's answer, and a
+ * client takes this one only while its lane sent nothing since the open
+ * began. Absent from a host older than it, which leaves Escape unknown.
+ */
+export const EditorSessionOpenResult = Schema.Struct({
+  ...EditorSessionSnapshot.fields,
+  escape: Schema.optionalKey(EditorSessionInputResult),
+});
+export type EditorSessionOpenResult = typeof EditorSessionOpenResult.Type;
 
 const EditorOverlay = Schema.Struct({
   line: EditorLineSchema,
@@ -407,9 +482,28 @@ export class EditorSessionRpcError extends Schema.TaggedError<EditorSessionRpcEr
   }
 }
 
+/**
+ * A re-sent key batch the server cannot vouch for: the Neovim that accepted it
+ * exited and was replaced, and accepting is not running, so the restored text
+ * may or may not hold it. Sending it again could type it twice; the client
+ * reports the keys lost instead.
+ */
+export class EditorSessionInputLostError extends Schema.TaggedError<EditorSessionInputLostError>()(
+  "EditorSessionInputLostError",
+  {
+    threadId: Schema.String,
+    detail: Schema.String,
+  },
+) {
+  override get message() {
+    return `Keys for thread ${this.threadId} may not have reached Neovim: ${this.detail}`;
+  }
+}
+
 export const EditorSessionError = Schema.Union([
   EditorSessionSpawnError,
   EditorSessionLookupError,
   EditorSessionRpcError,
+  EditorSessionInputLostError,
 ]);
 export type EditorSessionError = typeof EditorSessionError.Type;

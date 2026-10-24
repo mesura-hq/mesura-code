@@ -37,20 +37,18 @@ const LABEL_PRODUCERS = [
 const read = (relativePath: string) =>
   NodeFS.readFileSync(NodePath.join(repositoryRoot, relativePath), "utf8");
 
-for (const producer of LABEL_PRODUCERS) {
-  it(`names this fork in the client label ${producer.file} reports`, () => {
-    const source = read(producer.file);
-    for (const label of producer.labels) {
-      assert.include(
-        source,
-        label,
-        `${producer.file} no longer reports "${label}" — a sync replaced the fork's client label`,
-      );
-    }
-    assert.notMatch(
+it.each(LABEL_PRODUCERS)("names this fork in the client label $file reports", (producer) => {
+  const source = read(producer.file);
+  for (const label of producer.labels) {
+    assert.include(
       source,
-      /"T3 Code (Desktop|Web|Mobile)"/,
-      `${producer.file} reports a T3 Code client label, so this fork identifies itself as upstream`,
+      label,
+      `${producer.file} no longer reports "${label}" — a sync replaced the fork's client label`,
     );
-  });
-}
+  }
+  assert.notMatch(
+    source,
+    /"T3 Code (Desktop|Web|Mobile)"/,
+    `${producer.file} reports a T3 Code client label, so this fork identifies itself as upstream`,
+  );
+});

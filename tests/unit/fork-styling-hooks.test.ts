@@ -52,24 +52,22 @@ const STYLED_FORK_COMPONENTS: ReadonlyArray<{
   // on by design. Listing it here asserts the opposite and fails.
 ];
 
-for (const entry of STYLED_FORK_COMPONENTS) {
-  it(`styles every hook ${entry.component} sets`, () => {
-    const component = read(entry.component);
-    const stylesheet = read(entry.stylesheet);
-    for (const hook of entry.hooks) {
-      assert.include(
-        component,
-        hook,
-        `${entry.component} no longer sets "${hook}" — either the component changed or this guard is stale`,
-      );
-      assert.include(
-        stylesheet,
-        hook,
-        `${entry.stylesheet} has no rule for "${hook}", which ${entry.component} still sets, so that element renders unstyled and nothing fails`,
-      );
-    }
-  });
-}
+it.each(STYLED_FORK_COMPONENTS)("styles every hook $component sets", (entry) => {
+  const component = read(entry.component);
+  const stylesheet = read(entry.stylesheet);
+  for (const hook of entry.hooks) {
+    assert.include(
+      component,
+      hook,
+      `${entry.component} no longer sets "${hook}" — either the component changed or this guard is stale`,
+    );
+    assert.include(
+      stylesheet,
+      hook,
+      `${entry.stylesheet} has no rule for "${hook}", which ${entry.component} still sets, so that element renders unstyled and nothing fails`,
+    );
+  }
+});
 
 it("stacks the dictation strip inside the composer's banner column", () => {
   // Inside ComposerBanner.Column the strip joins the attached-banner stack and

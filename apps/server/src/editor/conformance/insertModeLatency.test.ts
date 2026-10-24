@@ -67,6 +67,9 @@ const SOURCE_FILE = "../web/src/components/files/monaco/MonacoFileSurface.tsx";
  * real event to wait for. Here the gap between keys is part of what is being
  * modelled: a person types, they do not hold the key down.
  */
+/** The idle window measured before typing; see the report. */
+const IDLE_WINDOW_MS = 500;
+
 const pause = (milliseconds: number) => Effect.sleep(`${milliseconds} millis`);
 
 /** Did anything actually happen on screen between these two readings? */
@@ -78,13 +81,14 @@ const somethingHappened = (
 /**
  * Counts the gaps in which something happened with no key in flight.
  *
- * This is the bench's error bar, and it is not decoration. Under the real
- * configuration Neovim flushes about every four milliseconds whether or not
- * anything is going on — measured at 114 frames in 500 idle milliseconds,
- * nearly all of them drawing nothing at all. A bench that timed "the next
- * frame" after a key would therefore be timing that stream rather than the
- * key: an earlier version of this file did exactly that and reported a p50 of
- * 1.73 ms, which is about half the gap between two empty frames.
+ * This is the bench's error bar, and it is not decoration. A configuration
+ * can make Neovim flush with nothing going on: an earlier state of the
+ * developer's flushed about every four milliseconds while idle (114 frames in
+ * 500 idle milliseconds, nearly all of them drawing nothing), while at
+ * `~/.neovim` `c730dae` it flushes not at all. A bench that timed "the next
+ * frame" after a key would time such a stream rather than the key: an earlier
+ * version of this file did exactly that and reported a p50 of 1.73 ms, which
+ * was about half the gap between two empty frames.
  *
  * So `probe` waits for a frame in which something happened, and this counts
  * how often something happens when nothing should. A total near zero says the
@@ -124,9 +128,10 @@ const round = (value: number) => Math.round(value * 100) / 100;
  * came to report a p50 of 1.8 ms beside a p95 of 515 ms. The cursor alone
  * misses the keys that redraw without moving it.
  *
- * Waiting for the next frame whatever it held is worse than either: this
- * configuration emits an empty frame about every four milliseconds, so that
- * version timed the background stream and not the key.
+ * Waiting for the next frame whatever it held is worse than either: under a
+ * configuration that emits empty frames while idle (an earlier state of the
+ * developer's did, about every four milliseconds), that version timed the
+ * background stream and not the key.
  */
 const probe = (bridge: NvimBridge.Session, keys: string) =>
   waitingFor(bridge, keys, (before) => somethingHappened(before, bridge.metrics));
@@ -237,6 +242,15 @@ if (enabled)
           });
           yield* bridge.settle;
 
+          // How much this configuration draws with no key in flight, so the
+          // report states the idle flush rate it measured instead of assuming
+          // one: it depends entirely on the configuration.
+          const idleBefore = bridge.metrics;
+          yield* pause(IDLE_WINDOW_MS);
+          const idleAfter = bridge.metrics;
+          const idleFrames = idleAfter.frames - idleBefore.frames;
+          const idleCells = idleAfter.gridCells - idleBefore.gridCells;
+
           // Insert mode: a sentence with spaces, brackets and quotes, so
           // autopairs has something to react to on a real share of the keys.
           const typed = 'const value = greet("world", [1, 2]); ';
@@ -305,9 +319,10 @@ if (enabled)
             `configuration ${configDirectory}`,
             ``,
             `Gaps of 25 ms in which something happened with no key in flight: ${strayFrames} of 200.`,
-            `That is the error bar. Neovim flushes about every 4 ms under this configuration`,
-            `whether or not anything is happening, so timing the next frame would time that`,
-            `stream; these are the gaps that could have been taken for a key.`,
+            `That is the error bar: these are the gaps that could have been taken for a key.`,
+            `Idle before typing, ${IDLE_WINDOW_MS} ms with no key in flight: ${idleFrames} frames, ${idleCells} cells drawn.`,
+            `A configuration that flushes while idle would put a frame in every gap, which is why`,
+            `the probe waits for a frame in which something happened rather than the next frame.`,
             ``,
             `| run | n | p50 ms | p95 ms | max ms | median cells | median buffer events |`,
             `| --- | --- | --- | --- | --- | --- | --- |`,

@@ -17,6 +17,7 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 
+import { observeResize } from "~/lib/observeResize";
 import { cn } from "~/lib/utils";
 import type { EnvironmentOption } from "../BranchToolbar.logic";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
@@ -363,13 +364,11 @@ export function RunContextDrawer(props: RunContextDrawerProps) {
         ) : null}
       </div>
 
-      <div className="flex items-center gap-2 px-2 pt-1 text-[10px] text-muted-foreground/60">
+      <div className="flex items-center gap-2 px-2 pt-1 text-caption text-muted-foreground/60">
         <span className="hidden min-w-0 flex-1 truncate pointer-fine:inline">
-          <Kbd className="h-4 min-w-4 text-[10px]">tab</Kbd> next ·{" "}
-          <Kbd className="h-4 min-w-4 text-[10px]">↑↓</Kbd> choose ·{" "}
-          <Kbd className="h-4 min-w-4 text-[10px]">1–9</Kbd> pick ·{" "}
-          <Kbd className="h-4 min-w-4 text-[10px]">↵</Kbd> done ·{" "}
-          <Kbd className="h-4 min-w-4 text-[10px]">esc</Kbd> close
+          <Kbd size="compact">tab</Kbd> next · <Kbd size="compact">↑↓</Kbd> choose ·{" "}
+          <Kbd size="compact">1–9</Kbd> pick · <Kbd size="compact">↵</Kbd> done ·{" "}
+          <Kbd size="compact">esc</Kbd> close
           {activeTab === "host" && cycleMachineShortcut
             ? ` · ${cycleMachineShortcut} cycles hosts`
             : ""}
@@ -432,7 +431,7 @@ function RunContextTabButton(props: {
         !editable && "cursor-default opacity-70 hover:bg-transparent",
       )}
     >
-      <span className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide opacity-70">
+      <span className="flex items-center gap-1 text-caption font-medium uppercase tracking-wide opacity-70">
         {label}
         {!editable ? <LockIcon className="size-2.5" aria-label="Read-only" /> : null}
       </span>
@@ -473,7 +472,7 @@ function RunContextOptionRow(props: {
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {selected ? <CheckIcon className="size-3.5 shrink-0 opacity-70" aria-hidden="true" /> : null}
       {digit <= 9 ? (
-        <span className="hidden w-3 text-right text-[10px] tabular-nums text-muted-foreground/50 pointer-fine:inline">
+        <span className="hidden w-3 text-right text-caption tabular-nums text-muted-foreground/50 pointer-fine:inline">
           {digit}
         </span>
       ) : null}
@@ -501,10 +500,9 @@ function useStripExtension(rootRef: React.RefObject<HTMLDivElement | null>) {
       );
     };
     update();
-    const observer = new ResizeObserver(update);
-    observer.observe(strip);
+    const stopObservingResize = observeResize(strip, update);
     return () => {
-      observer.disconnect();
+      stopObservingResize();
       shell.style.removeProperty("--chat-composer-context-extension");
     };
   }, [rootRef]);

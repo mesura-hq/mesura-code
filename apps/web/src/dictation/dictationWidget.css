@@ -9,16 +9,18 @@ html.dictation-widget-window #root {
   overflow: hidden;
 }
 
-.dictation-widget-rec-dot {
+@utility dictation-widget-rec-dot {
   animation: dictation-widget-blink 1.1s steps(1, end) infinite;
 }
 
-.dictation-widget-transcribing::after {
-  display: inline-block;
-  width: 1.2em;
-  text-align: left;
-  content: "";
-  animation: dictation-widget-dots 1.2s steps(1, end) infinite;
+@utility dictation-widget-transcribing {
+  &::after {
+    display: inline-block;
+    width: 1.2em;
+    text-align: left;
+    content: "";
+    animation: dictation-widget-dots 1.2s steps(1, end) infinite;
+  }
 }
 
 @keyframes dictation-widget-blink {

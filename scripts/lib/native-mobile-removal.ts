@@ -28,6 +28,28 @@ export function isRemovedNativeMobilePath(repositoryPath: string): boolean {
   return REMOVED_NATIVE_MOBILE_PREFIXES.some((prefix) => repositoryPath.startsWith(prefix));
 }
 
+/** Preserve workflow formatting while removing dependencies on deleted native jobs. */
+export function pruneNativeMobileJobNeeds(workflowYaml: string): string {
+  const removedJobs = new Set(["mobile_native_changes", "mobile_native_static_analysis"]);
+  return workflowYaml.replace(
+    /^( +)needs:\s*(\[[\s\S]*?\]|(?:\n\1 +-[^\n]*)+)/gm,
+    (needs: string, indentation: string, list: string) => {
+      if (list.startsWith("[")) {
+        const kept = list
+          .slice(1, -1)
+          .split(",")
+          .filter((entry) => !removedJobs.has(entry.trim()));
+        if (kept.length === list.slice(1, -1).split(",").length) return needs;
+        return `${indentation}needs: [${kept.join(",")}]`;
+      }
+      const pruned = needs.replace(/^ +-[ \t]*(\w+)[ \t]*$/gm, (entry: string, job: string) =>
+        removedJobs.has(job) ? "" : entry,
+      );
+      return /^ +-/m.test(pruned) ? pruned : `${indentation}needs: []`;
+    },
+  );
+}
+
 /**
  * Packages upstream patches only for the native apps, by name so that a version bump is still
  * caught. With the apps gone pnpm installs none of them, and their `patchedDependencies`
