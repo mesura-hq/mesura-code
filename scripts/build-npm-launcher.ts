@@ -23,6 +23,7 @@ import { Command, Flag } from "effect/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { DEFAULT_STATE_HOME_DIR_NAME, PUBLISHED_RELEASE_BASE_URL } from "@t3tools/shared/stateHome";
 import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 
@@ -46,6 +47,11 @@ export function npmLauncherPackageManifest(version: string) {
   return {
     name: NPM_LAUNCHER_PACKAGE_NAME,
     version,
+    // The standalone launcher cannot import workspace modules at runtime.
+    t3code: {
+      stateHomeDirectory: DEFAULT_STATE_HOME_DIR_NAME,
+      releaseBaseUrl: PUBLISHED_RELEASE_BASE_URL,
+    },
     description:
       "T3 Code CLI. Downloads the self-contained executable for this platform from the GitHub Release.",
     license: serverPackageJson.license,

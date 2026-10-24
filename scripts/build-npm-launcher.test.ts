@@ -163,6 +163,32 @@ it.layer(NodeServices.layer)("build-npm-launcher", (it) => {
         assert.equal(second.exitCode, 7);
         assert.equal(release.requests.length, requestsAfterFirst);
 
+        // A default launch stays inside Mesura's home and cannot download upstream's server.
+        const isolatedHome = path.join(root, "default-home");
+        yield* fs.makeDirectory(isolatedHome);
+        const unavailable = yield* run(process.execPath, [launcher, "--version"], {
+          cwd: root,
+          env: { PATH: process.env.PATH, HOME: isolatedHome },
+        });
+        assert.equal(unavailable.exitCode, 1);
+        assert.include(unavailable.stderr, "Mesura Code does not publish release archives");
+        assert.isFalse(yield* fs.exists(path.join(isolatedHome, ".t3")));
+        const defaultLaunch = yield* run(process.execPath, [launcher, "--version"], {
+          cwd: root,
+          env: {
+            PATH: process.env.PATH,
+            HOME: isolatedHome,
+            T3CODE_RELEASE_BASE_URL: release.baseUrl,
+          },
+        });
+        assert.equal(defaultLaunch.exitCode, 7, defaultLaunch.stderr);
+        assert.isTrue(
+          yield* fs.exists(
+            path.join(isolatedHome, ".mesura-code/runtime/versions", VERSION, ".install-complete"),
+          ),
+        );
+        assert.isFalse(yield* fs.exists(path.join(isolatedHome, ".t3")));
+
         // Services installed before 0.0.41 fork dist/bin.mjs and talk to the
         // server over IPC; the channel and SIGTERM must reach the executable.
         const ipcServer = path.join(home, "runtime/versions", VERSION, "t3");
