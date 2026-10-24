@@ -1519,6 +1519,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     };
     // Not getFocusedWebContents(): every guest of a focused window reports focus.
     // An agent's keys reach a guest without a focused frame through GuestInput.
+    // Do not focus the main window here: it can clear the guest's focusedFrame
+    // before its configured shortcut is forwarded.
     const holdsKeyboardFocus = (contents: Electron.WebContents) =>
       contents.isFocused() && contents.focusedFrame !== null;
     const syncMenuShortcuts = (contents: Electron.WebContents, input: Electron.Input): void => {

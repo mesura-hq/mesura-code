@@ -578,6 +578,11 @@ describe("PreviewManager", () => {
         (manager) =>
           Effect.gen(function* () {
             const preview = makeFaviconWebContents();
+            const previewContents = preview.webContents as Electron.WebContents;
+            const focusedFrame = previewContents.focusedFrame;
+            const focusMainWindow = vi.fn(() => {
+              Object.assign(preview.webContents, { focusedFrame: null });
+            });
             const send = vi.fn();
             let hostDestroyed = false;
             const hostWebContents = { isDestroyed: () => hostDestroyed, send };
@@ -585,6 +590,7 @@ describe("PreviewManager", () => {
             fromId.mockReturnValue(preview.webContents);
             getFocusedWebContents.mockReturnValue(preview.webContents as never);
             yield* manager.setMainWindow({
+              focus: focusMainWindow,
               isDestroyed: () => false,
               once: vi.fn(),
               webContents: hostWebContents,
@@ -612,6 +618,7 @@ describe("PreviewManager", () => {
             beforeInput({ preventDefault } as never, input as never);
             expect(preventDefault).toHaveBeenCalledOnce();
             expect(send).toHaveBeenCalledExactlyOnceWith("desktop:menu-action", command);
+            expect(focusMainWindow).not.toHaveBeenCalled();
             for (const overrides of [
               { isAutoRepeat: true },
               { type: "keyUp" },
@@ -636,10 +643,14 @@ describe("PreviewManager", () => {
               expect(send).toHaveBeenCalledOnce();
             }
             getFocusedWebContents.mockReturnValue(null);
+            vi.mocked(previewContents.isFocused).mockReturnValue(false);
             preventDefault.mockClear();
             beforeInput({ preventDefault } as never, input as never);
             expect(preventDefault).not.toHaveBeenCalled();
             expect(send).toHaveBeenCalledOnce();
+            // Guests share window focus, but only the keyboard owner has a focusedFrame.
+            vi.mocked(previewContents.isFocused).mockReturnValue(true);
+            Object.assign(preview.webContents, { focusedFrame: null });
             for (const focusedContents of [
               hostWebContents,
               makeFaviconWebContents({ id: 43 }).webContents,
@@ -651,6 +662,7 @@ describe("PreviewManager", () => {
               expect(send).toHaveBeenCalledOnce();
             }
             getFocusedWebContents.mockReturnValue(preview.webContents as never);
+            Object.assign(preview.webContents, { focusedFrame });
             hostDestroyed = true;
             preventDefault.mockClear();
             beforeInput({ preventDefault } as never, input as never);
@@ -666,6 +678,7 @@ describe("PreviewManager", () => {
             beforeInput({ preventDefault } as never, input as never);
             expect(preventDefault).not.toHaveBeenCalled();
             expect(send).toHaveBeenCalledOnce();
+            expect(focusMainWindow).not.toHaveBeenCalled();
           }),
         platform,
       ),
