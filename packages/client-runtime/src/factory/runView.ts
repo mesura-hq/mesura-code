@@ -37,7 +37,8 @@ export interface FactoryRailItem {
 }
 
 export type FactorySpineNodeStatus = "done" | "current" | "pending" | "stopped";
-export type FactorySpineStage = "Build" | "Harden" | "Close";
+/** `Steps` holds the nodes a skill run (prototype, sf-seal-prototype) names itself. */
+export type FactorySpineStage = "Build" | "Harden" | "Close" | "Steps";
 
 export interface FactorySpineNode {
   readonly node: string;
@@ -158,6 +159,8 @@ const SPINE: ReadonlyArray<{ stage: FactorySpineStage; nodes: ReadonlyArray<stri
   { stage: "Close", nodes: ["commit"] },
 ];
 const SPINE_NODES = SPINE.flatMap((stage) => stage.nodes);
+/** Every node sf-team enters: the spine plus `repair`, the return node. */
+const SF_TEAM_NODES = new Set([...SPINE_NODES, "repair"]);
 
 function resolveSelectedPhase(state: FactoryRunState, requested: number | null): number | null {
   if (requested !== null && state.phases.some((phase) => phase.index === requested)) {
@@ -274,8 +277,30 @@ function spineNodeStatuses(
   });
 }
 
+/**
+ * A phase that entered a node outside sf-team's draws its own nodes, once
+ * each in the order first entered: the node in flight is current, every other
+ * entered node done.
+ */
+function skillNodesView(
+  state: FactoryRunState,
+  phase: FactoryRunPhase,
+): FactorySpineView["stages"] {
+  const closed = phase.status === "clean" || phase.status === "degraded";
+  const inFlight: FactorySpineNodeStatus = state.status === "stopped" ? "stopped" : "current";
+  const nodes = [...new Set(phase.nodes.map((entry) => entry.node))].map((node) => ({
+    node,
+    label: factoryNodeDisplayName(node),
+    status: !closed && node === phase.node ? inFlight : ("done" as const),
+  }));
+  return [{ stage: "Steps", nodes }];
+}
+
 function spineView(state: FactoryRunState, phase: FactoryRunPhase): FactorySpineView {
   const returns = returnEdges(state, phase.index);
+  if (phase.nodes.some((entry) => !SF_TEAM_NODES.has(entry.node))) {
+    return { stages: skillNodesView(state, phase), returns };
+  }
   const statuses = spineNodeStatuses(state, phase, returns);
   let offset = 0;
   const stages = SPINE.map(({ stage, nodes }) => {

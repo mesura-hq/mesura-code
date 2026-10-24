@@ -1070,4 +1070,416 @@ it.layer(NodeServices.layer)("factory run tracker", (it) => {
         });
       }),
   );
+
+  describe("skill runs", () => {
+    // sf-solo, sf-seal-prototype and prototype publish the same record version 1 as sf-team, with
+    // fewer events: no role is dispatched, so `run.started` carries no route table, no returns
+    // budget and no dispatch events; a skill without a plan file carries no plan fields either.
+    // Each skill names its own phases and nodes.
+    interface SkillRunFixture {
+      readonly skill: string;
+      readonly runId: string;
+      readonly phases: ReadonlyArray<{ readonly index: number; readonly title: string }>;
+      readonly lines: ReadonlyArray<string>;
+      readonly expected: {
+        readonly phaseIndex: number;
+        readonly node: string;
+      };
+    }
+
+    const skillRunStartedLine = (
+      runId: string,
+      phases: SkillRunFixture["phases"],
+      plan: { readonly planPath: string; readonly planDigest: string } | null,
+    ) =>
+      eventLine(0, "run.started", {
+        runId,
+        request: `Build ${runId}`,
+        ...(plan === null ? {} : { ...plan, intentPath: null }),
+        phases: phases.map((phase) => ({ ...phase, acceptance: [] })),
+      });
+
+    const skillFrameLine = (minute: number) =>
+      eventLine(minute, "frame.recorded", {
+        repo: "/srv/repos/invoices",
+        branch: "feat/invoice-csv",
+        base: "abc1234",
+        testLayout: "colocated *.test.ts",
+        checks: ["pnpm lint"],
+        suiteAtFrame: "green",
+      });
+
+    const SF_SOLO_PHASES = [
+      { index: 1, title: "Serialize the invoice rows" },
+      { index: 2, title: "Add the Export button" },
+      { index: 3, title: "Name the file after the filter" },
+    ];
+    const sfSoloRun: SkillRunFixture = {
+      skill: "sf-solo",
+      runId: "solo-invoice-export",
+      phases: SF_SOLO_PHASES,
+      lines: [
+        skillRunStartedLine("solo-invoice-export", SF_SOLO_PHASES, {
+          planPath: "/srv/plans/invoice-export/plan.md",
+          planDigest: `sha256:${"c".repeat(64)}`,
+        }),
+        skillFrameLine(1),
+        eventLine(2, "phase.started", { phase: 1 }),
+        eventLine(3, "node.entered", { phase: 1, node: "implement" }),
+        eventLine(4, "node.entered", { phase: 1, node: "checks-build" }),
+        eventLine(5, "node.entered", { phase: 1, node: "verify-1" }),
+        eventLine(6, "node.entered", { phase: 1, node: "review" }),
+        eventLine(7, "node.entered", { phase: 1, node: "commit" }),
+        eventLine(8, "phase.closed", {
+          phase: 1,
+          close: "clean",
+          commit: { hash: "def5678", subject: "feat(invoices): serialize rows" },
+        }),
+        eventLine(9, "phase.started", { phase: 2 }),
+        eventLine(10, "node.entered", { phase: 2, node: "implement" }),
+      ],
+      expected: { phaseIndex: 2, node: "implement" },
+    };
+
+    const SEAL_PHASES = [{ index: 1, title: "Harden the accepted mailbox prototype" }];
+    const sealPrototypeRun: SkillRunFixture = {
+      skill: "sf-seal-prototype",
+      runId: "seal-mailbox",
+      phases: SEAL_PHASES,
+      lines: [
+        skillRunStartedLine("seal-mailbox", SEAL_PHASES, null),
+        skillFrameLine(1),
+        eventLine(2, "phase.started", { phase: 1 }),
+        eventLine(3, "node.entered", { phase: 1, node: "implement" }),
+        eventLine(4, "node.entered", { phase: 1, node: "review" }),
+        eventLine(5, "node.entered", { phase: 1, node: "verify-1" }),
+      ],
+      expected: { phaseIndex: 1, node: "verify-1" },
+    };
+
+    const PROTOTYPE_PHASES = [
+      { index: 1, title: "Try a one-slot mailbox" },
+      { index: 2, title: "Try a coalescing timer" },
+    ];
+    const prototypeRun: SkillRunFixture = {
+      skill: "prototype",
+      runId: "prototype-mailbox",
+      phases: PROTOTYPE_PHASES,
+      lines: [
+        skillRunStartedLine("prototype-mailbox", PROTOTYPE_PHASES, null),
+        eventLine(1, "phase.started", { phase: 1 }),
+        eventLine(2, "node.entered", { phase: 1, node: "experiment" }),
+        eventLine(3, "node.entered", { phase: 1, node: "report" }),
+        eventLine(4, "phase.started", { phase: 2 }),
+        eventLine(5, "node.entered", { phase: 2, node: "experiment" }),
+      ],
+      expected: { phaseIndex: 2, node: "experiment" },
+    };
+
+    it.effect(
+      "skill run fold: a minimal run of one to three phases with no role sessions shows its phase, phase count, node and status",
+      () =>
+        Effect.gen(function* () {
+          for (const fixture of [sealPrototypeRun, prototypeRun, sfSoloRun]) {
+            const harness = yield* makeHarness();
+            const runDir = yield* harness.makeRunDir(fixture.runId, fixture.lines);
+
+            yield* harness.attachRun(runDir);
+
+            const phaseCount = fixture.phases.length;
+            const phaseTitle = fixture.phases.find(
+              (phase) => phase.index === fixture.expected.phaseIndex,
+            )!.title;
+            // The thread's status slot.
+            expect({ skill: fixture.skill, shell: harness.summaries.get(THREAD_ID) }).toEqual({
+              skill: fixture.skill,
+              shell: {
+                status: "running",
+                phaseIndex: fixture.expected.phaseIndex,
+                phaseCount,
+                node: fixture.expected.node,
+              },
+            });
+            // The run card.
+            expect(yield* lastPayload(harness, FACTORY_RUN_ACTIVITY_KIND)).toMatchObject({
+              runId: fixture.runId,
+              status: "running",
+              phaseCount,
+              phase: { index: fixture.expected.phaseIndex, title: phaseTitle },
+              node: fixture.expected.node,
+              cost: { usd: 0, tokens: {} },
+            });
+            // The Factory side panel.
+            const panel = yield* harness.tracker
+              .stream(THREAD_ID, fixture.runId)
+              .pipe(Stream.runHead, Effect.map(Option.getOrThrow));
+            expect({
+              skill: fixture.skill,
+              warnings: panel.state.warnings,
+              titles: panel.state.phases.map((phase) => phase.title),
+              roles: panel.roles,
+            }).toEqual({
+              skill: fixture.skill,
+              warnings: [],
+              titles: fixture.phases.map((phase) => phase.title),
+              roles: [],
+            });
+          }
+        }),
+    );
+
+    it.effect(
+      "skill run fold: a minimal run that ends with stop.raised shows waiting, and running again once answered",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* makeHarness();
+          const runDir = yield* harness.makeRunDir(sfSoloRun.runId, [
+            ...sfSoloRun.lines,
+            eventLine(11, "stop.raised", {
+              phase: 2,
+              node: "implement",
+              question: "Put the button in the toolbar or in the row menu?",
+              options: ["toolbar", "row menu"],
+            }),
+          ]);
+          const eventsPath = harness.path.join(runDir, "events.jsonl");
+
+          yield* harness.attachRun(runDir);
+          expect(harness.summaries.get(THREAD_ID)).toEqual({
+            status: "waiting",
+            phaseIndex: 2,
+            phaseCount: 3,
+            node: "implement",
+          });
+
+          yield* harness.append(
+            eventsPath,
+            eventLine(12, "stop.answered", { answer: "toolbar" }) +
+              eventLine(13, "node.entered", { phase: 2, node: "checks-build" }),
+          );
+          yield* harness.tracker.drain(THREAD_ID, sfSoloRun.runId);
+          expect(harness.summaries.get(THREAD_ID)).toEqual({
+            status: "running",
+            phaseIndex: 2,
+            phaseCount: 3,
+            node: "checks-build",
+          });
+
+          yield* harness.append(
+            eventsPath,
+            eventLine(14, "stop.raised", {
+              phase: 2,
+              node: "checks-build",
+              question: "The lint rule rejects the icon import. Waive it?",
+              options: ["waive", "replace the icon"],
+            }),
+          );
+          yield* harness.tracker.drain(THREAD_ID, sfSoloRun.runId);
+          expect(harness.summaries.get(THREAD_ID)).toEqual({
+            status: "waiting",
+            phaseIndex: 2,
+            phaseCount: 3,
+            node: "checks-build",
+          });
+          expect(yield* lastPayload(harness, FACTORY_RUN_ACTIVITY_KIND)).toMatchObject({
+            status: "waiting",
+            question: "The lint rule rejects the icon import. Waive it?",
+          });
+        }),
+    );
+
+    it.effect("skill run fold: a minimal run that ends with run.finished done shows done", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness();
+        const runDir = yield* harness.makeRunDir(sealPrototypeRun.runId, sealPrototypeRun.lines);
+        yield* harness.attachRun(runDir);
+
+        yield* harness.append(
+          harness.path.join(runDir, "events.jsonl"),
+          eventLine(6, "node.entered", { phase: 1, node: "commit" }) +
+            eventLine(7, "phase.closed", { phase: 1, close: "clean" }) +
+            eventLine(8, "run.finished", { status: "done" }),
+        );
+        yield* harness.tracker.drain(THREAD_ID, sealPrototypeRun.runId);
+
+        expect(harness.summaries.get(THREAD_ID)).toEqual({
+          status: "done",
+          phaseIndex: 1,
+          phaseCount: 1,
+          node: "commit",
+        });
+        expect(yield* lastPayload(harness, FACTORY_RUN_ACTIVITY_KIND)).toMatchObject({
+          status: "done",
+          phase: { index: 1, title: SEAL_PHASES[0]!.title },
+          phaseStatuses: ["clean"],
+        });
+        expect(yield* harness.tracker.tailedFiles).toEqual([]);
+      }),
+    );
+
+    it.effect(
+      "skill run guard: a run directory deleted after attach keeps the last summary and leaves the tracker working",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* makeHarness();
+          const runDir = yield* harness.makeRunDir(prototypeRun.runId, prototypeRun.lines);
+          yield* harness.attachRun(runDir);
+          const labelBefore = harness.summaries.get(THREAD_ID);
+          const cardsBefore = (yield* harness.activities(FACTORY_RUN_ACTIVITY_KIND)).length;
+
+          yield* harness.fileSystem.remove(runDir, { recursive: true });
+          yield* harness.tracker.drain(THREAD_ID, prototypeRun.runId);
+
+          // The thread keeps the label it had; nothing new is recorded.
+          expect(harness.summaries.get(THREAD_ID)).toEqual(labelBefore);
+          expect(yield* harness.activities(FACTORY_RUN_ACTIVITY_KIND)).toHaveLength(cardsBefore);
+          // The panel still opens on the last state it read.
+          const panel = yield* harness.tracker
+            .stream(THREAD_ID, prototypeRun.runId)
+            .pipe(Stream.runHead, Effect.map(Option.getOrThrow));
+          expect(panel.state.runId).toBe(prototypeRun.runId);
+          // Attaching the deleted directory again is refused, and another run is still followed.
+          const error = yield* harness.attachRun(runDir).pipe(Effect.flip);
+          expect(error).toMatchObject({ _tag: "FactoryAttachRunError", reason: "not-found" });
+          const otherDir = yield* harness.makeRunDir(sealPrototypeRun.runId, [
+            ...sealPrototypeRun.lines,
+          ]);
+          yield* harness.attachRun(otherDir);
+          expect(yield* lastPayload(harness, FACTORY_RUN_ACTIVITY_KIND)).toMatchObject({
+            runId: sealPrototypeRun.runId,
+            status: "running",
+          });
+        }),
+    );
+
+    it.effect(
+      "skill run guard: a run never attached gives the thread no run label and the panel an empty stream",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* makeHarness();
+          // The skill created its directory but never called attach_factory_run.
+          yield* harness.makeRunDir(prototypeRun.runId, prototypeRun.lines);
+
+          expect(harness.summaries.get(THREAD_ID)).toBeNull();
+          expect(yield* harness.tracker.isAttached(THREAD_ID, prototypeRun.runId)).toBe(false);
+          const items = yield* FactoryRunTracker.subscribeFactoryRun(harness.tracker, {
+            threadId: THREAD_ID,
+            runId: prototypeRun.runId,
+          }).pipe(Stream.runCollect);
+          expect(items).toHaveLength(0);
+          expect(yield* harness.activities(FACTORY_RUN_ACTIVITY_KIND)).toEqual([]);
+          expect(yield* harness.tracker.tailedFiles).toEqual([]);
+        }),
+    );
+
+    it.effect(
+      "skill run guard: after a restart a run whose directory was deleted is not followed and its panel stream ends empty",
+      () =>
+        Effect.gen(function* () {
+          const before = yield* makeHarness();
+          const runDir = yield* before.makeRunDir(sfSoloRun.runId, sfSoloRun.lines);
+          yield* before.attachRun(runDir);
+          yield* before.fileSystem.remove(runDir, { recursive: true });
+
+          const after = yield* makeHarness({ cards: yield* before.cards });
+          yield* ServerRuntimeStartup.reattachFactoryRuns.pipe(Effect.provide(after.context));
+
+          expect(yield* after.tracker.isAttached(THREAD_ID, sfSoloRun.runId)).toBe(false);
+          expect(yield* after.tracker.tailedFiles).toEqual([]);
+          const items = yield* FactoryRunTracker.subscribeFactoryRun(after.tracker, {
+            threadId: THREAD_ID,
+            runId: sfSoloRun.runId,
+          }).pipe(Stream.runCollect);
+          expect(items).toHaveLength(0);
+        }),
+    );
+
+    it.effect(
+      "skill run guard: a full sf-team run directory still folds into the same summary and label",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* makeHarness();
+          // A snapshot of the live sf-team run `thread-attention` at phase 4's fence
+          // (159 lines, 2026-10-24), with every free-text body replaced by neutral text, every
+          // role file relative to the run directory, and synthetic session ids.
+          const fixturePath = yield* harness.path.fromFileUrl(
+            new URL("./fixtures/sf-team-thread-attention.events.jsonl", import.meta.url),
+          );
+          const events = yield* harness.fileSystem.readFileString(fixturePath);
+          const runDir = yield* harness.makeRunDir("thread-attention", [events]);
+          // The last line starts the phase 4 implementer, still running: its output is seeded here.
+          yield* harness.fileSystem.makeDirectory(harness.path.join(runDir, "phase-4"));
+          yield* harness.append(
+            harness.path.join(runDir, "phase-4", "implementer-1.jsonl"),
+            claudeToolUseLine("Read", "2026-10-24T16:33:00.000Z") +
+              claudeToolUseLine("Bash", "2026-10-24T16:34:00.000Z"),
+          );
+
+          yield* harness.attachRun(runDir);
+
+          expect(harness.summaries.get(THREAD_ID)).toEqual({
+            status: "running",
+            phaseIndex: 4,
+            phaseCount: 6,
+            node: "fence",
+          });
+          expect(yield* lastPayload(harness, FACTORY_RUN_ACTIVITY_KIND)).toEqual({
+            threadId: THREAD_ID,
+            runId: "thread-attention",
+            runDir,
+            status: "running",
+            startedAt: "2026-10-24T06:43:21.694Z",
+            lastEventAt: "2026-10-24T16:32:55.626Z",
+            phaseCount: 6,
+            phase: { index: 4, title: "Publish factory-like skill runs to the Factory panel" },
+            node: "fence",
+            returns: { used: 4, budget: 5 },
+            verdicts: [
+              { phase: 1, pass: 1, verdict: "WORKS" },
+              { phase: 1, pass: 2, verdict: "WORKS" },
+              { phase: 2, pass: 1, verdict: "WORKS" },
+              { phase: 2, pass: 2, verdict: "WORKS" },
+              { phase: 3, pass: 1, verdict: "COULD_NOT_EXERCISE" },
+              { phase: 3, pass: 2, verdict: "WORKS" },
+            ],
+            cost: {
+              usd: 95.971663,
+              tokens: {
+                input_tokens: 89939687,
+                cached_input_tokens: 87741824,
+                cache_write_input_tokens: 0,
+                output_tokens: 596279,
+                reasoning_output_tokens: 392079,
+              },
+            },
+            request: "Sanitized sf-team run request",
+            phaseStatuses: ["clean", "clean", "degraded", "running", "pending", "pending"],
+            question: null,
+            coverage: { passed: 23, total: 39 },
+            degradedPhases: 1,
+          });
+          const panel = yield* harness.tracker
+            .stream(THREAD_ID, "thread-attention")
+            .pipe(Stream.runHead, Effect.map(Option.getOrThrow));
+          expect(panel.roles).toEqual([
+            {
+              phase: 4,
+              role: "implementer",
+              turn: 1,
+              status: "running",
+              toolCalls: 2,
+              lastTool: "Bash",
+              lastActivityAt: "2026-10-24T16:34:00.000Z",
+            },
+          ]);
+          expect(panel.state.lineCount).toBe(159);
+          expect(panel.state.warningCount).toBe(0);
+          expect(panel.state.clock).toEqual({
+            elapsedMs: 35373932,
+            waitingMs: 23247571,
+            machineMs: 12126361,
+          });
+        }),
+    );
+  });
 });
