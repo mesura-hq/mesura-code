@@ -299,10 +299,15 @@ it("modal keys seam guard: the vimMode setting is in the client schema and its p
 
 it("modal keys seam guard: Settings shows the Vim mode row and search finds it", () => {
   const file = "apps/web/src/components/settings/SettingsPanels.tsx";
-  const typography = region(read(file), "function TypographySection(", "</SettingsSection>", file);
+  const editing = region(
+    read(file),
+    '<SettingsSection id="editing" title="Editing">',
+    "</SettingsSection>",
+    file,
+  );
   assert.isTrue(
-    rendersElement(typography, "VimModeRow"),
-    "the Typography section no longer renders VimModeRow",
+    rendersElement(editing, "VimModeRow"),
+    "the Editing section no longer renders VimModeRow",
   );
   assert.include(
     read("apps/web/src/components/settings/settingsSearch.ts"),
@@ -322,12 +327,18 @@ it("modal keys seam guard: the web package depends on @mesura/keys and @vimee/co
 // The composer.
 
 it("modal keys seam guard: the composer registers its Vim adapter", () => {
-  assertCallCarries("apps/web/src/components/chat/ChatComposer.tsx", "registerComposerVimAdapter", [
-    "read:",
-    "write:",
-    "setCursor:",
-    "draftKey:",
+  assertCallCarries("apps/web/src/components/chat/ChatComposer.tsx", "useMesuraComposerInput", [
+    "composerDraftTargetKeyRef",
+    "composerEditorRef",
+    "composerRef",
+    "promptRef",
+    "applyPromptReplacement: applyPromptReplacementStable",
   ]);
+  assertCallCarries(
+    "apps/web/src/components/chat/useMesuraComposerInput.ts",
+    "registerComposerVimAdapter",
+    ["read:", "write:", "setCursor:", "draftKey:"],
+  );
 });
 
 it("modal keys seam guard: a cite in Vim mode lands at the prompt's end and focuses the composer", () => {
@@ -336,12 +347,12 @@ it("modal keys seam guard: a cite in Vim mode lands at the prompt's end and focu
   const cite = region(
     read(file),
     "citeAssistantText: (citation, sourceAnchor) =>",
-    "openModelPicker,",
+    "openModelPicker:",
     file,
   );
   assert.include(
     cite,
-    tokens("getClientSettings().vimMode"),
+    tokens("settings.vimMode"),
     "citeAssistantText no longer branches on Vim mode",
   );
   // The composer taking focus is what puts the keys in insert mode after a cite.
@@ -350,6 +361,8 @@ it("modal keys seam guard: a cite in Vim mode lands at the prompt's end and focu
     tokens("focusEditor"),
     "the Vim mode cite passes a focus option, so it may no longer focus the composer",
   );
+  const vimCite = region(cite, "settings.vimMode ?", ": insertComposerTextStable(", file);
+  assert.include(vimCite, tokens('"end"'), "the Vim mode cite no longer appends to the prompt");
 });
 
 it("modal keys seam guard: a consumed draft clears the composer undo history", () => {
@@ -381,7 +394,12 @@ it("modal keys seam guard: the timeline minimap answers turn jump requests", () 
   assertCallCarries(
     "apps/web/src/components/chat/MessagesTimeline.tsx",
     "subscribeTurnJumpRequest",
-    ["onSelect(item)", "request.rowId"],
+    [
+      "onManualNavigation()",
+      "listRef.current?.scrollToIndex(",
+      "index: item.rowIndex",
+      "request.rowId = item.id",
+    ],
   );
 });
 
@@ -456,7 +474,18 @@ it("modal keys seam guard: the chat route registers new thread and preview", () 
 });
 
 it("modal keys seam guard: ChatView registers its thread and panel commands", () => {
-  assertRegistersCommands("apps/web/src/components/ChatView.tsx", [
+  const file = "apps/web/src/components/ChatView.tsx";
+  assertCallCarries(file, "useCommandHandlers", ["...mesuraPickerCommands"]);
+  const pickers = blockAfter(read(file), "const mesuraPickerCommands =", file);
+  for (const command of [
+    "traitsPicker.toggle",
+    "workspacePicker.toggle",
+    "branchPicker.toggle",
+    "question.toggleCollapse",
+  ]) {
+    assert.include(pickers, tokens(`"${command}":`), `ChatView no longer registers ${command}`);
+  }
+  assertRegistersCommands(file, [
     "thread.copyReference",
     "thread.settle",
     "thread.pin",
@@ -468,10 +497,6 @@ it("modal keys seam guard: ChatView registers its thread and panel commands", ()
     "modelPicker.toggle",
     "composer.host",
     "composer.mode",
-    "traitsPicker.toggle",
-    "workspacePicker.toggle",
-    "branchPicker.toggle",
-    "question.toggleCollapse",
   ]);
 });
 
@@ -500,7 +525,13 @@ it("modal keys seam guard: the open-in picker registers editor.openFavorite", ()
 });
 
 it("modal keys seam guard: the pull requests page registers its panel commands", () => {
-  assertRegistersCommands("apps/web/src/routes/_chat.pull-requests.tsx", [
+  const routeFile = "apps/web/src/routes/_chat.pull-requests.tsx";
+  assert.include(
+    read(routeFile),
+    tokens("component: PullRequestsPage"),
+    "the pull requests route no longer mounts PullRequestsPage",
+  );
+  assertRegistersCommands("apps/web/src/components/pullRequest/PullRequestsPage.tsx", [
     "rightPanel.close",
     "rightPanel.toggle",
     "thread.copyReference",
@@ -509,8 +540,12 @@ it("modal keys seam guard: the pull requests page registers its panel commands",
 
 it("modal keys seam guard: the command palette registers its overlay toggles", () => {
   assertCallCarries("apps/web/src/components/CommandPalette.tsx", "useCommandHandlers", [
-    "OVERLAY_MODE_BY_COMMAND",
-    "toggleMode(mode)",
+    '["commandPalette.toggle", "command"]',
+    '["filePicker.toggle", "files"]',
+    '["projectSearch.toggle", "content"]',
+    '["projectScope.toggle", "projects"]',
+    '["threadSearch.toggle", "threads"]',
+    "toggleMode(mode as SearchOverlayMode)",
   ]);
 });
 
@@ -547,11 +582,28 @@ it("modal keys seam guard round 2: the sidebar numbers and jumps to the threads 
     "the jump hints number the first nine threads of the list again, not the ones on screen",
   );
   assertCallCarries(file, "navigateToThreadKey", ["readViewportThreadKeys()"]);
-  assert.include(
-    read(file),
-    tokens("[keybindings, orderedThreadKeys, viewportThreadKeys]"),
-    "the jump hints no longer recompute when the threads on screen change",
-  );
+  // An inline calculation reruns on each render; a memo must depend on all three inputs.
+  const jumpLabels = region(read(file), "const jumpLabelByKey =", "const navigateToThread =", file);
+  if (callArguments(canonicalize(jumpLabels), "useMemo").length > 0) {
+    assert.include(
+      jumpLabels,
+      tokens("[keybindings, orderedThreadKeys, viewportThreadKeys]"),
+      "the jump hints no longer recompute when the threads on screen change",
+    );
+  } else {
+    assert.include(
+      jumpLabels,
+      tokens("(() => {"),
+      "the jump hints no longer calculate their labels during render",
+    );
+    assert.isTrue(
+      jumpLabels.endsWith(tokens("})();")),
+      "the jump hints no longer recalculate on each render",
+    );
+    for (const input of ["keybindings", "orderedThreadKeys", "viewportThreadKeys"]) {
+      assert.include(jumpLabels, input, `the jump hints no longer read ${input}`);
+    }
+  }
 });
 
 it("modal keys seam guard round 2: Ctrl+D and Ctrl+U scroll the sidebar without opening a thread", () => {
@@ -595,7 +647,17 @@ it("modal keys seam guard round 2: arrows move over the sidebar rows and only En
   );
   // The arrow hook finds rows by this attribute: both row kinds carry it, and
   // both hand their keys to the row handler below.
-  const rows = sidebar.text.split(tokens("data-mesura-thread-key={threadKey}")).slice(1);
+  const rowFile = "apps/web/src/components/sidebar/SidebarThreadRow.tsx";
+  const rowSource = read(rowFile);
+  assert.isTrue(
+    rendersElement(sidebar.text, "SortableThreadRow"),
+    "Sidebar no longer mounts its thread rows",
+  );
+  assert.isTrue(
+    rendersElement(rowSource, "SidebarThreadRow"),
+    "SortableThreadRow no longer mounts SidebarThreadRow",
+  );
+  const rows = rowSource.split(tokens("data-mesura-thread-key={threadKey}")).slice(1);
   assert.lengthOf(
     rows,
     2,
@@ -608,24 +670,35 @@ it("modal keys seam guard round 2: arrows move over the sidebar rows and only En
       tokens("onKeyDown={handleKeyDown}"),
       "a thread row lost its key handler",
     );
+    assert.include(
+      element,
+      "rowSurfaceClassName",
+      "a thread row no longer uses the shared focus styles",
+    );
   }
-  // The row the arrows reach looks hovered, in both row kinds.
-  assert.isAtLeast(
-    countOf(sidebar.text, "focus-visible:bg-sidebar-row-hover"),
-    2,
+  // Both row kinds use this shared class calculation, so each gets the focus tint.
+  const rowStyles = region(
+    rowSource,
+    "const rowSurfaceClassName = cn(",
+    "const sortable =",
+    rowFile,
+  );
+  assert.include(
+    rowStyles,
+    "focus-visible:bg-sidebar-row-hover",
     "a focused thread row no longer shows the hover background",
   );
   assert.include(
-    sidebar.text,
+    rowStyles,
     tokens("focus-visible:text-sidebar-foreground"),
     "a focused settled row no longer shows its title at full strength",
   );
   // An arrow reaching the row's own handler must not activate the thread.
   const handler = region(
-    sidebar.text,
+    rowSource,
     "if (event.target !== event.currentTarget) return;",
     "onThreadActivate(threadRef)",
-    file,
+    rowFile,
   );
   assert.include(
     handler,
@@ -665,7 +738,13 @@ it("modal keys seam guard round 2: the panel launcher takes its keys, opens on +
     "the + button no longer opens its panel's launcher",
   );
   // The overlay is drawn in the branch with open tabs, which stay mounted under it.
-  const shown = region(source, "{props.children}", "</>", file);
+  const tabs = region(
+    source,
+    "export function RightPanelTabs(",
+    "function DeviceTabTooltip(",
+    file,
+  );
+  const shown = region(tabs, "{props.children}", "</>", file);
   assert.include(
     shown,
     tokens("{launcherOpen ? ("),
@@ -797,7 +876,7 @@ it("modal keys seam guard round 2: the launcher answers every letter and shows w
     file,
   );
   for (const fragment of [
-    "if (event.defaultPrevented) return false;",
+    "if (event.defaultPrevented || document.querySelector(LAUNCHER_SHORTCUT_BLOCKING_LAYERS)) return false;",
     "const current = shortcutActionsRef.current;",
     "current.actions.map((entry) => ({ ...entry, available: true }))",
     "current.panelActions.map((entry) => ({ ...entry, available: true }))",
@@ -928,8 +1007,14 @@ it("modal keys seam guard round 2: the launcher answers every letter and shows w
   for (const name of ["absolute", "inset-0", "z-20"]) {
     assert.include(overlayClasses, name, `the launcher overlay lost the ${name} class`);
   }
-  // Upstream's drop-down menu behind the +, with its hover tooltips, is gone:
-  // a merge that brings it back gives the panel two menus again.
+  // Upstream retains exported menu helpers. The tab bar must keep
+  // using the launcher alone, without rendering those helpers beside it.
+  const tabs = region(
+    source,
+    "export function RightPanelTabs(",
+    "function DeviceTabTooltip(",
+    file,
+  );
   for (const removed of [
     "addSurfaceActions",
     "addSurfaceMenuOpen",
@@ -937,7 +1022,7 @@ it("modal keys seam guard round 2: the launcher answers every letter and shows w
     "DisabledReasonTooltip",
     "SURFACE_DISABLED_REASONS",
   ]) {
-    assert.notInclude(source, removed, `upstream's ${removed} is back beside the launcher`);
+    assert.notInclude(tabs, removed, `upstream's ${removed} is back beside the launcher`);
   }
 });
 
@@ -945,17 +1030,24 @@ it("modal keys seam guard round 2: ChatView registers maximize and the new-tab l
   const file = "apps/web/src/components/ChatView.tsx";
   assertRegistersCommands(file, ["rightPanel.toggleMaximized", "rightPanel.newTab"]);
   const newTab = blockAfter(read(file), '"rightPanel.newTab": () =>', file);
-  // Opens the panel only when it is closed (a toggle would close an open one),
-  // then the launcher in it.
-  assert.match(
+  // show is idempotent: it opens a closed panel and keeps an open panel open.
+  const showPanel = "if (activeThreadRef) useRightPanelStore.getState().show(activeThreadRef)";
+  assert.include(
     newTab,
-    /if\(!rightPanelOpen\)\{?toggleRightPanel\(\)/,
+    tokens(showPanel),
     "rightPanel.newTab no longer opens the panel only when it is closed",
+  );
+  const storeFile = "apps/web/src/rightPanelStore.ts";
+  const show = region(read(storeFile), "show: (ref) =>", "close: (ref) =>", storeFile);
+  assert.include(
+    show,
+    tokens("current.isOpen ? current : { ...current, isOpen: true }"),
+    "show no longer preserves an already open panel",
   );
   const launcherAt = newTab.indexOf(tokens("openPanelLauncher()"));
   assert.isAbove(
     launcherAt,
-    newTab.indexOf(tokens("toggleRightPanel()")),
+    newTab.indexOf(tokens(showPanel)),
     "rightPanel.newTab no longer opens the launcher after the panel",
   );
 });

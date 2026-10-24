@@ -425,6 +425,11 @@ async function mountApp(
     root = await renderBrowser(null, { container: container, router: false });
     await root.rerender(<AppRoot router={router as unknown as AppRouter} />);
   });
+  await vi.waitFor(() =>
+    expect(document.activeElement, "the route focuses its current editor").toBe(
+      composerEditorElement(),
+    ),
+  );
 }
 
 /**
@@ -555,19 +560,28 @@ function tiptapEditor(): Editor {
 
 /** Places a real ProseMirror text selection after `before` in the document. */
 async function placeCaretAfter(before: string) {
-  const editor = tiptapEditor();
-  let caret: number | undefined;
-  editor.state.doc.descendants((node, position) => {
-    if (caret !== undefined || !node.isText) return;
-    const offset = node.text!.indexOf(before);
-    if (offset >= 0) caret = position + offset + before.length;
-  });
-  expect(caret, `No text node holds ${before}`).toBeDefined();
+  // A native click waits for the editor's real layout while pending focus callbacks run.
+  // MessageChannel tasks alone let an earlier marker's focusAt overwrite the next caret.
+  await root!.getByTestId("composer-editor").click();
   await act(async () => {
+    // Resolve the keyed Tiptap instance after the click so selection uses the mounted view.
+    const editor = tiptapEditor();
+    expect(editor.isDestroyed, "the fixture uses a live editor").toBe(false);
+    expect(editor.view.dom.isConnected, "the fixture uses the mounted editor").toBe(true);
+    let caret: number | undefined;
+    editor.state.doc.descendants((node, position) => {
+      if (caret !== undefined || !node.isText) return;
+      const offset = node.text!.indexOf(before);
+      if (offset >= 0) caret = position + offset + before.length;
+    });
+    expect(caret, `No text node holds ${before}`).toBeDefined();
     editor.view.dispatch(
       editor.state.tr.setSelection(TextSelection.create(editor.state.doc, caret!)),
     );
   });
+  expect(document.activeElement, "the fixture focuses the current editor").toBe(
+    composerEditorElement(),
+  );
   expect(textBeforeCaret(), "the fixture placed the caret").toMatch(new RegExp(`${before}$`));
 }
 
@@ -2043,13 +2057,14 @@ describe("dictation phase 6 rework", () => {
   });
 
   it("dictation phase 6 rework: level samples are published only while the window does not have focus", async () => {
-    using _timers = fakeTimers();
     await using _browserFixture0 = await setupBrowserFixture0();
     await using _browserFixture4 = await setupBrowserFixture4();
 
     const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
     const desktop = installLoopbackDesktopBridge();
     await mountApp();
+    // Let native mount focus finish before the recorder's sample clock takes over.
+    using _timers = fakeTimers();
     await desktop.forward("dictation.toggle");
     const whileFocused = desktop.published.length;
     // The recorder samples the level every 100 ms.

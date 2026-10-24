@@ -194,7 +194,7 @@ describe("agent search criterion 1: switching between exact words and agent mode
 
     await openThreadSearch();
     expect(paletteMode()).toBe("threads");
-    expect(focusIsInPickerTextField()).toBe(true);
+    await vi.waitFor(() => expect(focusIsInPickerTextField()).toBe(true));
     expect(activeSearchMode()).toBe("exact");
     expect(optionRows().map((row) => row.textContent)).toContainEqual(
       expect.stringContaining("Rename keybind chord"),
@@ -204,7 +204,7 @@ describe("agent search criterion 1: switching between exact words and agent mode
     expect(enter.defaultPrevented).toBe(true);
     expect(activeSearchMode()).toBe("agent");
     expect(paletteMode()).toBe("threads");
-    expect(focusIsInPickerTextField()).toBe(true);
+    await vi.waitFor(() => expect(focusIsInPickerTextField()).toBe(true));
     expect(optionRows().map((row) => row.textContent)).not.toContainEqual(
       expect.stringContaining("Rename keybind chord"),
     );
@@ -212,7 +212,7 @@ describe("agent search criterion 1: switching between exact words and agent mode
     const leave = await pressKey(pickerTextField(), "Tab");
     expect(leave.defaultPrevented).toBe(true);
     expect(activeSearchMode()).toBe("exact");
-    expect(focusIsInPickerTextField()).toBe(true);
+    await vi.waitFor(() => expect(focusIsInPickerTextField()).toBe(true));
     expect(optionRows().map((row) => row.textContent)).toContainEqual(
       expect.stringContaining("Rename keybind chord"),
     );
@@ -346,7 +346,7 @@ describe("agent search criterion 3: keyboard selection, Escape, failure, empty, 
     await using _browserFixture0 = await setupBrowserFixture0();
 
     await searchAndShow([HOSTS_DOCK_MATCH, ARROW_LAG_MATCH]);
-    expect(focusIsInPickerTextField()).toBe(true);
+    await vi.waitFor(() => expect(focusIsInPickerTextField()).toBe(true));
 
     await highlightRow(1);
     expect(isHighlighted(optionRows()[0]!)).toBe(false);
@@ -365,7 +365,7 @@ describe("agent search criterion 3: keyboard selection, Escape, failure, empty, 
     await pressKey(pickerTextField(), "Escape");
     expect(paletteMode()).toBe("threads");
     expect(activeSearchMode()).toBe("exact");
-    expect(focusIsInPickerTextField()).toBe(true);
+    await vi.waitFor(() => expect(focusIsInPickerTextField()).toBe(true));
 
     await pressKey(pickerTextField(), "Escape");
     expect(paletteMode()).toBe("command");
@@ -388,7 +388,7 @@ describe("agent search criterion 3: keyboard selection, Escape, failure, empty, 
     expect(alert!.textContent).toMatch(/fail|could not|couldn't|error/i);
     expect(picker.textContent).toContain(DESCRIPTION);
     expect(optionRows()).toHaveLength(0);
-    expect(focusIsInPickerTextField()).toBe(true);
+    await vi.waitFor(() => expect(focusIsInPickerTextField()).toBe(true));
 
     await submitDescription(DESCRIPTION);
     expect(threadSearchFixture.agentCalls).toHaveLength(2);
@@ -400,7 +400,7 @@ describe("agent search criterion 3: keyboard selection, Escape, failure, empty, 
     expect(threadSearchPicker()!.querySelector('[role="alert"]')?.textContent ?? "").toMatch(
       /fail|could not|couldn't|error/i,
     );
-    expect(focusIsInPickerTextField()).toBe(true);
+    await vi.waitFor(() => expect(focusIsInPickerTextField()).toBe(true));
   });
 
   it("agent search: no confident match says so and names the environments it could not reach", async () => {
@@ -431,7 +431,7 @@ describe("agent search criterion 3: keyboard selection, Escape, failure, empty, 
       coverageNotice,
       `Expected the unreachable environment named; rendered: ${picker.textContent}`,
     ).toBeDefined();
-    expect(focusIsInPickerTextField()).toBe(true);
+    await vi.waitFor(() => expect(focusIsInPickerTextField()).toBe(true));
   });
 });
 

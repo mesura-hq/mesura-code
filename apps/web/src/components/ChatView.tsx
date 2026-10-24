@@ -2503,6 +2503,7 @@ export default function ChatView(props: ChatViewProps) {
     createBrowserSurfaceStable,
     moveRightPanelSurfaceStable,
     onOpenTurnDiffStable,
+    onToggleDiffStable,
     openChangesFromThreadPanelStable,
     openFileSurfaceStable,
     toggleRightPanelMaximizedStable,
@@ -2902,6 +2903,7 @@ export default function ChatView(props: ChatViewProps) {
     "rightPanel.close": () => {
       if (activeRightPanelSurface) closeRightPanelSurface(activeRightPanelSurface);
     },
+    "diff.toggle": onToggleDiffStable,
     "treeDiff.toggle": toggleTreeDiff,
     "diff.modeMenu": openDiffModeMenu,
     "modelPicker.toggle": () => composerRef.current?.toggleModelPicker(),

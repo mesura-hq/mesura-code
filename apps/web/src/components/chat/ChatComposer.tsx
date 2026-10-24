@@ -1,3 +1,4 @@
+import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { useMesuraComposerInput } from "./useMesuraComposerInput";
 import { reclaimDictationComposer } from "../../dictation/dictationController";
 import { useMesuraComposerFocus } from "./useMesuraComposerFocus";
@@ -338,6 +339,7 @@ export interface ChatComposerHandle {
     citation: AssistantCitation,
     sourceAnchor: AssistantCitationSourceAnchor,
   ) => boolean;
+  openAttachmentPicker: () => boolean;
   openModelPicker: () => void;
   stepReasoningEffort: (direction: 1 | -1) => void;
   toggleModelPicker: () => void;
@@ -3168,12 +3170,25 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     openPicker: openModelPickerStable,
   });
 
+  // The chord and registry share the visible button's path and availability.
+  const openAttachmentPicker = useStableCallback(() => {
+    if (
+      !showComposerAttachAction ||
+      isCommandPaletteOpen() ||
+      isComposerApprovalState ||
+      projectSelectionRequired ||
+      isRevertingCheckpoint
+    )
+      return false;
+    const button = composerFormRef.current?.querySelector<HTMLButtonElement>(
+      '[aria-label="Attach files"]',
+    );
+    if (!button || button.disabled) return false;
+    button.click();
+    return true;
+  });
   useCommandHandlers({
-    "composer.attachFiles": () => {
-      composerFormRef.current
-        ?.querySelector<HTMLButtonElement>('[aria-label="Attach files"]')
-        ?.click();
-    },
+    "composer.attachFiles": openAttachmentPicker,
     "composer.stash": () => {
       void stashCurrentPromptStable();
     },
@@ -3182,6 +3197,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   useImperativeHandle(
     composerRef,
     () => ({
+      openAttachmentPicker,
       focusAtEnd: () => {
         cancelComposerNormalResume();
         focusComposerEditor();
@@ -3470,6 +3486,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       applyPromptReplacementStable,
       isComposerModelPickerOpen,
       openModelPickerStable,
+      openAttachmentPicker,
       combinedPicker.openOnMoreOptions,
       readComposerSnapshotStable,
       resetComposerTrigger,
@@ -3644,7 +3661,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             target={composerDraftTarget}
             pendingCount={countPendingDictationSlots(prompt)}
           />
-          {dictationStrip}
           <ComposerBannerStack
             key={activeThreadId}
             className="relative z-0"
@@ -3739,6 +3755,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               />
             </ComposerBanner.Attachment>
           ) : null}
+          {/* Keep the recording strip nearest the composer, after the other banners. */}
+          {dictationStrip}
         </ComposerBanner.Column>
         <ComposerStashBadge
           count={stashQueue.length}

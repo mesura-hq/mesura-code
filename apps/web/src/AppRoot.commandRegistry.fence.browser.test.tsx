@@ -107,7 +107,12 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { installKeyEngine } from "./keys/keyEngine";
 
 import { readKeyEngineSnapshot } from "./keys/keyEngineStore";
-import { selectActiveRightPanelSurface, useRightPanelStore } from "./rightPanelStore";
+import { runRegisteredCommand } from "./commands/commandRegistry";
+import {
+  selectActiveRightPanelSurface,
+  selectThreadRightPanelState,
+  useRightPanelStore,
+} from "./rightPanelStore";
 
 const { Outlet } = await import("@tanstack/react-router");
 const { AppRoot } = await import("./AppRoot");
@@ -129,6 +134,8 @@ const pressedByTest = new Set<Event>();
 
 async function setupBrowserFixture0() {
   const previousViewport = { width: window.innerWidth, height: window.innerHeight };
+  const environment = appRootFence.environments[0]!.serverConfig.environment;
+  const previousCapabilities = { ...environment.capabilities };
   // Native matchMedia must select the desktop sidebar and inline right panel.
   await page.viewport(1440, 900);
   // Registered before the engine, so it sees every keydown, consumed or not.
@@ -158,6 +165,7 @@ async function setupBrowserFixture0() {
       root = undefined;
       container.remove();
       useRightPanelStore.getState().removeThread(threadRef);
+      environment.capabilities = previousCapabilities;
       appRootFence.threads.clear();
       appRootFence.threadStates.clear();
       vi.unstubAllGlobals();
@@ -293,6 +301,60 @@ describe("registry fence: lifted ChatView chords keep their effect", () => {
     vimMode,
     label: vimMode ? "Vim mode on" : "Vim mode off",
   }));
+
+  it.each(vimModeCases)(
+    "registry fence regression: Alt+A and the attachment command reach the real file input with $label",
+    async ({ vimMode }) => {
+      await using _browserFixture0 = await setupBrowserFixture0();
+      Object.assign(appRootFence.environments[0]!.serverConfig.environment.capabilities, {
+        attachmentUploads: true,
+        fileAttachments: { maxUploadBytes: 1_048_576 },
+      });
+      await mountApp({ vimMode });
+      const input = container.querySelector<HTMLInputElement>('input[type="file"]');
+      expect(input, "the composer mounts its real attachment input").not.toBeNull();
+      using click = vi.spyOn(input!, "click").mockImplementation(() => {});
+      const event = await press({ key: "a", code: "KeyA", altKey: true });
+      expect(event.defaultPrevented).toBe(true);
+      expect(click).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        expect(runRegisteredCommand("composer.attachFiles")).toBe(true);
+      });
+      expect(click).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it.each(vimModeCases)(
+    "registry fence regression: unavailable attachments leave Alt+A unclaimed with $label",
+    async ({ vimMode }) => {
+      await using _browserFixture0 = await setupBrowserFixture0();
+      await mountApp({ vimMode });
+      expect(container.querySelector('input[type="file"]')).toBeNull();
+      const event = await press({ key: "a", code: "KeyA", altKey: true });
+      expect(event.defaultPrevented).toBe(false);
+    },
+  );
+
+  it.each(vimModeCases)(
+    "registry fence regression: registered diff.toggle opens and closes the diff with $label",
+    async ({ vimMode }) => {
+      await using _browserFixture0 = await setupBrowserFixture0();
+      await mountApp({ vimMode });
+      await act(async () => {
+        expect(runRegisteredCommand("diff.toggle")).toBe(true);
+      });
+      expect(activeSurface()?.kind).toBe("diff");
+      expect(
+        selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef).isOpen,
+      ).toBe(true);
+      await act(async () => {
+        expect(runRegisteredCommand("diff.toggle")).toBe(true);
+      });
+      expect(
+        selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef).isOpen,
+      ).toBe(false);
+    },
+  );
 
   it.each(vimModeCases)(
     "registry fence guard: Mod+Shift+S settles the open thread with $label",

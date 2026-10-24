@@ -15,6 +15,8 @@ export function composerShortcutCommands(
   branchToolbarRef: { readonly current: BranchToolbarHandle | null },
 ): ChatShortcutCommands {
   return {
+    "composer.attachFiles": ({ event }) =>
+      !event.repeat && (composerRef.current?.openAttachmentPicker() ?? false),
     "modelPicker.toggle": ({ event }) => {
       if (!event.repeat) composerRef.current?.toggleModelPicker();
     },

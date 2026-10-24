@@ -336,13 +336,12 @@ describe("Symmetria broker contract phase-one regression guards", () => {
       };
     };
 
-    // Effect 4.0.0-rc.112 emits the bound directly; up to beta.103 it wrapped
-    // it in `allOf: [{ minimum: 0 }]`. What this guard is for is the alignment
-    // below — every non-negative field carrying the SAME constraint — so the
-    // shape is pinned only to catch the day one of them stops matching.
+    // Effect now emits Int's safe-integer ceiling as well as the minimum.
+    // Require the full wire range and keep every branded field aligned with it.
     expect(documents.base).toEqual({
       type: "integer",
       minimum: 0,
+      maximum: Number.MAX_SAFE_INTEGER,
     });
     expect(documents.draftVersion).toEqual(documents.base);
     expect(documents.snapshotRevision).toEqual(documents.base);

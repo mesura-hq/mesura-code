@@ -77,6 +77,7 @@ import { type PullRequestRowTarget } from "./PullRequestRow";
 import { PullRequestsUnavailableState } from "./PullRequestsUnavailableState";
 import { RightPanelTabs } from "../RightPanelTabs";
 import { isCommandPaletteOpen } from "~/commandPaletteBus";
+import { useCommandHandlers } from "~/commands/commandRegistry";
 import { isElectron } from "~/env";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "~/keybindings";
 import { isTerminalFocused } from "~/lib/terminalFocus";
@@ -1359,11 +1360,11 @@ export function PullRequestsPage() {
     selectSurfaceInUrl(null);
   };
 
-  const copyPullRequestFromShortcut = useEffectEvent((event: KeyboardEvent) => {
+  const copyPullRequestFromShortcut = useStableCallback((event?: KeyboardEvent) => {
     if (!openPanelPullRequestUrl) return;
-    event.preventDefault();
-    event.stopPropagation();
-    if (event.repeat) return;
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (event?.repeat) return;
     const url = openPanelPullRequestUrl;
     void writeTextToClipboard(url, "pull request link").then(
       (didCopy) => {
@@ -1379,23 +1380,30 @@ export function PullRequestsPage() {
       },
     );
   });
-  const closeActiveSurfaceFromShortcut = useEffectEvent((event: KeyboardEvent) => {
+  const closeActiveSurfaceFromShortcut = useStableCallback((event?: KeyboardEvent) => {
     if (activePullRequestSurface === null) return;
-    event.preventDefault();
-    event.stopPropagation();
-    if (!event.repeat) closeSurface(activePullRequestSurface);
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (!event?.repeat) closeSurface(activePullRequestSurface);
   });
-  const toggleRightPanelFromShortcut = useEffectEvent((event: KeyboardEvent) => {
+  const toggleRightPanelFromShortcut = useStableCallback((event?: KeyboardEvent) => {
     if (!rightPanelAvailable) return;
-    event.preventDefault();
-    event.stopPropagation();
-    if (!event.repeat) toggleRightPanel();
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (!event?.repeat) toggleRightPanel();
   });
-  const toggleRightPanelMaximizedFromShortcut = useEffectEvent((event: KeyboardEvent) => {
+  const toggleRightPanelMaximizedFromShortcut = useStableCallback((event?: KeyboardEvent) => {
     if (!rightPanelState.isOpen) return;
-    event.preventDefault();
-    event.stopPropagation();
-    if (!event.repeat) toggleRightPanelMaximized();
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (!event?.repeat) toggleRightPanelMaximized();
+  });
+  // The extracted route owns the same commands as its keyboard listener.
+  useCommandHandlers({
+    "rightPanel.close": () => closeActiveSurfaceFromShortcut(),
+    "rightPanel.toggle": () => toggleRightPanelFromShortcut(),
+    "rightPanel.toggleMaximized": () => toggleRightPanelMaximizedFromShortcut(),
+    "thread.copyReference": () => copyPullRequestFromShortcut(),
   });
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1410,7 +1418,13 @@ export function PullRequestsPage() {
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [keybindings]);
+  }, [
+    keybindings,
+    closeActiveSurfaceFromShortcut,
+    toggleRightPanelFromShortcut,
+    toggleRightPanelMaximizedFromShortcut,
+    copyPullRequestFromShortcut,
+  ]);
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">

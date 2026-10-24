@@ -45,8 +45,9 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
           ref.threadId === draftSession.threadId,
       ) ?? null)
     : null;
+  // Keep the explicit promotion target while the shell loads, so the visible thread retains its scope.
   const serverThreadRef: ScopedThreadRef | null =
-    target.kind === "server" ? target.threadRef : inferredThreadRef;
+    target.kind === "server" ? target.threadRef : (draftSession?.promotedTo ?? inferredThreadRef);
   const serverThread = useQuietThreadShell(serverThreadRef);
   useThreadBackgroundScope(serverThreadRef);
   const backgroundSubmissionPending = useBackgroundDraftSubmissionPending(
