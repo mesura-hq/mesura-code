@@ -3,11 +3,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import { type MouseEvent } from "react";
 
-import {
-  issueRepositoryUrl,
-  pullRequestHostOf,
-  type SourceControlProviderKind,
-} from "@t3tools/contracts";
+import { issueRepositoryUrl } from "@t3tools/contracts";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { parseChangeRequestUrl, type ChangeRequestLink } from "@t3tools/shared/changeRequestUrl";
 import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
@@ -38,10 +34,24 @@ export function findProjectForChangeRequest(
 ): EnvironmentProject | undefined {
   return projects.find((project) => {
     const identity = project.repositoryIdentity;
-    return (
-      identity?.provider !== undefined &&
-      sourceControlClients.get(identity.provider).isChangeRequestInRepository(identity, link)
-    );
+    if (identity?.provider === undefined) return false;
+    const client = sourceControlClients.get(identity.provider);
+    // GitHub issue reads validate every recorded repository field. Apply the same
+    // rule to PR links so canonical-only identities work and contradictory ones claim neither.
+    if (identity.provider === "github") {
+      const repositoryUrl = issueRepositoryUrl(identity);
+      if (repositoryUrl === null) return false;
+      return client.isChangeRequestInRepository(
+        {
+          ...identity,
+          displayName: new URL(repositoryUrl).pathname
+            .replace(/^\/+|\/+$/gu, "")
+            .replace(/\.git$/u, ""),
+        },
+        link,
+      );
+    }
+    return client.isChangeRequestInRepository(identity, link);
   });
 }
 

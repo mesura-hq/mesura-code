@@ -121,27 +121,43 @@ describe("composerSubmissionIntentForKey", () => {
     ).toBe(expected);
   });
 
-  it("honors the send preference with an existing install's saved alternate binding", () => {
-    const keybindings = mergeWithDefaultKeybindings(
-      compileResolvedKeybindingsConfig([
-        {
-          key: "mod+enter",
-          command: "composer.sendAlternate",
-          when: "composerFocus && turnRunning",
-        },
-      ]),
-    );
-    const running = { ...input, keybindings, isRunning: true, sendShortcut: "mod-enter" as const };
-    expect(composerSubmissionIntentForKey({ ...running, event: { ...enter, ctrlKey: true } })).toBe(
-      "foreground",
-    );
-    expect(
-      composerSubmissionIntentForKey({
-        ...running,
-        event: { ...enter, ctrlKey: true, shiftKey: true },
-      }),
-    ).toBe("alternate");
-  });
+  it.each(["MacIntel", "Win32", "Linux"])(
+    "honors the send preference with an existing install's saved alternate binding on %s",
+    (platform) => {
+      const keybindings = mergeWithDefaultKeybindings(
+        compileResolvedKeybindingsConfig([
+          {
+            key: "mod+enter",
+            command: "composer.sendAlternate",
+            when: "composerFocus && turnRunning",
+          },
+        ]),
+      );
+      const modifier = {
+        metaKey: platform === "MacIntel",
+        ctrlKey: platform !== "MacIntel",
+      };
+      for (const sendShortcut of ["mod-enter", "mod-enter-multiline"] as const) {
+        const running = {
+          ...input,
+          platform,
+          keybindings,
+          isRunning: true,
+          sendShortcut,
+          prompt: "two\nlines",
+        };
+        expect(
+          composerSubmissionIntentForKey({ ...running, event: { ...enter, ...modifier } }),
+        ).toBe("foreground");
+        expect(
+          composerSubmissionIntentForKey({
+            ...running,
+            event: { ...enter, ...modifier, shiftKey: true },
+          }),
+        ).toBe("alternate");
+      }
+    },
+  );
 
   it.each(["enter", "mod-enter", "mod-enter-multiline"] as const)(
     "uses remapped keys and removes the old action bindings with %s",

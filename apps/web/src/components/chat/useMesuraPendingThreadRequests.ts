@@ -1,3 +1,4 @@
+import { runWithCleanup } from "../../lib/runWithCleanup";
 import { useEffect, useRef, useState } from "react";
 import {
   AuthOrchestrationOperateScope,
@@ -178,34 +179,43 @@ export function useMesuraPendingThreadRequests(input: {
     setRespondingUserInputRequestKeys((existing) =>
       existing.includes(responseKey) ? existing : [...existing, responseKey],
     );
-    try {
-      const result = await respondToThreadUserInput({
-        environmentId,
-        input: {
-          threadId: activeThreadId,
-          requestId,
-          answers,
-          ...(Object.keys(attachmentsByQuestionId).length > 0 ? { attachmentsByQuestionId } : {}),
-        },
-      });
-      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-        const error = squashAtomCommandFailure(result);
-        setThreadError(
-          activeThreadId,
-          error instanceof Error ? error.message : "Failed to submit user input.",
+    return runWithCleanup(
+      async () => {
+        try {
+          const result = await respondToThreadUserInput({
+            environmentId,
+            input: {
+              threadId: activeThreadId,
+              requestId,
+              answers,
+              ...(Object.keys(attachmentsByQuestionId).length > 0
+                ? { attachmentsByQuestionId }
+                : {}),
+            },
+          });
+          if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+            const error = squashAtomCommandFailure(result);
+            setThreadError(
+              activeThreadId,
+              error instanceof Error ? error.message : "Failed to submit user input.",
+            );
+          }
+          return result._tag === "Success";
+        } catch (error) {
+          setThreadError(
+            activeThreadId,
+            error instanceof Error ? error.message : "Failed to submit user input.",
+          );
+          return false;
+        }
+      },
+      () => {
+        userInputResponsesInFlight.current.delete(responseKey);
+        setRespondingUserInputRequestKeys((existing) =>
+          existing.filter((id) => id !== responseKey),
         );
-      }
-      return result._tag === "Success";
-    } catch (error) {
-      setThreadError(
-        activeThreadId,
-        error instanceof Error ? error.message : "Failed to submit user input.",
-      );
-      return false;
-    } finally {
-      userInputResponsesInFlight.current.delete(responseKey);
-      setRespondingUserInputRequestKeys((existing) => existing.filter((id) => id !== responseKey));
-    }
+      },
+    );
   };
 
   // A dictated answer that submits itself goes through this thread's own respond while shown.
@@ -232,29 +242,36 @@ export function useMesuraPendingThreadRequests(input: {
     setRespondingUserInputRequestKeys((existing) =>
       existing.includes(responseKey) ? existing : [...existing, responseKey],
     );
-    try {
-      const result = await dismissThreadUserInput({
-        environmentId,
-        input: { threadId: activeThreadId, requestId },
-      });
-      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-        const error = squashAtomCommandFailure(result);
-        setThreadError(
-          activeThreadId,
-          error instanceof Error ? error.message : "Failed to dismiss the question.",
+    return runWithCleanup(
+      async () => {
+        try {
+          const result = await dismissThreadUserInput({
+            environmentId,
+            input: { threadId: activeThreadId, requestId },
+          });
+          if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+            const error = squashAtomCommandFailure(result);
+            setThreadError(
+              activeThreadId,
+              error instanceof Error ? error.message : "Failed to dismiss the question.",
+            );
+          }
+          return result._tag === "Success";
+        } catch (error) {
+          setThreadError(
+            activeThreadId,
+            error instanceof Error ? error.message : "Failed to dismiss the question.",
+          );
+          return false;
+        }
+      },
+      () => {
+        userInputResponsesInFlight.current.delete(responseKey);
+        setRespondingUserInputRequestKeys((existing) =>
+          existing.filter((id) => id !== responseKey),
         );
-      }
-      return result._tag === "Success";
-    } catch (error) {
-      setThreadError(
-        activeThreadId,
-        error instanceof Error ? error.message : "Failed to dismiss the question.",
-      );
-      return false;
-    } finally {
-      userInputResponsesInFlight.current.delete(responseKey);
-      setRespondingUserInputRequestKeys((existing) => existing.filter((id) => id !== responseKey));
-    }
+      },
+    );
   };
 
   // Mesura: the in-feed question cards' shared state (ADR-007). A request that cannot be

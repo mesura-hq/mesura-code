@@ -294,12 +294,16 @@ function ManagedCodexSetup({
     awaitingProvider !== null &&
     !authenticated &&
     (auth?.phase === "succeeded" || awaitingProvider === "handoff");
-  if (
-    awaitingProvider !== null &&
-    (authenticated || auth?.phase === "failed" || auth?.phase === "cancelled")
-  ) {
-    setAwaitingProvider(null);
-  }
+  // A render reset clears a new request against the previous terminal receipt.
+  // Reset only when the external receipt or authenticated snapshot changes.
+  useEffect(() => {
+    if (authenticated || auth?.phase === "failed" || auth?.phase === "cancelled") {
+      // WORKAROUND: React's setter rule cannot model external receipt transitions.
+      // Remove when it recognizes this synchronization without resetting new attempts.
+      // oxlint-disable-next-line react/set-state-in-effect -- reset on external auth changes, not on a new local request
+      setAwaitingProvider(null);
+    }
+  }, [authenticated, auth?.phase]);
   useEffect(() => {
     if (awaitingProvider && auth?.phase === "succeeded") {
       void refreshProviders({ environmentId, input: { instanceId } });
@@ -376,19 +380,25 @@ function ManagedCodexSetup({
     importedAttempt.current = attemptId;
     void transferFinishedProfile(handoffQuery.data.profile);
   }, [handoff, handoffQuery.data]);
-  if (
-    handoff &&
-    (handoffQuery.error ||
-      (handoffQuery.data?.phase === "auth" &&
-        ["failed", "cancelled"].includes(handoffQuery.data.state.phase)))
-  ) {
-    setError(
-      handoffQuery.data?.phase === "auth"
-        ? (handoffQuery.data.state.message ?? "ChatGPT sign-in could not finish. Try again.")
-        : "ChatGPT sign-in on the primary environment was interrupted. Try again.",
-    );
-    setHandoff(null);
-  }
+  useEffect(() => {
+    if (
+      handoff &&
+      (handoffQuery.error ||
+        (handoffQuery.data?.phase === "auth" &&
+          ["failed", "cancelled"].includes(handoffQuery.data.state.phase)))
+    ) {
+      // A render reset discards retained finished data before the preceding import effect runs.
+      // WORKAROUND: preserve import-before-disposal ordering until React's setter rule
+      // recognizes ordered external receipt effects.
+      // oxlint-disable-next-line react/set-state-in-effect -- import finished handoff data before disposing a failed query
+      setError(
+        handoffQuery.data?.phase === "auth"
+          ? (handoffQuery.data.state.message ?? "ChatGPT sign-in could not finish. Try again.")
+          : "ChatGPT sign-in on the primary environment was interrupted. Try again.",
+      );
+      setHandoff(null);
+    }
+  }, [handoff, handoffQuery.data, handoffQuery.error]);
   const cancelSignIn = () => {
     setAwaitingProvider(null);
     if (handoff) {

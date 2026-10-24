@@ -1,3 +1,4 @@
+import { runWithCleanup } from "~/lib/runWithCleanup";
 import { useAtomValue } from "@effect/atom-react";
 import {
   AuthEnvironmentMaintainScope,
@@ -360,30 +361,40 @@ export function OutdatedServerUpdateAction({
   const handleUpdate = async () => {
     if (pendingUpdateEnvironmentIds.has(environmentId)) return;
     pendingUpdateEnvironmentIds.add(environmentId);
-    try {
-      const result = await update({
-        environmentId,
-        input: { targetVersion },
-        ...(fromVersion === undefined ? {} : { fromVersion }),
-      });
-      if (result._tag === "Failure") {
-        if (isAtomCommandInterrupted(result)) return;
-        throw squashAtomCommandFailure(result);
-      }
-      toastManager.add({
-        type: "success",
-        title: `${serverLabel} updated`,
-        description: `Reconnected on ${result.value.targetVersion}.`,
-      });
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: `${serverLabel} update failed`,
-        description: updateFailureMessage(error),
-      });
-    } finally {
-      pendingUpdateEnvironmentIds.delete(environmentId);
-    }
+    return runWithCleanup(
+      async () => {
+        try {
+          const result = await update({
+            environmentId,
+            input: { targetVersion },
+            ...(fromVersion === undefined ? {} : { fromVersion }),
+          });
+          if (result._tag === "Failure") {
+            if (isAtomCommandInterrupted(result)) return;
+            toastManager.add({
+              type: "error",
+              title: `${serverLabel} update failed`,
+              description: updateFailureMessage(squashAtomCommandFailure(result)),
+            });
+            return;
+          }
+          toastManager.add({
+            type: "success",
+            title: `${serverLabel} updated`,
+            description: `Reconnected on ${result.value.targetVersion}.`,
+          });
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: `${serverLabel} update failed`,
+            description: updateFailureMessage(error),
+          });
+        }
+      },
+      () => {
+        pendingUpdateEnvironmentIds.delete(environmentId);
+      },
+    );
   };
   return (
     <Button size="xs" variant="outline" onClick={() => void handleUpdate()}>

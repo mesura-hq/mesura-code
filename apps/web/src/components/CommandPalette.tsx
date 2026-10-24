@@ -29,6 +29,7 @@ import {
   GitCompareArrowsIcon,
   ImageIcon,
   MicIcon,
+  MessagesSquareIcon,
   ServerIcon,
 } from "lucide-react";
 import type { RefObject } from "react";
@@ -449,6 +450,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
             openIntent={state.openIntent}
             setOpen={setOpen}
             openChildSearch={openChildSearch}
+            openThreadSearch={reopenThreadSearch}
             initialContext={state.restoredSearch}
             clearOpenIntent={clearOpenIntent}
           />
@@ -462,6 +464,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
 }
 
 function CommandPaletteDialog(props: {
+  readonly openThreadSearch: () => void;
   readonly mode: SearchOverlayMode;
   readonly overlayBackHandlerRef: RefObject<ThreadSearchBackHandler | null>;
   readonly openIntent: CommandPaletteOpenIntent | null;
@@ -532,6 +535,7 @@ function CommandPaletteDialog(props: {
           openIntent={props.openIntent}
           setOpen={props.setOpen}
           openChildSearch={props.openChildSearch}
+          openThreadSearch={props.openThreadSearch}
           initialContext={props.initialContext}
           clearOpenIntent={props.clearOpenIntent}
         />
@@ -541,6 +545,7 @@ function CommandPaletteDialog(props: {
 }
 
 function OpenCommandPaletteDialog(props: {
+  readonly openThreadSearch: () => void;
   readonly openIntent: CommandPaletteOpenIntent | null;
   readonly setOpen: (open: boolean) => void;
   readonly openChildSearch: (
@@ -1602,6 +1607,19 @@ function OpenCommandPaletteDialog(props: {
     shortcutCommand: "filePicker.toggle",
     run: async () => {
       openChildSearch("files", { query, linkedThreadSearch });
+    },
+  });
+
+  actionItems.push({
+    kind: "action",
+    value: "action:search-threads",
+    searchTerms: ["search threads", "find thread", "go to thread", "thread search", "all projects"],
+    title: "Search threads",
+    icon: <MessagesSquareIcon className={ITEM_ICON_CLASS} />,
+    keepOpen: true,
+    shortcutCommand: "threadSearch.toggle",
+    run: async () => {
+      props.openThreadSearch();
     },
   });
 

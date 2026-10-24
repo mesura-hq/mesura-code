@@ -1,5 +1,7 @@
 import type { ScopedThreadRef } from "@t3tools/contracts";
-import { useEffect, useMemo, useRef } from "react";
+import { useMemo } from "react";
+
+import { useStableCallback } from "~/hooks/useStableCallback";
 
 import { useThreadActions } from "../hooks/useThreadActions";
 import { reportThreadActionFailure } from "./threadActionFailureToast";
@@ -33,36 +35,18 @@ export function useThreadSettledToggle(
 ): () => ThreadSettledToggleOutcome {
   const { settleThread, unsettleThread } = useThreadActions();
 
-  // Read through a ref so the returned callback keeps a stable identity. It is
-  // a dependency of ChatView's capture-phase window keydown effect, and the
-  // target changes on every settled-state edge: depending on the value directly
-  // would tear down and re-add that global listener as the thread runs.
-  //
-  // Written in an effect rather than during render, matching the sibling
-  // useChatReadingScroll. React flushes pending passive effects before a
-  // discrete input event, so a keydown cannot observe a stale target.
-  const latestRef = useRef({ target, settleThread, unsettleThread });
-  useEffect(() => {
-    latestRef.current = { target, settleThread, unsettleThread };
+  // Stable callbacks preserve the in-flight guard and the window keydown
+  // listener across settled-state changes. They read the latest committed target.
+  const readTarget = useStableCallback(() => target);
+  const settle = useStableCallback(async (threadRef: ScopedThreadRef) => {
+    reportThreadActionFailure("Failed to settle thread", await settleThread(threadRef));
+  });
+  const unsettle = useStableCallback(async (threadRef: ScopedThreadRef) => {
+    reportThreadActionFailure("Failed to un-settle thread", await unsettleThread(threadRef));
   });
 
   return useMemo(
-    () =>
-      createThreadSettledToggle({
-        readTarget: () => latestRef.current.target,
-        settle: async (threadRef: ScopedThreadRef) => {
-          reportThreadActionFailure(
-            "Failed to settle thread",
-            await latestRef.current.settleThread(threadRef),
-          );
-        },
-        unsettle: async (threadRef: ScopedThreadRef) => {
-          reportThreadActionFailure(
-            "Failed to un-settle thread",
-            await latestRef.current.unsettleThread(threadRef),
-          );
-        },
-      }),
-    [],
+    () => createThreadSettledToggle({ readTarget, settle, unsettle }),
+    [readTarget, settle, unsettle],
   );
 }

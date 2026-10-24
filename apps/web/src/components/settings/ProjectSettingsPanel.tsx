@@ -1,3 +1,4 @@
+import { runWithCleanup } from "../../lib/runWithCleanup";
 import { openProjectIconDiscoveryDialog } from "../projects/ProjectIconDiscoveryDialog";
 import { useComposerMenuState } from "../chat/useComposerMenuState";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
@@ -235,12 +236,10 @@ function ProjectDetail({
     if (savingFaviconRef.current) return;
     savingFaviconRef.current = true;
     setIsSavingFavicon(true);
-    try {
-      await update();
-    } finally {
+    await runWithCleanup(update, () => {
       savingFaviconRef.current = false;
       setIsSavingFavicon(false);
-    }
+    });
   };
 
   const hasMultipleCheckouts = group.memberProjects.length > 1;

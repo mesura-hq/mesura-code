@@ -22,7 +22,13 @@ import {
   selectProjectGroupingSettings,
 } from "../logicalProject";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { readProjects, readThreadShell, useProjects, useQuietThreadShell } from "../state/entities";
+import {
+  readProject,
+  readProjects,
+  readThreadShell,
+  useProjects,
+  useQuietThreadShell,
+} from "../state/entities";
 import {
   applyImplicitDraftModelDefaults,
   resolveNewDraftStartFromOrigin,
@@ -214,7 +220,9 @@ export function useNewThreadHandler() {
         nextDraftId,
         true,
       );
-      if (routeChangedSinceRequest()) return null;
+      // The captured project can disappear while repository defaults are read.
+      // Neither a new draft nor a reusable draft may reopen that removed project.
+      if (routeChangedSinceRequest() || readProject(projectRef) === null) return null;
       projectSettings = resolveProjectSettings(targetServerSettings, project.id, project, {
         repositoryDefaults,
         providers:

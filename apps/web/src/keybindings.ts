@@ -306,7 +306,9 @@ export function findLastMatchingBinding(
     // Shortcut first, `when` second. Both must hold, so the order cannot
     // change the answer, but a `when` clause can now read the focus tree
     // while a shortcut comparison is pure arithmetic on the event.
-    if (!matchesShortcut(event, binding.shortcut, platform)) continue;
+    // Saved Mod+Enter must move to Mod+Shift+Enter with the send preference,
+    // just as its label does, or it steals foreground sends and loses to queue steering.
+    if (!matchesShortcut(event, shortcutForContext(binding, context), platform)) continue;
     if (!matchesWhenClause(binding.whenAst, context)) continue;
     // The file-manager stand-down belongs here rather than in
     // `resolveShortcutCommand`, because that is no longer the single point

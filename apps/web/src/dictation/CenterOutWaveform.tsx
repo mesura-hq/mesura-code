@@ -106,14 +106,28 @@ export function mirroredBarXPositions(centerX: number, distance: number) {
   };
 }
 
-export const CenterOutWaveform = memo(function CenterOutWaveform(props: {
+interface CenterOutWaveformProps {
   sessionId: string;
   phase: DictationRecordingPhase;
   audioLevel: number | null;
   active: boolean;
   reducedMotion: boolean;
   className?: string;
-}) {
+}
+
+export const CenterOutWaveform = memo(function CenterOutWaveform(props: CenterOutWaveformProps) {
+  const { sessionId, ...waveformProps } = props;
+  // A new recording owns new amplitude history and animation clocks.
+  return <RecordingWaveform key={sessionId} {...waveformProps} />;
+});
+
+function RecordingWaveform({
+  phase,
+  audioLevel,
+  active,
+  reducedMotion,
+  className,
+}: Omit<CenterOutWaveformProps, "sessionId">) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const historyRef = useRef<Array<number>>([]);
   const currentAmplitudeRef = useRef(0);
@@ -121,14 +135,8 @@ export const CenterOutWaveform = memo(function CenterOutWaveform(props: {
   const staticRedrawRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    historyRef.current = [];
-    currentAmplitudeRef.current = 0;
-    targetAmplitudeRef.current = 0;
-  }, [props.sessionId]);
-
-  useEffect(() => {
-    targetAmplitudeRef.current = normalizedAmplitude(props.audioLevel ?? 0);
-  }, [props.audioLevel]);
+    targetAmplitudeRef.current = normalizedAmplitude(audioLevel ?? 0);
+  }, [audioLevel]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -165,12 +173,12 @@ export const CenterOutWaveform = memo(function CenterOutWaveform(props: {
       // Capped at two steps, so a frame after a stall does not jump the smoothing.
       const deltaMs = Math.min(FRAME_INTERVAL_MS * 2, Math.max(0, timestamp - lastFrameAt));
       lastFrameAt = timestamp;
-      const target = props.phase === "recording" ? targetAmplitudeRef.current : 0;
+      const target = phase === "recording" ? targetAmplitudeRef.current : 0;
       const timeConstant = target > currentAmplitudeRef.current ? ATTACK_TIME_MS : RELEASE_TIME_MS;
       currentAmplitudeRef.current +=
         (target - currentAmplitudeRef.current) * waveformSmoothingAlpha(deltaMs, timeConstant);
 
-      if (props.phase === "recording" && timestamp - lastSampleAt >= HISTORY_SAMPLE_INTERVAL_MS) {
+      if (phase === "recording" && timestamp - lastSampleAt >= HISTORY_SAMPLE_INTERVAL_MS) {
         const advanced = advanceWaveformHistory({
           history: historyRef.current,
           currentAmplitude: currentAmplitudeRef.current,
@@ -205,7 +213,7 @@ export const CenterOutWaveform = memo(function CenterOutWaveform(props: {
             MIN_BAR_HEIGHT + amplitude * (MAX_BAR_HEIGHT - MIN_BAR_HEIGHT) * positionFactor,
           ),
         );
-        const opacity = props.phase === "paused" ? 0.42 : Math.max(0.34, 0.92 - edgeProgress * 0.5);
+        const opacity = phase === "paused" ? 0.42 : Math.max(0.34, 0.92 - edgeProgress * 0.5);
         const x = mirroredBarXPositions(centerX, distance);
         const y = (height - barHeight) / 2;
 
@@ -221,7 +229,7 @@ export const CenterOutWaveform = memo(function CenterOutWaveform(props: {
 
     const animate = (timestamp: number) => {
       const settled =
-        props.phase === "recording" &&
+        phase === "recording" &&
         isRecordingWaveformSettled({
           history: historyRef.current,
           currentAmplitude: currentAmplitudeRef.current,
@@ -255,7 +263,7 @@ export const CenterOutWaveform = memo(function CenterOutWaveform(props: {
     lastDrawAt = lastFrameAt;
     staticRedrawRef.current = () => draw(performance.now());
 
-    if (shouldAnimateDictationWaveform(props)) {
+    if (shouldAnimateDictationWaveform({ active, phase, reducedMotion })) {
       animationFrame = window.requestAnimationFrame(animate);
     }
 
@@ -265,18 +273,23 @@ export const CenterOutWaveform = memo(function CenterOutWaveform(props: {
       window.cancelAnimationFrame(animationFrame);
       staticRedrawRef.current = null;
     };
-  }, [props.active, props.phase, props.reducedMotion, props.sessionId]);
+  }, [active, phase, reducedMotion]);
 
+  // The sample is part of the redraw request even though drawing reads the
+  // amplitude ref. Keep the drawing setup stable while audio levels change.
+  const staticAudioUpdate = shouldDrawStaticAudioUpdate({ active, phase, reducedMotion })
+    ? { audioLevel }
+    : null;
   useEffect(() => {
-    if (shouldDrawStaticAudioUpdate(props)) staticRedrawRef.current?.();
-  }, [props.active, props.audioLevel, props.phase, props.reducedMotion]);
+    if (staticAudioUpdate !== null) staticRedrawRef.current?.();
+  }, [staticAudioUpdate]);
 
   return (
     <canvas
       ref={canvasRef}
       aria-hidden="true"
-      className={cn("h-6 min-w-0 flex-1 text-foreground", props.className)}
+      className={cn("h-6 min-w-0 flex-1 text-foreground", className)}
       data-dictation-waveform="center-out"
     />
   );
-});
+}

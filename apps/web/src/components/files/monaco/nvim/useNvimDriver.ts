@@ -8,7 +8,16 @@ import type {
   ScopedThreadRef,
 } from "@t3tools/contracts";
 import * as monaco from "monaco-editor";
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 
 import { editsForLinesEvent, editsForSnapshot, type MonacoEdit } from "./nvimModelSync.ts";
 import { toNvimKey } from "./nvimKeymap.ts";
@@ -429,19 +438,8 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
       appliedCursorRef.current = null;
     }
 
-    const apply = (edits: ReadonlyArray<MonacoEdit>) => {
-      if (edits.length === 0) return false;
-      applyingNvimEditRef.current = true;
-      try {
-        // `applyEdits`, never `pushEditOperations`: undo is Neovim's while
-        // Neovim drives, and anything on Monaco's stack would let Ctrl+Z take
-        // back an edit Neovim still believes is there.
-        model.applyEdits(edits as monaco.editor.IIdentifiedSingleEditOperation[]);
-      } finally {
-        applyingNvimEditRef.current = false;
-      }
-      return true;
-    };
+    const apply = (edits: ReadonlyArray<MonacoEdit>) =>
+      applyNvimEdits(model, edits, applyingNvimEditRef);
 
     const reconcileText = (state: NvimDriverState): boolean => {
       // The text has not changed since the model last agreed with it.
@@ -673,6 +671,7 @@ export function useNvimDriver(options: NvimDriverOptions): NvimDriverResult {
   // down: a file switch, the driver going quiet, the surface going away.
   useEffect(() => {
     if (!enabled || editor === null) return;
+    if (model === null) return;
     decorationsRef.current = editor.createDecorationsCollection([]);
     return () => {
       decorationsRef.current?.clear();
@@ -976,4 +975,24 @@ function applyEditorFont(node: HTMLElement, editor: monaco.editor.IStandaloneCod
   node.style.fontFeatureSettings = font.fontFeatureSettings;
   node.style.lineHeight = `${font.lineHeight}px`;
   node.style.letterSpacing = `${font.letterSpacing}px`;
+}
+
+// Neovim owns undo here. Keep the flag's exception cleanup at the imperative
+// model boundary, outside the hook that React Compiler analyzes.
+function applyNvimEdits(
+  model: monaco.editor.ITextModel,
+  edits: ReadonlyArray<MonacoEdit>,
+  applyingNvimEditRef: RefObject<boolean>,
+): boolean {
+  if (edits.length === 0) return false;
+  applyingNvimEditRef.current = true;
+  try {
+    // `applyEdits`, never `pushEditOperations`: undo is Neovim's while
+    // Neovim drives, and anything on Monaco's stack would let Ctrl+Z take
+    // back an edit Neovim still believes is there.
+    model.applyEdits(edits as monaco.editor.IIdentifiedSingleEditOperation[]);
+  } finally {
+    applyingNvimEditRef.current = false;
+  }
+  return true;
 }

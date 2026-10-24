@@ -1,6 +1,14 @@
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import * as monaco from "monaco-editor";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { createPortal } from "react-dom";
 
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
@@ -167,6 +175,14 @@ export function useMonacoFileComments({
 
   const [entries, setEntries] = useState<FileCommentAnnotationEntry[]>([]);
   const [selection, setSelection] = useState<SelectedLineRange | null>(null);
+  const [commentModel, setCommentModel] = useState(model);
+  // Reset before React commits the new model, so an old draft never renders
+  // into the new file's zones.
+  if (commentModel !== model) {
+    setCommentModel(model);
+    setEntries([]);
+    setSelection(null);
+  }
   /**
    * The tracked decoration that anchors each comment, by comment id, with the
    * offsets its placement used. The decoration covers a little more than the
@@ -179,19 +195,22 @@ export function useMonacoFileComments({
   // work inside an updater means doing it during render, and writing to the
   // composer store from there updates another component mid-render.
   const entriesRef = useRef(entries);
-  useEffect(() => {
+  useLayoutEffect(() => {
     entriesRef.current = entries;
   }, [entries]);
 
   const hasOpenDraft = entries.some((entry) => entry.kind === "draft");
   const hasOpenDraftRef = useRef(hasOpenDraft);
-  hasOpenDraftRef.current = hasOpenDraft;
+  useLayoutEffect(() => {
+    hasOpenDraftRef.current = hasOpenDraft;
+  }, [hasOpenDraft]);
 
-  // A file switch replaces the model, and the comments belonged to the old one.
+  // The editor owns the decorations. Only release the anchor registry here:
+  // the surface can dispose the editor before passive cleanups run.
   useEffect(() => {
-    anchorsRef.current = new Map();
-    setEntries([]);
-    setSelection(null);
+    if (model === null) return;
+    const anchors = anchorsRef.current;
+    return () => anchors.clear();
   }, [model]);
 
   const dropEntries = useCallback(
@@ -408,102 +427,119 @@ function useCommentZones(
   editor: monaco.editor.IStandaloneCodeEditor | null,
   groups: readonly FileCommentGroup[],
 ): ReadonlyArray<{ group: FileCommentGroup; contentNode: HTMLElement }> {
-  const zonesRef = useRef(new Map<number, CommentZone>());
-  const [, forceRender] = useState(0);
-  // Which lines carry a zone, as one string. The effects below depend on this
-  // rather than on `groups`, because `groups` is a fresh array on every
-  // keystroke into a comment: its text changed, but the set of zones did not,
-  // and rebuilding Monaco zones and a resize subscription per character is work that
-  // buys nothing.
+  const [store] = useState(createCommentZoneStore);
+  const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+  // Comment text changes per keystroke; only changed line membership needs
+  // Monaco zone reconciliation and a new resize subscription.
   const zoneLines = groups.map((group) => group.endLine).join(",");
 
   useEffect(() => {
     if (editor === null) return;
-    const zones = zonesRef.current;
-    const wanted = new Set(zoneLines === "" ? [] : zoneLines.split(",").map(Number));
-    let touched = false;
+    return store.synchronize(editor, zoneLines);
+  }, [editor, store, zoneLines]);
 
-    // Collected before the loop, so nothing is deleted from the map while it is
-    // being walked.
-    const stale = [...zones.keys()].filter((endLine) => !wanted.has(endLine));
-
-    editor.changeViewZones((accessor) => {
-      for (const endLine of stale) {
-        const zone = zones.get(endLine);
-        if (zone === undefined) continue;
-        accessor.removeZone(zone.zoneId);
-        zones.delete(endLine);
-        touched = true;
-      }
-      for (const endLine of wanted) {
-        if (zones.has(endLine)) continue;
-        const domNode = document.createElement("div");
-        domNode.className = ZONE_CLASS;
-        const contentNode = document.createElement("div");
-        domNode.append(contentNode);
-        stopEditorEvents(domNode);
-        const zone: monaco.editor.IViewZone = {
-          afterLineNumber: endLine,
-          domNode,
-          heightInPx: 0,
-        };
-        zones.set(endLine, {
-          zoneId: accessor.addZone(zone),
-          domNode,
-          contentNode,
-          zone,
-        });
-        touched = true;
-      }
-    });
-
-    // The portals target nodes that were just created, so a render has to
-    // follow the zone change rather than the other way round.
-    if (touched) forceRender((tick) => tick + 1);
-  }, [editor, zoneLines]);
-
-  // The form grows as its textarea does, and the zone has to grow with it or
-  // Monaco clips the content.
   useEffect(() => {
     if (editor === null) return;
-    const zones = zonesRef.current;
-    const byContentNode = new Map<Element, CommentZone>();
-    for (const zone of zones.values()) byContentNode.set(zone.contentNode, zone);
+    return () => store.clear();
+  }, [editor, store]);
 
-    return observeResize([...byContentNode.keys()], (observed) => {
-      let needsLayout = false;
-      for (const item of observed) {
-        const entry = byContentNode.get(item.target);
-        if (entry === undefined) continue;
-        const height = Math.ceil(item.contentRect.height);
-        if (entry.zone.heightInPx === height) continue;
-        entry.zone.heightInPx = height;
-        needsLayout = true;
-      }
-      if (!needsLayout) return;
-      editor.changeViewZones((accessor) => {
-        for (const zone of zones.values()) accessor.layoutZone(zone.zoneId);
-      });
-    });
-  }, [editor, zoneLines]);
-
-  // Deliberately does NOT remove the zones through the editor.
-  //
-  // This runs when the editor goes away, and the surface disposes the editor
-  // from a layout effect. React flushes layout-effect cleanups before passive
-  // ones on unmount, whatever order the hooks were declared in, so by the time
-  // this runs the editor is already disposed and calling into it would be
-  // reaching through a dangling handle. Disposing an editor takes its view
-  // zones with it, so there is nothing left to release here but the map.
-  useEffect(() => {
-    if (editor === null) return;
-    return () => zonesRef.current.clear();
-  }, [editor]);
-
+  if (snapshot.editor !== editor) return [];
   return groups.flatMap((group) => {
-    const zone = zonesRef.current.get(group.endLine);
-    return zone === undefined ? [] : [{ group, contentNode: zone.contentNode }];
+    const contentNode = snapshot.contentNodes.get(group.endLine);
+    return contentNode === undefined ? [] : [{ group, contentNode }];
   });
+}
+
+// Monaco owns mutable zones. React subscribes only to the portal destinations,
+// which change after reconciliation, never while React renders a comment.
+function createCommentZoneStore() {
+  const zones = new Map<number, CommentZone>();
+  const listeners = new Set<() => void>();
+  let snapshot: {
+    readonly editor: monaco.editor.IStandaloneCodeEditor | null;
+    readonly contentNodes: ReadonlyMap<number, HTMLElement>;
+  } = { editor: null, contentNodes: new Map() };
+
+  return {
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    getSnapshot: () => snapshot,
+    synchronize: (editor: monaco.editor.IStandaloneCodeEditor, zoneLines: string) => {
+      const wanted = new Set(zoneLines === "" ? [] : zoneLines.split(",").map(Number));
+      let touched = snapshot.editor !== editor;
+      // Collect first so deleting entries does not change the iteration.
+      const stale = [...zones.keys()].filter((endLine) => !wanted.has(endLine));
+
+      editor.changeViewZones((accessor) => {
+        for (const endLine of stale) {
+          const zone = zones.get(endLine);
+          if (zone === undefined) continue;
+          accessor.removeZone(zone.zoneId);
+          zones.delete(endLine);
+          touched = true;
+        }
+        for (const endLine of wanted) {
+          if (zones.has(endLine)) continue;
+          const domNode = document.createElement("div");
+          domNode.className = ZONE_CLASS;
+          const contentNode = document.createElement("div");
+          domNode.append(contentNode);
+          stopEditorEvents(domNode);
+          const zone: monaco.editor.IViewZone = {
+            afterLineNumber: endLine,
+            domNode,
+            heightInPx: 0,
+          };
+          zones.set(endLine, {
+            zoneId: accessor.addZone(zone),
+            domNode,
+            contentNode,
+            zone,
+          });
+          touched = true;
+        }
+      });
+
+      if (touched) {
+        snapshot = {
+          editor,
+          contentNodes: new Map([...zones].map(([line, zone]) => [line, zone.contentNode])),
+        };
+        for (const listener of listeners) listener();
+      }
+
+      // The form grows with its textarea. Monaco needs the measured height or
+      // it clips the portal's content.
+      const byContentNode = new Map<Element, CommentZone>();
+      for (const zone of zones.values()) byContentNode.set(zone.contentNode, zone);
+      return observeResize([...byContentNode.keys()], (observed) => {
+        let needsLayout = false;
+        for (const item of observed) {
+          const entry = byContentNode.get(item.target);
+          if (entry === undefined) continue;
+          const height = Math.ceil(item.contentRect.height);
+          if (entry.zone.heightInPx === height) continue;
+          entry.zone.heightInPx = height;
+          needsLayout = true;
+        }
+        if (!needsLayout) return;
+        editor.changeViewZones((accessor) => {
+          for (const zone of zones.values()) accessor.layoutZone(zone.zoneId);
+        });
+      });
+    },
+    clear: () => {
+      // The surface disposes the editor in a layout cleanup, before this
+      // passive cleanup. Disposal removes its zones; calling it here reaches
+      // through a disposed handle.
+      zones.clear();
+      snapshot = { editor: null, contentNodes: new Map() };
+    },
+  };
 }
 
 /**
