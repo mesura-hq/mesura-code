@@ -112,6 +112,9 @@ export interface UnsnoozeThreadInput extends ThreadCommandInput {
   readonly reason: "user";
 }
 
+/** Mesura: the developer dismisses the agent's needs-input or ready-to-close mark. */
+export type ClearThreadAgentSignalInput = ThreadCommandInput;
+
 export interface VisitThreadInput extends ThreadCommandInput {
   readonly visitedAt: string;
 }
@@ -532,6 +535,16 @@ export const unsnoozeThread = Effect.fn("EnvironmentCommands.unsnoozeThread")(fu
     reason: input.reason,
   });
 });
+
+export const clearThreadAgentSignal = Effect.fn("EnvironmentCommands.clearThreadAgentSignal")(
+  function* (input: ClearThreadAgentSignalInput) {
+    return yield* dispatch({
+      type: "thread.agent-signal.clear",
+      commandId: yield* allocateCommandId(input),
+      threadId: input.threadId,
+    });
+  },
+);
 
 export const visitThread = Effect.fn("EnvironmentCommands.visitThread")(function* (
   input: VisitThreadInput,

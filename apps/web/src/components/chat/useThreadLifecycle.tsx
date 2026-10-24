@@ -48,6 +48,7 @@ import { vcsEnvironment } from "../../state/vcs";
 import { useChildThreadInputs, readThreadShell, waitForThreadShell } from "../../state/entities";
 import { environmentShell } from "../../state/shell";
 import { ThreadStatusLine } from "./ThreadStatusLine";
+import { AgentSignalStatusLine } from "./AgentSignalStatusLine";
 import { formatRelativeTimeLabel, formatRelativeTimeUntilLabel } from "../../timestampFormat";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { readEnvironmentScope } from "../../state/session";
@@ -532,6 +533,34 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
         onOpenThread: onOpenRelatedThreadStable,
       })
     : null;
+  const toastThreadActionFailure =
+    (title: string) => (result: AtomCommandResult<unknown, unknown>) => {
+      if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
+      const error = squashAtomCommandFailure(result);
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title,
+          description: error instanceof Error ? error.message : "An error occurred.",
+        }),
+      );
+    };
+  // Settles in place, or hands the thread to the sidebar so the selection moves on.
+  const settleActiveThread = () => {
+    if (!activeThreadRef) return;
+    if (settleAndAdvance(activeThreadRef)) return;
+    void settleThread(activeThreadRef).then(toastThreadActionFailure("Failed to settle thread"));
+  };
+  const settleActiveThreadStable = useStableCallback(settleActiveThread);
+  const activeAgentSignal = activeThreadShell?.agentSignal ?? null;
+  const clearAgentSignal = useOrchestrationCommand(threadEnvironment.clearAgentSignal);
+  const clearActiveAgentSignalStable = useStableCallback(() => {
+    if (!activeThreadRef) return;
+    void clearAgentSignal({
+      environmentId: activeThreadRef.environmentId,
+      input: { threadId: activeThreadRef.threadId },
+    }).then(toastThreadActionFailure("Failed to dismiss the agent's signal"));
+  });
   // The relative times read the clock; nowMinute re-renders them on the minute.
   const snoozedUntil = activeThreadShell?.snoozedUntil ?? null;
   const settledAt = activeThreadShell?.settledAt ?? null;
@@ -560,19 +589,15 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
       actionLabel="Dismiss"
       onAction={acknowledgeActiveThreadWokeStable}
     />
+  ) : activeAgentSignal ? (
+    <AgentSignalStatusLine
+      signal={activeAgentSignal}
+      settleSupported={supportsSettlement}
+      actionsDisabled={!canOperateThread}
+      onDismiss={clearActiveAgentSignalStable}
+      onSettle={settleActiveThreadStable}
+    />
   ) : null;
-  const toastThreadActionFailure =
-    (title: string) => (result: AtomCommandResult<unknown, unknown>) => {
-      if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
-      const error = squashAtomCommandFailure(result);
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title,
-          description: error instanceof Error ? error.message : "An error occurred.",
-        }),
-      );
-    };
   const shortcuts = {
     "thread.settle": () => {
       if (!readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) return false;
@@ -581,8 +606,7 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
         void handleUnsettleActiveThread();
         return;
       }
-      if (settleAndAdvance(activeThreadRef)) return;
-      void settleThread(activeThreadRef).then(toastThreadActionFailure("Failed to settle thread"));
+      settleActiveThread();
     },
     "thread.pin": () => {
       if (!readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) return false;

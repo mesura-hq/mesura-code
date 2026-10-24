@@ -1,0 +1,155 @@
+/**
+ * Mesura: the one label the current sidebar's top status slot shows, and the in-tab
+ * notifications read. It joins the resolved status with what the status does not carry: the
+ * agent's signal, the Software Factory run, and whether a pull request is still open. The legacy
+ * sidebar keeps `resolveThreadStatusPill` and never reaches this module.
+ */
+import { factoryRunShortLabel } from "@t3tools/client-runtime/factory/run-presentation";
+import type {
+  FactoryRunShellSummary,
+  ThreadAgentSignal,
+  ThreadPullRequestLink,
+} from "@t3tools/contracts";
+import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
+
+import type { SidebarThreadStatus } from "./Sidebar.logic";
+
+export type SidebarThreadAttentionKind =
+  | "approval"
+  | "input"
+  | "failed"
+  | "limited"
+  | "factory"
+  | "working"
+  | "waiting"
+  | "woke"
+  | "ready_to_close"
+  | "done";
+
+/**
+ * `quiet` is busy work the developer need not look at; `loud` needs the developer; `calm` is
+ * finished.
+ */
+export type SidebarThreadAttentionEmphasis = "quiet" | "loud" | "calm";
+
+export interface SidebarThreadAttention {
+  readonly kind: SidebarThreadAttentionKind;
+  readonly text: string;
+  readonly emphasis: SidebarThreadAttentionEmphasis;
+}
+
+export interface SidebarThreadAttentionInput {
+  readonly status: SidebarThreadStatus;
+  readonly isUnread: boolean;
+  readonly isWoke: boolean;
+  readonly agentSignal: ThreadAgentSignal | null | undefined;
+  readonly factoryRun: FactoryRunShellSummary | null | undefined;
+  readonly hasOpenPullRequest: boolean;
+  /** A provider goal in progress reads `Goal` instead of `Working`. */
+  readonly goalActive?: boolean;
+}
+
+const NEEDS_INPUT: SidebarThreadAttention = {
+  kind: "input",
+  text: "Needs input",
+  emphasis: "loud",
+};
+const READY_TO_CLOSE: SidebarThreadAttention = {
+  kind: "ready_to_close",
+  text: "Ready to close",
+  emphasis: "calm",
+};
+
+// A run that stopped on a question, degraded, or was stopped waits on the developer.
+const FACTORY_NEEDS_INPUT_STATUSES: ReadonlySet<string> = new Set([
+  "waiting",
+  "degraded",
+  "stopped",
+]);
+
+/** Precedence follows the prototype's `statusAfter`: what needs the developer first, then busy work, then finished. */
+export function resolveSidebarThreadAttention(
+  input: SidebarThreadAttentionInput,
+): SidebarThreadAttention | null {
+  const { status, agentSignal, factoryRun } = input;
+  if (status === "approval") return { kind: "approval", text: "Approval", emphasis: "loud" };
+  if (
+    status === "input" ||
+    agentSignal?.kind === "needs_input" ||
+    (factoryRun != null && FACTORY_NEEDS_INPUT_STATUSES.has(factoryRun.status))
+  ) {
+    return NEEDS_INPUT;
+  }
+  if (status === "failed") return { kind: "failed", text: "Failed", emphasis: "loud" };
+  if (status === "limited") return { kind: "limited", text: "Limited", emphasis: "loud" };
+  if (factoryRun?.status === "running") {
+    return { kind: "factory", text: factoryRunShortLabel(factoryRun) ?? "", emphasis: "quiet" };
+  }
+  if (status === "working") {
+    return { kind: "working", text: input.goalActive ? "Goal" : "Working", emphasis: "quiet" };
+  }
+  if (status === "waiting") return { kind: "waiting", text: "Waiting", emphasis: "quiet" };
+  if (input.isWoke) return { kind: "woke", text: "Woke", emphasis: "calm" };
+  if (
+    agentSignal?.kind === "ready_to_close" ||
+    (factoryRun?.status === "done" && !input.hasOpenPullRequest)
+  ) {
+    return READY_TO_CLOSE;
+  }
+  return input.isUnread ? { kind: "done", text: "Done", emphasis: "calm" } : null;
+}
+
+/** A link whose state is not yet known counts as open, as it does for the current pull request. */
+export function threadHasOpenPullRequest(links: ReadonlyArray<ThreadPullRequestLink>): boolean {
+  return visibleThreadPullRequests(links).some(
+    (link) => link.snapshot === null || link.snapshot.state === "open",
+  );
+}
+
+export type SidebarThreadAttentionIcon = "approval" | "input" | "failed" | "done" | "woke" | null;
+
+export interface SidebarThreadAttentionLook {
+  readonly className: string;
+  readonly icon: SidebarThreadAttentionIcon;
+  /** The 2 px left edge a loud row carries in its label's color; empty for the rest. */
+  readonly rowEdgeClassName: string;
+}
+
+const QUIET_LOOK: SidebarThreadAttentionLook = {
+  className: "font-normal text-muted-foreground opacity-75",
+  icon: null,
+  rowEdgeClassName: "",
+};
+
+// The prototype's emphasis levels on the sidebar's own hues. Limited, Woke and Done keep the look
+// they had before the label moved here; Limited therefore carries no edge.
+const LOOK_BY_KIND: Readonly<Record<SidebarThreadAttentionKind, SidebarThreadAttentionLook>> = {
+  approval: {
+    className: "font-semibold text-warning-foreground",
+    icon: "approval",
+    rowEdgeClassName: "shadow-[inset_2px_0_0_var(--color-warning)]",
+  },
+  input: {
+    className: "font-semibold text-needs-input",
+    icon: "input",
+    rowEdgeClassName: "shadow-[inset_2px_0_0_var(--color-needs-input)]",
+  },
+  failed: {
+    className: "font-semibold text-error",
+    icon: "failed",
+    rowEdgeClassName: "shadow-[inset_2px_0_0_var(--color-error)]",
+  },
+  limited: { className: "font-medium text-warning", icon: "failed", rowEdgeClassName: "" },
+  factory: QUIET_LOOK,
+  working: QUIET_LOOK,
+  waiting: QUIET_LOOK,
+  woke: { className: "font-medium text-warning", icon: "woke", rowEdgeClassName: "" },
+  ready_to_close: { className: "font-normal text-success/70", icon: null, rowEdgeClassName: "" },
+  done: { className: "font-medium text-success", icon: "done", rowEdgeClassName: "" },
+};
+
+export function sidebarThreadAttentionLook(
+  kind: SidebarThreadAttentionKind,
+): SidebarThreadAttentionLook {
+  return LOOK_BY_KIND[kind];
+}

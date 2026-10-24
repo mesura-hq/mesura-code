@@ -167,3 +167,32 @@ describe("sidebar thread attention: the shared status pill keeps upstream behavi
     expect(pillOf({ ...failed, factoryRun: runningFactoryRun })).toBe("Failed");
   });
 });
+
+// The agent signal reaches only the current sidebar, through sidebarThreadAttention.ts; the
+// shared pill the legacy sidebar and the command palette draw ignores it.
+describe("sidebar thread attention: the shared status pill ignores the agent signal", () => {
+  const pillOf = (shell: OrchestrationV2ThreadShell) =>
+    resolveThreadStatusPill({ thread: presentThreadShell(environmentId, shell) })?.label ?? null;
+  const signal = (kind: "needs_input" | "ready_to_close") => ({
+    kind,
+    note: kind === "needs_input" ? "Which branch?" : null,
+    runId: completedUnread.latestRunId,
+    setAt: "2026-06-20T01:00:00.000Z",
+  });
+
+  it("sidebar thread attention pill guard: a needs_input or ready_to_close signal leaves Completed", () => {
+    expect(pillOf(completedUnread)).toBe("Completed");
+    expect(pillOf({ ...completedUnread, agentSignal: signal("needs_input") })).toBe("Completed");
+    expect(pillOf({ ...completedUnread, agentSignal: signal("ready_to_close") })).toBe("Completed");
+  });
+
+  it("sidebar thread attention pill guard: a signal leaves a running thread's pill unchanged", () => {
+    const running = {
+      ...completedUnread,
+      status: "running" as const,
+      activeRunId: completedUnread.latestRunId,
+    };
+    const before = pillOf(running);
+    expect(pillOf({ ...running, agentSignal: signal("needs_input") })).toBe(before);
+  });
+});
