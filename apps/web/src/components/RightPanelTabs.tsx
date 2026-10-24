@@ -176,7 +176,9 @@ export interface PullRequestTabStatus {
 
 export type PullRequestTabStatusSeed = Pick<PullRequestTabStatus, "state" | "isDraft">;
 
-export function shouldOpenDefaultBrowserProfileFromMenuClick(pointerType: string | undefined): boolean {
+export function shouldOpenDefaultBrowserProfileFromMenuClick(
+  pointerType: string | undefined,
+): boolean {
   return pointerType !== "touch";
 }
 
@@ -469,7 +471,8 @@ function RightPanelEmptyState(props: {
   });
   useEffect(() => {
     const handler = (event: KeyboardEvent): boolean => {
-      if (event.defaultPrevented || document.querySelector(LAUNCHER_SHORTCUT_BLOCKING_LAYERS)) return false;
+      if (event.defaultPrevented || document.querySelector(LAUNCHER_SHORTCUT_BLOCKING_LAYERS))
+        return false;
       const current = shortcutActionsRef.current;
       const action = surfaceShortcutActionForKey(
         current.actions.map((entry) => ({ ...entry, available: true })),
@@ -1023,8 +1026,8 @@ function RightPanelTab(
     dragDisabled: boolean;
     active: boolean;
     pending: boolean;
-  pendingProjectKey?: string | null;
-  pendingSurfaceIds?: ReadonlySet<string>;
+    pendingProjectKey?: string | null;
+    pendingSurfaceIds?: ReadonlySet<string>;
     title: string;
     audio: TabAudioState;
     audioRuntimeTabId: string | null;
@@ -1065,8 +1068,11 @@ function RightPanelTab(
           environmentId={props.environmentId}
           pullRequestStatusSeed={props.pullRequestStatusSeed}
         />
-        <FileSurfacePendingMarker projectKey={props.pendingProjectKey ?? null} surfaceId={props.surface.id} />
-      {props.pending ? (
+        <FileSurfacePendingMarker
+          projectKey={props.pendingProjectKey ?? null}
+          surfaceId={props.surface.id}
+        />
+        {props.pending ? (
           <span
             className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-current"
             aria-hidden
@@ -1441,7 +1447,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     surface={surface}
                     dragDisabled={!props.onMoveSurface || renamingDevice === surface.id}
                     active={surface.id === props.activeSurfaceId}
-                    pending={props.pendingSurfaceIds?.has(surface.id) ?? false} pendingProjectKey={props.pendingProjectKey ?? null}
+                    pending={props.pendingSurfaceIds?.has(surface.id) ?? false}
+                    pendingProjectKey={props.pendingProjectKey ?? null}
                     title={surfaceTitle(surface, props.previewSessions, props.terminalLabelsById)}
                     audio={tabAudioState(
                       previewTabId ? (props.desktopByTabId[previewTabId] ?? null) : null,

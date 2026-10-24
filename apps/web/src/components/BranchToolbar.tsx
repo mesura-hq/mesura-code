@@ -654,21 +654,21 @@ export const BranchToolbar = memo(function BranchToolbar({
   // "Previous worktree" hops a draft into the most recently active worktree
   // of this project — the "keep going where I just was" follow-up flow. Only
   // drafts can hop; started server threads have their workspace pinned.
-  const canUsePreviousWorktree =
-    !isServerThread && !envModeLocked && !forceNewWorktree;
-  const projectRefsForWorktreeLookup = (() => (canUsePreviousWorktree && activeProjectRef ? [activeProjectRef] : []))();
+  const canUsePreviousWorktree = !isServerThread && !envModeLocked && !forceNewWorktree;
+  const projectRefsForWorktreeLookup = (() =>
+    canUsePreviousWorktree && activeProjectRef ? [activeProjectRef] : [])();
   // Mesura: re-read at most once a second, off the message task; the seed only
   // needs the latest worktree (phase 6).
   const projectThreads = useThreadShellsForProjectRefs(projectRefsForWorktreeLookup, {
     throttled: true,
   });
   const previousWorktreeSeed = (() =>
-      canUsePreviousWorktree
-        ? resolvePreviousWorktreeSeed({
-            threads: projectThreads,
-            currentWorktreePath: activeWorktreePath,
-          })
-        : null)();
+    canUsePreviousWorktree
+      ? resolvePreviousWorktreeSeed({
+          threads: projectThreads,
+          currentWorktreePath: activeWorktreePath,
+        })
+      : null)();
   const previousWorktreeLabel = previousWorktreeSeed
     ? resolvePreviousWorktreeLabel(previousWorktreeSeed)
     : null;

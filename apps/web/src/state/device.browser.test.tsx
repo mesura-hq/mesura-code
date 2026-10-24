@@ -55,30 +55,27 @@ function observed(): string {
 }
 
 async function render(): Promise<void> {
-
   container ??= document.body.appendChild(document.createElement("div"));
   root ??= await renderBrowser(null, { container: container, router: false });
   await act(async () => await root!.rerender(<Probe />));
 }
 
 async function setupBrowserFixture0() {
-
-
-return {async [Symbol.asyncDispose]() {
-
-  await act(async () => root?.[Symbol.asyncDispose]());
-  container?.remove();
-  root = undefined;
-  container = undefined;
-  query.data = null;
-  vi.unstubAllGlobals();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      await act(async () => root?.[Symbol.asyncDispose]());
+      container?.remove();
+      root = undefined;
+      container = undefined;
+      query.data = null;
+      vi.unstubAllGlobals();
+    },
+  };
 }
 
 describe("device state loading", () => {
   it("device state: a pending subscription is not loaded, and its first value is", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await render();
     expect(observed()).toBe("pending:revision-0:setup");

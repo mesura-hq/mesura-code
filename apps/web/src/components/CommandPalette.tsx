@@ -1,11 +1,20 @@
-import { openProjectIconDiscoveryDialog, ProjectIconDiscoveryDialogHost } from "./projects/ProjectIconDiscoveryDialog";
-import { openProjectIconFileDialog, ProjectIconFileDialogHost } from "./projects/ProjectIconFileDialog";
+import {
+  openProjectIconDiscoveryDialog,
+  ProjectIconDiscoveryDialogHost,
+} from "./projects/ProjectIconDiscoveryDialog";
+import {
+  openProjectIconFileDialog,
+  ProjectIconFileDialogHost,
+} from "./projects/ProjectIconFileDialog";
 import { openTranscriptionsList, TranscriptionsListHost } from "./dictation/TranscriptionsList";
 import { ProjectScopePicker } from "./projects/ProjectScopePicker";
 import { AgentThreadSearchSessionProvider } from "./threads/AgentThreadSearchSession";
 import { ThreadSearchPicker } from "./threads/ThreadSearchPicker";
 import type { ThreadSearchBackHandler } from "./threads/AgentThreadSearch";
-import { keepFocusInFileManager, openFileManager } from "./files/mesuraFileManager/fileManagerToggle";
+import {
+  keepFocusInFileManager,
+  openFileManager,
+} from "./files/mesuraFileManager/fileManagerToggle";
 import { restorePaletteOrigin } from "../keys/keyEngine";
 import { useCommandHandlers } from "../commands/commandRegistry";
 import { requestSidebarDockPin } from "./sidebar/sidebarDockController";
@@ -14,7 +23,14 @@ import { parseIssueSearch, someEnvironmentHasIssues } from "./issues/issues.logi
 import { useDiffPanelStore } from "../diffPanelStore";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { buildProjectActionItems, findJumpTargetItem } from "./CommandPalette.logic";
-import { Columns3Icon, CircleDotIcon, GitCompareArrowsIcon, ImageIcon, MicIcon, ServerIcon } from "lucide-react";
+import {
+  Columns3Icon,
+  CircleDotIcon,
+  GitCompareArrowsIcon,
+  ImageIcon,
+  MicIcon,
+  ServerIcon,
+} from "lucide-react";
 import type { RefObject } from "react";
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
@@ -378,11 +394,17 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     usagePageOpen,
   ]);
 
-  useCommandHandlers(Object.fromEntries([
-    ["commandPalette.toggle", "command"], ["filePicker.toggle", "files"],
-    ["projectSearch.toggle", "content"], ["projectScope.toggle", "projects"],
-    ["threadSearch.toggle", "threads"],
-  ].map(([command, mode]) => [command, () => toggleMode(mode as SearchOverlayMode)])));
+  useCommandHandlers(
+    Object.fromEntries(
+      [
+        ["commandPalette.toggle", "command"],
+        ["filePicker.toggle", "files"],
+        ["projectSearch.toggle", "content"],
+        ["projectScope.toggle", "projects"],
+        ["threadSearch.toggle", "threads"],
+      ].map(([command, mode]) => [command, () => toggleMode(mode as SearchOverlayMode)]),
+    ),
+  );
 
   useEffect(
     () =>
@@ -406,33 +428,35 @@ export function CommandPalette({ children }: { children: ReactNode }) {
 
   return (
     <AgentThreadSearchSessionProvider reopen={reopenThreadSearch}>
-    <ComposerHandleContext value={composerHandleRef}>
-      <CommandDialog
-        open={state.open}
-        onOpenChange={(open, eventDetails) => {
-          if (!open && eventDetails.reason === "escape-key" && state.mode !== "command") {
-            eventDetails.cancel();
-            dispatch({ _tag: "BackToCommand" });
-            return;
-          }
-          setOpen(open);
-        }}
-      >
-        <div className="contents" inert={state.open}>
-          {children}
-        </div>
-        <CommandPaletteDialog
-          mode={state.mode}
-          overlayBackHandlerRef={overlayBackHandlerRef}
-          openIntent={state.openIntent}
-          setOpen={setOpen}
-          openChildSearch={openChildSearch}
-          initialContext={state.restoredSearch}
-          clearOpenIntent={clearOpenIntent}
-        />
-      </CommandDialog>
-    </ComposerHandleContext>
-    <TranscriptionsListHost /><ProjectIconFileDialogHost /><ProjectIconDiscoveryDialogHost />
+      <ComposerHandleContext value={composerHandleRef}>
+        <CommandDialog
+          open={state.open}
+          onOpenChange={(open, eventDetails) => {
+            if (!open && eventDetails.reason === "escape-key" && state.mode !== "command") {
+              eventDetails.cancel();
+              dispatch({ _tag: "BackToCommand" });
+              return;
+            }
+            setOpen(open);
+          }}
+        >
+          <div className="contents" inert={state.open}>
+            {children}
+          </div>
+          <CommandPaletteDialog
+            mode={state.mode}
+            overlayBackHandlerRef={overlayBackHandlerRef}
+            openIntent={state.openIntent}
+            setOpen={setOpen}
+            openChildSearch={openChildSearch}
+            initialContext={state.restoredSearch}
+            clearOpenIntent={clearOpenIntent}
+          />
+        </CommandDialog>
+      </ComposerHandleContext>
+      <TranscriptionsListHost />
+      <ProjectIconFileDialogHost />
+      <ProjectIconDiscoveryDialogHost />
     </AgentThreadSearchSessionProvider>
   );
 }
@@ -453,7 +477,9 @@ function CommandPaletteDialog(props: {
   const mountedRef = useRef(false);
   useLayoutEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
   return (
@@ -579,7 +605,8 @@ function OpenCommandPaletteDialog(props: {
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
   const paletteRouteTarget = useThreadRouteTarget();
-  const routeThreadRef = paletteRouteTarget?.kind === "server" ? paletteRouteTarget.threadRef : null;
+  const routeThreadRef =
+    paletteRouteTarget?.kind === "server" ? paletteRouteTarget.threadRef : null;
   const isMobileViewport = useIsMobile();
   const projects = useProjects();
   const referenceThreadRef =
@@ -1240,7 +1267,9 @@ function OpenCommandPaletteDialog(props: {
     if (firstOption) startNewProject(firstOption.environmentId, null);
   };
 
-  const projectFavicon = (project: Parameters<typeof ProjectFavicon>[0]["project"]) => <ProjectFavicon project={project} className={ITEM_ICON_CLASS} />;
+  const projectFavicon = (project: Parameters<typeof ProjectFavicon>[0]["project"]) => (
+    <ProjectFavicon project={project} className={ITEM_ICON_CLASS} />
+  );
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
   if (someEnvironmentHasIssues(environments)) {
     actionItems.push({
@@ -1367,8 +1396,6 @@ function OpenCommandPaletteDialog(props: {
       },
     });
   }
-
-
 
   if (projects.length > 0) {
     const activeProjectTitle =
@@ -1809,7 +1836,9 @@ function OpenCommandPaletteDialog(props: {
     title: "Transcriptions",
     searchTerms: ["dictation", "speech", "voice", "recordings", "transcripts"],
     icon: <MicIcon className={ITEM_ICON_CLASS} />,
-    run: async () => { openTranscriptionsList(currentProjectEnvironmentId ?? primaryEnvironmentId); },
+    run: async () => {
+      openTranscriptionsList(currentProjectEnvironmentId ?? primaryEnvironmentId);
+    },
   });
   const rootGroups = buildRootGroups({ actionItems, recentThreadItems });
   const settingsSearchItems: CommandPaletteActionItem[] = searchSettings(
@@ -2542,9 +2571,26 @@ function OpenCommandPaletteDialog(props: {
       context: { modelPickerOpen: false, editableFocus: true },
     });
     // Global new-thread handlers ignore shortcuts while the palette is open.
-    const jumpTarget = findJumpTargetItem({ event, keybindings, items: displayedGroups.flatMap((group) => group.items), platform: navigator.platform });
-    const newThreadItem = ["chat.new", "chat.newLocal", "chat.newWithoutProject"].includes(command ?? "") && !event.nativeEvent.isComposing ? displayedGroups.flatMap((group) => group.items).find((item) => item.shortcutCommand === command) : undefined;
-    if (jumpTarget || newThreadItem) { event.preventDefault(); event.stopPropagation(); (event as typeof event & { preventBaseUIHandler?: () => void }).preventBaseUIHandler?.(); executeItem(jumpTarget ?? newThreadItem!); return; }
+    const jumpTarget = findJumpTargetItem({
+      event,
+      keybindings,
+      items: displayedGroups.flatMap((group) => group.items),
+      platform: navigator.platform,
+    });
+    const newThreadItem =
+      ["chat.new", "chat.newLocal", "chat.newWithoutProject"].includes(command ?? "") &&
+      !event.nativeEvent.isComposing
+        ? displayedGroups
+            .flatMap((group) => group.items)
+            .find((item) => item.shortcutCommand === command)
+        : undefined;
+    if (jumpTarget || newThreadItem) {
+      event.preventDefault();
+      event.stopPropagation();
+      (event as typeof event & { preventBaseUIHandler?: () => void }).preventBaseUIHandler?.();
+      executeItem(jumpTarget ?? newThreadItem!);
+      return;
+    }
     if (command === "thread.copyReference") {
       event.preventDefault();
       event.stopPropagation();

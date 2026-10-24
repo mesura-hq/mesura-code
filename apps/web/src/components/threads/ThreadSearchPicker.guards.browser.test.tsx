@@ -1,4 +1,3 @@
-
 /**
  * Entry point: AppRoot → CommandPalette. A memory router renders the real
  * CommandPalette around the routed outlet; Ctrl+Alt+K, Ctrl+P and Ctrl+O reach
@@ -72,19 +71,15 @@ import {
 let app: MountedApp | undefined;
 
 async function setupBrowserFixture0() {
-
-
   resetThreadSearchFixture();
 
-return {async [Symbol.asyncDispose]() {
-
-  await app?.unmount();
-  app = undefined;
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      await app?.unmount();
+      app = undefined;
+    },
+  };
 }
-
-
 
 function rowTitled(title: string): HTMLElement {
   const row = optionRows().find((candidate) => candidate.textContent?.includes(title));
@@ -97,18 +92,14 @@ function rowTitled(title: string): HTMLElement {
 
 describe("thread search guards: shortcut, lexical search, file picker, command palette", () => {
   async function setupBrowserFixture1() {
-
-
     app = await mountApp();
-  
-return {async [Symbol.asyncDispose]() {
 
-}};
-}
+    return { async [Symbol.asyncDispose]() {} };
+  }
 
   it("thread search guard: Ctrl+Alt+K opens the thread picker with focus in its field and a second press closes it", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     await openThreadSearch();
     expect(paletteMode()).toBe("threads");
@@ -123,8 +114,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   });
 
   it("thread search guard: exact words match in any order and Enter opens the matching thread", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     await openThreadSearch();
     await typeInto(pickerTextField(), "keybind rename");
@@ -140,8 +131,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   });
 
   it("thread search guard: Escape from exact-word thread search goes back to the command palette", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     await openThreadSearch();
     await pressKey(pickerTextField(), "Escape");
@@ -149,8 +140,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   });
 
   it("thread search guard: Ctrl+P opens the file picker and Tab there leaves it the file picker", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     await openFilePicker();
     expect(paletteMode()).toBe("files");
@@ -164,8 +155,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   });
 
   it("thread search guard: the command palette's Search threads row opens exact-word thread search", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     await openCommandPalette();
     expect(paletteMode()).toBe("command");
@@ -178,8 +169,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   });
 
   it("thread search guard: a command palette thread row still opens its thread", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     await openCommandPalette();
     await click(rowTitled("Rename keybind chord"));
@@ -190,7 +181,7 @@ await using _browserFixture1 = await setupBrowserFixture1();
 
 describe("thread search guards: archived-thread unarchive semantics", () => {
   it("thread search guard: unarchiveThread dispatches one scoped unarchive and returns its failure unchanged", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     let actions: ReturnType<typeof useThreadActions> | null = null;
     function ThreadActionsProbe() {

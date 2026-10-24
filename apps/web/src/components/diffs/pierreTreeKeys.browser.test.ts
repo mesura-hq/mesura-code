@@ -69,8 +69,13 @@ async function mount(rovingIndex: number): Promise<Element> {
     <div data-preview-panel-mode="inline">
       <div data-right-panel-surface-content data-testid="content"></div>
     </div>`;
-  root = await renderBrowser(null, { container: document.querySelector('[data-testid="content"]')!, router: false });
-  await act(async () => await root.rerender(createElement(TreeWrapper, { model: fakeTree(rovingIndex) })));
+  root = await renderBrowser(null, {
+    container: document.querySelector('[data-testid="content"]')!,
+    router: false,
+  });
+  await act(
+    async () => await root.rerender(createElement(TreeWrapper, { model: fakeTree(rovingIndex) })),
+  );
   return document.querySelector("[data-preview-panel-mode]")!;
 }
 
@@ -99,28 +104,23 @@ async function pressCtrl(key: "d" | "u"): Promise<KeyboardEvent> {
 const focusedRowIndex = () => rows.indexOf(shadow.activeElement as HTMLButtonElement);
 
 async function setupBrowserFixture0() {
-
-
-
   vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(
     () => ({ length: 1 }) as DOMRectList,
   );
 
-return {async [Symbol.asyncDispose]() {
-
-  await root[Symbol.asyncDispose]();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-  document.body.innerHTML = "";
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      await root[Symbol.asyncDispose]();
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+      document.body.innerHTML = "";
+    },
+  };
 }
-
-
 
 describe("pierre tree pane entry", () => {
   it("focuses the Pierre tree's roving row when the panel surface takes focus", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const panel = await mount(3);
     expect(focusPanelSurface(panel)).toBe(true);
@@ -128,7 +128,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("focuses the Pierre tree's first row when no row holds the roving tabindex", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const panel = await mount(-1);
     expect(focusPanelSurface(panel)).toBe(true);
@@ -138,7 +138,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("pierre tree half-page keys at the end of the list", () => {
   it("moves the Pierre tree focus half a page of rows on Ctrl+D and Ctrl+U when the list cannot scroll", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const panel = await mount(2);
     focusPanelSurface(panel);
@@ -158,7 +158,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("leaves Ctrl+D alone while no Pierre tree row has focus", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mount(2);
     const event = new KeyboardEvent("keydown", {

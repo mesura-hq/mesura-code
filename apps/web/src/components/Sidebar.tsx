@@ -1,7 +1,12 @@
 import type { SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import { useProjectScopeStore } from "../projectScopeStore";
 import { useCommandHandlers } from "../commands/commandRegistry";
-import { readViewportThreadKeys, scrollThreadList, useThreadRowArrowKeys, useViewportThreadKeys } from "../lib/sidebarThreadViewport";
+import {
+  readViewportThreadKeys,
+  scrollThreadList,
+  useThreadRowArrowKeys,
+  useViewportThreadKeys,
+} from "../lib/sidebarThreadViewport";
 import { ThreadJumpHintModifierSync } from "./sidebar/ThreadJumpHintModifierSync";
 import { sortActiveThreadsForSidebar } from "./sidebar/activeThreadOrder";
 import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
@@ -1135,7 +1140,6 @@ export default function Sidebar() {
     }
     return mapping;
   })();
-
 
   const navigateToThread = (threadRef: ScopedThreadRef) => {
     if (useThreadSelectionStore.getState().selectedThreadKeys.size > 0) {
@@ -2515,7 +2519,11 @@ export default function Sidebar() {
       : false,
   );
   const openAdjacentThread = (direction: "next" | "previous") => {
-    const key = resolveAdjacentThreadId({ threadIds: orderedThreadKeys, currentThreadId: routeRowThreadKey, direction });
+    const key = resolveAdjacentThreadId({
+      threadIds: orderedThreadKeys,
+      currentThreadId: routeRowThreadKey,
+      direction,
+    });
     const thread = key ? threadByKey.get(key) : undefined;
     if (!thread) return false;
     navigateToThread(scopeThreadRef(thread.environmentId, thread.id));
@@ -2603,7 +2611,11 @@ export default function Sidebar() {
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
   return (
     <>
-      <ThreadJumpHintModifierSync keybindings={keybindings} terminalOpen={routeTerminalOpen} onChange={updateThreadJumpHintsVisibility} />
+      <ThreadJumpHintModifierSync
+        keybindings={keybindings}
+        terminalOpen={routeTerminalOpen}
+        onChange={updateThreadJumpHintsVisibility}
+      />
       <ThreadContextDragGhost />
       <SidebarChromeHeader isElectron={isElectron} />
       <SidebarContent

@@ -1,4 +1,7 @@
-import { toComposerContextId, toKindScopedComposerContextId } from "@t3tools/shared/composerContextReferences";
+import {
+  toComposerContextId,
+  toKindScopedComposerContextId,
+} from "@t3tools/shared/composerContextReferences";
 import { describe, expect, it } from "vite-plus/test";
 
 import {

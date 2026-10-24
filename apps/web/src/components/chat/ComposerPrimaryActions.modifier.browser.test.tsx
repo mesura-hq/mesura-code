@@ -28,24 +28,19 @@ let container: HTMLDivElement;
 let commits = 0;
 
 async function setupBrowserFixture0() {
-
-
-
   container = document.createElement("div");
   document.body.append(container);
   commits = 0;
 
-return {async [Symbol.asyncDispose]() {
-
-  await act(async () => root?.[Symbol.asyncDispose]());
-  root = undefined;
-  container.remove();
-  vi.unstubAllGlobals();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      await act(async () => root?.[Symbol.asyncDispose]());
+      root = undefined;
+      container.remove();
+      vi.unstubAllGlobals();
+    },
+  };
 }
-
-
 
 async function mountActions(isRunning: boolean): Promise<void> {
   await act(async () => {
@@ -101,7 +96,7 @@ const sendLabel = () =>
 
 describe("the composer's actions and held modifiers", () => {
   it("composer modifier guard: holding Ctrl while a turn runs turns a steer into a queue", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountActions(true);
     expect(sendLabel()).toBe("Steer message");
@@ -114,7 +109,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("composer modifier spec: a Control chord without a running turn re-renders nothing", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountActions(false);
     const before = commits;
@@ -129,7 +124,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("composer modifier guard: a turn that starts while Ctrl is already held offers the queue at once", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountActions(false);
     await press("keydown", CONTROL);

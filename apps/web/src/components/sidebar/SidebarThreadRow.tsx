@@ -1105,7 +1105,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             }
           >
             {accessibleTitle}
-          {factoryLabel}
+            {factoryLabel}
             <span
               className={cn(
                 "flex shrink-0 items-center transition-opacity",

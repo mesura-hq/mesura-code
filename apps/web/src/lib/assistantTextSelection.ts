@@ -273,7 +273,9 @@ function rawTextOffset(text: string, normalizedOffset: number): number {
   return text.length;
 }
 
-function isText(node: Node): node is Text { return node.nodeType === 3; }
+function isText(node: Node): node is Text {
+  return node.nodeType === 3;
+}
 
 export function resolveAssistantCitationRange(
   root: HTMLElement,

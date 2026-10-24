@@ -175,7 +175,9 @@ function DisabledCommandPaletteResultRow(props: {
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
                 {props.item.titleLeadingContent}
-                <span className="truncate"><CommandPaletteTitle title={props.item.title} /></span>
+                <span className="truncate">
+                  <CommandPaletteTitle title={props.item.title} />
+                </span>
               </span>
               {props.item.threadContentMatch ? (
                 <ThreadSearchMatchExcerpt match={props.item.threadContentMatch} />
@@ -189,7 +191,9 @@ function DisabledCommandPaletteResultRow(props: {
           ) : (
             <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-foreground">
               {props.item.titleLeadingContent}
-              <span className="truncate"><CommandPaletteTitle title={props.item.title} /></span>
+              <span className="truncate">
+                <CommandPaletteTitle title={props.item.title} />
+              </span>
             </span>
           )}
         </>
@@ -229,7 +233,9 @@ function CommandPaletteResultRow(props: {
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
                 {props.item.titleLeadingContent}
-                <span className="truncate"><CommandPaletteTitle title={props.item.title} /></span>
+                <span className="truncate">
+                  <CommandPaletteTitle title={props.item.title} />
+                </span>
               </span>
               {props.item.threadContentMatch ? (
                 <ThreadSearchMatchExcerpt match={props.item.threadContentMatch} />
@@ -243,7 +249,9 @@ function CommandPaletteResultRow(props: {
           ) : (
             <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-foreground">
               {props.item.titleLeadingContent}
-              <span className="truncate"><CommandPaletteTitle title={props.item.title} /></span>
+              <span className="truncate">
+                <CommandPaletteTitle title={props.item.title} />
+              </span>
             </span>
           )}
         </>

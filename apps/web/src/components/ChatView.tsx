@@ -2,7 +2,11 @@ import { useMesuraPendingThreadRequests } from "./chat/useMesuraPendingThreadReq
 import { MesuraRightPanelSurfaceContent as RightPanelSurfaceContent } from "./chat/useMesuraRightPanelContent";
 import { deriveFactoryTimelineItemsFromTurnItems } from "@t3tools/client-runtime/factory/plan-activities";
 import { deriveLatestFactoryRunItemFromTurnItems } from "@t3tools/client-runtime/factory/run-activities";
-import { openFactoryPlanInRightPanel, openFactoryRunInRightPanel, openFactoryReportInRightPanel } from "../factory/factoryRightPanel";
+import {
+  openFactoryPlanInRightPanel,
+  openFactoryRunInRightPanel,
+  openFactoryReportInRightPanel,
+} from "../factory/factoryRightPanel";
 import { DictationRecordingStrip, DictationStartButton } from "../dictation/DictationControls";
 import { useDictationComposer } from "../dictation/useDictationSession";
 import type { DirectedSubmissionContext } from "../dictation/directedComposerSubmission";
@@ -725,13 +729,12 @@ export default function ChatView(props: ChatViewProps) {
     draftId,
   );
   const draftProjectSettings = (() =>
-      draftRepository.defaults
-        ? resolveProjectSettings(settings, fallbackDraftProject?.id ?? null, fallbackDraftProject, {
-            repositoryDefaults: draftRepository.defaults,
-            providers:
-              providersByEnvironment.get(environmentId) ?? EMPTY_PROVIDERS,
-          })
-        : resolveProjectSettings(settings, fallbackDraftProject?.id ?? null, fallbackDraftProject))();
+    draftRepository.defaults
+      ? resolveProjectSettings(settings, fallbackDraftProject?.id ?? null, fallbackDraftProject, {
+          repositoryDefaults: draftRepository.defaults,
+          providers: providersByEnvironment.get(environmentId) ?? EMPTY_PROVIDERS,
+        })
+      : resolveProjectSettings(settings, fallbackDraftProject?.id ?? null, fallbackDraftProject))();
   useEffect(() => {
     if (serverThread || !draftId || !draftRepository.defaults) return;
     const store = useComposerDraftStore.getState();
@@ -1167,7 +1170,10 @@ export default function ChatView(props: ChatViewProps) {
     : null;
   const pendingFileSurfaceIds = EMPTY_PENDING_FILE_SURFACE_IDS;
   const handleFilePendingChange = (relativePath: string, pending: boolean) => {
-    if (activeProjectKey) useFileSurfacePendingStore.getState().setPending(activeProjectKey, `file:${relativePath}`, pending);
+    if (activeProjectKey)
+      useFileSurfacePendingStore
+        .getState()
+        .setPending(activeProjectKey, `file:${relativePath}`, pending);
   };
   const handleFilePendingChangeStable = useStableCallback(handleFilePendingChange);
   const configuredPreviewUrls = getConfiguredPreviewUrls(activeProjectScripts);
@@ -1352,12 +1358,26 @@ export default function ChatView(props: ChatViewProps) {
     setLocalServerErrorsByThreadKey,
     setLocalDraftErrorsByDraftId,
   });
-  const { pendingApprovals, pendingUserInputs, activePendingApproval, activePendingUserInput,
-    respondingRequestIds, onRespondToApproval: onRespondToApprovalStable, inlinePendingUserInput,
-    onDismissUserInput: onDismissUserInputStable } = useMesuraPendingThreadRequests({
-      environmentId, activeThreadId, activeThread, serverProjection, supportsQuestionAttachments,
-      maxFileAttachmentBytes, activeEnvironmentUnavailable, canOperateThread, setThreadError,
-    });
+  const {
+    pendingApprovals,
+    pendingUserInputs,
+    activePendingApproval,
+    activePendingUserInput,
+    respondingRequestIds,
+    onRespondToApproval: onRespondToApprovalStable,
+    inlinePendingUserInput,
+    onDismissUserInput: onDismissUserInputStable,
+  } = useMesuraPendingThreadRequests({
+    environmentId,
+    activeThreadId,
+    activeThread,
+    serverProjection,
+    supportsQuestionAttachments,
+    maxFileAttachmentBytes,
+    activeEnvironmentUnavailable,
+    canOperateThread,
+    setThreadError,
+  });
   // Questions own answer drafts in the feed. The composer keeps its message draft.
   const activePendingProgress = null;
   const activePendingResolvedAnswers = null;
@@ -1467,8 +1487,10 @@ export default function ChatView(props: ChatViewProps) {
     activeThreadLiveTokenUsage,
     activeProviderThread,
   );
-  const factoryItems = (() => deriveFactoryTimelineItemsFromTurnItems(serverVisibleTurnItems ?? []))();
-  const factoryRun = (() => deriveLatestFactoryRunItemFromTurnItems(serverVisibleTurnItems ?? []))();
+  const factoryItems = (() =>
+    deriveFactoryTimelineItemsFromTurnItems(serverVisibleTurnItems ?? []))();
+  const factoryRun = (() =>
+    deriveLatestFactoryRunItemFromTurnItems(serverVisibleTurnItems ?? []))();
   const pendingBackgroundTasks = deriveThreadPendingBackgroundTasks(serverProjection);
   const activeWorkStartedAt =
     deriveActiveWorkStartedAt(activeActivityRun, activeRuntime, localDispatchStartedAt) ??
@@ -2494,18 +2516,51 @@ export default function ChatView(props: ChatViewProps) {
     onDiffPanelOpen,
     closeRightPanelSurface,
   });
-  const activeProjectIssuesAvailability = activeProject ? projectIssuesAvailability(activeProject, environmentById.get(activeProject.environmentId) ?? null) : null;
-  const issuesSurfaceAvailable = activeProjectIssuesAvailability !== null && activeProjectIssuesAvailability !== "not-github" && activeProjectIssuesAvailability !== "unsupported";
-  const addIssuesSurface = () => { if (activeThreadRef && issuesSurfaceAvailable) useRightPanelStore.getState().open(activeThreadRef, "issues"); };
-  const addFactorySurface = () => { if (activeThreadRef) useRightPanelStore.getState().open(activeThreadRef, "factory"); };
-  const factoryOpenTarget = activeThreadRef ? { ref: activeThreadRef, maximizeKey: routeThreadKey,
-    setMaximizedRightPanelThreadKey: () => useRightPanelStore.getState().setMaximized(activeThreadRef, true) } : null;
-  const openFactoryPlan = (planId: string) => { if (factoryOpenTarget) openFactoryPlanInRightPanel({ ...factoryOpenTarget, planId }); };
-  const openFactoryRun = (runId: string) => { if (factoryOpenTarget) openFactoryRunInRightPanel({ ...factoryOpenTarget, runId }); };
-  const openFactoryReport = (runId: string) => { if (factoryOpenTarget) openFactoryReportInRightPanel({ ...factoryOpenTarget, runId }); };
+  const activeProjectIssuesAvailability = activeProject
+    ? projectIssuesAvailability(
+        activeProject,
+        environmentById.get(activeProject.environmentId) ?? null,
+      )
+    : null;
+  const issuesSurfaceAvailable =
+    activeProjectIssuesAvailability !== null &&
+    activeProjectIssuesAvailability !== "not-github" &&
+    activeProjectIssuesAvailability !== "unsupported";
+  const addIssuesSurface = () => {
+    if (activeThreadRef && issuesSurfaceAvailable)
+      useRightPanelStore.getState().open(activeThreadRef, "issues");
+  };
+  const addFactorySurface = () => {
+    if (activeThreadRef) useRightPanelStore.getState().open(activeThreadRef, "factory");
+  };
+  const factoryOpenTarget = activeThreadRef
+    ? {
+        ref: activeThreadRef,
+        maximizeKey: routeThreadKey,
+        setMaximizedRightPanelThreadKey: () =>
+          useRightPanelStore.getState().setMaximized(activeThreadRef, true),
+      }
+    : null;
+  const openFactoryPlan = (planId: string) => {
+    if (factoryOpenTarget) openFactoryPlanInRightPanel({ ...factoryOpenTarget, planId });
+  };
+  const openFactoryRun = (runId: string) => {
+    if (factoryOpenTarget) openFactoryRunInRightPanel({ ...factoryOpenTarget, runId });
+  };
+  const openFactoryReport = (runId: string) => {
+    if (factoryOpenTarget) openFactoryReportInRightPanel({ ...factoryOpenTarget, runId });
+  };
   const [diffModeMenuRequestId, setDiffModeMenuRequestId] = useState(0);
-  const toggleTreeDiff = () => { if (!activeThreadRef) return; useDiffPanelStore.getState().selectGitScope(activeThreadRef, "tree"); useRightPanelStore.getState().open(activeThreadRef, "diff"); };
-  const openDiffModeMenu = () => { if (!activeThreadRef) return; useRightPanelStore.getState().open(activeThreadRef, "diff"); setDiffModeMenuRequestId(allocateDiffModeMenuRequestId()); };
+  const toggleTreeDiff = () => {
+    if (!activeThreadRef) return;
+    useDiffPanelStore.getState().selectGitScope(activeThreadRef, "tree");
+    useRightPanelStore.getState().open(activeThreadRef, "diff");
+  };
+  const openDiffModeMenu = () => {
+    if (!activeThreadRef) return;
+    useRightPanelStore.getState().open(activeThreadRef, "diff");
+    setDiffModeMenuRequestId(allocateDiffModeMenuRequestId());
+  };
   const pullRequestSurfaceAvailable = supportsPullRequests && pullRequestPanelTarget !== null;
   const nowMinute = useNowMinute();
   const {
@@ -2788,16 +2843,27 @@ export default function ChatView(props: ChatViewProps) {
   );
   useCommandHandlers({
     "thread.copyReference": copyActiveThreadReference,
-    "thread.settle": () => { toggleActiveThreadSettled(); },
-    "thread.pin": () => { threadLifecycleShortcuts["thread.pin"](); },
+    "thread.settle": () => {
+      toggleActiveThreadSettled();
+    },
+    "thread.pin": () => {
+      threadLifecycleShortcuts["thread.pin"]();
+    },
     "chat.scrollHalfPageUp": () => scrollTimelineForReading("up"),
     "chat.scrollHalfPageDown": () => scrollTimelineForReading("down"),
-    "thread.steerQueuedMessage": () => { if (routeKind !== "draft") queuedRunsControlRef.current?.steerNext(false); },
+    "thread.steerQueuedMessage": () => {
+      if (routeKind !== "draft") queuedRunsControlRef.current?.steerNext(false);
+    },
     "terminal.toggle": () => terminalShortcuts["terminal.toggle"]?.(),
     "rightPanel.toggle": () => toggleRightPanelStable(),
     "rightPanel.toggleMaximized": () => toggleRightPanelMaximizedStable(),
-    "rightPanel.newTab": () => { if (activeThreadRef) useRightPanelStore.getState().show(activeThreadRef); openPanelLauncher(); },
-    "rightPanel.close": () => { if (activeRightPanelSurface) closeRightPanelSurface(activeRightPanelSurface); },
+    "rightPanel.newTab": () => {
+      if (activeThreadRef) useRightPanelStore.getState().show(activeThreadRef);
+      openPanelLauncher();
+    },
+    "rightPanel.close": () => {
+      if (activeRightPanelSurface) closeRightPanelSurface(activeRightPanelSurface);
+    },
     "treeDiff.toggle": toggleTreeDiff,
     "diff.modeMenu": openDiffModeMenu,
     "modelPicker.toggle": () => composerRef.current?.toggleModelPicker(),
@@ -3617,7 +3683,9 @@ export default function ChatView(props: ChatViewProps) {
                           ) : null}
                           {!composerMounted ? null : (
                             <ChatComposer
-                              requireExplicitModelSelection={!!draftProjectSettings.modelDefaultWarning}
+                              requireExplicitModelSelection={
+                                !!draftProjectSettings.modelDefaultWarning
+                              }
                               dictationStartControl={<DictationStartButton />}
                               dictationStrip={<DictationRecordingStrip />}
                               canOperateThread={canOperateThread}

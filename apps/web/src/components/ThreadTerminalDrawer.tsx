@@ -491,7 +491,9 @@ function TerminalSessionViewport({
     environmentId,
     serverConfig?.availableEditors ?? [],
   );
-  const openTerminalPath = useEffectEvent((text: string) => openInPreferredEditor(resolvePathLinkTarget(text, cwd)));
+  const openTerminalPath = useEffectEvent((text: string) =>
+    openInPreferredEditor(resolvePathLinkTarget(text, cwd)),
+  );
   const openPreview = useAtomCommand(previewEnvironment.open, {
     reportFailure: false,
   });
@@ -1083,7 +1085,7 @@ function TerminalSessionViewport({
         mount.focus({ preventScroll: true });
       }
     };
-  }, []);
+  }, [terminalId]);
 
   useEffect(() => {
     const terminal = terminalRef.current;

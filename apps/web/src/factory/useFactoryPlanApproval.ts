@@ -50,45 +50,45 @@ export function useFactoryPlanApproval(
   // the message comes back as an approval, and a failed send clears it.
   const [sentDigest, setSentDigest] = useState<string | null>(null);
   const inFlight = useRef(false);
-  const approve = (async (routes: FactoryRoutes) => {
-      // On orchestrator v2, title, model and runtime mode live on the thread shell.
-      const current = readThreadShell(threadRef);
-      if (
-        current === null ||
-        inFlight.current ||
-        !readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope)
-      )
-        return;
-      inFlight.current = true;
-      setSentDigest(plan.digest);
-      const result = await startTurn({
+  const approve = async (routes: FactoryRoutes) => {
+    // On orchestrator v2, title, model and runtime mode live on the thread shell.
+    const current = readThreadShell(threadRef);
+    if (
+      current === null ||
+      inFlight.current ||
+      !readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope)
+    )
+      return;
+    inFlight.current = true;
+    setSentDigest(plan.digest);
+    const result = await startTurn({
+      environmentId: threadRef.environmentId,
+      input: buildDirectedTurnStartInput({
         environmentId: threadRef.environmentId,
-        input: buildDirectedTurnStartInput({
-          environmentId: threadRef.environmentId,
-          threadId: threadRef.threadId,
-          commandId: newCommandId(),
-          messageId: newMessageId(),
-          createdAt: new Date().toISOString(),
-          prompt: formatPlanApprovalMessage({
-            digest: plan.digest,
-            planPath: plan.planPath,
-            intentPath: plan.intentPath,
-            routes,
-          }),
-          modelSelection: current.modelSelection,
-          titleSeed: current.title,
-          runtimeMode: current.runtimeMode,
-          // Approving is implementing, as the proposed plan's Implement is: a
-          // thread left in plan mode would plan the build instead of running it.
-          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-          attachments: [],
-          bootstrap: undefined,
-          pendingAction: { kind: "composer" },
+        threadId: threadRef.threadId,
+        commandId: newCommandId(),
+        messageId: newMessageId(),
+        createdAt: new Date().toISOString(),
+        prompt: formatPlanApprovalMessage({
+          digest: plan.digest,
+          planPath: plan.planPath,
+          intentPath: plan.intentPath,
+          routes,
         }),
-      });
-      inFlight.current = false;
-      if (result._tag !== "Success") setSentDigest(null);
+        modelSelection: current.modelSelection,
+        titleSeed: current.title,
+        runtimeMode: current.runtimeMode,
+        // Approving is implementing, as the proposed plan's Implement is: a
+        // thread left in plan mode would plan the build instead of running it.
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        attachments: [],
+        bootstrap: undefined,
+        pendingAction: { kind: "composer" },
+      }),
     });
+    inFlight.current = false;
+    if (result._tag !== "Success") setSentDigest(null);
+  };
 
   return { state, providers, approve, canApprove, sending: sentDigest === plan.digest };
 }

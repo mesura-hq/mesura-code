@@ -87,5 +87,5 @@ export async function openTerminalLinkInPreview<E>(
   recordVisitForThread(input.threadRef, input.url);
   applyPreviewServerSnapshot(input.threadRef, result.value);
   useRightPanelStore.getState().openBrowser(input.threadRef, result.value.tabId);
-    useRightPanelStore.getState().setMaximized(input.threadRef, true);
+  useRightPanelStore.getState().setMaximized(input.threadRef, true);
 }

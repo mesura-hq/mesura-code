@@ -1,4 +1,3 @@
-
 /**
  * Entry point: AppRoot → CommandPalette, through `threadSearchPicker.testMount.tsx`.
  * The user opens the palette with Ctrl+O and picks the Transcriptions action;
@@ -137,27 +136,24 @@ function dictationJobs() {
 let app: MountedApp | undefined;
 
 async function setupBrowserFixture0() {
-  const clock = fakeTimers({ toFake: ["Date"], now: TEST_NOW });
-
+  const clock = fakeTimers({ now: TEST_NOW });
 
   resetThreadSearchFixture();
   dictationFixture.jobs = dictationJobs();
   dictationFixture.environmentIds = [];
   dictationFixture.primaryEnvironmentId = undefined;
 
-return {async [Symbol.asyncDispose]() {
-
-  // The open request outlives the mount, as it outlives the palette in the app.
-  closeTranscriptionsList();
-  await app?.unmount();
-  app = undefined;
-  vi.unstubAllGlobals();
-  clock[Symbol.dispose]();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      // The open request outlives the mount, as it outlives the palette in the app.
+      closeTranscriptionsList();
+      await app?.unmount();
+      app = undefined;
+      vi.unstubAllGlobals();
+      clock[Symbol.dispose]();
+    },
+  };
 }
-
-
 
 function paletteRowTitled(title: string): HTMLElement {
   const row = optionRows().find((candidate) => candidate.textContent?.trim().startsWith(title));
@@ -194,7 +190,7 @@ async function openTranscriptions(): Promise<HTMLElement> {
 
 describe("transcriptions palette entry (criterion 6)", () => {
   it("transcriptions palette: the command palette lists a Transcriptions action that opens the list", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await openTranscriptions();
     expect(paletteElement()).toBeNull();
@@ -203,7 +199,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("transcriptions list (criterion 5)", () => {
   it("transcriptions list: shows the recent completed and failed jobs, newest first, and hides jobs older than 24 hours", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const list = await openTranscriptions();
     const rows = transcriptionRows();
@@ -216,7 +212,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("transcriptions list: Retry appears only on the failed job", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await openTranscriptions();
     const [completed, failed] = transcriptionRows();
@@ -229,7 +225,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("transcriptions list: Copy writes the full transcript with the async clipboard", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const writeText = vi.fn(async (_text: string) => undefined);
     vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
@@ -241,7 +237,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("transcriptions list: Copy falls back to a hidden textarea when the async clipboard is missing", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     vi.stubGlobal("navigator", { ...navigator, clipboard: undefined });
     const copied: string[] = [];
@@ -263,7 +259,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("transcriptions list: Retry dispatches the retry command for that job on its environment", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await openTranscriptions();
     await click(buttonIn(transcriptionRows()[1]!, /retry/i));
@@ -276,7 +272,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("transcriptions environment (review P1-1)", () => {
   it("transcriptions palette: from a thread on a non-primary environment the list shows and retries that environment's jobs", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     app = await mountApp();
     await app.router.navigate({
@@ -296,7 +292,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("transcriptions palette: with no primary and several connected environments the user picks one first", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     dictationFixture.primaryEnvironmentId = null;
     app = await mountApp();
@@ -317,7 +313,7 @@ describe("transcriptions environment resolution", () => {
   const vigilia = { environmentId: EnvironmentId.make("resolve-vigilia"), label: "Vigilia" };
 
   it("transcriptions environment: the opener's environment wins over the primary one", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     expect(
       resolveTranscriptionsEnvironment({
@@ -329,7 +325,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("transcriptions environment: without context the primary one is used, then the only connected one", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     expect(
       resolveTranscriptionsEnvironment({
@@ -344,7 +340,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("transcriptions environment: no context and no connected environment resolves to none", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     expect(
       resolveTranscriptionsEnvironment({ requested: null, primary: null, connected: [] }),

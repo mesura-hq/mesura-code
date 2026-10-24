@@ -1,4 +1,8 @@
-import { threadJumpCommandForIndex, threadJumpIndexFromCommand, threadTraversalDirectionFromCommand } from "./keybindings";
+import {
+  threadJumpCommandForIndex,
+  threadJumpIndexFromCommand,
+  threadTraversalDirectionFromCommand,
+} from "./keybindings";
 import { assert, describe, it } from "vite-plus/test";
 import {
   compileResolvedKeybindingsConfig,

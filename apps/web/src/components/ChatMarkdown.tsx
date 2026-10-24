@@ -670,13 +670,13 @@ function useChatMarkdownState({
   };
   const openChangeRequestLink = useOpenChangeRequestLink(threadRef, pullRequestPanelRef);
   const openDeferredMarkdownLink = useOpenLink(threadRef);
-  const openClassifiedPullRequest = ((url: string) =>
-      openChangeRequestLink(
-        { metaKey: false, ctrlKey: false, preventDefault: () => {}, stopPropagation: () => {} },
-        url,
-        undefined,
-        environmentId ?? undefined,
-      ));
+  const openClassifiedPullRequest = (url: string) =>
+    openChangeRequestLink(
+      { metaKey: false, ctrlKey: false, preventDefault: () => {}, stopPropagation: () => {} },
+      url,
+      undefined,
+      environmentId ?? undefined,
+    );
   const issueReferences = useOpenIssueReference(threadRef, {
     openChangeRequest: openClassifiedPullRequest,
     openFallback: openDeferredMarkdownLink,

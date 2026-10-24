@@ -106,20 +106,17 @@ function EditorUnderTest(props: { readonly editor: unknown; readonly model: Harn
 let mounted: Awaited<ReturnType<typeof mountNvimEditor>> | undefined;
 
 async function setupBrowserFixture0() {
-
   editorTransport.reset();
 
-return {async [Symbol.asyncDispose]() {
-
-  editorTransport.autoReplyAll();
-  await mounted?.unmount();
-  mounted = undefined;
-  vi.unstubAllGlobals();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      editorTransport.autoReplyAll();
+      await mounted?.unmount();
+      mounted = undefined;
+      vi.unstubAllGlobals();
+    },
+  };
 }
-
-
 
 /**
  * Mounts the hook inside a `Profiler`, over an editor whose every call is
@@ -173,7 +170,7 @@ const isPositionCall =
 
 describe("a cursor event from Neovim reaches Monaco as it arrives (phase 4, criterion 1)", () => {
   it("puts Monaco's caret on Neovim's line before React commits anything for the cursor event", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const { model } = countingModel(LINES);
     editorTransport.setSnapshot({ lines: LINES, cursor: { line: 1, col: 1 }, topline: 1 });
@@ -197,7 +194,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("scrolls a cursor that left the visible lines into view before React commits anything for it", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const { model } = countingModel(LINES);
     editorTransport.setSnapshot({ lines: LINES, cursor: { line: 15, col: 1 }, topline: 1 });
@@ -249,7 +246,7 @@ describe("events that change no text leave the whole model alone (phase 4, crite
   it.each(TEXTLESS_EVENTS)(
     "reads no whole model for a lone %s event after the editor reconciled",
     async (name, event) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+      await using _browserFixture0 = await setupBrowserFixture0();
 
       const counting = countingModel(LINES);
       editorTransport.setSnapshot({ lines: LINES, cursor: { line: 1, col: 1 }, topline: 1 });
@@ -269,7 +266,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   );
 
   it("reads no whole model across a burst of cursor, mode, decoration and message events", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const counting = countingModel(LINES);
     editorTransport.setSnapshot({ lines: LINES, cursor: { line: 1, col: 1 }, topline: 1 });

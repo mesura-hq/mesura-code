@@ -186,7 +186,6 @@ async function startHandoff() {
   });
 }
 async function setupBrowserFixture0() {
-
   vi.resetAllMocks();
 
   vi.stubGlobal("desktopBridge", undefined);
@@ -217,22 +216,21 @@ async function setupBrowserFixture0() {
   document.body.append(container);
   root = await renderBrowser(null, { container, router: false });
 
-return {async [Symbol.asyncDispose]() {
-
-  await root[Symbol.asyncDispose]();
-  container.remove();
-  vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      await root[Symbol.asyncDispose]();
+      container.remove();
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    },
+  };
 }
-
 
 describe("phase3 Codex auth lifecycle", () => {
   it.each(["failed", "cancelled"] as const)(
     "retains the new request after the previous %s receipt",
     async (phase) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+      await using _browserFixture0 = await setupBrowserFixture0();
 
       fixture.auth = receipt(phase);
       fixture.commands.startProviderAuth.mockResolvedValue(AsyncResult.success(undefined));
@@ -264,7 +262,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   it.each(["receipt-first", "snapshot-first"] as const)(
     "accepts independent auth and provider updates: %s",
     async (order) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+      await using _browserFixture0 = await setupBrowserFixture0();
 
       fixture.commands.startProviderAuth.mockResolvedValue(AsyncResult.success(undefined));
       await render();
@@ -293,7 +291,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   it.each(["failed", "cancelled"] as const)(
     "reports the primary handoff %s receipt and permits a new attempt",
     async (phase) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+      await using _browserFixture0 = await setupBrowserFixture0();
 
       await startHandoff();
       const firstAttempt = fixture.handoffQuery.mock.lastCall?.[0].input.attemptId;
@@ -314,7 +312,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   );
 
   it("imports retained finished handoff data before disposing a later query error", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const imported = deferred<AsyncResult.Success<void>>();
     fixture.commands.chatGptImportProfile.mockReturnValue(imported.promise);
@@ -342,7 +340,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("consumes auto-start UI state while pendingRef guards StrictMode dispatch", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const started = deferred<AsyncResult.Success<void>>();
     fixture.commands.startProviderAuth.mockReturnValue(started.promise);
@@ -364,7 +362,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("reports effect-only browser opening failures and retains the explicit retry callback", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.commands.startProviderAuth.mockResolvedValue(AsyncResult.success(undefined));
     fixture.openExternal.mockRejectedValueOnce(new Error("Controlled shell rejection"));
@@ -383,7 +381,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("discards a cancelled desktop callback and completes the explicitly reopened current flow", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const oldCallback = deferred<string>();
     const currentCallback = deferred<string>();

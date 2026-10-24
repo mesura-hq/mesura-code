@@ -562,15 +562,14 @@ export function BranchToolbarBranchSelector({
     worktreeBaseBranchCandidate,
   ]);
 
-
-  const handleOpenChange = ((open: boolean) => {
-      // With the drawer, the controller owns the open state.
-      if (isDrawer) return;
-      setIsBranchMenuOpen(open);
-      if (!open) {
-        setBranchQuery("");
-      }
-    });
+  const handleOpenChange = (open: boolean) => {
+    // With the drawer, the controller owns the open state.
+    if (isDrawer) return;
+    setIsBranchMenuOpen(open);
+    if (!open) {
+      setBranchQuery("");
+    }
+  };
 
   useImperativeHandle(
     ref,

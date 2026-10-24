@@ -7,28 +7,24 @@ import { useElapsedLabel } from "./useElapsedLabel";
 const STARTED_MS = Date.UTC(2026, 9, 20);
 
 async function setupBrowserFixture0() {
-
-
   const _timers = fakeTimers();
   vi.setSystemTime(STARTED_MS);
 
+  return {
+    async [Symbol.asyncDispose]() {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
 
-return {async [Symbol.asyncDispose]() {
-
-  vi.useRealTimers();
-  vi.unstubAllGlobals();
-
-
-_timers[Symbol.dispose]();
-}};
+      _timers[Symbol.dispose]();
+    },
+  };
 }
-
 
 const seconds = (elapsedMs: number) => `${Math.floor(elapsedMs / 1000)}s`;
 const minutes = (elapsedMs: number) => `${Math.floor(elapsedMs / 60_000)}m`;
 
 it("ticks every reader in one commit, and leaves a reader whose label is unchanged alone", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   const container = document.createElement("div");
   const root = await renderBrowser(null, { container: container, router: false });
@@ -41,14 +37,15 @@ await using _browserFixture0 = await setupBrowserFixture0();
     countRender(name);
     return <span>{useElapsedLabel(startedMs, format)}</span>;
   }
-  await act(async () =>
-    await root.rerender(
-      <>
-        <Label name="a" format={seconds} />
-        <Label name="b" format={seconds} />
-        <Label name="slow" format={minutes} />
-      </>,
-    ),
+  await act(
+    async () =>
+      await root.rerender(
+        <>
+          <Label name="a" format={seconds} />
+          <Label name="b" format={seconds} />
+          <Label name="slow" format={minutes} />
+        </>,
+      ),
   );
   renders.a = renders.b = renders.slow = 0;
 

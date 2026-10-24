@@ -1,4 +1,8 @@
-import { type CommandPaletteActionItem, enumerateCommandPaletteItems, buildBrowseGroups } from "./CommandPalette.logic";
+import {
+  type CommandPaletteActionItem,
+  enumerateCommandPaletteItems,
+  buildBrowseGroups,
+} from "./CommandPalette.logic";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 // Default mod+number bindings belong to Electron; web browsers own these chords.

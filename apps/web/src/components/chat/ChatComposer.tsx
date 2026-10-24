@@ -1007,12 +1007,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     selectedProviderEntry?.snapshot,
     selectedModel,
   );
-  const modelSelectionRequired = requireExplicitModelSelection && composerDraft.modelSelectionExplicit !== true;
+  const modelSelectionRequired =
+    requireExplicitModelSelection && composerDraft.modelSelectionExplicit !== true;
   const sendDisabledReason =
     (modelSelectionRequired ? "Choose a model before sending." : null) ??
     externalSendDisabledReason ??
     (projectSelectionRequired ? "Choose a project before sending." : null) ??
-    (noProviderAvailable ? (providerCatalogPending ? "Loading providers." : "Enable a provider in Settings before sending.") : null) ??
+    (noProviderAvailable
+      ? providerCatalogPending
+        ? "Loading providers."
+        : "Enable a provider in Settings before sending."
+      : null) ??
     (multipleModelSelections?.length === 0 ? "Select at least one model." : null) ??
     (activePendingProgress
       ? attachmentBlockReason
@@ -1959,10 +1964,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     };
   };
   const readComposerSnapshotStable = useStableCallback(readComposerSnapshot);
-  useMesuraComposerInput({ composerDraftTarget, composerDraftTargetKeyRef, composerEditorRef,
-    composerRef, promptRef, setPrompt, setComposerCursor,
-    readComposerSnapshot: readComposerSnapshotStable, applyPromptReplacement: applyPromptReplacementStable });
-
+  useMesuraComposerInput({
+    composerDraftTarget,
+    composerDraftTargetKeyRef,
+    composerEditorRef,
+    composerRef,
+    promptRef,
+    setPrompt,
+    setComposerCursor,
+    readComposerSnapshot: readComposerSnapshotStable,
+    applyPromptReplacement: applyPromptReplacementStable,
+  });
 
   const resolveActiveComposerTrigger = (): {
     snapshot: { value: string; cursor: number; expandedCursor: number };
@@ -3157,8 +3169,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const openModelPickerStable = useStableCallback(openModelPicker);
 
   useCommandHandlers({
-    "composer.attachFiles": () => { composerFormRef.current?.querySelector<HTMLButtonElement>('[aria-label="Attach files"]')?.click(); },
-    "composer.stash": () => { void stashCurrentPromptStable(); },
+    "composer.attachFiles": () => {
+      composerFormRef.current
+        ?.querySelector<HTMLButtonElement>('[aria-label="Attach files"]')
+        ?.click();
+    },
+    "composer.stash": () => {
+      void stashCurrentPromptStable();
+    },
   });
 
   useImperativeHandle(
@@ -3198,8 +3216,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         (pendingImageCompressionsRef.current.get(attachmentTargetKey) ?? 0) > 0 ||
         pendingDraftWork.has(attachmentTargetKey),
       insertTextAtEnd: insertComposerTextAtEndStable,
-      replacePrompt: (prompt) => applyPromptReplacementStable(0, promptRef.current.length, prompt, { focusEditorAfterReplace: false }),
-      insertDictationSlot: (slot) => insertComposerText(`${slot} `, composerEditorRef.current?.hasCaret() ? "cursor" : "end", { ensureLeadingBoundary: true }),
+      replacePrompt: (prompt) =>
+        applyPromptReplacementStable(0, promptRef.current.length, prompt, {
+          focusEditorAfterReplace: false,
+        }),
+      insertDictationSlot: (slot) =>
+        insertComposerText(`${slot} `, composerEditorRef.current?.hasCaret() ? "cursor" : "end", {
+          ensureLeadingBoundary: true,
+        }),
       pasteTextAtEnd: (text: string, options) => {
         const shortcutArmed = consumePasteAsTextShortcut(pasteAsTextShortcutUntilRef);
         const bypassAutoAttachment = options?.bypassAutoAttachment === true || shortcutArmed;
@@ -3598,7 +3622,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         : null}
       <ComposerBanner.Dock>
         <ComposerBanner.Column>
-          <SendWhenReadyBanner target={composerDraftTarget} pendingCount={countPendingDictationSlots(prompt)} />
+          <SendWhenReadyBanner
+            target={composerDraftTarget}
+            pendingCount={countPendingDictationSlots(prompt)}
+          />
           {dictationStrip}
           <ComposerBannerStack
             key={activeThreadId}
@@ -3994,9 +4021,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
                 >
                   {settings.contextWindowMeterEnabled && activeContextWindow ? (
-                    <ContextWindowMeter usage={activeContextWindow} modelDisplayName={activeThreadModelDisplayName}
-                      onCompact={onCompactContext} compactDisabled={compactDisabled} compactDisabledReason={resolvedCompactDisabledReason} />
-                  ) : reserveContextWindowMeter ? <ContextWindowMeterPlaceholder /> : null}
+                    <ContextWindowMeter
+                      usage={activeContextWindow}
+                      modelDisplayName={activeThreadModelDisplayName}
+                      onCompact={onCompactContext}
+                      compactDisabled={compactDisabled}
+                      compactDisabledReason={resolvedCompactDisabledReason}
+                    />
+                  ) : reserveContextWindowMeter ? (
+                    <ContextWindowMeterPlaceholder />
+                  ) : null}
                   {composerAttachButton}
                   {dictationStartControl}
                   <ComposerFooterPrimaryActions

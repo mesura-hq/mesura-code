@@ -24,7 +24,11 @@ import {
   type ProviderInstanceEntry,
 } from "../providerInstances";
 import { useProjects, useThreadShells } from "../state/entities";
-import { useEnvironments, useEnvironmentProviders, usePrimaryEnvironmentId } from "../state/environments";
+import {
+  useEnvironments,
+  useEnvironmentProviders,
+  usePrimaryEnvironmentId,
+} from "../state/environments";
 import { primaryServerProvidersAtom } from "../state/server";
 import { buildThreadRouteParams } from "../threadRoutes";
 import type { Thread } from "../types";
@@ -72,8 +76,10 @@ export function useThreadCommandItems(input?: {
 
   // Keyed by environment as well as project id: two environments can both hold
   // a project of the same id, and the favicon is the project's own.
-  const projectByKey = (() => new Map(projects.map((project) => [`${project.environmentId}:${project.id}`, project])))();
-  const projectTitleById = (() => new Map(projects.map((project) => [project.id, project.title] as const)))();
+  const projectByKey = (() =>
+    new Map(projects.map((project) => [`${project.environmentId}:${project.id}`, project])))();
+  const projectTitleById = (() =>
+    new Map(projects.map((project) => [project.id, project.title] as const)))();
   const providerEntryByEnvironmentAndInstanceId = (() => {
     const map = new Map<string, ProviderInstanceEntry>();
     for (const environment of environments) {
@@ -95,67 +101,67 @@ export function useThreadCommandItems(input?: {
   })();
 
   return (() =>
-      buildThreadActionItems({
-        threads,
-        ...(activeThreadId ? { activeThreadId } : {}),
-        projectTitleById,
-        sortOrder: clientSettings.sidebarThreadSortOrder,
-        icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
-        renderLeadingContent: (thread) => <ThreadRowLeadingStatus thread={thread} />,
-        renderTrailingContent: (thread) => <ThreadRowTrailingStatus thread={thread} />,
-        renderDescription: (thread, { projectTitle }) => {
-          const modelInstanceId =
-            thread.runtime?.providerInstanceId ?? thread.modelSelection.instanceId;
-          const providerEntry =
-            providerEntryByEnvironmentAndInstanceId.get(
-              `${thread.environmentId}:${modelInstanceId}`,
-            ) ?? null;
-          return (
-            <ThreadCommandSubtitle
-              project={projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null}
-              projectTitle={projectTitle ?? null}
-              environmentLabel={
-                environmentLabelById
-                  ? (environmentLabelById.get(thread.environmentId) ?? "Remote")
-                  : null
-              }
-              branch={thread.branch}
-              worktreePath={thread.worktreePath}
-              isCurrent={thread.id === activeThreadId}
-              driverKind={providerEntry?.driverKind ?? null}
-              providerDisplayName={
-                thread.runtime?.providerName ?? providerEntry?.displayName ?? modelInstanceId
-              }
-              acpRegistryAgentId={providerEntry?.acpRegistryAgentId}
-              acpRegistryIconUrl={providerEntry?.acpRegistryIconUrl}
-            />
-          );
-        },
-        getContentMatch: (thread) => {
-          const match = contentMatchByKey?.get(
-            threadSearchMatchKey({
-              environmentId: thread.environmentId,
-              threadId: thread.id,
-            }),
-          );
-          return match && (match.source === "user" || match.source === "assistant")
-            ? { source: match.source, snippet: match.snippet, query: contentQuery }
-            : undefined;
-        },
-        runThread: async (thread) => {
-          await navigate({
-            to: "/$environmentId/$threadId",
-            params: buildThreadRouteParams(scopeThreadRef(thread.environmentId, thread.id)),
-          });
-        },
-      }))();
+    buildThreadActionItems({
+      threads,
+      ...(activeThreadId ? { activeThreadId } : {}),
+      projectTitleById,
+      sortOrder: clientSettings.sidebarThreadSortOrder,
+      icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
+      renderLeadingContent: (thread) => <ThreadRowLeadingStatus thread={thread} />,
+      renderTrailingContent: (thread) => <ThreadRowTrailingStatus thread={thread} />,
+      renderDescription: (thread, { projectTitle }) => {
+        const modelInstanceId =
+          thread.runtime?.providerInstanceId ?? thread.modelSelection.instanceId;
+        const providerEntry =
+          providerEntryByEnvironmentAndInstanceId.get(
+            `${thread.environmentId}:${modelInstanceId}`,
+          ) ?? null;
+        return (
+          <ThreadCommandSubtitle
+            project={projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null}
+            projectTitle={projectTitle ?? null}
+            environmentLabel={
+              environmentLabelById
+                ? (environmentLabelById.get(thread.environmentId) ?? "Remote")
+                : null
+            }
+            branch={thread.branch}
+            worktreePath={thread.worktreePath}
+            isCurrent={thread.id === activeThreadId}
+            driverKind={providerEntry?.driverKind ?? null}
+            providerDisplayName={
+              thread.runtime?.providerName ?? providerEntry?.displayName ?? modelInstanceId
+            }
+            acpRegistryAgentId={providerEntry?.acpRegistryAgentId}
+            acpRegistryIconUrl={providerEntry?.acpRegistryIconUrl}
+          />
+        );
+      },
+      getContentMatch: (thread) => {
+        const match = contentMatchByKey?.get(
+          threadSearchMatchKey({
+            environmentId: thread.environmentId,
+            threadId: thread.id,
+          }),
+        );
+        return match && (match.source === "user" || match.source === "assistant")
+          ? { source: match.source, snippet: match.snippet, query: contentQuery }
+          : undefined;
+      },
+      runThread: async (thread) => {
+        await navigate({
+          to: "/$environmentId/$threadId",
+          params: buildThreadRouteParams(scopeThreadRef(thread.environmentId, thread.id)),
+        });
+      },
+    }))();
 }
 
 /** The environments a thread search can reach: everything currently connected. */
 export function useConnectedEnvironmentIds() {
   const { environments } = useEnvironments();
   return (() =>
-      environments
-        .filter((environment) => environment.connection.phase === "connected")
-        .map((environment) => environment.environmentId))();
+    environments
+      .filter((environment) => environment.connection.phase === "connected")
+      .map((environment) => environment.environmentId))();
 }

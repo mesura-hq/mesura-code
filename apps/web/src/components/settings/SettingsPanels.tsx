@@ -1,6 +1,9 @@
 import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
 import { SIDEBAR_THREAD_SORT_LABELS } from "../sidebar/threadOrderLabels";
-import { THREAD_ORDER_DEFAULT_SETTINGS_PATCH, getChangedThreadOrderSettingLabels } from "./SettingsPanels.logic";
+import {
+  THREAD_ORDER_DEFAULT_SETTINGS_PATCH,
+  getChangedThreadOrderSettingLabels,
+} from "./SettingsPanels.logic";
 import { SettingsGroup } from "./SettingsGroup";
 import { NotificationSettings } from "./NotificationSettings";
 import { PRIVACY_POLICY_URL } from "../../legalLinks";
@@ -464,7 +467,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...getChangedThreadOrderSettingLabels(settings.sidebarThreadSortOrder),
     ...(settings.modalEditing !== DEFAULT_UNIFIED_SETTINGS.modalEditing ? ["Modal editing"] : []),
     ...(settings.vimMode !== DEFAULT_UNIFIED_SETTINGS.vimMode ? ["Vim mode"] : []),
-    ...(settings.neovimConfigDirectory !== DEFAULT_UNIFIED_SETTINGS.neovimConfigDirectory ? ["Neovim configuration directory"] : []),
+    ...(settings.neovimConfigDirectory !== DEFAULT_UNIFIED_SETTINGS.neovimConfigDirectory
+      ? ["Neovim configuration directory"]
+      : []),
     ...(settings.diffFilesCollapsed !== DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed
       ? ["Default diff file state"]
       : []),
@@ -751,7 +756,6 @@ function NeovimConfigDirectoryRow() {
   );
 }
 
-
 const AUTO_SETTLE_DEFAULT_DAYS = DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays ?? 3;
 
 function AutoSettleDaysInput({
@@ -946,9 +950,29 @@ export function GeneralSettingsPanel() {
         <SettingsRow
           {...searchableSetting("thread-order")}
           description="Choose how active, unpinned threads are ordered."
-          control={<Select value={settings.sidebarThreadSortOrder} onValueChange={(value) => {
-            if (value === "updated_at" || value === "created_at") updateSettings({ sidebarThreadSortOrder: value });
-          }}><SelectTrigger size="sm" className="w-full sm:w-48" aria-label="Thread order"><SelectValue>{SIDEBAR_THREAD_SORT_LABELS[settings.sidebarThreadSortOrder]}</SelectValue></SelectTrigger><SelectPopup align="end" alignItemWithTrigger={false}><SelectItem hideIndicator value="updated_at">{SIDEBAR_THREAD_SORT_LABELS.updated_at}</SelectItem><SelectItem hideIndicator value="created_at">{SIDEBAR_THREAD_SORT_LABELS.created_at}</SelectItem></SelectPopup></Select>}
+          control={
+            <Select
+              value={settings.sidebarThreadSortOrder}
+              onValueChange={(value) => {
+                if (value === "updated_at" || value === "created_at")
+                  updateSettings({ sidebarThreadSortOrder: value });
+              }}
+            >
+              <SelectTrigger size="sm" className="w-full sm:w-48" aria-label="Thread order">
+                <SelectValue>
+                  {SIDEBAR_THREAD_SORT_LABELS[settings.sidebarThreadSortOrder]}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="updated_at">
+                  {SIDEBAR_THREAD_SORT_LABELS.updated_at}
+                </SelectItem>
+                <SelectItem hideIndicator value="created_at">
+                  {SIDEBAR_THREAD_SORT_LABELS.created_at}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
         />
 
         <SettingsRow
@@ -2058,19 +2082,19 @@ export function GeneralSettingsPanel() {
         <ModalEditingRow />
         <VimModeRow />
         <NeovimConfigDirectoryRow />
-            <SettingsRow
-              {...searchableSetting("context-window-indicator")}
-              description="Shows context window usage as a circular indicator in the composer."
-              control={
-                <Switch
-                  checked={settings.contextWindowMeterEnabled}
-                  onCheckedChange={(checked) =>
-                    updateSettings({ contextWindowMeterEnabled: Boolean(checked) })
-                  }
-                  aria-label="Context window indicator"
-                />
+        <SettingsRow
+          {...searchableSetting("context-window-indicator")}
+          description="Shows context window usage as a circular indicator in the composer."
+          control={
+            <Switch
+              checked={settings.contextWindowMeterEnabled}
+              onCheckedChange={(checked) =>
+                updateSettings({ contextWindowMeterEnabled: Boolean(checked) })
               }
+              aria-label="Context window indicator"
             />
+          }
+        />
       </SettingsSection>
       <LegacyFeaturesSection />
     </SettingsPageContainer>

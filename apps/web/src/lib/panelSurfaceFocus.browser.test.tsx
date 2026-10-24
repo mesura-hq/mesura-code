@@ -32,8 +32,6 @@ const byTestId = (id: string) => document.querySelector<HTMLElement>(`[data-test
 const hidden = new Set<Element>();
 
 async function setupBrowserFixture0() {
-
-
   vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(function (
     this: HTMLElement,
   ) {
@@ -41,20 +39,18 @@ async function setupBrowserFixture0() {
     return { length: shown ? 1 : 0 } as DOMRectList;
   });
 
-return {async [Symbol.asyncDispose]() {
-
-  vi.restoreAllMocks();
-  hidden.clear();
-  document.body.innerHTML = "";
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      vi.restoreAllMocks();
+      hidden.clear();
+      document.body.innerHTML = "";
+    },
+  };
 }
-
-
 
 describe("panel surface focus", () => {
   it("focuses the highest-ranked entry the surface shows, not a toolbar button", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const panel = mountPanel(`
       <button data-testid="refresh">Refresh</button>
@@ -65,7 +61,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("skips an entry that is not shown", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const panel = mountPanel(`
       <div data-pane-entry="1" data-testid="tree" tabindex="-1"></div>
@@ -76,7 +72,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("focuses an entry's scroll region, so the arrows scroll it", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const panel = mountPanel(`
       <div data-pane-entry="2"><div><div data-testid="scroller" style="overflow-y: auto"></div></div></div>`);
@@ -86,7 +82,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("focuses the shown scroll region past a hidden one, as a pull request's inactive tab is", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const panel = mountPanel(`
       <div data-pane-entry="1">
@@ -98,7 +94,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("reports a surface still loading its scroll region as not ready", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const panel = mountPanel(`<div data-pane-entry="2"><p>Loading…</p></div>`);
     expect(focusPanelSurface(panel)).toBe(false);
@@ -106,7 +102,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("uses an entry's own focus when it names one", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const panel = mountPanel(`<div data-pane-entry="1" data-testid="pierre"></div>`);
     const row = document.createElement("button");
@@ -205,13 +201,14 @@ async function pressFrom(target: Element, init: KeyboardEventInit): Promise<Keyb
 }
 
 const pressCtrlTab = async () =>
-  await pressFrom(document.activeElement ?? document.body, { key: "Tab", code: "Tab", ctrlKey: true });
+  await pressFrom(document.activeElement ?? document.body, {
+    key: "Tab",
+    code: "Tab",
+    ctrlKey: true,
+  });
 
 describe("panel surface focus follows a key", () => {
   async function setupBrowserFixture1() {
-
-
-
     frames = [];
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
       frames.push(callback);
@@ -223,22 +220,20 @@ describe("panel surface focus follows a key", () => {
       <button data-testid="diff-toolbar">Refresh</button>
       <div data-pane-entry="1" data-testid="diff-list" tabindex="-1"></div>
       <div data-pane-entry="2" data-testid="diff-view" tabindex="-1"></div>`;
-  
-return {async [Symbol.asyncDispose]() {
 
-    await harnessRoot?.[Symbol.asyncDispose]();
-    harnessRoot = null;
-    vi.useRealTimers();
-    vi.unstubAllGlobals();
-  
-}};
-}
-
-  
+    return {
+      async [Symbol.asyncDispose]() {
+        await harnessRoot?.[Symbol.asyncDispose]();
+        harnessRoot = null;
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
+      },
+    };
+  }
 
   it("lands focus on the new surface's highest-ranked entry after Ctrl+Tab changes the surface", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     await mountHarness();
     byTestId("files-tree").focus();
@@ -248,8 +243,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   });
 
   it("preserves a user focus move before the pending surface handoff's first frame", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     await mountHarness();
     byTestId("files-tree").focus();
@@ -260,8 +255,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   });
 
   it("leaves focus where it was when a pointer changes the active surface", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     await mountHarness();
     byTestId("title-files").focus();
@@ -300,8 +295,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   }
 
   it("parks focus on the active tab title until a late entry renders, then focuses the entry", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     await parkOnLoadingDiff();
     vi.advanceTimersByTime(3999);
@@ -310,8 +305,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   });
 
   it("stops waiting for a late entry after 4 s, leaving focus on the tab title", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     await parkOnLoadingDiff();
     vi.advanceTimersByTime(4000);
@@ -320,8 +315,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   });
 
   it("stops waiting for a late entry when focus moves elsewhere meanwhile", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     await parkOnLoadingDiff();
     byTestId("chat-focus").focus();
@@ -330,8 +325,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   });
 
   it("cancels lazy keyboard entry focus on pointer input that keeps the current focus", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     await parkOnLoadingDiff();
     byTestId("title-diff").dispatchEvent(new Event("pointerdown", { bubbles: true }));
@@ -340,8 +335,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   });
 
   it("stops waiting for a late entry when focus leaves the tab title and comes back before it renders", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     await parkOnLoadingDiff();
     byTestId("chat-focus").focus();
@@ -351,8 +346,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   });
 
   it("waits for a late entry after a pane move into the panel too (Ctrl+L)", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     using _timers = fakeTimers();
     // A Files tree still loading after a reload: its entry has no scroll region yet.
@@ -375,8 +370,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   });
 
   it("keeps waiting for a late entry when focus drops from the tab title to the body", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     await parkOnLoadingDiff();
     byTestId("title-diff").blur();
@@ -402,28 +397,23 @@ describe("panel surface half-page keys", () => {
   }
 
   async function setupBrowserFixture2() {
-
-
-
     vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 0);
     scrollBy = vi.fn();
-  
-return {async [Symbol.asyncDispose]() {
 
-    await harnessRoot?.[Symbol.asyncDispose]();
-    harnessRoot = null;
-    vi.unstubAllGlobals();
-  
-}};
-}
-
-  
+    return {
+      async [Symbol.asyncDispose]() {
+        await harnessRoot?.[Symbol.asyncDispose]();
+        harnessRoot = null;
+        vi.unstubAllGlobals();
+      },
+    };
+  }
 
   const ctrl = (key: string) => ({ key, code: `Key${key.toUpperCase()}`, ctrlKey: true });
 
   it("scrolls a focused panel scroll region half its height on Ctrl+D and Ctrl+U", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture2 = await setupBrowserFixture2();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture2 = await setupBrowserFixture2();
 
     const region = await mountScrollingSurface("");
     region.focus();
@@ -451,8 +441,8 @@ await using _browserFixture2 = await setupBrowserFixture2();
   it.each(leftAlone)(
     "leaves Ctrl+D and Ctrl+U to %s inside a panel scroll region",
     async (_name, inner) => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture2 = await setupBrowserFixture2();
+      await using _browserFixture0 = await setupBrowserFixture0();
+      await using _browserFixture2 = await setupBrowserFixture2();
 
       await mountScrollingSurface(inner);
       const target = byTestId("target");
@@ -466,8 +456,8 @@ await using _browserFixture2 = await setupBrowserFixture2();
   );
 
   it("leaves Ctrl+D to a panel surface that took it first", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture2 = await setupBrowserFixture2();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture2 = await setupBrowserFixture2();
 
     const region = await mountScrollingSurface("");
     region.addEventListener("keydown", (event) => event.preventDefault());

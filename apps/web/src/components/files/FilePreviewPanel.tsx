@@ -807,7 +807,9 @@ export default function FilePreviewPanel({
   if (!editorEligible && editorFile !== null) {
     setEditorFile(null);
   } else if (
-    editorEligible && loadedContents !== null && relativePath !== null &&
+    editorEligible &&
+    loadedContents !== null &&
+    relativePath !== null &&
     (editorFile?.relativePath !== relativePath || editorFile.contents !== loadedContents)
   ) {
     setEditorFile({ relativePath, contents: loadedContents });
@@ -1218,7 +1220,9 @@ export default function FilePreviewPanel({
                   : trailChildOf(hostFolderPath, breadcrumbTrail ?? hostFolderPath)
               }
               selectedPathRevealId={revealRequestId}
-              onOpenFile={(path) => onOpenFile(hostFolderPath === null ? path : joinPath(hostFolderPath, path))}
+              onOpenFile={(path) =>
+                onOpenFile(hostFolderPath === null ? path : joinPath(hostFolderPath, path))
+              }
               workspaceMutationId={workspaceMutationId}
               {...(previewPath && !isMedia && !isPdf
                 ? { onRefreshSelectedFile: file.refresh }

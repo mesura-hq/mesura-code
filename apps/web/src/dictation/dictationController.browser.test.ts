@@ -71,8 +71,6 @@ let unregister: () => void;
 let writeText: ReturnType<typeof vi.fn<(text: string) => Promise<void>>>;
 
 async function setupBrowserFixture0() {
-
-
   fixture.calls.length = 0;
   fixture.startGate = null;
   fixture.names = new Map<unknown, string>([
@@ -92,20 +90,18 @@ async function setupBrowserFixture0() {
     insertSlot: null,
   });
 
-return {async [Symbol.asyncDispose]() {
-
-  cancelDictation();
-  unregister();
-  useDictationSessionStore.setState({ session: null, lastJob: null });
-  useComposerDraftStore.getState().clearComposerContent(draftTarget);
-  setDictationMediaBackend(null);
-  Reflect.deleteProperty(navigator, "clipboard");
-  vi.restoreAllMocks();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      cancelDictation();
+      unregister();
+      useDictationSessionStore.setState({ session: null, lastJob: null });
+      useComposerDraftStore.getState().clearComposerContent(draftTarget);
+      setDictationMediaBackend(null);
+      Reflect.deleteProperty(navigator, "clipboard");
+      vi.restoreAllMocks();
+    },
+  };
 }
-
-
 
 const prompt = () => useComposerDraftStore.getState().getComposerDraft(draftTarget)?.prompt ?? "";
 const markers = () => findDictationSlots(prompt()).map((slot) => slot.jobId);
@@ -137,7 +133,7 @@ const settle = () => flushBrowserTasks();
 
 describe("dictation mode changes after the recording stopped", () => {
   it("dictation phase 4 regression: a saved job switched to insert drops a marker and fills it", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const jobId = await recordAndStop("clipboard");
     expect(markers()).toEqual([]);
@@ -154,7 +150,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 4 regression: an inserting job switched to save takes its marker out and copies", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const jobId = await recordAndStop();
     expect(markers()).toEqual([jobId]);
@@ -170,7 +166,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 4 regression: a mode key pressed while the start is on the wire reaches the server", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     let openGate = () => undefined as void;
     fixture.startGate = new Promise<void>((resolve) => {
@@ -192,7 +188,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("dictation across reloads and tabs", () => {
   it("dictation phase 4 regression: after a reload the mode keys pick the transcribing job back up", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const jobId = await recordAndStop();
     fixture.calls.length = 0;
@@ -215,7 +211,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 4 regression: two tabs recording at once keep both records", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const shared = new Map<string, string>();
     const storage = {
@@ -254,7 +250,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 4 regression: a job another tab already handled fills this tab's marker without a second notice", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     // Insert mode: since phase 5 of the STT redesign, a send-mode draft sends itself once filled.
     const jobId = await recordAndStop("inject");
@@ -275,7 +271,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("dictation delivery is acknowledged once it is durable", () => {
   it("dictation phase 4 regression: a fill whose draft write fails stays unhandled and is written on the next delivery", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     // Insert mode: since phase 5 of the STT redesign, a send-mode draft sends itself once filled.
     const jobId = await recordAndStop("inject");
@@ -306,7 +302,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("restarting a recording", () => {
   it("dictation phase 4 regression: cancel while a restart waits for the microphone keeps the recording cancelled", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await startDictation();
     media.holdMicrophone();
@@ -321,7 +317,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("dictation phase 4 regression: a mode chosen while a restart waits for the microphone is kept", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await startDictation();
     media.holdMicrophone();
@@ -360,23 +356,20 @@ describe("a transcript another tab overwrites", () => {
       .mock.calls.filter(([toast]) => String(toast.title).includes("kept in Transcriptions"));
 
   async function setupBrowserFixture1() {
-
-
     const _timers = fakeTimers();
-  
-return {async [Symbol.asyncDispose]() {
 
-    vi.useRealTimers();
-  
+    return {
+      async [Symbol.asyncDispose]() {
+        vi.useRealTimers();
 
-_timers[Symbol.dispose]();
-}};
-}
-  
+        _timers[Symbol.dispose]();
+      },
+    };
+  }
 
   it("dictation phase 4 regression: a transcript another tab saved over is announced as kept in Transcriptions, once", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     const jobId = await recordAndStop();
     deliverDictationJobs(environmentId, [completed(jobId, "submit", "texto de esta pestaña")]);
@@ -392,8 +385,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   });
 
   it("dictation phase 4 regression: another tab's save that keeps the transcript, or a draft the user already sent, raises no notice", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     const jobId = await recordAndStop();
     deliverDictationJobs(environmentId, [completed(jobId, "submit", "sigue aquí")]);
@@ -422,8 +415,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   const notices = () => vi.mocked(toastManager.add).mock.calls.map(([toast]) => toast);
 
   it("dictation phase 4 regression: concurrent stops in two tabs announce only the transcript a save really lost, with the other-tab wording", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     // Insert mode: since phase 5 of the STT redesign, a send-mode draft sends itself once filled.
     const mine = await recordAndStop("inject");
@@ -449,8 +442,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   });
 
   it("dictation phase 4 regression: a marker another tab's save removed is announced once, with the other-tab wording, when no tab delivers it", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     await recordAndStop();
     const orphan = jobFromSecondTab("2e8b4c17-93d5-4a0f-b6e2-5d1c7a9f3b08");
@@ -471,8 +464,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   });
 
   it("dictation phase 4 regression: no notice for a job whose text storage still holds, even when no tab acknowledged it", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     const saved = jobFromSecondTab("5a9f0c3e-6d21-4b87-8e4c-1f7b2d6a0e93");
     // This tab's own earlier edit is already written; a pending one would rightly overwrite tab 2.

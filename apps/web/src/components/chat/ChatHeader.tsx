@@ -194,7 +194,11 @@ export const ChatHeader = memo(function ChatHeader({
     });
   };
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  useThreadRenameShortcut({ keybindings, enabled: isServerThread && renamingTitle === null, onStartRename: startRename });
+  useThreadRenameShortcut({
+    keybindings,
+    enabled: isServerThread && renamingTitle === null,
+    onStartRename: startRename,
+  });
   const { openMenu, closeMenu } = useThreadActionMenu({
     threadRef: isServerThread ? activeThreadRef : null,
     projectCwd: activeProjectCwd,

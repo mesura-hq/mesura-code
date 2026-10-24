@@ -15,7 +15,12 @@ import { RunId } from "@t3tools/contracts";
  */
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { EnvironmentId, MessageId, ProjectId, ThreadId } from "@t3tools/contracts";
-import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
 import { AppAtomRegistryProvider } from "../../rpc/atomRegistry";
 import * as Cause from "effect/Cause";
 import { createRef, type ReactNode, useSyncExternalStore } from "react";
@@ -436,7 +441,6 @@ function pullRequestSurfaces(ref: typeof threadRef = threadRef) {
 }
 
 async function setupBrowserFixture0() {
-
   messageCounter = 0;
   fixture.projects = [alpha, zetaElsewhere];
   fixture.threadShells = new Map([
@@ -453,23 +457,21 @@ async function setupBrowserFixture0() {
   fixture.connectionPhaseByEnvironment = new Map();
   useRightPanelStore.setState({ byThreadKey: {}, userActionRevisionByThreadKey: {} });
 
-return {async [Symbol.asyncDispose]() {
-
-  await root?.[Symbol.asyncDispose]();
-  container?.remove();
-  root = null;
-  container = null;
-  router = null;
-  vi.unstubAllGlobals();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      await root?.[Symbol.asyncDispose]();
+      container?.remove();
+      root = null;
+      container = null;
+      router = null;
+      vi.unstubAllGlobals();
+    },
+  };
 }
-
-
 
 describe("Issue references in agent messages: activation opens the integrated Issues surface", () => {
   it("issues phase 3 fence: clicking a registered issue URL opens that issue beside the thread without leaving the route", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountTimeline([
       assistantEntry("The crash is tracked in https://github.com/acme/alpha/issues/7 upstream."),
@@ -491,7 +493,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues phase 3 fence: keyboard activation of an issue URL opens the same issue", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountTimeline([assistantEntry("See https://github.com/acme/alpha/issues/7.")]);
     // Enter on a focused link dispatches a click whose detail is 0.
@@ -506,7 +508,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues phase 3 fence: an explicit issue-number reference in agent prose links to the thread project's repository", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountTimeline([assistantEntry("This regressed in #7, see the notes there.")]);
     const link = anchorTo("https://github.com/acme/alpha/issues/7");
@@ -522,7 +524,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues phase 3 fence: code, authored links and document fragments keep their meaning beside a linked reference", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountTimeline([
       assistantEntry(
@@ -539,7 +541,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues phase 3 guard: without a known repository context a short reference stays plain text", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.threadShells.set(scopedThreadKey(threadRef), threadShell(threadRef, null));
     await mountTimeline([assistantEntry("This regressed in #7.")]);
@@ -551,7 +553,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("Issue references in agent messages: authoritative issue and pull request classification", () => {
   it("issues phase 3 fence: a short reference GitHub classifies as a pull request opens the pull request surface", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountTimeline([assistantEntry("Fixed by #9.")]);
     await activate(anchorTo("https://github.com/acme/alpha/issues/9"));
@@ -565,7 +567,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues phase 3 fence: an issues URL that names a pull request opens the pull request surface", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountTimeline([assistantEntry("Read https://github.com/acme/alpha/issues/17404 first.")]);
     await activate(anchorTo("https://github.com/acme/alpha/issues/17404"));
@@ -578,7 +580,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues phase 3 guard: a pull request URL opens the pull request surface without an issue classification", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountTimeline([assistantEntry("Review https://github.com/acme/alpha/pull/9 please.")]);
     const { followedAsLink } = await activate(anchorTo("https://github.com/acme/alpha/pull/9"));
@@ -591,7 +593,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues phase 3 fence: without reference resolution a short reference keeps the pull request confirmation and never guesses an issue", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.capabilitiesByEnvironment.set(environmentId, {
       repositoryIdentity: true,
@@ -612,7 +614,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("Issue references in agent messages: routing stays inside the thread's environment", () => {
   it("issues phase 3 guard: an issue URL of an unregistered repository stays an ordinary external link", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountTimeline([assistantEntry("Upstream bug: https://github.com/cli/cli/issues/7")]);
     const { followedAsLink } = await activate(anchorTo("https://github.com/cli/cli/issues/7"));
@@ -623,7 +625,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues phase 3 guard: an issue URL registered only on another environment stays an ordinary external link", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountTimeline([assistantEntry("See https://github.com/acme/zeta/issues/3")]);
     const { followedAsLink } = await activate(anchorTo("https://github.com/acme/zeta/issues/3"));
@@ -634,7 +636,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues phase 3 guard: an environment that cannot resolve references keeps an issue URL an ordinary external link", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.capabilitiesByEnvironment.set(environmentId, {
       repositoryIdentity: true,
@@ -652,7 +654,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("Issue references in agent messages: a disconnected environment", () => {
   it("issues phase 3 regression: a stale reference capability on a disconnected environment sends no read and keeps the original link", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.connectionPhaseByEnvironment.set(environmentId, "reconnecting");
     await mountTimeline([assistantEntry("See https://github.com/acme/alpha/issues/7")]);
@@ -666,7 +668,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("Issue references in agent messages: newer panel choices win (rework)", () => {
   it("issues phase 3 regression: a file opened while an issue is classifying keeps the panel", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountTimeline([
       assistantEntry(
@@ -689,7 +691,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues phase 3 regression: closing the panel while an issue is classifying keeps it closed", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountTimeline([assistantEntry("See https://github.com/acme/alpha/issues/7")]);
     await act(() => useRightPanelStore.getState().open(threadRef, "diff"));
@@ -708,7 +710,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues phase 3 regression: an automatic panel update does not cancel a pending issue choice", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountTimeline([assistantEntry("See https://github.com/acme/alpha/issues/7")]);
     await activate(anchorTo("https://github.com/acme/alpha/issues/7"));
@@ -738,7 +740,7 @@ describe("Issue references in agent messages: unavailable environments keep shor
   ] as const)(
     "issues phase 3 regression: a short reference on a disconnected environment with %s stays an ordinary link",
     async (_label, capabilities) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+      await using _browserFixture0 = await setupBrowserFixture0();
 
       fixture.capabilitiesByEnvironment.set(environmentId, capabilities);
       fixture.connectionPhaseByEnvironment.set(environmentId, "reconnecting");
@@ -756,7 +758,7 @@ describe("Direct pull request links keep every modifier ordinary (rework)", () =
   it.each(["metaKey", "ctrlKey", "shiftKey", "altKey"] as const)(
     "issues phase 3 regression: a %s click on a direct pull request link stays an ordinary link",
     async (modifier) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+      await using _browserFixture0 = await setupBrowserFixture0();
 
       await mountTimeline([assistantEntry("Review https://github.com/acme/alpha/pull/9 please.")]);
       const { followedAsLink } = await activate(anchorTo("https://github.com/acme/alpha/pull/9"), {
@@ -772,7 +774,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("Issue references in agent messages: modifiers and rapid activation", () => {
   it("issues phase 3 fence: a modified click on an issue URL stays an ordinary external link", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountTimeline([assistantEntry("See https://github.com/acme/alpha/issues/7 and #8.")]);
     for (const modifier of ["metaKey", "ctrlKey", "shiftKey", "altKey"] as const) {
@@ -790,7 +792,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues phase 3 fence: the most recently activated issue stays visible when an earlier read answers last", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountTimeline([
       assistantEntry("First: https://github.com/acme/alpha/issues/7"),
@@ -807,7 +809,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues phase 3 fence: an earlier pull request answer cannot replace a later issue choice", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountTimeline([
       assistantEntry("First: #9"),
@@ -826,7 +828,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues phase 3 regression: a pull request link followed while an issue is classifying is not replaced by the older answer", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountTimeline([
       assistantEntry("First: https://github.com/acme/alpha/issues/7"),
@@ -848,7 +850,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues phase 3 regression: a modified pull request click leaves a pending issue choice in place", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountTimeline([
       assistantEntry("First: https://github.com/acme/alpha/issues/7"),
@@ -867,7 +869,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues phase 3 fence: a read that answers after the thread changed opens nothing", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountTimeline([assistantEntry("See https://github.com/acme/alpha/issues/7")]);
     await activate(anchorTo("https://github.com/acme/alpha/issues/7"));
@@ -880,7 +882,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues phase 3 fence: a read that answers after the conversation unmounted opens nothing", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountTimeline([assistantEntry("See https://github.com/acme/alpha/issues/7")]);
     await activate(anchorTo("https://github.com/acme/alpha/issues/7"));
@@ -895,7 +897,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("Issue references in agent messages: boundaries the phase learned (regression)", () => {
   it("issues phase 3 regression: the pane consuming an earlier selection does not cancel a newer pending reference", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountTimeline([assistantEntry("See https://github.com/acme/alpha/issues/7")]);
     await act(() =>
@@ -914,7 +916,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues phase 3 regression: a panel choice in another thread does not cancel this thread's pending reference", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountTimeline([assistantEntry("See https://github.com/acme/alpha/issues/7")]);
     await activate(anchorTo("https://github.com/acme/alpha/issues/7"));
@@ -927,7 +929,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues phase 3 regression: an older message leaving the timeline does not cancel a newer message's pending reference", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const older = assistantEntry("First: https://github.com/acme/alpha/issues/7", { id: "older" });
     const newer = assistantEntry("Second: https://github.com/acme/alpha/issues/8", { id: "newer" });
@@ -944,7 +946,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues phase 3 regression: a streaming message keeps short references as text until it settles", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const id = "settling-message";
     await mountTimeline([
@@ -970,7 +972,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues phase 3 regression: a recorded identity naming two repositories links no short reference", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.projects = [
       { ...alpha, repositoryIdentity: { ...alpha.repositoryIdentity, owner: "someone-else" } },
@@ -990,7 +992,7 @@ describe("Issue references in agent messages: canonical-only identities (repair)
   };
 
   it("issues phase 3 repair: a short reference in a canonical-only GitHub project opens its issue", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.projects = [canonicalOnly(), zetaElsewhere];
     await mountTimeline([assistantEntry("This regressed in #7.")]);
@@ -1005,7 +1007,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues phase 3 repair: a short reference GitHub classifies as a pull request opens it in a canonical-only project", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.projects = [canonicalOnly(), zetaElsewhere];
     await mountTimeline([assistantEntry("Fixed by #9.")]);
@@ -1020,7 +1022,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues phase 3 repair: an issue URL naming one of two repositories in a contradictory identity stays an ordinary link", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     fixture.projects = [
       { ...alpha, repositoryIdentity: { ...alpha.repositoryIdentity, name: "other" } },
@@ -1045,7 +1047,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("Issue references in agent messages: rendering is not activation", () => {
   it("issues phase 3 fence: rendering and streaming issue mentions sends no read and opens nothing", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const id = "streaming-message";
     await mountTimeline([
@@ -1073,7 +1075,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("Issue references in agent messages: failures keep the original link", () => {
   it("issues phase 3 fence: a classification read failure opens the original link and no surface", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountTimeline([assistantEntry("See https://github.com/acme/alpha/issues/7")]);
     await activate(anchorTo("https://github.com/acme/alpha/issues/7"));
@@ -1087,7 +1089,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues phase 3 fence: a classification naming another repository or number is never substituted", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountTimeline([
       assistantEntry(
@@ -1107,7 +1109,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues phase 3 fence: after a failure the same reference can be followed again", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountTimeline([assistantEntry("See #7")]);
     await activate(anchorTo("https://github.com/acme/alpha/issues/7"));
@@ -1121,7 +1123,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("Issue references in agent messages: ordinary links keep their behavior", () => {
   it("issues phase 3 guard: an ordinary web link in an agent message is not intercepted", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await mountTimeline([assistantEntry("Docs: https://example.com/guide")]);
     const { followedAsLink } = await activate(anchorTo("https://example.com/guide"));

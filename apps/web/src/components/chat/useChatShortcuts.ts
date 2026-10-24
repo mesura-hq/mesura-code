@@ -67,7 +67,10 @@ export function useChatShortcuts(input: ChatShortcutsInput) {
       !shortcutContext.modelPickerOpen &&
       !getClientSettings().vimMode &&
       !useFileManagerStore.getState().open &&
-      !(event.target instanceof HTMLElement && event.target.closest("[data-pending-user-input-request-id]")) &&
+      !(
+        event.target instanceof HTMLElement &&
+        event.target.closest("[data-pending-user-input-request-id]")
+      ) &&
       shouldTypeToFocusComposer(event) &&
       input.composerRef.current?.insertTextAtEnd(event.key) === true
     ) {

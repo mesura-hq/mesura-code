@@ -38,17 +38,28 @@ function buildProps() {
   };
 }
 
-
 describe("timeline historical reading", () => {
   it("retains follow cancellation after opening and closing Find", async () => {
-    const props = buildProps() satisfies Omit<ComponentProps<typeof MessagesTimeline>, "timelineEntries">;
+    const props = buildProps() satisfies Omit<
+      ComponentProps<typeof MessagesTimeline>,
+      "timelineEntries"
+    >;
     function Thread({ findOpen }: { findOpen: boolean }) {
       const [follow, setFollow] = useState(true);
       const cancelFollow = () => setFollow(false);
-      return <><output>{follow ? "following" : "reading history"}</output>
-        <MessagesTimeline {...props} timelineEntries={[]} liveFollowEnabled={follow}
-          findOpen={findOpen} findExpanded={findOpen} onManualNavigation={cancelFollow} />
-      </>;
+      return (
+        <>
+          <output>{follow ? "following" : "reading history"}</output>
+          <MessagesTimeline
+            {...props}
+            timelineEntries={[]}
+            liveFollowEnabled={follow}
+            findOpen={findOpen}
+            findExpanded={findOpen}
+            onManualNavigation={cancelFollow}
+          />
+        </>
+      );
     }
     await using screen = await render(<Thread findOpen={false} />);
     expect(screen.container.querySelector("output")?.textContent).toBe("following");

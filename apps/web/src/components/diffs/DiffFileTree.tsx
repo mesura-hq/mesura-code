@@ -100,7 +100,8 @@ export function DiffFileTree({
       },
     };
   });
-  const gitStatus = (() => entries.map((entry) => ({ path: presented.modelPath(entry.path), status: entry.status })))();
+  const gitStatus = (() =>
+    entries.map((entry) => ({ path: presented.modelPath(entry.path), status: entry.status })))();
   const filePathsRef = useRef<ReadonlySet<string>>(new Set(paths));
   const onSelectFileRef = useRef(onSelectFile);
   // Pierre takes the renderer once, at creation; the ref keeps it current.

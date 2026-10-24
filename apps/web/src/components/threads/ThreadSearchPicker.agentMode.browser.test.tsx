@@ -121,20 +121,16 @@ const ARCHIVED_LAG_MATCH = agentMatch({
 let app: MountedApp;
 
 async function setupBrowserFixture0() {
-
-
   resetThreadSearchFixture();
   app = await mountApp();
 
-return {async [Symbol.asyncDispose]() {
-
-  await app.unmount();
-  vi.restoreAllMocks();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      await app.unmount();
+      vi.restoreAllMocks();
+    },
+  };
 }
-
-
 
 async function enterAgentMode(): Promise<void> {
   await openThreadSearch();
@@ -191,7 +187,7 @@ function threadPath(match: ReturnType<typeof agentMatch>): string {
 
 describe("agent search criterion 1: switching between exact words and agent mode", () => {
   it("agent search: Tab on the thread-search input enters agent mode and Tab returns to exact words", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await openThreadSearch();
     expect(paletteMode()).toBe("threads");
@@ -220,7 +216,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("agent search: the visible mode control switches both ways and hands focus back to the text field", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await openThreadSearch();
     const agentSegment = modeControl(AGENT_MODE_NAME);
@@ -239,7 +235,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("agent search: Tab while the mode control owns focus moves focus normally instead of switching modes", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await openThreadSearch();
     const agentSegment = modeControl(AGENT_MODE_NAME);
@@ -255,7 +251,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("agent search criterion 2: describe, see progress, refine, and get ranked links", () => {
   it("agent search: a submitted description shows progress, then ranked links with reasons and project and environment labels", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await enterAgentMode();
     await submitDescription(DESCRIPTION);
@@ -304,7 +300,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("agent search: clicking a ranked result opens that thread in its own environment", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await searchAndShow([HOSTS_DOCK_MATCH, ARROW_LAG_MATCH]);
 
@@ -315,7 +311,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("agent search: a refinement reruns the search and replaces a search still running", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await searchAndShow([HOSTS_DOCK_MATCH, ARROW_LAG_MATCH]);
 
@@ -344,7 +340,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("agent search criterion 3: keyboard selection, Escape, failure, empty, and focus", () => {
   it("agent search: arrow keys move the highlight through ranked results and Enter opens the highlighted one", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await searchAndShow([HOSTS_DOCK_MATCH, ARROW_LAG_MATCH]);
     expect(focusIsInPickerTextField()).toBe(true);
@@ -359,7 +355,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("agent search: Escape in agent mode returns to exact words, and a second Escape returns to the command palette", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await searchAndShow([HOSTS_DOCK_MATCH]);
 
@@ -373,7 +369,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("agent search: a failed search stays visible with its description and keeps focus for a retry", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await enterAgentMode();
     await submitDescription(DESCRIPTION);
@@ -405,7 +401,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("agent search: no confident match says so and names the environments it could not reach", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await enterAgentMode();
     await submitDescription(DESCRIPTION);
@@ -438,7 +434,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("agent search criterion 4: archived results unarchive before opening", () => {
   it("agent search: an archived result asks before unarchiving and opens only after the unarchive succeeds", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     let finishUnarchive: (() => void) | undefined;
     threadSearchFixture.commandReplies.set(
@@ -492,7 +488,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("agent search: an unarchived thread whose environment drops before its shell arrives shows a recoverable wait and opens after reconnecting", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await searchAndShow([ARCHIVED_LAG_MATCH]);
     await click(optionRows()[0]!);
@@ -519,7 +515,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("agent search: a failed unarchive keeps the confirmation open with the error and does not navigate", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     threadSearchFixture.commandReplies.set(UNARCHIVE_COMMAND_LABEL, async () =>
       commandFailure("Thread is locked by another client"),
@@ -542,7 +538,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("agent search: cancelling the unarchive confirmation dispatches nothing and returns focus to the picker", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await searchAndShow([ARCHIVED_LAG_MATCH]);
 
@@ -559,7 +555,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("does not restart while the unarchive confirmation is open", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await searchAndShow([ARCHIVED_LAG_MATCH]);
     await click(optionRows()[0]!);
@@ -573,7 +569,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("agent search: persistent popup session", () => {
   it("reopens an unsent description in agent mode", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await enterAgentMode();
     await typeInto(pickerTextField(), "an unfinished description");
@@ -584,7 +580,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("collapses a long activity log when ranked threads arrive", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await enterAgentMode();
     await submitDescription(DESCRIPTION);
@@ -609,7 +605,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("shows observed search activity in the conversation", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await enterAgentMode();
     await submitDescription(DESCRIPTION);
@@ -625,7 +621,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("keeps searching while closed and resumes with results", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const addToast = vi.spyOn(toastManager, "add");
     await enterAgentMode();
@@ -659,7 +655,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("keeps searching through the command palette and Alt+R cancels the session", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await enterAgentMode();
     await submitDescription(DESCRIPTION);
@@ -683,7 +679,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("agent search regressions from phase 4 verification and review", () => {
   it("agent search: Escape with the unarchive confirmation open closes only the confirmation", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await searchAndShow([ARCHIVED_LAG_MATCH]);
     await click(optionRows()[0]!);
@@ -700,7 +696,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("agent search: cancelling while an unarchived thread's shell is awaited stops it from opening later", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await searchAndShow([ARCHIVED_LAG_MATCH]);
     await click(optionRows()[0]!);
@@ -718,7 +714,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("agent search: ranked results keep both the work-limit and unread-evidence notices", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await enterAgentMode();
     await submitDescription(DESCRIPTION);

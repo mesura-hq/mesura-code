@@ -995,8 +995,8 @@ export function useComposerSend(input: ComposerSendInput) {
         .getState()
         .getComposerDraft(composerDraftTarget);
       const changedBeforeDecline = draftChangedSinceSend();
-      const pendingIdsBeforeDecline = pendingApprovalsRef.current.map(
-        (approval) => approval.requestId,
+      const pendingIdsBeforeDecline = new Set(
+        pendingApprovalsRef.current.map((approval) => approval.requestId),
       );
       const respondingApprovalIds = new Set(respondingRequestIdsRef.current);
       const approvalResponding = approvalsToDecline.some((approval) =>
@@ -1016,7 +1016,7 @@ export function useComposerSend(input: ComposerSendInput) {
       // An approval that arrived during the decline would block the redirect; keep the draft so
       // the next send declines it too.
       const approvalArrived = pendingApprovalsRef.current.some(
-        (approval) => !pendingIdsBeforeDecline.includes(approval.requestId),
+        (approval) => !pendingIdsBeforeDecline.has(approval.requestId),
       );
       if (
         !declined ||

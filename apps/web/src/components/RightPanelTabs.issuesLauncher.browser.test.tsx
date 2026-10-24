@@ -88,30 +88,24 @@ async function press(target: Element, key: string, init: KeyboardEventInit = {})
 }
 
 async function setupBrowserFixture0() {
-
-
-
-
-return {async [Symbol.asyncDispose]() {
-
-  await act(() => {
-    closePanelLauncher();
-    root?.[Symbol.asyncDispose]();
-  });
-  container?.remove();
-  document.body.replaceChildren();
-  root = null;
-  container = null;
-  vi.unstubAllGlobals();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      await act(() => {
+        closePanelLauncher();
+        root?.[Symbol.asyncDispose]();
+      });
+      container?.remove();
+      document.body.replaceChildren();
+      root = null;
+      container = null;
+      vi.unstubAllGlobals();
+    },
+  };
 }
-
-
 
 describe("Issues launcher guard: the contextual I shortcut", () => {
   it("issues launcher guard: bare I on the surface launcher opens Issues and nothing else", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const callbacks = await mountTabs();
     const event = await press(document.activeElement ?? document.body, "i");
@@ -123,7 +117,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues launcher guard: I typed into a text field or terminal input stays text", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const callbacks = await mountTabs();
     const field = document.createElement("input");
@@ -142,7 +136,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues launcher guard: I is left alone while a blocking overlay owns focus or with a modifier", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const callbacks = await mountTabs();
     await press(document.body, "i", { ctrlKey: true });
@@ -158,7 +152,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues launcher guard: without a GitHub project I opens nothing", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const callbacks = await mountTabs({ onAddIssues: undefined });
     await press(document.body, "i");
@@ -169,7 +163,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("issues launcher guard: I inside the Add surface launcher opens Issues and closes the launcher", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const callbacks = await mountTabs({
       surfaces: [{ id: "pull-requests", kind: "pull-requests" }],

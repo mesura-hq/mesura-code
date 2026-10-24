@@ -613,15 +613,23 @@ const ConversationTimeline = memo(function ConversationTimeline({
       : paintedExpandedAttemptIds;
 
   const [focusRequestId, setFocusRequestId] = useState<PendingUserInput["requestId"] | null>(null);
-  const pendingContext = pendingUserInput ? { ...pendingUserInput, focusRequestId, onQuestionFocused: () => setFocusRequestId(null) } : null;
-  const factoryContext = { onOpenFactoryPlan: onOpenFactoryPlan ?? null, onOpenFactoryRun: onOpenFactoryRun ?? null, onOpenFactoryReport: onOpenFactoryReport ?? null };
+  const pendingContext = pendingUserInput
+    ? { ...pendingUserInput, focusRequestId, onQuestionFocused: () => setFocusRequestId(null) }
+    : null;
+  const factoryContext = {
+    onOpenFactoryPlan: onOpenFactoryPlan ?? null,
+    onOpenFactoryRun: onOpenFactoryRun ?? null,
+    onOpenFactoryReport: onOpenFactoryReport ?? null,
+  };
   const rawRows = useIncrementalTimelineRows(`${listIdentityKey}\0${workspaceRoot ?? ""}`, {
     timelineEntries,
-    ...(pendingUserInput ? {
-      pendingUserInputs: pendingUserInput.requests,
-      environmentId: pendingUserInput.environmentId,
-      threadId: pendingUserInput.threadId,
-    } : {}),
+    ...(pendingUserInput
+      ? {
+          pendingUserInputs: pendingUserInput.requests,
+          environmentId: pendingUserInput.environmentId,
+          threadId: pendingUserInput.threadId,
+        }
+      : {}),
     ...(factoryRun === undefined ? {} : { factoryRun }),
     latestRun,
     runningRunId,
@@ -1075,29 +1083,46 @@ const ConversationTimeline = memo(function ConversationTimeline({
   // thread's context just before they unmount. extraData hands a changed
   // sharedState to the rows that stay.
   const renderItem = ({ item }: { item: MessagesTimelineRow }) => (
-    <PendingUserInputCtx value={pendingContext}><FactoryTimelineCtx value={factoryContext}>
-    <TimelineRowCtx value={sharedState}>
-      <div className="messages-timeline-row-frame">
-        <div
-          className="@container/chat-lane chat-content-lane overflow-x-clip"
-          data-timeline-root="true"
-        >
-          <TimelineRowContent row={item} />
-        </div>
-      </div>
-    </TimelineRowCtx></FactoryTimelineCtx></PendingUserInputCtx>
+    <PendingUserInputCtx value={pendingContext}>
+      <FactoryTimelineCtx value={factoryContext}>
+        <TimelineRowCtx value={sharedState}>
+          <div className="messages-timeline-row-frame">
+            <div
+              className="@container/chat-lane chat-content-lane overflow-x-clip"
+              data-timeline-root="true"
+            >
+              <TimelineRowContent row={item} />
+            </div>
+          </div>
+        </TimelineRowCtx>
+      </FactoryTimelineCtx>
+    </PendingUserInputCtx>
   );
-  const listExtraData = { identity: listIdentityKey, rowCount: rows.length, sharedState, pendingContext, factoryContext };
+  const listExtraData = {
+    identity: listIdentityKey,
+    rowCount: rows.length,
+    sharedState,
+    pendingContext,
+    factoryContext,
+  };
 
-  useEffect(() => subscribeTurnJumpRequest((request) => {
-    const index = minimapCurrentIndex;
-    if (index === null) return;
-    const item = minimapItems[index + (request.direction === "previous" ? -1 : 1)];
-    if (!item) return;
-    onManualNavigation();
-    void listRef.current?.scrollToIndex({ index: item.rowIndex, animated: false, viewOffset: 24 });
-    request.rowId = item.id;
-  }), [minimapCurrentIndex, minimapItems, onManualNavigation, listRef]);
+  useEffect(
+    () =>
+      subscribeTurnJumpRequest((request) => {
+        const index = minimapCurrentIndex;
+        if (index === null) return;
+        const item = minimapItems[index + (request.direction === "previous" ? -1 : 1)];
+        if (!item) return;
+        onManualNavigation();
+        void listRef.current?.scrollToIndex({
+          index: item.rowIndex,
+          animated: false,
+          viewOffset: 24,
+        });
+        request.rowId = item.id;
+      }),
+    [minimapCurrentIndex, minimapItems, onManualNavigation, listRef],
+  );
 
   const forwardMinimapWheel = (event: WheelEvent) => {
     const scrollNode = listRef.current?.getScrollableNode();
@@ -1508,4 +1533,3 @@ function FactoryReportTimelineRow({
     </div>
   );
 }
-

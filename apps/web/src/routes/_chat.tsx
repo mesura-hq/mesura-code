@@ -1,7 +1,7 @@
 import { AuthPreviewOperateScope } from "@t3tools/contracts";
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
-import { useEffect, } from "react";
+import { useEffect } from "react";
 
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { ThreadRouteView } from "../components/ThreadRouteView";
@@ -77,15 +77,15 @@ function ChatRouteGlobalShortcuts() {
   usePaneNavigation(keybindings, routeThreadRef ? scopedThreadKey(routeThreadRef) : null);
   // The chord branches below and the command registry run these, so a
   // leader key and the chord share one body.
-  const startContextualNewThread = (() => {
+  const startContextualNewThread = () => {
     void startNewThreadFromContext({
       activeDraftThread,
       activeThread: activeThread ?? undefined,
       defaultProjectRef,
       handleNewThread,
     });
-  });
-  const startNewThread = (() => {
+  };
+  const startNewThread = () => {
     // The default sidebar routes creation through the command palette
     // whenever there is a real choice to make; the legacy sidebar (and
     // single-project setups) keep the immediate contextual create.
@@ -94,8 +94,8 @@ function ChatRouteGlobalShortcuts() {
       return;
     }
     startContextualNewThread();
-  });
-  const togglePreviewPanel = (() => {
+  };
+  const togglePreviewPanel = () => {
     if (!routeThreadRef || (!canOperatePreview && !previewOpen)) return;
     if (!isPreviewAvailableFor(routeThreadRef.environmentId)) {
       toastManager.add(
@@ -108,7 +108,7 @@ function ChatRouteGlobalShortcuts() {
       return;
     }
     dispatchPreviewAction("toggle-panel");
-  });
+  };
   useCommandHandlers({
     "chat.new": startNewThread,
     "chat.newLocal": startContextualNewThread,

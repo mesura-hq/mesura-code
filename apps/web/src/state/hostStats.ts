@@ -38,7 +38,10 @@ const hostStatsSourcesAtom = Atom.family((enabled: boolean) =>
     if (!enabled) return { presentations, subscriptions: NO_SUBSCRIPTIONS };
     const subscriptions = new Map<EnvironmentId, HostStatsSubscription>();
     for (const environmentId of presentations.keys()) {
-      subscriptions.set(environmentId, readHostStatsSubscription(get(hostStatsTarget(environmentId))));
+      subscriptions.set(
+        environmentId,
+        readHostStatsSubscription(get(hostStatsTarget(environmentId))),
+      );
     }
     return { presentations, subscriptions };
   }),

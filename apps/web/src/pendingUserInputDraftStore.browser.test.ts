@@ -1,4 +1,3 @@
-
 import { expect, it } from "vite-plus/test";
 
 import { usePendingUserInputDraftStore } from "./pendingUserInputDraftStore";
@@ -31,22 +30,18 @@ const versionTwoStorage = {
 };
 
 async function setupBrowserFixture0() {
-
-
   localStorage.clear();
   usePendingUserInputDraftStore.setState({ requests: {} });
 
-return {async [Symbol.asyncDispose]() {
-
-  localStorage.clear();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      localStorage.clear();
+    },
+  };
 }
 
-
-
 it("pending question drafts saved at version 2 keep their answers and drop the Shell dictation ledger on load", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+  await using _browserFixture0 = await setupBrowserFixture0();
 
   localStorage.setItem(STORAGE_KEY, JSON.stringify(versionTwoStorage));
 

@@ -1,3 +1,4 @@
+import { APP_BASE_NAME } from "~/branding";
 import { useIssueReferenceAutolinks } from "~/lib/openIssueLink";
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
 import { type RunId } from "@t3tools/contracts";
@@ -32,7 +33,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
   return (
     <>
       <div className="relative min-w-0 px-1 py-0.5">
-        <MessageAuthorHeading>T3 Code</MessageAuthorHeading>
+        <MessageAuthorHeading>{APP_BASE_NAME}</MessageAuthorHeading>
         <div data-thread-find-text="true">
           <AssistantCitationSource
             messageId={row.message.id}

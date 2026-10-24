@@ -123,7 +123,13 @@ type LinkActivationModifiers = Pick<MouseEvent<HTMLElement>, "metaKey" | "ctrlKe
  * own, since the panel is told which one to show.
  */
 export function shouldOpenPullRequestExternally(event: LinkActivationModifiers): boolean {
-  return event.metaKey || event.ctrlKey || event.shiftKey === true || event.altKey === true || event.button === 1;
+  return (
+    event.metaKey ||
+    event.ctrlKey ||
+    event.shiftKey === true ||
+    event.altKey === true ||
+    event.button === 1
+  );
 }
 
 export function useOpenChangeRequestLink(

@@ -1,4 +1,3 @@
-
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { type EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
@@ -12,20 +11,18 @@ import { useFileTreeStore } from "./fileTreeStore";
 const disposers: Array<() => void> = [];
 
 async function setupBrowserFixture0() {
-
-
-return {async [Symbol.asyncDispose]() {
-
-  for (const dispose of disposers.splice(0)) dispose();
-  useFileTreeStore.getState().setExplorerOpen(true);
-  useFileTreeStore.getState().clearPendingFocus();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      for (const dispose of disposers.splice(0)) dispose();
+      useFileTreeStore.getState().setExplorerOpen(true);
+      useFileTreeStore.getState().clearPendingFocus();
+    },
+  };
 }
 
 describe("leaveFileTree", () => {
   it("hides the tree only after an editor took focus", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     let editorFocused = 0;
     disposers.push(
@@ -40,7 +37,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("falls back to the composer and keeps the tree when no editor is mounted", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     let composerFocused = 0;
     disposers.push(
@@ -55,7 +52,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("drops a pending focus request on the way out", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     useFileTreeStore.getState().requestFocus();
     leaveFileTree();
@@ -67,7 +64,7 @@ describe("runFileTreeToggle on a hidden panel", () => {
   const ref = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("focus-moves-thread"));
 
   it("restores a file tab opened without the explorer with its explorer shown", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     useRightPanelStore.setState({ byThreadKey: {}, userActionRevisionByThreadKey: {} });
     const panels = useRightPanelStore.getState();

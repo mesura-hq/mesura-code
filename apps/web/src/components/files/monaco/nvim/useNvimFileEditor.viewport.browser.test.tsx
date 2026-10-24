@@ -81,25 +81,22 @@ let mounted: Awaited<ReturnType<typeof mountNvimEditor>> | undefined;
 const nextFrames = () => act(() => vi.advanceTimersToNextFrame());
 
 async function setupBrowserFixture0() {
-
   editorTransport.reset();
 
-return {async [Symbol.asyncDispose]() {
-
-  editorTransport.autoReplyAll();
-  await mounted?.unmount();
-  mounted = undefined;
-  vi.unstubAllGlobals();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      editorTransport.autoReplyAll();
+      await mounted?.unmount();
+      mounted = undefined;
+      vi.unstubAllGlobals();
+    },
+  };
 }
-
-
 
 describe("the window the client asks Neovim for, with word wrap on", () => {
   it("never sends Neovim a window that leaves out the line a key put its cursor on", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-using _timers = fakeTimers();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _timers = fakeTimers();
 
     const model = makeHarnessModel(
       LINES,
@@ -160,8 +157,8 @@ using _timers = fakeTimers();
   });
 
   it("keeps the caret in view when a key lands on a later wrapped row of a long line", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-using _timers = fakeTimers();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _timers = fakeTimers();
 
     // Line 3 wraps to 20 rows at 180 columns. A key puts the caret on its 18th
     // row and Neovim makes line 3 its topline. Following that topline shows

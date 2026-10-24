@@ -99,7 +99,11 @@ describe("factory surface in the right panel (phase 2 fence)", () => {
     expect(
       useRightPanelStore
         .getState()
-        .openProactive(ref, { kind: "diff", turnId: RunId.make("automatic-diff") }, revisionBeforeOpen),
+        .openProactive(
+          ref,
+          { kind: "diff", turnId: RunId.make("automatic-diff") },
+          revisionBeforeOpen,
+        ),
     ).toBe(false);
     expect(panelState().activeSurfaceId).toBe("factory");
   });

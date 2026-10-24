@@ -26,7 +26,6 @@ const addFiles = vi.fn();
 const noop = () => undefined;
 
 async function setupBrowserFixture0() {
-
   const _timers = fakeTimers();
   vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
   addFiles.mockClear();
@@ -35,19 +34,17 @@ async function setupBrowserFixture0() {
   document.body.append(container);
   root = await render(null, { container, router: false });
 
-return {async [Symbol.asyncDispose]() {
-
-  closePanelLauncher();
-  await root[Symbol.asyncDispose]();
-  container.remove();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-  _timers[Symbol.dispose]();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      closePanelLauncher();
+      await root[Symbol.asyncDispose]();
+      container.remove();
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+      _timers[Symbol.dispose]();
+    },
+  };
 }
-
-
 
 function panelElement(overrides: Partial<ComponentProps<typeof RightPanelTabs>> = {}) {
   return (
@@ -134,7 +131,7 @@ describe("right panel new-tab shortcut", () => {
   it.each(["MacIntel", "Win32", "Linux x86_64"])(
     "opens the launcher on %s and chooses a tab",
     async (platform) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+      await using _browserFixture0 = await setupBrowserFixture0();
 
       vi.spyOn(navigator, "platform", "get").mockReturnValue(platform);
       await renderPanel();
@@ -163,7 +160,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   );
 
   it("right panel launcher regression: unmount after opening releases the new-tab shortcut", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await renderPanel();
     await press("t", { metaKey: true });
@@ -178,7 +175,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("right panel launcher regression: closing a rerendered panel releases the new-tab shortcut", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await renderPanel();
     await press("t", { metaKey: true });
@@ -187,7 +184,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("right panel launcher regression: a focused closed panel preserves browser new-tab keys after repeated choices", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     for (let iteration = 0; iteration < 3; iteration++) {
       await renderPanel();
@@ -203,7 +200,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("leaves the shortcut alone while the mounted panel is closed", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await renderPanel({ open: false });
     expect((await press("t", { metaKey: true })).defaultPrevented).toBe(false);
@@ -213,7 +210,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   it.each(["Win32", "Linux x86_64"])(
     "leaves Ctrl+T for the focused terminal on %s",
     async (platform) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+      await using _browserFixture0 = await setupBrowserFixture0();
 
       vi.spyOn(navigator, "platform", "get").mockReturnValue(platform);
       await renderPanel({
@@ -239,7 +236,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   );
 
   it("uses a custom binding from a text field and closes on Escape", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const input = document.createElement("input");
     await renderPanel({
@@ -258,7 +255,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("does not open over another popup or during text composition", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await renderPanel();
     expect((await press("t", { metaKey: true, isComposing: true })).defaultPrevented).toBe(false);
@@ -270,7 +267,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("supports arrow keys with an existing tab in sheet mode and clears the launcher on close", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const panel = {
       mode: "sheet" as const,
@@ -301,7 +298,7 @@ describe("panel launcher review regressions", () => {
   ] as const)(
     "parks keyboard focus before first surface activation in $mode via $activation",
     async ({ mode, activation }) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+      await using _browserFixture0 = await setupBrowserFixture0();
 
       let focusAtActivation: Element | null = null;
       const activate = vi.fn(() => {
@@ -333,7 +330,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   it.each([0, 1])(
     "preserves pointer focus on first launcher activation with click detail %s",
     async (detail) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+      await using _browserFixture0 = await setupBrowserFixture0();
 
       let focusAtActivation: Element | null = null;
       const activate = vi.fn(() => {
@@ -352,7 +349,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   );
 
   it("parks focus for Base UI browser-profile keyboard activation before the launcher is removed", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     browserDefaults.profiles = [
       { id: "synthetic-one", name: "Synthetic first profile" },
@@ -385,7 +382,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("retains native keyboard handoff when another mounted panel disposes its input listener", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     let focusAtActivation: Element | null = null;
     const activate = vi.fn(() => {
@@ -416,7 +413,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   it.each(["inline", "sheet"] as const)(
     "panel launcher P1-1: a retained empty %s panel ignores letters and navigation while closed and restores them on reopen",
     async (mode) => {
-await using _browserFixture0 = await setupBrowserFixture0();
+      await using _browserFixture0 = await setupBrowserFixture0();
 
       const toggle = vi.fn();
       const dispose = registerCommandHandlers({ "rightPanel.toggle": toggle });
@@ -447,7 +444,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   );
 
   it("panel launcher P1-2: inline to phone-sheet handoff retains the launcher only with an open replacement", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await renderPanels(<section key="inline">{panelElement()}</section>);
     await press("t", { metaKey: true });
@@ -469,7 +466,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("panel launcher P1-2: closing and removing a second mounted panel cannot clear the first panel owner", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const panels = (second: "open" | "closed" | "absent") => (
       <>
@@ -503,7 +500,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("panel launcher P1-2: removal of the owner closes its launcher without transferring it to an existing unrelated panel", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await renderPanels(
       <>

@@ -88,20 +88,17 @@ async function mount() {
 }
 
 async function setupBrowserFixture0() {
-
   editorTransport.reset();
 
-return {async [Symbol.asyncDispose]() {
-
-  editorTransport.autoReplyAll();
-  await mounted?.unmount();
-  mounted = undefined;
-  vi.unstubAllGlobals();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      editorTransport.autoReplyAll();
+      await mounted?.unmount();
+      mounted = undefined;
+      vi.unstubAllGlobals();
+    },
+  };
 }
-
-
 
 const inputPayloads = () => editorTransport.inputs().map((request) => request.payload);
 
@@ -120,7 +117,7 @@ const appliedWithoutRepeats = (typed: string, applied: string) => {
 
 describe("modal editor key delivery while a request is in flight", () => {
   it("coalesces the keys typed during an in-flight input request into one request", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const { press } = await mount();
     editorTransport.holdReplies();
@@ -154,7 +151,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("modal editor key batches and the contract's keys bound", () => {
   it("splits an accumulated batch longer than 1024 characters in order, at key boundaries", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const { press } = await mount();
     editorTransport.holdReplies();
@@ -213,7 +210,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
    * are still `dw` when nothing lands between them.
    */
   it("keeps an operator typed in one batch before its motion typed in the next", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const { press } = await mount();
     editorTransport.holdReplies();
@@ -236,7 +233,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("modal editor keys after a failed input request", () => {
   it("re-sends the keys of an input request lost to a disconnect, once, in order, or shows the loss", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const { press, container } = await mount();
     editorTransport.holdReplies();
@@ -269,7 +266,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("delivers the keys typed while the socket was reconnecting, in order, once it is back", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const { press, container } = await mount();
     editorTransport.holdReplies();
@@ -298,8 +295,8 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("re-sends on the session's return even after wire failures have backed the lane off", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-using _timers = fakeTimers();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    using _timers = fakeTimers();
     const { press } = await mount();
     editorTransport.holdReplies();
 
@@ -338,7 +335,7 @@ using _timers = fakeTimers();
   });
 
   it("re-sends the keys of an input request the server refused, once, in order, or shows the loss", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const { press, container } = await mount();
     editorTransport.holdReplies();
@@ -375,7 +372,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
  */
 describe("modal editor key delivery guards", () => {
   it("delivers a long mixed key sequence to Neovim in order with nothing held back", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const { press } = await mount();
 
@@ -414,7 +411,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("keeps a mouse cursor move in order with the keys around it, never beside them", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const { press, click } = await mount();
     editorTransport.holdReplies();
@@ -449,7 +446,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("modal editor calls that share the key lane with a coalesced batch", () => {
   it("keeps a click and an agent's edit in order around a coalesced batch in flight", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const { press, click } = await mount();
     editorTransport.holdReplies();
@@ -500,13 +497,12 @@ await using _browserFixture0 = await setupBrowserFixture0();
  */
 describe("modal editor keys that cannot be delivered", () => {
   async function setupBrowserFixture1() {
-
-return {async [Symbol.asyncDispose]() {
-
-    vi.useRealTimers();
-  
-}};
-}
+    return {
+      async [Symbol.asyncDispose]() {
+        vi.useRealTimers();
+      },
+    };
+  }
 
   /** Moves the fake clock on, letting promises and React run as it goes. */
   async function advance(milliseconds: number) {
@@ -516,8 +512,8 @@ return {async [Symbol.asyncDispose]() {
   }
 
   it("reports keys lost once the session has been gone for the outage limit", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     const { press, container } = await mount();
     using _timers = fakeTimers();
@@ -545,8 +541,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   });
 
   it("reports keys lost after the server has refused them six times", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     const { press, container } = await mount();
     using _timers = fakeTimers();
@@ -564,8 +560,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   });
 
   it("reports keys lost at once when the server cannot vouch for a re-sent batch", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     const { press, container } = await mount();
     editorTransport.holdReplies();

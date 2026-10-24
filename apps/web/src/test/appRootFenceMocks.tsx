@@ -148,7 +148,10 @@ type FenceEnvironmentsModule = ModuleWithOverrides<
       environments: typeof appRootFence.environments;
       isReady: boolean;
     };
-    useEnvironmentProviders: () => Map<string, (typeof appRootFence.environments)[number]["serverConfig"]["providers"]>;
+    useEnvironmentProviders: () => Map<
+      string,
+      (typeof appRootFence.environments)[number]["serverConfig"]["providers"]
+    >;
     usePrimaryEnvironment: () => null;
   }
 >;
@@ -259,7 +262,13 @@ export async function mockEnvironments(
   return {
     ...(await importOriginal()),
     useEnvironments: () => ({ environments: appRootFence.environments, isReady: true }),
-    useEnvironmentProviders: () => new Map(appRootFence.environments.map((environment) => [environment.environmentId, environment.serverConfig.providers])),
+    useEnvironmentProviders: () =>
+      new Map(
+        appRootFence.environments.map((environment) => [
+          environment.environmentId,
+          environment.serverConfig.providers,
+        ]),
+      ),
     usePrimaryEnvironment: () => null,
   };
 }

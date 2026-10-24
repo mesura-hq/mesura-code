@@ -143,24 +143,21 @@ async function neovimReports(mode: string, extra: { readonly jumping?: boolean }
 }
 
 async function setupBrowserFixture0() {
-
   editorTransport.reset();
 
-return {async [Symbol.asyncDispose]() {
-
-  editorTransport.autoReplyAll();
-  await mounted?.unmount();
-  mounted = undefined;
-  vi.unstubAllGlobals();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      editorTransport.autoReplyAll();
+      await mounted?.unmount();
+      mounted = undefined;
+      vi.unstubAllGlobals();
+    },
+  };
 }
-
-
 
 describe("Escape in the file editor before Neovim has caught up with the keys", () => {
   it("sends Escape to Neovim instead of releasing the editor while a typed key is in flight", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const surface = await openEditor();
     editorTransport.holdReplies();
@@ -179,7 +176,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("sends Escape to Neovim when the key it acknowledged has not had its mode reported yet", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const surface = await openEditor();
     // Neovim answers A from insert mode.
@@ -206,7 +203,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("sends Escape to Neovim before the session has reported any mode", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     // Neither the attachment's snapshot nor the open's answer has arrived.
     const surface = await openEditor({ snapshotHeld: true, openHeld: true });
@@ -231,7 +228,7 @@ describe("the S4 Escape race, replayed on the client in its recorded order", () 
   // arrives and x goes out; Escape is typed while x is unanswered, with the
   // client still showing NORMAL; then x's reply, then Neovim's INSERT.
   it("keeps A, x, Escape and the keys after them in the editor when the replies trail the typing", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const surface = await openEditor();
     editorTransport.holdReplies();
@@ -278,7 +275,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("Escape that still belongs to the panel, and to flash", () => {
   it("releases the editor on the first Escape after a fresh open", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const surface = await openEditor();
     await settleUntil(() => stripMode(surface.container) === "NORMAL", "the strip says NORMAL");
@@ -292,7 +289,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("ignores an open's answer when a key was typed while the open was in flight", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const surface = await openEditor({ openHeld: true });
     // A is answered from insert mode before the open's answer arrives.
@@ -310,7 +307,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("keeps Escape for Neovim after opening on an older host whose open answer says nothing", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     editorTransport.answerLikeAnOlderHost();
     const surface = await openEditor();
@@ -322,7 +319,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("releases the editor on Escape once typed keys are acknowledged and Neovim reports normal mode", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const surface = await openEditor();
 
@@ -340,7 +337,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("keeps Escape for Neovim while the last answer says a command waits, and releases on the next plain answer", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const surface = await openEditor();
     // `d` is answered waiting for its motion, `f` waiting for its character.
@@ -371,7 +368,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("keeps Escape for Neovim while flash labels jump targets in normal mode", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const surface = await openEditor();
     await neovimReports("n", { jumping: true });
@@ -390,7 +387,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("keeps Escape for Neovim once Neovim has confirmed insert mode", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const surface = await openEditor();
     editorTransport.setNeovimMode({ mode: "i" });
@@ -433,7 +430,7 @@ describe("Escape when a snapshot or the host cannot vouch for Neovim's mode", ()
   };
 
   it("keeps Escape for Neovim when a normal-mode snapshot lands after a reply that confirmed insert mode", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const surface = await openEditor();
     editorTransport.setNeovimMode({ mode: "i" });
@@ -452,7 +449,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("keeps Escape for Neovim when an older host answers a key batch with nothing", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const surface = await openEditor();
     editorTransport.answerLikeAnOlderHost();
@@ -470,7 +467,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("keeps Escape for Neovim after a reattach snapshot says plain normal while f still waits", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const surface = await openEditor();
     // Neovim answers `f` waiting for its character, as a native `f` does.
@@ -488,7 +485,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("releases the editor on Escape after a snapshot and a message arrive together", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     // The restart path: a snapshot followed at once by a message, folded into
     // one render. The open's answer confirmed; the snapshot changes nothing.

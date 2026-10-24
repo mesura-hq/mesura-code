@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { act, render, type Screen } from "../../../test/render";
 import { DiffFileTree, type DiffFileTreeEntry } from "./DiffFileTree";
 import { focusPanelSurface } from "../../lib/panelSurfaceFocus";
-vi.mock(import("../../hooks/useTheme"), async (original) => ({ ...(await original()), useTheme: (() => ({ resolvedTheme: "dark" })) as never }));
+vi.mock(import("../../hooks/useTheme"), async (original) => ({
+  ...(await original()),
+  useTheme: (() => ({ resolvedTheme: "dark" })) as never,
+}));
 describe("diff tree decoration refresh guards", () => {
   let root: Screen;
   let container: HTMLDivElement;
@@ -14,23 +17,20 @@ describe("diff tree decoration refresh guards", () => {
   const onSelectFile = () => {};
 
   async function setupBrowserFixture0() {
-
     container = document.createElement("div");
     container.setAttribute("data-right-panel-surface-content", "");
     document.body.append(container);
     root = await render(null, { container, router: false });
-  
-return {async [Symbol.asyncDispose]() {
 
-    await act(async () => root.unmount());
-    await root[Symbol.asyncDispose]();
-    vi.restoreAllMocks();
-    vi.unstubAllGlobals();
-  
-}};
-}
-
-  
+    return {
+      async [Symbol.asyncDispose]() {
+        await act(async () => root.unmount());
+        await root[Symbol.asyncDispose]();
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+      },
+    };
+  }
 
   async function renderDecoration(renderFileDecoration: (path: string) => { text: string } | null) {
     await act(async () => {
@@ -46,7 +46,7 @@ return {async [Symbol.asyncDispose]() {
   }
 
   it("DiffFileTree decoration guard: count-only updates preserve the model, selection, collapsed folders and keyboard entry", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const render = vi.spyOn(FileTreeModel.prototype, "render");
     await renderDecoration(() => ({ text: "+9 −2" }));
@@ -83,7 +83,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("DiffFileTree decoration guard: unchanged renderers do not redraw and removing a renderer clears counts", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const decoration = vi.fn(() => ({ text: "+9 −2" }));
     await renderDecoration(decoration);

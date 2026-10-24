@@ -32,18 +32,16 @@ function register(handlers: Parameters<typeof registerCommandHandlers>[0]) {
 }
 
 async function setupBrowserFixture0() {
-
-
-return {async [Symbol.asyncDispose]() {
-
-  for (const dispose of disposers.splice(0)) dispose();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      for (const dispose of disposers.splice(0)) dispose();
+    },
+  };
 }
 
 describe("command registry", () => {
   it("runs the handler registered for a command and reports that it ran", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const run = vi.fn();
     register({ "thread.pin": run });
@@ -52,13 +50,13 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("reports a command with no registered handler as not run", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     expect(runRegisteredCommand("thread.settle")).toBe(false);
   });
 
   it("runs a command with no default chord from the registry", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     expect(findEffectiveShortcutForCommand(DEFAULT_RESOLVED_KEYBINDINGS, CHORDLESS_COMMAND)).toBe(
       null,
@@ -70,7 +68,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("registers every command in one map and disposes them together", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const pin = vi.fn();
     const settle = vi.fn();
@@ -85,7 +83,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("runs the most recent registration and restores the previous one on dispose", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const first = vi.fn();
     const second = vi.fn();
@@ -101,7 +99,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("keeps the most recent registration when an older one is disposed first", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const first = vi.fn();
     const second = vi.fn();
@@ -119,30 +117,27 @@ describe("command registry hook", () => {
   let container: HTMLDivElement;
 
   async function setupBrowserFixture1() {
-
-
-
     container = document.createElement("div");
     document.body.append(container);
-  
-return {async [Symbol.asyncDispose]() {
 
-    await root?.[Symbol.asyncDispose]();
-    root = undefined;
-    container.remove();
-    vi.unstubAllGlobals();
-  
-}};
-}
-
-  
+    return {
+      async [Symbol.asyncDispose]() {
+        await root?.[Symbol.asyncDispose]();
+        root = undefined;
+        container.remove();
+        vi.unstubAllGlobals();
+      },
+    };
+  }
 
   function Owner(props: { readonly onPin: () => void }) {
     useCommandHandlers({ "thread.pin": () => props.onPin() });
     return null;
   }
 
-  async function render(owners: ReadonlyArray<{ readonly key: string; readonly onPin: () => void }>) {
+  async function render(
+    owners: ReadonlyArray<{ readonly key: string; readonly onPin: () => void }>,
+  ) {
     await act(async () => {
       root ??= await renderBrowser(null, { container: container, router: false });
       await root.rerender(owners.map((owner) => createElement(Owner, owner)));
@@ -150,8 +145,8 @@ return {async [Symbol.asyncDispose]() {
   }
 
   it("runs the most recently mounted owner and restores the previous one on unmount", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     const first = vi.fn();
     const second = vi.fn();
@@ -173,8 +168,8 @@ await using _browserFixture1 = await setupBrowserFixture1();
   });
 
   it("runs the owner's latest callback after a re-render with a fresh closure", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture1 = await setupBrowserFixture1();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture1 = await setupBrowserFixture1();
 
     const stale = vi.fn();
     const fresh = vi.fn();
@@ -216,10 +211,8 @@ describe("command registry from the key engine", () => {
   let disposeSurface: () => void = () => {};
 
   async function setupBrowserFixture2() {
-
     window.addEventListener("keydown", (event) => keydownsAtWindow.push(event), true);
     installKeyEngine();
-  
 
     document.body.innerHTML = `
       <div data-chat-column-maximized-away="false">
@@ -237,27 +230,23 @@ describe("command registry from the key engine", () => {
       reset: () => {},
     });
     document.querySelector<HTMLElement>('[data-testid="chat-focus"]')!.focus();
-  
-return {async [Symbol.asyncDispose]() {
 
-    disposeSurface();
-    configureKeyEngine({ enabled: false });
-    document.body.innerHTML = "";
-  
-}};
-}
-
-  
-
-  
+    return {
+      async [Symbol.asyncDispose]() {
+        disposeSurface();
+        configureKeyEngine({ enabled: false });
+        document.body.innerHTML = "";
+      },
+    };
+  }
 
   // Round 7 (`470f7c80c6`) replaced the `<leader>p*` rows with one `<leader>p`
   // row that opens the panel launcher, which runs those commands itself. Their
   // owners are pinned by "every panel launcher action has an owner that
   // registers it" in `tests/unit/modal-keys-command-registry.test.ts`.
   it("covers every app command the default keymap binds", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture2 = await setupBrowserFixture2();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture2 = await setupBrowserFixture2();
 
     expect(OWNED_ROWS.length).toBeGreaterThanOrEqual(27);
   });
@@ -265,8 +254,8 @@ await using _browserFixture2 = await setupBrowserFixture2();
   it.each(OWNED_ROWS)(
     "runs $command from $keys through its owner, with no synthetic keydown",
     async (row) => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture2 = await setupBrowserFixture2();
+      await using _browserFixture0 = await setupBrowserFixture0();
+      await using _browserFixture2 = await setupBrowserFixture2();
 
       const ran: string[] = [];
       for (const other of new Set(OWNED_ROWS.map((entry) => entry.command))) {
@@ -282,8 +271,8 @@ await using _browserFixture2 = await setupBrowserFixture2();
   );
 
   it("runs an owner's command from the leader when no chord binds it", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture2 = await setupBrowserFixture2();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture2 = await setupBrowserFixture2();
 
     const pin = vi.fn();
     register({ "thread.pin": pin });
@@ -295,8 +284,8 @@ await using _browserFixture2 = await setupBrowserFixture2();
   });
 
   it("shows the not available notice once the command's owner is gone", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture2 = await setupBrowserFixture2();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture2 = await setupBrowserFixture2();
 
     const pin = vi.fn();
     const dispose = register({ "thread.pin": pin });
@@ -310,8 +299,8 @@ await using _browserFixture2 = await setupBrowserFixture2();
   });
 
   it("runs the most recent owner of a leader command and the previous one after it leaves", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
-await using _browserFixture2 = await setupBrowserFixture2();
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture2 = await setupBrowserFixture2();
 
     const first = vi.fn();
     const second = vi.fn();

@@ -583,12 +583,12 @@ export interface AccountLimitsView extends AccountLimitsProjection {
 export function useAccountLimits(): AccountLimitsView {
   const inputs = useAtomValue(environmentAccountLimitsAtom);
   const projection = projectAccountLimits(inputs, Date.now());
-  const refresh = (() => {
+  const refresh = () => {
     for (const environment of inputs) {
       appAtomRegistry.refresh(
         serverEnvironment.accountLimits({ environmentId: environment.environmentId, input: {} }),
       );
     }
-  });
+  };
   return { ...projection, refresh };
 }

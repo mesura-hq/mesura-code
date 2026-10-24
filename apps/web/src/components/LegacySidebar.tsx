@@ -3417,7 +3417,11 @@ export default function LegacySidebar() {
   }, [shouldShowThreadJumpHintsNow, updateThreadJumpHintsVisibility]);
 
   const openAdjacentThread = (direction: "next" | "previous") => {
-    const key = resolveAdjacentThreadId({ threadIds: orderedSidebarThreadKeys, currentThreadId: routeThreadKey, direction });
+    const key = resolveAdjacentThreadId({
+      threadIds: orderedSidebarThreadKeys,
+      currentThreadId: routeThreadKey,
+      direction,
+    });
     const thread = key ? sidebarThreadByKey.get(key) : undefined;
     if (thread) navigateToThread(scopeThreadRef(thread.environmentId, thread.id));
   };

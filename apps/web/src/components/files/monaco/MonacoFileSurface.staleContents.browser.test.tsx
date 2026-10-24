@@ -98,20 +98,17 @@ function useContentsProp(prop: ReturnType<typeof makeContentsProp>) {
 let mounted: Awaited<ReturnType<typeof mountMonacoFileSurface>> | undefined;
 
 async function setupBrowserFixture0() {
-
   editorTransport.reset();
   fileStore.clear();
 
-return {async [Symbol.asyncDispose]() {
-
-  await mounted?.unmount();
-  mounted = undefined;
-  vi.unstubAllGlobals();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      await mounted?.unmount();
+      mounted = undefined;
+      vi.unstubAllGlobals();
+    },
+  };
 }
-
-
 
 /** Neovim's text for line 1 after a key, as its `lines` event carries it. */
 async function neovimTypes(line1: string, col: number) {
@@ -125,7 +122,7 @@ async function neovimTypes(line1: string, col: number) {
 
 describe("MonacoFileSurface under a burst of Neovim edits (phase 6)", () => {
   it("never sends Neovim an older text of its own as an external edit when a render lags the model", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const model = makeEditableHarnessModel(
       LINES,
@@ -182,7 +179,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("still sends Neovim a write from outside the editor that reaches the file store", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const model = makeEditableHarnessModel(
       LINES,

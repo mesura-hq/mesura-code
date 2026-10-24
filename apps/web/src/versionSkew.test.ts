@@ -1,4 +1,8 @@
-import { appendVersionMismatchHint, supportsDesktopAppUpdate, serverUpdateGuidance } from "./versionSkew";
+import {
+  appendVersionMismatchHint,
+  supportsDesktopAppUpdate,
+  serverUpdateGuidance,
+} from "./versionSkew";
 import { EnvironmentId } from "@t3tools/contracts";
 import type { ServerUpdateState } from "@t3tools/client-runtime/state/server";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";

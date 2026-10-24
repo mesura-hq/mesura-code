@@ -94,7 +94,7 @@ const testServerConfigs = () =>
   ]);
 
 vi.mock("../rpc/atomRegistry", () => ({
-  appAtomRegistry: { get: (atom: unknown) => atom === "providers" ? [] : testServerConfigs() },
+  appAtomRegistry: { get: (atom: unknown) => (atom === "providers" ? [] : testServerConfigs()) },
 }));
 
 vi.mock("@effect/atom-react", () => ({

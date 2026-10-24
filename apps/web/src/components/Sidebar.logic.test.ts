@@ -1,4 +1,9 @@
-import { resolveAdjacentThreadId, isContextMenuPointerDown, filterSidebarProjectScopeItems, reduceSidebarProjectScopeMenuState } from "./Sidebar.logic";
+import {
+  resolveAdjacentThreadId,
+  isContextMenuPointerDown,
+  filterSidebarProjectScopeItems,
+  reduceSidebarProjectScopeMenuState,
+} from "./Sidebar.logic";
 import { presentThreadShell } from "@t3tools/client-runtime/state/models";
 import * as DateTime from "effect/DateTime";
 import { deriveActiveWorkStartedAt } from "../session-logic.ts";

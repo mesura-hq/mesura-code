@@ -350,12 +350,12 @@ export default function DiffPanel({
       ? "Files diff"
       : "Branch changes";
   const selectedCheckpointRange = (() =>
-      typeof selectedCheckpointTurnCount === "number"
-        ? {
-            fromTurnCount: Math.max(0, selectedCheckpointTurnCount - 1),
-            toTurnCount: selectedCheckpointTurnCount,
-          }
-        : null)();
+    typeof selectedCheckpointTurnCount === "number"
+      ? {
+          fromTurnCount: Math.max(0, selectedCheckpointTurnCount - 1),
+          toTurnCount: selectedCheckpointTurnCount,
+        }
+      : null)();
   const activeCheckpointDiff = useCheckpointDiff(
     {
       environmentId: activeThread?.environmentId ?? null,

@@ -40,7 +40,10 @@ function TabBarProbe({
 }
 
 async function render(activeSurfaceId: string, panelOpen = true): Promise<void> {
-  await act(async () => await root.rerender(<TabBarProbe activeSurfaceId={activeSurfaceId} panelOpen={panelOpen} />));
+  await act(
+    async () =>
+      await root.rerender(<TabBarProbe activeSurfaceId={activeSurfaceId} panelOpen={panelOpen} />),
+  );
 }
 
 /** Dispatches a keydown from the focused element, as the browser does. */
@@ -53,14 +56,12 @@ async function press(init: KeyboardEventInit): Promise<KeyboardEvent> {
 }
 
 const nextTab = async () => await press({ key: "Tab", code: "Tab", ctrlKey: true });
-const previousTab = async () => await press({ key: "Tab", code: "Tab", ctrlKey: true, shiftKey: true });
+const previousTab = async () =>
+  await press({ key: "Tab", code: "Tab", ctrlKey: true, shiftKey: true });
 const focusTestId = (id: string) =>
   document.querySelector<HTMLElement>(`[data-testid="${id}"]`)!.focus();
 
 async function setupBrowserFixture0() {
-
-
-
   document.body.innerHTML = `
     <div data-chat-column-maximized-away="false">
       <div data-testid="chat-focus" tabindex="0"></div>
@@ -72,24 +73,25 @@ async function setupBrowserFixture0() {
       </div>
     </div>`;
   activated = [];
-  root = await renderBrowser(null, { container: document.querySelector("[data-testid='tabbar-host']")!, router: false });
+  root = await renderBrowser(null, {
+    container: document.querySelector("[data-testid='tabbar-host']")!,
+    router: false,
+  });
   await render("files");
 
-return {async [Symbol.asyncDispose]() {
-
-  await act(() => closePanelLauncher());
-  await root[Symbol.asyncDispose]();
-  vi.unstubAllGlobals();
-  document.body.innerHTML = "";
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      await act(() => closePanelLauncher());
+      await root[Symbol.asyncDispose]();
+      vi.unstubAllGlobals();
+      document.body.innerHTML = "";
+    },
+  };
 }
-
-
 
 describe("right panel tab cycling in the panel", () => {
   it("activates the next surface on Ctrl+Tab with focus in the panel and consumes the chord", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     focusTestId("surface-focus");
     const event = await nextTab();
@@ -98,7 +100,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("activates the previous surface on Ctrl+Shift+Tab with focus in the panel", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await render("diff");
     focusTestId("surface-focus");
@@ -107,7 +109,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("wraps Ctrl+Tab from the last surface to the first and Ctrl+Shift+Tab from the first to the last", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     await render("terminal");
     focusTestId("surface-focus");
@@ -120,7 +122,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("opens the panel launcher on Ctrl+T with focus in the panel", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     focusTestId("surface-focus");
     const event = await press({ key: "t", code: "KeyT", ctrlKey: true });
@@ -132,7 +134,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("right panel tab cycling outside the panel", () => {
   it("leaves Ctrl+Tab and Ctrl+Shift+Tab alone with focus in the chat", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     focusTestId("chat-focus");
     const forward = await nextTab();
@@ -143,7 +145,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("leaves Ctrl+Tab alone with focus on the body", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     (document.activeElement as HTMLElement | null)?.blur();
     await nextTab();
@@ -151,7 +153,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("does not open the panel launcher on Ctrl+T with focus in the chat", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     focusTestId("chat-focus");
     await press({ key: "t", code: "KeyT", ctrlKey: true });
@@ -161,7 +163,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("right panel tab cycling launcher availability regressions", () => {
   it("retains mounted surface focus across close and opens the launcher only after reopening", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     focusTestId("surface-focus");
     await render("files", false);
@@ -177,7 +179,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("defers the focused panel new-tab chord to a blocking popup until it closes", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     focusTestId("surface-focus");
     const popup = document.createElement("div");
@@ -194,7 +196,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("preserves terminal new-tab and tab-cycling chords with a terminal focused inside the panel", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const surface = document.querySelector<HTMLElement>("[data-testid='surface-focus']")!;
     surface.dataset.terminalOwner = "right-panel";

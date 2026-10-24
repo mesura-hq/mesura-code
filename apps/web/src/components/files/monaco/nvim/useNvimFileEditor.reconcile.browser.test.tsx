@@ -72,20 +72,17 @@ function EditorUnderTest(props: {
 let mounted: Awaited<ReturnType<typeof mountNvimEditor>> | undefined;
 
 async function setupBrowserFixture0() {
-
   editorTransport.reset();
 
-return {async [Symbol.asyncDispose]() {
-
-  editorTransport.autoReplyAll();
-  await mounted?.unmount();
-  mounted = undefined;
-  vi.unstubAllGlobals();
-
-}};
+  return {
+    async [Symbol.asyncDispose]() {
+      editorTransport.autoReplyAll();
+      await mounted?.unmount();
+      mounted = undefined;
+      vi.unstubAllGlobals();
+    },
+  };
 }
-
-
 
 /** Mounts the hook over `LINES`, with the session agreeing, and waits for it to settle. */
 async function mountReconciled(lines: ReadonlyArray<string> = LINES) {
@@ -126,7 +123,7 @@ const lastPosition = (calls: ReadonlyArray<{ method: string; args: ReadonlyArray
 
 describe("the model follows Neovim's text whatever one render carries", () => {
   it("applies one lines event and puts the caret where its cursor event says", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const { model, calls } = await mountReconciled();
 
@@ -141,7 +138,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("ends at the session's text when two lines events land between two renders", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const { model } = await mountReconciled();
 
@@ -161,7 +158,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("follows a run of single-line events typed one render apart, then a line deleted", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const { model } = await mountReconciled();
 
@@ -180,7 +177,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("reconciles to a new snapshot that differs from the model", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const { model } = await mountReconciled();
 
@@ -201,7 +198,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("leaves the model alone for a lines event that names another file", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const { model } = await mountReconciled();
 
@@ -214,7 +211,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("applies a lines event that arrives after text-free events in the same render", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const { model, calls } = await mountReconciled();
 
@@ -232,7 +229,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
 
 describe("what is drawn and written around the text", () => {
   it("keeps a decoration's widget node while cursor and mode events arrive", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const { calls } = await mountReconciled();
     await deliver({
@@ -253,7 +250,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("flushes the save for a write request that shares a render with a cursor event", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const { flushSave } = await mountReconciled();
 
@@ -293,7 +290,7 @@ describe("opening a file whose session already holds older text", () => {
   };
 
   it("opens with the editor's own text when the attachment already cached the older snapshot", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const model = localModel();
     editorTransport.setSnapshot({ lines: CACHED, cursor: { line: 1, col: 1 }, topline: 1 });
@@ -333,7 +330,7 @@ await using _browserFixture0 = await setupBrowserFixture0();
   });
 
   it("keeps the editor's text while an older snapshot arrives during the open", async () => {
-await using _browserFixture0 = await setupBrowserFixture0();
+    await using _browserFixture0 = await setupBrowserFixture0();
 
     const model = localModel();
     editorTransport.setSnapshot({ lines: CACHED, cursor: { line: 1, col: 1 }, topline: 1 });

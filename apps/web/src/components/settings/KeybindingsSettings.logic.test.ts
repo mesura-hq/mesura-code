@@ -1,5 +1,9 @@
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
-import { groupKeybindingRows, buildKeybindingCommandOptions, filterKeybindingRows } from "./KeybindingsSettings.logic";
+import {
+  groupKeybindingRows,
+  buildKeybindingCommandOptions,
+  filterKeybindingRows,
+} from "./KeybindingsSettings.logic";
 import { assert, describe, expect, it } from "vite-plus/test";
 import type { ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import {
@@ -45,7 +49,9 @@ describe("KeybindingsSettings.logic", () => {
     }
   });
   it("finds the editable shortcut for sending the first queued message", () => {
-    expect(filterKeybindingRows(buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS), "first queued")).toContainEqual(
+    expect(
+      filterKeybindingRows(buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS), "first queued"),
+    ).toContainEqual(
       expect.objectContaining({
         command: "thread.steerQueuedMessage",
         key: "mod+shift+enter",
@@ -62,7 +68,9 @@ describe("KeybindingsSettings.logic", () => {
     },
   );
   it("groups rows by command area in page order and drops empty groups", () => {
-    const groups = groupKeybindingRows(filterKeybindingRows(buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS), ""));
+    const groups = groupKeybindingRows(
+      filterKeybindingRows(buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS), ""),
+    );
     expect(groups.map((group) => group.title)).toEqual([
       "Navigation",
       "Threads",
@@ -80,9 +88,15 @@ describe("KeybindingsSettings.logic", () => {
   });
 
   it("changes row identity when a shortcut changes", () => {
-    const before = buildKeybindingRows(compileResolvedKeybindingsConfig([{ command: "chat.new", key: "mod+n" }]));
-    const after = buildKeybindingRows(compileResolvedKeybindingsConfig([{ command: "chat.new", key: "mod+shift+n" }]));
-    expect(after.find((row) => row.command === "chat.new")?.id).not.toBe(before.find((row) => row.command === "chat.new")?.id);
+    const before = buildKeybindingRows(
+      compileResolvedKeybindingsConfig([{ command: "chat.new", key: "mod+n" }]),
+    );
+    const after = buildKeybindingRows(
+      compileResolvedKeybindingsConfig([{ command: "chat.new", key: "mod+shift+n" }]),
+    );
+    expect(after.find((row) => row.command === "chat.new")?.id).not.toBe(
+      before.find((row) => row.command === "chat.new")?.id,
+    );
   });
   it("orders Usage bindings and command choices like the page", () => {
     const expected = [
@@ -101,7 +115,9 @@ describe("KeybindingsSettings.logic", () => {
       DEFAULT_RESOLVED_KEYBINDINGS,
       DEFAULT_RESOLVED_KEYBINDINGS.toReversed(),
     ]) {
-      expect(filterKeybindingRows(buildKeybindingRows(bindings), "usage").map((row) => row.command)).toEqual(expected);
+      expect(
+        filterKeybindingRows(buildKeybindingRows(bindings), "usage").map((row) => row.command),
+      ).toEqual(expected);
       expect(
         buildKeybindingCommandOptions(bindings).filter((command) => command.startsWith("usage.")),
       ).toEqual(expected);
