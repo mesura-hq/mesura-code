@@ -4,7 +4,6 @@ import { useDictationJobs } from "~/state/dictation";
 import { MaterialDictationModeIcon } from "./MaterialDictationModeIcon";
 import { discardDictationJob, retryDictationJob } from "./dictationController";
 import { useOwnDictationJobsStore } from "./dictationSessionStore";
-import "./dictationSlot.css";
 
 const WAVE_BARS = [0, 1, 2, 3, 4, 5] as const;
 
@@ -22,7 +21,7 @@ export function DictationSlotChip(props: { readonly jobId: string }) {
     return (
       <span
         contentEditable={false}
-        className="mx-0.5 inline-flex items-center gap-1 rounded-md border border-destructive/40 bg-destructive/10 px-1.5 py-px align-baseline text-[11px] text-destructive-foreground select-none"
+        className="mx-0.5 inline-flex items-center gap-1 rounded-md border border-destructive/40 bg-destructive/10 px-1.5 py-px align-baseline text-search-label text-destructive-foreground select-none"
       >
         transcription failed
         <button
@@ -48,13 +47,13 @@ export function DictationSlotChip(props: { readonly jobId: string }) {
   return (
     <span
       contentEditable={false}
-      className="dictation-slot mx-0.5 inline-flex h-[1.4em] items-center gap-1 rounded-sm px-0.5 align-middle text-[11px] leading-none text-primary select-none"
+      className="dictation-slot mx-0.5 h-[1.4em] items-center gap-1 rounded-sm px-0.5 align-middle text-search-label leading-none text-primary select-none"
     >
-      <span className="dictation-slot-caret inline-block h-[1.5em] w-[2px] rounded-full bg-primary" />
+      <span className="dictation-slot-caret h-[1.5em] w-[2px] rounded-full bg-primary" />
       <span
         role="img"
         aria-label="Transcribing"
-        className="dictation-slot-wave inline-flex h-[1em] items-center gap-[2px]"
+        className="dictation-slot-wave h-[1em] items-center gap-0.5"
       >
         {WAVE_BARS.map((bar) => (
           <span key={bar} className="block h-full w-[2px] rounded-full bg-primary/80" />

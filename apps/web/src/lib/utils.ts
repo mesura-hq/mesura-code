@@ -7,7 +7,26 @@ import { DraftId } from "../composerDraftStore";
 
 // The theme's extra font sizes (index.css). Unregistered, tailwind-merge reads
 // text-2xs as a colour and drops it next to text-muted-foreground.
-const twMerge = extendTailwindMerge({ extend: { theme: { text: ["2xs", "3xs", "4xs", "5xs"] } } });
+const twMerge = extendTailwindMerge({
+  extend: {
+    theme: {
+      text: [
+        "2xs",
+        "3xs",
+        "4xs",
+        "5xs",
+        "search-label",
+        "settings-intro",
+        "micro",
+        "micro-plus",
+        "caption",
+        "caption-plus",
+        "small-label",
+        "phase-label",
+      ],
+    },
+  },
+});
 
 export function cn(...inputs: CxOptions) {
   return twMerge(cx(inputs));

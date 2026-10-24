@@ -190,6 +190,15 @@ describe("isTemporaryWorktreeBranch", () => {
     );
   });
 
+  it.each(["t3/deadbeef", "t3-deadbeef"])(
+    "keeps the legacy temporary ref %s eligible and flattens it into the current namespace",
+    (refName) => {
+      expect(isTemporaryWorktreeBranch(refName)).toBe(true);
+      expect(flattenTemporaryWorktreeBranchName(refName)).toBe("mesura-deadbeef");
+      expect(isTemporaryWorktreeBranch(`${refName}-extra`)).toBe(false);
+    },
+  );
+
   it("matches legacy t3code temporary worktree refs", () => {
     expect(isTemporaryWorktreeBranch("t3code/deadbeef")).toBe(true);
     expect(isTemporaryWorktreeBranch("t3code-deadbeef")).toBe(true);

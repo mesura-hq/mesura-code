@@ -1068,13 +1068,29 @@ describe("ServerSettings.neovimConfigDirectory", () => {
 });
 
 describe("branch naming settings", () => {
-  it("defaults existing settings to the t3 static prefix", () => {
+  it("defaults existing settings to the mesura static prefix", () => {
     expect(decodeServerSettings({})).toMatchObject({
       branchNamingMode: "static",
-      branchNamePrefix: "t3",
+      branchNamePrefix: "mesura",
       branchNameInstructions: "",
     });
   });
+
+  it.each(["t3", "t3code"])(
+    "preserves the saved %s prefix and an independent custom project prefix",
+    (branchNamePrefix) => {
+      const input = {
+        branchNamingMode: "static",
+        branchNamePrefix,
+        projectSettingsOverrides: {
+          project: { branchNamingMode: "static", branchNamePrefix: "Team/Julius/" },
+        },
+      };
+      expect(encodeServerSettings(decodeServerSettings(input))).toMatchObject(input);
+      expect(decodeServerSettingsPatch(input)).toEqual(input);
+    },
+  );
+
   it.each(["static", "semantic", "custom"])(
     "round-trips %s and project overrides",
     (branchNamingMode) => {

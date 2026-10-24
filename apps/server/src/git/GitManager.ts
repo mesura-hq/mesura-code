@@ -80,6 +80,7 @@ import { detachStackFrame } from "./detachStackFrame.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import type { GitManagerServiceError } from "@t3tools/contracts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import { memoizeRepositoryReads } from "./repositoryStateMemo.ts";
 import * as SourceControlProvider from "@t3tools/source-control-core/server/SourceControlProvider";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import type { ChangeRequest } from "@t3tools/contracts";
@@ -132,7 +133,11 @@ export class GitManager extends Context.Service<
     /** Resolve the PR for a saved branch without changing the current checkout. */
     readonly branchPullRequest: (
       input: { readonly cwd: string; readonly branch: string },
-      options?: { readonly refresh?: boolean },
+      options?: {
+        readonly refresh?: boolean;
+        /** Mesura: also drop a cached failed lookup, which `refresh` keeps (the background sweep's retry policy). */
+        readonly retryFailedLookup?: boolean;
+      },
     ) => Effect.Effect<GitBranchPullRequest | null, GitManagerServiceError>;
     readonly invalidateLocalStatus: (cwd: string) => Effect.Effect<void, never>;
     readonly invalidateRemoteStatus: (cwd: string) => Effect.Effect<void, never>;
@@ -710,7 +715,8 @@ function toPullRequestHeadRemoteInfo(pr: {
 }
 
 export const make = Effect.gen(function* () {
-  const gitCore = yield* GitVcsDriver.GitVcsDriver;
+  // Mesura: lookup reads are remembered while the repository is unchanged.
+  const gitCore = memoizeRepositoryReads(yield* GitVcsDriver.GitVcsDriver);
   const sourceControlProviders = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
   const textGeneration = yield* TextGeneration.TextGeneration;
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
@@ -1196,6 +1202,9 @@ export const make = Effect.gen(function* () {
     },
   );
   const getPrLookup = (key: string) => detachStackFrame(Cache.get(prLookupCache, key));
+  // Mesura: a cached failure is replayed on every status poll until its TTL ends;
+  // it is logged the first time only, so one warning means one lookup attempt.
+  const loggedPrLookupFailures = new WeakSet<object>();
   // A transient lookup failure (rate limit, network blip) must not clear an
   // already-known PR badge, so the last successful answer per branch sticks
   // around as the fallback. Keep the resolved head context with it so a
@@ -1299,7 +1308,15 @@ export const make = Effect.gen(function* () {
       ),
       Effect.map(({ pr }) => pr),
       Effect.catch((error) =>
-        Effect.logWarning("PR lookup failed; keeping last known PR state.").pipe(
+        (typeof error === "object" && error !== null && loggedPrLookupFailures.has(error)
+          ? Effect.void
+          : Effect.logWarning("PR lookup failed; keeping last known PR state.")
+        ).pipe(
+          Effect.tap(() =>
+            typeof error === "object" && error !== null
+              ? Effect.sync(() => loggedPrLookupFailures.add(error))
+              : Effect.void,
+          ),
           Effect.annotateLogs({
             operation: "lookupStatusPr",
             branch: details.branch,
@@ -2293,6 +2310,10 @@ export const make = Effect.gen(function* () {
         Effect.orElseSucceed(() => Option.none()),
       );
       if (Option.isSome(cached)) yield* Cache.invalidate(prLookupCache, cacheKey);
+    }
+    if (options?.retryFailedLookup) {
+      const cachedExit = yield* Effect.exit(Cache.getOption(prLookupCache, cacheKey));
+      if (Exit.isFailure(cachedExit)) yield* Cache.invalidate(prLookupCache, cacheKey);
     }
     let cached = yield* getPrLookup(cacheKey);
     // The cached head context may have resolved on a different remote than

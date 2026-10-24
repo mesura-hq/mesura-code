@@ -251,6 +251,7 @@ import {
   type RightPanelSurface,
   useRightPanelStore,
 } from "../rightPanelStore";
+import { useFileSurfacePendingStore } from "./files/fileSurfacePendingStore";
 import { deriveFactoryTimelineItemsFromTurnItems } from "@t3tools/client-runtime/factory/plan-activities";
 import { deriveLatestFactoryRunItemFromTurnItems } from "@t3tools/client-runtime/factory/run-activities";
 import {
@@ -451,7 +452,7 @@ import {
   useThreadVisibleTurnItems,
   waitForThreadShell,
 } from "../state/entities";
-import { environmentShell } from "../state/shell";
+import { useEnvironmentShellBootstrapped } from "../state/shellBootstrapped";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { createPageScrollController, type PageScrollKey } from "./chat/pageScrollController";
 import { isTimelineScrollTarget } from "./chat/timelineScrollTarget";
@@ -731,7 +732,6 @@ const DevicePanel = lazy(() =>
 );
 const FilePreviewPanel = lazy(() => import("./files/FilePreviewPanel"));
 const FactoryPane = lazy(() => import("../factory/FactoryPane"));
-const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
 const TYPE_TO_FOCUS_EDITABLE_SELECTOR = [
   "input",
   "textarea",
@@ -2753,34 +2753,21 @@ export default function ChatView(props: ChatViewProps) {
       params: { projectKey: activeDraftLogicalProjectKey },
     });
   }, [activeDraftLogicalProjectKey, navigate]);
-  const activeEnvironmentShell = useEnvironmentQuery(
-    activeThread ? environmentShell.stateAtom(activeThread.environmentId) : null,
+  // Mesura: the flag alone; the whole shell state re-rendered this view per streamed update.
+  const activeEnvironmentBootstrapComplete = useEnvironmentShellBootstrapped(
+    activeThread?.environmentId ?? null,
   );
-  const activeEnvironmentBootstrapComplete = activeEnvironmentShell.data?.snapshot._tag === "Some";
   const activeProjectKey = activeProject
     ? `${activeProject.environmentId}:${activeProject.workspaceRoot}`
     : null;
-  const [pendingFileSurfaceIdsByProject, setPendingFileSurfaceIdsByProject] = useState<
-    ReadonlyMap<string, ReadonlySet<string>>
-  >(() => new Map());
-  const pendingFileSurfaceIds = activeProjectKey
-    ? (pendingFileSurfaceIdsByProject.get(activeProjectKey) ?? EMPTY_PENDING_FILE_SURFACE_IDS)
-    : EMPTY_PENDING_FILE_SURFACE_IDS;
+  // Mesura: the pending-save flags live in a store this view only writes, so a
+  // typing burst's first key and its save do not re-render the chat view.
   const handleFilePendingChange = useCallback(
     (relativePath: string, pending: boolean) => {
       if (!activeProjectKey) return;
-      setPendingFileSurfaceIdsByProject((currentByProject) => {
-        const current = currentByProject.get(activeProjectKey) ?? EMPTY_PENDING_FILE_SURFACE_IDS;
-        const surfaceId = `file:${relativePath}`;
-        if (current.has(surfaceId) === pending) return currentByProject;
-        const next = new Set(current);
-        if (pending) next.add(surfaceId);
-        else next.delete(surfaceId);
-        const nextByProject = new Map(currentByProject);
-        if (next.size === 0) nextByProject.delete(activeProjectKey);
-        else nextByProject.set(activeProjectKey, next);
-        return nextByProject;
-      });
+      useFileSurfacePendingStore
+        .getState()
+        .setPending(activeProjectKey, `file:${relativePath}`, pending);
     },
     [activeProjectKey],
   );
@@ -11584,10 +11571,7 @@ export default function ChatView(props: ChatViewProps) {
           }
           onOpenFile={openFileSurface}
           onPendingChange={handleFilePendingChange}
-          selectedFilePending={
-            renderedRightPanelSurface.kind === "file" &&
-            pendingFileSurfaceIds.has(renderedRightPanelSurface.id)
-          }
+          pendingProjectKey={activeProjectKey}
           workspaceMutationId={workspaceMutationId}
           explorerHidden={
             renderedRightPanelSurface.kind === "file" &&
@@ -12447,7 +12431,7 @@ export default function ChatView(props: ChatViewProps) {
           surfaces={renderedRightPanelSurfaces}
           environmentId={activeThreadRef.environmentId}
           activeSurfaceId={renderedRightPanelSurface?.id ?? null}
-          pendingSurfaceIds={pendingFileSurfaceIds}
+          pendingProjectKey={activeProjectKey}
           previewSessions={activePreviewState.sessions}
           desktopByTabId={activePreviewState.desktopByTabId}
           previewRuntimeTabId={resolvePreviewRuntimeTabId}
@@ -12507,7 +12491,7 @@ export default function ChatView(props: ChatViewProps) {
             surfaces={renderedRightPanelSurfaces}
             environmentId={activeThreadRef.environmentId}
             activeSurfaceId={renderedRightPanelSurface?.id ?? null}
-            pendingSurfaceIds={pendingFileSurfaceIds}
+            pendingProjectKey={activeProjectKey}
             previewSessions={activePreviewState.sessions}
             desktopByTabId={activePreviewState.desktopByTabId}
             previewRuntimeTabId={resolvePreviewRuntimeTabId}

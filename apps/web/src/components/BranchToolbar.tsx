@@ -656,7 +656,11 @@ export const BranchToolbar = memo(function BranchToolbar({
     () => (canUsePreviousWorktree && activeProjectRef ? [activeProjectRef] : []),
     [canUsePreviousWorktree, activeProjectRef],
   );
-  const projectThreads = useThreadShellsForProjectRefs(projectRefsForWorktreeLookup);
+  // Mesura: re-read at most once a second, off the message task; the seed only
+  // needs the latest worktree (phase 6).
+  const projectThreads = useThreadShellsForProjectRefs(projectRefsForWorktreeLookup, {
+    throttled: true,
+  });
   const previousWorktreeSeed = useMemo(
     () =>
       canUsePreviousWorktree
@@ -834,7 +838,7 @@ export const BranchToolbar = memo(function BranchToolbar({
           className={cn("contents @3xl/composer-surface:hidden", runContext.drawerOpen && "hidden")}
         >
           <RunContextStripTrigger
-            className="max-w-[48%] flex-initial justify-start"
+            layout="paired"
             icon={
               showEnvironmentIndicator ? (
                 // Button's base styles apply `-mx-0.5` to descendant SVGs;
@@ -870,7 +874,7 @@ export const BranchToolbar = memo(function BranchToolbar({
           {showEnvironmentIndicator && availableEnvironments && (
             <>
               <RunContextStripTrigger
-                className="max-w-full"
+                layout="host"
                 icon={machineIcon}
                 label={activeEnvironmentLabel}
                 locked={!showEnvironmentPicker || envLocked || draftId === undefined}
@@ -890,7 +894,7 @@ export const BranchToolbar = memo(function BranchToolbar({
           )}
           {showGitControls ? (
             <RunContextStripTrigger
-              className="shrink"
+              layout="workspace"
               icon={<ActiveWorkspaceIcon className="size-3 shrink-0" />}
               label={activeWorkspaceLabel}
               locked={envModeLocked || forceNewWorktree}

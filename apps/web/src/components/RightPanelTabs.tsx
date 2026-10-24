@@ -1,4 +1,5 @@
 import { pullRequestHostOf, type SourceControlProviderKind } from "@t3tools/contracts";
+import { FileSurfacePendingMarker } from "./files/fileSurfacePendingStore";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { useProjects, useServerConfigs, useThreadShells } from "~/state/entities";
 import {
@@ -110,7 +111,8 @@ interface RightPanelTabsProps {
   /** Fallback environment for surfaces that do not carry their own. */
   environmentId: EnvironmentId | null;
   activeSurfaceId: string | null;
-  pendingSurfaceIds: ReadonlySet<string>;
+  /** Mesura: the project the pending-save flags are kept under; see `fileSurfacePendingStore`. */
+  pendingProjectKey: string | null;
   previewSessions: Readonly<Record<string, PreviewSessionSnapshot>>;
   desktopByTabId: Readonly<Record<string, DesktopPreviewOverlay>>;
   /**
@@ -1200,7 +1202,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           <div className="flex h-full w-max min-w-full items-center gap-1">
             {props.surfaces.map((surface) => {
               const active = surface.id === props.activeSurfaceId;
-              const pending = props.pendingSurfaceIds.has(surface.id);
               const title = surfaceTitle(surface, props.previewSessions, props.terminalLabelsById);
               const previewTabId = previewTabIdOf(surface, props.previewSessions);
               // Desktop state is keyed by the session id, but desktop actions
@@ -1238,12 +1239,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                       environmentId={props.environmentId}
                       pullRequestStatusSeeds={props.pullRequestStatusSeeds}
                     />
-                    {pending ? (
-                      <span
-                        className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-current"
-                        aria-hidden
-                      />
-                    ) : null}
+                    <FileSurfacePendingMarker
+                      projectKey={props.pendingProjectKey}
+                      surfaceId={surface.id}
+                    />
                   </PanelTabCloseButton>
                   {audio === "none" || !audioRuntimeTabId ? null : (
                     <Tooltip>

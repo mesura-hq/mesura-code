@@ -27,9 +27,24 @@ export function areShortcutModifierStatesEqual(
   );
 }
 
-export function useShortcutModifierState(ignoreEditable = false): ShortcutModifierState {
+/**
+ * `enabled` false keeps following the keyboard but stops re-rendering for it,
+ * and reports nothing held, so a caller that only needs the modifiers in some
+ * state does not re-render on every modifier press outside it. Enabling it
+ * reports what is held at that moment: a Ctrl pressed before is not lost.
+ */
+export function useShortcutModifierState(
+  ignoreEditable = false,
+  enabled = true,
+): ShortcutModifierState {
   const [state, setState] = useState(EMPTY_SHORTCUT_MODIFIER_STATE);
   const stateRef = useRef(EMPTY_SHORTCUT_MODIFIER_STATE);
+  const enabledRef = useRef(enabled);
+
+  useEffect(() => {
+    enabledRef.current = enabled;
+    if (enabled) setState(stateRef.current);
+  }, [enabled]);
 
   useEffect(() => {
     const updateState = (next: ShortcutModifierState) => {
@@ -37,7 +52,7 @@ export function useShortcutModifierState(ignoreEditable = false): ShortcutModifi
       // Ordinary typing must return before dispatching a React update.
       if (areShortcutModifierStatesEqual(stateRef.current, next)) return;
       stateRef.current = next;
-      setState(next);
+      if (enabledRef.current) setState(next);
     };
     const onKeyboardEvent = (event: KeyboardEvent) => {
       updateState(
@@ -72,7 +87,7 @@ export function useShortcutModifierState(ignoreEditable = false): ShortcutModifi
     };
   }, [ignoreEditable]);
 
-  return state;
+  return enabled ? state : EMPTY_SHORTCUT_MODIFIER_STATE;
 }
 
 function normalizeModifierKey(key: string): keyof ShortcutModifierState | null {

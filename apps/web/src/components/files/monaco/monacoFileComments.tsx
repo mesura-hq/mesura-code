@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
+import { observeResize } from "~/lib/observeResize";
 import { buildFileReviewComment } from "~/reviewCommentContext";
 
 import { DiffCommentAnnotation } from "../../diffs/DiffCommentAnnotation";
@@ -412,7 +413,7 @@ function useCommentZones(
   // Which lines carry a zone, as one string. The effects below depend on this
   // rather than on `groups`, because `groups` is a fresh array on every
   // keystroke into a comment: its text changed, but the set of zones did not,
-  // and rebuilding Monaco zones and a ResizeObserver per character is work that
+  // and rebuilding Monaco zones and a resize subscription per character is work that
   // buys nothing.
   const zoneLines = groups.map((group) => group.endLine).join(",");
 
@@ -469,7 +470,7 @@ function useCommentZones(
     const byContentNode = new Map<Element, CommentZone>();
     for (const zone of zones.values()) byContentNode.set(zone.contentNode, zone);
 
-    const observer = new ResizeObserver((observed) => {
+    return observeResize([...byContentNode.keys()], (observed) => {
       let needsLayout = false;
       for (const item of observed) {
         const entry = byContentNode.get(item.target);
@@ -484,8 +485,6 @@ function useCommentZones(
         for (const zone of zones.values()) accessor.layoutZone(zone.zoneId);
       });
     });
-    for (const contentNode of byContentNode.keys()) observer.observe(contentNode);
-    return () => observer.disconnect();
   }, [editor, zoneLines]);
 
   // Deliberately does NOT remove the zones through the editor.

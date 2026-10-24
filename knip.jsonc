@@ -58,6 +58,17 @@
         "scripts/verify-background-live.ts",
         "src/provider/testFixtures/*.mjs",
       ],
+      // Retain upstream helpers and fallback layers that currently have no callers.
+      // Exempt only export/duplicate reports; keep dependency analysis for these modules.
+      "ignoreIssues": {
+        "src/orchestration-v2/Orchestrator.ts": ["exports", "nsExports", "duplicates"],
+        "src/orchestration-v2/Adapters/CodexAdapterV2.ts": ["exports", "nsExports", "duplicates"],
+        "src/orchestration-v2/Adapters/ClaudeAdapterV2.ts": ["exports", "nsExports", "duplicates"],
+        "src/orchestration-v2/ProviderAdapterRegistry.ts": ["exports", "nsExports", "duplicates"],
+        "src/scheduledTasks/Schedule.ts": ["exports", "nsExports", "duplicates"],
+        "src/usage/UsageService.ts": ["exports", "nsExports", "duplicates"],
+        "src/orchestration-v2/EffectWorker.ts": ["exports", "nsExports", "duplicates"],
+      },
       // Keep the transitive Effect runtime pinned for standalone npm installs.
       // The Vite+ web build prerequisite.
       // Native and disk-loaded provider packages stay external to the bundle; the

@@ -28,10 +28,10 @@ export function DictationWidget({ snapshot }: { readonly snapshot: DictationWidg
         <span
           className={cn(
             "size-2 shrink-0 rounded-full",
-            paused ? "bg-zinc-500" : "dictation-widget-rec-dot bg-red-500",
+            paused ? "bg-dictation-paused" : "dictation-widget-rec-dot bg-dictation-recording",
           )}
         />
-        <span className="font-mono text-xs tabular-nums text-zinc-300">
+        <span className="font-mono text-xs tabular-nums text-dictation-label">
           {formatDictationElapsed(dictationRecordedElapsedMs(session))}
         </span>
         <div className="flex w-28">
@@ -41,15 +41,18 @@ export function DictationWidget({ snapshot }: { readonly snapshot: DictationWidg
             audioLevel={session.level}
             active
             reducedMotion={prefersReducedMotion()}
-            className="text-zinc-200"
+            className="text-dictation-wave"
           />
         </div>
-        <MaterialDictationModeIcon mode={session.mode} className="size-4 shrink-0 text-zinc-300" />
+        <MaterialDictationModeIcon
+          mode={session.mode}
+          className="size-4 shrink-0 text-dictation-label"
+        />
         {target ? (
-          <span className="max-w-36 truncate text-xs text-zinc-400">→ {target}</span>
+          <span className="max-w-36 truncate text-xs text-dictation-muted">→ {target}</span>
         ) : null}
         {snapshot.transcribingCount > 0 ? (
-          <span className="shrink-0 text-[11px] text-sky-300">
+          <span className="shrink-0 text-search-label text-dictation-processing">
             +{snapshot.transcribingCount} transcribing
           </span>
         ) : null}
@@ -58,7 +61,7 @@ export function DictationWidget({ snapshot }: { readonly snapshot: DictationWidg
   } else if (snapshot.failed) {
     // Shown until Mesura has focus: the user in another app must not assume it went out.
     body = (
-      <span className="truncate text-xs text-red-300">
+      <span className="truncate text-xs text-dictation-error">
         {snapshot.failed.target
           ? `Transcription failed in ${snapshot.failed.target}. Open Mesura to retry.`
           : "Transcription failed. Open Mesura to retry."}
@@ -68,9 +71,12 @@ export function DictationWidget({ snapshot }: { readonly snapshot: DictationWidg
     body = (
       <>
         {mode ? (
-          <MaterialDictationModeIcon mode={mode} className="size-4 shrink-0 text-sky-300" />
+          <MaterialDictationModeIcon
+            mode={mode}
+            className="size-4 shrink-0 text-dictation-processing"
+          />
         ) : null}
-        <span className="dictation-widget-transcribing truncate text-xs text-sky-300">
+        <span className="dictation-widget-transcribing truncate text-xs text-dictation-processing">
           {snapshot.transcribingCount > 1
             ? `Transcribing ${snapshot.transcribingCount} recordings`
             : target
@@ -82,7 +88,7 @@ export function DictationWidget({ snapshot }: { readonly snapshot: DictationWidg
   } else if (snapshot.delivered) {
     const { delivered } = snapshot;
     body = (
-      <span className="flex min-w-0 items-center gap-1.5 text-xs text-emerald-400">
+      <span className="flex min-w-0 items-center gap-1.5 text-xs text-dictation-success">
         <CheckIcon className="size-3.5 shrink-0" />
         <span className="truncate">
           {delivered.mode === "clipboard"
@@ -99,7 +105,7 @@ export function DictationWidget({ snapshot }: { readonly snapshot: DictationWidg
     <div className="pointer-events-none flex h-full items-center justify-center font-sans">
       <div
         role="status"
-        className="flex h-11 max-w-full items-center gap-2.5 rounded-full border border-white/10 bg-zinc-900/90 px-4 shadow-xl"
+        className="flex h-11 max-w-full items-center gap-2.5 rounded-full border border-white/10 bg-dictation-surface/90 px-4 shadow-xl"
       >
         {body}
       </div>

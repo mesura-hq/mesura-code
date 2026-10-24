@@ -227,6 +227,30 @@ export default defineConfig({
     },
     overrides: [
       {
+        // Keep upstream fallback layers and helpers unchanged even before they have callers.
+        // Match only their names in these files; every other lint rule stays enabled.
+        files: [
+          "apps/server/src/orchestration-v2/Orchestrator.ts",
+          "apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts",
+          "apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts",
+          "apps/server/src/orchestration-v2/ProviderAdapterRegistry.ts",
+          "apps/server/src/scheduledTasks/Schedule.ts",
+          "apps/server/src/usage/UsageService.ts",
+          "apps/server/src/orchestration-v2/EffectWorker.ts",
+        ],
+        rules: {
+          "eslint/no-unused-vars": [
+            "warn",
+            {
+              varsIgnorePattern:
+                "^_|^(describeSchedule|layerFromProviderAdapter|layerDaemon|layerTest|layerCodexAppServerClientFactoryCommand|layer|layerUnavailable)$",
+              // An options object clears Oxlint's default underscore argument exemption.
+              argsIgnorePattern: "^_.+",
+            },
+          ],
+        },
+      },
+      {
         files: ["packages/client-runtime/src/state/**", "apps/{web,mobile,desktop}/src/**"],
         rules: { "t3code/no-rpc-permission-bypass": ["error", { allowRawClientAccess: false }] },
       },

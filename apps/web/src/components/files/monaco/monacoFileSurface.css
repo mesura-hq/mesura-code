@@ -86,3 +86,19 @@
   pointer-events: none;
   white-space: pre;
 }
+
+/*
+ * The scrollbar shows and hides without fading. Monaco reveals it on every
+ * change of the content's height — each row a typed line wraps onto — and
+ * fades it out over 800 ms with an opacity transition Chromium does not
+ * composite. While the pointer is anywhere but over the editor, typing
+ * therefore kept a stream of main-thread frames running, and a key's paint
+ * waited for that stream: measured in the editor bench (S8, pointer away from
+ * the editor), insert keystroke-to-paint p95 went from 12 ms to 35 ms, with
+ * nothing else on the page.
+ */
+[data-monaco-file-surface] .monaco-scrollable-element > .scrollbar.visible,
+[data-monaco-file-surface] .monaco-scrollable-element > .scrollbar.invisible.fade,
+[data-monaco-file-surface] .monaco-scrollable-element > .shadow {
+  transition: none;
+}
