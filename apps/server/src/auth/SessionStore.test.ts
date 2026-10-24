@@ -430,7 +430,7 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
       expect((yield* Effect.flip(sessions.verify(issued.token)))._tag).toBe(
         "SessionTokenExpiredError",
       );
-    }).pipe(Effect.provide(Layer.merge(makeSessionStoreLayer(), TestClock.layer()))),
+    }).pipe(Effect.provide(Layer.merge(layerSessionStore(), TestClock.layer()))),
   );
 
   it.effect("verifies session tokens against the Effect clock", () =>
