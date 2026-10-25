@@ -39,7 +39,7 @@ import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { observeResize } from "~/lib/observeResize";
 import { AccountLimitsDock, useAccountLimitsPanelController } from "./AccountLimitsPanel";
 import { HostsDock } from "./HostsPanel";
-import { useSidebarDockController } from "./sidebarDockController";
+import { type SidebarDockTriggerProps, useSidebarDockController } from "./sidebarDockController";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
@@ -145,15 +145,13 @@ function SidebarUtilityItem({
   icon,
   label,
   onClick,
-  onPointerEnter,
-  onPointerLeave,
+  dockTrigger,
   suppressTooltip = false,
 }: {
   icon: ReactNode;
   label: string;
   onClick: () => void;
-  onPointerEnter?: () => void;
-  onPointerLeave?: () => void;
+  dockTrigger?: SidebarDockTriggerProps;
   suppressTooltip?: boolean;
 }) {
   return (
@@ -161,13 +159,7 @@ function SidebarUtilityItem({
       <Tooltip disabled={suppressTooltip}>
         <TooltipTrigger
           render={
-            <SidebarMenuButton
-              aria-label={label}
-              onClick={onClick}
-              onPointerEnter={onPointerEnter}
-              onPointerLeave={onPointerLeave}
-              size="icon"
-            >
+            <SidebarMenuButton aria-label={label} onClick={onClick} {...dockTrigger} size="icon">
               {icon}
             </SidebarMenuButton>
           }
@@ -187,8 +179,9 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   });
   // The dock takes sidebar height, so it only exists where the Usage entry that
   // opens it does. On a settings or usage page the row shows Back instead, and
-  // a keyboard-only panel there would have no way to say it was there.
-  const accountLimitsEnabled = !isMobile && !isOnUtilityPage;
+  // a keyboard-only panel there would have no way to say it was there. Phones
+  // have the docks too: a long press on the icon opens them (Mesura).
+  const accountLimitsEnabled = !isOnUtilityPage;
   const accountLimitsController = useAccountLimitsPanelController(accountLimitsEnabled);
   // Fork: the Hosts dock shares the usage dock's gate and its controller.
   const hostsController = useSidebarDockController({
@@ -285,16 +278,14 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
               icon={<ChartNoAxesColumnIcon />}
               label="Usage"
               onClick={handleUsageClick}
-              onPointerEnter={accountLimitsController.onPointerEnter}
-              onPointerLeave={accountLimitsController.onPointerLeave}
+              dockTrigger={accountLimitsController.triggerProps}
               suppressTooltip={accountLimitsController.open}
             />
             <SidebarUtilityItem
               icon={<ServerIcon />}
               label="Hosts"
               onClick={hostsController.togglePinned}
-              onPointerEnter={hostsController.onPointerEnter}
-              onPointerLeave={hostsController.onPointerLeave}
+              dockTrigger={hostsController.triggerProps}
               suppressTooltip={hostsController.open}
             />
           </>

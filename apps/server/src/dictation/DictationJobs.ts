@@ -18,6 +18,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
+import * as Random from "effect/Random";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
@@ -117,13 +118,22 @@ export const make = Effect.gen(function* () {
   // they were made. Insertion order is creation order.
   const jobs = new Map<DictationJobId, TrackedJob>();
   const subscribers = new Set<Subscriber>();
+  // Jobs live in memory, so a restart starts an empty list: a new epoch tells clients the jobs
+  // of the last run are gone. `revision` counts every published change within this run.
+  const epoch = `${(yield* Clock.currentTimeMillis).toString(36)}-${(yield* Random.nextIntBetween(0, 0x7fffffff)).toString(36)}`;
+  let revision = 0;
   // Transcriptions outlive the RPC that started them but not the server.
   const jobScope = yield* Scope.make("parallel");
   yield* Effect.addFinalizer(() => Scope.close(jobScope, Exit.void));
 
   const listJobs = () => Array.from(jobs.values(), (tracked) => tracked.job).toReversed();
 
-  const notifyUnsafe = (job: DictationJob) => {
+  /** Stamps the job's current state with the next revision, stores it and publishes it. */
+  const notifyUnsafe = (unstamped: DictationJob) => {
+    revision += 1;
+    const job: DictationJob = { ...unstamped, epoch, revision };
+    const tracked = jobs.get(job.id);
+    if (tracked) jobs.set(job.id, { ...tracked, job });
     for (const subscriber of subscribers) {
       // Re-inserted so the pending order follows the order of the latest changes.
       subscriber.pending.delete(job.id);
@@ -133,6 +143,7 @@ export const make = Effect.gen(function* () {
   };
 
   const notifySnapshotUnsafe = () => {
+    revision += 1;
     for (const subscriber of subscribers) {
       subscriber.snapshotPending = true;
       subscriber.pending.clear();
@@ -348,7 +359,7 @@ export const make = Effect.gen(function* () {
             };
             setUnsafe({ ...tracked, job: rejected });
             pruneUnsafe(nowMs, input.jobId);
-            return { kind: "settled", job: rejected };
+            return { kind: "settled", job: jobs.get(input.jobId)?.job ?? rejected };
           }
           // Published by the attempt once it knows whether the job can run.
           jobs.set(input.jobId, tracked);
@@ -450,7 +461,7 @@ export const make = Effect.gen(function* () {
             const events = yield* Effect.sync(() => {
               subscriber.snapshotPending = false;
               subscriber.pending.clear();
-              return [{ type: "snapshot", jobs: listJobs() } as const];
+              return [{ type: "snapshot", jobs: listJobs(), epoch, revision } as const];
             });
             for (const event of events) yield* Queue.offer(mailbox, event);
           }

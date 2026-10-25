@@ -30,7 +30,12 @@ import { EnvironmentRegistry } from "../connection/registry.ts";
 import { EnvironmentSupervisor } from "../connection/supervisor.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import type { RpcSession } from "../rpc/session.ts";
-import { createDictationEnvironmentAtoms, reduceDictationJobs } from "./jobs.ts";
+import {
+  createDictationEnvironmentAtoms,
+  type DictationJobsState,
+  reduceDictationJobs,
+  reduceDictationJobsState,
+} from "./jobs.ts";
 
 const TARGET = new PrimaryConnectionTarget({
   environmentId: EnvironmentId.make("dictation-environment"),
@@ -56,6 +61,44 @@ const MIDDLE = job("job-middle", "2026-10-03T09:00:00.000Z");
 const NEWEST = job("job-newest", "2026-10-03T10:00:00.000Z");
 
 const ids = (jobs: ReadonlyArray<DictationJob>) => jobs.map((entry) => entry.id);
+
+describe("dictation jobs cursor", () => {
+  const empty: DictationJobsState = { jobs: [], cursor: { epoch: null, revision: null } };
+
+  it("takes the run and revision of a snapshot", () => {
+    const next = reduceDictationJobsState(empty, {
+      type: "snapshot",
+      jobs: [OLDEST],
+      epoch: "run-a",
+      revision: 7,
+    });
+    expect(next.cursor).toEqual({ epoch: "run-a", revision: 7 });
+  });
+
+  it("is not moved by upserts, which the server coalesces per job", () => {
+    const at7 = reduceDictationJobsState(empty, {
+      type: "snapshot",
+      jobs: [],
+      epoch: "run-a",
+      revision: 7,
+    });
+    // A1, B2, A3 coalesced to B2 then A3: after B2 the list still lacks A.
+    const afterB2 = reduceDictationJobsState(at7, {
+      type: "upsert",
+      job: job("job-b", "2026-10-03T08:00:00.000Z", { epoch: "run-a", revision: 9 }),
+    });
+    expect(afterB2.cursor).toEqual({ epoch: "run-a", revision: 7 });
+  });
+
+  it("keeps an empty cursor for a server that sends no stamps", () => {
+    const next = reduceDictationJobsState(
+      reduceDictationJobsState(empty, { type: "snapshot", jobs: [OLDEST] }),
+      { type: "upsert", job: NEWEST },
+    );
+    expect(next.cursor).toEqual({ epoch: null, revision: null });
+    expect(ids(next.jobs)).toEqual(["job-newest", "job-oldest"]);
+  });
+});
 
 describe("dictation jobs reducer", () => {
   it("dictation jobs reducer: a snapshot replaces the whole list", () => {
@@ -128,14 +171,14 @@ const makeHarness = Effect.fn("DictationJobsTest.makeHarness")(function* () {
 
 function waitForJobIds(
   registry: AtomRegistry.AtomRegistry,
-  atom: Atom.Atom<AsyncResult.AsyncResult<ReadonlyArray<DictationJob>, unknown>>,
+  atom: Atom.Atom<AsyncResult.AsyncResult<DictationJobsState, unknown>>,
   expected: ReadonlyArray<string>,
 ) {
   return AtomRegistry.toStream(registry, atom).pipe(
     Stream.filter(
       (result) =>
         AsyncResult.isSuccess(result) &&
-        JSON.stringify(ids(result.value)) === JSON.stringify(expected),
+        JSON.stringify(ids(result.value.jobs)) === JSON.stringify(expected),
     ),
     Stream.runHead,
   );

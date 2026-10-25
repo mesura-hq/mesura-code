@@ -50,6 +50,7 @@ import {
   type PrimaryEnvironmentTarget,
 } from "../environments/primary/target";
 import { clearComposerDraftsEnvironment } from "../composerDraftStore";
+import { forgetDictationEnvironment } from "../dictation/dictationSessionStore";
 import { isHostedStaticApp } from "../hostedPairing";
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
 import { randomUUID } from "../lib/utils";
@@ -805,6 +806,7 @@ const layerEnvironmentOwnedDataCleanup = Layer.succeed(
     clear: (environmentId) =>
       Effect.sync(() => {
         clearComposerDraftsEnvironment(environmentId);
+        forgetDictationEnvironment(environmentId);
       }),
   }),
 );

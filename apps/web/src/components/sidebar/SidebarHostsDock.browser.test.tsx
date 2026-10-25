@@ -649,3 +649,208 @@ describe("Usage dock guards (criterion 7)", () => {
     await vi.waitFor(() => expect(router.state.location.pathname).toBe("/usage"));
   });
 });
+
+// A phone has no hover: a long press by touch on a footer icon pins its dock.
+async function touch(
+  target: Element,
+  type: "pointerdown" | "pointermove" | "pointerup" | "pointerover" | "pointerout",
+  at: { x: number; y: number } = { x: 10, y: 10 },
+) {
+  await act(async () => {
+    target.dispatchEvent(
+      new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        pointerId: 7,
+        pointerType: "touch",
+        clientX: at.x,
+        clientY: at.y,
+        relatedTarget: document.body,
+      }),
+    );
+  });
+}
+
+/** The click a finger lift produces; `element.click()` would read as the keyboard's. */
+async function liftClick(target: HTMLElement) {
+  await act(async () => {
+    target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1 }));
+  });
+}
+
+/** A touch tap as a phone sends it: hover-like events, then the click. */
+async function tap(target: HTMLElement) {
+  await touch(target, "pointerover");
+  await touch(target, "pointerdown");
+  await touch(target, "pointerup");
+  await touch(target, "pointerout");
+  await liftClick(target);
+}
+
+/** Holds a finger on the icon past the long-press delay, then lifts it. */
+async function longPress(target: HTMLElement) {
+  await touch(target, "pointerover");
+  await touch(target, "pointerdown");
+  await advance(450);
+  await touch(target, "pointerup");
+  await touch(target, "pointerout");
+  await liftClick(target);
+}
+
+describe("Docks on a phone: long press on the footer icon", () => {
+  it("opens the hosts dock on a long press and keeps it open after the finger lifts", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.mobile = true;
+    await mountSidebar();
+    using _timers = fakeTimers();
+    const button = footerButton("Hosts");
+    expect(hostsOpen()).toBe(false);
+    await touch(button, "pointerdown");
+    await advance(449);
+    expect(hostsOpen()).toBe(false);
+    await advance(1);
+    expect(hostsOpen()).toBe(true);
+    await touch(button, "pointerup");
+    await touch(button, "pointerout");
+    // The click the browser sends on lift is swallowed: it would unpin.
+    await liftClick(button);
+    await advance(1_000);
+    expect(hostsOpen()).toBe(true);
+    expect(fixture.sourcesEnabled.at(-1)).toBe(true);
+  });
+
+  it("opens the usage dock on a long press without leaving for the usage page", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.mobile = true;
+    await mountSidebar();
+    using _timers = fakeTimers();
+    await longPress(footerButton("Usage"));
+    await advance(1_000);
+    expect(usageOpen()).toBe(true);
+    expect(router.state.location.pathname).toBe("/");
+  });
+
+  it("closes a long-pressed dock on a touch outside it and keeps it on a touch inside", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.mobile = true;
+    await mountSidebar();
+    using _timers = fakeTimers();
+    await longPress(footerButton("Hosts"));
+    await touch(hostsPanel(), "pointerdown");
+    await touch(hostsPanel(), "pointerup");
+    expect(hostsOpen()).toBe(true);
+    await touch(document.body, "pointerdown");
+    expect(hostsOpen()).toBe(false);
+  });
+
+  it("does not open a dock when the finger moves away before the delay (a scroll)", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.mobile = true;
+    await mountSidebar();
+    using _timers = fakeTimers();
+    const button = footerButton("Hosts");
+    await touch(button, "pointerdown", { x: 10, y: 10 });
+    await touch(button, "pointermove", { x: 10, y: 40 });
+    await advance(1_000);
+    expect(hostsOpen()).toBe(false);
+  });
+
+  it("a long press on one icon replaces the other dock", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.mobile = true;
+    await mountSidebar();
+    using _timers = fakeTimers();
+    await longPress(footerButton("Usage"));
+    expect(usageOpen()).toBe(true);
+    await longPress(footerButton("Hosts"));
+    expect(hostsOpen()).toBe(true);
+    expect(usageOpen()).toBe(false);
+  });
+
+  it("a short tap on Usage still opens the usage page and flashes no dock", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.mobile = true;
+    await mountSidebar();
+    using _timers = fakeTimers();
+    const button = footerButton("Usage");
+    await touch(button, "pointerover");
+    expect(usageOpen()).toBe(false);
+    await touch(button, "pointerdown");
+    await touch(button, "pointerup");
+    await touch(button, "pointerout");
+    await liftClick(button);
+    await vi.waitFor(() => expect(router.state.location.pathname).toBe("/usage"));
+  });
+
+  it("a short tap on Hosts pins its dock as a click does on the desktop", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.mobile = true;
+    await mountSidebar();
+    using _timers = fakeTimers();
+    await tap(footerButton("Hosts"));
+    await advance(1_000);
+    expect(hostsOpen()).toBe(true);
+  });
+
+  it("swallows the context menu a long press raises while the finger is down", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.mobile = true;
+    await mountSidebar();
+    using _timers = fakeTimers();
+    const button = footerButton("Hosts");
+    await touch(button, "pointerdown");
+    await advance(450);
+    const duringPress = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    await act(async () => {
+      button.dispatchEvent(duringPress);
+    });
+    expect(duringPress.defaultPrevented).toBe(true);
+    await touch(button, "pointerup");
+    const afterLift = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    await act(async () => {
+      button.dispatchEvent(afterLift);
+    });
+    expect(afterLift.defaultPrevented).toBe(false);
+  });
+
+  it("a mouse click after a long press that sent no click still reaches the icon", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.mobile = true;
+    await mountSidebar();
+    using _timers = fakeTimers();
+    const button = footerButton("Hosts");
+    await touch(button, "pointerdown");
+    await advance(450);
+    await touch(button, "pointerup");
+    expect(hostsOpen()).toBe(true);
+    // No click from the browser; a later mouse click on the icon unpins.
+    await act(async () => {
+      button.dispatchEvent(
+        new PointerEvent("pointerdown", { bubbles: true, pointerId: 2, pointerType: "mouse" }),
+      );
+    });
+    await liftClick(button);
+    await advance(1_000);
+    expect(hostsOpen()).toBe(false);
+  });
+
+  it("a mouse right click on a dock icon keeps its context menu", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    await mountSidebar();
+    const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    await act(async () => {
+      footerButton("Hosts").dispatchEvent(event);
+    });
+    expect(event.defaultPrevented).toBe(false);
+  });
+});

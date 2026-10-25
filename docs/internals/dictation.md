@@ -19,7 +19,13 @@ The server owns transcription for two reasons:
   key stays in the secret store and never reaches a client.
 
 Jobs live in memory for 24 hours. A server restart forgets them, including text not yet
-delivered. The engine choice in [`openAiTranscription.ts`](../../apps/server/src/dictation/openAiTranscription.ts)
+delivered. Every published job state and every snapshot carries the server run's `epoch` and a
+rising `revision`, and the start response carries the job's. A client can then tell a list that
+is only older than its job (a snapshot can overtake the start response) from one that lost it (a
+new epoch, or a snapshot revision at or past the job's), and release the mode keys, which
+otherwise hold `Alt+S` from the Hosts peek. Only a snapshot proves a job absent: pending upserts
+coalesce per job, so an upsert's revision does not mean every earlier change arrived. The engine
+choice in [`openAiTranscription.ts`](../../apps/server/src/dictation/openAiTranscription.ts)
 matches Symmetria Shell's: `gpt-4o-transcribe` silently truncates long audio, so recordings over
 420 s use `whisper-1`. No language parameter is sent, because the user mixes Spanish and English.
 

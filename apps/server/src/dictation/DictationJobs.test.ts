@@ -594,3 +594,54 @@ it.layer(NodeServices.layer)("DictationJobs phase 1 fence", (it) => {
       }),
   );
 });
+
+it.layer(NodeServices.layer)("DictationJobs snapshot ordering", (it) => {
+  it.effect(
+    "stamps every published state and snapshot with the run's epoch and a rising revision, and start returns the stamped job",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* startDictationJobs(withKey);
+        const received = yield* subscribeInto(harness.jobs);
+        const first = yield* Queue.take(received);
+        assert.strictEqual(first.type, "snapshot");
+        const empty = first as Extract<DictationJobEvent, { type: "snapshot" }>;
+        assert.isString(empty.epoch);
+
+        const started = yield* harness.jobs.start(startInput("job-stamped"));
+        const transcribing = yield* takeUpsert(received);
+        assert.strictEqual(started.epoch, empty.epoch);
+        assert.strictEqual(started.revision, transcribing.revision);
+        assert.isAbove(transcribing.revision ?? -1, empty.revision ?? -1);
+
+        const call = yield* Queue.take(harness.openAi.calls);
+        yield* call.answer(200, "done");
+        const completed = yield* takeUpsert(received);
+        assert.isAbove(completed.revision ?? -1, transcribing.revision ?? -1);
+
+        const late = yield* subscribeInto(harness.jobs);
+        const snapshot = (yield* Queue.take(late)) as Extract<
+          DictationJobEvent,
+          { type: "snapshot" }
+        >;
+        assert.strictEqual(snapshot.epoch, empty.epoch);
+        assert.isAtLeast(snapshot.revision ?? -1, completed.revision ?? -1);
+        assert.strictEqual(snapshot.jobs[0]?.revision, completed.revision);
+      }),
+  );
+
+  it.effect("a new server run has a new epoch, so clients know the old run's jobs are gone", () =>
+    Effect.gen(function* () {
+      const first = yield* startDictationJobs(withKey);
+      const second = yield* startDictationJobs(withKey);
+      const one = (yield* Queue.take(yield* subscribeInto(first.jobs))) as Extract<
+        DictationJobEvent,
+        { type: "snapshot" }
+      >;
+      const two = (yield* Queue.take(yield* subscribeInto(second.jobs))) as Extract<
+        DictationJobEvent,
+        { type: "snapshot" }
+      >;
+      assert.notStrictEqual(one.epoch, two.epoch);
+    }),
+  );
+});

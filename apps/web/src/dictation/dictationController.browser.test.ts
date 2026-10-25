@@ -21,6 +21,8 @@ const fixture = vi.hoisted(() => ({
   calls: [] as Array<{ name: string; value: unknown }>,
   /** While set, the start command waits for it. */
   startGate: null as Promise<void> | null,
+  /** Where the server's change sequence stood when it accepted the start. */
+  startStamp: { epoch: "server-run-1", revision: 5 },
 }));
 
 vi.mock("@t3tools/client-runtime/state/runtime", async (importOriginal) => ({
@@ -29,7 +31,9 @@ vi.mock("@t3tools/client-runtime/state/runtime", async (importOriginal) => ({
     const name = fixture.names.get(command) ?? "other";
     fixture.calls.push({ name, value });
     if (name === "start" && fixture.startGate) await fixture.startGate;
-    return { _tag: "Success", value: undefined };
+    if (name !== "start") return { _tag: "Success", value: undefined };
+    const { input } = value as { input: { jobId: string } };
+    return { _tag: "Success", value: { id: input.jobId, ...fixture.startStamp } };
   },
 }));
 vi.mock("@t3tools/client-runtime/state/attachments", async (importOriginal) => ({
@@ -58,6 +62,7 @@ import {
 import { createFakeMedia } from "./dictationMedia.testFixtures";
 import {
   createOwnDictationJobs,
+  forgetDictationEnvironment,
   isDictationLive,
   recordOwnDictationJob,
   updateOwnDictationJob,
@@ -141,6 +146,9 @@ const settle = () => flushBrowserTasks();
 // Seed only durable ownership, without starting this controller and setting its restore latch.
 describe("dictation after a reload", () => {
   it("dictation phase 4 regression: after a reload the mode keys pick the transcribing job back up", async () => {
+    // Browser test files share one origin: a job another file recorded later would be the
+    // device's newest, and only the newest job is restored.
+    localStorage.clear();
     using _clock = fakeTimers({ now: JOB_CREATED_AT });
     await using _browserFixture0 = await setupBrowserFixture0();
 
@@ -510,5 +518,148 @@ describe("a transcript another tab overwrites", () => {
     deliverDictationJobs(environmentId, [completed(saved, "submit", "texto guardado")]);
     await vi.advanceTimersByTimeAsync(3_000);
     expect(notices()).toEqual([]);
+  });
+});
+
+// The server keeps jobs in memory. A server restart, or the retention sweep,
+// drops a job the client never saw finish, and the mode keys then claimed
+// Alt+S (and the other Alt keys) for good, hiding the Hosts peek. Lists carry
+// a cursor (server run and revision) that tells a stale list from one that
+// lost the job; the start was accepted at server-run-1, revision 5.
+describe("a last job the server no longer knows", () => {
+  const transcribingJob = (jobId: string) =>
+    ({ ...completed(jobId, "submit", ""), status: "transcribing", text: undefined }) as const;
+
+  it("frees the mode keys when the server's list no longer holds the listed job", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    const jobId = await recordAndStop();
+    await vi.waitFor(() => expect(callsNamed("start")).toHaveLength(1));
+    deliverDictationJobs(environmentId, [transcribingJob(jobId)]);
+    expect(isDictationLive()).toBe(true);
+    deliverDictationJobs(environmentId, []);
+    expect(isDictationLive()).toBe(false);
+  });
+
+  it("keeps the mode keys for a list older than the accepted start, then frees them for a later one that lacks the job", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    await recordAndStop();
+    await vi.waitFor(() => expect(callsNamed("start")).toHaveLength(1));
+    // The subscription's older snapshot predates the job, but lands after the start answered.
+    deliverDictationJobs(environmentId, [], { epoch: "server-run-1", revision: 4 });
+    expect(isDictationLive()).toBe(true);
+    // The server lost the job without ever listing it: a list at or past its revision lacks it.
+    deliverDictationJobs(environmentId, [], { epoch: "server-run-1", revision: 5 });
+    expect(isDictationLive()).toBe(false);
+  });
+
+  it("frees the mode keys when the list comes from a new server run", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    await recordAndStop();
+    await vi.waitFor(() => expect(callsNamed("start")).toHaveLength(1));
+    deliverDictationJobs(environmentId, [], { epoch: "server-run-2", revision: 1 });
+    expect(isDictationLive()).toBe(false);
+  });
+
+  it("keeps the mode keys while the start is still on the wire", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    let openGate = () => undefined as void;
+    fixture.startGate = new Promise<void>((resolve) => {
+      openGate = resolve;
+    });
+    await startDictation();
+    const stopping = stopDictation();
+    await vi.waitFor(() => expect(callsNamed("start")).toHaveLength(1));
+    deliverDictationJobs(environmentId, [], { epoch: "server-run-2", revision: 9 });
+    expect(isDictationLive()).toBe(true);
+    openGate();
+    await stopping;
+  });
+
+  it("keeps the mode keys when the server sends no cursor and never listed the job", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    await recordAndStop();
+    await vi.waitFor(() => expect(callsNamed("start")).toHaveLength(1));
+    deliverDictationJobs(environmentId, []);
+    expect(isDictationLive()).toBe(true);
+  });
+
+  it("gives the mode keys back when a forgotten job is listed transcribing again", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    const jobId = await recordAndStop();
+    await vi.waitFor(() => expect(callsNamed("start")).toHaveLength(1));
+    deliverDictationJobs(environmentId, [], { epoch: "server-run-2", revision: 1 });
+    expect(isDictationLive()).toBe(false);
+    // A start resent after the reconnect lists the job in the new run.
+    deliverDictationJobs(environmentId, [transcribingJob(jobId)], {
+      epoch: "server-run-2",
+      revision: 2,
+    });
+    expect(isDictationLive()).toBe(true);
+    selectDictationMode("inject");
+    expect(callsNamed("setMode")).toEqual([{ environmentId, input: { jobId, mode: "inject" } }]);
+  });
+
+  it("hands the keys to a reappeared job a recording deferred once that recording is cancelled", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    const jobId = await recordAndStop();
+    await vi.waitFor(() => expect(callsNamed("start")).toHaveLength(1));
+    deliverDictationJobs(environmentId, [], { epoch: "server-run-2", revision: 1 });
+    expect(isDictationLive()).toBe(false);
+    const cursor = { epoch: "server-run-2", revision: 2 };
+    await startDictation();
+    deliverDictationJobs(environmentId, [transcribingJob(jobId)], cursor);
+    // The recording defers it; cancelling the recording hands the keys to it at once.
+    cancelDictation();
+    expect(isDictationLive()).toBe(true);
+    selectDictationMode("clipboard");
+    expect(callsNamed("setMode").at(-1)).toEqual({
+      environmentId,
+      input: { jobId, mode: "clipboard" },
+    });
+  });
+
+  it("does not resurrect a deferred job of an environment removed before the recording is cancelled", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    const jobId = await recordAndStop();
+    await vi.waitFor(() => expect(callsNamed("start")).toHaveLength(1));
+    deliverDictationJobs(environmentId, [], { epoch: "server-run-2", revision: 1 });
+    await startDictation();
+    deliverDictationJobs(environmentId, [transcribingJob(jobId)], {
+      epoch: "server-run-2",
+      revision: 2,
+    });
+    forgetDictationEnvironment(environmentId);
+    cancelDictation();
+    expect(isDictationLive()).toBe(false);
+  });
+
+  it("frees the mode keys when the job's environment is removed", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    await recordAndStop();
+    forgetDictationEnvironment(EnvironmentId.make("another-environment"));
+    expect(isDictationLive()).toBe(true);
+    forgetDictationEnvironment(environmentId);
+    expect(isDictationLive()).toBe(false);
+  });
+
+  it("leaves another environment's last job alone", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    await recordAndStop();
+    await vi.waitFor(() => expect(callsNamed("start")).toHaveLength(1));
+    deliverDictationJobs(EnvironmentId.make("another-environment"), [], {
+      epoch: "server-run-2",
+      revision: 1,
+    });
+    expect(isDictationLive()).toBe(true);
   });
 });
