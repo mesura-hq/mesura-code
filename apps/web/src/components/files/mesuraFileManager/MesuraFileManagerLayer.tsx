@@ -9,6 +9,7 @@ import { createPortal } from "react-dom";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { isCommandPaletteOpen } from "~/commandPaletteBus";
 import { useComposerHandleContext } from "~/composerHandleContext";
+import { activeComposerHandle } from "~/components/searches/conversationShortcutOwner";
 import { captureComposerFocusReturn } from "~/keys/composer/composerSurface";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { useProject } from "~/state/entities";
@@ -149,9 +150,13 @@ function OpenFileManager({ routeThreadRef, environmentId, cwd }: OpenFileManager
       const origin = document.activeElement;
       focusReturn.current = {
         origin,
-        restoreComposer: composerRef
-          ? captureComposerFocusReturn(origin, (cursor) => composerRef.current?.focusAt(cursor))
-          : null,
+        restoreComposer: (() => {
+          // The composer the file manager opened from: the agent search popup's, when open.
+          const composer = activeComposerHandle(composerRef);
+          return composer
+            ? captureComposerFocusReturn(origin, (cursor) => composer.current?.focusAt(cursor))
+            : null;
+        })(),
       };
     }
     const { origin, restoreComposer } = focusReturn.current;

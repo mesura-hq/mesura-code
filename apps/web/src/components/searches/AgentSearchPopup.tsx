@@ -1,6 +1,6 @@
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { HistoryIcon, SparklesIcon } from "lucide-react";
-import { useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 
 import { ComposerHandleContext } from "~/composerHandleContext";
@@ -14,7 +14,7 @@ import { Dialog, DialogPopup } from "../ui/dialog";
 import { Sheet, SheetPopup } from "../ui/sheet";
 import { dispatchAgentSearchPopup, useAgentSearchPopupStore } from "./agentSearchPopupStore";
 import { ArchivedResultLinks } from "./ArchivedResultLinks";
-import { ConversationLayerContext } from "./conversationShortcutOwner";
+import { ConversationLayerContext, registerAgentSearchComposer } from "./conversationShortcutOwner";
 import { AgentSearchRunningMark } from "./DotsSpinner";
 import { SearchHistoryList } from "./SearchHistoryList";
 import { useAgentSearchRunning } from "./useAgentSearchActivity";
@@ -122,6 +122,7 @@ function SearchConversation({ search }: { search: ScopedThreadRef }) {
   // The palette's composer handle belongs to the main conversation; this one
   // has its own, so neither composer overwrites or clears the other's.
   const composerHandle = useRef<ChatComposerHandle | null>(null);
+  useEffect(() => registerAgentSearchComposer(composerHandle), []);
   if (!shell) {
     return <p className="m-auto text-sm text-muted-foreground">Starting the search…</p>;
   }

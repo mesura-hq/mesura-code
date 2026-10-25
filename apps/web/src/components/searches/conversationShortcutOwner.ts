@@ -1,5 +1,7 @@
 import { createContext, use } from "react";
 
+import type { ComposerHandleRef } from "~/composerHandleContext";
+
 import { useAgentSearchPopupStore } from "./agentSearchPopupStore";
 
 /**
@@ -25,4 +27,23 @@ export function useConversationOwnsShortcuts(): () => boolean {
 /** For listeners outside any ChatView (the palette): whether the popup has the keyboard. */
 export function isAgentSearchPopupOpen(): boolean {
   return useAgentSearchPopupStore.getState().open;
+}
+
+let agentSearchComposer: ComposerHandleRef | null = null;
+
+/** The popup's conversation registers its composer handle while it is mounted. */
+export function registerAgentSearchComposer(handle: ComposerHandleRef): () => void {
+  agentSearchComposer = handle;
+  return () => {
+    if (agentSearchComposer === handle) agentSearchComposer = null;
+  };
+}
+
+/**
+ * The composer that surfaces outside any ChatView (the palette, the file manager, the file tree)
+ * act on: the popup's while it is open, else the main one they were given. Read it at the moment
+ * of use, not at render, so a popup opened meanwhile is honoured.
+ */
+export function activeComposerHandle(main: ComposerHandleRef | null): ComposerHandleRef | null {
+  return isAgentSearchPopupOpen() && agentSearchComposer !== null ? agentSearchComposer : main;
 }

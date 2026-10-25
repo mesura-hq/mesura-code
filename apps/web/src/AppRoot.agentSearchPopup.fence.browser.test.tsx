@@ -1245,6 +1245,13 @@ describe("agent search popup: closing and completion", () => {
       "the keyboard is not in the main composer behind the popup",
     ).toBe(false);
     expect(popup(), "the popup stays open").not.toBeNull();
+    await vi.waitFor(() =>
+      expect(
+        requirePopup().contains(document.activeElement) &&
+          document.activeElement?.closest('[data-testid="composer-editor"]') !== null,
+        "the keyboard is back in the popup's composer",
+      ).toBe(true),
+    );
   });
 
   // regression: verifier-3 — the finished-search toast sat over the open popup's

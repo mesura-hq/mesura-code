@@ -17,7 +17,7 @@ import {
   onSidebarRequestClosesPalette,
   serveSidebarFocusRequest,
 } from "./sidebar/SidebarCommandHost";
-import { isAgentSearchPopupOpen } from "./searches/conversationShortcutOwner";
+import { activeComposerHandle } from "./searches/conversationShortcutOwner";
 import { requestSidebarDockPin } from "./sidebar/sidebarDockController";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { parseIssueSearch, someEnvironmentHasIssues } from "./issues/issues.logic";
@@ -322,7 +322,8 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           terminalOpen,
           previewFocus: isPreviewFocused(),
           previewOpen,
-          modelPickerOpen: composerHandleRef.current?.isModelPickerOpen() ?? false,
+          modelPickerOpen:
+            activeComposerHandle(composerHandleRef)?.current?.isModelPickerOpen() ?? false,
           usagePageOpen,
         },
       });
@@ -509,9 +510,8 @@ function CommandPaletteDialog(props: {
           if (serveSidebarFocusRequest()) return;
           // Fork: Vim mode returns to the chat, or to the composer's mode, it left.
           if (restorePaletteOrigin()) return;
-          // Fork: the main composer sits behind an open agent search popup.
-          if (isAgentSearchPopupOpen()) return;
-          composerHandleRef?.current?.focusAtEnd();
+          // Fork: over an open agent search popup, its composer takes the keyboard back.
+          activeComposerHandle(composerHandleRef)?.current?.focusAtEnd();
         });
         return false;
       }}
