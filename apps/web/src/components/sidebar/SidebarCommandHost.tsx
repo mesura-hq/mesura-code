@@ -11,6 +11,7 @@ import { isTerminalFocused } from "../../lib/terminalFocus";
 import { useProjectScopeStore } from "../../projectScopeStore";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { useThreadSelectionStore } from "../../threadSelectionStore";
+import { closeAgentSearchPopupForWorkspace } from "../searches/agentSearchPopupStore";
 import { toastManager } from "../ui/toast";
 import { useSidebar } from "../ui/sidebar";
 import { useNavigateToMainApp } from "./mainAppLocation";
@@ -121,6 +122,8 @@ export function SidebarCommandHost(props: { readonly surface: "threads" | "setti
       openCommandPalette();
       return;
     }
+    // The sidebar is workspace too: a focus request over the agent search popup closes it first.
+    closeAgentSearchPopupForWorkspace();
     useSidebarFocusRequestStore.setState({ target: FOCUS_TARGET_BY_COMMAND[command] });
     if (isCommandPaletteOpen()) window.dispatchEvent(new Event(CLOSE_PALETTE_EVENT));
     if (props.surface === "settings") {

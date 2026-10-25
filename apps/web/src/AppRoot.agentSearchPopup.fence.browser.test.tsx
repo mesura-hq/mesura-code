@@ -1282,6 +1282,21 @@ describe("agent search popup: closing and completion", () => {
     await vi.waitFor(() => expect(popup(), "the pane chord closed the popup").toBeNull());
   });
 
+  it("agent search popup spec: the thread-search chord over the popup closes it and focuses the sidebar Search", async () => {
+    await using _fixture = await setup();
+    await mountApp();
+    await startSearchWithTab();
+    const popupEditor = await vi.waitFor(() => {
+      const found = requirePopup().querySelector<HTMLElement>('[data-testid="composer-editor"]');
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    await act(async () => popupEditor.focus());
+    await press(THREAD_SEARCH_CHORD);
+    await vi.waitFor(() => expect(popup(), "the chord closed the popup").toBeNull());
+    await vi.waitFor(() => expect(document.activeElement).toBe(sidebarSearchField()));
+  });
+
   it("agent search popup spec: the palette closed over the open popup leaves the main composer alone", async () => {
     await using _fixture = await setup();
     await mountApp();
