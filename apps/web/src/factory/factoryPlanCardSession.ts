@@ -29,6 +29,15 @@ function updateSession(planKey: string, change: FactoryPlanCardSession) {
   }));
 }
 
+function dropSession(planKey: string) {
+  useFactoryPlanCardSessions.setState((state) => {
+    if (!(planKey in state.byPlan)) return state;
+    const byPlan = { ...state.byPlan };
+    delete byPlan[planKey];
+    return { byPlan };
+  });
+}
+
 /** Keeps one plan's session alive while the caller is mounted; `null` holds nothing. */
 export function useHoldFactoryPlanCardSession(planKey: string | null) {
   useEffect(() => {
@@ -41,11 +50,7 @@ export function useHoldFactoryPlanCardSession(planKey: string | null) {
         return;
       }
       holdersByPlan.delete(planKey);
-      useFactoryPlanCardSessions.setState((state) => {
-        if (!(planKey in state.byPlan)) return state;
-        const { [planKey]: _dropped, ...byPlan } = state.byPlan;
-        return { byPlan };
-      });
+      dropSession(planKey);
     };
   }, [planKey]);
 }
