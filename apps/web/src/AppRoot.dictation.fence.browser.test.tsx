@@ -81,6 +81,8 @@ const fixture = vi.hoisted(() => ({
   startTurnFails: false,
   /** While set, checking an earlier upload waits for it. */
   verifyGate: null as Promise<void> | null,
+  /** While set, a mode change waits for it, as a server that has not answered yet. */
+  setModeGate: null as Promise<void> | null,
   /** False until the subscription's snapshot arrives, as for a fresh subscription. */
   jobsLoaded: true,
   jobListeners: new Set<() => void>(),
@@ -90,6 +92,12 @@ const fixture = vi.hoisted(() => ({
 function dispatchCommand(command: unknown, value: unknown) {
   const name = fixture.dictationCommands.get(command);
   if (name) fixture.dictationCalls.push({ name, value });
+  if (name === "setMode" && fixture.setModeGate) {
+    return fixture.setModeGate.then(() => ({
+      _tag: "Success" as const,
+      value: { providers: [] },
+    }));
+  }
   if (name === "startTurn" && (fixture.startTurnGate || fixture.startTurnFails)) {
     const gate = fixture.startTurnGate ?? Promise.resolve();
     return gate.then(() =>
@@ -318,6 +326,7 @@ async function setupBrowserFixture0() {
   fixture.startTurnGate = null;
   fixture.startTurnFails = false;
   fixture.verifyGate = null;
+  fixture.setModeGate = null;
   fixture.dictationCommands = new Map<unknown, string>([
     [dictationEnvironment.start, "start"],
     [dictationEnvironment.retry, "retry"],
@@ -1032,6 +1041,87 @@ describe("dictation phase 4 regressions", () => {
     ]);
     expect(squash(promptOf(onScreenTarget))).toBe("Hello hola mundo big world y adios");
     expect(squash(textBeforeCaret())).toBe("Hello hola mundo big");
+  });
+});
+
+/** The mode icon of the one transcribing marker in the composer. */
+function markerModeSymbol(): string | null {
+  const waves = composerEditorElement().querySelectorAll('[aria-label="Transcribing"]');
+  expect(waves, "Expected one transcribing marker").toHaveLength(1);
+  return (
+    waves[0]!
+      .parentElement!.querySelector("svg[data-material-symbol]")
+      ?.getAttribute("data-material-symbol") ?? null
+  );
+}
+
+describe("search unification phase 4 fence: the stopped-recording marker's mode", () => {
+  it("search unification phase 4 AC7: a locally owned stopped job's marker shows the mode Alt+I chose before the server answers", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    await mountApp();
+    await startRecordingFromMicrophone();
+    await stopRecordingFromStrip();
+    const started = startedJob(0).input;
+    expect(started.mode).toBe("submit");
+    await pushJobs([job(started.jobId, { status: "transcribing", mode: "submit" })]);
+    expect(markerModeSymbol()).toBe("send");
+
+    // The server holds the mode change: the job list keeps saying submit.
+    let answerServer!: () => void;
+    fixture.setModeGate = new Promise<void>((resolve) => {
+      answerServer = resolve;
+    });
+    await pressKey(ALT_I);
+    expect(setModeCalls().map((call) => call.value)).toEqual([
+      { environmentId, input: { jobId: started.jobId, mode: "inject" } },
+    ]);
+    expect(markerModeSymbol(), "the marker shows the mode chosen here").toBe("input");
+
+    answerServer();
+    await pushJobs([job(started.jobId, { status: "transcribing", mode: "inject" })]);
+    expect(markerModeSymbol()).toBe("input");
+  });
+
+  it("search unification phase 4 AC7: a marker whose job this device does not own follows the server's mode", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    const foreignJobId = "3a9d5c71-8e2b-4f60-b1d4-7c0e9f2a6b58";
+    useComposerDraftStore
+      .getState()
+      .setPrompt(
+        onScreenTarget,
+        `Before ${formatDictationSlot(DictationJobId.make(foreignJobId))} after`,
+      );
+    await pushJobs([job(foreignJobId, { status: "transcribing", mode: "inject" })]);
+    await mountApp();
+    await settle();
+
+    expect(markerModeSymbol(), "the server says inject").toBe("input");
+    await pushJobs([job(foreignJobId, { status: "transcribing", mode: "clipboard" })]);
+    expect(markerModeSymbol(), "the server says save").toBe("content_copy");
+  });
+});
+
+describe("search unification phase 4 regressions: a marker this device does not own", () => {
+  it("search unification phase 4 regression: another device's failed job shows the failure without Retry or Discard", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    const foreignJobId = "5d2e8b17-4c9a-4f31-a0e6-9b3c7d1e2f40";
+    useComposerDraftStore
+      .getState()
+      .setPrompt(
+        onScreenTarget,
+        `Before ${formatDictationSlot(DictationJobId.make(foreignJobId))} after`,
+      );
+    await pushJobs([job(foreignJobId, { status: "failed", failure: "Network error" })]);
+    await mountApp();
+    await settle();
+
+    expect(composerEditorElement().textContent).toContain("transcription failed");
+    // Both act only on this device's jobs, so they would do nothing here.
+    expect(buttonLabelled("Retry transcription")).toBeUndefined();
+    expect(buttonLabelled("Discard transcription marker")).toBeUndefined();
   });
 });
 

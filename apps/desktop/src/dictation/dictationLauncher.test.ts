@@ -118,6 +118,9 @@ describe("dictation phase 6 regressions: bind launcher", () => {
     const binds = createHyprlandSessionBinds({
       env: { HYPRLAND_INSTANCE_SIGNATURE: "fence" },
       launcher: development(),
+      // No socket client on the PATH: the keys keep the launcher line this pins.
+      socketPath: "/run/user/1000/mesura-dictation-4242.sock",
+      resolveCommand: async () => null,
       execute: async (file, args) => {
         if (args[0] === "--batch") batches.push(args[1]!);
         return execute(file, args);

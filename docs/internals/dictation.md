@@ -76,6 +76,25 @@ While a recording or its transcription exists, the desktop binds Alt+S, Alt+I, A
 Alt+Space, Alt+R and Alt+X through `hyprctl`. Every session start unbinds before it binds, so binds
 that leaked after a crash cannot stack.
 
+Each bind writes its `--dictation …` words as one line to the session's command socket,
+`$XDG_RUNTIME_DIR/mesura-dictation-<pid>.sock` (mode 0600, in userData when the variable is
+unset). The client is `socat`, else `python3`. The session resolves the client to an absolute
+path when it installs the binds: Hyprland runs binds with its own PATH, and the app's PATH has
+been extended from the login shell. A socket path that socat's address grammar would split
+(a `,`, `:`, quote or space) goes through `python3`. The socket exists only during the session,
+and the binds point at it only while it listens; teardown waits for a start still running.
+
+Every socket bind ends in `|| <launcher> --dictation …`, so a client that fails relaunches the
+app with the same words, and the single-instance lock hands them to the running instance. With
+neither client, or when the socket cannot listen, that relaunch is the whole bind. It costs a
+full Electron start per key press (250-340 ms measured headless), which the developer saw as a
+mode change that lagged by about a second. Both paths end in
+[`forwardDictationCommand`](../../apps/desktop/src/dictation/dictationCommandForwarding.ts).
+
+Hyprlang reads a `#` as the start of a comment, even inside shell quotes, so every value sent
+through `hyprctl keyword` writes a literal hash as `##`. That includes the binds put back at
+session end, because `hyprctl -j binds` reports them unescaped.
+
 ## Why the Symmetria Shell link was removed
 
 Desktop dictation used to be a protocol between two processes. Shell recorded and transcribed, and

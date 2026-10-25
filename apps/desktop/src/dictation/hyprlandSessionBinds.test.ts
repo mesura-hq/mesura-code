@@ -1,11 +1,20 @@
+// @effect-diagnostics nodeBuiltinImport:off - the rework specs run the generated bind lines
+// through `/bin/sh` against a real Unix socket, as Hyprland would.
 /**
  * Entry point: `createHyprlandSessionBinds`, which the desktop main process
  * drives from the renderer's dictation state and from app quit, with the
  * `hyprctl` execution injected the way `snapShot/CaptureShortcutConfig.ts`
  * injects its own.
  *
- * STT redesign, phase 6, criterion 5.
+ * STT redesign, phase 6, criterion 5. Search unification, phase 4, criteria 4 and 5: the
+ * socket client each key runs, with the PATH lookup injected as `resolveCommand`.
  */
+import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
+import * as NodeNet from "node:net";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { createHyprlandSessionBinds } from "./hyprlandSessionBinds.ts";
@@ -39,11 +48,19 @@ const UNBIND_BATCH = [
 
 const READ_BINDS = ["hyprctl", ["-j", "binds"]];
 
-/** `existing` is what `hyprctl -j binds` reports; an Error makes the read fail. */
+const SOCKET_PATH = "/run/user/1000/mesura-dictation-4242.sock";
+
+/**
+ * `existing` is what `hyprctl -j binds` reports; an Error makes the read fail. `tools` are the
+ * socket clients on the PATH Hyprland runs binds with; none keeps today's relaunch.
+ */
 function makeBinds(
   env: Record<string, string | undefined>,
   launcher = LAUNCHER,
   existing: ReadonlyArray<Record<string, unknown>> | Error = [],
+  tools: ReadonlyArray<string> = [],
+  socketPath = SOCKET_PATH,
+  toolPath: (name: string) => string = (name) => `/usr/bin/${name}`,
 ) {
   const execute = vi.fn(async (_file: string, args: ReadonlyArray<string>) => {
     if (args[0] !== "-j") return undefined;
@@ -51,15 +68,39 @@ function makeBinds(
     return { stdout: JSON.stringify(existing) };
   });
   const onError = vi.fn();
-  const binds = createHyprlandSessionBinds({ env, launcher, execute, onError });
+  const resolveCommand = vi.fn(async (name: string) =>
+    tools.includes(name) ? toolPath(name) : null,
+  );
+  const binds = createHyprlandSessionBinds({
+    env,
+    launcher,
+    socketPath,
+    resolveCommand,
+    execute,
+    onError,
+  });
   const batches = () =>
     execute.mock.calls.filter(([, args]) => args[0] === "--batch").map(([, args]) => args[1]);
   /** Every write to Hyprland in order: a batch as its string, a single keyword as its vector. */
   const writes = () =>
     execute.mock.calls
       .filter(([, args]) => args[0] !== "-j")
-      .map(([, args]) => (args[0] === "--batch" ? args[1] : [...args]));
-  return { binds, execute, batches, writes, onError };
+      .map(([, args]) => (args[0] === "--batch" ? args[1]! : [...args]));
+  /** The `bind` value Hyprland received for `key`, from a batch or a single call. */
+  const bindValue = (key: string) => {
+    const values = writes().flatMap((write) =>
+      typeof write === "string"
+        ? write
+            .split(" ; ")
+            .filter((line) => line.startsWith("keyword bind "))
+            .map((line) => line.slice("keyword bind ".length))
+        : write[1] === "bind"
+          ? [write[2]!]
+          : [],
+    );
+    return values.find((value) => value.startsWith(`ALT,${key},exec,`));
+  };
+  return { binds, execute, batches, writes, onError, resolveCommand, bindValue };
 }
 
 /** A bind as `hyprctl -j binds` reports it on Hyprland 0.56.2. */
@@ -249,5 +290,349 @@ describe("dictation phase 6 rework: restored binds that carry semicolons", () =>
       "ALT,S,exec,'/opt/odd;dir/mesura-code' --dictation mode clipboard",
     ]);
     expect(third).toBe("keyword unbind ALT,I");
+  });
+});
+
+describe("search unification phase 4 fence: session binds reach the app over the socket", () => {
+  const KEY_WORDS: ReadonlyArray<readonly [key: string, words: string]> = [
+    ["S", "--dictation mode clipboard"],
+    ["I", "--dictation mode inject"],
+    ["Return", "--dictation mode submit"],
+    ["space", "--dictation pause"],
+    ["R", "--dictation restart"],
+    ["X", "--dictation cancel"],
+  ];
+
+  it("search unification phase 4 AC4: with socat on the PATH every key runs a socat client against the socket", async () => {
+    const { binds, bindValue } = makeBinds(HYPRLAND, LAUNCHER, [], ["socat", "python3"]);
+    await binds.setSessionActive(true);
+    for (const [key, words] of KEY_WORDS) {
+      const value = bindValue(key);
+      expect(value, `Alt+${key}`).toContain(`/usr/bin/socat - UNIX-CONNECT:${SOCKET_PATH}`);
+      expect(value, `Alt+${key}`).toContain(words);
+      // The launcher runs only when the client fails.
+      expect(value, `Alt+${key}`).toMatch(new RegExp(` \\|\\| ${LAUNCHER[0]} ${words}$`));
+    }
+  });
+
+  it("search unification phase 4 AC4: without socat but with python3 every key runs a python3 client against the socket", async () => {
+    const { binds, bindValue } = makeBinds(HYPRLAND, LAUNCHER, [], ["python3"]);
+    await binds.setSessionActive(true);
+    for (const [key, words] of KEY_WORDS) {
+      const value = bindValue(key);
+      expect(value, `Alt+${key}`).toMatch(/^ALT,\w+,exec,\/usr\/bin\/python3 -c /);
+      expect(value, `Alt+${key}`).toContain(` ${SOCKET_PATH} ${words} || `);
+      expect(value, `Alt+${key}`).not.toContain("socat");
+      expect(value, `Alt+${key}`).toMatch(new RegExp(` \\|\\| ${LAUNCHER[0]} ${words}$`));
+    }
+  });
+
+  it("search unification phase 4 guard: with neither socat nor python3 the keys keep today's launcher line", async () => {
+    const { binds, batches } = makeBinds(HYPRLAND, LAUNCHER, [], []);
+    await binds.setSessionActive(true);
+    expect(batches()).toEqual([BIND_BATCH]);
+  });
+
+  it("search unification phase 4 AC4: the client is chosen once, when a session installs the binds", async () => {
+    const { binds, resolveCommand } = makeBinds(HYPRLAND, LAUNCHER, [], ["python3"]);
+    expect(resolveCommand).not.toHaveBeenCalled();
+    await binds.setSessionActive(true);
+    const probed = resolveCommand.mock.calls.map(([name]) => name);
+    expect(probed).toContain("socat");
+    expect(probed).toContain("python3");
+    // Once per install, not once per key.
+    expect(probed.length).toBeLessThanOrEqual(2);
+    await binds.setSessionActive(false);
+    expect(resolveCommand).toHaveBeenCalledTimes(probed.length);
+  });
+
+  it("search unification phase 4 AC4: a socket path with a space is quoted for the shell", async () => {
+    const socketPath = "/tmp/Mesura Runtime/mesura-dictation-4242.sock";
+    const { binds, bindValue } = makeBinds(
+      HYPRLAND,
+      LAUNCHER,
+      [],
+      ["socat", "python3"],
+      socketPath,
+    );
+    await binds.setSessionActive(true);
+    // socat's address grammar is not the shell's, so such a path goes through python3.
+    expect(bindValue("I")).toContain(` '${socketPath}' --dictation mode inject || `);
+  });
+
+  it("search unification phase 4 AC5 guard: socket binds still unbind each key before binding it, and the session end restores what they covered", async () => {
+    const SHELL_PAUSE = "qs ipc --pid 4242 call recorder pause";
+    const { binds, writes } = makeBinds(
+      HYPRLAND,
+      LAUNCHER,
+      [
+        reportedBind({
+          key: "space",
+          has_description: true,
+          description: "Pause/Resume recording",
+          arg: SHELL_PAUSE,
+        }),
+      ],
+      ["socat"],
+    );
+    await binds.setSessionActive(true);
+    const lines = writes().flatMap((write) =>
+      typeof write === "string" ? write.split(" ; ") : [write.join(" ")],
+    );
+    for (const [key] of KEY_WORDS) {
+      const unbindAt = lines.indexOf(`keyword unbind ALT,${key}`);
+      const bindAt = lines.findIndex((line) => line.startsWith(`keyword bind ALT,${key},exec,`));
+      expect(unbindAt, `Alt+${key} is unbound`).toBeGreaterThanOrEqual(0);
+      expect(bindAt, `Alt+${key} is bound`).toBeGreaterThan(unbindAt);
+    }
+
+    const before = writes().length;
+    await binds.setSessionActive(false);
+    expect(writes().slice(before)).toEqual([
+      UNBIND_BATCH,
+      ["keyword", "bindd", `ALT,space,Pause/Resume recording,exec,${SHELL_PAUSE}`],
+    ]);
+  });
+
+  it("search unification phase 4 AC5: a socket-client bind an earlier Mesura left behind is not put back", async () => {
+    const leftBehind = (words: string) =>
+      `printf '%s\\n' '${words}' | socat - UNIX-CONNECT:/run/user/1000/mesura-dictation-99.sock`;
+    const { binds, writes } = makeBinds(
+      HYPRLAND,
+      LAUNCHER,
+      [
+        reportedBind({ key: "S", arg: leftBehind("--dictation mode clipboard") }),
+        reportedBind({
+          key: "X",
+          arg: "python3 -c 'import sys' /run/user/1000/mesura-dictation-99.sock --dictation cancel",
+        }),
+      ],
+      [],
+    );
+    await binds.setSessionActive(true);
+    await binds.setSessionActive(false);
+    expect(writes()).toEqual([BIND_BATCH, UNBIND_BATCH]);
+  });
+});
+
+/** The absolute path of `name` on this test host's PATH, or null. */
+function hostCommand(name: string): string | null {
+  try {
+    const found = NodeChildProcess.execFileSync("sh", ["-c", 'command -v "$1"', "sh", name], {
+      encoding: "utf8",
+    }).trim();
+    return found.startsWith("/") ? found : null;
+  } catch {
+    return null;
+  }
+}
+
+const HOST_SOCAT = hostCommand("socat");
+const HOST_PYTHON3 = hostCommand("python3");
+const hostToolPath = (name: string) => (name === "socat" ? HOST_SOCAT! : HOST_PYTHON3!);
+
+/** A Unix socket server that resolves with the first line a client writes. */
+async function listenForLine(socketPath: string) {
+  let resolveLine!: (line: string) => void;
+  const line = new Promise<string>((resolve) => {
+    resolveLine = resolve;
+  });
+  const server = NodeNet.createServer((connection) => {
+    let received = "";
+    connection.setEncoding("utf8");
+    connection.on("data", (chunk: string) => {
+      received += chunk;
+      if (received.includes("\n")) resolveLine(received.slice(0, received.indexOf("\n") + 1));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  return { line, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
+}
+
+/**
+ * Runs what Hyprland runs for a bind value: Hyprlang turns `##` into `#`, and `exec` hands the
+ * rest to `/bin/sh -c`. `PATH` is the compositor's, which need not hold the app's tools.
+ */
+function runBind(value: string, path = "/nonexistent-compositor-path") {
+  const decoded = value.replaceAll("##", "#");
+  const command = decoded.slice(decoded.indexOf(",exec,") + ",exec,".length);
+  return new Promise<number>((resolve) => {
+    const child = NodeChildProcess.spawn("/bin/sh", ["-c", command], {
+      env: { PATH: path },
+      stdio: "ignore",
+    });
+    child.on("exit", (code) => resolve(code ?? -1));
+  });
+}
+
+/** A temporary directory with a launcher that records the arguments it was started with. */
+function makeLauncherDir(name = "mesura-binds-") {
+  const directory = makeTempDir(name);
+  const launcher = NodePath.join(directory, "fake-launcher");
+  NodeFS.writeFileSync(launcher, `#!/bin/sh\nprintf '%s\\n' "$*" > "$0.args"\n`, { mode: 0o755 });
+  return {
+    directory,
+    launcher,
+    launched: () =>
+      NodeFS.existsSync(`${launcher}.args`)
+        ? NodeFS.readFileSync(`${launcher}.args`, "utf8")
+        : null,
+    [Symbol.dispose]: () => NodeFS.rmSync(directory, { recursive: true, force: true }),
+  };
+}
+
+function makeTempDir(name: string) {
+  return NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), name));
+}
+
+describe("search unification phase 4 rework: the bind lines Hyprland runs", () => {
+  it.skipIf(HOST_SOCAT === null)(
+    "search unification phase 4 rework P1-2: a socat client found on the app's PATH runs where the compositor's PATH lacks it",
+    async () => {
+      using dir = makeLauncherDir();
+      const socketPath = NodePath.join(dir.directory, "mesura-dictation-4242.sock");
+      const server = await listenForLine(socketPath);
+      const { binds, bindValue } = makeBinds(
+        HYPRLAND,
+        [dir.launcher],
+        [],
+        ["socat"],
+        socketPath,
+        hostToolPath,
+      );
+      await binds.setSessionActive(true);
+      expect(await runBind(bindValue("I")!)).toBe(0);
+      expect(await server.line).toBe("--dictation mode inject\n");
+      expect(dir.launched(), "the socket answered, so nothing relaunched").toBeNull();
+      await server.close();
+    },
+  );
+
+  it.skipIf(HOST_PYTHON3 === null)(
+    "search unification phase 4 rework P1-2: a python3 client found on the app's PATH runs where the compositor's PATH lacks it",
+    async () => {
+      using dir = makeLauncherDir();
+      const socketPath = NodePath.join(dir.directory, "mesura-dictation-4242.sock");
+      const server = await listenForLine(socketPath);
+      const { binds, bindValue } = makeBinds(
+        HYPRLAND,
+        [dir.launcher],
+        [],
+        ["python3"],
+        socketPath,
+        hostToolPath,
+      );
+      await binds.setSessionActive(true);
+      expect(await runBind(bindValue("space")!)).toBe(0);
+      expect(await server.line).toBe("--dictation pause\n");
+      await server.close();
+    },
+  );
+
+  it.skipIf(HOST_SOCAT === null || HOST_PYTHON3 === null)(
+    "search unification phase 4 rework P1-2: a key whose socket client cannot connect relaunches the app with its words",
+    async () => {
+      for (const tool of ["socat", "python3"]) {
+        using dir = makeLauncherDir();
+        // No server: the socket is gone, as after a crash.
+        const socketPath = NodePath.join(dir.directory, "mesura-dictation-4242.sock");
+        const { binds, bindValue } = makeBinds(
+          HYPRLAND,
+          [dir.launcher],
+          [],
+          [tool],
+          socketPath,
+          hostToolPath,
+        );
+        await binds.setSessionActive(true);
+        await runBind(bindValue("Return")!);
+        expect(dir.launched(), tool).toBe("--dictation mode submit\n");
+      }
+    },
+  );
+
+  it.skipIf(HOST_PYTHON3 === null)(
+    "search unification phase 4 rework P2-2: a socket path socat cannot address is reached through python3",
+    async () => {
+      using dir = makeLauncherDir("mesura, it's odd-");
+      const socketPath = NodePath.join(dir.directory, "mesura-dictation-4242.sock");
+      const server = await listenForLine(socketPath);
+      const { binds, bindValue } = makeBinds(
+        HYPRLAND,
+        [dir.launcher],
+        [],
+        ["socat", "python3"],
+        socketPath,
+        hostToolPath,
+      );
+      await binds.setSessionActive(true);
+      const value = bindValue("I")!;
+      expect(value).not.toContain("socat");
+      expect(await runBind(value)).toBe(0);
+      expect(await server.line).toBe("--dictation mode inject\n");
+      expect(dir.launched()).toBeNull();
+      await server.close();
+    },
+  );
+
+  it.skipIf(HOST_PYTHON3 === null)(
+    "search unification phase 4 rework P2-3: a hash in the socket path survives Hyprlang's comment stripping",
+    async () => {
+      using dir = makeLauncherDir("mesura #2-");
+      const socketPath = NodePath.join(dir.directory, "mesura-dictation-4242.sock");
+      const server = await listenForLine(socketPath);
+      const { binds, bindValue } = makeBinds(
+        HYPRLAND,
+        [dir.launcher],
+        [],
+        ["python3"],
+        socketPath,
+        hostToolPath,
+      );
+      await binds.setSessionActive(true);
+      const value = bindValue("X")!;
+      expect(value).toContain("mesura ##2-");
+      expect(await runBind(value)).toBe(0);
+      expect(await server.line).toBe("--dictation cancel\n");
+      await server.close();
+    },
+  );
+});
+
+describe("search unification phase 4 rework: binds that existed before the session", () => {
+  it("search unification phase 4 regression: a session whose socket could not listen binds the launcher line", async () => {
+    const { binds, batches, resolveCommand } = makeBinds(
+      HYPRLAND,
+      LAUNCHER,
+      [],
+      ["socat", "python3"],
+    );
+    await binds.setSessionActive(true, false);
+    expect(batches()).toEqual([BIND_BATCH]);
+    expect(resolveCommand).not.toHaveBeenCalled();
+  });
+
+  it("search unification phase 4 rework P2-1: a user bind whose text quotes the dictation words is put back", async () => {
+    const userArg = "notify-send '--dictation mode inject'";
+    const { binds, writes } = makeBinds(HYPRLAND, LAUNCHER, [
+      reportedBind({ key: "I", arg: userArg }),
+    ]);
+    await binds.setSessionActive(true);
+    await binds.setSessionActive(false);
+    expect(writes().at(-1)).toEqual(["keyword", "bind", `ALT,I,exec,${userArg}`]);
+  });
+
+  it("search unification phase 4 rework P2-3: a restored bind with a hash in it is written with Hyprlang's escape", async () => {
+    const userArg = "notify-send 'colour #ff0000'";
+    const { binds, writes } = makeBinds(HYPRLAND, LAUNCHER, [
+      reportedBind({ key: "S", arg: userArg }),
+    ]);
+    await binds.setSessionActive(true);
+    await binds.setSessionActive(false);
+    expect(writes().at(-1)).toEqual([
+      "keyword",
+      "bind",
+      "ALT,S,exec,notify-send 'colour ##ff0000'",
+    ]);
   });
 });

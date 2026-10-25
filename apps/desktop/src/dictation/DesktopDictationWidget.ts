@@ -3,8 +3,9 @@
  * binds. The main window's renderer publishes its dictation state on
  * `PUBLISH_DICTATION_WIDGET_STATE_CHANNEL`; this service relays it to the widget window, shows
  * the widget while no Mesura window has focus, and binds the dictation keys in Hyprland while a
- * session is live. The `--dictation …` command line itself is forwarded in `DesktopClerk`, where
- * the single-instance lock lives.
+ * session is live. Those binds reach this process over the session's command socket; the
+ * `--dictation …` command line of a second launch is forwarded in `DesktopClerk`, where the
+ * single-instance lock lives, through the same `forwardDictationCommand`.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -27,8 +28,17 @@ import {
   createDictationWidgetWindow,
   type DictationWidgetPresence,
 } from "./DictationWidgetWindow.ts";
+import {
+  dictationCommandSocketPath,
+  makeDictationCommandSocket,
+} from "./dictationCommandSocket.ts";
 import { resolveDictationLauncher } from "./dictationLauncher.ts";
-import { createHyprlandSessionBinds, executeHyprctl } from "./hyprlandSessionBinds.ts";
+import { createDictationSessionKeys } from "./dictationSessionKeys.ts";
+import {
+  createHyprlandSessionBinds,
+  executeHyprctl,
+  resolveCommandPath,
+} from "./hyprlandSessionBinds.ts";
 
 const { logWarning } = makeComponentLogger("dictation-widget");
 
@@ -99,9 +109,18 @@ export const make = Effect.gen(function* () {
     cwd: process.cwd(),
     env: process.env,
   });
+  const socketPath = dictationCommandSocketPath({
+    env: process.env,
+    pid: process.pid,
+    userDataPath: Electron.app.getPath("userData"),
+  });
+  // Closed with the session, and by this layer's scope on quit.
+  const commandSocket = yield* makeDictationCommandSocket({ socketPath });
   const binds = createHyprlandSessionBinds({
     env: process.env,
     launcher,
+    socketPath,
+    resolveCommand: resolveCommandPath,
     execute: executeHyprctl,
     onError: (cause) =>
       runFork(
@@ -111,9 +130,21 @@ export const make = Effect.gen(function* () {
       ),
   });
 
+  const runPromise = Effect.runPromiseWith(context);
+  const sessionKeys = createDictationSessionKeys({
+    binds,
+    setSocketActive: (active) => runPromise(commandSocket.setSessionActive(active)),
+    onError: (cause) =>
+      runFork(
+        logWarning("the dictation keys did not follow the session", {
+          message: cause instanceof Error ? cause.message : String(cause),
+        }),
+      ),
+  });
+
   const apply = (state: PublishedDictationState) => {
     widget.update(state);
-    void binds.setSessionActive(state.live);
+    sessionKeys.setLive(state.live);
   };
 
   // Blur fires before the next window's focus, so read the outcome once both have landed.
@@ -121,7 +152,7 @@ export const make = Effect.gen(function* () {
     setImmediate(() => widget.setFocusedWindow(Electron.BrowserWindow.getFocusedWindow()));
   yield* electronApp.on("browser-window-focus", syncFocus);
   yield* electronApp.on("browser-window-blur", syncFocus);
-  yield* electronApp.on("before-quit", () => void binds.dispose());
+  yield* electronApp.on("before-quit", () => void sessionKeys.dispose());
 
   /** The renderer that publishes; when it goes away its dictation goes with it. */
   const publishers = new Set<number>();
@@ -160,8 +191,10 @@ export const make = Effect.gen(function* () {
     handler: () => Effect.sync(() => widget.state()),
   });
 
+  // Runs before the socket's own finalizer, which was registered first: the binds are restored
+  // and the socket closed in order, after any start still running.
   yield* Effect.addFinalizer(() =>
-    Effect.promise(() => binds.dispose()).pipe(Effect.andThen(Effect.sync(widget.dispose))),
+    Effect.promise(() => sessionKeys.dispose()).pipe(Effect.andThen(Effect.sync(widget.dispose))),
   );
 
   return DesktopDictationWidget.of({});
