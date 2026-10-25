@@ -15,6 +15,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderSessionId,
+  THREAD_SEARCH_PROJECT_ID,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -3508,5 +3509,78 @@ it.effect(
         projectExists: false,
       });
       assert.isFalse(denied?.capabilities?.has("device"));
+    }),
+);
+
+// Mesura: only a search conversation's provider session may call `find_threads`
+// (ADR-010). The capability is granted when the MCP credential is issued, by
+// the thread's project.
+const issuedCapabilitiesFor = (input: {
+  readonly threadId: ThreadId;
+  readonly projectId: ProjectId;
+}) =>
+  Effect.gen(function* () {
+    const state = yield* Ref.make(emptyState);
+    const mcpConfigs = yield* Ref.make<
+      ReadonlyArray<McpProviderSession.McpProviderSessionConfig | undefined>
+    >([]);
+    return yield* Effect.gen(function* () {
+      const eventSink = yield* EventSink.EventSinkV2;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+      const registry = yield* McpSessionRegistry.McpSessionRegistry;
+      const now = yield* DateTime.now;
+      const providerSessionId = yield* idAllocator.allocate.providerSession({
+        providerInstanceId: modelSelection.instanceId,
+        threadId: input.threadId,
+      });
+      yield* eventSink.write({
+        events: [
+          yield* makeThreadCreatedEvent({
+            idAllocator,
+            threadId: input.threadId,
+            now,
+            projectId: input.projectId,
+          }),
+        ],
+      });
+      yield* manager.open({
+        threadId: input.threadId,
+        providerSessionId,
+        modelSelection,
+        runtimePolicy,
+      });
+      const captured = (yield* Ref.get(mcpConfigs))[0];
+      assert.isDefined(captured);
+      const token = captured?.authorizationHeader.replace(/^Bearer\s+/, "") ?? "";
+      const resolved = yield* registry.resolve(token);
+      yield* manager.close(providerSessionId);
+      return resolved?.capabilities;
+    }).pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 1_000, mcpConfigs })));
+  });
+
+it.effect(
+  "ProviderSessionManagerV2 grants the thread-search capability to a search project session",
+  () =>
+    Effect.gen(function* () {
+      assert.isDefined(THREAD_SEARCH_PROJECT_ID);
+      const capabilities = yield* issuedCapabilitiesFor({
+        threadId: ThreadId.make("thread-provider-session-manager-search-chat"),
+        projectId: THREAD_SEARCH_PROJECT_ID,
+      });
+      assert.isTrue(capabilities?.has("thread-search"));
+    }),
+);
+
+it.effect(
+  "ProviderSessionManagerV2 withholds the thread-search capability from an ordinary session",
+  () =>
+    Effect.gen(function* () {
+      const capabilities = yield* issuedCapabilitiesFor({
+        threadId: ThreadId.make("thread-provider-session-manager-ordinary-chat"),
+        projectId: ProjectId.make("project-provider-session-manager-ordinary"),
+      });
+      assert.isDefined(capabilities);
+      assert.isFalse(capabilities?.has("thread-search" as never));
     }),
 );

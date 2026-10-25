@@ -67,6 +67,8 @@ import * as WorktreeMcpService from "./WorktreeMcpService.ts";
 import * as PullRequestsHandlers from "./toolkits/pullRequests/handlers.ts";
 import * as FactoryHandlers from "./toolkits/factory/handlers.ts";
 import { FactoryToolkit } from "./toolkits/factory/tools.ts";
+import * as ThreadSearchHandlers from "./toolkits/threadSearch/handlers.ts";
+import { ThreadSearchToolkit } from "./toolkits/threadSearch/tools.ts";
 import * as ProjectIconsHandlers from "./toolkits/projectIcons/handlers.ts";
 import { ProjectIconsToolkit } from "./toolkits/projectIcons/tools.ts";
 import { PullRequestsToolkit } from "./toolkits/pullRequests/tools.ts";
@@ -1077,6 +1079,12 @@ export const layerProjectIconsToolkit = toolkitRegistration(
 
 export const layerFactoryToolkit = toolkitRegistration(FactoryToolkit, FactoryHandlers.layer);
 
+// Mesura: `find_threads`, which only search conversations hold the capability for.
+const layerThreadSearchToolkit = toolkitRegistration(
+  ThreadSearchToolkit,
+  ThreadSearchHandlers.layer,
+);
+
 export const layerAttachmentToolkit = toolkitRegistration(
   AttachmentToolkit,
   AttachmentHandlers.layer,
@@ -1122,6 +1130,7 @@ export const layer = Layer.mergeAll(
   layerPullRequestsToolkit,
   layerFactoryToolkit,
   layerProjectIconsToolkit,
+  layerThreadSearchToolkit,
   layerDeviceToolkit,
   layerHtmlToolkit,
 ).pipe(Layer.provideMerge(layerMcpTransport));

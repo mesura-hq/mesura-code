@@ -22,6 +22,10 @@ import {
   startProjectIconDiscovery,
 } from "./projectIconDiscovery.ts";
 import type { ProjectRow } from "./ProjectStore.ts";
+import {
+  isThreadSearchProject,
+  THREAD_SEARCH_PROJECT_DELETION_REFUSAL,
+} from "./threadSearchProject.ts";
 
 export interface ProjectCreateCommand {
   readonly type: "project.create";
@@ -322,6 +326,9 @@ export function planProjectCommand(input: {
 
     case "project.delete": {
       if (activeProject === undefined) return missingProject();
+      // Mesura: the hidden search project is not the user's to delete (ADR-010).
+      if (isThreadSearchProject(command.projectId))
+        return invariant(THREAD_SEARCH_PROJECT_DELETION_REFUSAL);
       // Thread children are deleted by ProjectService before this event commits.
       return Result.succeed({
         ...base,

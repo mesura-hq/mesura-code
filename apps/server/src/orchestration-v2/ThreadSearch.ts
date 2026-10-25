@@ -4,6 +4,7 @@ import {
   type OrchestrationSearchThreadsInput,
   type OrchestrationSearchThreadsResult,
   ProjectId,
+  THREAD_SEARCH_PROJECT_ID,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -93,6 +94,8 @@ export const make = Effect.gen(function* () {
         WHERE threads.deleted_at IS NULL
           AND threads.archived_at IS NULL
           AND projects.deleted_at IS NULL
+          -- Mesura: search conversations stay out of thread search (ADR-010).
+          AND threads.project_id <> ${THREAD_SEARCH_PROJECT_ID}
           AND messages.streaming = 0
           AND messages.role IN ('user', 'assistant')
           AND json_extract(messages.payload_json, '$.text') LIKE ${pattern} ESCAPE '!'

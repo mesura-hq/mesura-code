@@ -7,6 +7,12 @@ import {
 } from "./projectIcons.ts";
 import { THREAD_SEARCH_WS_METHODS, ThreadSearchRpcSchemas } from "./threadSearchEvidence.ts";
 import {
+  StartThreadSearchChatResult,
+  ThreadSearchToolError,
+  ThreadSearchToolEvent,
+  ThreadSearchToolResponse,
+} from "./threadSearchTools.ts";
+import {
   OrchestrationV2SearchThreadError,
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
@@ -2222,6 +2228,26 @@ const WsOrchestrationReasonThreadSearchRpc = Rpc.make(THREAD_SEARCH_WS_METHODS.r
   error: Schema.Union([TextGenerationError, EnvironmentAuthorizationError]),
 });
 
+// Search conversations (threadSearchTools.ts): start one, and the connection a
+// client holds open to answer the `find_threads` calls the server forwards.
+const WsStartThreadSearchChatRpc = Rpc.make(THREAD_SEARCH_WS_METHODS.startThreadSearchChat, {
+  payload: Schema.Struct({}),
+  success: StartThreadSearchChatResult,
+  error: Schema.Union([ThreadSearchToolError, EnvironmentAuthorizationError]),
+});
+
+const WsThreadSearchToolConnectRpc = Rpc.make(THREAD_SEARCH_WS_METHODS.threadSearchToolConnect, {
+  payload: Schema.Struct({}),
+  success: ThreadSearchToolEvent,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
+const WsThreadSearchToolRespondRpc = Rpc.make(THREAD_SEARCH_WS_METHODS.threadSearchToolRespond, {
+  payload: ThreadSearchToolResponse,
+  error: Schema.Union([ThreadSearchToolError, EnvironmentAuthorizationError]),
+});
+
 /**
  * Checks the connection's scopes against the scope each RPC declares, before
  * the handler runs. Every RPC in `WsRpcGroup` carries it, so a handler cannot
@@ -2481,6 +2507,9 @@ const MesuraWsRpcGroup = RpcGroup.make(
   WsOrchestrationListThreadSearchCatalogRpc,
   WsOrchestrationSearchThreadEvidenceRpc,
   WsOrchestrationReasonThreadSearchRpc,
+  WsStartThreadSearchChatRpc,
+  WsThreadSearchToolConnectRpc,
+  WsThreadSearchToolRespondRpc,
 );
 
 /** Every RPC, as clients and the server's router see them. */

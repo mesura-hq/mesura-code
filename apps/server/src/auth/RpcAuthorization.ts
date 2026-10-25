@@ -52,6 +52,11 @@ export const RPC_REQUIRED_SCOPES = {
   [THREAD_SEARCH_WS_METHODS.searchThreadEvidence]: AuthOrchestrationReadScope,
   // Runs the environment's text model, like the other model-driven operations.
   [THREAD_SEARCH_WS_METHODS.reasonThreadSearch]: AuthOrchestrationOperateScope,
+  // Search conversations: starting one creates a thread, and a client that
+  // answers `find_threads` runs searches on the agent's behalf.
+  [THREAD_SEARCH_WS_METHODS.startThreadSearchChat]: AuthOrchestrationOperateScope,
+  [THREAD_SEARCH_WS_METHODS.threadSearchToolConnect]: AuthOrchestrationOperateScope,
+  [THREAD_SEARCH_WS_METHODS.threadSearchToolRespond]: AuthOrchestrationOperateScope,
   [ORCHESTRATION_V2_WS_METHODS.getArchivedShellSnapshot]: AuthOrchestrationReadScope,
   [ORCHESTRATION_V2_WS_METHODS.getThreadProjection]: AuthOrchestrationReadScope,
   [ORCHESTRATION_V2_WS_METHODS.getTurnItem]: AuthOrchestrationReadScope,

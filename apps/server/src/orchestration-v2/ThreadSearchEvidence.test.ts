@@ -17,6 +17,7 @@ import {
   THREAD_SEARCH_CURSOR_MAX_LENGTH,
   THREAD_SEARCH_EVIDENCE_EXCERPT_MAX_LENGTH,
   THREAD_SEARCH_EVIDENCE_MAX_PAGE_SIZE,
+  THREAD_SEARCH_PROJECT_ID,
   THREAD_SEARCH_TITLE_MAX_LENGTH,
   ThreadId,
   type OrchestrationThreadSearchEvidence,
@@ -1357,6 +1358,100 @@ it.effect("keeps lexical searchThreads active-only and capped at fifty threads",
       ]);
       const limited = yield* lexical.search({ query: "lexical garnet", limit: 3 });
       assert.strictEqual(limited.matches.length, 3);
+    }),
+  ),
+);
+
+// Mesura: search conversations repeat the words the user remembers, so they
+// would outrank the conversation being searched for. The hidden search project
+// stays out of every search read (ADR-010). Search threads sort first by id
+// here, so a filter applied after the page cut would leave a short first page.
+const seedSearchAndOrdinaryThreads = Effect.gen(function* () {
+  assert.isDefined(THREAD_SEARCH_PROJECT_ID);
+  yield* insertProject({ projectId: THREAD_SEARCH_PROJECT_ID, title: "Thread searches" });
+  yield* insertProject({ projectId: "project-ordinary", title: "Ordinary" });
+  for (const index of [1, 2, 3, 4, 5]) {
+    yield* insertThread({
+      threadId: `thread-a-search-${index}`,
+      projectId: THREAD_SEARCH_PROJECT_ID,
+      title: `Search ${index}`,
+      updatedAt: "2026-06-09T00:00:00.000Z",
+    });
+    yield* insertMessage({
+      messageId: `message-a-search-${index}`,
+      threadId: `thread-a-search-${index}`,
+      role: "user",
+      text: "Find the thread about the obsidian lantern refactor.",
+      createdAt: `2026-06-09T00:00:0${index}.000Z`,
+    });
+  }
+  yield* insertThread({
+    threadId: "thread-z-ordinary-active",
+    projectId: "project-ordinary",
+    title: "Lantern refactor",
+    updatedAt: "2026-06-02T00:00:00.000Z",
+  });
+  yield* insertMessage({
+    messageId: "message-z-ordinary-active",
+    threadId: "thread-z-ordinary-active",
+    role: "user",
+    text: "Let us start the obsidian lantern refactor today.",
+    createdAt: "2026-06-02T00:00:00.000Z",
+  });
+  yield* insertThread({
+    threadId: "thread-z-ordinary-archived",
+    projectId: "project-ordinary",
+    title: "Lantern follow-up",
+    updatedAt: "2026-06-03T00:00:00.000Z",
+    archivedAt: "2026-06-04T00:00:00.000Z",
+  });
+  yield* insertMessage({
+    messageId: "message-z-ordinary-archived",
+    threadId: "thread-z-ordinary-archived",
+    role: "assistant",
+    text: "The obsidian lantern refactor shipped.",
+    createdAt: "2026-06-03T00:00:00.000Z",
+  });
+});
+
+it.effect("search project exclusion spec: thread search catalog pages skip search threads", () =>
+  withFreshDatabase(
+    Effect.gen(function* () {
+      yield* seedSearchAndOrdinaryThreads;
+      const firstPage = yield* readCatalogPage(undefined, 2);
+      assert.deepStrictEqual(
+        firstPage.entries.map((entry) => entry.threadId as string).toSorted(),
+        ["thread-z-ordinary-active", "thread-z-ordinary-archived"],
+      );
+      const everyEntry = (yield* collectPages((cursor) => readCatalogPage(cursor, 2))).flat();
+      assert.isFalse(everyEntry.some((entry) => entry.projectId === THREAD_SEARCH_PROJECT_ID));
+    }),
+  ),
+);
+
+it.effect("search project exclusion spec: thread search evidence pages skip search threads", () =>
+  withFreshDatabase(
+    Effect.gen(function* () {
+      yield* seedSearchAndOrdinaryThreads;
+      const evidence = yield* collectEvidence("obsidian lantern");
+      assert.deepStrictEqual(
+        [...new Set(evidence.map((match) => match.threadId as string))].toSorted(),
+        ["thread-z-ordinary-active", "thread-z-ordinary-archived"],
+      );
+    }),
+  ),
+);
+
+it.effect("search project exclusion spec: lexical searchThreads skips search threads", () =>
+  withFreshDatabase(
+    Effect.gen(function* () {
+      yield* seedSearchAndOrdinaryThreads;
+      const lexical = yield* ThreadSearch.ThreadSearch;
+      const result = yield* lexical.search({ query: "obsidian lantern" });
+      assert.deepStrictEqual(
+        result.matches.map((match) => match.threadId as string),
+        ["thread-z-ordinary-active"],
+      );
     }),
   ),
 );

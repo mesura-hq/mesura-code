@@ -15,6 +15,7 @@ import {
   OrchestrationThreadSearchSource,
   ProjectId,
   THREAD_SEARCH_EVIDENCE_EXCERPT_MAX_LENGTH,
+  THREAD_SEARCH_PROJECT_ID,
   THREAD_SEARCH_TITLE_MAX_LENGTH,
   ThreadId,
   type OrchestrationThreadSearchCatalogInput,
@@ -237,6 +238,9 @@ export const make = Effect.gen(function* () {
         ON projects.project_id = threads.project_id
       WHERE threads.deleted_at IS NULL
         AND projects.deleted_at IS NULL
+        -- Search conversations repeat the remembered words and would outrank
+        -- the thread searched for (ADR-010). Filtered here, before LIMIT.
+        AND threads.project_id <> ${THREAD_SEARCH_PROJECT_ID}
         AND (
           ${afterCreatedAt} IS NULL
           OR threads.created_at < ${afterCreatedAt}
@@ -371,6 +375,9 @@ export const make = Effect.gen(function* () {
             })}
             AND threads.deleted_at IS NULL
             AND projects.deleted_at IS NULL
+            -- A window of only search-conversation messages still advances the
+            -- cursor, so the scan bound holds (ADR-010).
+            AND threads.project_id <> ${THREAD_SEARCH_PROJECT_ID}
             AND messages.streaming = 0
             AND messages.role IN ('user', 'assistant')
             AND NOT EXISTS (

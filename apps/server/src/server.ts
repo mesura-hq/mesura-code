@@ -34,6 +34,7 @@ import {
 } from "./httpResponseErrorGuard.ts";
 import { fixPath } from "./os-jank.ts";
 import * as Ws from "./ws.ts";
+import { layerMesuraServerScope } from "./wsMesura.ts";
 import * as AgentScopeLive from "./process/agentScope.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as NodePtyAdapter from "./terminal/NodePtyAdapter.ts";
@@ -817,6 +818,8 @@ const layerMakeRoutes = Layer.mergeAll(
     ),
   ),
   Layer.provide(PreviewAutomationBroker.layer),
+  // Mesura: the search broker (MCP to WebSocket) and search starter, one per server.
+  Layer.provide(layerMesuraServerScope),
   // Mesura: the Software Factory's plan and report bytes, read by MCP and WebSocket alike.
   Layer.provide(FactorySnapshotStore.layer),
   Layer.provide(ServerSelfUpdate.layer.pipe(Layer.provide(layerDesktopAppUpdate))),

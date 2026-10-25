@@ -13,6 +13,10 @@ export const THREAD_SEARCH_WS_METHODS = {
   listThreadSearchCatalog: "orchestration.listThreadSearchCatalog",
   searchThreadEvidence: "orchestration.searchThreadEvidence",
   reasonThreadSearch: "orchestration.reasonThreadSearch",
+  // Search conversations (threadSearchTools.ts).
+  startThreadSearchChat: "threadSearchChat.start",
+  threadSearchToolConnect: "threadSearchTool.connect",
+  threadSearchToolRespond: "threadSearchTool.respond",
 } as const;
 
 // Agent thread search reads history page by page instead of widening
@@ -164,6 +168,11 @@ export const OrchestrationThreadSearchReasoningInput = Schema.Struct({
    * never sends it keeps decoding.
    */
   finalStep: Schema.optional(Schema.Boolean),
+  /**
+   * `jev` asks the server's Jev classifier instead of the configured text
+   * model. Absent means the configured text model, so older callers decode.
+   */
+  engine: Schema.optional(Schema.Literal("jev")),
 });
 export type OrchestrationThreadSearchReasoningInput =
   typeof OrchestrationThreadSearchReasoningInput.Type;

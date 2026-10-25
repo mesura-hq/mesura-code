@@ -22,6 +22,8 @@ const ALL_MCP_CAPABILITIES = [
   "factory",
   // Mesura: the manual project icon tool, scoped to the calling thread's project.
   "project-icons",
+  // Mesura: `find_threads`, granted only to search conversations (ADR-010).
+  "thread-search",
 ] as const;
 export type McpCapability = (typeof ALL_MCP_CAPABILITIES)[number];
 
