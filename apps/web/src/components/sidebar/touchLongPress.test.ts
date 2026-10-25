@@ -28,6 +28,7 @@ function harness() {
     return {
       calls,
       event: {
+        detail: 1,
         preventDefault: () => calls.push("preventDefault"),
         stopPropagation: () => calls.push("stopPropagation"),
       },
@@ -91,7 +92,7 @@ describe("createTouchLongPress", () => {
     expect(timers.size).toBe(0);
   });
 
-  it("swallows the context menu only during a touch press", () => {
+  it("swallows the context menu only while a finger is down", () => {
     const { press, runTimers, cancelable } = harness();
     const idle = cancelable();
     press.onContextMenu(idle.event);
@@ -104,6 +105,28 @@ describe("createTouchLongPress", () => {
     const fired = cancelable();
     press.onContextMenu(fired.event);
     expect(fired.calls).toEqual(["preventDefault"]);
+    press.onPointerUp(finger());
+    const afterLift = cancelable();
+    press.onContextMenu(afterLift.event);
+    expect(afterLift.calls).toEqual([]);
+  });
+
+  it("loses no later input when the browser sends no click after a fired press", () => {
+    const { press, runTimers, cancelable } = harness();
+    press.onPointerDown(finger());
+    runTimers();
+    press.onPointerCancel(finger());
+    const keyboard = cancelable();
+    press.onClickCapture({ ...keyboard.event, detail: 0 });
+    expect(keyboard.calls).toEqual([]);
+    press.onPointerDown({ ...finger(), pointerType: "mouse" });
+    press.onPointerUp({ ...finger(), pointerType: "mouse" });
+    const mouse = cancelable();
+    press.onClickCapture(mouse.event);
+    expect(mouse.calls).toEqual([]);
+    const rightClick = cancelable();
+    press.onContextMenu(rightClick.event);
+    expect(rightClick.calls).toEqual([]);
   });
 
   it("drops a pending press on pointer cancel and on dispose", () => {

@@ -671,13 +671,20 @@ async function touch(
   });
 }
 
+/** The click a finger lift produces; `element.click()` would read as the keyboard's. */
+async function liftClick(target: HTMLElement) {
+  await act(async () => {
+    target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1 }));
+  });
+}
+
 /** A touch tap as a phone sends it: hover-like events, then the click. */
 async function tap(target: HTMLElement) {
   await touch(target, "pointerover");
   await touch(target, "pointerdown");
   await touch(target, "pointerup");
   await touch(target, "pointerout");
-  await act(async () => target.click());
+  await liftClick(target);
 }
 
 /** Holds a finger on the icon past the long-press delay, then lifts it. */
@@ -687,7 +694,7 @@ async function longPress(target: HTMLElement) {
   await advance(450);
   await touch(target, "pointerup");
   await touch(target, "pointerout");
-  await act(async () => target.click());
+  await liftClick(target);
 }
 
 describe("Docks on a phone: long press on the footer icon", () => {
@@ -707,7 +714,7 @@ describe("Docks on a phone: long press on the footer icon", () => {
     await touch(button, "pointerup");
     await touch(button, "pointerout");
     // The click the browser sends on lift is swallowed: it would unpin.
-    await act(async () => button.click());
+    await liftClick(button);
     await advance(1_000);
     expect(hostsOpen()).toBe(true);
     expect(fixture.sourcesEnabled.at(-1)).toBe(true);
@@ -777,7 +784,7 @@ describe("Docks on a phone: long press on the footer icon", () => {
     await touch(button, "pointerdown");
     await touch(button, "pointerup");
     await touch(button, "pointerout");
-    await act(async () => button.click());
+    await liftClick(button);
     await vi.waitFor(() => expect(router.state.location.pathname).toBe("/usage"));
   });
 
@@ -790,6 +797,50 @@ describe("Docks on a phone: long press on the footer icon", () => {
     await tap(footerButton("Hosts"));
     await advance(1_000);
     expect(hostsOpen()).toBe(true);
+  });
+
+  it("swallows the context menu a long press raises while the finger is down", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.mobile = true;
+    await mountSidebar();
+    using _timers = fakeTimers();
+    const button = footerButton("Hosts");
+    await touch(button, "pointerdown");
+    await advance(450);
+    const duringPress = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    await act(async () => {
+      button.dispatchEvent(duringPress);
+    });
+    expect(duringPress.defaultPrevented).toBe(true);
+    await touch(button, "pointerup");
+    const afterLift = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    await act(async () => {
+      button.dispatchEvent(afterLift);
+    });
+    expect(afterLift.defaultPrevented).toBe(false);
+  });
+
+  it("a mouse click after a long press that sent no click still reaches the icon", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    fixture.mobile = true;
+    await mountSidebar();
+    using _timers = fakeTimers();
+    const button = footerButton("Hosts");
+    await touch(button, "pointerdown");
+    await advance(450);
+    await touch(button, "pointerup");
+    expect(hostsOpen()).toBe(true);
+    // No click from the browser; a later mouse click on the icon unpins.
+    await act(async () => {
+      button.dispatchEvent(
+        new PointerEvent("pointerdown", { bubbles: true, pointerId: 2, pointerType: "mouse" }),
+      );
+    });
+    await liftClick(button);
+    await advance(1_000);
+    expect(hostsOpen()).toBe(false);
   });
 
   it("a mouse right click on a dock icon keeps its context menu", async () => {
