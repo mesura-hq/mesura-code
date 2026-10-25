@@ -19,14 +19,11 @@ import {
 } from "@t3tools/contracts";
 
 import * as ServerConfig from "../config.ts";
-import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import { readWorkingTreeChanges } from "./GitWorkingTreeChanges.ts";
 import * as GitWorkingTreeWatcher from "./GitWorkingTreeWatcher.ts";
-import * as ServerSettings from "../serverSettings.ts";
-import { isFilesystemRoot, managedWorktreesDirectories } from "../worktreesDirectory.ts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as KnownWorkspaces from "../workspace/KnownWorkspaces.ts";
 
 export class ReviewService extends Context.Service<
   ReviewService,
@@ -56,8 +53,7 @@ export const make = Effect.gen(function* () {
   const vcsRegistry = yield* VcsDriverRegistry.VcsDriverRegistry;
   const git = yield* GitVcsDriver.GitVcsDriver;
   const workingTreeWatcher = yield* GitWorkingTreeWatcher.GitWorkingTreeWatcher;
-  const settings = yield* ServerSettings.ServerSettingsService;
-  const projectStore = yield* ProjectStore.ProjectStoreV2;
+  const knownWorkspaces = yield* KnownWorkspaces.KnownWorkspaces;
 
   const canonicalizePath = (value: string, allowMissing = true) => {
     const resolvedPath = path.resolve(value);
@@ -78,11 +74,6 @@ export const make = Effect.gen(function* () {
     );
   };
 
-  const isWithinRoot = (candidate: string, root: string) => {
-    const relative = path.relative(root, candidate);
-    return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
-  };
-
   const assertWorkspaceBoundCwd = Effect.fn("ReviewService.assertWorkspaceBoundCwd")(function* (
     operation:
       | "ReviewService.getDiffPreview"
@@ -91,42 +82,20 @@ export const make = Effect.gen(function* () {
       | "ReviewService.subscribeWorkingTreeChanges",
     cwd: string,
   ) {
-    const worktreesDirectories = yield* settings.getSettings.pipe(
-      Effect.orElseSucceed(() => ({ worktreesDirectory: "", previousWorktreesDirectories: [] })),
-    );
-    const home = yield* HostProcess.HomeDirectory;
-    const [candidate, workspaceRoot, worktreesRoots] = yield* Effect.all([
+    const [candidate, workspaceRoot] = yield* Effect.all([
       canonicalizePath(cwd),
       canonicalizePath(config.cwd),
-      // A managed root that cannot be resolved, or resolves to a filesystem
-      // root through a symlink, is skipped rather than failing every review.
-      Effect.forEach(
-        managedWorktreesDirectories(worktreesDirectories, config.worktreesDir, path, home),
-        (directory) => canonicalizePath(directory).pipe(Effect.orElseSucceed(() => null)),
-      ).pipe(
-        Effect.map((roots) =>
-          roots.filter((root): root is string => root !== null && !isFilesystemRoot(root, path)),
-        ),
-      ),
     ]);
-
     if (
-      isWithinRoot(candidate, workspaceRoot) ||
-      worktreesRoots.some((root) => isWithinRoot(candidate, root))
+      KnownWorkspaces.isWithinRoot(path, candidate, workspaceRoot) ||
+      // contains also accepts missing roots for workspace creation. Review reads
+      // require assertContains so a missing registered root cannot grant access.
+      (yield* knownWorkspaces.assertContains(candidate).pipe(
+        Effect.as(true),
+        Effect.orElseSucceed(() => false),
+      ))
     ) {
       return;
-    }
-
-    // Registered projects can live outside the server cwd. Unreadable or
-    // unresolvable project roots grant nothing, including missing roots.
-    const projects = yield* projectStore.listShells().pipe(Effect.orElseSucceed(() => []));
-    for (const project of projects) {
-      const root = yield* canonicalizePath(project.workspaceRoot, false).pipe(
-        Effect.orElseSucceed(() => null),
-      );
-      if (root !== null && isWithinRoot(candidate, root)) {
-        return;
-      }
     }
 
     return yield* new VcsRepositoryDetectionError({

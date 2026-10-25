@@ -57,11 +57,17 @@ export function MesuraFileManagerLayer({
   // unmounted on each blip would lose its tabs and cursor. The last target
   // holds while the thread stays; only the thread leaving the route closes
   // the layer, or the next chord would flip a flag nobody can see.
-  const lastTarget = useRef<FileManagerTarget | null>(null);
-  const target = fileManagerTarget(activeThread, project) ?? lastTarget.current;
-  useEffect(() => {
-    lastTarget.current = target;
-  });
+  const currentTarget = fileManagerTarget(activeThread, project);
+  const [lastTarget, setLastTarget] = useState<FileManagerTarget | null>(currentTarget);
+  if (
+    currentTarget !== null &&
+    (lastTarget === null ||
+      currentTarget.environmentId !== lastTarget.environmentId ||
+      currentTarget.cwd !== lastTarget.cwd)
+  ) {
+    setLastTarget(currentTarget);
+  }
+  const target = currentTarget ?? lastTarget;
   useEffect(() => {
     if (open && routeThreadRef === null) closeFileManager();
   }, [open, routeThreadRef]);

@@ -14,6 +14,7 @@
           "type": "string"
         },
         "version": {
+          "maximum": 9007199254740991,
           "minimum": 0,
           "type": "integer"
         }
@@ -268,6 +269,7 @@
                 "autoCompactThreshold": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 1,
                       "type": "integer"
                     },
@@ -279,6 +281,7 @@
                 "cacheCreationTokens": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
@@ -290,6 +293,7 @@
                 "cachedInputTokens": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
@@ -334,6 +338,7 @@
                 "durationMs": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
@@ -345,6 +350,7 @@
                 "inputTokens": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
@@ -356,6 +362,7 @@
                 "lastCacheCreationTokens": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
@@ -367,6 +374,7 @@
                 "lastCachedInputTokens": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
@@ -378,6 +386,7 @@
                 "lastInputTokens": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
@@ -389,6 +398,7 @@
                 "lastOutputTokens": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
@@ -400,6 +410,7 @@
                 "lastReasoningOutputTokens": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
@@ -411,6 +422,7 @@
                 "lastUsedTokens": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
@@ -422,6 +434,7 @@
                 "maxTokens": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 1,
                       "type": "integer"
                     },
@@ -433,6 +446,7 @@
                 "outputTokens": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
@@ -444,6 +458,7 @@
                 "reasoningOutputTokens": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
@@ -455,6 +470,7 @@
                 "toolUses": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
@@ -466,6 +482,7 @@
                 "totalProcessedTokens": {
                   "anyOf": [
                     {
+                      "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
@@ -475,6 +492,7 @@
                   ]
                 },
                 "usedTokens": {
+                  "maximum": 9007199254740991,
                   "minimum": 0,
                   "type": "integer"
                 }
@@ -553,6 +571,7 @@
               "type": "number"
             },
             "minor": {
+              "maximum": 9007199254740991,
               "minimum": 0,
               "type": "integer"
             }
@@ -564,6 +583,7 @@
           "type": "object"
         },
         "revision": {
+          "maximum": 9007199254740991,
           "minimum": 0,
           "type": "integer"
         },
@@ -702,6 +722,7 @@
               "type": "number"
             },
             "minor": {
+              "maximum": 9007199254740991,
               "minimum": 0,
               "type": "integer"
             }
@@ -713,6 +734,7 @@
           "type": "object"
         },
         "sequence": {
+          "maximum": 9007199254740991,
           "minimum": 0,
           "type": "integer"
         },

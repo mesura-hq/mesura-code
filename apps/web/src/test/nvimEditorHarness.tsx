@@ -1,3 +1,4 @@
+import { flushBrowserTasks } from "./browserTasks";
 /**
  * The modal editor's key path, mounted for real down to the RPC session.
  *
@@ -62,8 +63,10 @@ import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { Atom, AtomRegistry } from "effect/reactivity";
 import * as RpcClientError from "effect/rpc/RpcClientError";
-import { act, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import type { ReactNode } from "react";
+import { expect, vi } from "vite-plus/test";
+
+import { act, render } from "../../test/render";
 
 export const HARNESS_ENVIRONMENT_ID = EnvironmentId.make("nvim-harness-environment");
 const HARNESS_THREAD_ID = ThreadId.make("nvim-harness-thread");
@@ -820,23 +823,22 @@ export async function mountNvimEditor(options: {
   readonly renderEditor: (editor: unknown) => ReactNode;
   readonly layout?: HarnessLayout;
 }) {
+  await using stack = new AsyncDisposableStack();
   const registry = AtomRegistry.make();
-  const container = document.createElement("div");
-  document.body.append(container);
+  stack.defer(() => registry.dispose());
   const fake = makeFakeEditor(options.layout);
-  let root: Root | undefined;
-  await act(async () => {
-    root = createRoot(container);
-    root.render(
+  const screen = stack.use(
+    await render(
       <RegistryContext.Provider value={registry}>
         {options.renderEditor(fake.editor)}
       </RegistryContext.Provider>,
-    );
-  });
+    ),
+  );
   await flushHarness();
+  const lifetime = stack.move();
   return {
     registry,
-    container,
+    container: screen.container,
     press: async (init: KeyboardEventInit) => {
       await act(async () => fake.press(init));
     },
@@ -845,11 +847,8 @@ export async function mountNvimEditor(options: {
     click: async (lineNumber: number, column: number) => {
       await act(async () => fake.click(lineNumber, column));
     },
-    unmount: async () => {
-      await act(async () => root?.unmount());
-      container.remove();
-      registry.dispose();
-    },
+    unmount: () => lifetime.disposeAsync(),
+    [Symbol.asyncDispose]: () => lifetime.disposeAsync(),
   };
 }
 
@@ -882,20 +881,24 @@ function makeSurfaceModels(model: HarnessModel) {
  * (`shouldRedirectInputToComposer` in `ChatView.tsx`).
  *
  * The test file mocks what the surface needs beyond the editor and the
- * session; see `MonacoFileSurface.escape.test.tsx`.
+ * session; see `MonacoFileSurface.escape.browser.test.tsx`.
  */
 export async function mountMonacoFileSurface(options: {
   readonly layout: HarnessLayout;
   readonly renderSurface: (models: unknown) => ReactNode;
 }) {
+  await using stack = new AsyncDisposableStack();
   const registry = AtomRegistry.make();
+  stack.defer(() => registry.dispose());
   const container = document.createElement("div");
-  document.body.append(container);
   let fake: ReturnType<typeof makeFakeEditor> | null = null;
   createSurfaceEditor = (host) => {
     fake = makeFakeEditor(options.layout, host);
     return fake.editor;
   };
+  stack.defer(() => {
+    createSurfaceEditor = null;
+  });
   const keysOutsideEditor: Array<string> = [];
   const recordKeyOutsideEditor = (event: KeyboardEvent) => {
     const host = container.querySelector("[data-monaco-file-surface]");
@@ -905,17 +908,18 @@ export async function mountMonacoFileSurface(options: {
     keysOutsideEditor.push(event.key);
   };
   document.addEventListener("keydown", recordKeyOutsideEditor);
+  stack.defer(() => document.removeEventListener("keydown", recordKeyOutsideEditor));
   const models = makeSurfaceModels(options.layout.model);
-  let root: Root | undefined;
-  await act(async () => {
-    root = createRoot(container);
-    root.render(
+  stack.use(
+    await render(
       <RegistryContext.Provider value={registry}>
         {options.renderSurface(models)}
       </RegistryContext.Provider>,
-    );
-  });
+      { container },
+    ),
+  );
   await flushHarness();
+  const lifetime = stack.move();
   const editContext = () => {
     const node = (fake as ReturnType<typeof makeFakeEditor> | null)?.editContext ?? null;
     if (node === null) throw new Error("the surface never created its editor");
@@ -941,53 +945,33 @@ export async function mountMonacoFileSurface(options: {
       });
     },
     keysOutsideEditor: keysOutsideEditor as ReadonlyArray<string>,
-    unmount: async () => {
-      await act(async () => root?.unmount());
-      document.removeEventListener("keydown", recordKeyOutsideEditor);
-      container.remove();
-      registry.dispose();
-      createSurfaceEditor = null;
-    },
+    unmount: () => lifetime.disposeAsync(),
+    [Symbol.asyncDispose]: () => lifetime.disposeAsync(),
   };
 }
 
-/** Lets promises, effects and React commits run. No clock is involved. */
+/** Drains browser tasks and React work without waiting for elapsed time. */
 export async function flushHarness(rounds = 5): Promise<void> {
   for (let round = 0; round < rounds; round += 1) {
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await flushBrowserTasks();
     });
   }
 }
 
-/**
- * Lets the harness run until `predicate` holds, and fails with `what` if it
- * never does. Bounded by turns of the event loop, not by a clock, so a red
- * run fails at once instead of waiting out the test timeout.
- */
+/** Waits for an observable editor milestone through the browser runner. */
 export async function settleUntil(predicate: () => boolean, what: string): Promise<void> {
-  for (let round = 0; round < 200; round += 1) {
-    if (predicate()) return;
-    await flushHarness(1);
-  }
-  if (predicate()) return;
-  const seen = editorTransport.requests
-    .map((request) => `${request.method}(${JSON.stringify(request.payload)})`)
-    .join(", ");
-  throw new Error(`never happened: ${what}. Requests the server saw: [${seen}]`);
+  await vi.waitFor(() => {
+    const seen = editorTransport.requests
+      .map((request) => `${request.method}(${JSON.stringify(request.payload)})`)
+      .join(", ");
+    expect(predicate(), `${what}. Requests the server saw: [${seen}]`).toBe(true);
+  });
 }
 
-/**
- * Waits on the real clock, for what runs on a timer or an animation frame
- * rather than on a promise: the lane's backoff, the viewport's coalescing.
- */
+/** Waits for a timer-driven editor milestone, such as a viewport or retry. */
 export async function waitForReal(predicate: () => boolean, limitMs: number, what: string) {
-  const deadline = Date.now() + limitMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) throw new Error(`never happened within ${limitMs} ms: ${what}`);
-    await flushHarness(1);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
+  await vi.waitFor(() => expect(predicate(), what).toBe(true), { timeout: limitMs });
 }
 
 export const harnessThreadRef: ScopedThreadRef = {

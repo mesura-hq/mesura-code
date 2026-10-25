@@ -233,15 +233,26 @@ function rowAt(buffer: ChatBuffer, line: number): BufferRow | null {
   return index === undefined || index === -1 ? null : buffer.rows[index]!;
 }
 
-function boundaryAt(row: BufferRow, offset: number): { node: Text; offset: number } | null {
-  for (const chunk of row.chunks) {
-    if (offset < chunk.end || (offset === chunk.end && chunk === row.chunks.at(-1))) {
-      if (offset < chunk.start) return { node: chunk.node, offset: 0 };
-      return { node: chunk.node, offset: offset - chunk.start };
-    }
+function boundaryAt(
+  row: BufferRow,
+  offset: number,
+  edge: "start" | "end",
+): { node: Node; offset: number } | null {
+  const chunk = row.chunks.find((candidate) => offset < candidate.end) ?? row.chunks.at(-1);
+  if (!chunk) return null;
+  if (chunk.node.nodeType === Node.TEXT_NODE) {
+    return {
+      node: chunk.node,
+      offset: Math.max(0, Math.min(chunk.end - chunk.start, offset - chunk.start)),
+    };
   }
-  const last = row.chunks.at(-1);
-  return last ? { node: last.node, offset: last.node.length } : null;
+  const parent = chunk.node.parentNode;
+  if (!parent) return null;
+  const index = Array.prototype.indexOf.call(parent.childNodes, chunk.node) as number;
+  // Math chunks store their copy text on the rendered element. Cover the whole
+  // formula when a motion ends inside it, as citation selection does.
+  const after = offset >= chunk.end || (offset > chunk.start && edge === "end");
+  return { node: parent, offset: index + Number(after) };
 }
 
 /** The DOM range between two buffer positions, end exclusive. */
@@ -261,8 +272,8 @@ export function rangeBetween(
     rowAt(buffer, end.line) === null
       ? endRow.text.length
       : endRow.lineStarts[end.line - endRow.firstLine]! + end.col;
-  const from = boundaryAt(startRow, startOffset);
-  const to = boundaryAt(endRow, endOffset);
+  const from = boundaryAt(startRow, startOffset, "start");
+  const to = boundaryAt(endRow, endOffset, "end");
   if (from === null || to === null) return null;
   const range = document.createRange();
   range.setStart(from.node, from.offset);

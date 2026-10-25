@@ -11,6 +11,7 @@ import {
   panelFixtureVersions,
 } from "./mesura-panel.launcher.fixture-build.ts";
 import { createTimelineFixtureOutput as createFixtureOutput } from "./mesura-timeline.find.fixture-output.ts";
+import { expectFixtureVersionFloor } from "./mesura-fixture-versions.ts";
 
 interface Snapshot {
   focus: number;
@@ -52,7 +53,9 @@ let output: ReturnType<typeof createFixtureOutput> | undefined;
 let fixturePath: string;
 let launch: Promise<Browser> | undefined;
 beforeAll(async () => {
-  expect(panelFixtureVersions).toEqual({ react: "19.2.6", reactDom: "19.2.6", baseUi: "1.5.0" });
+  expectFixtureVersionFloor(panelFixtureVersions.react, [19, 2, 6]);
+  expect(panelFixtureVersions.reactDom).toBe(panelFixtureVersions.react);
+  expectFixtureVersionFloor(panelFixtureVersions.baseUi, [1, 5, 0]);
   output = createFixtureOutput(NodeProcess.env.MESURA_PANEL_ARTIFACT_DIR);
   fixturePath = await buildPanelLauncherFixture(output.directory);
   const cache =

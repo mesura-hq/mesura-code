@@ -145,7 +145,14 @@ export function readWorkspacePackages(repositoryRoot: string): WorkspacePackage[
         {
           name: manifest.name,
           directory,
-          typecheckScript: manifest.scripts?.typecheck,
+          // Vite+ tasks can own typecheck without a package script.
+          typecheckScript:
+            manifest.scripts?.typecheck ??
+            (NodeFS.existsSync(NodePath.join(repositoryRoot, directory, "tsconfig.json"))
+              ? manifest.devDependencies?.["@astrojs/check"] === undefined
+                ? "tsc-rs --noEmit"
+                : "astro check"
+              : undefined),
           workspaceDependencies,
         },
       ];

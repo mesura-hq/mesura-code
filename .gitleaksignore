@@ -1,2 +1,16 @@
 # Fake test key `sk-dictation-ac6-secret`, not a credential. Its commit is already in pushed history, so only an ignore entry can clear it.
 78e0f16a7e431fbd43a5bc32fb18d3603a9b3c89:apps/server/src/dictation/DictationRpc.test.ts:generic-api-key:60
+
+# OpenCode status tests hash literal console-key, go-key and inline-key fixtures.
+f04546609a0600bd6b878baca0dae75b191f7d35:packages/provider-opencode/src/server/status.test.ts:generic-api-key:124
+f04546609a0600bd6b878baca0dae75b191f7d35:packages/provider-opencode/src/server/status.test.ts:generic-api-key:125
+f04546609a0600bd6b878baca0dae75b191f7d35:packages/provider-opencode/src/server/status.test.ts:generic-api-key:126
+
+# outboundHttp.test.ts uses this public, self-signed loopback TLS fixture for ALPN tests.
+3ff452bd65adf758e68b886d1e3778ae1ec7d970:apps/server/src/outboundHttp.test.ts:private-key:17
+
+# The same reviewed public fixtures in the staged merge tree.
+apps/server/src/outboundHttp.test.ts:private-key:24
+packages/provider-opencode/src/server/status.test.ts:generic-api-key:118
+packages/provider-opencode/src/server/status.test.ts:generic-api-key:119
+packages/provider-opencode/src/server/status.test.ts:generic-api-key:120

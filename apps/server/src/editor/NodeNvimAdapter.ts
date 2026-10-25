@@ -38,75 +38,74 @@ const KILL_GRACE = Duration.seconds(2);
  * can make from a request. A queue bridges the two: writes land on the queue,
  * and one forked fiber drains it into the sink for as long as the scope lives.
  */
-const spawnWith = (
+const spawnWith = Effect.fn(function* (
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
   input: NvimSpawnInput,
-) =>
-  Effect.gen(function* () {
-    const child = yield* spawner
-      .spawn(
-        ChildProcess.make(input.executable, [...input.args], {
-          ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
-          ...(input.env === undefined ? {} : { env: input.env }),
-          shell: false,
-          stdin: "pipe",
-          stdout: "pipe",
-          stderr: "pipe",
-        }),
-      )
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new NvimSpawnError({
-              executable: input.executable,
-              // A missing binary is the ordinary case on a machine with no
-              // Neovim, and it deserves to be told apart from a real failure:
-              // one is fixed by installing Neovim and the other is not fixed
-              // by anything the developer can reach from Settings.
-              //
-              // Measured, because the first version of this could never say
-              // so. Effect reports a missing executable as a `PlatformError`
-              // whose tag is `NotFound` — one word, no space — and the test
-              // was `/ENOENT|not found/i`, which matches neither. Every
-              // missing binary came back as a plain spawn failure, and the
-              // developer was told the one thing they could fix was not
-              // fixable.
-              reason: isMissingBinary(cause) ? "binary-missing" : "spawn-failed",
-              message: String(cause),
-            }),
-        ),
-      );
-
-    const outbound = yield* Queue.make<Uint8Array>();
-    yield* Stream.fromQueue(outbound).pipe(
-      Stream.run(child.stdin),
-      Effect.catchCause(() => Effect.void),
-      Effect.forkScoped,
+) {
+  const child = yield* spawner
+    .spawn(
+      ChildProcess.make(input.executable, [...input.args], {
+        ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+        ...(input.env === undefined ? {} : { env: input.env }),
+        shell: false,
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+      }),
+    )
+    .pipe(
+      Effect.mapError(
+        (cause) =>
+          new NvimSpawnError({
+            executable: input.executable,
+            // A missing binary is the ordinary case on a machine with no
+            // Neovim, and it deserves to be told apart from a real failure:
+            // one is fixed by installing Neovim and the other is not fixed
+            // by anything the developer can reach from Settings.
+            //
+            // Measured, because the first version of this could never say
+            // so. Effect reports a missing executable as a `PlatformError`
+            // whose tag is `NotFound` — one word, no space — and the test
+            // was `/ENOENT|not found/i`, which matches neither. Every
+            // missing binary came back as a plain spawn failure, and the
+            // developer was told the one thing they could fix was not
+            // fixable.
+            reason: isMissingBinary(cause) ? "binary-missing" : "spawn-failed",
+            message: String(cause),
+          }),
+      ),
     );
 
-    return {
-      pid: Number(child.pid),
-      write: (bytes: Uint8Array) => {
-        Queue.offerUnsafe(outbound, bytes);
-      },
-      stdout: child.stdout,
-      stderr: child.stderr.pipe(Stream.decodeText(), Stream.splitLines),
-      exitCode: child.exitCode.pipe(
-        Effect.map((code) => Number(code)),
-        Effect.catchCause(() => Effect.succeed(null)),
-      ),
-      kill: (signal?: string) =>
-        child
-          .kill({
-            killSignal: (signal ?? "SIGTERM") as never,
-            // The spawner already knows how to escalate, so this is one option
-            // rather than a second implementation of it standing beside the
-            // first and drifting from it.
-            forceKillAfter: KILL_GRACE,
-          })
-          .pipe(Effect.catchCause(() => Effect.void)),
-    } satisfies NvimProcess;
-  });
+  const outbound = yield* Queue.make<Uint8Array>();
+  yield* Stream.fromQueue(outbound).pipe(
+    Stream.run(child.stdin),
+    Effect.catchCause(() => Effect.void),
+    Effect.forkScoped,
+  );
+
+  return {
+    pid: Number(child.pid),
+    write: (bytes: Uint8Array) => {
+      Queue.offerUnsafe(outbound, bytes);
+    },
+    stdout: child.stdout,
+    stderr: child.stderr.pipe(Stream.decodeText(), Stream.splitLines),
+    exitCode: child.exitCode.pipe(
+      Effect.map((code) => Number(code)),
+      Effect.catchCause(() => Effect.succeed(null)),
+    ),
+    kill: (signal?: string) =>
+      child
+        .kill({
+          killSignal: (signal ?? "SIGTERM") as never,
+          // The spawner already knows how to escalate, so this is one option
+          // rather than a second implementation of it standing beside the
+          // first and drifting from it.
+          forceKillAfter: KILL_GRACE,
+        })
+        .pipe(Effect.catchCause(() => Effect.void)),
+  } satisfies NvimProcess;
+});
 
 /**
  * Whether a spawn failure means the binary is not there.

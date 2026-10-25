@@ -17,7 +17,6 @@ import {
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
-import { useCallback } from "react";
 
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import {
@@ -247,7 +246,7 @@ function subscriptionPresentation(subscription: { readonly key: string; readonly
  * Whether this agent ever reports account limits, and so deserves a row saying
  * it has not reported one yet.
  *
- * HACK: the client should not know which drivers these are. The honest answer
+ * The client should not know which drivers these are. The honest answer
  * is a capability on the provider snapshot the server already builds, since the
  * server is the only side that knows which drivers implement the reader. This
  * list exists because adding that capability means touching the provider
@@ -565,7 +564,7 @@ const environmentAccountLimitsAtom = Atom.make(
         environmentId,
         label: presentation.entry.target.label,
         connectionPhase: presentation.connection.phase,
-        providers: presentation.serverConfig?.providers ?? [],
+        providers: get(serverEnvironment.providersValueAtom(environmentId)) ?? [],
         isPending: result.waiting,
         error:
           result._tag === "Failure" ? "This environment could not report account limits." : null,
@@ -584,12 +583,12 @@ export interface AccountLimitsView extends AccountLimitsProjection {
 export function useAccountLimits(): AccountLimitsView {
   const inputs = useAtomValue(environmentAccountLimitsAtom);
   const projection = projectAccountLimits(inputs, Date.now());
-  const refresh = useCallback(() => {
+  const refresh = () => {
     for (const environment of inputs) {
       appAtomRegistry.refresh(
         serverEnvironment.accountLimits({ environmentId: environment.environmentId, input: {} }),
       );
     }
-  }, [inputs]);
+  };
   return { ...projection, refresh };
 }

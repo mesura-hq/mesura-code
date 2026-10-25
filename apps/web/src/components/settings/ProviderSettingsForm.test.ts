@@ -30,7 +30,8 @@ describe("ProviderSettingsForm helpers", () => {
 
     expect(serverPassword).toMatchObject({
       label: "Server password",
-      description: "Stored in plain text on disk.",
+      description: "Stored separately on the host.",
+      secret: true,
       control: "password",
     });
   });
@@ -103,6 +104,7 @@ describe("ProviderSettingsForm helpers", () => {
       "homePath",
       "autoCompactWindow",
       "offerResumeCompaction",
+      "idleCompaction",
       "launchArgs",
     ]);
   });

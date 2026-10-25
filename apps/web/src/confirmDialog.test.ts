@@ -1,8 +1,8 @@
+import { isConfirmDialogActive } from "./confirmDialog";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
   completeConfirmDialogClose,
-  isConfirmDialogActive,
   readConfirmDialogState,
   registerConfirmDialogHost,
   requestConfirmDialog,

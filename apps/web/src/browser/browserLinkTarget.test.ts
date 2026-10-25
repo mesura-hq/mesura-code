@@ -1,9 +1,8 @@
 import type { BrowserLinkTarget } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { ensureClientSettingsHydrated } from "~/hooks/useSettings";
-
 import { resolveBrowserLinkTargetPreference, resolveLinkTarget } from "./browserLinkTarget";
+import { ensureClientSettingsHydrated } from "~/hooks/useSettings";
 
 const settings = vi.hoisted(() => ({ browserLinkTarget: "system" as BrowserLinkTarget }));
 
@@ -42,8 +41,6 @@ describe("resolveLinkTarget", () => {
   });
 
   it("falls back to the system browser where there is no in-app browser", () => {
-    // The hosted web app and mobile have nowhere to open a tab, so the
-    // preference cannot be honoured there and the link still has to open.
     expect(
       resolveLinkTarget({
         url: "https://example.com/",
@@ -137,4 +134,16 @@ it("link policy hydration: reads the saved choice only after hydration completes
   settings.browserLinkTarget = "app";
   release();
   await expect(reading).resolves.toBe("app");
+});
+
+it("keeps middle-click in the system browser", () => {
+  expect(
+    resolveLinkTarget({
+      url: "https://example.com/",
+      event: { ...click, button: 1 },
+      preference: "app",
+      canOpenInApp: true,
+      linkClient: desktop,
+    }),
+  ).toBe("system");
 });

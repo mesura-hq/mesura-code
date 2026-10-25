@@ -149,6 +149,32 @@ describe("readWorkspacePackages", () => {
     }
   });
 
+  it("finds typecheck tasks that moved out of package scripts", () => {
+    const root = writeWorkspace({
+      "pnpm-workspace.yaml": "packages:\n  - packages/*\n",
+      "packages/tasks/package.json": JSON.stringify({ name: "tasks" }),
+      "packages/tasks/tsconfig.json": "{}",
+      "packages/plain/package.json": JSON.stringify({ name: "plain" }),
+      "packages/astro/package.json": JSON.stringify({
+        name: "astro",
+        devDependencies: { "@astrojs/check": "^0.9.0" },
+      }),
+      "packages/astro/tsconfig.json": "{}",
+    });
+    try {
+      const scripts = Object.fromEntries(
+        readWorkspacePackages(root).map((entry) => [entry.name, entry.typecheckScript]),
+      );
+      expect(scripts).toEqual({
+        tasks: "tsc-rs --noEmit",
+        plain: undefined,
+        astro: "astro check",
+      });
+    } finally {
+      NodeFS.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("refuses a workspace it reads as empty instead of selecting nothing", () => {
     const root = writeWorkspace({ "pnpm-workspace.yaml": "packages: [apps/*]\n" });
     try {

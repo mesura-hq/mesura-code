@@ -6,7 +6,7 @@ import type {
   RuntimeMode,
   ServerProviderModel,
 } from "@t3tools/contracts";
-import { useCallback, useEffect, useMemo, useState, type ReactNode, type RefObject } from "react";
+import { useEffect, useState, type ReactNode, type RefObject } from "react";
 
 import { useComposerDraftStore, type ComposerThreadTarget } from "../../composerDraftStore";
 import { subscribePickerAction } from "../../lib/pickerActionBus";
@@ -203,29 +203,16 @@ export function useComposerCombinedPicker(input: {
     respondsToShortcut: true,
   };
 
-  const triggerTraits = useMemo(
-    () =>
-      resolveCombinedPickerTriggerTraits({
-        provider: input.driverKind,
-        instanceId: input.instanceId,
-        models: input.models,
-        model: input.model,
-        prompt: input.prompt,
-        modelOptions: input.modelOptions,
-        reportedModelSelection: input.reportedModelSelection,
-        planModeEnabled: input.planModeEnabled,
-      }),
-    [
-      input.driverKind,
-      input.instanceId,
-      input.model,
-      input.modelOptions,
-      input.models,
-      input.planModeEnabled,
-      input.prompt,
-      input.reportedModelSelection,
-    ],
-  );
+  const triggerTraits = resolveCombinedPickerTriggerTraits({
+    provider: input.driverKind,
+    instanceId: input.instanceId,
+    models: input.models,
+    model: input.model,
+    prompt: input.prompt,
+    modelOptions: input.modelOptions,
+    reportedModelSelection: input.reportedModelSelection,
+    planModeEnabled: input.planModeEnabled,
+  });
   const triggerAccessory =
     triggerTraits && !input.showsMultipleModels ? (
       <span
@@ -239,7 +226,7 @@ export function useComposerCombinedPicker(input: {
       </span>
     ) : null;
 
-  const openOnMoreOptions = useCallback(() => setOpensOnMoreOptions(true), []);
+  const openOnMoreOptions = () => setOpensOnMoreOptions(true);
 
   return { config, triggerAccessory, openOnMoreOptions };
 }

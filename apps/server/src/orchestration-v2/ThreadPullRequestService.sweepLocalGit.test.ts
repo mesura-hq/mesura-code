@@ -9,7 +9,7 @@
  * with a GitHub provider that answers lookups, against a real repository.
  */
 import { describe, expect, it } from "@effect/vitest";
-import { ProjectId, type ChangeRequest } from "@t3tools/contracts";
+import { SourceControlProviderKind, ProjectId, type ChangeRequest } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
@@ -65,7 +65,7 @@ const makeSucceedingSweep = Effect.gen(function* () {
         if (index < 0 || index >= OPEN_PULL_REQUESTS) return [];
         return [
           {
-            provider: "github",
+            provider: SourceControlProviderKind.make("github"),
             number: index + 1,
             title: `Pull request ${index + 1}`,
             url: pullRequestUrl(index),
@@ -141,76 +141,63 @@ describe("PR sweep local git cost", () => {
           expect(sweep.harness.logs.filter((log) => log.level === "Warn")).toEqual([]);
         }),
       ),
-    { timeout: 300_000 },
   );
 
-  it.effect(
-    "PR sweep local git guard: a branch's new upstream reaches the next sweep",
-    () =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const sweep = yield* makeSucceedingSweep;
-          const branch = branchName(30);
-          git(sweep.repo, ["update-ref", "refs/remotes/origin/renamed-upstream", "HEAD"]);
-          git(sweep.repo, ["config", `branch.${branch}.merge`, "refs/heads/renamed-upstream"]);
-          const before = sweep.providerCalls.length;
-          yield* sweep.harness.sweep;
-          expect(
-            sweep.providerCalls
-              .slice(before)
-              .some((call) => call.headSelector.endsWith("renamed-upstream")),
-          ).toBe(true);
-        }),
-      ),
-    { timeout: 120_000 },
+  it.effect("PR sweep local git guard: a branch's new upstream reaches the next sweep", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const sweep = yield* makeSucceedingSweep;
+        const branch = branchName(30);
+        git(sweep.repo, ["update-ref", "refs/remotes/origin/renamed-upstream", "HEAD"]);
+        git(sweep.repo, ["config", `branch.${branch}.merge`, "refs/heads/renamed-upstream"]);
+        const before = sweep.providerCalls.length;
+        yield* sweep.harness.sweep;
+        expect(
+          sweep.providerCalls
+            .slice(before)
+            .some((call) => call.headSelector.endsWith("renamed-upstream")),
+        ).toBe(true);
+      }),
+    ),
   );
 
-  it.effect(
-    "PR sweep local git guard: a new remote URL reaches the next sweep",
-    () =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const sweep = yield* makeSucceedingSweep;
-          const movedUrl = "https://github.com/acme/gadgets.git";
-          git(sweep.repo, ["remote", "set-url", "origin", movedUrl]);
-          const calls = yield* callsInNextSweepFor(sweep, branchName(31));
-          expect(calls.map((call) => call.remoteUrl)).toContain(movedUrl);
-        }),
-      ),
-    { timeout: 120_000 },
+  it.effect("PR sweep local git guard: a new remote URL reaches the next sweep", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const sweep = yield* makeSucceedingSweep;
+        const movedUrl = "https://github.com/acme/gadgets.git";
+        git(sweep.repo, ["remote", "set-url", "origin", movedUrl]);
+        const calls = yield* callsInNextSweepFor(sweep, branchName(31));
+        expect(calls.map((call) => call.remoteUrl)).toContain(movedUrl);
+      }),
+    ),
   );
 
-  it.effect(
-    "PR sweep local git guard: a deleted local branch reaches the next sweep",
-    () =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const sweep = yield* makeSucceedingSweep;
-          const branch = branchName(32);
-          git(sweep.repo, ["branch", "-D", branch]);
-          const calls = yield* callsInNextSweepFor(sweep, branch);
-          expect(calls.length).toBeGreaterThan(0);
-        }),
-      ),
-    { timeout: 120_000 },
+  it.effect("PR sweep local git guard: a deleted local branch reaches the next sweep", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const sweep = yield* makeSucceedingSweep;
+        const branch = branchName(32);
+        git(sweep.repo, ["branch", "-D", branch]);
+        const calls = yield* callsInNextSweepFor(sweep, branch);
+        expect(calls.length).toBeGreaterThan(0);
+      }),
+    ),
   );
 
-  it.effect(
-    "PR sweep local git guard: a new default branch reaches the next sweep",
-    () =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const sweep = yield* makeSucceedingSweep;
-          git(sweep.repo, ["update-ref", "refs/remotes/origin/develop", "HEAD"]);
-          git(sweep.repo, [
-            "symbolic-ref",
-            "refs/remotes/origin/HEAD",
-            "refs/remotes/origin/develop",
-          ]);
-          const calls = yield* callsInNextSweepFor(sweep, branchName(33));
-          expect(calls.length).toBeGreaterThan(0);
-        }),
-      ),
-    { timeout: 120_000 },
+  it.effect("PR sweep local git guard: a new default branch reaches the next sweep", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const sweep = yield* makeSucceedingSweep;
+        git(sweep.repo, ["update-ref", "refs/remotes/origin/develop", "HEAD"]);
+        git(sweep.repo, [
+          "symbolic-ref",
+          "refs/remotes/origin/HEAD",
+          "refs/remotes/origin/develop",
+        ]);
+        const calls = yield* callsInNextSweepFor(sweep, branchName(33));
+        expect(calls.length).toBeGreaterThan(0);
+      }),
+    ),
   );
 });

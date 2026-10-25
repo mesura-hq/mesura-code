@@ -36,6 +36,11 @@ previous worktree directly.
 Use `mod+alt+a` to attach files. `alt+a` does the same where your desktop
 does not keep `Alt+A` for itself.
 
+To change effort one step without opening the picker, bind
+**Composer: Increase Effort** and **Composer: Decrease Effort** in Keybindings.
+Both are unbound by default. Increase wraps from the highest level to the
+lowest, and decrease wraps from the lowest level to the highest.
+
 In the model picker, Tab and Shift+Tab move to the next or previous provider,
 including Favorites. Up/Down highlight a model, and Left/Right change that
 model's effort without choosing it. Enter or a click uses the highlighted model
@@ -148,7 +153,8 @@ the keyboard. `isWeb` is true in a browser tab. `isDesktop` is true in the
 desktop app. Unknown keys evaluate to `false`.
 
 `mod+1` through `mod+9` jump to the first nine threads, and to models while the
-model picker is open. Those defaults use `isDesktop` so they do not steal the
+model picker is open. The thread jumps do not run while the model picker is open.
+Those defaults use `isDesktop` so they do not steal the
 browser's tab-switch shortcuts. Remove that condition in Settings if you want
 the same jumps in a browser.
 
@@ -517,8 +523,9 @@ shortcut; assign one in **Settings → Keybindings**.
 bottom of the sidebar, such as unpin, settle, snooze, archive, or discarding a
 draft. Consecutive
 actions of the same kind undo together. The notice remains available for five
-seconds after the latest action. The default shortcut skips text fields and
-terminals so native undo keeps working there.
+seconds after the latest action. Right after an action, the shortcut works even
+in a text field such as the composer. Once you type or press another key, the
+field gets its own undo back. Terminals always keep their native shortcut.
 
 `navigation.back` (`mod+[` by default) and `navigation.forward` (`mod+]`) move
 through the pages you have visited, like a browser's back and forward buttons.

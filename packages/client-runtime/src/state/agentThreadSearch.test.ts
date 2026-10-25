@@ -27,6 +27,7 @@ import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import * as HttpClient from "effect/http/HttpClient";
 import { Atom, AtomRegistry } from "effect/reactivity";
 
 import { EnvironmentRegistry } from "../connection/registry.ts";
@@ -47,6 +48,10 @@ import {
 } from "./threadSearchEnvironmentFakes.testFixtures.ts";
 
 const METHODS = THREAD_SEARCH_WS_METHODS;
+const unusedHttpClientLayer = Layer.succeed(
+  HttpClient.HttpClient,
+  HttpClient.make(() => Effect.die("Unexpected HTTP request during thread search")),
+);
 const decodeReasoningInput = Schema.decodeUnknownExit(OrchestrationThreadSearchReasoningInput);
 const encodeReasoningInputJson = Schema.encodeUnknownSync(
   Schema.fromJsonString(OrchestrationThreadSearchReasoningInput),
@@ -835,7 +840,9 @@ describe("agent thread search: shared client wiring", () => {
         { environmentId: "env-laptop", label: "Laptop", threads: [wiringThread], reason },
       ]);
       const atoms = createOrchestrationEnvironmentAtoms(
-        Atom.runtime(Layer.succeed(EnvironmentRegistry, fakes.registry)),
+        Atom.runtime(
+          Layer.merge(Layer.succeed(EnvironmentRegistry, fakes.registry), unusedHttpClientLayer),
+        ),
       );
       const registry = yield* Effect.acquireRelease(Effect.sync(AtomRegistry.make), (registry) =>
         Effect.sync(() => registry.dispose()),

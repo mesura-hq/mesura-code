@@ -1,4 +1,4 @@
-import { act } from "react";
+import { act } from "../../test/render";
 import { expect } from "vite-plus/test";
 
 export function pickerContent() {

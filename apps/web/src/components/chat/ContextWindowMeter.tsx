@@ -187,7 +187,6 @@ export function ContextWindowMeter(props: {
   );
 }
 
-/** Holds the meter's footprint while a thread's activities are still loading. */
 export function ContextWindowMeterPlaceholder() {
   return <span aria-hidden="true" className="h-7 w-[4.75rem] shrink-0" />;
 }

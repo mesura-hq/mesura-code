@@ -70,7 +70,7 @@ vi.mock("~/hooks/useSettings", () => ({
 const savedTarget = vi.hoisted(() => ({ value: "app" as "app" | "system" }));
 
 const hydratedDefaults = {
-  viewport: { _tag: "fixed", width: 1280, height: 720 } as const,
+  viewport: { _tag: "freeform", width: 1280, height: 720 } as const,
   profileId: "work",
 };
 

@@ -208,65 +208,66 @@ const make = Effect.gen(function* () {
   const attachLock = yield* Semaphore.make(1);
 
   const commandId = (threadId: ThreadId, kind: "factory-run" | "factory-report") =>
-    crypto.randomUUIDv4.pipe(
+    crypto.randomUUIDv4().pipe(
       Effect.orDie,
       Effect.map((uuid) => CommandId.make(`server:${kind}:${threadId}:${uuid}`)),
     );
 
   /** Records or updates a card on the thread: the orchestrator upserts it by its turn item id. */
-  const recordCard = (
+  const recordCard = Effect.fn("FactoryRunTracker.recordCard")(function* (
     threadId: ThreadId,
     kind: "factory-run" | "factory-report",
     turnItemId: string,
     card: FactoryThreadCard,
-  ) =>
-    Effect.gen(function* () {
-      yield* orchestrator.dispatch({
-        type: "factory_card.record",
-        commandId: yield* commandId(threadId, kind),
-        threadId,
-        turnItemId: TurnItemId.make(turnItemId),
-        card,
-      });
+  ) {
+    yield* orchestrator.dispatch({
+      type: "factory_card.record",
+      commandId: yield* commandId(threadId, kind),
+      threadId,
+      turnItemId: TurnItemId.make(turnItemId),
+      card,
     });
+  });
 
   /** Snapshots the report by digest and records its card: the headings, never the body. */
-  const recordReport = (run: TrackedRun, report: { readonly path: string; readonly at: string }) =>
-    Effect.gen(function* () {
-      const reportPath = path.resolve(run.runDir, report.path);
-      const info = yield* fileSystem.stat(reportPath);
-      if (info.type !== "File" || Number(info.size) > FACTORY_SNAPSHOT_MAX_BYTES) {
-        return yield* Effect.logWarning("factory run report is not a file of at most 1 MiB", {
-          runDir: run.runDir,
-          reportPath,
-        });
-      }
-      const bytes = yield* fileSystem.readFile(reportPath);
-      const digest = yield* snapshots.put(bytes);
-      const document = splitFactoryDocument(new TextDecoder().decode(bytes));
-      const payload: FactoryReportActivityPayload = {
-        runId: run.runId,
-        digest,
-        path: reportPath,
-        title: document.title,
-        headings: document.sections.map((section) => section.heading),
-        writtenAt: report.at,
-      };
-      yield* recordCard(
-        run.threadId,
-        "factory-report",
-        factoryReportActivityId(run.threadId, run.runId),
-        { kind: "report", payload },
-      );
-    });
+  const recordReport = Effect.fn("FactoryRunTracker.recordReport")(function* (
+    run: TrackedRun,
+    report: { readonly path: string; readonly at: string },
+  ) {
+    const reportPath = path.resolve(run.runDir, report.path);
+    const info = yield* fileSystem.stat(reportPath);
+    if (info.type !== "File" || Number(info.size) > FACTORY_SNAPSHOT_MAX_BYTES) {
+      return yield* Effect.logWarning("factory run report is not a file of at most 1 MiB", {
+        runDir: run.runDir,
+        reportPath,
+      });
+    }
+    const bytes = yield* fileSystem.readFile(reportPath);
+    const digest = yield* snapshots.put(bytes);
+    const document = splitFactoryDocument(new TextDecoder().decode(bytes));
+    const payload: FactoryReportActivityPayload = {
+      runId: run.runId,
+      digest,
+      path: reportPath,
+      title: document.title,
+      headings: document.sections.map((section) => section.heading),
+      writtenAt: report.at,
+    };
+    yield* recordCard(
+      run.threadId,
+      "factory-report",
+      factoryReportActivityId(run.threadId, run.runId),
+      { kind: "report", payload },
+    );
+  });
 
   /**
    * Carries a new fold to the thin path. The shell label is updated BEFORE the
    * card is recorded: the shell stream refetches a thread's shell on its next
    * event, and that event is this card's `turn-item.updated`.
    */
-  const publishToThread = (run: TrackedRun) =>
-    Effect.gen(function* () {
+  const publishToThread = Effect.fn("FactoryRunTracker.publishToThread")(
+    function* (run: TrackedRun) {
       const state = run.state;
       shellSummaries.set(run.threadId, toFactoryRunShellSummary(state));
 
@@ -291,18 +292,21 @@ const make = Effect.gen(function* () {
         yield* recordReport(run, report);
         run.recordedReport = reportKey(report);
       }
-    }).pipe(
-      Effect.catch((error) =>
-        Effect.logWarning("failed to publish a factory run to its thread", {
-          runDir: run.runDir,
-          cause: error.message,
-        }),
+    },
+    (effect, run) =>
+      effect.pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("failed to publish a factory run to its thread", {
+            runDir: run.runDir,
+            cause: error.message,
+          }),
+        ),
       ),
-    );
+  );
 
   /** Reads every complete line waiting in the events file into the fold; true when any arrived. */
-  const foldNewEventLines = (run: TrackedRun) =>
-    Effect.gen(function* () {
+  const foldNewEventLines = Effect.fn("FactoryRunTracker.foldNewEventLines")(
+    function* (run: TrackedRun) {
       let changed = false;
       while (true) {
         const read = yield* run.eventsTail.read;
@@ -318,17 +322,20 @@ const make = Effect.gen(function* () {
         if (read.lines.length > 0) changed = true;
         if (!read.more) return changed;
       }
-    }).pipe(
-      Effect.catch((error) =>
-        Effect.logWarning("failed to read a factory run events file", {
-          runDir: run.runDir,
-          cause: error.message,
-        }).pipe(Effect.as(false)),
+    },
+    (effect, run) =>
+      effect.pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("failed to read a factory run events file", {
+            runDir: run.runDir,
+            cause: error.message,
+          }).pipe(Effect.as(false)),
+        ),
       ),
-    );
+  );
 
-  const readRoleTail = (role: RoleTail) =>
-    Effect.gen(function* () {
+  const readRoleTail = Effect.fn("FactoryRunTracker.readRoleTail")(
+    function* (role: RoleTail) {
       let changed = false;
       while (true) {
         const read = yield* role.tail.read;
@@ -345,7 +352,9 @@ const make = Effect.gen(function* () {
         }
         if (!read.more) return changed;
       }
-    }).pipe(Effect.catch(() => Effect.succeed(false)));
+    },
+    Effect.catch(() => Effect.succeed(false)),
+  );
 
   const closeRoleWatch = (role: RoleTail) =>
     Effect.suspend(() => {
@@ -431,31 +440,33 @@ const make = Effect.gen(function* () {
     );
 
   /** Opens the watch on a role's output, keeping any offset already read; true when it opened. */
-  const watchRoleTail = (run: TrackedRun, outputFile: string) =>
-    Effect.gen(function* () {
-      let role = run.roleTails.get(outputFile);
-      if (role === undefined) {
-        const tailScope = yield* Scope.fork(trackerScope);
-        role = {
-          tail: yield* makeAppendOnlyFileTail(path.resolve(run.runDir, outputFile)).pipe(
-            Scope.provide(tailScope),
-          ),
-          tailScope,
-          scope: null,
-          progress: emptyRoleOutputProgress,
-        };
-        run.roleTails.set(outputFile, role);
-      }
-      if (role.scope !== null) return false;
-      const scope = yield* Scope.fork(trackerScope);
-      const triggers = yield* watchAppendOnlyFile(role.tail).pipe(Scope.provide(scope));
-      role.scope = scope;
-      yield* triggers.pipe(
-        Stream.runForEach(() => refresh(run)),
-        Effect.forkIn(scope),
-      );
-      return true;
-    });
+  const watchRoleTail = Effect.fn("FactoryRunTracker.watchRoleTail")(function* (
+    run: TrackedRun,
+    outputFile: string,
+  ) {
+    let role = run.roleTails.get(outputFile);
+    if (role === undefined) {
+      const tailScope = yield* Scope.fork(trackerScope);
+      role = {
+        tail: yield* makeAppendOnlyFileTail(path.resolve(run.runDir, outputFile)).pipe(
+          Scope.provide(tailScope),
+        ),
+        tailScope,
+        scope: null,
+        progress: emptyRoleOutputProgress,
+      };
+      run.roleTails.set(outputFile, role);
+    }
+    if (role.scope !== null) return false;
+    const scope = yield* Scope.fork(trackerScope);
+    const triggers = yield* watchAppendOnlyFile(role.tail).pipe(Scope.provide(scope));
+    role.scope = scope;
+    yield* triggers.pipe(
+      Stream.runForEach(() => refresh(run)),
+      Effect.forkIn(scope),
+    );
+    return true;
+  });
 
   const roleProgress = (run: TrackedRun): Array<FactoryRoleProgress> =>
     currentDispatches(run.state).map((dispatch) => {
@@ -476,26 +487,27 @@ const make = Effect.gen(function* () {
     roles: roleProgress(run),
   });
 
-  const validateRunDirectory = (runDir: string) =>
-    Effect.gen(function* () {
-      if (!path.isAbsolute(runDir)) {
-        return yield* new FactoryAttachRunError({ reason: "relative-path", runDir });
-      }
-      const info = yield* fileSystem.stat(runDir).pipe(
-        Effect.mapError(
-          (cause) =>
-            new FactoryAttachRunError({
-              reason: cause.reason._tag === "NotFound" ? "not-found" : "read-failed",
-              runDir,
-              cause,
-            }),
-        ),
-      );
-      if (info.type !== "Directory") {
-        return yield* new FactoryAttachRunError({ reason: "not-directory", runDir });
-      }
-      return path.resolve(runDir);
-    });
+  const validateRunDirectory = Effect.fn("FactoryRunTracker.validateRunDirectory")(function* (
+    runDir: string,
+  ) {
+    if (!path.isAbsolute(runDir)) {
+      return yield* new FactoryAttachRunError({ reason: "relative-path", runDir });
+    }
+    const info = yield* fileSystem.stat(runDir).pipe(
+      Effect.mapError(
+        (cause) =>
+          new FactoryAttachRunError({
+            reason: cause.reason._tag === "NotFound" ? "not-found" : "read-failed",
+            runDir,
+            cause,
+          }),
+      ),
+    );
+    if (info.type !== "Directory") {
+      return yield* new FactoryAttachRunError({ reason: "not-directory", runDir });
+    }
+    return path.resolve(runDir);
+  });
 
   const attach: FactoryRunTracker["Service"]["attach"] = (threadId, requestedRunDir, options) =>
     attachLock.withPermits(1)(
@@ -663,15 +675,16 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const attachRecorded: FactoryRunTracker["Service"]["attachRecorded"] = (threadId, runId) =>
-    Effect.gen(function* () {
-      if (yield* isAttached(threadId, runId)) return;
-      const record = yield* cards
-        .get(TurnItemId.make(factoryRunActivityId(threadId, runId)))
-        .pipe(Effect.orElseSucceed(() => Option.none<FactoryCardQuery.FactoryCardRecord>()));
-      const payload = Option.flatMap(record, recordedRunOf);
-      if (Option.isSome(payload)) yield* attachRecordedRun(payload.value);
-    });
+  const attachRecorded: FactoryRunTracker["Service"]["attachRecorded"] = Effect.fn(
+    "FactoryRunTracker.attachRecorded",
+  )(function* (threadId: ThreadId, runId: string) {
+    if (yield* isAttached(threadId, runId)) return;
+    const record = yield* cards
+      .get(TurnItemId.make(factoryRunActivityId(threadId, runId)))
+      .pipe(Effect.orElseSucceed(() => Option.none<FactoryCardQuery.FactoryCardRecord>()));
+    const payload = Option.flatMap(record, recordedRunOf);
+    if (Option.isSome(payload)) yield* attachRecordedRun(payload.value);
+  });
 
   return FactoryRunTracker.of({
     attach,

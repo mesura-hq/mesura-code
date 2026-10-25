@@ -1,4 +1,8 @@
 import type { PreviewStreamControl } from "@t3tools/client-runtime/preview/server-browser-stream";
+import {
+  PrimaryConnectionTarget,
+  type ConnectionCatalogEntry,
+} from "@t3tools/client-runtime/connection";
 import type {
   EnvironmentId,
   PreviewOpenLinkTargetResult,
@@ -30,9 +34,10 @@ export const threadLinkFixture = {
       { environment: { capabilities: { serverBrowser?: boolean; threadLinkPreview?: boolean } } }
     >(),
   ).pipe(Atom.keepAlive),
-  catalog: Atom.make({ entries: new Map<EnvironmentId, object>(), isReady: true }).pipe(
-    Atom.keepAlive,
-  ),
+  catalog: Atom.make({
+    entries: new Map<EnvironmentId, ConnectionCatalogEntry>(),
+    isReady: true,
+  }).pipe(Atom.keepAlive),
   permission: Atom.family((_id: EnvironmentId) => Atom.make(true).pipe(Atom.keepAlive)),
   connection: Atom.family((_id: EnvironmentId) =>
     Atom.make(
@@ -63,7 +68,22 @@ export function installThreadLinkEnvironment(ref: ScopedThreadRef) {
   );
   appAtomRegistry.set(f.catalog, {
     isReady: true,
-    entries: new Map([...appAtomRegistry.get(f.catalog).entries, [ref.environmentId, {}]]),
+    entries: new Map([
+      ...appAtomRegistry.get(f.catalog).entries,
+      [
+        ref.environmentId,
+        {
+          target: new PrimaryConnectionTarget({
+            environmentId: ref.environmentId,
+            label: "Thread link fixture",
+            httpBaseUrl: "https://fixture.invalid",
+            wsBaseUrl: "wss://fixture.invalid",
+          }),
+          profile: Option.none(),
+          enabled: true,
+        },
+      ],
+    ]),
   });
   appAtomRegistry.set(f.permission(ref.environmentId), true);
   appAtomRegistry.set(

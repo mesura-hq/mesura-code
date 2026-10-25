@@ -1,3 +1,5 @@
+import { joinPath } from "@symmetria/fm-core/pane";
+import { useAtomValue } from "@effect/atom-react";
 import { Spinner } from "~/components/ui/spinner";
 import { useFileSurfacePending } from "./fileSurfacePendingStore";
 import {
@@ -25,7 +27,7 @@ import { mediaFileReference } from "@t3tools/client-runtime/media-reference";
 import { FolderTree, Globe2, WrapTextIcon } from "lucide-react";
 import { Code2, Eye, Table2 } from "lucide";
 import * as Schema from "effect/Schema";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { isBrowserPreviewFile, openFileInPreview } from "~/browser/openFileInPreview";
 import { useAssetUrlRefresh, useAssetUrlState } from "~/assets/assetUrls";
@@ -34,14 +36,14 @@ import { MediaVideoPlayer } from "~/components/media/MediaVideoPlayer";
 import { MediaActions, type MediaActionSource } from "~/components/media/MediaActions";
 import { MorphIcon } from "~/components/MorphIcon";
 import { useRemoteOpenState } from "~/remoteOpen";
-import { useClientSettings, useUpdateClientSettings } from "~/hooks/useSettings";
+import { useClientSettings, updateClientSettings } from "~/hooks/useSettings";
 import { useTheme } from "~/hooks/useTheme";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { useWorkspaceMutationRefresh } from "~/hooks/useWorkspaceMutationRefresh";
 import { previewFocusTargetRef } from "~/lib/panelSurfaceFocus";
 import { cn } from "~/lib/utils";
 import type { ChatFileAttachment } from "~/types";
-import { isAbsolutePath } from "@t3tools/shared/path";
+import { isHostPath } from "@t3tools/shared/path";
 import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
@@ -50,6 +52,7 @@ import { assetEnvironment } from "~/state/assets";
 import { usePreviewAvailable } from "~/browser/previewRuntime";
 import { useEnvironmentHttpBaseUrl, usePrimaryEnvironmentId } from "~/state/environments";
 import { previewEnvironment } from "~/state/preview";
+import { serverEnvironment } from "~/state/server";
 import { useEnvironmentScope } from "~/state/session";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
@@ -61,6 +64,7 @@ import { AudioPreview } from "./AudioPreview";
 import { BrowserDocumentFrame, isPdfPreviewFile } from "./BrowserDocumentFrame";
 import { DelimitedTablePreview } from "./DelimitedTablePreview";
 import { FileBreadcrumbs } from "./FileBreadcrumbs";
+import { breadcrumbPathOf, retainedBreadcrumbTrail, trailChildOf } from "./filePath";
 import { FileMarkdownPreview } from "./FileMarkdownPreview";
 import {
   FILE_LINK_REVEAL_ATTRIBUTE,
@@ -100,12 +104,18 @@ interface FilePreviewPanelProps {
   composerDraftTarget: ScopedThreadRef | DraftId;
   keybindings: ResolvedKeybindingsConfig;
   availableEditors: ReadonlyArray<EditorId>;
+  openInShortcutEnabled: boolean;
   revealLine: number | null;
   revealRequestId: number;
   onOpenFile: (relativePath: string) => void;
+  /** Moves this folder browser to another folder in place; see `navigateFolder`. */
+  onNavigateFolder: (relativePath: string, folderTrail: string, keepSource: boolean) => void;
+  /** The deeper path breadcrumbs keep after the browser moved up; see `navigateFolder`. */
+  folderTrail: string | undefined;
   onPendingChange: (relativePath: string, pending: boolean) => void;
   /** Mesura: the project the pending-save flags are kept under; see `fileSurfacePendingStore`. */
-  pendingProjectKey: string | null;
+  pendingProjectKey?: string | null;
+  selectedFilePending?: boolean;
   workspaceMutationId: string | null;
   /** Fork addition: this tab hides the explorer whatever the shared preference says. */
   explorerHidden?: boolean;
@@ -120,24 +130,19 @@ type FilePostRender = NonNullable<FileOptions<unknown, undefined>["onPostRender"
 function WorkspaceImagePreview(props: {
   readonly environmentId: EnvironmentId;
   readonly threadRef: ScopedThreadRef;
-  /** The thread is a draft the server does not know yet. */
   readonly draft: boolean;
   readonly absolutePath: string;
   readonly workspaceRoot: string;
   readonly alt: string;
   readonly workspaceMutationId: string | null;
 }) {
-  const resource = useMemo(
-    () =>
-      workspaceAssetResource({
-        kind: "workspace-file",
-        threadRef: props.threadRef,
-        draft: props.draft,
-        workspaceRoot: props.workspaceRoot,
-        absolutePath: props.absolutePath,
-      }),
-    [props.threadRef, props.draft, props.workspaceRoot, props.absolutePath],
-  );
+  const resource = workspaceAssetResource({
+    kind: "workspace-file",
+    threadRef: props.threadRef,
+    draft: props.draft,
+    workspaceRoot: props.workspaceRoot,
+    absolutePath: props.absolutePath,
+  });
   const assetUrl = useAssetUrlState(props.environmentId, resource);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const revisionSuffix =
@@ -187,15 +192,12 @@ function WorkspaceImagePreview(props: {
 }
 
 /**
- * Renders an HTML or PDF file in place from its signed asset URL. HTML runs in
- * a sandboxed frame with an opaque origin, so a page cannot reach the app's
- * session or storage. A file inside the workspace may load sibling assets; a
- * host file outside it is served on its own.
+ * HTML runs in a sandboxed frame with an opaque origin, so a page cannot reach
+ * the app's session or storage.
  */
 function WorkspaceBrowserPreview(props: {
   readonly environmentId: EnvironmentId;
   readonly threadRef: ScopedThreadRef;
-  /** The thread is a draft the server does not know yet. */
   readonly draft: boolean;
   readonly absolutePath: string;
   readonly workspaceRoot: string;
@@ -204,17 +206,13 @@ function WorkspaceBrowserPreview(props: {
 }) {
   const insideWorkspace =
     mediaFileReference(props.absolutePath, props.workspaceRoot).relativePath !== undefined;
-  const resource = useMemo(
-    () =>
-      workspaceAssetResource({
-        kind: insideWorkspace ? "workspace-file" : "media-file",
-        threadRef: props.threadRef,
-        draft: props.draft,
-        workspaceRoot: props.workspaceRoot,
-        absolutePath: props.absolutePath,
-      }),
-    [insideWorkspace, props.threadRef, props.draft, props.workspaceRoot, props.absolutePath],
-  );
+  const resource = workspaceAssetResource({
+    kind: insideWorkspace ? "workspace-file" : "media-file",
+    threadRef: props.threadRef,
+    draft: props.draft,
+    workspaceRoot: props.workspaceRoot,
+    absolutePath: props.absolutePath,
+  });
   const assetUrl = useAssetUrlState(props.environmentId, resource);
   const revisionSuffix =
     props.workspaceMutationId === null
@@ -238,6 +236,7 @@ function WorkspaceBrowserPreview(props: {
   return (
     <BrowserDocumentFrame
       src={`${assetUrl.url}${revisionSuffix}`}
+      documentKey={`${props.environmentId}:${resource._tag}:${props.threadRef.threadId}:${props.absolutePath}:${props.workspaceMutationId}`}
       title={props.title}
       pdf={isPdfPreviewFile(props.absolutePath)}
     />
@@ -247,31 +246,25 @@ function WorkspaceBrowserPreview(props: {
 function WorkspaceVideoPreview(props: {
   readonly environmentId: EnvironmentId;
   readonly threadRef: ScopedThreadRef;
-  /** The thread is a draft the server does not know yet. */
   readonly draft: boolean;
   readonly absolutePath: string;
   readonly workspaceRoot: string;
   readonly name: string;
   readonly workspaceMutationId: string | null;
 }) {
-  const resource = useMemo(
-    () =>
-      workspaceAssetResource({
-        kind: "media-file",
-        threadRef: props.threadRef,
-        draft: props.draft,
-        workspaceRoot: props.workspaceRoot,
-        absolutePath: props.absolutePath,
-      }),
-    [props.threadRef, props.draft, props.workspaceRoot, props.absolutePath],
-  );
+  const resource = workspaceAssetResource({
+    kind: "media-file",
+    threadRef: props.threadRef,
+    draft: props.draft,
+    workspaceRoot: props.workspaceRoot,
+    absolutePath: props.absolutePath,
+  });
   const assetUrl = useAssetUrlState(props.environmentId, resource);
   const refreshAssetUrl = useAssetUrlRefresh(props.environmentId, resource);
   useWorkspaceMutationRefresh({
     mutationId: props.workspaceMutationId,
     resourceKey: JSON.stringify([props.environmentId, resource]),
     refresh: () => {
-      // Failed refreshes flow through assetUrl and can be retried from the player.
       void refreshAssetUrl().catch(() => undefined);
     },
   });
@@ -306,24 +299,19 @@ function WorkspaceVideoPreview(props: {
 function WorkspaceAudioPreview(props: {
   readonly environmentId: EnvironmentId;
   readonly threadRef: ScopedThreadRef;
-  /** The thread is a draft the server does not know yet. */
   readonly draft: boolean;
   readonly absolutePath: string;
   readonly workspaceRoot: string;
   readonly name: string;
   readonly workspaceMutationId: string | null;
 }) {
-  const resource = useMemo(
-    () =>
-      workspaceAssetResource({
-        kind: "media-file",
-        threadRef: props.threadRef,
-        draft: props.draft,
-        workspaceRoot: props.workspaceRoot,
-        absolutePath: props.absolutePath,
-      }),
-    [props.threadRef, props.draft, props.workspaceRoot, props.absolutePath],
-  );
+  const resource = workspaceAssetResource({
+    kind: "media-file",
+    threadRef: props.threadRef,
+    draft: props.draft,
+    workspaceRoot: props.workspaceRoot,
+    absolutePath: props.absolutePath,
+  });
   const assetUrl = useAssetUrlState(props.environmentId, resource);
   const refreshAssetUrl = useAssetUrlRefresh(props.environmentId, resource);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
@@ -383,16 +371,11 @@ function updateFileLinkReveal(fileContainer: HTMLElement, line: number | null): 
     ?.setAttribute(FILE_LINK_REVEAL_ATTRIBUTE, "");
 }
 
-/**
- * Frames to keep retrying while the file contents or line metrics are not
- * available yet (fresh mounts hydrate asynchronously).
- */
 const REVEAL_MAX_ATTEMPTS = 30;
 /**
  * After scrolling to the target, hold it for a short window so late
  * programmatic scroll resets (editable-editor focus and state restoration)
- * cannot silently snap the file back to the top. Real user input cancels the
- * guard immediately.
+ * cannot silently snap the file back to the top.
  */
 const REVEAL_GUARD_FRAMES = 20;
 const REVEAL_GUARD_TOLERANCE_PX = 2;
@@ -411,164 +394,161 @@ function useFileLineReveal(
 ): FilePostRender {
   const [revealStatesByPath] = useState(() => new Map<string, FileRevealState>());
 
-  return useCallback<FilePostRender>(
-    (fileContainer, instance, phase) => {
-      if (relativePath === null) return;
+  return (fileContainer, instance, phase) => {
+    if (relativePath === null) return;
 
-      const existingState = revealStatesByPath.get(relativePath);
-      const state: FileRevealState = existingState ?? {
-        frameId: null,
-        cancelGuard: null,
-        handledRequestId: null,
-        latestRequestId: null,
-      };
-      if (!existingState) revealStatesByPath.set(relativePath, state);
+    const existingState = revealStatesByPath.get(relativePath);
+    const state: FileRevealState = existingState ?? {
+      frameId: null,
+      cancelGuard: null,
+      handledRequestId: null,
+      latestRequestId: null,
+    };
+    if (!existingState) revealStatesByPath.set(relativePath, state);
 
-      const cancelPendingReveal = () => {
-        if (state.frameId !== null) {
-          cancelAnimationFrame(state.frameId);
-          state.frameId = null;
-        }
-        state.cancelGuard?.();
-      };
-
-      if (phase === "unmount") {
-        cancelPendingReveal();
-        return;
+    const cancelPendingReveal = () => {
+      if (state.frameId !== null) {
+        cancelAnimationFrame(state.frameId);
+        state.frameId = null;
       }
+      state.cancelGuard?.();
+    };
 
-      const contents = instance.file?.contents;
-      const targetLine =
-        revealLine === null || contents === undefined ? null : clampFileLine(contents, revealLine);
-      updateFileLinkReveal(fileContainer, targetLine);
+    if (phase === "unmount") {
+      cancelPendingReveal();
+      return;
+    }
 
-      if (!(instance instanceof VirtualizedFile)) return;
+    const contents = instance.file?.contents;
+    const targetLine =
+      revealLine === null || contents === undefined ? null : clampFileLine(contents, revealLine);
+    updateFileLinkReveal(fileContainer, targetLine);
 
-      if (state.latestRequestId !== revealRequestId) {
-        cancelPendingReveal();
-        state.latestRequestId = revealRequestId;
-        state.handledRequestId = null;
-      }
+    if (!(instance instanceof VirtualizedFile)) return;
 
-      if (revealLine === null) {
-        fileContainer.style.minHeight = "";
-        return;
-      }
+    if (state.latestRequestId !== revealRequestId) {
+      cancelPendingReveal();
+      state.latestRequestId = revealRequestId;
+      state.handledRequestId = null;
+    }
 
-      const scrollContainer = fileContainer.closest<HTMLElement>(".file-preview-virtualizer");
-      if (!scrollContainer) return;
-      fileContainer.style.minHeight = `${Math.ceil(
-        Math.max(instance.height, scrollContainer.clientHeight),
-      )}px`;
+    if (revealLine === null) {
+      fileContainer.style.minHeight = "";
+      return;
+    }
 
-      if (state.handledRequestId === revealRequestId || state.frameId !== null) {
-        return;
-      }
+    const scrollContainer = fileContainer.closest<HTMLElement>(".file-preview-virtualizer");
+    if (!scrollContainer) return;
+    fileContainer.style.minHeight = `${Math.ceil(
+      Math.max(instance.height, scrollContainer.clientHeight),
+    )}px`;
 
-      const resolveScrollTarget = (line: number): number | null => {
-        const linePosition = instance.getLinePosition(line);
-        if (!linePosition) return null;
+    if (state.handledRequestId === revealRequestId || state.frameId !== null) {
+      return;
+    }
 
-        const scrollContainerRect = scrollContainer.getBoundingClientRect();
-        const fileTop =
-          scrollContainer.scrollTop +
-          fileContainer.getBoundingClientRect().top -
-          scrollContainerRect.top;
-        const root = fileContainer.shadowRoot ?? fileContainer;
-        const renderedLineElement = root.querySelector<HTMLElement>(`[data-line="${line}"]`);
-        const renderedLineRect = renderedLineElement?.getBoundingClientRect();
+    const resolveScrollTarget = (line: number): number | null => {
+      const linePosition = instance.getLinePosition(line);
+      if (!linePosition) return null;
 
-        return resolveCenteredFileLineScrollTop({
-          scrollTop: scrollContainer.scrollTop,
-          scrollHeight: scrollContainer.scrollHeight,
-          viewportTop: scrollContainerRect.top,
-          viewportHeight: scrollContainer.clientHeight,
-          fileTop,
-          estimatedLine: linePosition,
-          ...(renderedLineRect && renderedLineRect.height > 0
-            ? {
-                renderedLine: {
-                  top: renderedLineRect.top,
-                  height: renderedLineRect.height,
-                },
-              }
-            : {}),
-        });
-      };
+      const scrollContainerRect = scrollContainer.getBoundingClientRect();
+      const fileTop =
+        scrollContainer.scrollTop +
+        fileContainer.getBoundingClientRect().top -
+        scrollContainerRect.top;
+      const root = fileContainer.shadowRoot ?? fileContainer;
+      const renderedLineElement = root.querySelector<HTMLElement>(`[data-line="${line}"]`);
+      const renderedLineRect = renderedLineElement?.getBoundingClientRect();
 
-      const guardScrollTarget = (line: number) => {
-        let framesLeft = REVEAL_GUARD_FRAMES;
-        let guardFrameId: number | null = null;
-        const cancelGuard = () => {
-          if (guardFrameId !== null) {
-            cancelAnimationFrame(guardFrameId);
-            guardFrameId = null;
-          }
-          scrollContainer.removeEventListener("wheel", cancelGuard);
-          scrollContainer.removeEventListener("touchstart", cancelGuard);
-          scrollContainer.removeEventListener("pointerdown", cancelGuard, true);
-          window.removeEventListener("keydown", cancelGuard, true);
-          if (state.cancelGuard === cancelGuard) state.cancelGuard = null;
-        };
-        scrollContainer.addEventListener("wheel", cancelGuard, { passive: true });
-        scrollContainer.addEventListener("touchstart", cancelGuard, { passive: true });
-        // Pierre stops gutter pointer events from bubbling. Listen in capture
-        // so starting a comment cancels the reveal guard before the row expands.
-        scrollContainer.addEventListener("pointerdown", cancelGuard, {
-          passive: true,
-          capture: true,
-        });
-        window.addEventListener("keydown", cancelGuard, true);
-        const holdTarget = () => {
+      return resolveCenteredFileLineScrollTop({
+        scrollTop: scrollContainer.scrollTop,
+        scrollHeight: scrollContainer.scrollHeight,
+        viewportTop: scrollContainerRect.top,
+        viewportHeight: scrollContainer.clientHeight,
+        fileTop,
+        estimatedLine: linePosition,
+        ...(renderedLineRect && renderedLineRect.height > 0
+          ? {
+              renderedLine: {
+                top: renderedLineRect.top,
+                height: renderedLineRect.height,
+              },
+            }
+          : {}),
+      });
+    };
+
+    const guardScrollTarget = (line: number) => {
+      let framesLeft = REVEAL_GUARD_FRAMES;
+      let guardFrameId: number | null = null;
+      const cancelGuard = () => {
+        if (guardFrameId !== null) {
+          cancelAnimationFrame(guardFrameId);
           guardFrameId = null;
-          framesLeft -= 1;
-          if (framesLeft <= 0 || !scrollContainer.isConnected) {
-            cancelGuard();
-            return;
-          }
-          const targetTop = resolveScrollTarget(line);
-          if (
-            targetTop !== null &&
-            Math.abs(scrollContainer.scrollTop - targetTop) > REVEAL_GUARD_TOLERANCE_PX
-          ) {
-            scrollContainer.scrollTop = targetTop;
-          }
-          guardFrameId = requestAnimationFrame(holdTarget);
-        };
-        guardFrameId = requestAnimationFrame(holdTarget);
-        state.cancelGuard = cancelGuard;
+        }
+        scrollContainer.removeEventListener("wheel", cancelGuard);
+        scrollContainer.removeEventListener("touchstart", cancelGuard);
+        scrollContainer.removeEventListener("pointerdown", cancelGuard, true);
+        window.removeEventListener("keydown", cancelGuard, true);
+        if (state.cancelGuard === cancelGuard) state.cancelGuard = null;
       };
-
-      const scheduleReveal = (attempt: number) => {
-        state.frameId = requestAnimationFrame(() => {
-          state.frameId = null;
-          if (state.latestRequestId !== revealRequestId || !fileContainer.isConnected) {
-            return;
-          }
-
-          // Contents and line metrics can lag the first post-render on fresh
-          // mounts; clamping against missing contents would scroll to line 1
-          // and wrongly mark the request handled.
-          const currentContents = instance.file?.contents;
-          const line =
-            currentContents === undefined ? null : clampFileLine(currentContents, revealLine);
-          const targetTop = line === null ? null : resolveScrollTarget(line);
-          if (line === null || targetTop === null) {
-            if (attempt < REVEAL_MAX_ATTEMPTS) scheduleReveal(attempt + 1);
-            return;
-          }
-          updateFileLinkReveal(fileContainer, line);
-
+      scrollContainer.addEventListener("wheel", cancelGuard, { passive: true });
+      scrollContainer.addEventListener("touchstart", cancelGuard, { passive: true });
+      // Pierre stops gutter pointer events from bubbling. Listen in capture
+      // so starting a comment cancels the reveal guard before the row expands.
+      scrollContainer.addEventListener("pointerdown", cancelGuard, {
+        passive: true,
+        capture: true,
+      });
+      window.addEventListener("keydown", cancelGuard, true);
+      const holdTarget = () => {
+        guardFrameId = null;
+        framesLeft -= 1;
+        if (framesLeft <= 0 || !scrollContainer.isConnected) {
+          cancelGuard();
+          return;
+        }
+        const targetTop = resolveScrollTarget(line);
+        if (
+          targetTop !== null &&
+          Math.abs(scrollContainer.scrollTop - targetTop) > REVEAL_GUARD_TOLERANCE_PX
+        ) {
           scrollContainer.scrollTop = targetTop;
-          state.handledRequestId = revealRequestId;
-          guardScrollTarget(line);
-        });
+        }
+        guardFrameId = requestAnimationFrame(holdTarget);
       };
+      guardFrameId = requestAnimationFrame(holdTarget);
+      state.cancelGuard = cancelGuard;
+    };
 
-      scheduleReveal(0);
-    },
-    [revealStatesByPath, relativePath, revealLine, revealRequestId],
-  );
+    const scheduleReveal = (attempt: number) => {
+      state.frameId = requestAnimationFrame(() => {
+        state.frameId = null;
+        if (state.latestRequestId !== revealRequestId || !fileContainer.isConnected) {
+          return;
+        }
+
+        // Contents and line metrics can lag the first post-render on fresh
+        // mounts; clamping against missing contents would scroll to line 1
+        // and wrongly mark the request handled.
+        const currentContents = instance.file?.contents;
+        const line =
+          currentContents === undefined ? null : clampFileLine(currentContents, revealLine);
+        const targetTop = line === null ? null : resolveScrollTarget(line);
+        if (line === null || targetTop === null) {
+          if (attempt < REVEAL_MAX_ATTEMPTS) scheduleReveal(attempt + 1);
+          return;
+        }
+        updateFileLinkReveal(fileContainer, line);
+
+        scrollContainer.scrollTop = targetTop;
+        state.handledRequestId = revealRequestId;
+        guardScrollTarget(line);
+      });
+    };
+
+    scheduleReveal(0);
+  };
 }
 
 function RenderedMarkdownSurface({
@@ -577,12 +557,14 @@ function RenderedMarkdownSurface({
   relativePath,
   contents,
   threadRef,
+  workspaceMutationId,
   readOnly,
   onPendingChange,
 }: FileSaveCoordinatorInput & {
   contents: string;
   threadRef: ScopedThreadRef;
   readOnly: boolean;
+  workspaceMutationId: string | null;
 }) {
   const saveCoordinator = useFileSaveCoordinator({
     environmentId,
@@ -598,6 +580,7 @@ function RenderedMarkdownSurface({
         cwd={cwd}
         relativePath={relativePath}
         threadRef={threadRef}
+        workspaceMutationId={workspaceMutationId}
         onTaskListChange={
           readOnly
             ? undefined
@@ -632,21 +615,26 @@ export default function FilePreviewPanel({
   composerDraftTarget,
   keybindings,
   availableEditors,
+  openInShortcutEnabled,
   revealLine,
   revealRequestId,
   onOpenFile,
+  onNavigateFolder,
+  folderTrail,
   onPendingChange,
-  pendingProjectKey,
+  pendingProjectKey = null,
+  selectedFilePending: upstreamSelectedFilePending = false,
   workspaceMutationId,
   explorerHidden = false,
   onRevealExplorer,
 }: FilePreviewPanelProps) {
   const relativePath =
     attachment === undefined ? resolveFilePreviewPath(requestedPath, cwd) : requestedPath;
-  const selectedFilePending = useFileSurfacePending(
+  const storedFilePending = useFileSurfacePending(
     pendingProjectKey,
     attachment === undefined && requestedPath !== null ? `file:${requestedPath}` : null,
   );
+  const selectedFilePending = storedFilePending || upstreamSelectedFilePending;
   // A draft's composer target is its draft id; a thread the server knows is a ref.
   const draft = typeof composerDraftTarget === "string";
   const { resolvedTheme } = useTheme();
@@ -664,6 +652,7 @@ export default function FilePreviewPanel({
   const { models, retention } = useProjectEditorModels(environmentId, cwd);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const remoteOpenState = useRemoteOpenState(environmentId);
+  const serverConfig = useAtomValue(serverEnvironment.configValueAtom(environmentId));
   const environmentHttpBaseUrl = useEnvironmentHttpBaseUrl(environmentId);
   const previewAvailable = usePreviewAvailable(environmentId);
   const createAssetUrl = useAtomQueryRunner(assetEnvironment.createUrl, {
@@ -676,19 +665,13 @@ export default function FilePreviewPanel({
   const isAudio = relativePath !== null && !isVideo && isWorkspaceAudioPreviewPath(relativePath);
   const isImage = relativePath !== null && !isVideo && isWorkspaceImagePreviewPath(relativePath);
   const isMedia = isImage || isVideo || isAudio;
-  // PDFs have no text to show; HTML has, and can toggle between page and source.
   const isPdf = relativePath !== null && isPdfPreviewFile(relativePath);
   const isHtml = relativePath !== null && !isPdf && isBrowserPreviewFile(relativePath);
-  // A file outside the workspace (an absolute path) is shown, never edited.
   const isHostFile =
-    attachment !== undefined || (relativePath !== null && isAbsolutePath(relativePath));
+    attachment !== undefined || (relativePath !== null && isHostPath(relativePath));
   const fileAccess = useFilesystemReadAccess(environmentId);
   const { canReadFiles } = fileAccess;
   const canWriteFiles = useEnvironmentScope(environmentId, AuthFilesystemWriteScope);
-  // Media and PDFs render from their absolute path, so their contents are never
-  // shown. The read still runs: a folder named `assets.png` is only knowable as a
-  // folder from the read failure, and the server stats before reading, so a folder
-  // costs an open and a stat and returns no body.
   const file = useProjectFileQuery(
     environmentId,
     cwd,
@@ -700,10 +683,29 @@ export default function FilePreviewPanel({
   // a file surface and the read fails. Keep the breadcrumbs, drop the preview
   // pane, and let the tree fill the surface with the folder revealed. Mutation
   // refresh stays on so the surface notices if the path becomes a file. A host
-  // path cannot be revealed in the workspace tree, so it keeps the read error.
-  const isDirectory = file.isNotFile && !isHostFile;
+  // folder outside the workspace gets a tree of its own, rooted at that folder.
+  // `folderTrail` is set only when crumbs walked the browser up: the deeper path
+  // kept for the way back down. The explorer (`""`) shows crumbs only then.
+  const breadcrumbPath =
+    attachment !== undefined ? null : (relativePath ?? (folderTrail === undefined ? null : ""));
+  // A host trail that walked up to the workspace root (`/repo/project` is `""`) no
+  // longer passes through the current path, so the crumbs start over there.
+  const breadcrumbTrail =
+    breadcrumbPath === null ? null : retainedBreadcrumbTrail(folderTrail, breadcrumbPath);
+  // The trail only continues below folders, so a surface with one is a folder
+  // before its read settles, and walking up never flashes a file preview.
+  const isFolder =
+    attachment === undefined &&
+    (file.isNotFile || (folderTrail !== undefined && file.data === null && file.error === null));
+  const hostFolderPath = isFolder && isHostFile ? relativePath : null;
+  // A chat-linked folder reads as a file until its read settles, and revealing a
+  // folder selects it in its parent instead of opening it, so reveal waits.
+  const revealsInFileManager =
+    !isFolder &&
+    (file.data !== null || file.error !== null) &&
+    serverConfig?.shellRevealInFileManager === true;
   // Everything preview-related keys off previewPath; a folder has no preview.
-  const previewPath = isDirectory ? null : relativePath;
+  const previewPath = isFolder ? null : relativePath;
   // The explorer's open state stays in the file tree store rather than in local
   // state here: the tree and the panel header both read it, and v0.0.42's local
   // copy would be a second one that drifts.
@@ -759,7 +761,6 @@ export default function FilePreviewPanel({
   const isMarkdown = previewPath ? isMarkdownPreviewFile(previewPath) : false;
   const tableDelimiter =
     previewPath && attachment === undefined ? filePreviewDelimiter({ name: previewPath }) : null;
-  // A reveal still wins over the preference: the line only exists in the source.
   const revealHandled =
     revealLine === null ||
     (handledReveal?.path === relativePath && handledReveal.requestId === revealRequestId);
@@ -775,9 +776,6 @@ export default function FilePreviewPanel({
         : null;
   const canToggleRendered =
     previewPath !== null && attachment === undefined && renderedMode !== null;
-  const updateClientSettings = useUpdateClientSettings();
-  // Word wrap only reaches the text bodies. A rendered Markdown document, a table and the
-  // browser frame all lay themselves out, so the toggle stays hidden rather than inert.
   const showsRawText =
     previewPath !== null &&
     file.data !== null &&
@@ -798,7 +796,7 @@ export default function FilePreviewPanel({
   // editor either; upstream shows the read-only source preview for the latter.
   const editorEligible =
     relativePath !== null &&
-    !isDirectory &&
+    !isFolder &&
     canWriteFiles &&
     !isMedia &&
     !isHostFile &&
@@ -806,20 +804,16 @@ export default function FilePreviewPanel({
     !renderBrowserFile;
   const loadedContents =
     editorEligible && file.data !== null && !file.data.truncated ? file.data.contents : null;
-  useEffect(() => {
-    if (!editorEligible) {
-      setEditorFile(null);
-      return;
-    }
-    if (loadedContents === null || relativePath === null) return;
-    setEditorFile((current) =>
-      current !== null &&
-      current.relativePath === relativePath &&
-      current.contents === loadedContents
-        ? current
-        : { relativePath, contents: loadedContents },
-    );
-  }, [editorEligible, relativePath, loadedContents]);
+  if (!editorEligible && editorFile !== null) {
+    setEditorFile(null);
+  } else if (
+    editorEligible &&
+    loadedContents !== null &&
+    relativePath !== null &&
+    (editorFile?.relativePath !== relativePath || editorFile.contents !== loadedContents)
+  ) {
+    setEditorFile({ relativePath, contents: loadedContents });
+  }
 
   const canOpenInBrowser =
     canOperatePreview &&
@@ -828,8 +822,21 @@ export default function FilePreviewPanel({
     !isVideo &&
     previewAvailable &&
     isBrowserPreviewFile(previewPath);
+  // A file keeps its tab; walking up from it opens a folder browser beside it.
+  // The trail's end keeps its own spelling (`C:/a` or `C:\a`), so it finds its tab.
+  const navigateToFolder = (crumbPath: string) => {
+    const path =
+      breadcrumbTrail !== null && breadcrumbPathOf(breadcrumbTrail) === crumbPath
+        ? breadcrumbTrail
+        : crumbPath;
+    onNavigateFolder(path, retainedBreadcrumbTrail(breadcrumbTrail ?? undefined, path), !isFolder);
+  };
   const absolutePath =
-    relativePath && attachment === undefined ? resolvePathLinkTarget(relativePath, cwd) : null;
+    breadcrumbPath === ""
+      ? cwd
+      : relativePath && attachment === undefined
+        ? resolvePathLinkTarget(relativePath, cwd)
+        : null;
   const onFilePostRender = useFileLineReveal(relativePath, revealLine, revealRequestId);
   useWorkspaceMutationRefresh({
     enabled:
@@ -838,7 +845,7 @@ export default function FilePreviewPanel({
       // Media and PDFs never show their contents, so re-reading them on every
       // workspace mutation is waste. A folder named like one still re-reads, so
       // it notices when the path becomes a file.
-      (isDirectory || (!isMedia && !isPdf)) &&
+      (isFolder || (!isMedia && !isPdf)) &&
       !selectedFilePending,
     mutationId: workspaceMutationId,
     refresh: file.refresh,
@@ -861,13 +868,16 @@ export default function FilePreviewPanel({
   });
 
   useEffect(() => {
-    const currentCrumb = breadcrumbRef.current?.querySelector<HTMLElement>(
-      "[data-current-file-crumb='true']",
-    );
-    currentCrumb?.scrollIntoView({ block: "nearest", inline: "end" });
-  }, [relativePath]);
+    const crumbs = breadcrumbRef.current?.querySelectorAll<HTMLElement>("[data-file-crumb]");
+    // Show the deepest crumb when it fits, but never at the cost of the current one.
+    crumbs?.[crumbs.length - 1]?.scrollIntoView({ block: "nearest", inline: "end" });
+    breadcrumbRef.current
+      ?.querySelector<HTMLElement>("[data-current-file-crumb='true']")
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- A new path or trail re-renders the crumbs, so the current one scrolls back into view.
+  }, [breadcrumbPath, breadcrumbTrail]);
 
-  const handleOpenInBrowser = useCallback(() => {
+  const handleOpenInBrowser = () => {
     if (!canReadFiles || !canOperatePreview || !absolutePath || !environmentHttpBaseUrl) return;
     void (async () => {
       const result = await openFileInPreview({
@@ -890,16 +900,7 @@ export default function FilePreviewPanel({
         }),
       );
     })();
-  }, [
-    absolutePath,
-    canReadFiles,
-    canOperatePreview,
-    createAssetUrl,
-    cwd,
-    environmentHttpBaseUrl,
-    openPreview,
-    threadRef,
-  ]);
+  };
 
   if (attachment === undefined && !canReadFiles) {
     if (fileAccess.isPending) {
@@ -919,7 +920,7 @@ export default function FilePreviewPanel({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
-      {relativePath && attachment === undefined ? (
+      {breadcrumbPath !== null && breadcrumbTrail !== null ? (
         <div className={FILE_SURFACE_SUBHEADER_CLASS} data-surface-subheader>
           <ScrollArea
             radius="none"
@@ -933,9 +934,11 @@ export default function FilePreviewPanel({
               <FileBreadcrumbs
                 cwd={cwd}
                 environmentId={environmentId}
+                onNavigateFolder={navigateToFolder}
                 onOpenFile={onOpenFile}
                 projectName={projectName}
-                relativePath={relativePath}
+                relativePath={breadcrumbPath}
+                trail={breadcrumbTrail}
                 workspaceMutationId={workspaceMutationId}
               />
             </div>
@@ -946,8 +949,11 @@ export default function FilePreviewPanel({
               environmentId={environmentId}
               keybindings={keybindings}
               availableEditors={availableEditors}
+              enableShortcut={openInShortcutEnabled}
               openInCwd={absolutePath}
+              openInCwdIsFile={file.isFile}
               compact
+              revealFileManager={revealsInFileManager}
             />
           ) : null}
           {canToggleRendered && renderedMode ? (
@@ -1026,7 +1032,7 @@ export default function FilePreviewPanel({
             previewPath ? "flex" : "hidden",
           )}
         >
-          {isDirectory ? null : relativePath && attachment ? (
+          {isFolder ? null : relativePath && attachment ? (
             <AttachmentFilePreview
               key={`${environmentId}:${attachment.id}`}
               name={attachment.name}
@@ -1034,6 +1040,7 @@ export default function FilePreviewPanel({
               sizeBytes={attachment.sizeBytes}
               asset={{ environmentId, attachmentId: attachment.id }}
               htmlRender={attachment.htmlRender === true}
+              threadRef={threadRef}
             />
           ) : relativePath && isVideo && absolutePath ? (
             <WorkspaceVideoPreview
@@ -1123,6 +1130,7 @@ export default function FilePreviewPanel({
                 relativePath={relativePath}
                 threadRef={threadRef}
                 contents={file.data.contents}
+                workspaceMutationId={workspaceMutationId}
                 readOnly={isHostFile || !canWriteFiles}
                 onPendingChange={onPendingChange}
               />
@@ -1202,13 +1210,19 @@ export default function FilePreviewPanel({
             )}
           >
             <MesuraFileTree
-              key={`${environmentId}:${cwd}`}
+              key={`${environmentId}:${hostFolderPath ?? cwd}`}
               environmentId={environmentId}
-              cwd={cwd}
-              projectName={projectName}
-              selectedPath={relativePath}
+              cwd={hostFolderPath ?? cwd}
+              projectName={hostFolderPath ?? projectName}
+              selectedPath={
+                hostFolderPath === null
+                  ? relativePath
+                  : trailChildOf(hostFolderPath, breadcrumbTrail ?? hostFolderPath)
+              }
               selectedPathRevealId={revealRequestId}
-              onOpenFile={onOpenFile}
+              onOpenFile={(path) =>
+                onOpenFile(hostFolderPath === null ? path : joinPath(hostFolderPath, path))
+              }
               workspaceMutationId={workspaceMutationId}
               {...(previewPath && !isMedia && !isPdf
                 ? { onRefreshSelectedFile: file.refresh }

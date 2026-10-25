@@ -11,6 +11,7 @@
       "type": "string"
     },
     "expectedVersion": {
+      "maximum": 9007199254740991,
       "minimum": 0,
       "type": "integer"
     },
@@ -24,6 +25,7 @@
           "type": "number"
         },
         "minor": {
+          "maximum": 9007199254740991,
           "minimum": 0,
           "type": "integer"
         }

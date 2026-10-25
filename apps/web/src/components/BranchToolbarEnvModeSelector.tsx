@@ -21,6 +21,9 @@ import {
 } from "./ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { subscribePickerAction } from "../lib/pickerActionBus";
+import { useAtomValue } from "@effect/atom-react";
+import { shortcutLabelForCommand } from "../keybindings";
+import { primaryServerKeybindingsAtom } from "../state/server";
 
 const PREVIOUS_WORKTREE_SELECT_VALUE = "previous-worktree";
 
@@ -51,30 +54,29 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
   // that flipped the state anyway would open the menu by itself the moment a
   // new thread made the control editable again.
   const workspaceLocked = envLocked || forceNewWorktree;
+  if (workspaceLocked && isOpen) setIsOpen(false);
   useEffect(() => {
-    if (workspaceLocked) {
-      setIsOpen(false);
-      return;
-    }
+    if (workspaceLocked) return;
     return subscribePickerAction("workspace", () => {
       setIsOpen((open) => !open);
     });
   }, [workspaceLocked]);
   const composerFloatingLayerProps = useComposerMenuProps();
-  const showPreviousWorktree = Boolean(previousWorktreeLabel && onUsePreviousWorktree);
-  const envModeItems = useMemo(
-    () => [
-      {
-        value: "local",
-        label: resolveCurrentWorkspaceLabel(activeWorktreePath),
-      },
-      { value: "worktree", label: resolveEnvModeLabel("worktree") },
-      ...(showPreviousWorktree && previousWorktreeLabel
-        ? [{ value: PREVIOUS_WORKTREE_SELECT_VALUE, label: previousWorktreeLabel }]
-        : []),
-    ],
-    [activeWorktreePath, previousWorktreeLabel, showPreviousWorktree],
+  const shortcutLabel = shortcutLabelForCommand(
+    useAtomValue(primaryServerKeybindingsAtom),
+    "composer.workspace",
   );
+  const showPreviousWorktree = Boolean(previousWorktreeLabel && onUsePreviousWorktree);
+  const envModeItems = [
+    {
+      value: "local",
+      label: resolveCurrentWorkspaceLabel(activeWorktreePath),
+    },
+    { value: "worktree", label: resolveEnvModeLabel("worktree") },
+    ...(showPreviousWorktree && previousWorktreeLabel
+      ? [{ value: PREVIOUS_WORKTREE_SELECT_VALUE, label: previousWorktreeLabel }]
+      : []),
+  ];
 
   const stopContextMenuMouseDown = (event: ReactMouseEvent) => {
     if (event.button !== 0 || event.ctrlKey) {
@@ -158,6 +160,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
           {effectiveEnvMode === "worktree"
             ? resolveEnvModeLabel("worktree")
             : resolveCurrentWorkspaceLabel(activeWorktreePath)}
+          {shortcutLabel ? ` · ${shortcutLabel}` : null}
         </TooltipPopup>
       </Tooltip>
       <SelectPopup

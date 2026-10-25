@@ -13,7 +13,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "@effect/vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "@effect/vitest";
 
 import { PROJECT_ICON_MAX_BYTES } from "./ProjectIconCandidates.ts";
 import { writeProjectIconFile } from "./ProjectIconFile.ts";
@@ -58,7 +58,6 @@ let scratch: string;
 let root: string;
 let outside: string;
 let preloadPath: string;
-const savedEnvironment = { ...process.env };
 
 beforeEach(() => {
   scratch = NodeFS.realpathSync(NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "icon-writer-")));
@@ -71,13 +70,15 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  process.env = { ...savedEnvironment };
+  // Restore the variables in place: replacing process.env leaves Node 26's
+  // native spawn environment pointing at a preload that cleanup deletes.
+  vi.unstubAllEnvs();
   NodeFS.rmSync(scratch, { recursive: true, force: true });
 });
 
 const withSwap = (swap: Record<string, string>) => {
-  process.env.NODE_OPTIONS = `--require ${preloadPath}`;
-  process.env.ICON_WRITER_SWAP = JSON.stringify(swap);
+  vi.stubEnv("NODE_OPTIONS", `--require ${preloadPath}`);
+  vi.stubEnv("ICON_WRITER_SWAP", JSON.stringify(swap));
 };
 
 const write = (bytes: Buffer = SVG) =>
@@ -92,6 +93,26 @@ const failureOf = (promise: Promise<unknown>) =>
 const outsideEntries = () => NodeFS.readdirSync(outside, { recursive: true });
 
 describe("project icon writer", () => {
+  it("project icon writer regression: a replaced environment still controls the writer", async () => {
+    const environment = process.env;
+    process.env = {
+      ...environment,
+      NODE_OPTIONS: `--require ${preloadPath}`,
+      ICON_WRITER_SWAP: JSON.stringify({
+        step: "before-enter",
+        segment: ".mesura",
+        swap: NodePath.join(root, ".mesura"),
+        outside,
+      }),
+    };
+    try {
+      expect(await failureOf(write())).toContain("link or moved outside the project");
+      expect(outsideEntries()).toEqual([]);
+    } finally {
+      process.env = environment;
+    }
+  });
+
   it("project icon writer regression: a .mesura link swapped in before entry writes nothing outside", async () => {
     withSwap({
       step: "before-enter",

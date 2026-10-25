@@ -70,6 +70,7 @@ const SOURCE_FILE = "../web/src/components/files/monaco/MonacoFileSurface.tsx";
 /** The idle window measured before typing; see the report. */
 const IDLE_WINDOW_MS = 500;
 
+// oxlint-disable-next-line t3code/no-real-time-wait-in-tests -- Real gaps model human typing and expose idle plugin redraws in Neovim; no completion event represents an idle window.
 const pause = (milliseconds: number) => Effect.sleep(`${milliseconds} millis`);
 
 /** Did anything actually happen on screen between these two readings? */
@@ -166,6 +167,7 @@ function waitingFor(
     // The baseline is read after subscribing, so a frame landing during the
     // subscription cannot be folded into it and lost.
     const before = bridge.metrics;
+    // oxlint-disable-next-line t3code/no-wall-clock-in-tests -- The bench measures real Neovim input-to-redraw latency; virtual time cannot measure the subprocess.
     const started = performance.now();
     yield* bridge.input(keys);
 
@@ -182,6 +184,7 @@ function waitingFor(
 
     const after = bridge.metrics;
     return {
+      // oxlint-disable-next-line t3code/no-wall-clock-in-tests -- The bench measures real Neovim input-to-redraw latency; virtual time cannot measure the subprocess.
       elapsedMs: performance.now() - started,
       cells: after.gridCells - before.gridCells,
       bufferEvents: after.bufferEvents - before.bufferEvents,
@@ -218,6 +221,7 @@ if (configDirectory === null) {
 
 if (enabled)
   it.layer(layer, { excludeTestServices: true })("insert-mode latency", (it) => {
+    // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- The opt-in bench measures real Neovim plugins and paced typing; retain the existing measurement budget.
     it.effect(
       "measures the cost of a keystroke against the real configuration",
       () =>

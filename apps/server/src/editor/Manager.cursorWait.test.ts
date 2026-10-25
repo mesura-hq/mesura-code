@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import type { EditorSessionEvent } from "@t3tools/contracts";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 
 import { createManager } from "./Manager.testkit.ts";
@@ -31,6 +32,7 @@ it.layer(layer, { excludeTestServices: true })("the hold of text for its cursor"
       const arrivals: Array<{ readonly event: EditorSessionEvent; readonly at: number }> = [];
       const unsubscribe = yield* manager.attachStream({ threadId: "thread-slow" }, (event) =>
         Effect.sync(() => {
+          // oxlint-disable-next-line t3code/no-wall-clock-in-tests -- Manager measures its held-text deadline with performance.now(); the Effect TestClock cannot drive that deadline.
           arrivals.push({ event, at: performance.now() });
         }),
       );
@@ -45,9 +47,11 @@ it.layer(layer, { excludeTestServices: true })("the hold of text for its cursor"
           method === "nvim_exec_lua" && String(params[0]).includes("mesura.cursor_state"),
       );
       fake.cursor = { line: 1, col: 2 };
+      // oxlint-disable-next-line t3code/no-wall-clock-in-tests -- Manager measures its held-text deadline with performance.now(); the Effect TestClock cannot drive that deadline.
       const sentAt = performance.now();
       fake.notify("nvim_buf_lines_event", [2, 8, 0, 1, ["xold"], false]);
       fake.notify("redraw", [["mode_change", ["insert", 1]], ["flush"]]);
+      // oxlint-disable-next-line t3code/no-real-time-wait-in-tests -- The held reply models a cursor read delayed on Manager's performance.now() clock; preserve the 100 ms timing contract.
       yield* Effect.sleep("100 millis");
       fake.releaseReplies();
       yield* manager.settleForTest({ threadId: "thread-slow" });
@@ -79,24 +83,28 @@ it.layer(layer, { excludeTestServices: true })("the hold of text for its cursor"
         relativePath: "a.ts",
         lines: ["old"],
       });
+      const textSent = yield* Deferred.make<void>();
       const arrivals: Array<{ readonly event: EditorSessionEvent; readonly at: number }> = [];
       const unsubscribe = yield* manager.attachStream({ threadId: "thread-held" }, (event) =>
         Effect.sync(() => {
+          // oxlint-disable-next-line t3code/no-wall-clock-in-tests -- Manager measures its held-text deadline with performance.now(); the Effect TestClock cannot drive that deadline.
           arrivals.push({ event, at: performance.now() });
+          if (event.type === "lines") Deferred.doneUnsafe(textSent, Effect.void);
         }),
       );
       yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
 
-      // A main loop held by a prompt: the read is not answered for 1.3 s.
+      // A main loop held by a prompt: the cursor read stays unanswered until the text is sent.
       fake.holdReplies(
         (method, params) =>
           method === "nvim_exec_lua" && String(params[0]).includes("mesura.cursor_state"),
       );
       fake.cursor = { line: 1, col: 2 };
+      // oxlint-disable-next-line t3code/no-wall-clock-in-tests -- Manager measures its held-text deadline with performance.now(); the Effect TestClock cannot drive that deadline.
       const sentAt = performance.now();
       fake.notify("nvim_buf_lines_event", [2, 9, 0, 1, ["xold"], false]);
       fake.notify("redraw", [["mode_change", ["insert", 1]], ["flush"]]);
-      yield* Effect.sleep("1300 millis");
+      yield* Deferred.await(textSent);
 
       const lines = arrivals.find((arrival) => arrival.event.type === "lines");
       assert.isDefined(lines, "the text never went out while the read was stuck");

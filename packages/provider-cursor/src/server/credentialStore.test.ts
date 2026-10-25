@@ -12,7 +12,6 @@ import { makeCursorCredentialStore } from "./credentialStore.ts";
 
 const layerHost = Layer.provideMerge(TestProviderHost.layer(), NodeServices.layer);
 
-// The SDK's FileCredentialStore writes pretty-printed JSON.
 const legacyFileText = `{
   "version": 1,
   "backendUrl": "https://api.cursor.com",

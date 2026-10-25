@@ -7,10 +7,9 @@
  *
  * The source control registry is the server's real one. With no
  * `listChangeRequests` it has no provider registered, so every remote
- * resolves to the "No unknown source control provider is registered." failure
- * a remote on an unsupported host gets in production. With one, a GitHub
- * provider answers lookups through it, so github.com remotes reach the success
- * path. No test reaches a real hosting provider.
+ * returns no change requests for an unknown remote, as production does. With
+ * one, a GitHub provider answers lookups through it, so github.com remotes can
+ * exercise success and failure paths. No test reaches a real hosting provider.
  *
  * @module git/GitManager.testkit
  */
@@ -20,6 +19,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { SourceControlProviderKind } from "@t3tools/contracts";
 import type { SourceControlProvider } from "@t3tools/source-control-core/server/SourceControlProvider";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -95,13 +95,13 @@ export const makeGitManagerOverRealGit = (options?: {
             // The unregistered GitHub provider fails every call; only lookups answer.
             const unregistered = yield* (yield* SourceControlProviderRegistry.makeWithProviders(
               [],
-            )).get("github");
+            )).get(SourceControlProviderKind.make("github"));
             return yield* SourceControlProviderRegistry.makeWithProviders([
               {
-                kind: "github",
+                kind: SourceControlProviderKind.make("github"),
                 provider: { ...unregistered, listChangeRequests },
                 discovery: {
-                  kind: "github",
+                  kind: SourceControlProviderKind.make("github"),
                   label: "GitHub",
                   installHint: "",
                   type: "api",

@@ -128,6 +128,7 @@ const calculateContractChecksum = (
 // Each guard stays collectable if a phase-six script, artifact, or export is
 // removed. One regression therefore fails without hiding the remaining checks.
 describe("Symmetria broker contract phase-six guards", () => {
+  // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- CPU-bound contract guard runs nested package suites and compilers; this budget bounds real subprocess work.
   it("regenerates every schema artifact byte-identically on two consecutive runs", () => {
     expect(NodeFS.existsSync(schemaIndexPath)).toBe(true);
     const { temporaryPackageRoot, temporaryRoot } = copyContractPackageToTemporaryDirectory(
@@ -255,6 +256,7 @@ describe("Symmetria broker contract phase-six guards", () => {
     expect(index.checksum).toBe(calculateContractChecksum(schemaDirectory, documentPaths));
   });
 
+  // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- CPU-bound contract guard runs nested package suites and compilers; this budget bounds real subprocess work.
   it("changes the checksum after a Symmetria root schema changes and regeneration runs", () => {
     expect(
       NodeFS.existsSync(NodePath.join(contractPackageRoot, "scripts/emit-json-schema.ts")),
@@ -290,6 +292,7 @@ describe("Symmetria broker contract phase-six guards", () => {
     }
   }, 30_000);
 
+  // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- CPU-bound contract guard runs nested package suites and compilers; this budget bounds real subprocess work.
   it("changes the source checksum when JSON Schema cannot express a schema change", () => {
     const { temporaryPackageRoot, temporaryRoot } = copyContractPackageToTemporaryDirectory(
       "symmetria-source-checksum-",
@@ -388,6 +391,7 @@ describe("Symmetria broker contract phase-six guards", () => {
     expect(readme).toContain("vp run generate");
   });
 
+  // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- CPU-bound contract guard runs nested package suites and compilers; this budget bounds real subprocess work.
   it("keeps the phase-six package suite and typecheck green", () => {
     const testResult = run(
       vitePlusPath,

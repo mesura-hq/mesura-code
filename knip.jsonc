@@ -40,10 +40,14 @@
         "mesura-checks.ts",
         "mesura-browser.ts",
         "setup-worktree.ts",
+        "sign-macos.ts",
+        "verify-windows-desktop-artifact.ts",
         // Chromium fixture builders load these Vite library entries by path.
         "lib/mesura-panel.launcher.fixture.mjs",
         "lib/mesura-timeline.find.fixture.mjs",
       ],
+      "ignoreDependencies": ["esbuild"],
+      "ignore": ["npm-launcher/**"],
     },
     "apps/server": {
       // Vite+ pack entries and the launcher used by installed background services.
@@ -52,15 +56,19 @@
         "src/claude-history-worker.ts!",
         "scripts/cli.ts",
         "scripts/evaluate-thread-titles.ts",
+        "scripts/fetch-expo-schema.ts",
         "scripts/measure-pr-preview.ts",
         "scripts/probe-claude-fork-local-rollback-replay.ts",
         "scripts/update-test-shard-weights.ts",
         "scripts/verify-background-live.ts",
         "src/provider/testFixtures/*.mjs",
+        // graphqlgen reads its config.
+        "graphql.config.ts",
       ],
       // Retain upstream helpers and fallback layers that currently have no callers.
       // Exempt only export/duplicate reports; keep dependency analysis for these modules.
       "ignoreIssues": {
+        "**/*.graphql.ts": ["exports", "types", "namespaceMembers"],
         "src/orchestration-v2/Orchestrator.ts": ["exports", "nsExports", "duplicates"],
         "src/orchestration-v2/Adapters/CodexAdapterV2.ts": ["exports", "nsExports", "duplicates"],
         "src/orchestration-v2/Adapters/ClaudeAdapterV2.ts": ["exports", "nsExports", "duplicates"],
@@ -97,10 +105,9 @@
       "ignoreDependencies": ["playwright-core", "electron-builder"],
     },
     "apps/web": {
-      // Vitest loads this through the per-file @vitest-environment directive.
-      "ignoreDependencies": ["jsdom"],
-      // Worktree setup (scripts/setup-worktree.ts) runs this directly.
-      "entry": ["scripts/warm-dep-cache.ts"],
+      // Worktree setup (scripts/setup-worktree.ts) runs this directly, and evidence
+      // fixtures run under node.
+      "entry": ["scripts/warm-dep-cache.ts", "test/fixtures/**/*.mjs"],
       // UI component modules are copied and adapted as cohesive sets. Keep their
       // named subcomponents even before they have callers; the file audit still
       // reports an entire component module when nothing imports it.
@@ -118,9 +125,15 @@
         "src/components/GitActionsControl.tsx",
         "src/components/StartTruncatedPath.tsx",
         "src/components/files/useDirectoryEntries.ts",
+        // Upstream's file explorer uses this batch helper; the Symmetria tree owns this path here.
+        "src/components/files/fileTreePathReconciliation.ts",
         "src/components/BranchToolbarEnvironmentSelector.tsx",
         "src/components/BranchToolbarEnvModeSelector.tsx",
       ],
+    },
+    "apps/marketing": {
+      // `astro check` runs from the typecheck task in vite.config.ts, which knip does not read.
+      "ignoreDependencies": ["@astrojs/check"],
     },
     "infra/relay": {
       "entry": ["alchemy.run.ts!", "src/persistence/schema.ts!"],
@@ -146,6 +159,11 @@
       "includeEntryExports": true,
       "entry": ["test/fixtures/*.ts"],
       "ignoreIssues": { "src/_generated/**": ["exports", "types"] },
+    },
+    "packages/source-control-github": {
+      // graphqlgen reads its config; the generated operations export every selection's class.
+      "entry": ["graphql.config.ts"],
+      "ignoreIssues": { "**/*.graphql.ts": ["exports", "types", "namespaceMembers"] },
     },
   },
 }

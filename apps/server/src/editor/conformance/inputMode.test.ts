@@ -95,6 +95,7 @@ if (!nvimAvailable) reportMissingNvim("input-mode harness");
 
 if (nvimAvailable)
   it.layer(layer, { excludeTestServices: true })("the answer to an input batch", (it) => {
+    // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- Repeated key batches run through real Neovim and optional plugins; retain the existing subprocess budget.
     it.effect(
       "answers every input batch with the mode Neovim is in after consuming it",
       () =>
@@ -117,6 +118,7 @@ if (nvimAvailable)
       120_000,
     );
 
+    // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- Repeated key batches run through real Neovim and optional plugins; retain the existing subprocess budget.
     it.effect(
       "answers a re-sent input batch it skipped with the mode Neovim is in now",
       () =>
@@ -141,6 +143,7 @@ if (nvimAvailable)
       30_000,
     );
 
+    // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- Repeated key batches run through real Neovim and optional plugins; retain the existing subprocess budget.
     it.effect(
       "answers an open with the escape state Neovim is in",
       () =>
@@ -164,6 +167,7 @@ if (nvimAvailable)
     );
 
     if (realConfigDirectory !== null)
+      // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- Repeated key batches run through real Neovim and optional plugins; retain the existing subprocess budget.
       it.effect(
         "answers a flash jump waiting for its label as jumping under the developer's configuration",
         () =>

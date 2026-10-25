@@ -399,20 +399,23 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
    * for, and a buffer called `../../.ssh/id_rsa` would be shown to them as
    * though it were theirs.
    */
-  const resolveWithinRoot = (threadId: string, cwd: string, relativePath: string) =>
-    Effect.gen(function* () {
-      const root = path.resolve(cwd);
-      const absolutePath = path.resolve(root, relativePath);
-      const contained = absolutePath === root || absolutePath.startsWith(`${root}${path.sep}`);
-      if (!contained) {
-        return yield* new EditorSessionRpcError({
-          threadId,
-          method: "open",
-          detail: `path leaves the project: ${relativePath}`,
-        });
-      }
-      return absolutePath;
-    });
+  const resolveWithinRoot = Effect.fn(function* (
+    threadId: string,
+    cwd: string,
+    relativePath: string,
+  ) {
+    const root = path.resolve(cwd);
+    const absolutePath = path.resolve(root, relativePath);
+    const contained = absolutePath === root || absolutePath.startsWith(`${root}${path.sep}`);
+    if (!contained) {
+      return yield* new EditorSessionRpcError({
+        threadId,
+        method: "open",
+        detail: `path leaves the project: ${relativePath}`,
+      });
+    }
+    return absolutePath;
+  });
 
   /**
    * Sends an event to the attachments now, not through the outbox.
@@ -420,15 +423,14 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
    * For what is said as a session goes: stopping it closes the scope of the
    * fiber that drains the outbox, so a queued event would almost never arrive.
    */
-  const deliverNow = (session: Session, event: EditorSessionEvent) =>
-    Effect.gen(function* () {
-      if (trace.enabled) {
-        trace.record({ dir: "out", thread: session.threadId, ...summarizeEditorEvent(event) });
-      }
-      yield* Effect.forEach([...session.listeners.keys()], (listener) => listener(event), {
-        discard: true,
-      });
+  const deliverNow = Effect.fn(function* (session: Session, event: EditorSessionEvent) {
+    if (trace.enabled) {
+      trace.record({ dir: "out", thread: session.threadId, ...summarizeEditorEvent(event) });
+    }
+    yield* Effect.forEach([...session.listeners.keys()], (listener) => listener(event), {
+      discard: true,
     });
+  });
 
   /**
    * Stops a session, and tells its attachments it is gone.
@@ -437,16 +439,15 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
    * and a client whose stream simply went quiet kept sending keys to a session
    * that no longer existed, with nothing on screen saying so.
    */
-  const stopSession = (session: Session, reason: EditorSessionEndReason) =>
-    Effect.gen(function* () {
-      session.unsubscribe?.();
-      session.unsubscribe = null;
-      yield* deliverNow(session, { type: "exited", code: null, reason });
-      session.listeners.clear();
-      yield* Scope.close(session.scope, Effect.void as never).pipe(
-        Effect.catchCause(() => Effect.void),
-      );
-    });
+  const stopSession = Effect.fn(function* (session: Session, reason: EditorSessionEndReason) {
+    session.unsubscribe?.();
+    session.unsubscribe = null;
+    yield* deliverNow(session, { type: "exited", code: null, reason });
+    session.listeners.clear();
+    yield* Scope.close(session.scope, Effect.void as never).pipe(
+      Effect.catchCause(() => Effect.void),
+    );
+  });
 
   /**
    * Lets the oldest unattached session go once there are too many.
@@ -572,26 +573,24 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
     return session;
   });
 
-  const dropSession = (threadId: string, reason: EditorSessionEndReason) =>
-    Effect.gen(function* () {
-      let doomed: Session | undefined;
-      yield* SynchronizedRef.update(sessions, (current) => {
-        doomed = current.get(threadId);
-        if (doomed === undefined) return current;
-        const next = new Map(current);
-        next.delete(threadId);
-        return next;
-      });
-      if (doomed !== undefined) yield* stopSession(doomed, reason);
+  const dropSession = Effect.fn(function* (threadId: string, reason: EditorSessionEndReason) {
+    let doomed: Session | undefined;
+    yield* SynchronizedRef.update(sessions, (current) => {
+      doomed = current.get(threadId);
+      if (doomed === undefined) return current;
+      const next = new Map(current);
+      next.delete(threadId);
+      return next;
     });
+    if (doomed !== undefined) yield* stopSession(doomed, reason);
+  });
 
-  const lookup = (threadId: string) =>
-    Effect.gen(function* () {
-      const session = (yield* SynchronizedRef.get(sessions)).get(threadId);
-      if (session === undefined) return yield* new EditorSessionLookupError({ threadId });
-      session.lastActivityAt = now();
-      return session;
-    });
+  const lookup = Effect.fn(function* (threadId: string) {
+    const session = (yield* SynchronizedRef.get(sessions)).get(threadId);
+    if (session === undefined) return yield* new EditorSessionLookupError({ threadId });
+    session.lastActivityAt = now();
+    return session;
+  });
 
   const request = (session: Session, method: string, params: ReadonlyArray<unknown>) =>
     session.bridge.request(method, params).pipe(
@@ -637,19 +636,18 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
   });
 
   /** Forgets the least recently used buffers once a session holds too many. */
-  const trimBuffers = (session: Session) =>
-    Effect.gen(function* () {
-      if (session.buffers.size <= MAX_BUFFERS_PER_SESSION) return;
-      const oldest = [...session.buffers.values()]
-        .sort((left, right) => left.lastUsedAt - right.lastUsedAt)
-        .slice(0, session.buffers.size - MAX_BUFFERS_PER_SESSION);
-      for (const buffer of oldest) {
-        session.buffers.delete(buffer.absolutePath);
-        yield* request(session, "nvim_exec_lua", ["mesura.close(...)", [buffer.absolutePath]]).pipe(
-          Effect.catchCause(() => Effect.void),
-        );
-      }
-    });
+  const trimBuffers = Effect.fn(function* (session: Session) {
+    if (session.buffers.size <= MAX_BUFFERS_PER_SESSION) return;
+    const oldest = [...session.buffers.values()]
+      .sort((left, right) => left.lastUsedAt - right.lastUsedAt)
+      .slice(0, session.buffers.size - MAX_BUFFERS_PER_SESSION);
+    for (const buffer of oldest) {
+      session.buffers.delete(buffer.absolutePath);
+      yield* request(session, "nvim_exec_lua", ["mesura.close(...)", [buffer.absolutePath]]).pipe(
+        Effect.catchCause(() => Effect.void),
+      );
+    }
+  });
 
   const open = Effect.fn("EditorSessionManager.open")(function* (input: EditorSessionOpenInput) {
     if (stopping) {
@@ -1052,18 +1050,17 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
    * assigns it, and the bridge is what reads that stream. Before the first
    * `win_pos` there is nothing to resize but the outer grid.
    */
-  const resizeGrid = (session: Session, cols: number, rows: number) =>
-    Effect.gen(function* () {
-      // Unchanged is no request at all: Neovim would answer it with nothing.
-      if (cols === session.grid.cols && rows === session.grid.rows) return;
-      const gridId = session.bridge.bufferGridId;
-      yield* request(
-        session,
-        gridId === null ? "nvim_ui_try_resize" : "nvim_ui_try_resize_grid",
-        gridId === null ? [cols, rows] : [gridId, cols, rows],
-      );
-      session.grid = { ...session.grid, cols, rows };
-    });
+  const resizeGrid = Effect.fn(function* (session: Session, cols: number, rows: number) {
+    // Unchanged is no request at all: Neovim would answer it with nothing.
+    if (cols === session.grid.cols && rows === session.grid.rows) return;
+    const gridId = session.bridge.bufferGridId;
+    yield* request(
+      session,
+      gridId === null ? "nvim_ui_try_resize" : "nvim_ui_try_resize_grid",
+      gridId === null ? [cols, rows] : [gridId, cols, rows],
+    );
+    session.grid = { ...session.grid, cols, rows };
+  });
 
   /**
    * Widens the grid before keys that could carry the cursor's line past its
@@ -1071,67 +1068,69 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
    * cursor. Before the keys rather than after their text arrives: once Neovim
    * has drawn a key past the edge, the scroll has happened. See `gridWidth.ts`.
    */
-  const growGridFor = (session: Session, keys: string) =>
-    Effect.gen(function* () {
-      // These keys finish a command Neovim is waiting in, so they draw no text,
-      // and Neovim would hold the requests below until it had them: the keys
-      // would wait behind requests that wait for the keys.
-      if (session.waitingForKey) return;
-      const bridge = session.bridge;
-      const unpredictable = mayExpandUnpredictably(keys, bridge.mode);
-      session.grid.reservedBatches = unpredictable
-        ? RESERVATION_BATCHES
-        : Math.max(0, session.grid.reservedBatches - 1);
-      const cols = grownGridColumns(session.grid.cols, {
-        lines: bridge.lines,
-        topline: bridge.topLine + 1,
-        rows: session.grid.rows,
-        tabstop: bridge.tabstop,
-        cursorLine: bridge.cursor.line,
-        pendingCells: keys.length,
-        unpredictable,
-      });
-      if (cols !== null) yield* resizeGrid(session, cols, session.grid.rows);
-      // A change nothing predicted (a mapping, a completion, a paste wider
-      // than the bound left room for) can still have scrolled the window
-      // sideways. Once the grid is wide enough again, scrolling back is what
-      // takes the shift away: Neovim does not undo it on a wider grid by
-      // itself, and it keeps the cursor in view if 0 would hide it.
-      // Only when the line fits: past the bound the shift is the window's
-      // to keep, and resetting it would redraw every row on every key.
-      if (
-        bridge.leftColumn > 0 &&
-        lineFits(bridge.lines[bridge.cursor.line - 1] ?? "", bridge.tabstop, session.grid.cols)
-      ) {
-        yield* request(session, "nvim_exec_lua", [RESET_LEFT_COLUMN_LUA, [bridge.attachedBuffer]]);
-      }
+  const growGridFor = Effect.fn(function* (session: Session, keys: string) {
+    // These keys finish a command Neovim is waiting in, so they draw no text,
+    // and Neovim would hold the requests below until it had them: the keys
+    // would wait behind requests that wait for the keys.
+    if (session.waitingForKey) return;
+    const bridge = session.bridge;
+    const unpredictable = mayExpandUnpredictably(keys, bridge.mode);
+    session.grid.reservedBatches = unpredictable
+      ? RESERVATION_BATCHES
+      : Math.max(0, session.grid.reservedBatches - 1);
+    const cols = grownGridColumns(session.grid.cols, {
+      lines: bridge.lines,
+      topline: bridge.topLine + 1,
+      rows: session.grid.rows,
+      tabstop: bridge.tabstop,
+      cursorLine: bridge.cursor.line,
+      pendingCells: keys.length,
+      unpredictable,
     });
+    if (cols !== null) yield* resizeGrid(session, cols, session.grid.rows);
+    // A change nothing predicted (a mapping, a completion, a paste wider
+    // than the bound left room for) can still have scrolled the window
+    // sideways. Once the grid is wide enough again, scrolling back is what
+    // takes the shift away: Neovim does not undo it on a wider grid by
+    // itself, and it keeps the cursor in view if 0 would hide it.
+    // Only when the line fits: past the bound the shift is the window's
+    // to keep, and resetting it would redraw every row on every key.
+    if (
+      bridge.leftColumn > 0 &&
+      lineFits(bridge.lines[bridge.cursor.line - 1] ?? "", bridge.tabstop, session.grid.cols)
+    ) {
+      yield* request(session, "nvim_exec_lua", [RESET_LEFT_COLUMN_LUA, [bridge.attachedBuffer]]);
+    }
+  });
 
-  const submitKeys = (session: Session, keys: string, progress: { accepted: number }) =>
-    Effect.gen(function* () {
-      if (progress.accepted === 0) yield* growGridFor(session, keys);
-      const bytes = new TextEncoder().encode(keys);
-      let refusals = 0;
-      while (progress.accepted < bytes.length) {
-        const rest =
-          progress.accepted === 0
-            ? keys
-            : new TextDecoder().decode(bytes.subarray(progress.accepted));
-        const written = yield* request(session, "nvim_input", [rest]);
-        const taken = typeof written === "number" ? written : bytes.length - progress.accepted;
-        progress.accepted += taken;
-        if (taken > 0) continue;
-        refusals += 1;
-        if (refusals > INPUT_BUFFER_PATIENCE) {
-          return yield* new EditorSessionRpcError({
-            threadId: session.threadId,
-            method: "nvim_input",
-            detail: "Neovim's input buffer stayed full",
-          });
-        }
-        yield* Effect.sleep(Duration.millis(5));
+  const submitKeys = Effect.fn(function* (
+    session: Session,
+    keys: string,
+    progress: { accepted: number },
+  ) {
+    if (progress.accepted === 0) yield* growGridFor(session, keys);
+    const bytes = new TextEncoder().encode(keys);
+    let refusals = 0;
+    while (progress.accepted < bytes.length) {
+      const rest =
+        progress.accepted === 0
+          ? keys
+          : new TextDecoder().decode(bytes.subarray(progress.accepted));
+      const written = yield* request(session, "nvim_input", [rest]);
+      const taken = typeof written === "number" ? written : bytes.length - progress.accepted;
+      progress.accepted += taken;
+      if (taken > 0) continue;
+      refusals += 1;
+      if (refusals > INPUT_BUFFER_PATIENCE) {
+        return yield* new EditorSessionRpcError({
+          threadId: session.threadId,
+          method: "nvim_input",
+          detail: "Neovim's input buffer stayed full",
+        });
       }
-    });
+      yield* Effect.sleep(Duration.millis(5));
+    }
+  });
 
   /**
    * Refuses a call whose Neovim request would wait for a key nobody can send.
@@ -1145,20 +1144,19 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
    * with `nvim_get_mode`, which Neovim answers while it waits, and only when
    * the last batch left it waiting, so the common path costs nothing.
    */
-  const refuseWhileWaitingForKey = (session: Session, method: string) =>
-    Effect.gen(function* () {
-      if (!session.waitingForKey) return;
-      const reported = (yield* request(session, "nvim_get_mode", [])) as {
-        readonly blocking: boolean;
-      };
-      session.waitingForKey = reported.blocking;
-      if (!reported.blocking) return;
-      return yield* new EditorSessionRpcError({
-        threadId: session.threadId,
-        method,
-        detail: "Neovim is waiting for the rest of a command; finish or cancel it first",
-      });
+  const refuseWhileWaitingForKey = Effect.fn(function* (session: Session, method: string) {
+    if (!session.waitingForKey) return;
+    const reported = (yield* request(session, "nvim_get_mode", [])) as {
+      readonly blocking: boolean;
+    };
+    session.waitingForKey = reported.blocking;
+    if (!reported.blocking) return;
+    return yield* new EditorSessionRpcError({
+      threadId: session.threadId,
+      method,
+      detail: "Neovim is waiting for the rest of a command; finish or cancel it first",
     });
+  });
 
   /**
    * Cancels the command Neovim is waiting in, for a call that must reach
@@ -1172,25 +1170,24 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
    * and the mode read after it is ordered behind it (see `modeAfterKeys`). A
    * half-typed command is the user's to type again; a lost write is not.
    */
-  const cancelPendingCommand = (session: Session, method: string) =>
-    Effect.gen(function* () {
-      if (!session.waitingForKey) return;
-      const readMode = request(session, "nvim_get_mode", []).pipe(
-        Effect.map((reported) => (reported as { readonly blocking: boolean }).blocking),
-      );
-      let blocking = yield* readMode;
-      if (blocking) {
-        yield* request(session, "nvim_input", ["<Esc>"]);
-        blocking = yield* readMode;
-      }
-      session.waitingForKey = blocking;
-      if (!blocking) return;
-      return yield* new EditorSessionRpcError({
-        threadId: session.threadId,
-        method,
-        detail: "Neovim is still waiting for a key after <Esc>",
-      });
+  const cancelPendingCommand = Effect.fn(function* (session: Session, method: string) {
+    if (!session.waitingForKey) return;
+    const readMode = request(session, "nvim_get_mode", []).pipe(
+      Effect.map((reported) => (reported as { readonly blocking: boolean }).blocking),
+    );
+    let blocking = yield* readMode;
+    if (blocking) {
+      yield* request(session, "nvim_input", ["<Esc>"]);
+      blocking = yield* readMode;
+    }
+    session.waitingForKey = blocking;
+    if (!blocking) return;
+    return yield* new EditorSessionRpcError({
+      threadId: session.threadId,
+      method,
+      detail: "Neovim is still waiting for a key after <Esc>",
     });
+  });
 
   /**
    * Where Neovim is once it has consumed every key it was given: the answer to
@@ -1209,8 +1206,8 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
    * See `mesura.escape_state`. A batch typed in insert mode costs the one fast
    * call.
    */
-  const modeAfterKeys = (session: Session) =>
-    Effect.gen(function* () {
+  const modeAfterKeys = Effect.fn(
+    function* (session: Session) {
       const reported = (yield* request(session, "nvim_get_mode", [])) as {
         readonly mode: string;
         readonly blocking: boolean;
@@ -1237,15 +1234,18 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
         readonly jumping?: boolean;
       };
       return { ...settled, blocking: waiting === true, jumping: jumping === true };
-    }).pipe(
-      // The keys are Neovim's already, so the batch succeeds; where Neovim is
-      // stays unknown, which keeps the next Escape for Neovim. Failing the
-      // batch instead would have the client send it again.
-      Effect.orElseSucceed((): EditorSessionInputResult => {
-        session.waitingForKey = true;
-        return { mode: session.bridge.mode, blocking: true, jumping: false };
-      }),
-    );
+    },
+    (effect, session: Session) =>
+      effect.pipe(
+        // The keys are Neovim's already, so the batch succeeds; where Neovim is
+        // stays unknown, which keeps the next Escape for Neovim. Failing the
+        // batch instead would have the client send it again.
+        Effect.orElseSucceed((): EditorSessionInputResult => {
+          session.waitingForKey = true;
+          return { mode: session.bridge.mode, blocking: true, jumping: false };
+        }),
+      ),
+  );
 
   const service: EditorSessionManager["Service"] = {
     open,
@@ -1437,12 +1437,11 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
     closeThread: (input) => closeThread(input),
     hasSessionForTest: (input) =>
       SynchronizedRef.get(sessions).pipe(Effect.map((current) => current.has(input.threadId))),
-    settleForTest: (input) =>
-      Effect.gen(function* () {
-        const session = (yield* SynchronizedRef.get(sessions)).get(input.threadId);
-        if (session === undefined) return;
-        yield* session.bridge.settle.pipe(Effect.catchCause(() => Effect.void));
-      }),
+    settleForTest: Effect.fn(function* (input) {
+      const session = (yield* SynchronizedRef.get(sessions)).get(input.threadId);
+      if (session === undefined) return;
+      yield* session.bridge.settle.pipe(Effect.catchCause(() => Effect.void));
+    }),
   };
 
   const closeThread = (input: EditorSessionCloseInput) =>
@@ -1525,11 +1524,10 @@ export const makeWithOptions = Effect.fn("EditorSessionManager.makeWithOptions")
     );
 
   /** Drops a session whose Neovim cannot be replaced, and says why. */
-  const giveUp = (session: Session, text: string) =>
-    Effect.gen(function* () {
-      yield* deliverNow(session, { type: "message", kind: "emsg", text });
-      yield* dropSession(session.threadId, "gave-up");
-    });
+  const giveUp = Effect.fn(function* (session: Session, text: string) {
+    yield* deliverNow(session, { type: "message", kind: "emsg", text });
+    yield* dropSession(session.threadId, "gave-up");
+  });
 
   // Each restart on its own fiber, so a slow one — a real configuration takes a
   // plugin load — does not hold up another thread's. The thread's lock still

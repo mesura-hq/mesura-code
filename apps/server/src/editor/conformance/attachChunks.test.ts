@@ -69,6 +69,7 @@ if (!nvimAvailable) reportMissingNvim("attach-chunk harness");
 
 if (nvimAvailable)
   it.layer(layer, { excludeTestServices: true })("the attach stream for one key", (it) => {
+    // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- Real Neovim startup and redraws share this existing subprocess budget; virtual time cannot drive the process.
     it.effect(
       "delivers the lines event and the cursor event of one inserted key in one attach-stream chunk",
       () =>

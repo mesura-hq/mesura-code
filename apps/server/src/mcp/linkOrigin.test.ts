@@ -14,6 +14,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
 import { McpSchema, McpServer } from "effect/ai";
 
@@ -33,6 +34,8 @@ import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import * as CommandReceiptStore from "../orchestration-v2/CommandReceiptStore.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as RemoteDelegation from "../peer/RemoteDelegation.ts";
 import * as SourceControlRepositoryService from "../sourceControl/SourceControlRepositoryService.ts";
@@ -67,7 +70,10 @@ const layerOrchestrator = Layer.mergeAll(
     { databaseLayer: layerDatabase, runEffectWorker: false },
   ),
 );
-const layerOrchestration = ThreadManagement.layer.pipe(Layer.provideMerge(layerOrchestrator));
+const layerOrchestration = ThreadManagement.layer.pipe(
+  Layer.provide(CommandReceiptStore.layer.pipe(Layer.provide(layerDatabase))),
+  Layer.provideMerge(Layer.merge(layerOrchestrator, ServerSettings.layerTest())),
+);
 
 /** Launches dispatch the real thread.create, and nothing more: no workspace, no run. */
 const layerLaunches = Layer.effect(
@@ -125,8 +131,29 @@ const layerTools = Layer.mergeAll(
   Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
   Layer.provide(
     Layer.mock(ProjectService.ProjectService)({
-      getById: () => Effect.die("unused"),
-      update: () => Effect.die("A linked caller must never reach a project update."),
+      getById: () => Effect.succeed(Option.none()),
+      create: (input) =>
+        Effect.succeed({
+          id: input.projectId,
+          title: input.title,
+          workspaceRoot: input.workspaceRoot,
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: "2026-10-18T00:00:00.000Z",
+          updatedAt: "2026-10-18T00:00:00.000Z",
+          deletedAt: null,
+        }),
+      update: (input) =>
+        Effect.succeed({
+          id: input.projectId,
+          title: input.title ?? "Untitled",
+          workspaceRoot: "/p/t3code",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: "2026-10-18T00:00:00.000Z",
+          updatedAt: "2026-10-18T00:00:00.000Z",
+          deletedAt: null,
+        }),
     }),
   ),
   Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
@@ -139,7 +166,16 @@ const layerTools = Layer.mergeAll(
     Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/p" }),
   ),
   Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
-  Layer.provide(Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({})),
+  Layer.provide(
+    Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({
+      cloneRepository: (input) =>
+        Effect.succeed({
+          cwd: input.destinationPath,
+          remoteUrl: "https://github.com/pingdotgg/t3code.git",
+          repository: null,
+        }),
+    }),
+  ),
   Layer.provide(
     ServerConfig.layerTest(process.cwd(), { prefix: "t3-link-origin-" }).pipe(
       Layer.provide(NodeServices.layer),
@@ -164,17 +200,19 @@ const mcpClient = McpSchema.McpServerClient.of({
 const clientScope = (
   sessionId: string,
   linked: boolean,
+  access: McpInvocationContext.McpClientCaller["access"],
 ): McpInvocationContext.McpInvocationScope => ({
   environmentId: EnvironmentId.make("environment:box"),
   requestNamespace: `client:${sessionId}`,
   thread: undefined,
-  client: { sessionId, label: `T3 Code · ${sessionId}`, access: "full-access", linked },
+  client: { sessionId, label: `T3 Code · ${sessionId}`, access, linked },
   capabilities: new Set(["orchestration", "worktree", "pull-requests"]),
   issuedAt: 0,
 });
-const laptop = clientScope("laptop", true);
-const desk = clientScope("desk", true);
-const claudeCode = clientScope("claude-code", false);
+const laptop = clientScope("laptop", true, "auto");
+const desk = clientScope("desk", true, "auto");
+const trusted = clientScope("trusted", true, "full-access");
+const claudeCode = clientScope("claude-code", false, "full-access");
 
 const call = (
   scope: McpInvocationContext.McpInvocationScope,
@@ -221,7 +259,8 @@ const usersOwnThread = Effect.gen(function* () {
     projectId,
     title: "The user's own",
     modelSelection: { instanceId, model: "gpt-5" },
-    runtimeMode: "full-access",
+    // Within an `auto` link's modes, so only the fence decides.
+    runtimeMode: "auto",
     interactionMode: "default",
     branch: null,
     worktreePath: null,
@@ -237,7 +276,11 @@ it.layer(Layer.provideMerge(layerTools, layerOrchestration))("work a link starts
       const projections = yield* ProjectionStore.ProjectionStoreV2;
       const launched = yield* launch(laptop, "Started from the laptop");
       const shell = yield* projections.getThreadShell(launched);
-      assert.deepEqual(shell?.linkOrigin, { sessionId: "laptop", label: "T3 Code · laptop" });
+      assert.deepEqual(shell?.linkOrigin, {
+        sessionId: "laptop",
+        label: "T3 Code · laptop",
+        access: "auto",
+      });
 
       // A subagent of it and a fork of it are built from its thread, origin included.
       const thread = (yield* ThreadManagement.ThreadManagementService.pipe(
@@ -291,7 +334,7 @@ it.layer(Layer.provideMerge(layerTools, layerOrchestration))("work a link starts
     }),
   );
 
-  it.effect("changes only that link's threads, and never the environment", () =>
+  it.effect("changes only that link's threads below full access", () =>
     Effect.gen(function* () {
       const projections = yield* ProjectionStore.ProjectionStoreV2;
       const users = yield* usersOwnThread;
@@ -325,12 +368,7 @@ it.layer(Layer.provideMerge(layerTools, layerOrchestration))("work a link starts
         assert.equal(failureCode(result), "capability_denied", name);
       }
 
-      // Nor the environment itself: projects and settings (one declaration
-      // covers both), and scheduled tasks.
-      assert.equal(
-        failureCode(yield* call(laptop, "t3_project_update", { projectId, title: "Mine now" })),
-        "capability_denied",
-      );
+      // Nor scheduled tasks, which belong to no thread.
       assert.equal(
         failureCode(yield* call(laptop, "delete_scheduled_task", { scheduledTaskId: "any" })),
         "capability_denied",
@@ -339,6 +377,33 @@ it.layer(Layer.provideMerge(layerTools, layerOrchestration))("work a link starts
       // Reads are not fenced.
       const read = yield* call(laptop, "t3_thread_read", { threadId: users });
       assert.equal(read.isError, false);
+    }),
+  );
+
+  it.effect("is not fenced when the link has full access, but still says where it came from", () =>
+    Effect.gen(function* () {
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const users = yield* usersOwnThread;
+      const launched = yield* launch(trusted, "Started from the desk");
+      assert.deepEqual((yield* projections.getThreadShell(launched))?.linkOrigin, {
+        sessionId: "trusted",
+        label: "T3 Code · trusted",
+        access: "full-access",
+      });
+
+      const renamed = yield* call(trusted, "t3_thread_update", {
+        threadId: users,
+        action: "rename",
+        title: "Renamed from the desk",
+      });
+      assert.equal(renamed.isError, false, JSON.stringify(renamed.content));
+      for (const [name, args] of [
+        ["t3_project_update", { projectId, title: "The desk's now" }],
+        ["t3_project_create", { title: "t3code", workspaceRoot: "/p/t3code" }],
+      ] as const) {
+        const changed = yield* call(trusted, name, args);
+        assert.equal(changed.isError, false, `${name}: ${JSON.stringify(changed.content)}`);
+      }
     }),
   );
 });

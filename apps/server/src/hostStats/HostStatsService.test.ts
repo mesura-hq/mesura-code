@@ -54,7 +54,6 @@ const HistoryFile = Schema.Struct({
 });
 const decodeHistoryFile = Schema.decodeUnknownEffect(Schema.fromJsonString(HistoryFile));
 
-// ---------------------------------------------------------------------------
 // Fixtures
 
 function sampleAt(sampledAt: number): HostStatsSample {
@@ -190,8 +189,6 @@ const bucketStarts = (buckets: ReadonlyArray<HostStatsBucket>) =>
  */
 const sampledAtOf = (message: HostStatsMessage) =>
   message.type === "sample" ? message.sample.sampledAt : (message.latest?.sampledAt ?? null);
-
-// ---------------------------------------------------------------------------
 
 it.layer(NodeServices.layer)("HostStatsService phase 2 fence", (it) => {
   it.effect(
@@ -600,7 +597,6 @@ it.layer(NodeServices.layer)("HostStatsService phase 2 fence", (it) => {
   );
 });
 
-// ---------------------------------------------------------------------------
 // Regression: behaviour the phase 2 fence covered only indirectly.
 
 /** A collector that returns `sampleAt(now)` with the next scripted override, in order. */

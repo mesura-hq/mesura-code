@@ -55,6 +55,7 @@ if (nvimAvailable)
   it.layer(layer, { excludeTestServices: true })(
     "Neovim waiting for the rest of a command (phase 6)",
     (it) => {
+      // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- Real Neovim must answer blocking commands within PATIENCE_MS; retain the enclosing subprocess budget.
       it.effect(
         "a cursor move, a viewport or a text write while Neovim waits for a key does not take the thread",
         () =>
@@ -101,6 +102,7 @@ if (nvimAvailable)
         30_000,
       );
 
+      // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- Real Neovim must answer blocking commands within PATIENCE_MS; retain the enclosing subprocess budget.
       it.effect(
         "an outside write while Neovim waits for a key lands, and typing goes on after it",
         () =>
@@ -134,6 +136,7 @@ if (nvimAvailable)
         30_000,
       );
 
+      // oxlint-disable-next-line t3code/no-test-timeout-or-unreasoned-skip -- Real Neovim must answer blocking commands within PATIENCE_MS; retain the enclosing subprocess budget.
       it.effect(
         "opening another file while Neovim waits for a key opens it",
         () =>

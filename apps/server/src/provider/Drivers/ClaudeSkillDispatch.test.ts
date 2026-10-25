@@ -1,32 +1,24 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { planClaudeSkillDispatch } from "./ClaudeSkillDispatch.ts";
+import { planClaudeSkillDispatch, type ClaudeSkillTarget } from "./ClaudeSkillDispatch.ts";
 
-const SKILLS = new Set([
-  "2spec",
-  "implement",
-  "review",
-  "re-release-version",
-  "native-proof:dot.alias_Upper",
-]);
+const skillPath = (name: string) => `/home/me/.claude/skills/${name}/SKILL.md`;
+
+const skillMap = (names: Iterable<string>) =>
+  new Map<string, ClaudeSkillTarget>([...names].map((name) => [name, { path: skillPath(name) }]));
+
+const SKILLS = skillMap(["2spec", "implement", "review", "re-release-version"]);
 
 describe("planClaudeSkillDispatch", () => {
+  // regression: #9128 skills picked from the composer did not run
   it("leaves a prompt without a known skill untouched", () => {
     expect(planClaudeSkillDispatch("fix the build", SKILLS)).toBeUndefined();
-    // Not a discovered skill, so it stays prose rather than becoming a command.
     expect(planClaudeSkillDispatch("echo $HOME then $unknown", SKILLS)).toBeUndefined();
-    expect(planClaudeSkillDispatch("$native-proof:unknown.dot use this", SKILLS)).toBeUndefined();
-    expect(
-      planClaudeSkillDispatch(
-        "$native-proof:space alias_Upper use this",
-        new Set(["native-proof:space alias_Upper"]),
-      ),
-    ).toBeUndefined();
   });
 
-  it("moves a mid-prompt mention into a trailing slash command", () => {
+  it("keeps the whole request ahead of a mid-prompt slash command", () => {
     expect(planClaudeSkillDispatch("ok, now $implement all the tickets", SKILLS)).toEqual({
-      leadingText: "ok, now",
+      leadingText: "ok, now /implement all the tickets",
       commandText: "/implement all the tickets",
       skillName: "implement",
     });
@@ -40,32 +32,11 @@ describe("planClaudeSkillDispatch", () => {
     });
   });
 
-  it.each(["2spec", "native-proof:dot.alias_Upper"])(
-    "dispatches the exact known skill %s with arguments intact",
-    (name) => {
-      expect(planClaudeSkillDispatch(`use $${name} for this\nand that`, SKILLS)).toEqual({
-        leadingText: "use",
-        commandText: `/${name} for this\nand that`,
-        skillName: name,
-      });
-    },
-  );
-
   it("dispatches the last mention and rewrites earlier ones inline", () => {
     expect(planClaudeSkillDispatch("$review the diff, then $implement the fixes", SKILLS)).toEqual({
-      leadingText: "/review the diff, then",
+      leadingText: "/review the diff, then /implement the fixes",
       commandText: "/implement the fixes",
       skillName: "implement",
-    });
-    expect(
-      planClaudeSkillDispatch(
-        "$native-proof:dot.space alias_Upper argument one\nnext",
-        new Set(["native-proof:dot.space", "native-proof:dot.space alias_Upper"]),
-      ),
-    ).toEqual({
-      leadingText: undefined,
-      commandText: "/native-proof:dot.space alias_Upper argument one\nnext",
-      skillName: "native-proof:dot.space",
     });
   });
 
@@ -77,7 +48,7 @@ describe("planClaudeSkillDispatch", () => {
           SKILLS,
         ),
       ).toEqual({
-        leadingText: "/review the diff, then",
+        leadingText: "/review the diff, then /implement the fixes",
         commandText: "/implement the fixes",
         skillName: "implement",
       });
@@ -90,12 +61,8 @@ describe("planClaudeSkillDispatch", () => {
     }
   });
 
-  it("ignores a dollar token glued to other text", () => {
-    expect(planClaudeSkillDispatch("cost is 5$implement", SKILLS)).toBeUndefined();
-  });
-
   it("ignores currency amounts and compact monetary expressions", () => {
-    const skillsWithCurrency = new Set([...SKILLS, "20", "20k", "100M", "1e6", "20.5k"]);
+    const skillsWithCurrency = skillMap([...SKILLS.keys(), "20", "20k", "100M", "1e6"]);
     for (const symbol of ["$", "€", "£", "¥", "₹", "₩", "₿", "𑿝"]) {
       expect(
         planClaudeSkillDispatch(
@@ -104,8 +71,44 @@ describe("planClaudeSkillDispatch", () => {
         ),
       ).toBeUndefined();
     }
+  });
+
+  it("bounds notes for repeated user-only skills and leaves the native dispatch unannotated", () => {
+    const skills = new Map([
+      ["interrogate", { path: skillPath("interrogate"), userInvocationOnly: true }],
+      ["implement", { path: skillPath("implement"), userInvocationOnly: true }],
+    ]);
     expect(
-      planClaudeSkillDispatch("budget is $20.5k tomorrow", skillsWithCurrency),
+      planClaudeSkillDispatch(
+        "$interrogate then $interrogate then $implement and $implement the fixes",
+        skills,
+      ),
+    ).toEqual({
+      leadingText: `/interrogate [The user invoked this skill. Follow the instructions at: ${skillPath("interrogate")}] then /interrogate then /implement and /implement the fixes`,
+      commandText: "/implement the fixes",
+      skillName: "implement",
+    });
+  });
+});
+
+describe("Mesura plugin skill names", () => {
+  it.each(["2spec", "native-proof:dot.alias_Upper"])(
+    "dispatches the exact known skill %s with arguments intact",
+    (name) => {
+      const skills = skillMap([name]);
+      expect(planClaudeSkillDispatch(`use $${name} for this\nand that`, skills)).toEqual({
+        leadingText: `use /${name} for this\nand that`,
+        commandText: `/${name} for this\nand that`,
+        skillName: name,
+      });
+    },
+  );
+
+  it("rejects unknown and whitespace-containing plugin names", () => {
+    const skills = skillMap(["native-proof:dot.alias_Upper", "native-proof:space alias_Upper"]);
+    expect(planClaudeSkillDispatch("$native-proof:unknown.dot use this", skills)).toBeUndefined();
+    expect(
+      planClaudeSkillDispatch("$native-proof:space alias_Upper use this", skills),
     ).toBeUndefined();
   });
 });

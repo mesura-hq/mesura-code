@@ -18,6 +18,7 @@ import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
+import * as FactoryRunShellSummaries from "../factory/FactoryRunShellSummaries.ts";
 import * as EventSink from "./EventSink.ts";
 import * as EventStore from "./EventStore.ts";
 import * as FactoryCardQuery from "./FactoryCardQuery.ts";
@@ -84,6 +85,61 @@ const insertLegacyCard = Effect.fn("MesuraFactoryCard.test.insertCard")(function
 });
 
 it.layer(testLayer)("Mesura Factory lifecycle through the orchestrator", (it) => {
+  it.effect(
+    "keeps Factory shell labels when decoding a captured snapshot after its transaction",
+    () =>
+      Effect.gen(function* () {
+        const importer = yield* LegacyV1ThreadImporter.LegacyV1ThreadImporter;
+        const sql = yield* SqlClient.SqlClient;
+        const threadId = ThreadId.make("thread:factory-shell-read");
+        const laterThreadId = ThreadId.make("thread:factory-shell-after-read");
+        const summaries = FactoryRunShellSummaries.make();
+        yield* seedLegacyMessages(threadId);
+        yield* importer.reconcileShells;
+
+        yield* Effect.gen(function* () {
+          const projections = yield* ProjectionStore.ProjectionStoreV2;
+          const decode = yield* sql.withTransaction(projections.readShellSnapshot());
+          yield* seedLegacyMessages(laterThreadId);
+          yield* importer.reconcileShells;
+          const summary = {
+            status: "running",
+            phaseIndex: 2,
+            phaseCount: 3,
+            node: "review",
+          } as const;
+          summaries.set(threadId, summary);
+
+          const snapshot = yield* decode;
+          assert.deepStrictEqual(
+            snapshot.threads.find((thread) => thread.id === threadId)?.factoryRun,
+            summary,
+          );
+          assert.isUndefined(snapshot.threads.find((thread) => thread.id === laterThreadId));
+          assert.deepStrictEqual(
+            (yield* projections.getThreadShell(threadId))?.factoryRun,
+            summary,
+          );
+          const current = yield* projections.getShellSnapshot();
+          assert.deepStrictEqual(
+            current.threads.find((thread) => thread.id === threadId)?.factoryRun,
+            summary,
+          );
+          const plain = current.threads.find((thread) => thread.id === laterThreadId);
+          assert.isDefined(plain);
+          assert.isFalse(Object.hasOwn(plain!, "factoryRun"));
+        }).pipe(
+          Effect.provide(
+            Layer.fresh(ProjectionStore.layer).pipe(
+              Layer.provide(
+                Layer.succeed(FactoryRunShellSummaries.FactoryRunShellSummaries, summaries),
+              ),
+            ),
+          ),
+        );
+      }),
+  );
+
   it.effect(
     "Mesura P1-3 records the first report of an imported unfinished run through commands, retry and replay",
     () =>

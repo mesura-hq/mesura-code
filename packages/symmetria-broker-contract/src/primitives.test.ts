@@ -35,6 +35,12 @@ describe("Symmetria-owned branded primitives", () => {
       expect(Result.isFailure(decode(1.5))).toBe(true);
     });
 
+    it(`${name} preserves the safe-integer ceiling for JavaScript and JSON consumers`, () => {
+      expect(Result.isSuccess(decode(Number.MAX_SAFE_INTEGER))).toBe(true);
+      expect(Result.isFailure(decode(Number.MAX_SAFE_INTEGER + 1))).toBe(true);
+      expect(Schema.toJsonSchemaDocument(schema).schema.maximum).toBe(Number.MAX_SAFE_INTEGER);
+    });
+
     it(`${name} refuses a value that is not a number`, () => {
       expect(Result.isFailure(decode("1"))).toBe(true);
       expect(Result.isFailure(decode(null))).toBe(true);

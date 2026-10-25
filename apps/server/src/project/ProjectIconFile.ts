@@ -230,7 +230,14 @@ function writeInPinnedDirectories(input: {
           maxBytes: PROJECT_ICON_MAX_BYTES,
         }),
       ],
-      { stdio: ["pipe", "ignore", "pipe"], timeout: WRITER_TIMEOUT_MS, windowsHide: true },
+      {
+        stdio: ["pipe", "ignore", "pipe"],
+        timeout: WRITER_TIMEOUT_MS,
+        windowsHide: true,
+        // Node 26's default spawn path reads the native environment even after
+        // process.env is replaced. Pass the current settings to the writer.
+        env: process.env,
+      },
     );
     let stderr = "";
     child.stderr.setEncoding("utf8").on("data", (chunk: string) => {

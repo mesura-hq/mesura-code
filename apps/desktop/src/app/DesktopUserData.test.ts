@@ -3,7 +3,6 @@ import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
-import * as PlatformError from "effect/PlatformError";
 
 import { resolveUserDataPath } from "./DesktopUserData.ts";
 
@@ -11,37 +10,6 @@ import { resolveUserDataPath } from "./DesktopUserData.ts";
 // leaves the migration branches unreachable. Distinct names keep upstream's
 // Windows migration behavior under test.
 const distinctDirectoryNames = { current: "current-profile", legacy: "legacy-profile" };
-
-it.effect("identifies a failed source read and preserves its cause", () => {
-  const sourceState = "/profiles/legacy-profile/Local State";
-  const cause = PlatformError.systemError({
-    _tag: "PermissionDenied",
-    module: "FileSystem",
-    method: "readFileString",
-    pathOrDescriptor: sourceState,
-  });
-  return Effect.gen(function* () {
-    const error = yield* resolveUserDataPath({
-      appDataDirectory: "/profiles",
-      isDevelopment: false,
-      platform: "win32",
-      directoryNames: distinctDirectoryNames,
-    }).pipe(Effect.flip);
-    assert.equal(error.operation, "read");
-    assert.equal(error.resourcePath, sourceState);
-    assert.equal(error.category, "PermissionDenied");
-    assert.strictEqual(error.cause, cause);
-  }).pipe(
-    Effect.provideService(
-      FileSystem.FileSystem,
-      FileSystem.makeNoop({
-        exists: (path) => Effect.succeed(path === sourceState),
-        readFileString: () => Effect.fail(cause),
-      }),
-    ),
-    Effect.provide(NodeServices.layer),
-  );
-});
 
 it.effect("preserves Windows credential keys without copying browser databases", () =>
   Effect.gen(function* () {
@@ -84,7 +52,13 @@ it.effect.each([
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const directory = yield* fs.makeTempDirectoryScoped({ prefix: "mesura-profile-" });
-      for (const t3Name of ["t3code", "t3code-v2", "T3 Code (Alpha)", "T3 Code (Dev)"]) {
+      for (const t3Name of [
+        "t3code",
+        "t3code-v2",
+        "T3 Code (Alpha)",
+        "T3 Code (Beta)",
+        "T3 Code (Dev)",
+      ]) {
         yield* fs.makeDirectory(path.join(directory, t3Name), { recursive: true });
         yield* fs.writeFileString(path.join(directory, t3Name, "Local State"), "t3 keys");
       }

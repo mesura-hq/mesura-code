@@ -55,7 +55,6 @@ const copyFixture = (name: string) =>
   });
 
 it.layer(NodeServices.layer)("linuxReaders phase 1 fence", (it) => {
-  // -------------------------------------------------------------------------
   // AC4
   it.effect.each([
     {
@@ -100,7 +99,6 @@ it.layer(NodeServices.layer)("linuxReaders phase 1 fence", (it) => {
     }),
   );
 
-  // -------------------------------------------------------------------------
   // AC8, per reader: a malformed or missing file is a null result, never a failure.
   interface ReaderCase {
     readonly reader: string;

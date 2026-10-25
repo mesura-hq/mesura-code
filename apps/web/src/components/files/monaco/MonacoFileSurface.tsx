@@ -1,6 +1,6 @@
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import * as monaco from "monaco-editor";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 
 import type { DraftId } from "~/composerDraftStore";
 
@@ -12,7 +12,7 @@ import { useNvimFileEditor } from "./nvim/useNvimFileEditor";
 import { installFileEditorDismissal } from "../fileEditorDismissal";
 import { getProjectFileContents, setProjectFileQueryData } from "../projectFilesQueryState";
 import { useFileSaveCoordinator } from "../useFileSaveCoordinator";
-import { minimalTextEdit } from "./monacoFileEdit";
+import { minimalTextEdit, type MinimalTextEdit } from "./monacoFileEdit";
 import { ensureMonacoEnvironment } from "./monacoEnvironment";
 import { useMonacoFileComments } from "./monacoFileComments";
 import { languageIdForPath } from "./monacoFileLanguage";
@@ -102,6 +102,21 @@ export function MonacoFileSurface({
   const decorationsRef = useRef<monaco.editor.IEditorDecorationsCollection | null>(null);
   const fontFamilyCode = useClientSettings((settings) => settings.fontFamilyCode);
   const fontSizeCode = useClientSettings((settings) => settings.fontSizeCode);
+  const initialOptionsRef = useRef({ resolvedTheme, modalEditing, wordWrap });
+  const contentsRef = useRef(contents);
+  useLayoutEffect(() => {
+    contentsRef.current = contents;
+  }, [contents]);
+  const appliedFontRef = useRef<{
+    editor: monaco.editor.IStandaloneCodeEditor;
+    family: typeof fontFamilyCode;
+    size: typeof fontSizeCode;
+  } | null>(null);
+  const revealedRequestRef = useRef<{
+    editor: monaco.editor.IStandaloneCodeEditor;
+    line: number | null;
+    id: number;
+  } | null>(null);
 
   const saveCoordinator = useFileSaveCoordinator({
     environmentId,
@@ -138,14 +153,7 @@ export function MonacoFileSurface({
   const externalEdits = useMemo(
     () => ({
       isApplying: () => applyingExternalEditRef.current,
-      run: (body: () => void) => {
-        applyingExternalEditRef.current = true;
-        try {
-          body();
-        } finally {
-          applyingExternalEditRef.current = false;
-        }
-      },
+      run: (body: () => void) => runExternalEdit(applyingExternalEditRef, body),
     }),
     [],
   );
@@ -160,6 +168,7 @@ export function MonacoFileSurface({
     const surface = readCodeSurfaceColors(host);
     defineMesuraMonacoThemes(monaco, { light: surface, dark: surface });
     const font = readCodeFont();
+    const initialOptions = initialOptionsRef.current;
 
     // The prototype's options, kept as validated by hand. The ones that are not
     // defaults: the caret animates only on an explicit move, highlighting
@@ -167,10 +176,10 @@ export function MonacoFileSurface({
     // suggestion source is off because code intelligence is a backend job.
     const editor = monaco.editor.create(host, {
       value: "",
-      theme: resolvedTheme === "dark" ? MESURA_MONACO_DARK : MESURA_MONACO_LIGHT,
+      theme: initialOptions.resolvedTheme === "dark" ? MESURA_MONACO_DARK : MESURA_MONACO_LIGHT,
       fontFamily: font.family,
       fontSize: font.sizePx,
-      lineNumbers: modalEditing ? "relative" : "on",
+      lineNumbers: initialOptions.modalEditing ? "relative" : "on",
       scrollBeyondLastLine: false,
       cursorSmoothCaretAnimation: "explicit",
       smoothScrolling: true,
@@ -183,7 +192,7 @@ export function MonacoFileSurface({
       quickSuggestions: false,
       parameterHints: { enabled: false },
       contextmenu: false,
-      wordWrap: wordWrap ? "on" : "off",
+      wordWrap: initialOptions.wordWrap ? "on" : "off",
     });
     editorRef.current = editor;
     setEditor(editor);
@@ -236,7 +245,7 @@ export function MonacoFileSurface({
 
     const { model, reused } = models.acquire(
       key,
-      contents,
+      contentsRef.current,
       languageIdForPath(relativePath, monaco.languages.getLanguages()),
     );
     editor.setModel(model);
@@ -260,6 +269,119 @@ export function MonacoFileSurface({
     // changed while it was away is caught by that same effect, which runs after
     // this one on the same render.
   }, [environmentId, cwd, relativePath, retention, models]);
+
+  useEffect(() => {
+    editorRef.current?.updateOptions({ wordWrap: wordWrap ? "on" : "off" });
+  }, [wordWrap]);
+
+  // Redefined rather than only re-selected: an environment theme changes the
+  // code-surface custom properties without changing light or dark, and the
+  // colours have to be read off the node again to catch that.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (host === null) return;
+    const surface = readCodeSurfaceColors(host);
+    defineMesuraMonacoThemes(monaco, { light: surface, dark: surface });
+    monaco.editor.setTheme(resolvedTheme === "dark" ? MESURA_MONACO_DARK : MESURA_MONACO_LIGHT);
+  }, [resolvedTheme]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (editor === null) return;
+    const applied = appliedFontRef.current;
+    if (
+      applied?.editor === editor &&
+      applied.family === fontFamilyCode &&
+      applied.size === fontSizeCode
+    )
+      return;
+    // The settings invalidate the font read; CSS supplies the resolved values.
+    const font = readCodeFont();
+    editor.updateOptions({ fontFamily: font.family, fontSize: font.sizePx });
+    appliedFontRef.current = { editor, family: fontFamilyCode, size: fontSizeCode };
+  }, [fontFamilyCode, fontSizeCode]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    const decorations = decorationsRef.current;
+    const model = editor?.getModel();
+    if (!editor || !decorations || !model) return;
+    const previous = revealedRequestRef.current;
+    if (
+      previous?.editor === editor &&
+      previous.line === revealLine &&
+      previous.id === revealRequestId
+    )
+      return;
+    revealedRequestRef.current = { editor, line: revealLine, id: revealRequestId };
+    if (revealLine === null) {
+      decorations.clear();
+      return;
+    }
+    const line = resolveRevealLine(revealLine, model.getLineCount());
+    editor.revealLineInCenter(line);
+    decorations.set([
+      {
+        range: new monaco.Range(line, 1, line, 1),
+        options: { isWholeLine: true, className: REVEAL_LINE_CLASS },
+      },
+    ]);
+    // A new request id reveals the same line again. The editor identity also
+    // lets a layout-effect replay reveal it in the replacement editor.
+  }, [revealRequestId, revealLine]);
+
+  const comments = useMonacoFileComments({
+    editor,
+    model,
+    relativePath,
+    composerDraftTarget,
+  });
+  // A ref so the dismissal listeners can read the current answer without being
+  // torn down and reinstalled every time a comment form opens or closes.
+  const nvim = useNvimFileEditor({
+    editor,
+    model,
+    environmentId,
+    threadRef,
+    cwd,
+    relativePath,
+    enabled: modalEditing,
+    // Shared with the effect below rather than duplicated: the driver has to
+    // know an agent's write from a browser composition, and the difference is
+    // this ref being set.
+    externalEdits: externalEdits,
+    flushSave: () => {
+      void saveRef.current.flush();
+    },
+  });
+
+  // Relative while Neovim is driving, absolute otherwise.
+  //
+  // The numbers are what `3j` and `d5k` are counted off, so they belong to the
+  // modal editing they serve. Monaco's `relative` is Vim's hybrid — the
+  // cursor's own line keeps its absolute number — which is what the
+  // developer's `number` plus `relativenumber` already gives them.
+  //
+  // Keyed on the driver being active, not on the setting. With the setting on
+  // and no session — `nvim` missing, a configuration directory that is not
+  // there — the panel is plain Monaco, and a relative gutter there counts off
+  // a cursor nothing is moving.
+  //
+  // Applied through `updateOptions` rather than only at creation, because the
+  // editor is created once on purpose and outlives every setting change.
+  // Adding this to the creating hook's dependencies would remount the editor
+  // and take the undo stack with it, which is the defect
+  // `monaco-file-surface-wired` exists to prevent.
+  useEffect(() => {
+    editorRef.current?.updateOptions({ lineNumbers: nvim.active ? "relative" : "on" });
+  }, [nvim.active]);
+
+  // Through a ref because the effect that applies an external change must not
+  // be torn down and re-run every time the driver's mode changes.
+  const nvimRef = useRef(nvim.takeExternalEdit);
+  useLayoutEffect(() => {
+    nvimRef.current = nvim.takeExternalEdit;
+  }, [nvim.takeExternalEdit]);
 
   // An external change to the open file: the watcher pushed one, or a save
   // confirmed. Applied as an edit, never `setValue`, because `setValue` clears
@@ -313,133 +435,13 @@ export function MonacoFileSurface({
       return;
     }
 
-    applyingExternalEditRef.current = true;
-    try {
-      // The edit gets its own undo element, on both sides. Without these,
-      // Monaco merges the incoming rewrite into whatever typing group is still
-      // open, and one Ctrl+Z then reverts the agent's write AND the user's
-      // last few keystrokes together. Measured, not guessed: undoing a
-      // merged group left a half-typed line on screen.
-      model.pushStackElement();
-      const range = monaco.Range.fromPositions(
-        model.getPositionAt(edit.startOffset),
-        model.getPositionAt(edit.endOffset),
-      );
-      // The selection goes in so undo restores it, and the computer returns
-      // null so Monaco maps the caret through the edit itself rather than
-      // being told where to put it.
-      model.pushEditOperations(
-        editor.getSelections() ?? [],
-        [{ range, text: edit.text }],
-        () => null,
-      );
-      model.pushStackElement();
-    } finally {
-      applyingExternalEditRef.current = false;
-    }
+    applyExternalModelEdit(editor, model, edit, applyingExternalEditRef);
     // Suppressing the listener also suppressed the record it keeps, so the
     // record is written here instead. Leaving it stale would cost the undo
     // stack on the next return to this file, because `canReuse` would compare
     // the pre-edit text against the file on disk and decide to load fresh.
     retention.noteEditorFile(relativePath, { contents });
   }, [contents, environmentId, cwd, relativePath, retention]);
-
-  useEffect(() => {
-    editorRef.current?.updateOptions({ wordWrap: wordWrap ? "on" : "off" });
-  }, [wordWrap]);
-
-  // Redefined rather than only re-selected: an environment theme changes the
-  // code-surface custom properties without changing light or dark, and the
-  // colours have to be read off the node again to catch that.
-  useEffect(() => {
-    const host = hostRef.current;
-    if (host === null) return;
-    const surface = readCodeSurfaceColors(host);
-    defineMesuraMonacoThemes(monaco, { light: surface, dark: surface });
-    monaco.editor.setTheme(resolvedTheme === "dark" ? MESURA_MONACO_DARK : MESURA_MONACO_LIGHT);
-  }, [resolvedTheme]);
-
-  useEffect(() => {
-    editorRef.current?.updateOptions(
-      (() => {
-        const font = readCodeFont();
-        return { fontFamily: font.family, fontSize: font.sizePx };
-      })(),
-    );
-  }, [fontFamilyCode, fontSizeCode]);
-
-  useEffect(() => {
-    const editor = editorRef.current;
-    const decorations = decorationsRef.current;
-    const model = editor?.getModel();
-    if (!editor || !decorations || !model) return;
-    if (revealLine === null) {
-      decorations.clear();
-      return;
-    }
-    const line = resolveRevealLine(revealLine, model.getLineCount());
-    editor.revealLineInCenter(line);
-    decorations.set([
-      {
-        range: new monaco.Range(line, 1, line, 1),
-        options: { isWholeLine: true, className: REVEAL_LINE_CLASS },
-      },
-    ]);
-    // `revealRequestId` is listed although the body never reads it: asking for
-    // the same line twice has to reveal it twice, and the request id is the only
-    // thing that changes between those two asks.
-  }, [revealRequestId, revealLine]);
-
-  const comments = useMonacoFileComments({
-    editor,
-    model,
-    relativePath,
-    composerDraftTarget,
-  });
-  // A ref so the dismissal listeners can read the current answer without being
-  // torn down and reinstalled every time a comment form opens or closes.
-  const nvim = useNvimFileEditor({
-    editor,
-    model,
-    environmentId,
-    threadRef,
-    cwd,
-    relativePath,
-    enabled: modalEditing,
-    // Shared with the effect below rather than duplicated: the driver has to
-    // know an agent's write from a browser composition, and the difference is
-    // this ref being set.
-    externalEdits: externalEdits,
-    flushSave: () => {
-      void saveRef.current.flush();
-    },
-  });
-
-  // Relative while Neovim is driving, absolute otherwise.
-  //
-  // The numbers are what `3j` and `d5k` are counted off, so they belong to the
-  // modal editing they serve. Monaco's `relative` is Vim's hybrid — the
-  // cursor's own line keeps its absolute number — which is what the
-  // developer's `number` plus `relativenumber` already gives them.
-  //
-  // Keyed on the driver being active, not on the setting. With the setting on
-  // and no session — `nvim` missing, a configuration directory that is not
-  // there — the panel is plain Monaco, and a relative gutter there counts off
-  // a cursor nothing is moving.
-  //
-  // Applied through `updateOptions` rather than only at creation, because the
-  // editor is created once on purpose and outlives every setting change.
-  // Adding this to the creating hook's dependencies would remount the editor
-  // and take the undo stack with it, which is the defect
-  // `monaco-file-surface-wired` exists to prevent.
-  useEffect(() => {
-    editorRef.current?.updateOptions({ lineNumbers: nvim.active ? "relative" : "on" });
-  }, [nvim.active]);
-
-  // Through a ref because the effect that applies an external change must not
-  // be torn down and re-run every time the driver's mode changes.
-  const nvimRef = useRef(nvim.takeExternalEdit);
-  nvimRef.current = nvim.takeExternalEdit;
 
   const hasOpenDraftRef = useRef(comments.hasOpenDraft);
   useEffect(() => {
@@ -449,7 +451,9 @@ export function MonacoFileSurface({
   // Read through refs because the dismissal listener is installed once, on
   // mount, and must see Neovim as it is now rather than as it was then.
   const nvimActiveRef = useRef(nvim.active);
-  nvimActiveRef.current = nvim.active;
+  useLayoutEffect(() => {
+    nvimActiveRef.current = nvim.active;
+  }, [nvim.active]);
   // Layout effect, not render: written after commit and before any later
   // keydown can reach the listener, so it never decides on a stale answer.
   const nvimEscapeRef = useRef(nvim.escapeGoesToNeovim);
@@ -519,4 +523,47 @@ export function MonacoFileSurface({
       ) : null}
     </div>
   );
+}
+
+// These operations run at the imperative editor boundary. Keep exception cleanup
+// outside the component because React Compiler cannot lower try/finally yet.
+function runExternalEdit(applyingExternalEditRef: RefObject<boolean>, body: () => void): void {
+  applyingExternalEditRef.current = true;
+  try {
+    body();
+  } finally {
+    applyingExternalEditRef.current = false;
+  }
+}
+
+function applyExternalModelEdit(
+  editor: monaco.editor.IStandaloneCodeEditor,
+  model: monaco.editor.ITextModel,
+  edit: MinimalTextEdit,
+  applyingExternalEditRef: RefObject<boolean>,
+): void {
+  applyingExternalEditRef.current = true;
+  try {
+    // The edit gets its own undo element, on both sides. Without these,
+    // Monaco merges the incoming rewrite into whatever typing group is still
+    // open, and one Ctrl+Z then reverts the agent's write AND the user's
+    // last few keystrokes together. Measured, not guessed: undoing a
+    // merged group left a half-typed line on screen.
+    model.pushStackElement();
+    const range = monaco.Range.fromPositions(
+      model.getPositionAt(edit.startOffset),
+      model.getPositionAt(edit.endOffset),
+    );
+    // The selection goes in so undo restores it, and the computer returns
+    // null so Monaco maps the caret through the edit itself rather than
+    // being told where to put it.
+    model.pushEditOperations(
+      editor.getSelections() ?? [],
+      [{ range, text: edit.text }],
+      () => null,
+    );
+    model.pushStackElement();
+  } finally {
+    applyingExternalEditRef.current = false;
+  }
 }

@@ -20,16 +20,6 @@ import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { environmentPresentations } from "~/state/presentation";
 import { useEnvironment } from "~/state/environments";
 
-/**
- * Read and decode the project's checked-in `t3.json`.
- *
- * Imperative counterpart to `useT3ProjectFileState` for the new-thread path,
- * which resolves defaults at call time rather than render time. The file
- * query atom caches per (environment, cwd), so repeat calls don't re-fetch.
- * Optimistic in-app writes overlay the query result, matching what
- * `useProjectFileQuery` renders. Missing, truncated, or invalid files
- * resolve to null.
- */
 export async function readT3ProjectFile(
   environmentId: EnvironmentId,
   workspaceRoot: string,
@@ -45,7 +35,7 @@ export async function readT3ProjectFile(
     T3_PROJECT_FILE_NAME,
     result._tag === "Success" ? result.value : null,
   );
-  if (data === null || data.truncated) return null;
+  if (data === null || data.exists === false || data.truncated) return null;
   return parseT3ProjectFile(data.contents);
 }
 
