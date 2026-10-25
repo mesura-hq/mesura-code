@@ -146,6 +146,9 @@ const settle = () => flushBrowserTasks();
 // Seed only durable ownership, without starting this controller and setting its restore latch.
 describe("dictation after a reload", () => {
   it("dictation phase 4 regression: after a reload the mode keys pick the transcribing job back up", async () => {
+    // Browser test files share one origin: a job another file recorded later would be the
+    // device's newest, and only the newest job is restored.
+    localStorage.clear();
     using _clock = fakeTimers({ now: JOB_CREATED_AT });
     await using _browserFixture0 = await setupBrowserFixture0();
 
