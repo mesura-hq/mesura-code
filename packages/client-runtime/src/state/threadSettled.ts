@@ -77,6 +77,7 @@ export interface ThreadSnoozeShell extends QueuedThreadShell {
   readonly hasPendingApprovals: boolean;
   readonly hasPendingUserInput: boolean;
   readonly pendingSubagentRequest?: PendingSubagentRequest | null;
+  readonly agentSignal?: EnvironmentThreadShell["agentSignal"];
 }
 
 /**
@@ -88,6 +89,8 @@ export function threadRaisedHandWhileSnoozed(shell: ThreadSnoozeShell): boolean 
   if (shell.hasPendingApprovals || shell.hasPendingUserInput) return true;
   if (shell.source?.pendingRuntimeRequest != null) return true;
   if (shell.pendingSubagentRequest != null) return true;
+  // Mesura: a question the agent asked in prose, the twin of the server's `isSnoozed`.
+  if (shell.agentSignal?.kind === "needs_input") return true;
   const failedAt = failureEdgeAt(shell);
   return (
     failedAt !== undefined &&

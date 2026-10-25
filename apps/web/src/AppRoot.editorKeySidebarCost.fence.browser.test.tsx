@@ -37,6 +37,10 @@ import { flushBrowserTasks } from "./test/browserTasks";
  * memoized row's `sortable` bag was new each time: the drag sensor's options
  * were rebuilt with each sidebar render, which renews every row's listeners,
  * and the sortable ids were a new array, which dnd-kit reads as a reorder.
+ *
+ * The thread attention cycle (phase 3) reuses the harness for the one thing
+ * only the real sidebar shows: a live Working row at Pixel 7 size, opened
+ * through the sidebar sheet, beside a Waiting row it must look like.
  */
 import { type ReactNode } from "react";
 import * as monaco from "monaco-editor";
@@ -873,5 +877,109 @@ describe("the first key after opening a file (phase 4, criterion 2)", () => {
 
     expect(editorTransport.appliedKeys().endsWith("j"), "the key reached Neovim").toBe(true);
     expect(rendersOutsideFilePanel(rendered)).toEqual({});
+  });
+});
+
+/** The status label in a row's top slot, found by its live-region text. The phone's sidebar
+ * sheet is portaled to the body, so the search covers the document. */
+function rowStatusLabel(rowTitle: string, label: string): HTMLElement {
+  const row = [...document.querySelectorAll<HTMLElement>('[data-testid="sidebar-row-card"]')].find(
+    (candidate) => candidate.textContent?.includes(rowTitle),
+  );
+  expect(row, `a card row for ${rowTitle}`).toBeDefined();
+  const live = [...row!.querySelectorAll<HTMLElement>('[role="status"]')].find(
+    (candidate) => candidate.textContent === label,
+  );
+  expect(live, `${rowTitle} shows ${label}; row reads ${row!.textContent}`).toBeDefined();
+  return live!.parentElement!;
+}
+
+/** The opacity a reader sees: the product of every ancestor's, up to the row's list item. */
+function effectiveOpacity(element: HTMLElement): number {
+  let opacity = 1;
+  for (let node: HTMLElement | null = element; node; node = node.parentElement) {
+    opacity *= Number(getComputedStyle(node).opacity);
+    if (node.matches("[data-thread-item]")) break;
+  }
+  return opacity;
+}
+
+// Phase 3 of the thread attention cycle: no witness could produce a live Working row, so this
+// mounts the real sidebar at Pixel 7 size with one running and one waiting thread.
+describe("thread attention: Working and Waiting rows at phone width", () => {
+  it("sidebar attention row spec: Working keeps its timer, has no icon and looks like Waiting at Pixel 7", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await page.viewport(412, 915);
+
+    const [openId, workingId, waitingId] = [
+      "attention-open",
+      "attention-working",
+      "attention-waiting",
+    ].map((id, index) => {
+      const threadId = addFenceThread(
+        id,
+        ["Opened thread", "Working thread", "Waiting thread"][index]!,
+        [makeMessage(`${id}-assistant`, "assistant", "Done.")],
+      );
+      openedThreads.push(threadId);
+      return threadId;
+    });
+    const workingShell = fixture.threads.get(workingId!)!;
+    const workingRun = RunId.make("attention-working-run");
+    fixture.threads.set(
+      workingId!,
+      presentThreadShell(environmentId, {
+        ...workingShell.source,
+        latestRunId: workingRun,
+        activeRunId: workingRun,
+        status: "running",
+        latestRunStartedAt: DateTime.makeUnsafe("2026-10-08T11:55:00.000Z"),
+      }),
+    );
+    const waitingShell = fixture.threads.get(waitingId!)!;
+    fixture.threads.set(
+      waitingId!,
+      presentThreadShell(environmentId, {
+        ...waitingShell.source,
+        latestRunId: RunId.make("attention-waiting-run"),
+        activeRunId: null,
+        status: "completed",
+        latestRunStartedAt: DateTime.makeUnsafe("2026-10-08T11:50:00.000Z"),
+        latestRunCompletedAt: DateTime.makeUnsafe("2026-10-08T11:58:00.000Z"),
+        pendingBackgroundTasks: [
+          { taskId: "attention-command", description: "pnpm test", kind: "command" },
+        ],
+      }),
+    );
+    sidebarLists.threads = [...fixture.threads.values()];
+    sidebarLists.projects = [fixture.project];
+    ({ root } = await renderFenceApp(container, openId!, { vimMode: false }));
+    await settle();
+    // At phone width the sidebar is a sheet; the toggle chord opens it, as a keyboard would.
+    // The composer takes focus on mount and claims Mod+B for bold, so the chord starts elsewhere.
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    await dispatch("keydown", { key: "b", code: "KeyB", ctrlKey: true });
+    await expect.element(page.getByTestId("sidebar-row-card").first()).toBeInTheDocument();
+    await settle();
+
+    const working = rowStatusLabel("Working thread", "Working");
+    const waiting = rowStatusLabel("Waiting thread", "Waiting");
+    expect(working.querySelector("svg"), "no Working icon").toBeNull();
+    expect(waiting.querySelector("svg"), "no Waiting icon").toBeNull();
+    const timer = working.querySelector(
+      '[aria-hidden="true"] .tabular-nums, [aria-hidden] .tabular-nums',
+    );
+    expect(timer?.textContent ?? "", "the Working timer").toMatch(/\d/);
+
+    const look = (element: HTMLElement) => {
+      const style = getComputedStyle(element);
+      return {
+        color: style.color,
+        fontWeight: style.fontWeight,
+        opacity: effectiveOpacity(element),
+      };
+    };
+    expect(look(working)).toEqual(look(waiting));
+    expect(look(working).opacity, "quiet, not full strength").toBeLessThan(1);
   });
 });

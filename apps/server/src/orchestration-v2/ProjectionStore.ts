@@ -2,6 +2,10 @@ import { applyThreadPullRequestLinkUpdate } from "@t3tools/shared/threadPullRequ
 import { projectTurnItemForWire } from "./WireProjection.ts";
 // Mesura: the Software Factory run label on thread shells.
 import { factoryRunShellLabeler } from "./FactoryCards.ts";
+import {
+  UNDELIVERED_DELEGATED_RESULT_SQL_STATES,
+  withUndeliveredDelegatedResults,
+} from "./undeliveredDelegatedResults.ts";
 import * as Stream from "effect/Stream";
 import { makeThreadFind, findProjectedThreadItems } from "./ThreadFind.ts";
 import type {
@@ -197,6 +201,7 @@ export type ProjectionSettlementCandidate = Pick<
   | "settledOverride"
   | "pinnedAt"
   | "autoSettleDisabledAt"
+  | "agentSignal"
   | "snoozedUntil"
   | "snoozedAt"
   | "latestRunId"
@@ -803,6 +808,8 @@ export function applyToProjection(
     case "thread.interaction-mode-updated":
     case "thread.model-selection-updated":
     case "thread.provider-switched":
+    case "thread.agent-signal-set":
+    case "thread.agent-signal-cleared":
       return {
         ...base,
         thread: event.payload,
@@ -1576,13 +1583,20 @@ export function threadShellFromProjection(
         DateTime.toEpochMillis(right.updatedAt) - DateTime.toEpochMillis(left.updatedAt),
     );
   const latestUserMessage = userMessages[0] ?? null;
-  const pendingBackgroundTasks = derivePendingBackgroundWork({
-    latestRun,
-    providerThreads: projection.providerThreads,
-    turnItems: projection.turnItems,
-    activeProviderThreadId: projection.thread.activeProviderThreadId,
-    runs: projection.runs,
-    pullRequests: projection.thread.pullRequests,
+  const pendingBackgroundTasks = withUndeliveredDelegatedResults({
+    pendingBackgroundTasks: derivePendingBackgroundWork({
+      latestRun,
+      providerThreads: projection.providerThreads,
+      turnItems: projection.turnItems,
+      activeProviderThreadId: projection.thread.activeProviderThreadId,
+      runs: projection.runs,
+      pullRequests: projection.thread.pullRequests,
+    }),
+    subagents: projection.subagents,
+    latestRunStatus: latestRun?.status ?? null,
+    hasActiveRun: projection.runs.some(
+      (run) => run.status === "preparing" || run.status === "starting" || run.status === "running",
+    ),
   });
   return {
     createdBy: projection.thread.createdBy,
@@ -1669,6 +1683,7 @@ export function threadShellFromProjection(
     pinnedAt: projection.thread.pinnedAt ?? null,
 
     autoSettleDisabledAt: projection.thread.autoSettleDisabledAt ?? null,
+    agentSignal: projection.thread.agentSignal ?? null,
     pinOrderKey: projection.thread.pinOrderKey ?? null,
     lastVisitedAt: projection.thread.lastVisitedAt,
     titleRegeneration: projection.thread.titleRegeneration ?? null,
@@ -1916,6 +1931,7 @@ function shellFromState(input: {
     pinnedAt: input.state.thread.pinnedAt ?? null,
 
     autoSettleDisabledAt: input.state.thread.autoSettleDisabledAt ?? null,
+    agentSignal: input.state.thread.agentSignal ?? null,
     pinOrderKey: input.state.thread.pinOrderKey ?? null,
     lastVisitedAt: input.state.thread.lastVisitedAt,
     titleRegeneration: input.state.thread.titleRegeneration ?? null,
@@ -1979,7 +1995,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             case "thread.runtime-mode-updated":
             case "thread.interaction-mode-updated":
             case "thread.model-selection-updated":
-            case "thread.provider-switched": {
+            case "thread.provider-switched":
+            case "thread.agent-signal-set":
+            case "thread.agent-signal-cleared": {
               const payloadJson = yield* encodeThreadPayload(event.payload);
               const payload = parseEncodedPayload(payloadJson);
               yield* sql`
@@ -2812,7 +2830,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             event.type !== "thread.runtime-mode-updated" &&
             event.type !== "thread.interaction-mode-updated" &&
             event.type !== "thread.model-selection-updated" &&
-            event.type !== "thread.provider-switched"
+            event.type !== "thread.provider-switched" &&
+            event.type !== "thread.agent-signal-set" &&
+            event.type !== "thread.agent-signal-cleared"
           ) {
             const updatedAt = yield* encodeThreadUpdatedAt(event.occurredAt);
             yield* sql`
@@ -5915,6 +5935,18 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             WHERE thread_id IN ${sql.in(threadIds)}
           `;
 
+    // Mesura: finished delegated tasks whose result has not reached the parent.
+    const selectShellUndeliveredDelegatedResultRows = (threadIds: ReadonlyArray<ThreadId>) =>
+      sql<PayloadRow & { readonly thread_id: string }>`
+        SELECT thread_id, payload_json
+        FROM orchestration_v2_projection_subagents
+        WHERE thread_id IN ${sql.in(threadIds)}
+          AND origin = 'app_owned'
+          AND status IN ('completed', 'failed', 'cancelled', 'interrupted')
+          AND json_extract(payload_json, '$.completionDelivery.state')
+            IN ${sql.in(UNDELIVERED_DELEGATED_RESULT_SQL_STATES)}
+      `;
+
     const selectShellPendingTurnItemRows = (
       threadIds?: ReadonlyArray<ThreadId>,
       activeRunIds: ReadonlyArray<string> = [],
@@ -5972,6 +6004,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
     )(function* (input: {
       readonly providerThreadRows: ReadonlyArray<PayloadRow & { readonly thread_id: string }>;
       readonly pendingTurnItemRows: ReadonlyArray<ShellPendingTurnItemRow>;
+      readonly undeliveredDelegatedResultRows?: ReadonlyArray<
+        PayloadRow & { readonly thread_id: string }
+      >;
     }) {
       const providerThreadsByThreadId = new Map<
         ThreadId,
@@ -6005,7 +6040,22 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         pendingTurnItemsByThreadId.set(threadId, existing);
       }
 
-      return { providerThreadsByThreadId, pendingTurnItemsByThreadId };
+      const undeliveredDelegatedResultsByThreadId = new Map<
+        ThreadId,
+        Array<OrchestrationV2Subagent>
+      >();
+      for (const row of input.undeliveredDelegatedResultRows ?? []) {
+        const threadId = ThreadId.make(row.thread_id);
+        const existing = undeliveredDelegatedResultsByThreadId.get(threadId) ?? [];
+        existing.push(yield* decodeSubagentPayload(row.payload_json));
+        undeliveredDelegatedResultsByThreadId.set(threadId, existing);
+      }
+
+      return {
+        providerThreadsByThreadId,
+        pendingTurnItemsByThreadId,
+        undeliveredDelegatedResultsByThreadId,
+      };
     });
 
     const getSettlementCandidates: ProjectionStoreV2Shape["getSettlementCandidates"] = (threadId) =>
@@ -6210,6 +6260,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           ThreadId,
           ReadonlyArray<OrchestrationV2TurnItem>
         >;
+        readonly undeliveredDelegatedResultsByThreadId?: ReadonlyMap<
+          ThreadId,
+          ReadonlyArray<OrchestrationV2Subagent>
+        >;
       }) {
         const {
           row,
@@ -6217,6 +6271,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           itemCountsByThreadId,
           providerThreadsByThreadId,
           pendingTurnItemsByThreadId,
+          undeliveredDelegatedResultsByThreadId,
         } = input;
         const thread = yield* decodeThreadPayload(row.payload_json);
         const waitingCards = [
@@ -6293,20 +6348,25 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           }
         }
         const pendingBackgroundTasks = [
-          ...derivePendingBackgroundWork({
-            latestRun:
-              latestRunId === null || latestRunStatus === "idle"
-                ? null
-                : {
-                    id: latestRunId,
-                    ordinal: 0,
-                    status: latestRunStatus,
-                  },
-            providerThreads: providerThreadsByThreadId.get(thread.id) ?? [],
-            turnItems: pendingTurnItemsByThreadId.get(thread.id) ?? [],
-            activeProviderThreadId: thread.activeProviderThreadId,
+          ...withUndeliveredDelegatedResults({
+            pendingBackgroundTasks: derivePendingBackgroundWork({
+              latestRun:
+                latestRunId === null || latestRunStatus === "idle"
+                  ? null
+                  : {
+                      id: latestRunId,
+                      ordinal: 0,
+                      status: latestRunStatus,
+                    },
+              providerThreads: providerThreadsByThreadId.get(thread.id) ?? [],
+              turnItems: pendingTurnItemsByThreadId.get(thread.id) ?? [],
+              activeProviderThreadId: thread.activeProviderThreadId,
+              hasActiveRun: row.active_run_id !== null,
+              pullRequests: thread.pullRequests,
+            }),
+            subagents: undeliveredDelegatedResultsByThreadId?.get(thread.id) ?? [],
+            latestRunStatus: latestRunId === null ? null : latestRunStatus,
             hasActiveRun: row.active_run_id !== null,
-            pullRequests: thread.pullRequests,
           }),
         ];
         return {
@@ -6400,28 +6460,35 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         read: (ids: ReadonlyArray<ThreadId>) => Effect.Effect<ReadonlyArray<A>, unknown>,
         ids: ReadonlyArray<ThreadId> = threadIds,
       ) => (ids.length === 0 ? Effect.succeed([] as ReadonlyArray<A>) : read(ids));
-      const [runRows, itemCountRows, sequenceRows, providerThreadRows, pendingTurnItemRows] =
-        yield* Effect.all([
-          readForThreadIds(selectShellRunRows, forkSourceIds),
-          readForThreadIds(selectShellRunItemCounts, forkSourceIds),
-          sql<{ readonly snapshot_sequence: number | null }>`
+      const [
+        runRows,
+        itemCountRows,
+        sequenceRows,
+        providerThreadRows,
+        pendingTurnItemRows,
+        undeliveredDelegatedResultRows,
+      ] = yield* Effect.all([
+        readForThreadIds(selectShellRunRows, forkSourceIds),
+        readForThreadIds(selectShellRunItemCounts, forkSourceIds),
+        sql<{ readonly snapshot_sequence: number | null }>`
         SELECT MAX(sequence) AS snapshot_sequence
         FROM orchestration_events
         WHERE application_event_version = 2
           AND aggregate_kind = 'thread'
       `,
-          readForThreadIds(selectShellProviderThreadRows),
-          readForThreadIds((ids) =>
-            selectShellPendingTurnItemRows(
-              ids,
-              threadRows.flatMap((row) =>
-                row.active_run_id !== null && row.active_run_status === "running"
-                  ? [row.active_run_id]
-                  : [],
-              ),
+        readForThreadIds(selectShellProviderThreadRows),
+        readForThreadIds((ids) =>
+          selectShellPendingTurnItemRows(
+            ids,
+            threadRows.flatMap((row) =>
+              row.active_run_id !== null && row.active_run_status === "running"
+                ? [row.active_run_id]
+                : [],
             ),
           ),
-        ]);
+        ),
+        readForThreadIds(selectShellUndeliveredDelegatedResultRows),
+      ]);
       return {
         targetThreadIds,
         threadRows,
@@ -6430,6 +6497,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         sequenceRows,
         providerThreadRows,
         pendingTurnItemRows,
+        undeliveredDelegatedResultRows,
       };
     });
 
@@ -6441,13 +6509,21 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       sequenceRows,
       providerThreadRows,
       pendingTurnItemRows,
+      undeliveredDelegatedResultRows,
     }: Effect.Success<ReturnType<typeof readShellSnapshotRows>>) {
       const { runOrdinalsByThreadId, itemCountsByThreadId } = runMapsByThreadId({
         runRows,
         itemCountRows,
       });
-      const { providerThreadsByThreadId, pendingTurnItemsByThreadId } =
-        yield* pendingBackgroundDataByThreadId({ providerThreadRows, pendingTurnItemRows });
+      const {
+        providerThreadsByThreadId,
+        pendingTurnItemsByThreadId,
+        undeliveredDelegatedResultsByThreadId,
+      } = yield* pendingBackgroundDataByThreadId({
+        providerThreadRows,
+        pendingTurnItemRows,
+        undeliveredDelegatedResultRows,
+      });
       const states = yield* Effect.forEach(threadRows, (row) =>
         shellThreadStateFromRow({
           row,
@@ -6455,6 +6531,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           itemCountsByThreadId,
           providerThreadsByThreadId,
           pendingTurnItemsByThreadId,
+          undeliveredDelegatedResultsByThreadId,
         }),
       );
       const statesByThreadId = new Map(states.map((state) => [state.thread.id, state]));
@@ -6519,30 +6596,43 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
 
             const threadIds = [...rowsByThreadId.keys()];
             const forkSourceIds = shellForkSourceIds([...rowsByThreadId.values()]);
-            const [runRows, itemCountRows, providerThreadRows, pendingTurnItemRows] =
-              yield* Effect.all([
-                forkSourceIds.length === 0
-                  ? Effect.succeed([] as ReadonlyArray<ShellRunRow>)
-                  : selectShellRunRows(forkSourceIds),
-                forkSourceIds.length === 0
-                  ? Effect.succeed([] as ReadonlyArray<ShellRunItemCountRow>)
-                  : selectShellRunItemCounts(forkSourceIds),
-                selectShellProviderThreadRows(threadIds),
-                selectShellPendingTurnItemRows(
-                  threadIds,
-                  [...rowsByThreadId.values()].flatMap((row) =>
-                    row.active_run_id !== null && row.active_run_status === "running"
-                      ? [row.active_run_id]
-                      : [],
-                  ),
+            const [
+              runRows,
+              itemCountRows,
+              providerThreadRows,
+              pendingTurnItemRows,
+              undeliveredDelegatedResultRows,
+            ] = yield* Effect.all([
+              forkSourceIds.length === 0
+                ? Effect.succeed([] as ReadonlyArray<ShellRunRow>)
+                : selectShellRunRows(forkSourceIds),
+              forkSourceIds.length === 0
+                ? Effect.succeed([] as ReadonlyArray<ShellRunItemCountRow>)
+                : selectShellRunItemCounts(forkSourceIds),
+              selectShellProviderThreadRows(threadIds),
+              selectShellPendingTurnItemRows(
+                threadIds,
+                [...rowsByThreadId.values()].flatMap((row) =>
+                  row.active_run_id !== null && row.active_run_status === "running"
+                    ? [row.active_run_id]
+                    : [],
                 ),
-              ]);
+              ),
+              selectShellUndeliveredDelegatedResultRows(threadIds),
+            ]);
             const { runOrdinalsByThreadId, itemCountsByThreadId } = runMapsByThreadId({
               runRows,
               itemCountRows,
             });
-            const { providerThreadsByThreadId, pendingTurnItemsByThreadId } =
-              yield* pendingBackgroundDataByThreadId({ providerThreadRows, pendingTurnItemRows });
+            const {
+              providerThreadsByThreadId,
+              pendingTurnItemsByThreadId,
+              undeliveredDelegatedResultsByThreadId,
+            } = yield* pendingBackgroundDataByThreadId({
+              providerThreadRows,
+              pendingTurnItemRows,
+              undeliveredDelegatedResultRows,
+            });
 
             const states = yield* Effect.forEach([...rowsByThreadId.values()], (row) =>
               shellThreadStateFromRow({
@@ -6551,6 +6641,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 itemCountsByThreadId,
                 providerThreadsByThreadId,
                 pendingTurnItemsByThreadId,
+                undeliveredDelegatedResultsByThreadId,
               }),
             );
             const statesByThreadId = new Map(states.map((state) => [state.thread.id, state]));

@@ -1,5 +1,5 @@
 import { threadBranchCardLabel } from "./threadBranchLabel";
-import { FactoryRunThreadLabel } from "../../factory/FactoryRunThreadLabel";
+import { factoryRunLabel } from "@t3tools/client-runtime/factory/run-presentation";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "../ThreadHoverCard";
 import { ThreadTerminalStatusButton } from "../ThreadStatusIndicators";
 import { discardComposerDraft } from "../../lib/discardComposerDraft";
@@ -35,8 +35,6 @@ import {
   CheckIcon,
   CircleAlertIcon,
   CircleCheckIcon,
-  CircleDashedIcon,
-  CircleDotDashedIcon,
   ClockIcon,
   GitBranchIcon,
   MessageCircleQuestionIcon,
@@ -86,6 +84,11 @@ import {
   useRetainedValue,
   useSidebarRowSubscriptionLease,
 } from "../Sidebar.logic";
+import {
+  resolveSidebarThreadAttention,
+  sidebarThreadAttentionLook,
+  threadHasOpenPullRequest,
+} from "../sidebarThreadAttention";
 import { resolveLocalCheckoutBranchMismatch } from "../BranchToolbar.logic";
 import {
   ThreadPullRequestBadgeControl,
@@ -652,64 +655,33 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     wokeAtDate !== null &&
     (lastVisitedDate === null || lastVisitedDate < wokeAtDate) &&
     thread.settledOverride !== "settled";
+  const attention = resolveSidebarThreadAttention({
+    status,
+    isUnread,
+    isWoke,
+    agentSignal: thread.agentSignal,
+    factoryRun: thread.factoryRun,
+    hasOpenPullRequest: pr?.state === "open" || threadHasOpenPullRequest(thread.pullRequests),
+    goalActive: thread.goal?.status === "active",
+  });
   const shouldRecede = shouldRecedeSidebarThread({
     status,
     isUnread,
     isWoke,
     isActive: props.isActive,
     isSelected,
+    attentionKind: attention?.kind ?? null,
   });
   const topStatus =
-    status === "working"
-      ? {
-          label: thread.goal?.status === "active" ? "Goal" : "Working",
-          icon: "working" as const,
-          className: "text-info",
-        }
-      : status === "waiting"
-        ? {
-            label: "Waiting",
-            icon: "waiting" as const,
-            className: "text-muted-foreground",
-          }
-        : status === "approval"
-          ? {
-              label: "Approval",
-              icon: "approval" as const,
-              className: "text-warning-foreground",
-            }
-          : status === "input"
-            ? {
-                label: "Input",
-                icon: "input" as const,
-                className: "text-indigo-600 dark:text-indigo-300",
-              }
-            : status === "limited"
-              ? {
-                  label: "Limited",
-                  icon: "failed" as const,
-                  className: "text-warning",
-                }
-              : status === "failed"
-                ? {
-                    label: "Failed",
-                    icon: "failed" as const,
-                    className: "text-error",
-                  }
-                : isWoke
-                  ? {
-                      label: "Woke",
-                      icon: "woke" as const,
-                      className: "text-warning",
-                    }
-                  : isUnread
-                    ? {
-                        label: "Done",
-                        icon: "done" as const,
-                        className: "text-success",
-                      }
-                    : null;
-  const isWokeStatus = topStatus?.icon === "woke";
+    attention === null
+      ? null
+      : {
+          ...sidebarThreadAttentionLook(attention.kind),
+          kind: attention.kind,
+          label: attention.text,
+        };
+  const isWokeStatus = topStatus?.kind === "woke";
+  const needsInput = topStatus?.kind === "input";
 
   const branchMismatch = resolveLocalCheckoutBranchMismatch({
     effectiveEnvMode: thread.worktreePath === null ? "local" : "worktree",
@@ -908,9 +880,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           : shouldRecede
             ? "text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
             : "bg-transparent text-sidebar-foreground hover:bg-sidebar-row-hover",
-    shouldRecede &&
-      status === "working" &&
-      "opacity-70 transition-opacity hover:opacity-100 focus-within:opacity-100 motion-reduce:transition-none",
+    // Mesura: upstream dimmed a receding Working row to 70% here. Stacked on the quiet label's
+    // own opacity it made Working fainter than Waiting, which must look the same; do not restore.
+    topStatus?.rowEdgeClassName,
     isFileDragOver && "ring-1 ring-inset ring-primary/70",
     isFileDragOver && !props.isActive && !isSelected && "bg-sidebar-row-hover",
     props.sortable?.isDragging &&
@@ -950,7 +922,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
 
   const accessibility = resolveSidebarRowAccessibility({
     title: thread.title,
-    statusLabel: topStatus?.label ?? null,
+    // The slot shows `5/11 Review`; a screen reader hears the run's long label.
+    statusLabel:
+      topStatus?.kind === "factory"
+        ? (factoryRunLabel(thread.factoryRun)?.text ?? topStatus.label)
+        : (topStatus?.label ?? null),
     projectDisplayName: props.projectDisplayName,
     isActive: props.isActive,
   });
@@ -981,7 +957,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 "truncate",
                 shouldRecede
                   ? "text-secondary-label"
-                  : isUnread || isWoke || status === "input"
+                  : isUnread || isWoke || needsInput
                     ? "text-foreground"
                     : status === "failed"
                       ? "text-foreground/95"
@@ -991,7 +967,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 "truncate group-focus-within/sidebar-row:text-foreground group-hover/sidebar-row:text-foreground",
                 shouldRecede
                   ? "text-secondary-label/70"
-                  : props.isActive || isWoke || status === "input"
+                  : props.isActive || isWoke || needsInput
                     ? "text-foreground"
                     : isUnread
                       ? "text-muted-foreground"
@@ -1004,7 +980,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         {thread.title}
       </span>
     );
-  const factoryLabel = <FactoryRunThreadLabel run={thread.factoryRun} />;
   const accessibleTitle = isRenaming ? null : <span className="sr-only">{thread.title}</span>;
 
   const prBadgeShape = supportsMultiplePullRequests
@@ -1118,7 +1093,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             }
           >
             {accessibleTitle}
-            {factoryLabel}
             <span
               className={cn(
                 "flex shrink-0 items-center transition-opacity",
@@ -1279,7 +1253,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           }
         >
           {accessibleTitle}
-          {factoryLabel}
           <div className="relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)">
             <div className="flex h-5 min-w-0 items-center gap-1.5">
               {draftIndicator}
@@ -1341,17 +1314,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                           <TooltipPopup side="top">Dismiss Woke notification</TooltipPopup>
                         </Tooltip>
                       ) : (
-                        <span
-                          className={cn(
-                            "inline-flex items-center gap-1 font-medium",
-                            topStatus.className,
-                          )}
-                        >
-                          {topStatus.icon === "working" ? (
-                            <CircleDashedIcon aria-hidden className="size-4 shrink-0" />
-                          ) : topStatus.icon === "waiting" ? (
-                            <CircleDotDashedIcon aria-hidden className="size-4 shrink-0" />
-                          ) : topStatus.icon === "input" ? (
+                        <span className={cn("inline-flex items-center gap-1", topStatus.className)}>
+                          {topStatus.icon === "input" ? (
                             <MessageCircleQuestionIcon aria-hidden className="size-4 shrink-0" />
                           ) : topStatus.icon === "approval" ? (
                             <ShieldQuestionIcon aria-hidden className="size-4 shrink-0" />
@@ -1364,11 +1328,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                             wrapper around the ticking duration would make
                             screen readers announce every second. */}
                           <span role="status">{topStatus.label}</span>
-                          {status === "working" ? (
+                          {topStatus.kind === "working" ? (
                             <span aria-hidden>
                               <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />
                             </span>
-                          ) : status === "waiting" ? (
+                          ) : topStatus.kind === "waiting" ? (
                             <span aria-hidden>
                               <WorkingDuration startedAt={thread.latestRun?.completedAt ?? null} />
                             </span>

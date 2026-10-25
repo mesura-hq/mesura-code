@@ -76,6 +76,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Result from "effect/Result";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -147,6 +148,12 @@ import {
 import { planThreadDeletion } from "./ThreadDeletion.ts";
 // Mesura: Software Factory cards (`factory_card.record`).
 import { planFactoryCardRecord } from "./FactoryCards.ts";
+// Mesura: the agent's needs-input / ready-to-close signal.
+import {
+  agentSignalNeedsInput,
+  decideAgentSignalCommand,
+  type ThreadAgentSignalCommand,
+} from "./ThreadSignal.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ServerSettings from "../serverSettings.ts";
 
@@ -506,6 +513,9 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "link_request.record":
     // Mesura: Software Factory cards.
     case "factory_card.record":
+    // Mesura: agent signals.
+    case "thread.agent-signal.set":
+    case "thread.agent-signal.clear":
       return command.threadId;
     case "thread.fork":
     case "thread.merge_back":
@@ -3091,6 +3101,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             activeOrderKey: null,
             snoozedUntil: null,
             snoozedAt: null,
+            // Mesura: settling resolves whatever the agent declared; unsettling does not restore it.
+            agentSignal: null,
             updatedAt:
               alreadySettled && thread.snoozedUntil == null && thread.snoozedAt == null
                 ? thread.updatedAt
@@ -8016,6 +8028,51 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   );
 
   /**
+   * Mesura: sets or clears the agent's signal. The decision lives in `ThreadSignal.ts`; this
+   * reads the thread and its active run and emits what it returns.
+   */
+  const dispatchThreadAgentSignal = Effect.fn("orchestrationV2.dispatch.threadAgentSignal")(
+    function* (
+      command: ThreadAgentSignalCommand,
+      events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    ) {
+      const mapProjectionError = Effect.mapError(
+        (cause: unknown) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+      );
+      const thread = yield* projectionStore.getThread(command.threadId).pipe(mapProjectionError);
+      const shell = yield* projectionStore
+        .getThreadShell(command.threadId)
+        .pipe(mapProjectionError);
+      const decision = decideAgentSignalCommand({
+        thread,
+        command,
+        activeRunId: shell?.activeRunId ?? null,
+        now: yield* DateTime.now,
+      });
+      if (Result.isFailure(decision)) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: decision.failure,
+        });
+      }
+      yield* emit(
+        events,
+        command,
+      )({
+        type:
+          command.type === "thread.agent-signal.set"
+            ? "thread.agent-signal-set"
+            : "thread.agent-signal-cleared",
+        threadId: command.threadId,
+        providerInstanceId: decision.success.providerInstanceId,
+        occurredAt: yield* DateTime.now,
+        payload: decision.success,
+      });
+    },
+  );
+
+  /**
    * Mesura: records or updates a Software Factory card. The decision lives in
    * `FactoryCards.ts`; this reads the thread and emits what it returns.
    */
@@ -11900,6 +11957,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           );
         if (
           thread.settledOverride !== null ||
+          // Mesura: a signal keeps `updatedAt`, so a question set after the snapshot needs its own check.
+          agentSignalNeedsInput(thread) ||
           DateTime.toEpochMillis(thread.updatedAt) > DateTime.toEpochMillis(command.snapshotAt)
         ) {
           return yield* new OrchestratorDispatchError({
@@ -12200,6 +12259,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       // Mesura: Software Factory cards.
       case "factory_card.record":
         yield* dispatchFactoryCardRecord(command, events);
+        break;
+      // Mesura: agent signals.
+      case "thread.agent-signal.set":
+      case "thread.agent-signal.clear":
+        yield* dispatchThreadAgentSignal(command, events);
         break;
       default:
         return yield* dispatchUnsupported(command);

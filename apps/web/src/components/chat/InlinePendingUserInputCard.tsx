@@ -60,6 +60,11 @@ export interface InlinePendingUserInputContext {
   respondingRequestIds: ReadonlyArray<RuntimeRequestId>;
   onRespond: (requestId: RuntimeRequestId, answers: Record<string, unknown>) => Promise<boolean>;
   onDismiss: (requestId: RuntimeRequestId) => Promise<boolean>;
+  /** Answers "dismissed" without the draft's attachments, for a question no dismiss can close. */
+  onDismissWithAnswer: (
+    requestId: RuntimeRequestId,
+    answers: Record<string, unknown>,
+  ) => Promise<boolean>;
 }
 
 export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCard({
@@ -181,7 +186,8 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
       request.questions.find(
         (entry) => resolvePendingUserInputAnswer(entry, completeDrafts[entry.id]) === null,
       ) ?? request.questions[0];
-    focusAnswerField(question?.id);
+    // `nearest` leaves a card the list already scrolled to in place, and brings one in otherwise.
+    focusAnswerField(question?.id)?.scrollIntoView?.({ block: "nearest" });
     context.onQuestionFocused?.();
   }, [context, request, completeDrafts, focusAnswerField]);
   const sendWhenReadyArmed = useQuestionSendWhenReadyArmed(key);

@@ -29,6 +29,7 @@ import {
   unlockNotificationAudio,
 } from "../threadNotifications";
 import { resolveSidebarThreadStatus } from "./Sidebar.logic";
+import { resolveSidebarThreadAttention } from "./sidebarThreadAttention";
 import { toastManager } from "./ui/toast";
 
 export function ThreadNotificationCoordinator() {
@@ -152,10 +153,29 @@ function EnvironmentNotifications({
       const thread = presentThreadShell(environmentId, rawThread, subagentRequest);
       let status = resolveSidebarThreadStatus(thread);
       if (status === "ready" && thread.latestRun?.status === "failed") status = "failed";
-      const attention =
-        status === "input" || status === "approval" || status === "failed" || status === "limited"
-          ? `${thread.latestRun?.runId ?? ""}:${status}`
+      // Mesura: the sidebar's label decides, so an agent's needs-input signal or a stopped
+      // Factory run asks for the developer the way a structured question does.
+      const attentionKind =
+        resolveSidebarThreadAttention({
+          status,
+          isUnread: false,
+          isWoke: false,
+          agentSignal: thread.agentSignal,
+          factoryRun: thread.factoryRun,
+          hasOpenPullRequest: false,
+        })?.kind ?? null;
+      const loudKind =
+        attentionKind === "input" ||
+        attentionKind === "approval" ||
+        attentionKind === "failed" ||
+        attentionKind === "limited"
+          ? attentionKind
           : null;
+      const signalSetAt =
+        thread.agentSignal?.kind === "needs_input" ? `:${thread.agentSignal.setAt}` : "";
+      const attention = loudKind
+        ? `${thread.latestRun?.runId ?? ""}:${loudKind}${signalSetAt}`
+        : null;
       const completedAt = Date.parse(thread.latestRun?.completedAt ?? "");
       const completion =
         status === "ready" &&
@@ -168,7 +188,10 @@ function EnvironmentNotifications({
       const kind =
         attention && attention !== prior.attention
           ? "input"
-          : !rawThread.latestRunStopRequested &&
+          : // A completion while the thread still asks for the developer would replace the
+            // input notification (both carry the thread's tag); it is recorded, not announced.
+            loudKind !== "input" &&
+              !rawThread.latestRunStopRequested &&
               completion !== null &&
               (prior.completion === null || completion > prior.completion)
             ? "completion"
@@ -177,11 +200,11 @@ function EnvironmentNotifications({
       const title =
         kind === "completion"
           ? "Thread completed"
-          : status === "approval"
+          : loudKind === "approval"
             ? "Approval needed"
-            : status === "limited"
+            : loudKind === "limited"
               ? "Usage limit reached"
-              : status === "failed"
+              : loudKind === "failed"
                 ? "Thread failed"
                 : "Input needed";
       if (hasNotificationSound(mode)) {
@@ -196,7 +219,7 @@ function EnvironmentNotifications({
         (activeEnvironmentId !== environmentId || activeThreadId !== thread.id)
       ) {
         const toastId = toastManager.add({
-          type: kind === "completion" ? "success" : status === "failed" ? "error" : "warning",
+          type: kind === "completion" ? "success" : loudKind === "failed" ? "error" : "warning",
           title,
           description: thread.title,
           data: {
@@ -204,9 +227,9 @@ function EnvironmentNotifications({
             leadingIcon:
               kind === "completion" ? (
                 <CircleCheckIcon aria-hidden className="size-4 text-success-foreground" />
-              ) : status === "approval" ? (
+              ) : loudKind === "approval" ? (
                 <ShieldQuestionIcon aria-hidden className="size-4 text-warning-foreground" />
-              ) : status === "failed" ? (
+              ) : loudKind === "failed" ? (
                 <CircleAlertIcon aria-hidden className="size-4 text-destructive-foreground" />
               ) : (
                 <MessageCircleQuestionIcon aria-hidden className="size-4 text-info-foreground" />

@@ -12,7 +12,7 @@ import {
   type FactoryPlanApprovalState,
 } from "@t3tools/client-runtime/factory/plan-approval";
 import type { FactoryRoutes } from "@t3tools/client-runtime/factory/routes";
-import { useRef, useState } from "react";
+import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 
 import { newCommandId, newMessageId } from "../lib/utils";
 import { readThreadShell, useThreadProjection } from "../state/entities";
@@ -21,8 +21,19 @@ import { threadEnvironment } from "../state/threads";
 import { readEnvironmentScope, useEnvironmentScope } from "../state/session";
 import { useAtomCommand } from "../state/use-atom-command";
 import { buildDirectedTurnStartInput } from "../dictation/directedComposerSubmission";
+import {
+  beginFactoryPlanSend,
+  failFactoryPlanSend,
+  useFactoryPlanSending,
+  useHoldFactoryPlanCardSession,
+} from "./factoryPlanCardSession";
 
 const EMPTY_PROVIDERS: ReadonlyArray<ServerProvider> = [];
+
+/** Which plan's route edits a card reads: one plan's bytes in one thread. */
+export function factoryPlanRoutesKey(threadRef: ScopedThreadRef, digest: string): string {
+  return `${scopedThreadKey(threadRef)}\0${digest}`;
+}
 
 /**
  * A plan card's approval: where the plan stands in this thread, the provider
@@ -46,21 +57,20 @@ export function useFactoryPlanApproval(
 
   const canApprove = useEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope);
   const startTurn = useAtomCommand(threadEnvironment.startTurn);
-  // The digest a sent or sending approval names: Approve stays disabled until
-  // the message comes back as an approval, and a failed send clears it.
-  const [sentDigest, setSentDigest] = useState<string | null>(null);
-  const inFlight = useRef(false);
+  // A sent or sending approval of these bytes: Approve stays disabled on every card of the plan
+  // until the message comes back as an approval, and a failed send clears it.
+  const planKey = factoryPlanRoutesKey(threadRef, plan.digest);
+  useHoldFactoryPlanCardSession(planKey);
+  const sending = useFactoryPlanSending(planKey);
   const approve = async (routes: FactoryRoutes) => {
     // On orchestrator v2, title, model and runtime mode live on the thread shell.
     const current = readThreadShell(threadRef);
     if (
       current === null ||
-      inFlight.current ||
-      !readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope)
+      !readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope) ||
+      !beginFactoryPlanSend(planKey)
     )
       return;
-    inFlight.current = true;
-    setSentDigest(plan.digest);
     const result = await startTurn({
       environmentId: threadRef.environmentId,
       input: buildDirectedTurnStartInput({
@@ -86,9 +96,8 @@ export function useFactoryPlanApproval(
         pendingAction: { kind: "composer" },
       }),
     });
-    inFlight.current = false;
-    if (result._tag !== "Success") setSentDigest(null);
+    if (result._tag !== "Success") failFactoryPlanSend(planKey);
   };
 
-  return { state, providers, approve, canApprove, sending: sentDigest === plan.digest };
+  return { state, providers, approve, canApprove, sending };
 }

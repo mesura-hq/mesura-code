@@ -92,7 +92,7 @@ describe("newest model of a family (phase 4 fence, criterion 2)", () => {
     expect(resolveLatestModelOfFamily([], "luna")).toBeNull();
   });
 
-  it("phase4 AC2 defaults to the newest Opus at high with 25 dollars, Sol at high and Luna at max", () => {
+  it("phase4 AC2 defaults each role to the newest model of its family, with 25 dollars for Opus", () => {
     const slots = defaultFactoryRoutes(makeFactoryRouteProviders());
     expect(slots).toEqual({
       implementer: { status: "ready", route: DEFAULT_ROUTES.implementer },
@@ -473,6 +473,85 @@ describe("level ranking and provider changes (phase 4 review P1-1, P1-2)", () =>
     expect(reconciled.verifier).toEqual({
       status: "ready",
       route: { harness: "codex", model: "gpt-6-luna", effort: "xhigh" },
+    });
+  });
+});
+
+// Phase 5 fence (thread-attention plan): the developer's new defaults, Opus at
+// medium, Sol at high, Luna at xhigh. Expectations are literals, never read
+// from `FACTORY_DEFAULT_TEST_ROUTES`, so a drift in the test data cannot hide
+// a drift in `ROLE_DEFAULTS`.
+describe("default routes Opus medium, Sol high, Luna xhigh (phase 5 fence)", () => {
+  it("phase5 AC1 defaults the implementer to Opus at medium, the reviewer to Sol at high and the verifier to Luna at xhigh", () => {
+    expect(defaultFactoryRoutes(makeFactoryRouteProviders())).toEqual({
+      implementer: {
+        status: "ready",
+        route: { harness: "claude", model: "claude-opus-5-5", effort: "medium", budgetUsd: 25 },
+      },
+      reviewer: {
+        status: "ready",
+        route: { harness: "codex", model: "gpt-6-sol", effort: "high" },
+      },
+      verifier: {
+        status: "ready",
+        route: { harness: "codex", model: "gpt-6-luna", effort: "xhigh" },
+      },
+    });
+  });
+
+  it("phase5 AC2 falls back to the highest offered level when Opus lacks medium or Luna lacks xhigh", () => {
+    const providers = makeFactoryRouteProviders({
+      claude: [
+        { slug: "claude-opus-5-5", name: "Claude Opus 5.5", levels: ["low", "high", "max"] },
+      ],
+      codex: [
+        { slug: "gpt-6-sol", name: "GPT-6 Sol", levels: ["low", "medium"] },
+        { slug: "gpt-6-luna", name: "GPT-6 Luna", levels: ["low", "medium", "high"] },
+      ],
+    });
+    const slots = defaultFactoryRoutes(providers);
+    expect(slots.implementer).toMatchObject({ status: "ready", route: { effort: "max" } });
+    expect(slots.reviewer).toMatchObject({ status: "ready", route: { effort: "medium" } });
+    expect(slots.verifier).toMatchObject({ status: "ready", route: { effort: "high" } });
+  });
+
+  it("phase5 AC4 guard keeps the default verifier on Codex and the reviewer on the other family", () => {
+    const slots = defaultFactoryRoutes(makeFactoryRouteProviders());
+    const routes = readyFactoryRoutes(slots);
+    expect(routes).not.toBeNull();
+    expect(routes!.verifier.harness).toBe("codex");
+    expect(routes!.reviewer.harness).not.toBe(routes!.implementer.harness);
+    expect(validateFactoryRoutes(routes!)).toEqual([]);
+    expect(
+      validateFactoryRoutes({
+        ...routes!,
+        verifier: { harness: "claude", model: "claude-opus-5-5", effort: "medium" },
+      }),
+    ).toHaveLength(1);
+    expect(
+      validateFactoryRoutes({
+        ...routes!,
+        reviewer: { harness: "claude", model: "claude-opus-5-5", effort: "high" },
+      }),
+    ).toHaveLength(1);
+  });
+
+  it("phase5 guard keeps Sol at high for a Codex implementer and Opus at high for its reviewer", () => {
+    const providers = makeFactoryRouteProviders();
+    const unavailable = { status: "unavailable", harness: "claude", reason: "test" } as const;
+    const toCodex = changeFactoryRouteModel(
+      { ...defaultFactoryRoutes(providers), implementer: unavailable },
+      providers,
+      "implementer",
+      { harness: "codex", model: "gpt-6-sol" },
+    );
+    expect(toCodex.implementer).toEqual({
+      status: "ready",
+      route: { harness: "codex", model: "gpt-6-sol", effort: "high" },
+    });
+    expect(toCodex.reviewer).toEqual({
+      status: "ready",
+      route: { harness: "claude", model: "claude-opus-5-5", effort: "high" },
     });
   });
 });

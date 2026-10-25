@@ -7,6 +7,7 @@ import {
   type ProviderApprovalDecision,
   type RuntimeRequestId,
   type ThreadId,
+  type UserInputAttachments,
 } from "@t3tools/contracts";
 import { derivePendingThreadRequests } from "@t3tools/client-runtime/state/thread-requests";
 import {
@@ -149,32 +150,17 @@ export function useMesuraPendingThreadRequests(input: {
     return result;
   };
 
-  const onRespondToUserInput = async (
+  // One respond, shared by an answer and by the dock's dismissed answer; `describeFailure` words
+  // the thread error for each.
+  const sendUserInputResponse = async (
     requestId: RuntimeRequestId,
     answers: Record<string, unknown>,
+    attachmentsByQuestionId: UserInputAttachments,
+    describeFailure: (message: string) => string,
   ) => {
-    if (!activeThreadId || !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope))
-      return false;
-    const request = pendingUserInputs.find((entry) => entry.requestId === requestId);
-    if (!request || request.responseCapability === "not_resumable" || activeEnvironmentUnavailable)
-      return false;
+    if (!activeThreadId) return false;
     const responseKey = JSON.stringify([environmentId, activeThreadId, requestId]);
     if (userInputResponsesInFlight.current.has(responseKey)) return false;
-    const attachments = collectQuestionAttachments({
-      environmentId,
-      threadId: activeThreadId,
-      requestId,
-      questions: request.questions,
-    });
-    if (attachments.status === "preparing") return false;
-    if (attachments.status === "not-uploaded") {
-      setThreadError(
-        activeThreadId,
-        "Wait for attachments to finish uploading, or remove failed uploads.",
-      );
-      return false;
-    }
-    const { attachmentsByQuestionId } = attachments;
     userInputResponsesInFlight.current.add(responseKey);
     setRespondingUserInputRequestKeys((existing) =>
       existing.includes(responseKey) ? existing : [...existing, responseKey],
@@ -197,14 +183,18 @@ export function useMesuraPendingThreadRequests(input: {
             const error = squashAtomCommandFailure(result);
             setThreadError(
               activeThreadId,
-              error instanceof Error ? error.message : "Failed to submit user input.",
+              describeFailure(
+                error instanceof Error ? error.message : "Failed to submit user input.",
+              ),
             );
           }
           return result._tag === "Success";
         } catch (error) {
           setThreadError(
             activeThreadId,
-            error instanceof Error ? error.message : "Failed to submit user input.",
+            describeFailure(
+              error instanceof Error ? error.message : "Failed to submit user input.",
+            ),
           );
           return false;
         }
@@ -216,6 +206,56 @@ export function useMesuraPendingThreadRequests(input: {
         );
       },
     );
+  };
+
+  const onRespondToUserInput = async (
+    requestId: RuntimeRequestId,
+    answers: Record<string, unknown>,
+  ) => {
+    if (!activeThreadId || !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope))
+      return false;
+    const request = pendingUserInputs.find((entry) => entry.requestId === requestId);
+    if (!request || request.responseCapability === "not_resumable" || activeEnvironmentUnavailable)
+      return false;
+    const attachments = collectQuestionAttachments({
+      environmentId,
+      threadId: activeThreadId,
+      requestId,
+      questions: request.questions,
+    });
+    if (attachments.status === "preparing") return false;
+    if (attachments.status === "not-uploaded") {
+      setThreadError(
+        activeThreadId,
+        "Wait for attachments to finish uploading, or remove failed uploads.",
+      );
+      return false;
+    }
+    return sendUserInputResponse(
+      requestId,
+      answers,
+      attachments.attachmentsByQuestionId,
+      (message) => message,
+    );
+  };
+
+  // Mesura: the dock's X on a question the provider cannot dismiss. It answers "dismissed"
+  // through the same respond, without the draft's attachments, which the developer chose not to
+  // send; one still preparing or failed therefore cannot hold the question open.
+  const onDismissWithAnswer = async (
+    requestId: RuntimeRequestId,
+    answers: Record<string, unknown>,
+  ) => {
+    if (!activeThreadId || !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope))
+      return false;
+    const describeFailure = (message: string) => `Could not dismiss the question: ${message}`;
+    const request = pendingUserInputs.find((entry) => entry.requestId === requestId);
+    if (!request) return false;
+    if (request.responseCapability === "not_resumable" || activeEnvironmentUnavailable) {
+      setThreadError(activeThreadId, describeFailure("the agent can no longer receive answers."));
+      return false;
+    }
+    return sendUserInputResponse(requestId, answers, {}, describeFailure);
   };
 
   // A dictated answer that submits itself goes through this thread's own respond while shown.
@@ -296,6 +336,7 @@ export function useMesuraPendingThreadRequests(input: {
             .map((request) => request.requestId),
           onRespond: onRespondToUserInput,
           onDismiss: onDismissUserInput,
+          onDismissWithAnswer,
         }
       : null)();
 

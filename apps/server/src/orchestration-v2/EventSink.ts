@@ -34,6 +34,7 @@ import * as EventStore from "./EventStore.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
+import { withAgentSignalClearings } from "./ThreadSignal.ts";
 
 export class EventSinkWriteError extends Schema.TaggedError<EventSinkWriteError>()(
   "EventSinkWriteError",
@@ -337,6 +338,11 @@ const layerBase: Layer.Layer<
         });
       });
 
+    const readThreadIfPresent = (threadId: ThreadId) =>
+      projectionStore
+        .getThread(threadId)
+        .pipe(Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(null) }));
+
     const normalizeEvents = (events: ReadonlyArray<OrchestrationV2DomainEvent>) => {
       const runOrdinals = new Map(
         events.flatMap((event) =>
@@ -357,6 +363,9 @@ const layerBase: Layer.Layer<
                 .pipe(Effect.map((payload) => ({ ...event, payload })))
             : Effect.succeed(event),
         { concurrency: 1 },
+      ).pipe(
+        // Mesura: append the agent-signal clearings these events imply, whoever wrote them.
+        Effect.flatMap((normalized) => withAgentSignalClearings(normalized, readThreadIfPresent)),
       );
     };
 

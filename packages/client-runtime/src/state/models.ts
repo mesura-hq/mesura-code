@@ -1,4 +1,3 @@
-import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { threadPullRequestsOf } from "@t3tools/shared/threadPullRequests";
 import type {
   ThreadLinkedPullRequest,
@@ -19,6 +18,7 @@ import type {
 import * as DateTime from "effect/DateTime";
 
 import { formatSubagentDisplayTitle } from "./subagentDisplay.ts";
+import { shellHoldsCompletion } from "./threadAttention.ts";
 
 export interface EnvironmentProject extends OrchestrationProjectShell {
   readonly environmentId: EnvironmentId;
@@ -137,6 +137,8 @@ export interface EnvironmentThreadShell {
   readonly linkedPullRequest?: ThreadLinkedPullRequest | null;
   /** Mesura: the attached Software Factory run's sidebar summary, when one is attached. */
   readonly factoryRun?: OrchestrationV2ThreadShell["factoryRun"] | null;
+  /** Mesura: the agent's needs-input or ready-to-close mark. */
+  readonly agentSignal?: OrchestrationV2ThreadShell["agentSignal"] | null;
   readonly branchPullRequest?: ThreadLinkedPullRequest | null;
   /**
    * Server-tracked visited watermark. `undefined` means the environment's
@@ -167,14 +169,11 @@ function terminalRunStatus(status: OrchestrationV2RunStatus): boolean {
   );
 }
 
-// Only work that wakes the agent holds it: commands it left running, such as a
-// dev server, present the run's own status (#14872). The server suppresses the
-// roster while an interruptible activity run exists, so a remaining roster is
+// Only work that wakes the agent holds it (Mesura: see threadAttention.ts). The server
+// suppresses the roster while an interruptible activity run exists, so a remaining roster is
 // stronger than checkpoint-oriented waiting.
 function shellRuntime(thread: OrchestrationV2ThreadShell): ThreadRuntimeSummary | null {
-  const parkAtIdle =
-    backgroundWorkHoldsCompletion(thread.pendingBackgroundTasks ?? []) &&
-    thread.status !== "failed";
+  const parkAtIdle = shellHoldsCompletion(thread) && thread.status !== "failed";
   if (thread.latestRunId === null && thread.activeProviderThreadId === null && !parkAtIdle) {
     return null;
   }
@@ -289,6 +288,7 @@ export function presentThreadShell(
     pinOrderKey: thread.pinOrderKey ?? null,
     activeOrderKey: thread.activeOrderKey ?? null,
     factoryRun: thread.factoryRun ?? null,
+    agentSignal: thread.agentSignal ?? null,
     ...(thread.lastVisitedAt === undefined
       ? {}
       : { lastVisitedAt: nullableIso(thread.lastVisitedAt) }),

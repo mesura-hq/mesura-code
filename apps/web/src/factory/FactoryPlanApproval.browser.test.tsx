@@ -455,13 +455,17 @@ it("phase4 web AC1 ends the plan card with implementer, reviewer and verifier ro
     expect(row.textContent).toContain(entry.role);
     previous = entry.level;
   }
-  // Criterion 2 through the card: newest Opus at high, Sol at high, Luna at max.
+  // Criterion 2 through the card: newest Opus at medium, Sol at high, Luna at xhigh.
   expect(rows.map((entry) => entry.model.textContent?.trim())).toEqual([
     "Claude Opus 5.5",
     "GPT-6 Sol",
     "GPT-6 Luna",
   ]);
-  expect(rows.map((entry) => entry.level.textContent?.trim())).toEqual(["High", "High", "Max"]);
+  expect(rows.map((entry) => entry.level.textContent?.trim())).toEqual([
+    "Medium",
+    "High",
+    "Extra High",
+  ]);
   expect(approveButton()?.disabled).toBe(false);
 });
 

@@ -41,6 +41,11 @@ import { AuthMcpClientAccess } from "./auth.ts";
 import { ChatAttachment } from "./chatAttachment.ts";
 import { FactoryRunShellSummary, FactoryThreadCard } from "./factory.ts";
 import {
+  ThreadAgentSignal,
+  ThreadAgentSignalKind,
+  ThreadAgentSignalNote,
+} from "./threadAgentSignal.ts";
+import {
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
   OrchestrationGetTurnDiffInput,
@@ -453,6 +458,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
   limitRecovery: Schema.optional(Schema.NullOr(OrchestrationV2LimitRecovery)),
   pinnedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
+  /** Mesura: optional so threads written before it, and older peers, keep decoding. */
+  agentSignal: Schema.optional(Schema.NullOr(ThreadAgentSignal)),
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   lastVisitedAt: Schema.NullOr(Schema.DateTimeUtc).pipe(
@@ -1752,6 +1759,8 @@ export const OrchestrationV2DomainEvent = Schema.Union([
       "thread.interaction-mode-updated",
       "thread.model-selection-updated",
       "thread.provider-switched",
+      "thread.agent-signal-set",
+      "thread.agent-signal-cleared",
     ]),
     payload: OrchestrationV2AppThread,
   }),
@@ -2007,6 +2016,8 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   deletedAt: Schema.NullOr(Schema.DateTimeUtc),
   /** Mesura: the Software Factory run attached to this thread, for its status label. */
   factoryRun: Schema.optional(Schema.NullOr(FactoryRunShellSummary)),
+  /** Mesura: the agent's needs-input or ready-to-close mark; optional so older peers decode. */
+  agentSignal: Schema.optional(Schema.NullOr(ThreadAgentSignal)),
 });
 export type OrchestrationV2ThreadShell = typeof OrchestrationV2ThreadShell.Type;
 
@@ -2578,6 +2589,8 @@ export const OrchestrationV2DomainEventJson = Schema.Union([
       "thread.interaction-mode-updated",
       "thread.model-selection-updated",
       "thread.provider-switched",
+      "thread.agent-signal-set",
+      "thread.agent-signal-cleared",
     ]),
     payload: OrchestrationV2AppThreadJson,
   }),
@@ -2773,6 +2786,19 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     reason: Schema.Literal("user"),
+  }),
+  /** Mesura: the server stamps the active run and the time. */
+  Schema.Struct({
+    type: Schema.Literal("thread.agent-signal.set"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    kind: ThreadAgentSignalKind,
+    note: Schema.optional(Schema.NullOr(ThreadAgentSignalNote)),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.agent-signal.clear"),
+    commandId: CommandId,
+    threadId: ThreadId,
   }),
   Schema.Struct({
     type: Schema.Literal("thread.snooze"),

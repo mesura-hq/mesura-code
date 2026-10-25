@@ -100,6 +100,12 @@ const thread = {
   hasPendingUserInput: false,
   session: null as { status: string } | null,
   latestTurn: { turnId: "turn", state: "running", completedAt: null as string | null },
+  agentSignal: null as {
+    kind: "needs_input" | "ready_to_close";
+    note: string | null;
+    runId: string | null;
+    setAt: string;
+  } | null,
 };
 let focused = false;
 let visibility = "visible";
@@ -157,6 +163,7 @@ function toV2ThreadShell(input: typeof thread) {
     settledAt: null,
     lastVisitedAt: null,
     deletedAt: null,
+    agentSignal: input.agentSignal,
   };
 }
 
@@ -231,3 +238,62 @@ it.each(["hasPendingApprovals", "hasPendingUserInput"] as const)(
     expect(notification.close).toHaveBeenCalled();
   },
 );
+
+it("notifies a new needs_input agent signal as Input needed, once", async () => {
+  await using app = setup();
+  await app.render();
+  const completed = {
+    latestTurn: { turnId: "turn", state: "completed", completedAt: "2026-09-13T07:01:00.000Z" },
+  };
+  state.shells.set("one", shell(completed));
+  await app.render();
+  expect(TestNotification.sent.map((entry) => entry.title)).toEqual(["Thread completed"]);
+  const agentSignal = {
+    kind: "needs_input" as const,
+    note: "Which database should the migration target?",
+    runId: "turn",
+    setAt: "2026-09-13T07:01:00.000Z",
+  };
+  state.shells.set("one", shell({ ...completed, agentSignal }));
+  await app.render();
+  expect(TestNotification.sent.map((entry) => entry.title)).toEqual([
+    "Thread completed",
+    "Input needed",
+  ]);
+  state.shells.set("one", shell({ ...completed, agentSignal: { ...agentSignal } }));
+  await app.render();
+  expect(TestNotification.sent).toHaveLength(2);
+});
+
+// regression: phase 3 review P1-1 — the run's completion replaced the agent's Input needed.
+it("keeps Input needed when the run that signalled needs_input completes", async () => {
+  await using app = setup();
+  await app.render();
+  const agentSignal = {
+    kind: "needs_input" as const,
+    note: "Which database should the migration target?",
+    runId: "turn",
+    setAt: "2026-09-13T07:00:30.000Z",
+  };
+  state.shells.set("one", shell({ agentSignal }));
+  await app.render();
+  expect(TestNotification.sent.map((entry) => entry.title)).toEqual(["Input needed"]);
+  state.shells.set(
+    "one",
+    shell({
+      agentSignal,
+      latestTurn: { turnId: "turn", state: "completed", completedAt: "2026-09-13T07:01:00.000Z" },
+    }),
+  );
+  await app.render();
+  expect(TestNotification.sent.map((entry) => entry.title)).toEqual(["Input needed"]);
+  // Dismissing the signal later announces nothing: the completion was already recorded.
+  state.shells.set(
+    "one",
+    shell({
+      latestTurn: { turnId: "turn", state: "completed", completedAt: "2026-09-13T07:01:00.000Z" },
+    }),
+  );
+  await app.render();
+  expect(TestNotification.sent.map((entry) => entry.title)).toEqual(["Input needed"]);
+});

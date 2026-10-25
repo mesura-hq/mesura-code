@@ -196,6 +196,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --color-issue-open: light-dark(var(--color-emerald-600), var(--color-emerald-400));
   --color-issue-closed: light-dark(var(--color-violet-500), var(--color-violet-400));
   --color-editor-warning: light-dark(var(--color-amber-600), var(--color-amber-400));
+  /* Mesura: the sidebar's and chat's Needs input, the one loud state of thread attention. */
+  --color-needs-input: light-dark(var(--color-indigo-600), var(--color-indigo-300));
   --color-context-track: color-mix(in oklab, var(--color-muted-foreground) 24%, transparent);
   --color-sidebar-recess: color-mix(in srgb, var(--background) 45%, transparent);
   /* The floating dictation widget always uses its dark overlay treatment. */

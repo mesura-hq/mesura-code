@@ -1,5 +1,5 @@
 import { TIMELINE_FIND_VISIBLE_CONTENT_POSITION } from "./timelineFindScrollPolicy";
-import { subscribePickerAction } from "../../lib/pickerActionBus";
+import { subscribePickerAction, subscribeQuestionFocus } from "../../lib/pickerActionBus";
 import { subscribeTurnJumpRequest } from "~/keys/chat/chatTurnBus";
 import {
   InlinePendingUserInputCard,
@@ -646,19 +646,28 @@ const ConversationTimeline = memo(function ConversationTimeline({
     worktreeSetup,
   });
   const rows = useStableRows(rawRows, listIdentityKey);
-  // Mesura: the question keybinding scrolls to the first pending question and focuses it.
-  useEffect(
-    () =>
-      subscribePickerAction("question", () => {
-        const index = rows.findIndex((row) => row.kind === "pending-user-input");
-        if (index < 0) return;
-        onManualNavigation();
-        const row = rows[index];
-        if (row?.kind === "pending-user-input") setFocusRequestId(row.request.requestId);
-        void listRef.current?.scrollToIndex({ index, animated: false, viewOffset: 24 });
-      }),
-    [rows, listRef, onManualNavigation],
-  );
+  // Mesura: the question keybinding scrolls to the first pending question and focuses it; the
+  // pinned action dock's Answer does the same for one request.
+  useEffect(() => {
+    const revealQuestion = (requestId?: string) => {
+      const index = rows.findIndex(
+        (row) =>
+          row.kind === "pending-user-input" &&
+          (requestId === undefined || row.request.requestId === requestId),
+      );
+      if (index < 0) return;
+      onManualNavigation();
+      const row = rows[index];
+      if (row?.kind === "pending-user-input") setFocusRequestId(row.request.requestId);
+      void listRef.current?.scrollToIndex({ index, animated: false, viewOffset: 24 });
+    };
+    const stopShortcut = subscribePickerAction("question", () => revealQuestion());
+    const stopDock = subscribeQuestionFocus(revealQuestion);
+    return () => {
+      stopShortcut();
+      stopDock();
+    };
+  }, [rows, listRef, onManualNavigation]);
 
   // Run status/timestamps churn on every stream event; the shared row context
   // must not change with them or every timeline row re-renders per event.

@@ -734,3 +734,66 @@ describe("phase10 shared run view review regressions", () => {
     expect(second.rail[0]).toBe(first.rail[0]);
   });
 });
+
+describe("phase 4 skill run spine", () => {
+  // A prototype run as the prototype skill records it: no route table, its own node names.
+  const prototypeStarted = event("2026-10-24T10:00:00.000Z", "run.started", {
+    runId: "prototype-mailbox",
+    request: "Does a one-slot mailbox drop frames?",
+    phases: [{ index: 1, title: "Try a one-slot mailbox", acceptance: [] }],
+  });
+  const prototypeLines = [
+    prototypeStarted,
+    event("2026-10-24T10:01:00.000Z", "phase.started", { phase: 1 }),
+    event("2026-10-24T10:02:00.000Z", "node.entered", { phase: 1, node: "experiment" }),
+    event("2026-10-24T10:03:00.000Z", "node.entered", { phase: 1, node: "observe" }),
+    event("2026-10-24T10:04:00.000Z", "node.entered", { phase: 1, node: "discuss" }),
+    event("2026-10-24T10:05:00.000Z", "node.entered", { phase: 1, node: "experiment" }),
+    event("2026-10-24T10:06:00.000Z", "node.entered", { phase: 1, node: "observe" }),
+  ];
+  const nodeRows = (result: ReturnType<typeof view>) =>
+    (result.spine?.stages ?? []).flatMap((stage) =>
+      stage.nodes.map((node) => [stage.stage, node.label, node.status] as const),
+    );
+
+  it("skill run spine: a prototype phase draws its own recorded nodes once each, the latest current", () => {
+    const result = view(foldFactoryRunTestLines(prototypeLines));
+
+    expect(nodeRows(result)).toEqual([
+      ["Steps", "Experiment", "done"],
+      ["Steps", "Observe", "current"],
+      ["Steps", "Discuss", "done"],
+    ]);
+  });
+
+  it("skill run spine: a closed prototype phase shows its own nodes done and no sf-team node", () => {
+    const result = view(
+      foldFactoryRunTestLines([
+        ...prototypeLines,
+        event("2026-10-24T10:07:00.000Z", "phase.closed", { phase: 1, close: "clean" }),
+        event("2026-10-24T10:08:00.000Z", "run.finished", { status: "done" }),
+      ]),
+    );
+
+    expect(nodeRows(result)).toEqual([
+      ["Steps", "Experiment", "done"],
+      ["Steps", "Observe", "done"],
+      ["Steps", "Discuss", "done"],
+    ]);
+  });
+
+  it("skill run spine: the node a stopped prototype run stopped at reads stopped", () => {
+    const result = view(
+      foldFactoryRunTestLines([
+        ...prototypeLines,
+        event("2026-10-24T10:07:00.000Z", "run.finished", { status: "stopped" }),
+      ]),
+    );
+
+    expect(nodeRows(result).map(([, label, status]) => [label, status])).toEqual([
+      ["Experiment", "done"],
+      ["Observe", "stopped"],
+      ["Discuss", "done"],
+    ]);
+  });
+});

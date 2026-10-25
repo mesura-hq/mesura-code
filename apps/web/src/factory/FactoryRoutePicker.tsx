@@ -219,3 +219,14 @@ export const FactoryApprovedRoutes = memo(function FactoryApprovedRoutes(props: 
     </dl>
   );
 });
+
+/** The routes on one line, role by role, for the composer dock's compact plan card. */
+export function summarizeFactoryRoutes(
+  providers: ReadonlyArray<ServerProvider>,
+  routes: FactoryRoutes,
+): string {
+  return FACTORY_ROUTE_ROLES.map((role) => {
+    const described = describeFactoryRoute(providers, routes[role]);
+    return `${FACTORY_ROUTE_ROLE_LABELS[role]} ${described.model} ${described.effort}`;
+  }).join(" · ");
+}
