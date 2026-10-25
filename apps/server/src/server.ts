@@ -129,6 +129,9 @@ import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as DictationJobs from "./dictation/DictationJobs.ts";
+import * as PushSender from "./push/PushSender.ts";
+import * as PushSubscriptions from "./push/PushSubscriptions.ts";
+import * as VapidKeys from "./push/vapidKeys.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as SourceControlProviderRegistry from "./sourceControl/SourceControlProviderRegistry.ts";
@@ -433,6 +436,12 @@ const layerProjectCloneTracker = ProjectCloneTracker.layer.pipe(
 // Mesura: server-side dictation, transcribed with the key from server settings.
 const layerDictationJobs = DictationJobs.layer.pipe(Layer.provide(layerServerSettings));
 
+// Mesura: Web Push to subscribed devices, signed with this server's VAPID key pair.
+const layerPushSubscriptions = PushSubscriptions.layer.pipe(
+  Layer.provide(PushSender.layer),
+  Layer.provide(VapidKeys.layer),
+);
+
 const layerKnownWorkspaces = KnownWorkspaces.layer.pipe(
   Layer.provide(ProjectStore.layer),
   Layer.provide(GitVcsDriver.layer),
@@ -664,6 +673,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   ReplayMarkers.layer,
   // Mesura: fork services that read the core services below.
   ProjectIconDiscovery.layer,
+  layerPushSubscriptions,
   layerAccountLimits,
   layerHostStats,
   // Mesura: follows Software Factory runs for the MCP tool, the WebSocket and startup alike.

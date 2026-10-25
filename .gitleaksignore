@@ -14,3 +14,6 @@ apps/server/src/outboundHttp.test.ts:private-key:24
 packages/provider-opencode/src/server/status.test.ts:generic-api-key:118
 packages/provider-opencode/src/server/status.test.ts:generic-api-key:119
 packages/provider-opencode/src/server/status.test.ts:generic-api-key:120
+# The web-push documentation's example PushSubscription keys, used as public test fixtures.
+apps/server/src/push/PushRpc.test.ts:generic-api-key:34
+packages/contracts/src/pushNotifications.test.ts:generic-api-key:34

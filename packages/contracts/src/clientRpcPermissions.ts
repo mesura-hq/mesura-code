@@ -59,6 +59,13 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.peerLinksAnswerRequest]: AuthAccessWriteScope,
   // Mesura: starting an agent search creates a thread that runs a model (ADR-010).
   [THREAD_SEARCH_WS_METHODS.startThreadSearchChat]: AuthOrchestrationOperateScope,
+  // Mesura: Web Push. Subscribing is a device setting, so it takes the bar the
+  // notification settings already write with.
+  [WS_METHODS.pushPublicKey]: AuthSettingsWriteScope,
+  [WS_METHODS.pushSubscribe]: AuthSettingsWriteScope,
+  [WS_METHODS.pushUnsubscribe]: AuthSettingsWriteScope,
+  [WS_METHODS.pushStatus]: AuthSettingsWriteScope,
+  [WS_METHODS.pushSendTest]: AuthSettingsWriteScope,
 } as const;
 export type ClientGuardedRpcTag = keyof typeof CLIENT_GUARDED_RPC_SCOPES;
 

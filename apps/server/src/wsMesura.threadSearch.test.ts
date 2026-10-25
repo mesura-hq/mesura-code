@@ -27,6 +27,7 @@ import * as RpcTest from "effect/rpc/RpcTest";
 import * as RpcAuthorization from "./auth/RpcAuthorization.ts";
 import * as ServerConfig from "./config.ts";
 import { DictationJobs } from "./dictation/DictationJobs.ts";
+import { PushSubscriptions } from "./push/PushSubscriptions.ts";
 import * as EditorSessionManager from "./editor/Manager.ts";
 import * as FactoryRunTracker from "./factory/FactoryRunTracker.ts";
 import * as FactorySnapshotStore from "./factory/FactorySnapshotStore.ts";
@@ -67,6 +68,7 @@ const makeServerScope = Effect.fn("WsMesuraThreadSearchTest.makeServerScope")(fu
     Layer.mock(FactorySnapshotStore.FactorySnapshotStore)({}),
     Layer.mock(FactoryRunTracker.FactoryRunTracker)({}),
     Layer.mock(DictationJobs)({}),
+    Layer.mock(PushSubscriptions)({}),
     Layer.mock(HostStatsService)({}),
     Layer.mock(AccountLimitsService)({}),
     Layer.mock(ReviewService.ReviewService)({}),

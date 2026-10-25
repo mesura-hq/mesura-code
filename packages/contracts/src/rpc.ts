@@ -433,6 +433,16 @@ import {
   DictationSubscribeInput,
 } from "./dictation.ts";
 import {
+  PushEndpointInput,
+  PushNotificationError,
+  PushPublicKey,
+  PushPublicKeyInput,
+  PushSendTestResult,
+  PushSubscriptionInput,
+  PushSubscriptionStatus,
+  PushUnsubscribeResult,
+} from "./pushNotifications.ts";
+import {
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
   SourceControlDiscoveryResult,
@@ -682,6 +692,12 @@ export const WS_METHODS = {
   dictationCancel: "dictation.cancel",
   dictationSetMode: "dictation.setMode",
   subscribeDictationJobs: "subscribeDictationJobs",
+  // Mesura: Web Push to the devices that subscribe (pushNotifications.ts).
+  pushPublicKey: "push.publicKey",
+  pushSubscribe: "push.subscribe",
+  pushUnsubscribe: "push.unsubscribe",
+  pushStatus: "push.status",
+  pushSendTest: "push.sendTest",
 
   subscribeVcsStatus: "subscribeVcsStatus",
   subscribeWorktreeSetup: "subscribeWorktreeSetup",
@@ -1396,6 +1412,40 @@ const WsSubscribeDictationJobsRpc = Rpc.make(WS_METHODS.subscribeDictationJobs, 
   success: DictationJobEvent,
   error: EnvironmentAuthorizationError,
   stream: true,
+});
+
+// Mesura: Web Push. A device subscribes and unsubscribes itself by its own
+// endpoint, and a test push goes only to the endpoint that asked for it.
+const PushRpcError = Schema.Union([PushNotificationError, EnvironmentAuthorizationError]);
+
+const WsPushPublicKeyRpc = Rpc.make(WS_METHODS.pushPublicKey, {
+  payload: PushPublicKeyInput,
+  success: PushPublicKey,
+  error: PushRpcError,
+});
+
+const WsPushSubscribeRpc = Rpc.make(WS_METHODS.pushSubscribe, {
+  payload: PushSubscriptionInput,
+  success: PushSubscriptionStatus,
+  error: PushRpcError,
+});
+
+const WsPushUnsubscribeRpc = Rpc.make(WS_METHODS.pushUnsubscribe, {
+  payload: PushEndpointInput,
+  success: PushUnsubscribeResult,
+  error: PushRpcError,
+});
+
+const WsPushStatusRpc = Rpc.make(WS_METHODS.pushStatus, {
+  payload: PushEndpointInput,
+  success: PushSubscriptionStatus,
+  error: PushRpcError,
+});
+
+const WsPushSendTestRpc = Rpc.make(WS_METHODS.pushSendTest, {
+  payload: PushEndpointInput,
+  success: PushSendTestResult,
+  error: PushRpcError,
 });
 
 const WsSourceControlPublishRepositoryRpc = Rpc.make(WS_METHODS.sourceControlPublishRepository, {
@@ -2485,6 +2535,11 @@ const MesuraWsRpcGroup = RpcGroup.make(
   WsDictationCancelRpc,
   WsDictationSetModeRpc,
   WsSubscribeDictationJobsRpc,
+  WsPushPublicKeyRpc,
+  WsPushSubscribeRpc,
+  WsPushUnsubscribeRpc,
+  WsPushStatusRpc,
+  WsPushSendTestRpc,
   WsProjectIconsPreviewRpc,
   WsProjectIconsDiscoverRpc,
   WsFileManagerHostRpc,
