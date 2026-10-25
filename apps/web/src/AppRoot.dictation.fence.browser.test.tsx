@@ -283,6 +283,7 @@ import {
   makeFenceUserInput,
 } from "./test/fenceThreadShell";
 import { publishFenceThreadProjection } from "./test/appRootFenceApp";
+import { focusTestWindow } from "./test/windowFocus";
 
 const { DictationWidgetPage } = await import("./dictation/DictationWidget");
 
@@ -430,6 +431,7 @@ async function mountApp(
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
   await router.load();
+  await focusTestWindow();
   await act(async () => {
     root = await renderBrowser(null, { container: container, router: false });
     await root.rerender(<AppRoot router={router as unknown as AppRouter} />);
