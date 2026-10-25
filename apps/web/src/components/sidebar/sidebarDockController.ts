@@ -1,7 +1,9 @@
 /**
  * Mesura: the controller behind the sidebar's two docks, usage (Alt+U) and
- * hosts (Alt+S). Each dock opens while its chord is held, while the pointer is
- * on its footer icon or the dock, or while it is pinned.
+ * hosts (Alt+S). Each dock opens while its chord is held, while a mouse or pen
+ * rests on its footer icon or the dock, or while it is pinned. A phone has no
+ * hover: a long press on the icon pins the dock, and a touch anywhere outside
+ * the dock and its icon unpins it.
  *
  * Only one dock is open at a time. Whichever opened last owns
  * `activeSidebarDockAtom`, and a dock that sees another take it closes itself
@@ -11,7 +13,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import { Atom } from "effect/reactivity";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { shortcutLabelForCommand } from "../../keybindings";
 import { isTerminalFocused } from "../../lib/terminalFocus";
@@ -30,6 +32,7 @@ import {
   type UsagePeekKeyboardLifecycle,
   type UsagePeekState,
 } from "./AccountLimitsPanel.logic";
+import { createTouchLongPress, type TouchLongPressHandlers } from "./touchLongPress";
 
 export type SidebarDockId = "usage" | "hosts";
 
@@ -89,12 +92,26 @@ function useSidebarDockRequest(dock: SidebarDockId, enabled: boolean): void {
   }, [dock, enabled, isMobile, navigate, request, setSidebarOpen, sidebarOpen]);
 }
 
+interface PointerTypeEvent {
+  readonly pointerType: string;
+}
+
+/** Spread on the dock and on its footer icon: both count as "on the dock". */
+export interface SidebarDockSurfaceProps {
+  readonly "data-sidebar-dock-surface": SidebarDockId;
+  readonly onPointerEnter: (event: PointerTypeEvent) => void;
+  readonly onPointerLeave: (event: PointerTypeEvent) => void;
+}
+
+export type SidebarDockTriggerProps = SidebarDockSurfaceProps &
+  Omit<TouchLongPressHandlers, "dispose">;
+
 export interface SidebarDockController {
   readonly open: boolean;
   readonly pinned: boolean;
   readonly shortcutLabel: string | null;
-  readonly onPointerEnter: () => void;
-  readonly onPointerLeave: () => void;
+  readonly surfaceProps: SidebarDockSurfaceProps;
+  readonly triggerProps: SidebarDockTriggerProps;
   /** Pins the dock, or unpins and closes it. */
   readonly togglePinned: () => void;
   readonly close: () => void;
@@ -128,8 +145,14 @@ export function useSidebarDockController(input: {
     });
   }
 
-  const onPointerEnter = useCallback(() => hoverBridgeRef.current?.enter(), []);
-  const onPointerLeave = useCallback(() => hoverBridgeRef.current?.leave(), []);
+  // A finger fires pointerenter and pointerleave around every tap; treated as
+  // hover, each tap would flash the dock open for the bridge's 120 ms.
+  const onPointerEnter = useCallback((event: PointerTypeEvent) => {
+    if (event.pointerType !== "touch") hoverBridgeRef.current?.enter();
+  }, []);
+  const onPointerLeave = useCallback((event: PointerTypeEvent) => {
+    if (event.pointerType !== "touch") hoverBridgeRef.current?.leave();
+  }, []);
   const closePanel = useCallback(() => {
     hoverBridgeRef.current?.dispose();
     if (keyboardLifecycleRef.current) {
@@ -148,6 +171,17 @@ export function useSidebarDockController(input: {
     }
     appAtomRegistry.set(pinnedSidebarDockAtom, dock);
   }, [closePanel, dock]);
+  // One long-press tracker per dock for the component's life; a controller's
+  // dock id never changes. No `enabled` gate: the footer icons render only
+  // where the docks are enabled, and a pin on a disabled dock is dropped below.
+  const [longPress] = useState(() =>
+    createTouchLongPress({
+      onLongPress: () => appAtomRegistry.set(pinnedSidebarDockAtom, dock),
+      schedule: (callback, delayMs) => setTimeout(callback, delayMs),
+      cancel: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+      vibrate: (durationMs) => navigator.vibrate?.(durationMs),
+    }),
+  );
 
   useEffect(() => {
     if (!enabled) return;
@@ -203,6 +237,7 @@ export function useSidebarDockController(input: {
   useEffect(
     () => () => {
       hoverBridgeRef.current?.dispose();
+      longPress.dispose();
       if (appAtomRegistry.get(pinnedSidebarDockAtom) === dock) {
         appAtomRegistry.set(pinnedSidebarDockAtom, null);
       }
@@ -210,10 +245,25 @@ export function useSidebarDockController(input: {
         appAtomRegistry.set(activeSidebarDockAtom, null);
       }
     },
-    [dock],
+    [dock, longPress],
   );
 
   useSidebarDockRequest(dock, enabled);
+
+  // A pinned dock on a phone has no pointer to leave it and no Escape key: a
+  // touch outside the dock and its icon is the way out. Mouse clicks keep the
+  // desktop behaviour, where only the icon, Escape or the other dock unpin.
+  useEffect(() => {
+    if (!pinned) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.pointerType !== "touch") return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest(`[data-sidebar-dock-surface="${dock}"]`)) return;
+      closePanel();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [closePanel, dock, pinned]);
 
   // A pin only means something where the dock can show. Leaving for a page
   // without it drops the pin, so the dock does not greet the user on return.
@@ -239,12 +289,21 @@ export function useSidebarDockController(input: {
     if (activeDock !== null && activeDock !== dock && wantsOpenRef.current) closePanel();
   }, [activeDock, closePanel, dock]);
 
+  const surfaceProps = useMemo<SidebarDockSurfaceProps>(
+    () => ({ "data-sidebar-dock-surface": dock, onPointerEnter, onPointerLeave }),
+    [dock, onPointerEnter, onPointerLeave],
+  );
+  const triggerProps = useMemo<SidebarDockTriggerProps>(() => {
+    const { dispose: _dispose, ...handlers } = longPress;
+    return { ...surfaceProps, ...handlers };
+  }, [longPress, surfaceProps]);
+
   return {
     open: wantsOpen && activeDock === dock,
     pinned,
     shortcutLabel: shortcutLabelForCommand(keybindings, command),
-    onPointerEnter,
-    onPointerLeave,
+    surfaceProps,
+    triggerProps,
     togglePinned,
     close: closePanel,
   };

@@ -348,8 +348,7 @@ export function AccountLimitsDock(props: { readonly controller: AccountLimitsPan
         controller.open ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
       )}
       inert={!controller.open}
-      onPointerEnter={controller.onPointerEnter}
-      onPointerLeave={controller.onPointerLeave}
+      {...controller.surfaceProps}
     >
       <div className="min-h-0 overflow-hidden">
         <AccountLimitsPanelContent

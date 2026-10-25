@@ -12,11 +12,12 @@ keeps the last 12 hours of its own readings, so the panel shows a trend as soon 
   it.
 - Choose **Show hosts** in the command palette to keep the panel open. From Settings, Usage or
   Pull requests it returns to the thread list first, and it opens a hidden sidebar.
+- On a phone, open the sidebar and hold your finger on the **Hosts** button. The panel stays open
+  after you lift it; touch anywhere outside the panel to close it. A short tap also keeps it open.
 
 The panel opens inside the sidebar, above the footer buttons, in the same place as the
 [account limits](./account-limits.md) panel. Only one of the two is open at a time: opening one
-closes the other. Like that panel, it is available on the thread list only, and not when the window
-is as narrow as a phone.
+closes the other. Like that panel, it is available on the thread list only.
 
 You can change the shortcut in **Settings → Keybindings**, where it is listed as **Hosts: Peek**.
 

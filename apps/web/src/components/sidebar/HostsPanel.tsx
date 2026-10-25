@@ -304,8 +304,7 @@ export function HostsDock(props: { readonly controller: SidebarDockController })
         controller.open ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
       )}
       inert={!controller.open}
-      onPointerEnter={controller.onPointerEnter}
-      onPointerLeave={controller.onPointerLeave}
+      {...controller.surfaceProps}
     >
       <div className="min-h-0 overflow-hidden">
         <HostsPanelContent
