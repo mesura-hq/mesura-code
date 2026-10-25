@@ -2,6 +2,7 @@ import "../index.css";
 import "../mesura.css";
 
 import { render as renderBrowser, type Screen } from "../../test/render";
+import { expect, vi } from "vite-plus/test";
 
 import {
   createMemoryHistory,
@@ -200,6 +201,12 @@ export async function renderFenceApp(
 ): Promise<{ root: Screen; router: FenceRouter }> {
   // The shared browser fixture lasts for this test environment, as document does.
   installFenceFontEvents();
+  // ChatView refocuses the composer two frames after a window `focus` event when nothing holds
+  // the keyboard. An unfocused test window receives that event from the first focus inside it,
+  // which can land after a fence has moved the keyboard elsewhere (a blur, a chat motion) and
+  // take it back. Focusing the window before the app mounts means no such event comes later.
+  window.focus();
+  await vi.waitFor(() => expect(document.hasFocus(), "the test window has focus").toBe(true));
   appRootFence.vimMode = vimMode;
   appRootFence.openThreadId = threadId;
   const router = createFenceRouter(threadId);
