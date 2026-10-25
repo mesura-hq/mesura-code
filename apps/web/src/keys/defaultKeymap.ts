@@ -32,7 +32,7 @@ const BRIDGED: ReadonlyArray<CommandEntry & { readonly command: KeybindingComman
   { keys: "<leader><Space>", command: "filePicker.toggle", title: "Find file" },
   { keys: "<leader>ff", command: "filePicker.toggle", title: "File" },
   { keys: "<leader>fg", command: "projectSearch.toggle", title: "Grep project" },
-  { keys: "<leader>fp", command: "projectScope.toggle", title: "Project scope" },
+  { keys: "<leader>fp", command: "projectScope.toggle", title: "Project filter" },
   { keys: "<leader>ft", command: "threadSearch.toggle", title: "Thread" },
   { keys: "<leader>fc", command: "commandPalette.toggle", title: "Command" },
   { keys: "<leader>tn", command: "chat.new", title: "New thread" },

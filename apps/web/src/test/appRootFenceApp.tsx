@@ -159,8 +159,15 @@ export function createFenceRouter(firstThreadId: ThreadId) {
     path: "/$environmentId/$threadId",
     component: () => null,
   });
+  // A Settings page outside the chat layout, as the real one is: the layout's
+  // sidebar slot shows the settings navigation there.
+  const settings = createRoute({
+    getParentRoute: () => route,
+    path: "/settings",
+    component: () => <button data-testid="settings-control">Save</button>,
+  });
   return createRouter({
-    routeTree: route.addChildren([chatLayout.addChildren([thread])]),
+    routeTree: route.addChildren([chatLayout.addChildren([thread]), settings]),
     history: createMemoryHistory({
       initialEntries: [`/${fenceEnvironmentId}/${firstThreadId}`],
     }),

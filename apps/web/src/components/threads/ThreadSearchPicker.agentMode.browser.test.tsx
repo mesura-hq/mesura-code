@@ -2,14 +2,16 @@ import { act } from "../../../test/render";
 /**
  * Entry point: AppRoot → CommandPalette. A memory router renders the real
  * CommandPalette around the routed outlet, and every picker is reached the way
- * a user reaches it: Ctrl+Alt+K (`threadSearch.toggle`) opens ThreadSearchPicker
- * through the palette's keyboard route. The fixture replaces data sources only:
+ * a user reaches it: the palette's "Search threads with an agent" row opens
+ * ThreadSearchPicker. The fixture replaces data sources only:
  * environments, entity shells, the lexical search query, the shared
  * `orchestrationEnvironment.agentThreadSearch` atom family (same shape and
  * cancellation semantics, hand-settled results), and the RPC command boundary.
  *
- * Phase 4 acceptance criteria 1–5 of the agent thread search plan. Criterion 6
- * is pinned by `ThreadSearchPicker.guards.test.tsx`.
+ * Phase 4 acceptance criteria 2–5 of the agent thread search plan. Criterion 1,
+ * switching between exact words and agent mode, went with the exact mode in the
+ * search unification cycle. Criterion 6 is pinned by
+ * `ThreadSearchPicker.guards.browser.test.tsx`.
  */
 
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -64,17 +66,14 @@ import {
 } from "./threadSearchPicker.testFixtures";
 import {
   activeSearchMode,
-  AGENT_MODE_NAME,
   alertDialog,
   buttonIn,
   click,
   currentPath,
-  EXACT_MODE_NAME,
   focusIsInPickerTextField,
   isHighlighted,
-  modeControl,
   mountApp,
-  openThreadSearch,
+  toggleAgentSearch,
   optionRows,
   paletteElement,
   paletteMode,
@@ -136,8 +135,7 @@ async function setupBrowserFixture0() {
 }
 
 async function enterAgentMode(): Promise<void> {
-  await openThreadSearch();
-  await pressKey(pickerTextField(), "Tab");
+  await toggleAgentSearch();
   expect(activeSearchMode()).toBe("agent");
 }
 
@@ -187,70 +185,6 @@ function unarchivedShell(match: ReturnType<typeof agentMatch>) {
 function threadPath(match: ReturnType<typeof agentMatch>): string {
   return `/${match.environmentId}/${match.threadId}`;
 }
-
-describe("agent search criterion 1: switching between exact words and agent mode", () => {
-  it("agent search: Tab on the thread-search input enters agent mode and Tab returns to exact words", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
-
-    await openThreadSearch();
-    expect(paletteMode()).toBe("threads");
-    await vi.waitFor(() => expect(focusIsInPickerTextField()).toBe(true));
-    expect(activeSearchMode()).toBe("exact");
-    expect(optionRows().map((row) => row.textContent)).toContainEqual(
-      expect.stringContaining("Rename keybind chord"),
-    );
-
-    const enter = await pressKey(pickerTextField(), "Tab");
-    expect(enter.defaultPrevented).toBe(true);
-    expect(activeSearchMode()).toBe("agent");
-    expect(paletteMode()).toBe("threads");
-    await vi.waitFor(() => expect(focusIsInPickerTextField()).toBe(true));
-    expect(optionRows().map((row) => row.textContent)).not.toContainEqual(
-      expect.stringContaining("Rename keybind chord"),
-    );
-
-    const leave = await pressKey(pickerTextField(), "Tab");
-    expect(leave.defaultPrevented).toBe(true);
-    expect(activeSearchMode()).toBe("exact");
-    await vi.waitFor(() => expect(focusIsInPickerTextField()).toBe(true));
-    expect(optionRows().map((row) => row.textContent)).toContainEqual(
-      expect.stringContaining("Rename keybind chord"),
-    );
-  });
-
-  it("agent search: the visible mode control switches both ways and hands focus back to the text field", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
-
-    await openThreadSearch();
-    const agentSegment = modeControl(AGENT_MODE_NAME);
-    expect(agentSegment, "Expected a visible agent-mode control").not.toBeNull();
-
-    await click(agentSegment!);
-    expect(activeSearchMode()).toBe("agent");
-    await vi.waitFor(() => expect(focusIsInPickerTextField()).toBe(true));
-
-    const exactSegment = modeControl(EXACT_MODE_NAME);
-    expect(exactSegment, "Expected a visible exact-words control").not.toBeNull();
-    await click(exactSegment!);
-    expect(activeSearchMode()).toBe("exact");
-    await vi.waitFor(() => expect(focusIsInPickerTextField()).toBe(true));
-    expect(paletteMode()).toBe("threads");
-  });
-
-  it("agent search: Tab while the mode control owns focus moves focus normally instead of switching modes", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
-
-    await openThreadSearch();
-    const agentSegment = modeControl(AGENT_MODE_NAME);
-    expect(agentSegment, "Expected a visible agent-mode control").not.toBeNull();
-    agentSegment!.focus();
-    expect(document.activeElement).toBe(agentSegment);
-
-    const tab = await pressKey(agentSegment!, "Tab");
-    expect(tab.defaultPrevented).toBe(false);
-    expect(activeSearchMode()).toBe("exact");
-  });
-});
 
 describe("agent search criterion 2: describe, see progress, refine, and get ranked links", () => {
   it("agent search: a submitted description shows progress, then ranked links with reasons and project and environment labels", async () => {
@@ -357,15 +291,10 @@ describe("agent search criterion 3: keyboard selection, Escape, failure, empty, 
     expect(threadSearchFixture.agentCalls).toHaveLength(1);
   });
 
-  it("agent search: Escape in agent mode returns to exact words, and a second Escape returns to the command palette", async () => {
+  it("agent search: Escape in the agent search returns to the command palette", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 
     await searchAndShow([HOSTS_DOCK_MATCH]);
-
-    await pressKey(pickerTextField(), "Escape");
-    expect(paletteMode()).toBe("threads");
-    expect(activeSearchMode()).toBe("exact");
-    await vi.waitFor(() => expect(focusIsInPickerTextField()).toBe(true));
 
     await pressKey(pickerTextField(), "Escape");
     expect(paletteMode()).toBe("command");
@@ -483,7 +412,7 @@ describe("agent search criterion 4: archived results unarchive before opening", 
     expect(currentPath(app)).toBe(threadPath(ARCHIVED_LAG_MATCH));
     expect(alertDialog()).toBeNull();
 
-    await openThreadSearch();
+    await toggleAgentSearch();
     expect(optionRows()[0]?.textContent).not.toMatch(/archived/i);
     await click(optionRows()[0]!);
     expect(alertDialog()).toBeNull();
@@ -576,8 +505,8 @@ describe("agent search: persistent popup session", () => {
 
     await enterAgentMode();
     await typeInto(pickerTextField(), "an unfinished description");
-    await openThreadSearch();
-    await openThreadSearch();
+    await toggleAgentSearch();
+    await toggleAgentSearch();
     expect(activeSearchMode()).toBe("agent");
     expect(pickerTextField().value).toBe("an unfinished description");
   });
@@ -632,7 +561,7 @@ describe("agent search: persistent popup session", () => {
     const call = agentCall(0);
     expect(call.interrupted).toBe(false);
 
-    await openThreadSearch();
+    await toggleAgentSearch();
     await settle();
 
     expect(paletteElement()).toBeNull();
@@ -665,12 +594,11 @@ describe("agent search: persistent popup session", () => {
     const call = agentCall(0);
 
     await pressKey(pickerTextField(), "Escape");
-    await pressKey(pickerTextField(), "Escape");
     await settle();
 
     expect(paletteMode()).toBe("command");
     expect(call.interrupted).toBe(false);
-    await openThreadSearch();
+    await toggleAgentSearch();
     expect(activeSearchMode()).toBe("agent");
     await pressKey(pickerTextField(), "r", { altKey: true });
     expect(call.interrupted).toBe(true);

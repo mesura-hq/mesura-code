@@ -585,6 +585,20 @@ describe("searchSidebarThreads", () => {
     expect(searchSidebarThreads(linked, "#41 absent", PROJECT_TITLE_BY_ID)).toEqual([]);
   });
 
+  // Search unification phase 1, criterion 2, guard: no word score. The older
+  // thread holds both words in its title; the newer one holds one in its title
+  // and the other in its branch, which the former score weighed less.
+  it("search order guard: a 58-day-old title with more word hits stays where the sidebar order puts it", () => {
+    const newer = searchThread("thread-newer", "Sidebar polish", "p-alpha", "rename-flow");
+    const older58Days = searchThread("thread-58-days", "Sidebar rename", "p-beta", null);
+    expect(
+      searchSidebarThreads([newer, older58Days], "sidebar rename", PROJECT_TITLE_BY_ID),
+    ).toEqual([newer, older58Days]);
+    expect(
+      searchSidebarThreads([older58Days, newer], "sidebar rename", PROJECT_TITLE_BY_ID),
+    ).toEqual([older58Days, newer]);
+  });
+
   // "cleanup" matches only thread-3's fields, so the others can be content-only matches.
   it("appends content-only matches after every field match", () => {
     expect(

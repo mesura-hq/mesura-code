@@ -50,8 +50,7 @@ import {
   AlertDialogTitle,
 } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
-import { Kbd, KbdGroup } from "../ui/kbd";
-import { agentSearchResultValue } from "./threadSearchPicker.logic";
+import { Kbd } from "../ui/kbd";
 import { AgentThreadSearchResultCard } from "./AgentThreadSearchResultCard";
 import {
   useAgentThreadSearchSession,
@@ -73,36 +72,7 @@ function claimComboboxKey(event: ComboboxKeyboardEvent): void {
 }
 
 /**
- * Switches the thread picker's mode on a plain Tab in its text field. Only the
- * field claims Tab: from the mode switch itself, Tab and Shift+Tab move focus
- * as usual, so keyboard and assistive-technology users keep a normal path.
- */
-export function handleThreadSearchModeKey(
-  event: ComboboxKeyboardEvent,
-  toggleMode: () => void,
-): boolean {
-  if (event.key !== "Tab" || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) {
-    return false;
-  }
-  claimComboboxKey(event);
-  toggleMode();
-  return true;
-}
-
-/** The hint that tells the user Tab changes the search mode. */
-export function ThreadSearchModeHint(props: { readonly target: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <KbdGroup>
-        <Kbd>Tab</Kbd>
-      </KbdGroup>
-      <span>{props.target}</span>
-    </span>
-  );
-}
-
-/**
- * Agent mode of the thread picker: the user describes a conversation, the
+ * The thread picker's agent search: the user describes a conversation, the
  * shared `agentThreadSearch` coordinator searches every connected environment,
  * and the ranked threads it verified come back as rows with a short reason.
  *
@@ -110,12 +80,10 @@ export function ThreadSearchModeHint(props: { readonly target: string }) {
  * Reset cancels it and starts a fresh conversation.
  */
 export function AgentThreadSearch(props: {
-  readonly modeSwitch: ReactNode;
   readonly backHandlerRef: RefObject<ThreadSearchBackHandler | null>;
-  readonly onExitAgentMode: () => void;
   readonly setOpen: (open: boolean) => void;
 }) {
-  const { backHandlerRef, onExitAgentMode, setOpen } = props;
+  const { backHandlerRef, setOpen } = props;
   const navigate = useNavigate();
   const session = useAgentThreadSearchSession();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -204,8 +172,7 @@ export function AgentThreadSearch(props: {
         if (!isUnarchiving) closeArchivedConfirmation();
         return true;
       }
-      onExitAgentMode();
-      return true;
+      return false;
     };
     backHandlerRef.current = handleBack;
     return () => {
@@ -286,21 +253,18 @@ export function AgentThreadSearch(props: {
         key={session.resetCount}
         aria-label="Search threads with an agent"
         autoHighlight="always"
-        escapeLabel="Exact words"
+        escapeLabel="Back"
         footerActionLabel={
           draft.trim().length > 0 ? "Search" : items.length > 0 ? "Open thread" : undefined
         }
-        footerTrailing={<ThreadSearchModeHint target="Exact words" />}
-        inputAccessory={props.modeSwitch}
         inputProps={{
-          className: "pe-40",
+          "aria-label": "Search threads with an agent",
           placeholder:
             turns.length === 0
               ? "Describe the thread you remember…"
               : "Refine the description, or pick a thread…",
           startAddon: <SparklesIcon className="translate-x-0.5 text-icon-muted" />,
           onKeyDown: (event: ComboboxKeyboardEvent) => {
-            if (handleThreadSearchModeKey(event, onExitAgentMode)) return;
             // New words are a new search. With the field empty, Enter falls
             // through to the combobox and opens the highlighted thread.
             if (event.key === "Enter" && draft.trim().length > 0) {
@@ -402,7 +366,8 @@ function agentResultItem(
 ): CommandPaletteActionItem {
   return {
     kind: "action",
-    value: agentSearchResultValue(match),
+    // Keyed by environment and thread together: one thread id can exist in two environments.
+    value: `agent-thread:${match.environmentId}:${match.threadId}`,
     searchTerms: [],
     title: match.threadTitle,
     icon: null,

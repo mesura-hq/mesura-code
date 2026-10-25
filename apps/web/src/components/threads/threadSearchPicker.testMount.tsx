@@ -153,8 +153,33 @@ export async function pressKey(
   return event;
 }
 
-export function openThreadSearch(): Promise<KeyboardEvent> {
-  return toggleOverlay("threads", "k", { ctrlKey: true, altKey: true });
+const AGENT_ROW_TITLE = "Search threads with an agent";
+export const AGENT_FIELD_NAME = "Search threads with an agent";
+
+/**
+ * Opens the agent search through the command palette's "Search threads with an
+ * agent" row, from a closed palette or from its command list; closes the
+ * palette when the agent search is already showing, as its chord used to.
+ */
+export async function toggleAgentSearch(): Promise<void> {
+  if (paletteMode() === "threads") {
+    // Escape steps back to the command list, and a second Escape closes it.
+    await pressKey(document.activeElement ?? document.body, "Escape");
+    await pressKey(document.activeElement ?? document.body, "Escape");
+    await vi.waitFor(() => expect(paletteElement()).toBeNull());
+    return;
+  }
+  if (paletteMode() !== "command") await openCommandPalette();
+  const input = paletteElement()?.querySelector<HTMLInputElement>("input");
+  expect(input, "the palette's input").toBeTruthy();
+  await typeInto(input!, "agent");
+  const row = optionRows().find((candidate) => candidate.textContent?.includes(AGENT_ROW_TITLE));
+  expect(
+    row,
+    `Expected a row titled ${AGENT_ROW_TITLE}; rows: ${optionRows().map((r) => r.textContent)}`,
+  ).toBeDefined();
+  await click(row!);
+  await vi.waitFor(() => expect(paletteMode()).toBe("threads"));
 }
 
 export function openFilePicker(): Promise<KeyboardEvent> {
@@ -288,21 +313,13 @@ export function modeControl(name: RegExp): HTMLElement | null {
   );
 }
 
-export const AGENT_MODE_NAME = /agent/i;
 export const EXACT_MODE_NAME = /exact/i;
 
-function isOn(element: HTMLElement | null): boolean {
-  if (element === null) return false;
-  return ["aria-pressed", "aria-checked", "aria-selected"].some(
-    (attribute) => element.getAttribute(attribute) === "true",
-  );
-}
-
-/** Which search mode the visible control reports, or null when it reports none. */
-export function activeSearchMode(): "agent" | "exact" | null {
-  if (isOn(modeControl(AGENT_MODE_NAME))) return "agent";
-  if (isOn(modeControl(EXACT_MODE_NAME))) return "exact";
-  return null;
+/** "agent" while the picker shows the agent search's field, else null. */
+export function activeSearchMode(): "agent" | null {
+  return threadSearchPicker()?.querySelector(`input[aria-label="${AGENT_FIELD_NAME}"]`)
+    ? "agent"
+    : null;
 }
 
 export function alertDialog(): HTMLElement | null {

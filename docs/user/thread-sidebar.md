@@ -198,8 +198,13 @@ On web and desktop, open the command palette with `Cmd/Ctrl+K` to search threads
 across connected environments. Message search starts after two characters and
 includes your messages and final agent responses.
 
-When you remember what a thread was about but not its words, open thread search
-(`mod+alt+k`) and press Tab for agent search. Describe the conversation, then
+The sidebar's Search field (`mod+alt+k`) searches every project while it has
+text, even with a project filter on, and lists matches newest first. Clear it to
+return to the filtered list. `mod+shift+f` opens the project filter, and
+`mod+alt+p` switches between All projects and the last project.
+
+When you remember what a thread was about but not its words, choose **Search
+threads with an agent** in the command palette. Describe the conversation, then
 refine it if the first results miss. It reaches archived threads too, and asks
 before it unarchives one to open it. Closing the search stops it; no thread is
 created for the search itself.

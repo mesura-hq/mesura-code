@@ -1,12 +1,14 @@
 /**
  * Entry point: AppRoot → CommandPalette. A memory router renders the real
- * CommandPalette around the routed outlet; Ctrl+Alt+K, Ctrl+P and Ctrl+O reach
- * the thread picker, the file picker and the command palette through the
- * palette's own keyboard route. The fixture replaces data sources only.
+ * CommandPalette around the routed outlet; Ctrl+P and Ctrl+O reach the file
+ * picker and the command palette through the palette's own keyboard route. The
+ * fixture replaces data sources only.
  *
- * Guards for phase 4 criterion 6 of the agent thread search plan: behavior that
- * already works at the base and must keep working once the thread picker gains
- * an agent mode. Every test here passes before the phase starts.
+ * Guards first written for phase 4 criterion 6 of the agent thread search plan.
+ * The search unification cycle removed the picker's exact-word mode, and with
+ * it the guards that pinned Ctrl+Alt+K, exact words and the Search threads row
+ * opening it: those now land in the sidebar Search
+ * (`AppRoot.searchUnification.fence.browser.test.tsx`).
  */
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -56,18 +58,14 @@ import {
 import {
   click,
   currentPath,
-  focusIsInPickerTextField,
   mountApp,
   openCommandPalette,
   openFilePicker,
-  openThreadSearch,
   optionRows,
   paletteElement,
   paletteMode,
-  pickerTextField,
   pressKey,
   threadSearchPicker,
-  typeInto,
   type MountedApp,
 } from "./threadSearchPicker.testMount";
 
@@ -93,54 +91,12 @@ function rowTitled(title: string): HTMLElement {
   return row!;
 }
 
-describe("thread search guards: shortcut, lexical search, file picker, command palette", () => {
+describe("thread search guards: file picker and command palette", () => {
   async function setupBrowserFixture1() {
     app = await mountApp();
 
     return { async [Symbol.asyncDispose]() {} };
   }
-
-  it("thread search guard: Ctrl+Alt+K opens the thread picker with focus in its field and a second press closes it", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
-    await using _browserFixture1 = await setupBrowserFixture1();
-
-    await openThreadSearch();
-    expect(paletteMode()).toBe("threads");
-    expect(focusIsInPickerTextField()).toBe(true);
-    expect(optionRows().map((row) => row.textContent)).toEqual([
-      expect.stringContaining("Rename keybind chord"),
-      expect.stringContaining("Hosts dock layout"),
-    ]);
-
-    await openThreadSearch();
-    expect(paletteElement()).toBeNull();
-  });
-
-  it("thread search guard: exact words match in any order and Enter opens the matching thread", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
-    await using _browserFixture1 = await setupBrowserFixture1();
-
-    await openThreadSearch();
-    await typeInto(pickerTextField(), "keybind rename");
-
-    expect(optionRows().map((row) => row.textContent)).toEqual([
-      expect.stringContaining("Rename keybind chord"),
-    ]);
-
-    await pressKey(pickerTextField(), "Enter");
-    expect(currentPath(app!)).toBe(`/${LAPTOP_ENVIRONMENT_ID}/thread-rename-keybind`);
-    expect(paletteElement()).toBeNull();
-    expect(threadSearchFixture.agentCalls).toHaveLength(0);
-  });
-
-  it("thread search guard: Escape from exact-word thread search goes back to the command palette", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
-    await using _browserFixture1 = await setupBrowserFixture1();
-
-    await openThreadSearch();
-    await pressKey(pickerTextField(), "Escape");
-    expect(paletteMode()).toBe("command");
-  });
 
   it("thread search guard: Ctrl+P opens the file picker and Tab there leaves it the file picker", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
@@ -155,20 +111,6 @@ describe("thread search guards: shortcut, lexical search, file picker, command p
     expect(paletteMode()).toBe("files");
     expect(threadSearchPicker()).toBeNull();
     expect(threadSearchFixture.agentCalls).toHaveLength(0);
-  });
-
-  it("thread search guard: the command palette's Search threads row opens exact-word thread search", async () => {
-    await using _browserFixture0 = await setupBrowserFixture0();
-    await using _browserFixture1 = await setupBrowserFixture1();
-
-    await openCommandPalette();
-    expect(paletteMode()).toBe("command");
-
-    await click(rowTitled("Search threads"));
-    expect(paletteMode()).toBe("threads");
-    expect(optionRows().map((row) => row.textContent)).toContainEqual(
-      expect.stringContaining("Rename keybind chord"),
-    );
   });
 
   it("thread search guard: a command palette thread row still opens its thread", async () => {

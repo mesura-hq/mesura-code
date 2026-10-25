@@ -379,6 +379,7 @@ import {
 import { useDraftHeroLayoutTransition } from "./chat/useDraftHeroLayoutTransition";
 import { useLocalDispatchState } from "./chat/useLocalDispatchState";
 import { draftFanoutSelectionsAtom, draftSendState } from "./chat/chatViewSend";
+import { sidebarHoldsRequestedFocus } from "./sidebar/SidebarCommandHost";
 import {
   isCompactCommandMessage,
   type LocalThreadErrorEntry,
@@ -2176,6 +2177,8 @@ export default function ChatView(props: ChatViewProps) {
   useEffect(() => {
     if (!activeThread?.id || terminalUiState.terminalOpen) return;
     const frame = window.requestAnimationFrame(() => {
+      // Fork: a sidebar focus shortcut that left Settings keeps the keyboard in the sidebar.
+      if (sidebarHoldsRequestedFocus()) return;
       focusComposerStable();
     });
     return () => {

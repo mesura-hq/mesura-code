@@ -129,18 +129,16 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "commandPalette.toggle",
   "filePicker.toggle",
   "projectSearch.toggle",
-  // Opens the project scope picker, which filters the sidebar's thread list to
-  // one project. It writes the same state the sidebar's own dropdown writes, so
-  // the two are one filter and not two. The rename warning below applies to this
-  // id too: RETIRED_KEYBINDING_DEFAULTS matches on the command, so it can move a
-  // rule's key but never carry it to a new command name.
+  // Opens the sidebar's project filter, which narrows the thread list to one
+  // project. The rename warning below applies to this id too:
+  // RETIRED_KEYBINDING_DEFAULTS matches on the command, so it can move a rule's
+  // key but never carry it to a new command name.
   "projectScope.toggle",
-  // Opens the thread search picker: every thread, in every project and every
-  // environment, found by words that may come from the project name, the title
-  // or the branch in any order. The command palette lists threads too, but it
-  // matches one contiguous substring over those fields joined, so it cannot
-  // find a thread from its project plus a word of its title. The rename
-  // warning below applies to this id too.
+  // Flips the sidebar's project filter between All projects and the last
+  // project it held.
+  "projectScope.toggleAll",
+  // Focuses the sidebar's Search field, which searches every project while it
+  // has text. The rename warning below applies to this id too.
   "threadSearch.toggle",
   "usage.open",
   "theme.select",

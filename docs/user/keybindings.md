@@ -171,18 +171,25 @@ it.
 Both reach the app from inside the editor, and neither runs while the terminal has focus.
 `projectSearch.toggle` searches inside the active project's files and defaults to `mod+alt+g`.
 Repeating either shortcut closes that search, and switching shortcuts replaces the open search.
-`projectScope.toggle` filters the thread list to one project and defaults to `mod+shift+f`.
-`threadSearch.toggle` searches every thread in every project and defaults to `mod+alt+k`. Type
-words in any order: each one is matched against the project name, the thread title and the branch,
-so `mesura rename` finds **Rename the sidebar** in the **Mesura Code** project. A word is also
-matched against what was said inside a thread. The project filter does not narrow this search — it
-always reaches every project. With the field empty it lists recent threads, so it doubles as a way
-back to what you were reading.
-Press Tab in its field, or choose **Agent** beside it, to describe a thread in your own words
-instead. The configured text model searches every connected environment, archived threads
-included, and returns likely threads with a short reason. Type again to refine the description.
-Tab or **Exact** returns to word search, and Escape steps back one mode at a time. Opening an
-archived result asks before it unarchives the thread.
+`projectScope.toggle` opens the sidebar's project filter with its search field ready, and defaults
+to `mod+shift+f`. Type part of a project's name and press Enter to show only that project's threads.
+`projectScope.toggleAll` switches the thread list to All projects, and pressed again returns to the
+last project you filtered to; it defaults to `mod+alt+p`. The filter resets to All projects when
+the app reloads.
+`threadSearch.toggle` moves the keyboard to the sidebar's Search field and defaults to `mod+alt+k`.
+On a phone it opens the sidebar first, and from Settings it returns to your threads. While the
+field has text it searches every project, whatever the project filter shows; clear it to return to
+the filtered list. Type words in any order: each one is matched against the project name, the
+thread title and the branch, so `mesura rename` finds **Rename the sidebar** in the **Mesura Code**
+project. Threads whose messages match follow, and each group keeps the sidebar's order, newest
+activity first.
+To describe a thread in your own words instead, choose **Search threads with an agent** in the
+command palette (`mod+o`). The configured text model searches every connected environment, archived
+threads included, and returns likely threads with a short reason. Type again to refine the
+description, and press Escape to return to the command palette. Opening an archived result asks
+before it unarchives the thread.
+With the legacy sidebar, which has no Search field or project filter, `threadSearch.toggle` and
+`projectScope.toggle` open the command palette, whose thread list searches every project.
 `themeEditor.toggle` opens or closes the floating theme editor and defaults to
 `mod+alt+shift+t`. Select a color label to spotlight the elements that use it; select the label
 again to clear the spotlight. The swatch and hex field keep that color selected while you edit it.

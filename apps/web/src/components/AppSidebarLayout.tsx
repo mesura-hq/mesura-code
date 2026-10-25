@@ -45,6 +45,7 @@ import ThreadSidebar from "./Sidebar";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import { SidebarBrandWidthProbe, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { MainAppLocationTracker } from "./sidebar/mainAppLocation";
+import { SidebarCommandHost } from "./sidebar/SidebarCommandHost";
 import { useSidebarStageBackdropVariant } from "./SidebarStageBackdrop";
 import { useProjects } from "../state/entities";
 import { useThreadFeed } from "../symmetria/useThreadFeed";
@@ -465,6 +466,9 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         <SidebarControl />
         <NavigationHistoryShortcuts />
         {isOnSettings ? null : <ThreadUndoShortcut />}
+        <SidebarCommandHost
+          surface={isOnSettings ? "settings" : legacySidebarEnabled ? "legacy" : "threads"}
+        />
         <MainAppLocationTracker />
       </SidebarProvider>
     </PanelAnimationSuppressionProvider>

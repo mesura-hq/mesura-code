@@ -1024,14 +1024,13 @@ const EMPTY_CONTENT_MATCH_KEYS: ReadonlySet<string> = new Set<string>();
  *
  * Every word of the query has to match the thread's title, its project's name,
  * its branch or a linked pull request, and the order of the words does not
- * matter — the same rule the thread search picker uses, so the two searches
- * never disagree about what a query means. Threads whose messages the server
+ * matter. Threads whose messages the server
  * matched (`contentMatchKeys`, keyed by `threadSearchMatchKey`) follow the
  * field matches.
  *
  * Scope stays the caller's decision: this filters exactly the threads it is
- * given, which in the sidebar are the ones the project filter already allowed.
- * Reaching every project is the picker's job, not this one's.
+ * given. The sidebar gives it every project while the query has text
+ * (`sidebar/sidebarSearchScope.ts`), so a search reaches past the filter.
  *
  * Keeping the input order means lifecycle ordering (active, snoozed, settled)
  * remains stable while the user narrows the list.

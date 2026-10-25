@@ -74,7 +74,7 @@ export function browseInputEndPaddingClass(input: {
  * picker (⇧⌘K). One reducer owns open/mode state so the surfaces can never
  * stack and re-triggering a mode's shortcut toggles it closed.
  */
-export type SearchOverlayMode = "command" | "files" | "content" | "projects" | "threads";
+export type SearchOverlayMode = "command" | "files" | "content" | "threads";
 
 export type CommandPaletteOpenIntent =
   | { readonly kind: "add-project" | "new-thread-in" | "change-theme" }
@@ -787,8 +787,6 @@ const OVERLAY_MODE_BY_COMMAND = {
   "commandPalette.toggle": "command",
   "filePicker.toggle": "files",
   "projectSearch.toggle": "content",
-  "projectScope.toggle": "projects",
-  "threadSearch.toggle": "threads",
 } as const satisfies Partial<Record<string, SearchOverlayMode>>;
 
 export function overlayModeForCommand(command: string | null): SearchOverlayMode | null {

@@ -59,3 +59,14 @@ it.effect.each(["projectScope.toggle", "usage.peek", "threadSearch.toggle"] as c
       assert.strictEqual(parsed.command, command);
     }),
 );
+
+// Search unification phase 1, criterion 5: a keybindings file can bind the new toggle.
+it.effect("project toggle spec: a keybindings file rule for projectScope.toggleAll decodes", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decode(KeybindingRule, {
+      key: "mod+alt+p",
+      command: "projectScope.toggleAll",
+    });
+    assert.strictEqual(parsed.command, "projectScope.toggleAll");
+  }),
+);

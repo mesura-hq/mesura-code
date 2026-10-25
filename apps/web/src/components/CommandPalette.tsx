@@ -7,7 +7,6 @@ import {
   ProjectIconFileDialogHost,
 } from "./projects/ProjectIconFileDialog";
 import { openTranscriptionsList, TranscriptionsListHost } from "./dictation/TranscriptionsList";
-import { ProjectScopePicker } from "./projects/ProjectScopePicker";
 import { AgentThreadSearchSessionProvider } from "./threads/AgentThreadSearchSession";
 import { ThreadSearchPicker } from "./threads/ThreadSearchPicker";
 import type { ThreadSearchBackHandler } from "./threads/AgentThreadSearch";
@@ -16,7 +15,11 @@ import {
   openFileManager,
 } from "./files/mesuraFileManager/fileManagerToggle";
 import { restorePaletteOrigin } from "../keys/keyEngine";
-import { useCommandHandlers } from "../commands/commandRegistry";
+import { runRegisteredCommand, useCommandHandlers } from "../commands/commandRegistry";
+import {
+  onSidebarRequestClosesPalette,
+  serveSidebarFocusRequest,
+} from "./sidebar/SidebarCommandHost";
 import { requestSidebarDockPin } from "./sidebar/sidebarDockController";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { parseIssueSearch, someEnvironmentHasIssues } from "./issues/issues.logic";
@@ -31,6 +34,7 @@ import {
   MicIcon,
   MessagesSquareIcon,
   ServerIcon,
+  SparklesIcon,
 } from "lucide-react";
 import type { RefObject } from "react";
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
@@ -401,8 +405,6 @@ export function CommandPalette({ children }: { children: ReactNode }) {
         ["commandPalette.toggle", "command"],
         ["filePicker.toggle", "files"],
         ["projectSearch.toggle", "content"],
-        ["projectScope.toggle", "projects"],
-        ["threadSearch.toggle", "threads"],
       ].map(([command, mode]) => [command, () => toggleMode(mode as SearchOverlayMode)]),
     ),
   );
@@ -426,6 +428,8 @@ export function CommandPalette({ children }: { children: ReactNode }) {
       }),
     [openAddProject, openNewThreadIn, setOpen],
   );
+  // Fork: a sidebar focus shortcut pressed over the palette closes it first.
+  useEffect(() => onSidebarRequestClosesPalette(() => setOpen(false)), [setOpen]);
 
   return (
     <AgentThreadSearchSessionProvider reopen={reopenThreadSearch}>
@@ -512,6 +516,8 @@ function CommandPaletteDialog(props: {
             return;
           // Fork: a row that opened the file manager hands it the keyboard.
           if (keepFocusInFileManager()) return;
+          // Fork: a row that asked for the sidebar Search or project filter hands it the keyboard.
+          if (serveSidebarFocusRequest()) return;
           // Fork: Vim mode returns to the chat, or to the composer's mode, it left.
           if (restorePaletteOrigin()) return;
           composerHandleRef?.current?.focusAtEnd();
@@ -526,8 +532,6 @@ function CommandPaletteDialog(props: {
         <ProjectFilePicker setOpen={props.setOpen} />
       ) : props.mode === "content" ? (
         <ProjectContentSearchDialog onOpenChange={props.setOpen} />
-      ) : props.mode === "projects" ? (
-        <ProjectScopePicker setOpen={props.setOpen} />
       ) : props.mode === "threads" ? (
         <ThreadSearchPicker backHandlerRef={props.overlayBackHandlerRef} setOpen={props.setOpen} />
       ) : (
@@ -1616,8 +1620,20 @@ function OpenCommandPaletteDialog(props: {
     searchTerms: ["search threads", "find thread", "go to thread", "thread search", "all projects"],
     title: "Search threads",
     icon: <MessagesSquareIcon className={ITEM_ICON_CLASS} />,
-    keepOpen: true,
     shortcutCommand: "threadSearch.toggle",
+    run: async () => {
+      runRegisteredCommand("threadSearch.toggle");
+    },
+  });
+
+  // Fork: the agent search's way in until the sidebar Search opens it itself.
+  actionItems.push({
+    kind: "action",
+    value: "action:search-threads-agent",
+    searchTerms: ["agent search", "search threads with an agent", "describe thread", "find thread"],
+    title: "Search threads with an agent",
+    icon: <SparklesIcon className={ITEM_ICON_CLASS} />,
+    keepOpen: true,
     run: async () => {
       props.openThreadSearch();
     },
