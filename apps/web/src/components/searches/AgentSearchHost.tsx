@@ -3,6 +3,8 @@ import type { ScopedThreadRef } from "@t3tools/contracts";
 import { useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 
+import { useFileManagerStore } from "~/components/files/mesuraFileManager/fileManagerStore";
+import { useFileTreeStore } from "~/components/files/mesuraTree/fileTreeStore";
 import { newMessageId } from "~/lib/utils";
 import { useQuietThreadShell, useQuietThreadShells } from "~/state/entities";
 import { threadEnvironment } from "~/state/threads";
@@ -39,6 +41,7 @@ export function AgentSearchHost() {
       <SearchLifecycle />
       <ClosePopupOnNavigation />
       <CloseSearchToastsOnOpen />
+      <ClosePopupForFilePanes />
       <ThreadSearchToolRuntime />
       {[...firstMessages.entries()].map(([key, { search }]) => (
         <FirstMessageSender key={key} search={search} />
@@ -153,5 +156,30 @@ function ClosePopupOnNavigation() {
     shownPathname.current = pathname;
     dispatchAgentSearchPopup({ type: "close" });
   }, [pathname]);
+  return null;
+}
+
+/**
+ * Opening the file manager or moving to the file tree closes the popup first, as a focus chord
+ * over the open palette closes the palette. The search keeps running and the sparkle reopens it.
+ * The file panes act on the project's files, which a search conversation has none of, and a
+ * file manager stacked over the popup would fight it for Escape and for focus return.
+ */
+function ClosePopupForFilePanes() {
+  useEffect(() => {
+    const closePopup = () => {
+      if (useAgentSearchPopupStore.getState().open) dispatchAgentSearchPopup({ type: "close" });
+    };
+    const offManager = useFileManagerStore.subscribe((state, previous) => {
+      if (state.open && !previous.open) closePopup();
+    });
+    const offTree = useFileTreeStore.subscribe((state, previous) => {
+      if (state.pendingFocus && !previous.pendingFocus) closePopup();
+    });
+    return () => {
+      offManager();
+      offTree();
+    };
+  }, []);
   return null;
 }

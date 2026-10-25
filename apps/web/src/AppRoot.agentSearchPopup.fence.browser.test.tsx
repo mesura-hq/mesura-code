@@ -320,6 +320,8 @@ import {
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 
+import { useFileManagerStore } from "./components/files/mesuraFileManager/fileManagerStore";
+import { useFileTreeStore } from "./components/files/mesuraTree/fileTreeStore";
 import { useAgentSearchPopupStore } from "./components/searches/agentSearchPopupStore";
 import { useComposerDraftStore } from "./composerDraftStore";
 import { installKeyEngine } from "./keys/keyEngine";
@@ -1221,6 +1223,32 @@ describe("agent search popup: closing and completion", () => {
 
   // regression: reviewer-2 P1-2 — the palette closed over the popup handed the
   // keyboard to the main composer, behind the modal popup.
+  it("agent search popup spec: opening the file manager closes the popup first", async () => {
+    await using _fixture = await setup();
+    await mountApp();
+    await startSearchWithTab();
+    await vi.waitFor(() => expect(popup()).not.toBeNull());
+    try {
+      await act(async () => useFileManagerStore.getState().setOpen(true));
+      await vi.waitFor(() => expect(popup(), "the file manager closed the popup").toBeNull());
+    } finally {
+      useFileManagerStore.getState().setOpen(false);
+    }
+  });
+
+  it("agent search popup spec: moving to the file tree closes the popup first", async () => {
+    await using _fixture = await setup();
+    await mountApp();
+    await startSearchWithTab();
+    await vi.waitFor(() => expect(popup()).not.toBeNull());
+    try {
+      await act(async () => useFileTreeStore.getState().requestFocus());
+      await vi.waitFor(() => expect(popup(), "the file tree closed the popup").toBeNull());
+    } finally {
+      useFileTreeStore.getState().clearPendingFocus();
+    }
+  });
+
   it("agent search popup spec: the palette closed over the open popup leaves the main composer alone", async () => {
     await using _fixture = await setup();
     await mountApp();

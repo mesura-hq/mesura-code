@@ -40,9 +40,9 @@ export function registerAgentSearchComposer(handle: ComposerHandleRef): () => vo
 }
 
 /**
- * The composer that surfaces outside any ChatView (the palette, the file manager, the file tree)
- * act on: the popup's while it is open, else the main one they were given. Read it at the moment
- * of use, not at render, so a popup opened meanwhile is honoured.
+ * The composer the command palette acts on: the popup's while it is open, else the main one it
+ * was given. Read it at the moment of use, not at render, so a popup opened meanwhile is
+ * honoured. The file panes need no such routing: opening them closes the popup.
  */
 export function activeComposerHandle(main: ComposerHandleRef | null): ComposerHandleRef | null {
   return isAgentSearchPopupOpen() && agentSearchComposer !== null ? agentSearchComposer : main;

@@ -11,7 +11,6 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 
 import { useComposerHandleContext } from "~/composerHandleContext";
-import { activeComposerHandle } from "~/components/searches/conversationShortcutOwner";
 import { registerFocusTarget } from "~/lib/focusTargets";
 import { setPaneEntryFocus } from "~/lib/panelSurfaceFocus";
 
@@ -138,7 +137,7 @@ export function MesuraFileTree({
   useEffect(
     () =>
       registerFocusTarget("composer", () => {
-        const composer = activeComposerHandle(composerRef)?.current;
+        const composer = composerRef?.current;
         if (!composer) return false;
         composer.focusAtEnd();
         return true;
@@ -212,7 +211,7 @@ export function MesuraFileTree({
     void showFileTreeContextMenu({
       relativePath: relative,
       position: { x: event.clientX, y: event.clientY },
-      composer: activeComposerHandle(composerRef)?.current ?? null,
+      composer: composerRef?.current ?? null,
     });
   };
 
