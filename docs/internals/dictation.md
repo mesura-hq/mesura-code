@@ -68,9 +68,16 @@ path refuses to send while a button approval is pending, because free text canno
 
 When another app has focus, a small Electron window titled `mesura-dictation-overlay` shows the
 recording and its transcription. The main window's renderer publishes the state, so the widget
-opens no server connection of its own. Without the four Hyprland window rules in the composer user
-guide (`float`, `pin`, `no_initial_focus`, `no_focus`), Hyprland focuses the window and keeps it on
-one workspace. The plan supplies the rules, and the user's dotfiles hold them.
+opens no server connection of its own. Under Hyprland, the desktop applies named runtime rules
+for that title through one `hyprctl` batch before the window first maps (`hyprlandWidgetRules.ts`):
+a base rule (float, pin, no focus, no frame, a fixed `size`, and a `move` to the bottom centre)
+and, per monitor, a placement rule selected by `match:workspace m[<monitor>]` whose `move` adds
+that monitor's reserved bottom edge, because `monitor_h` is the whole monitor. The monitors are
+read once per process; one connected later gets the base rule's plain margin. A named rule is
+replaced when the next app process sets it again, where anonymous runtime rules would stack until
+Hyprland reloads. The `move` uses the widget's own size, because Hyprland 0.56.2 evaluates
+`window_w`/`window_h` from the client's requested geometry on first map. Elsewhere the widget
+places itself with `dictationWidgetBounds`.
 
 While a recording or its transcription exists, the desktop binds Alt+S, Alt+I, Alt+Enter,
 Alt+Space, Alt+R and Alt+X through `hyprctl`. Every session start unbinds before it binds, so binds

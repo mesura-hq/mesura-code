@@ -1,6 +1,6 @@
 /**
- * Mesura's dictation outside the main window: the floating widget and the Hyprland session
- * binds. The main window's renderer publishes its dictation state on
+ * Mesura's dictation outside the main window: the floating widget, its Hyprland window rules,
+ * and the Hyprland session binds. The main window's renderer publishes its dictation state on
  * `PUBLISH_DICTATION_WIDGET_STATE_CHANNEL`; this service relays it to the widget window, shows
  * the widget while no Mesura window has focus, and binds the dictation keys in Hyprland while a
  * session is live. Those binds reach this process over the session's command socket; the
@@ -34,13 +34,13 @@ import {
 } from "./dictationCommandSocket.ts";
 import { resolveDictationLauncher } from "./dictationLauncher.ts";
 import { createDictationSessionKeys } from "./dictationSessionKeys.ts";
-import {
-  createHyprlandSessionBinds,
-  executeHyprctl,
-  resolveCommandPath,
-} from "./hyprlandSessionBinds.ts";
+import { executeHyprctl } from "./hyprctl.ts";
+import { createHyprlandSessionBinds, resolveCommandPath } from "./hyprlandSessionBinds.ts";
+import { createHyprlandWidgetRules } from "./hyprlandWidgetRules.ts";
 
 const { logWarning } = makeComponentLogger("dictation-widget");
+
+const causeMessage = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
 /** The query the web bundle's entry reads to draw the widget instead of the app. */
 const WIDGET_PAGE_QUERY = "?window=dictation-widget";
@@ -80,6 +80,17 @@ export const make = Effect.gen(function* () {
   const context = yield* Effect.context<never>();
   const runFork = Effect.runForkWith(context);
 
+  const widgetRules = createHyprlandWidgetRules({
+    env: process.env,
+    execute: executeHyprctl,
+    onError: (cause) =>
+      runFork(
+        logWarning("hyprctl did not apply the dictation widget rules", {
+          message: causeMessage(cause),
+        }),
+      ),
+  });
+
   const widgetUrl = `${getDesktopUrl(environment.isDevelopment)}${WIDGET_PAGE_QUERY}`;
   const widget = createDictationWidgetWindow({
     createWindow: (options) => {
@@ -99,6 +110,7 @@ export const make = Effect.gen(function* () {
     },
     workArea: () =>
       Electron.screen.getDisplayNearestPoint(Electron.screen.getCursorScreenPoint()).workArea,
+    beforeFirstShow: widgetRules.apply,
   });
 
   const launcher = resolveDictationLauncher({
@@ -125,7 +137,7 @@ export const make = Effect.gen(function* () {
     onError: (cause) =>
       runFork(
         logWarning("hyprctl did not apply the dictation binds", {
-          message: cause instanceof Error ? cause.message : String(cause),
+          message: causeMessage(cause),
         }),
       ),
   });
@@ -137,7 +149,7 @@ export const make = Effect.gen(function* () {
     onError: (cause) =>
       runFork(
         logWarning("the dictation keys did not follow the session", {
-          message: cause instanceof Error ? cause.message : String(cause),
+          message: causeMessage(cause),
         }),
       ),
   });

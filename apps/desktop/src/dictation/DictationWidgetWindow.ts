@@ -8,16 +8,16 @@ import { DICTATION_WIDGET_STATE_CHANNEL } from "../ipc/channels.ts";
  * bundle's widget page from the state the main window's renderer publishes; this module decides
  * when it is on screen and relays that state to it.
  *
- * The title is what the user's Hyprland window rules match (see the composer guide): without
- * them Hyprland focuses the window and keeps it on one workspace.
+ * The title is what the Hyprland window rules in `hyprlandWidgetRules.ts` match: without them
+ * Hyprland tiles the window, focuses it, frames it and keeps it on one workspace.
  */
 export const DICTATION_WIDGET_TITLE = "mesura-dictation-overlay";
 /** How long the delivery result stays on screen. */
 export const DICTATION_WIDGET_RESULT_MS = 1_800;
 
-const WIDGET_WIDTH = 440;
-const WIDGET_HEIGHT = 64;
-const WIDGET_BOTTOM_MARGIN = 24;
+export const WIDGET_WIDTH = 440;
+export const WIDGET_HEIGHT = 64;
+export const WIDGET_BOTTOM_MARGIN = 24;
 
 /** What the renderer publishes, as far as the main process reads it. */
 export interface DictationWidgetPresence {
@@ -118,6 +118,11 @@ export function createDictationWidgetWindow(input: {
   ) => DictationWidgetHostWindow;
   /** The work area of the display the user is on; the window is placed when it shows. */
   readonly workArea?: () => Electron.Rectangle;
+  /**
+   * Started when the window is first created and awaited before it first shows: the compositor
+   * reads its window rules when the window maps. A rejection still lets the window show.
+   */
+  readonly beforeFirstShow?: () => Promise<void>;
 }): {
   readonly update: (state: DictationWidgetPresence) => void;
   /** The last message sent to the page, for a widget page that just loaded. */
@@ -142,6 +147,19 @@ export function createDictationWidgetWindow(input: {
   let sequence = 0;
   /** The show waiting for the page to render `pendingSequence`. */
   let pendingSequence: number | null = null;
+  let beforeFirstShow: Promise<void> | null = null;
+  let readyToShow = input.beforeFirstShow === undefined;
+
+  const startBeforeFirstShow = () => {
+    const step = input.beforeFirstShow;
+    if (step === undefined || beforeFirstShow !== null) return;
+    // The executor runs `step` at once and turns a synchronous throw into a rejection.
+    beforeFirstShow = new Promise<void>((resolve) => resolve(step()))
+      .catch(() => undefined)
+      .then(() => {
+        readyToShow = true;
+      });
+  };
 
   /** What the widget page draws: a failure the user has seen in Mesura is left out. */
   const widgetState = (): DictationWidgetPresence | null =>
@@ -157,6 +175,7 @@ export function createDictationWidgetWindow(input: {
       // The page's <title> would replace the window title, and the window rules match the title.
       created.on("page-title-updated", (event) => event.preventDefault());
       window = created;
+      startBeforeFirstShow();
     }
     return window;
   };
@@ -217,9 +236,7 @@ export function createDictationWidgetWindow(input: {
     reconcile();
   };
 
-  const acknowledge = (acknowledged: number) => {
-    if (acknowledged !== pendingSequence) return;
-    pendingSequence = null;
+  const showRendered = () => {
     const target = existingWindow();
     // Focus and the session may have moved on while the page rendered.
     if (target === null || target.isVisible() || !shouldShow(Date.now())) return;
@@ -227,6 +244,19 @@ export function createDictationWidgetWindow(input: {
     // An X11 window maps again with its current title, which the rules must still match.
     target.setTitle(DICTATION_WIDGET_TITLE);
     target.showInactive();
+  };
+
+  const acknowledge = (acknowledged: number) => {
+    if (acknowledged !== pendingSequence) return;
+    pendingSequence = null;
+    if (readyToShow || beforeFirstShow === null) {
+      showRendered();
+      return;
+    }
+    // A newer state the page has not rendered yet shows through its own acknowledgement.
+    void beforeFirstShow.then(() => {
+      if (pendingSequence === null) showRendered();
+    });
   };
 
   return {

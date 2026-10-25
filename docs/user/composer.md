@@ -233,15 +233,9 @@ While a recording or its transcription is in progress, Mesura Code binds Alt+S (
 (insert), Alt+Enter (send), Alt+Space (pause), Alt+R (restart) and Alt+X (cancel), and releases them
 when it ends.
 
-A small widget at the bottom of the screen shows the recording while another app has focus. Add these
-window rules so it floats on every workspace and never takes focus:
-
-```
-windowrule = float on, match:title ^(mesura-dictation-overlay)$
-windowrule = pin on, match:title ^(mesura-dictation-overlay)$
-windowrule = no_initial_focus on, match:title ^(mesura-dictation-overlay)$
-windowrule = no_focus on, match:title ^(mesura-dictation-overlay)$
-```
+A small widget at the bottom of the screen shows the recording while another app has focus. On
+Hyprland, Mesura Code applies the window rules that keep it floating at the bottom centre of every
+workspace, without focus or a frame, so your Hyprland config needs none.
 
 ## Queued messages
 

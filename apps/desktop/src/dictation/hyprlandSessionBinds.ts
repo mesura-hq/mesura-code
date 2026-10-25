@@ -5,6 +5,13 @@ import * as NodeUtil from "node:util";
 import type { DictationKeybindingCommand } from "@t3tools/contracts";
 
 import { DICTATION_FLAG, dictationCommandLineArguments } from "./dictationCommandLine.ts";
+import {
+  generatedKeyword,
+  isHyprlandSession,
+  runKeywordCommands,
+  type HyprctlExecute,
+  type KeywordCommand,
+} from "./hyprctl.ts";
 
 /**
  * The dictation keys, bound in Hyprland only while a dictation session exists, so they reach
@@ -105,23 +112,6 @@ export function parseSessionComboBinds(json: string): ReadonlyArray<SavedBind> {
 }
 
 /**
- * One `hyprctl keyword` command. `--batch` splits its input on `;`, and shell quoting does not
- * protect it, so a command that carries text from the user's config (a restored bind) or any
- * `;` runs as its own `hyprctl keyword` call with an argument vector instead.
- */
-interface KeywordCommand {
-  readonly keyword: string;
-  readonly value: string;
-  readonly userText: boolean;
-}
-
-const generated = (keyword: string, value: string): KeywordCommand => ({
-  keyword,
-  value,
-  userText: false,
-});
-
-/**
  * How a key reaches the running instance, chosen once per session. A socket client runs by the
  * absolute path found on this process's PATH: Hyprland runs binds with its own PATH, and this
  * process's PATH has been extended from the login shell (`DesktopShellEnvironment`).
@@ -188,16 +178,16 @@ function bindCommands(
       ),
     ];
     return [
-      generated("unbind", `ALT,${key}`),
-      ...otherSpellings.map((name) => generated("unbind", `ALT,${name}`)),
-      generated("bind", `ALT,${key},exec,${execLine(target, command)}`),
+      generatedKeyword("unbind", `ALT,${key}`),
+      ...otherSpellings.map((name) => generatedKeyword("unbind", `ALT,${name}`)),
+      generatedKeyword("bind", `ALT,${key},exec,${execLine(target, command)}`),
     ];
   });
 }
 
 function unbindCommands(saved: ReadonlyArray<SavedBind>): ReadonlyArray<KeywordCommand> {
   return [
-    ...SESSION_KEYS.map(([key]) => generated("unbind", `ALT,${key}`)),
+    ...SESSION_KEYS.map(([key]) => generatedKeyword("unbind", `ALT,${key}`)),
     ...saved.map((bind) => ({
       keyword: `bind${bind.flags}`,
       value: `ALT,${bind.key},${bind.description === null ? "" : `${bind.description},`}${
@@ -207,49 +197,6 @@ function unbindCommands(saved: ReadonlyArray<SavedBind>): ReadonlyArray<KeywordC
     })),
   ];
 }
-
-/**
- * Hyprlang drops everything from a `#` as a comment, inside shell quotes too, in `keyword` and
- * `--batch` alike; `##` is its literal hash (checked on Hyprland 0.56.2). `hyprctl -j binds`
- * reports the unescaped text, so a restored bind needs it as much as a generated one.
- */
-const escapeHyprlang = (value: string) => value.replaceAll("#", "##");
-
-/** Runs `commands` in order: plain generated ones in batches, the rest one call each. */
-async function runKeywordCommands(
-  execute: HyprctlExecute,
-  commands: ReadonlyArray<KeywordCommand>,
-): Promise<void> {
-  let batch: KeywordCommand[] = [];
-  const flush = async () => {
-    if (batch.length === 0) return;
-    const lines = batch.map(
-      (command) => `keyword ${command.keyword} ${escapeHyprlang(command.value)}`,
-    );
-    batch = [];
-    await execute("hyprctl", ["--batch", lines.join(" ; ")]);
-  };
-  for (const command of commands) {
-    if (command.userText || command.value.includes(";")) {
-      await flush();
-      await execute("hyprctl", ["keyword", command.keyword, escapeHyprlang(command.value)]);
-    } else {
-      batch.push(command);
-    }
-  }
-  await flush();
-}
-
-export type HyprctlExecute = (
-  file: string,
-  args: ReadonlyArray<string>,
-) => Promise<{ readonly stdout: string } | undefined>;
-
-export const executeHyprctl: HyprctlExecute = (file, args) =>
-  NodeUtil.promisify(NodeChildProcess.execFile)(file, [...args], {
-    timeout: 5_000,
-    maxBuffer: 1024 * 1024,
-  });
 
 /** The absolute path `name` resolves to on this process's PATH, or null. */
 export const resolveCommandPath = async (name: string): Promise<string | null> => {
@@ -295,7 +242,7 @@ export function createHyprlandSessionBinds(input: {
   readonly setSessionActive: (active: boolean, socketListening?: boolean) => Promise<void>;
   readonly dispose: () => Promise<void>;
 } {
-  const enabled = Boolean(input.env.HYPRLAND_INSTANCE_SIGNATURE?.trim());
+  const enabled = isHyprlandSession(input.env);
   let bound = false;
   /** What sat on the session combos before this session bound them. */
   let saved: ReadonlyArray<SavedBind> = [];
@@ -304,6 +251,10 @@ export function createHyprlandSessionBinds(input: {
   const enqueue = (step: () => Promise<void>) => {
     queue = queue.then(step).catch((cause: unknown) => input.onError?.(cause));
     return queue;
+  };
+
+  const reportRejections = (rejections: ReadonlyArray<string>) => {
+    if (rejections.length > 0) input.onError?.(new Error(rejections.join("; ")));
   };
 
   const bind = async (socketListening: boolean) => {
@@ -318,16 +269,18 @@ export function createHyprlandSessionBinds(input: {
       saved = [];
       input.onError?.(cause);
     }
-    await runKeywordCommands(
-      input.execute,
-      bindCommands({ transport, launcher: input.launcher, socketPath: input.socketPath }, saved),
+    reportRejections(
+      await runKeywordCommands(
+        input.execute,
+        bindCommands({ transport, launcher: input.launcher, socketPath: input.socketPath }, saved),
+      ),
     );
   };
 
   const unbind = async () => {
     const restore = saved;
     saved = [];
-    await runKeywordCommands(input.execute, unbindCommands(restore));
+    reportRejections(await runKeywordCommands(input.execute, unbindCommands(restore)));
   };
 
   const setSessionActive = (active: boolean, socketListening = true): Promise<void> => {
