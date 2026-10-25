@@ -35,6 +35,10 @@ const FORK_BINDINGS = [
   // chord Symmetria IDE used, is composer.branch here.
   { command: "treeDiff.toggle", keys: ["alt+g"] },
   { command: "diff.modeMenu", keys: ["alt+c"] },
+  // Search unification: flips the sidebar between All projects and the last
+  // project. mod+shift+p stays thread.pin; mod+shift+0 types `=` on the Latin
+  // American layout.
+  { command: "projectScope.toggleAll", keys: ["mod+alt+p"] },
 ] as const;
 
 describe("fork keybindings", () => {
@@ -94,5 +98,16 @@ describe("hosts.peek", () => {
       (binding) => binding.command,
     );
     expect(order).toEqual(["hosts.peek", "dictation.mode.clipboard"]);
+  });
+});
+
+// Search unification phase 1, criterion 7, guard: the all-projects toggle took
+// a new chord, so the pin keeps its own.
+describe("thread.pin beside projectScope.toggleAll", () => {
+  it("pin guard: mod+shift+p still pins the current thread outside the terminal", () => {
+    const bindings = DEFAULT_KEYBINDINGS.filter((binding) => binding.key === "mod+shift+p");
+    expect(bindings.map((binding) => [binding.command, binding.when])).toEqual([
+      ["thread.pin", "!terminalFocus"],
+    ]);
   });
 });

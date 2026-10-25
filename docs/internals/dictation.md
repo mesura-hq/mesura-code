@@ -68,13 +68,39 @@ path refuses to send while a button approval is pending, because free text canno
 
 When another app has focus, a small Electron window titled `mesura-dictation-overlay` shows the
 recording and its transcription. The main window's renderer publishes the state, so the widget
-opens no server connection of its own. Without the four Hyprland window rules in the composer user
-guide (`float`, `pin`, `no_initial_focus`, `no_focus`), Hyprland focuses the window and keeps it on
-one workspace. The plan supplies the rules, and the user's dotfiles hold them.
+opens no server connection of its own. Under Hyprland, the desktop applies named runtime rules
+for that title through one `hyprctl` batch before the window first maps (`hyprlandWidgetRules.ts`):
+a base rule (float, pin, no focus, no frame, a fixed `size`, and a `move` to the bottom centre)
+and, per monitor, a placement rule selected by `match:workspace m[<monitor>]` whose `move` adds
+that monitor's reserved bottom edge, because `monitor_h` is the whole monitor. The monitors are
+read once per process; one connected later gets the base rule's plain margin. A named rule is
+replaced when the next app process sets it again, where anonymous runtime rules would stack until
+Hyprland reloads. The `move` uses the widget's own size, because Hyprland 0.56.2 evaluates
+`window_w`/`window_h` from the client's requested geometry on first map. Elsewhere the widget
+places itself with `dictationWidgetBounds`.
 
 While a recording or its transcription exists, the desktop binds Alt+S, Alt+I, Alt+Enter,
 Alt+Space, Alt+R and Alt+X through `hyprctl`. Every session start unbinds before it binds, so binds
 that leaked after a crash cannot stack.
+
+Each bind writes its `--dictation …` words as one line to the session's command socket,
+`$XDG_RUNTIME_DIR/mesura-dictation-<pid>.sock` (mode 0600, in userData when the variable is
+unset). The client is `socat`, else `python3`. The session resolves the client to an absolute
+path when it installs the binds: Hyprland runs binds with its own PATH, and the app's PATH has
+been extended from the login shell. A socket path that socat's address grammar would split
+(a `,`, `:`, quote or space) goes through `python3`. The socket exists only during the session,
+and the binds point at it only while it listens; teardown waits for a start still running.
+
+Every socket bind ends in `|| <launcher> --dictation …`, so a client that fails relaunches the
+app with the same words, and the single-instance lock hands them to the running instance. With
+neither client, or when the socket cannot listen, that relaunch is the whole bind. It costs a
+full Electron start per key press (250-340 ms measured headless), which the developer saw as a
+mode change that lagged by about a second. Both paths end in
+[`forwardDictationCommand`](../../apps/desktop/src/dictation/dictationCommandForwarding.ts).
+
+Hyprlang reads a `#` as the start of a comment, even inside shell quotes, so every value sent
+through `hyprctl keyword` writes a literal hash as `##`. That includes the binds put back at
+session end, because `hyprctl -j binds` reports them unescaped.
 
 ## Why the Symmetria Shell link was removed
 

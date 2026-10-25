@@ -43,7 +43,9 @@ import {
  * leaves the composer for the chat buffer.
  *
  * The composer registers an adapter while it is mounted; that is the only
- * seam in `ChatComposer.tsx`.
+ * seam in `ChatComposer.tsx`. Two can be mounted (the agent search popup's
+ * conversation over the main one): the last registered is the active one, and
+ * unmounting it hands Vim back to the one below.
  *
  * `u` and `<C-r>` walk the draft's whole edit history (`composerUndo.ts`),
  * not vimee's, whose stack lives in one normal-mode session's buffer: an
@@ -63,6 +65,8 @@ export interface ComposerVimAdapter {
 
 const OWNED_BY_KEYMAP = new Set(["s", "[", "]"]);
 
+/** Mounted composers' adapters, oldest first; the last one is active. */
+const adapters: ComposerVimAdapter[] = [];
 let adapter: ComposerVimAdapter | null = null;
 let mode: "insert" | "normal" = "insert";
 let context: VimContext = createInitialContext({ line: 0, col: 0 });
@@ -80,11 +84,14 @@ const COMPOSER_SURFACE_SELECTOR = "[data-chat-composer-main-surface]";
 const COMPOSER_SURFACE_VIM_ATTRIBUTE = "data-mesura-composer-vim";
 
 export function registerComposerVimAdapter(next: ComposerVimAdapter): () => void {
+  adapters.push(next);
   adapter = next;
   installFocusListener();
   return () => {
+    const index = adapters.indexOf(next);
+    if (index !== -1) adapters.splice(index, 1);
     if (adapter !== next) return;
-    adapter = null;
+    adapter = adapters.at(-1) ?? null;
     pendingNormalOffset = null;
     if (mode !== "insert") enterInsert();
   };

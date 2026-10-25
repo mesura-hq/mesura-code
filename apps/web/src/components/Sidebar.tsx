@@ -105,6 +105,9 @@ import {
 } from "../threadSelectionStore";
 import { useAcknowledgeThreadWoke, useThreadActions } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
+import { AgentSearchFieldAccessory } from "./searches/AgentSearchFieldAccessory";
+import { withoutSearchThreads } from "./searches/searchThreadExclusion";
+import { useAgentSearchFieldKeyDown } from "./searches/useStartSearchChat";
 import { useSidebarProjectGroups } from "../hooks/useSidebarProjectGroups";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { registerSettleAndAdvance } from "../settleAndAdvance";
@@ -202,6 +205,8 @@ import {
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
+import { useSidebarCommandTarget } from "./sidebar/SidebarCommandHost";
+import { resolveSidebarSearchProjectKeys } from "./sidebar/sidebarSearchScope";
 import { TooltipProvider } from "./ui/tooltip";
 import { composerDraftHasUserContent, DraftId, useComposerDraftStore } from "../composerDraftStore";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
@@ -361,13 +366,20 @@ function routeThreadOnly(
 function useSidebarThreads(input: {
   readonly projectScopeKey: string | null;
   readonly scopedProjectKeys: ReadonlySet<string> | null;
+  readonly searchProjectKeys: ReadonlySet<string> | null;
   readonly serverConfigs: ReadonlyMap<EnvironmentId, EnvironmentServerConfig>;
   readonly optimisticDrop: SidebarOptimisticDrop | null;
   readonly routeThreadRef: ScopedThreadRef | null;
 }) {
-  const { projectScopeKey, scopedProjectKeys, serverConfigs, optimisticDrop, routeThreadRef } =
-    input;
-  const threads = useQuietThreadShells();
+  const {
+    projectScopeKey,
+    scopedProjectKeys,
+    searchProjectKeys,
+    serverConfigs,
+    optimisticDrop,
+    routeThreadRef,
+  } = input;
+  const threads = withoutSearchThreads(useQuietThreadShells());
   const routeRowThreadKey =
     routeThreadRef === null
       ? null
@@ -419,7 +431,7 @@ function useSidebarThreads(input: {
   const settledVisibleCount =
     settledTail.scopeKey === projectScopeKey ? settledTail.count : SETTLED_TAIL_INITIAL_COUNT;
 
-  const partition = partitionSidebarThreads({
+  const partitionInput = {
     threads,
     scopedProjectKeys,
     delegatedUnderParent,
@@ -428,7 +440,13 @@ function useSidebarThreads(input: {
     workingShelfEnabled,
     sidebarThreadSortOrder,
     clockKey: `${nowMinute}:${snoozeWakeTick}`,
-  });
+  };
+  const partition = partitionSidebarThreads(partitionInput);
+  // Mesura: a search reaches past the project filter (sidebarSearchScope.ts).
+  const searchPartition =
+    searchProjectKeys === scopedProjectKeys
+      ? partition
+      : partitionSidebarThreads({ ...partitionInput, scopedProjectKeys: searchProjectKeys });
   const partitionNextWakeAt = partition.snoozedThreads[0]?.snoozedUntil ?? null;
   if (partitionNextWakeAt !== nextSnoozeWakeAt) setNextSnoozeWakeAt(partitionNextWakeAt);
 
@@ -477,11 +495,11 @@ function useSidebarThreads(input: {
     threads,
     workingShelfEnabled,
     searchableThreads: [
-      ...pinnedThreads,
-      ...activeThreads,
-      ...workingThreads,
-      ...snoozedThreads,
-      ...settledThreads,
+      ...searchPartition.pinnedThreads,
+      ...searchPartition.activeThreads,
+      ...searchPartition.workingThreads,
+      ...searchPartition.snoozedThreads,
+      ...searchPartition.settledThreads,
     ],
     settledVisibleCount,
     hiddenSettledCount: settledThreads.length - visibleSettledThreads.length,
@@ -1075,12 +1093,18 @@ export default function Sidebar() {
   } = useSidebarThreads({
     projectScopeKey,
     scopedProjectKeys,
+    searchProjectKeys: resolveSidebarSearchProjectKeys(threadSearchQuery, scopedProjectKeys),
     serverConfigs,
     optimisticDrop,
     routeThreadRef,
   });
 
   const isSearchingThreads = threadSearchQuery.trim().length > 0;
+  useSidebarCommandTarget({
+    searchInputRef: threadSearchInputRef,
+    openProjectFilter: () => dispatchProjectScopeMenu({ type: "open-changed", open: true }),
+    projectScopeItems,
+  });
   const threadSearchMatchByKey = new Map(
     threadSearch.matches.map((match) => [threadSearchMatchKey(match), match] as const),
   );
@@ -1186,6 +1210,7 @@ export default function Sidebar() {
     void router.navigate({ to: "/draft/$draftId", params: { draftId } });
   };
 
+  const handleAgentSearchKey = useAgentSearchFieldKeyDown();
   const clearThreadSearch = () => {
     setThreadSearchQuery("");
     setActiveSearchResultIndex(0);
@@ -1196,6 +1221,7 @@ export default function Sidebar() {
   };
   const handleThreadSearchKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+    if (handleAgentSearchKey(event, threadSearchQuery)) return;
     if (event.key === "Escape" && isSearchingThreads) {
       event.preventDefault();
       event.stopPropagation();
@@ -2780,6 +2806,7 @@ export default function Sidebar() {
                 setActiveSearchResultIndex(0);
               }}
               onSearchKeyDown={handleThreadSearchKeyDown}
+              searchFieldAccessory={<AgentSearchFieldAccessory query={threadSearchQuery} />}
               isSearching={isSearchingThreads}
               searchResultCount={threadSearchResults.length}
               activeSearchResultIndex={activeSearchResultIndex}

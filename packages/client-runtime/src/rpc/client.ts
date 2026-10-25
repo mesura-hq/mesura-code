@@ -5,6 +5,7 @@ import {
   type EnvironmentId,
   type ClientGuardedRpcTag,
   ORCHESTRATION_V2_WS_METHODS,
+  THREAD_SEARCH_WS_METHODS,
   WS_METHODS,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -80,7 +81,9 @@ export type EnvironmentSubscriptionRpcTag =
   | typeof WS_METHODS.fileManagerSubscribeEvents
   | typeof WS_METHODS.subscribeHostStats
   | typeof WS_METHODS.subscribeDictationJobs
-  | typeof WS_METHODS.reviewSubscribeWorkingTreeChanges;
+  | typeof WS_METHODS.reviewSubscribeWorkingTreeChanges
+  // Mesura: the search client's broker connection (docs/mesura/adr-010-search-chats.md).
+  | typeof THREAD_SEARCH_WS_METHODS.threadSearchToolConnect;
 
 export type EnvironmentStreamCommandRpcTag =
   | typeof WS_METHODS.chatGptHandoffSubscribe

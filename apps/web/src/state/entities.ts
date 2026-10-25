@@ -38,6 +38,7 @@ import {
   throttledThreadShellsForProjectRefsAtom,
 } from "./throttledShells";
 import { waitForAtomValue } from "./waitForAtomValue";
+import { withoutSearchProject } from "../components/searches/searchThreadExclusion";
 
 const EMPTY_THREAD_REFS: ReadonlyArray<ScopedThreadRef> = Object.freeze([]);
 const EMPTY_VISIBLE_TURN_ITEMS: ReadonlyArray<OrchestrationV2ProjectedTurnItem> = Object.freeze([]);
@@ -98,7 +99,8 @@ export function useEnvironmentThreadRefs(
 }
 
 export function useProjects(): ReadonlyArray<EnvironmentProject> {
-  return useAtomValue(environmentProjects.projectsAtom);
+  // Mesura: the hidden agent search project is no one's to list (ADR-010).
+  return withoutSearchProject(useAtomValue(environmentProjects.projectsAtom));
 }
 
 /** Providers are left out; read them with `useEnvironmentProviders()`. */
@@ -233,7 +235,7 @@ export function readProject(ref: ScopedProjectRef): EnvironmentProject | null {
 }
 
 export function readProjects(): ReadonlyArray<EnvironmentProject> {
-  return appAtomRegistry.get(environmentProjects.projectsAtom);
+  return withoutSearchProject(appAtomRegistry.get(environmentProjects.projectsAtom));
 }
 
 export function waitForProject(

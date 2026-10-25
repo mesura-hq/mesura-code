@@ -3,6 +3,7 @@ import {
   presentThreadShell,
 } from "@t3tools/client-runtime/state/models";
 import { isShownUnderParent } from "@t3tools/client-runtime/state/threads";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import type { EnvironmentId, OrchestrationV2ThreadShell, ThreadId } from "@t3tools/contracts";
@@ -31,6 +32,8 @@ import {
 import { resolveSidebarThreadStatus } from "./Sidebar.logic";
 import { resolveSidebarThreadAttention } from "./sidebarThreadAttention";
 import { toastManager } from "./ui/toast";
+import { AGENT_SEARCH_FINISHED_TITLE, openAgentSearch } from "./searches/agentSearchNotification";
+import { isSearchThread } from "./searches/agentSearchPopup.logic";
 
 export function ThreadNotificationCoordinator() {
   const environmentIds = useEnvironmentIds();
@@ -197,9 +200,14 @@ function EnvironmentNotifications({
             ? "completion"
             : null;
       if (!kind) continue;
+      // Mesura: a finished agent search has its own title, its own in-app toast
+      // (AgentSearchHost) and opens in the search popup.
+      const agentSearch = isSearchThread(thread);
       const title =
         kind === "completion"
-          ? "Thread completed"
+          ? agentSearch
+            ? AGENT_SEARCH_FINISHED_TITLE
+            : "Thread completed"
           : loudKind === "approval"
             ? "Approval needed"
             : loudKind === "limited"
@@ -216,6 +224,7 @@ function EnvironmentNotifications({
         inAppNotificationsEnabled &&
         document.visibilityState === "visible" &&
         document.hasFocus() &&
+        !(agentSearch && kind === "completion") &&
         (activeEnvironmentId !== environmentId || activeThreadId !== thread.id)
       ) {
         const toastId = toastManager.add({
@@ -266,6 +275,10 @@ function EnvironmentNotifications({
           notification.close();
           window.focus();
           void window.desktopBridge?.revealWindow?.().catch(() => undefined);
+          if (agentSearch) {
+            openAgentSearch(scopeThreadRef(environmentId, thread.id));
+            return;
+          }
           void navigate({
             to: "/$environmentId/$threadId",
             params: { environmentId, threadId: thread.id },

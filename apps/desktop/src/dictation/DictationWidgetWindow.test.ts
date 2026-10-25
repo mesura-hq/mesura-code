@@ -417,3 +417,86 @@ describe("dictation phase 6 rework: the widget shows only once its page has rend
     expect(window.showInactive).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Search unification, phase 5: on Hyprland the window rules must be in place before the widget
+ * maps, because Hyprland applies `move`, `float` and the frame rules when a window maps. The
+ * controller awaits `beforeFirstShow` (the rules' `apply`) before it shows the window.
+ */
+function makeWidgetAwaiting(beforeFirstShow: () => Promise<void>) {
+  const window = makeFakeWindow();
+  const createWindow = vi.fn(
+    (_options: Electron.BrowserWindowConstructorOptions) =>
+      window as unknown as DictationWidgetHostWindow,
+  );
+  const workArea = { x: 1920, y: 0, width: 2560, height: 1400 };
+  const widget = createDictationWidgetWindow({
+    createWindow,
+    workArea: () => workArea,
+    beforeFirstShow,
+  });
+  window.onMessage = (message) => {
+    if (message?.ackSequence !== undefined) widget.acknowledge(message.ackSequence);
+  };
+  return { widget, window };
+}
+
+describe("search unification phase 5 fence: the widget waits for its window rules", () => {
+  it("search unification phase 5 AC1: the widget does not show until the window rules are applied", async () => {
+    let finishRules!: () => void;
+    const rulesApplied = new Promise<void>((resolve) => {
+      finishRules = resolve;
+    });
+    const beforeFirstShow = vi.fn(() => rulesApplied);
+    const { widget, window } = makeWidgetAwaiting(beforeFirstShow);
+    widget.setFocusedWindow(null);
+    widget.update(recording);
+    expect(beforeFirstShow).toHaveBeenCalled();
+    expect(window.showInactive).not.toHaveBeenCalled();
+    finishRules();
+    await vi.waitFor(() => expect(window.showInactive).toHaveBeenCalledTimes(1));
+    expect(window.isVisible()).toBe(true);
+  });
+
+  it("search unification phase 5 AC1: focus on Mesura while the rules apply keeps the widget hidden", async () => {
+    let finishRules!: () => void;
+    const rulesApplied = new Promise<void>((resolve) => {
+      finishRules = resolve;
+    });
+    const { widget, window } = makeWidgetAwaiting(() => rulesApplied);
+    widget.setFocusedWindow(null);
+    widget.update(recording);
+    widget.setFocusedWindow({});
+    finishRules();
+    await rulesApplied;
+    await vi.waitFor(() => expect(window.isVisible()).toBe(false));
+    expect(window.showInactive).not.toHaveBeenCalled();
+  });
+
+  it("search unification phase 5 AC4: rules that fail to apply still let the widget show", async () => {
+    const beforeFirstShow = vi.fn(() => Promise.reject(new Error("no hyprctl")));
+    const { widget, window } = makeWidgetAwaiting(beforeFirstShow);
+    widget.setFocusedWindow(null);
+    widget.update(recording);
+    expect(beforeFirstShow).toHaveBeenCalled();
+    await vi.waitFor(() => expect(window.showInactive).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe("search unification phase 5 guard: the widget without Hyprland rules", () => {
+  it("search unification phase 5 guard: without a rules step the widget shows on the page's acknowledgement at the bottom centre of the work area", () => {
+    const window = makeFakeWindow();
+    const widget = createDictationWidgetWindow({
+      createWindow: () => window as unknown as DictationWidgetHostWindow,
+      workArea: () => ({ x: 1920, y: 0, width: 2560, height: 1400 }),
+    });
+    window.onMessage = (message) => {
+      if (message?.ackSequence !== undefined) widget.acknowledge(message.ackSequence);
+    };
+    widget.setFocusedWindow(null);
+    widget.update(recording);
+    expect(window.showInactive).toHaveBeenCalledTimes(1);
+    expect(window.setBounds).toHaveBeenCalledWith({ x: 2980, y: 1312, width: 440, height: 64 });
+    expect(window.calls).toEqual([`setTitle:${DICTATION_WIDGET_TITLE}`, "showInactive"]);
+  });
+});

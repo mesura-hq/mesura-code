@@ -78,3 +78,4 @@ export * from "./resourceTelemetry.ts";
 export * from "./secretRequest.ts";
 export * from "./clientRpcPermissions.ts";
 export * from "./threadSearchEvidence.ts";
+export * from "./threadSearchTools.ts";

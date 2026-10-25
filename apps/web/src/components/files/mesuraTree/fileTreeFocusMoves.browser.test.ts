@@ -7,6 +7,7 @@ import { selectThreadRightPanelState, useRightPanelStore } from "~/rightPanelSto
 
 import { leaveFileTree, runFileTreeToggle } from "./fileTreeFocusMoves";
 import { useFileTreeStore } from "./fileTreeStore";
+import { useAgentSearchPopupStore } from "~/components/searches/agentSearchPopupStore";
 
 const disposers: Array<() => void> = [];
 
@@ -81,5 +82,32 @@ describe("runFileTreeToggle on a hidden panel", () => {
       state.surfaces.find((surface) => surface.id === "file:src/edited.ts"),
     ).not.toHaveProperty("explorerHidden");
     expect(useFileTreeStore.getState().explorerOpen).toBe(true);
+  });
+});
+
+describe("runFileTreeToggle over the agent search popup", () => {
+  const ref = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("popup-thread"));
+
+  it("closes the popup before focusing a tree that is already mounted", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    useRightPanelStore.setState({ byThreadKey: {}, userActionRevisionByThreadKey: {} });
+    useRightPanelStore.getState().open(ref, "files");
+    let treeFocused = 0;
+    disposers.push(
+      registerFocusTarget("tree", () => {
+        treeFocused += 1;
+        return true;
+      }),
+    );
+    useAgentSearchPopupStore.setState({ open: true });
+    try {
+      runFileTreeToggle(ref);
+      expect(useAgentSearchPopupStore.getState().open).toBe(false);
+      expect(treeFocused).toBe(1);
+      expect(useFileTreeStore.getState().pendingFocus).toBe(false);
+    } finally {
+      useAgentSearchPopupStore.setState(useAgentSearchPopupStore.getInitialState(), true);
+    }
   });
 });

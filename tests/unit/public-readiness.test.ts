@@ -195,7 +195,7 @@ describe("client project names before publishing", () => {
     const files = (listed.stdout ?? "").split("\n");
     for (const expected of [
       "tests/unit/contractHarness.ts",
-      "apps/web/src/components/projects/projectScopePicker.logic.test.ts",
+      "apps/web/src/components/searches/agentSearchPopup.logic.test.ts",
       "vendor/symmetria-file-manager/packages/fm-ui/test/renderer/support.ts",
     ]) {
       assert.include(files, expected);

@@ -220,7 +220,14 @@ it("orders the active sidebar list through the fork's sort setting", () => {
     "useClientSettings((s) => s.sidebarThreadSortOrder)",
     "the active-list owner no longer subscribes to the fork's sort setting",
   );
-  const partitionCall = between(hook, "const partition = partitionSidebarThreads({", "});");
+  // One input object feeds both partitions: the project filter's and the search's,
+  // which reaches past the filter (sidebarSearchScope.ts).
+  const partitionCall = between(hook, "const partitionInput = {", "};");
+  assert.include(
+    hook,
+    "const partition = partitionSidebarThreads(partitionInput);",
+    "the active list is no longer partitioned from the shared input",
+  );
   assert.match(
     partitionCall,
     /\bsidebarThreadSortOrder\s*,/,

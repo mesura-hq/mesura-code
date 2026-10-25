@@ -2,6 +2,7 @@ import "../index.css";
 import "../mesura.css";
 
 import { render as renderBrowser, type Screen } from "../../test/render";
+import { expect, vi } from "vite-plus/test";
 
 import {
   createMemoryHistory,
@@ -19,6 +20,7 @@ import {
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2TurnItem,
   type OrchestrationV2ThreadProjection,
+  type OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
@@ -58,20 +60,32 @@ export function makeMessage(id: string, role: "user" | "assistant", text: string
   };
 }
 
-/** Registers a v2 shell and detail with local message turn items, and returns its id. */
+/**
+ * Registers a v2 shell and detail with local message turn items, and returns its id.
+ * `options` places it in another project or overrides shell fields such as its run status.
+ */
 export function addFenceThread(
   id: string,
   title: string,
   messages: ReadonlyArray<ReturnType<typeof makeMessage>>,
+  options: {
+    readonly projectId?: string;
+    readonly createdAt?: string;
+    readonly overrides?: Partial<OrchestrationV2ThreadShell>;
+  } = {},
 ): ThreadId {
   const threadId = ThreadId.make(id);
   const shell = makeFenceThreadShell({
     id: threadId,
     environmentId: fenceEnvironmentId,
-    projectId: ProjectId.make(FENCE_PROJECT_ID),
+    projectId: ProjectId.make(options.projectId ?? FENCE_PROJECT_ID),
     title,
-    createdAt: now,
-    overrides: { itemCount: messages.length, visibleItemCount: messages.length },
+    createdAt: options.createdAt ?? now,
+    overrides: {
+      itemCount: messages.length,
+      visibleItemCount: messages.length,
+      ...options.overrides,
+    },
   });
   const conversationMessages = messages.map((message): OrchestrationV2ConversationMessage => ({
     id: message.id,
@@ -159,8 +173,15 @@ export function createFenceRouter(firstThreadId: ThreadId) {
     path: "/$environmentId/$threadId",
     component: () => null,
   });
+  // A Settings page outside the chat layout, as the real one is: the layout's
+  // sidebar slot shows the settings navigation there.
+  const settings = createRoute({
+    getParentRoute: () => route,
+    path: "/settings",
+    component: () => <button data-testid="settings-control">Save</button>,
+  });
   return createRouter({
-    routeTree: route.addChildren([chatLayout.addChildren([thread])]),
+    routeTree: route.addChildren([chatLayout.addChildren([thread]), settings]),
     history: createMemoryHistory({
       initialEntries: [`/${fenceEnvironmentId}/${firstThreadId}`],
     }),
@@ -180,6 +201,12 @@ export async function renderFenceApp(
 ): Promise<{ root: Screen; router: FenceRouter }> {
   // The shared browser fixture lasts for this test environment, as document does.
   installFenceFontEvents();
+  // ChatView refocuses the composer two frames after a window `focus` event when nothing holds
+  // the keyboard. An unfocused test window receives that event from the first focus inside it,
+  // which can land after a fence has moved the keyboard elsewhere (a blur, a chat motion) and
+  // take it back. Focusing the window before the app mounts means no such event comes later.
+  window.focus();
+  await vi.waitFor(() => expect(document.hasFocus(), "the test window has focus").toBe(true));
   appRootFence.vimMode = vimMode;
   appRootFence.openThreadId = threadId;
   const router = createFenceRouter(threadId);

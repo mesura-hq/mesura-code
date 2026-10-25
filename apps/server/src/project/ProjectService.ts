@@ -31,6 +31,10 @@ import {
 } from "../orchestration-v2/ProjectCommands.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
+import {
+  isThreadSearchProject,
+  THREAD_SEARCH_PROJECT_DELETION_REFUSAL,
+} from "../orchestration-v2/threadSearchProject.ts";
 import { planThreadDeletion } from "../orchestration-v2/ThreadDeletion.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as ProjectEnrichmentService from "./ProjectEnrichmentService.ts";
@@ -536,6 +540,15 @@ export const make = Effect.gen(function* () {
         return yield* new ProjectNotFoundError({ projectId });
       }
 
+      // Mesura: the decider refuses the search project, but the cascade below
+      // would already have deleted its searches; refuse before it.
+      if (isThreadSearchProject(projectId)) {
+        return yield* new ProjectOperationError({
+          operation: "dispatch-project-command",
+          projectId,
+          cause: THREAD_SEARCH_PROJECT_DELETION_REFUSAL,
+        });
+      }
       const isFirstDelete = existing.value.deletedAt === null;
       if (isFirstDelete) {
         yield* deleteChildThreads(input);
@@ -600,7 +613,10 @@ export const make = Effect.gen(function* () {
 
   const listPage: ProjectService["Service"]["listPage"] = Effect.fn("ProjectService.listPage")(
     function* ({ cursor, limit }) {
-      const rows = (yield* snapshot).projects.filter((project) => project.deletedAt === null);
+      // Mesura: agents never see the hidden search project (ADR-010).
+      const rows = (yield* snapshot).projects.filter(
+        (project) => project.deletedAt === null && !isThreadSearchProject(project.id),
+      );
       const projects = yield* Effect.forEach(
         rows.slice(cursor, cursor + limit),
         (project) =>

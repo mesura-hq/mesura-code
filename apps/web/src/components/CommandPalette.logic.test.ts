@@ -195,21 +195,6 @@ describe("findJumpTargetItem", () => {
   });
 });
 
-describe("the projects overlay mode", () => {
-  it("opens on its own chord and closes on the next press", () => {
-    const closed = { open: false, mode: "command", openIntent: null } as const;
-
-    const opened = reduceCommandPaletteUiState(closed, { _tag: "ToggleMode", mode: "projects" });
-    expect(opened).toEqual({ open: true, mode: "projects", openIntent: null });
-
-    expect(reduceCommandPaletteUiState(opened, { _tag: "ToggleMode", mode: "projects" })).toEqual({
-      open: false,
-      mode: "projects",
-      openIntent: null,
-    });
-  });
-});
-
 describe("enumerateCommandPaletteItems", () => {
   it("assigns positional jump shortcuts to the first nine displayed items", () => {
     const items = Array.from({ length: 10 }, (_, index) => ({
@@ -573,48 +558,6 @@ describe("filterPinnedBrowseEntries", () => {
       visibleEntries: windowsEntries,
       exactEntry: windowsEntries[0],
     });
-  });
-});
-
-describe("the thread search mode", () => {
-  const closed = { open: false, mode: "command" as const, openIntent: null };
-
-  it("opens the overlay on the threads mode", () => {
-    expect(reduceCommandPaletteUiState(closed, { _tag: "ToggleMode", mode: "threads" })).toEqual({
-      open: true,
-      mode: "threads",
-      openIntent: null,
-    });
-  });
-
-  it("closes on a second press of the same chord", () => {
-    const open = reduceCommandPaletteUiState(closed, { _tag: "ToggleMode", mode: "threads" });
-    expect(reduceCommandPaletteUiState(open, { _tag: "ToggleMode", mode: "threads" })).toEqual({
-      open: false,
-      mode: "threads",
-      openIntent: null,
-    });
-  });
-
-  it("opens a thread search notification without toggling an open picker closed", () => {
-    const open = reduceCommandPaletteUiState(closed, { _tag: "OpenMode", mode: "threads" });
-    expect(reduceCommandPaletteUiState(open, { _tag: "OpenMode", mode: "threads" })).toEqual(open);
-  });
-
-  it("goes back to the command palette rather than closing, which is what Escape does", () => {
-    const open = reduceCommandPaletteUiState(closed, { _tag: "ToggleMode", mode: "threads" });
-    expect(reduceCommandPaletteUiState(open, { _tag: "ToggleMode", mode: "command" })).toEqual({
-      open: true,
-      mode: "command",
-      openIntent: null,
-    });
-  });
-
-  it("never stacks with another overlay mode", () => {
-    const files = reduceCommandPaletteUiState(closed, { _tag: "ToggleMode", mode: "files" });
-    const threads = reduceCommandPaletteUiState(files, { _tag: "ToggleMode", mode: "threads" });
-    expect(threads.mode).toBe("threads");
-    expect(threads.open).toBe(true);
   });
 });
 

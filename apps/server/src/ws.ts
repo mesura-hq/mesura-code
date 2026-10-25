@@ -211,7 +211,7 @@ import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as FactorySnapshotStore from "./factory/FactorySnapshotStore.ts";
-import { layerWsRpcMesura } from "./wsMesura.ts";
+import { captureMesuraServerScope, layerWsRpcMesura } from "./wsMesura.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as DirectEndpoints from "./environment/DirectEndpoints.ts";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
@@ -3188,6 +3188,7 @@ export const layer = Layer.unwrap(
     const peerLinks = yield* PeerLinks.PeerLinks;
     const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
     const factorySnapshots = yield* FactorySnapshotStore.FactorySnapshotStore;
+    const mesuraServerScope = yield* captureMesuraServerScope;
     const sql = yield* SqlClient.SqlClient;
     return HttpRouter.add(
       "GET",
@@ -3280,6 +3281,8 @@ export const layer = Layer.unwrap(
               Layer.provide(
                 Layer.succeed(FactorySnapshotStore.FactorySnapshotStore, factorySnapshots),
               ),
+              // Mesura: the fork's other server-scope services (wsMesura.ts).
+              Layer.provide(mesuraServerScope),
               Layer.provide(OtlpEndpointCheck.layer),
               Layer.provide(
                 Layer.succeed(

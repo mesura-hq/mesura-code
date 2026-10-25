@@ -5,11 +5,21 @@ import * as NodeUtil from "node:util";
 import type { DictationKeybindingCommand } from "@t3tools/contracts";
 
 import { DICTATION_FLAG, dictationCommandLineArguments } from "./dictationCommandLine.ts";
+import {
+  generatedKeyword,
+  isHyprlandSession,
+  runKeywordCommands,
+  type HyprctlExecute,
+  type KeywordCommand,
+} from "./hyprctl.ts";
 
 /**
  * The dictation keys, bound in Hyprland only while a dictation session exists, so they reach
- * Mesura while another app has focus and stay free the rest of the time. Each key launches the
- * desktop binary with `--dictation …`, which the running instance takes over.
+ * Mesura while another app has focus and stay free the rest of the time. Each key writes its
+ * `--dictation …` words to this instance's command socket through `socat`, or `python3` when
+ * `socat` is missing or cannot address the path. With neither, or when the client fails, the
+ * key launches the desktop binary with the same words, which the single-instance lock hands to
+ * the running instance: that works everywhere, but costs a full Electron start per key press.
  *
  * Every bind is preceded by its unbind: an instance that crashed mid-session leaves its binds
  * behind, and a second `bind` would add a duplicate instead of replacing it.
@@ -60,8 +70,23 @@ const BIND_FLAGS: ReadonlyArray<readonly [field: string, letter: string]> = [
 
 const SESSION_KEY_NAMES = new Set(SESSION_KEYS.map(([key]) => key.toLowerCase()));
 
-/** An earlier instance's own bind, left behind by a crash; never restored. */
-const isOwnBind = (arg: string) => arg.split(/\s+/).includes(DICTATION_FLAG);
+/** How every generated bind line ends: the launcher's words, alone or as the socket fallback. */
+const GENERATED_TAILS = SESSION_KEYS.map(
+  ([, command]) => ` ${dictationCommandLineArguments(command).join(" ")}`,
+);
+
+/** The session socket's file name, which no user command has reason to carry. */
+const SESSION_SOCKET_NAME = /mesura-dictation-\d+\.sock/;
+
+/**
+ * An earlier instance's own bind, left behind by a crash; never restored. Recognised by the
+ * shape this module generates, not by any mention of the flag: a user command that merely
+ * quotes the dictation words is the user's. A user bind that runs `… --dictation cancel` itself
+ * cannot be told from ours, as before the socket existed.
+ */
+const isOwnBind = (arg: string) =>
+  GENERATED_TAILS.some((tail) => arg.endsWith(tail)) ||
+  (SESSION_SOCKET_NAME.test(arg) && arg.includes(DICTATION_FLAG));
 
 /** The binds on the session combos, from `hyprctl -j binds`; throws on output it cannot read. */
 export function parseSessionComboBinds(json: string): ReadonlyArray<SavedBind> {
@@ -87,24 +112,60 @@ export function parseSessionComboBinds(json: string): ReadonlyArray<SavedBind> {
 }
 
 /**
- * One `hyprctl keyword` command. `--batch` splits its input on `;`, and shell quoting does not
- * protect it, so a command that carries text from the user's config (a restored bind) or any
- * `;` runs as its own `hyprctl keyword` call with an argument vector instead.
+ * How a key reaches the running instance, chosen once per session. A socket client runs by the
+ * absolute path found on this process's PATH: Hyprland runs binds with its own PATH, and this
+ * process's PATH has been extended from the login shell (`DesktopShellEnvironment`).
  */
-interface KeywordCommand {
-  readonly keyword: string;
-  readonly value: string;
-  readonly userText: boolean;
+type BindTransport =
+  | { readonly tool: "socat" | "python3"; readonly executable: string }
+  | { readonly tool: "launcher" };
+
+const SOCKET_CLIENTS = ["socat", "python3"] as const;
+
+/**
+ * Paths socat's address grammar reads as written: it splits addresses at `,` and `:` and
+ * gives quotes and `!!` meanings of their own. Any other path goes through python3.
+ */
+const SOCAT_SAFE_PATH = /^[\w./-]+$/;
+
+/**
+ * Writes `argv[2:]` as one line to the socket at `argv[1]`. One expression, because a `;`
+ * would make the bind leave the `hyprctl --batch` call.
+ */
+const PYTHON_CLIENT =
+  '(lambda m,a:(lambda s:(s.connect(a[1]),s.sendall((" ".join(a[2:])+"\\n").encode())))' +
+  '(m.socket(m.AF_UNIX)))(__import__("socket"),__import__("sys").argv)';
+
+interface BindTarget {
+  readonly transport: BindTransport;
+  readonly launcher: ReadonlyArray<string>;
+  readonly socketPath: string;
 }
 
-const generated = (keyword: string, value: string): KeywordCommand => ({
-  keyword,
-  value,
-  userText: false,
-});
+/**
+ * The shell line a key runs. A socket client that fails (the socket is gone, the client cannot
+ * start) falls back to the launcher, so a key never does nothing.
+ */
+function execLine(target: BindTarget, command: DictationKeybindingCommand): string {
+  const words = dictationCommandLineArguments(command);
+  const launch = [...target.launcher, ...words].map(shellQuote).join(" ");
+  const { transport } = target;
+  switch (transport.tool) {
+    case "socat":
+      return `printf ${shellQuote("%s\\n")} ${shellQuote(words.join(" "))} | ${shellQuote(
+        transport.executable,
+      )} - ${shellQuote(`UNIX-CONNECT:${target.socketPath}`)} || ${launch}`;
+    case "python3":
+      return `${[transport.executable, "-c", PYTHON_CLIENT, target.socketPath, ...words]
+        .map(shellQuote)
+        .join(" ")} || ${launch}`;
+    case "launcher":
+      return launch;
+  }
+}
 
 function bindCommands(
-  launcher: ReadonlyArray<string>,
+  target: BindTarget,
   saved: ReadonlyArray<SavedBind>,
 ): ReadonlyArray<KeywordCommand> {
   return SESSION_KEYS.flatMap(([key, command]) => {
@@ -117,21 +178,16 @@ function bindCommands(
       ),
     ];
     return [
-      generated("unbind", `ALT,${key}`),
-      ...otherSpellings.map((name) => generated("unbind", `ALT,${name}`)),
-      generated(
-        "bind",
-        `ALT,${key},exec,${[...launcher, ...dictationCommandLineArguments(command)]
-          .map(shellQuote)
-          .join(" ")}`,
-      ),
+      generatedKeyword("unbind", `ALT,${key}`),
+      ...otherSpellings.map((name) => generatedKeyword("unbind", `ALT,${name}`)),
+      generatedKeyword("bind", `ALT,${key},exec,${execLine(target, command)}`),
     ];
   });
 }
 
 function unbindCommands(saved: ReadonlyArray<SavedBind>): ReadonlyArray<KeywordCommand> {
   return [
-    ...SESSION_KEYS.map(([key]) => generated("unbind", `ALT,${key}`)),
+    ...SESSION_KEYS.map(([key]) => generatedKeyword("unbind", `ALT,${key}`)),
     ...saved.map((bind) => ({
       keyword: `bind${bind.flags}`,
       value: `ALT,${bind.key},${bind.description === null ? "" : `${bind.description},`}${
@@ -142,50 +198,51 @@ function unbindCommands(saved: ReadonlyArray<SavedBind>): ReadonlyArray<KeywordC
   ];
 }
 
-/** Runs `commands` in order: plain generated ones in batches, the rest one call each. */
-async function runKeywordCommands(
-  execute: HyprctlExecute,
-  commands: ReadonlyArray<KeywordCommand>,
-): Promise<void> {
-  let batch: KeywordCommand[] = [];
-  const flush = async () => {
-    if (batch.length === 0) return;
-    const lines = batch.map((command) => `keyword ${command.keyword} ${command.value}`);
-    batch = [];
-    await execute("hyprctl", ["--batch", lines.join(" ; ")]);
-  };
-  for (const command of commands) {
-    if (command.userText || command.value.includes(";")) {
-      await flush();
-      await execute("hyprctl", ["keyword", command.keyword, command.value]);
-    } else {
-      batch.push(command);
-    }
+/** The absolute path `name` resolves to on this process's PATH, or null. */
+export const resolveCommandPath = async (name: string): Promise<string | null> => {
+  try {
+    const { stdout } = await NodeUtil.promisify(NodeChildProcess.execFile)(
+      "sh",
+      ["-c", 'command -v "$1"', "sh", name],
+      { timeout: 5_000 },
+    );
+    const found = stdout.trim();
+    // A builtin, alias or function prints a bare name, which Hyprland's shell may not have.
+    return found.startsWith("/") ? found : null;
+  } catch {
+    return null;
   }
-  await flush();
+};
+
+async function resolveBindTransport(
+  socketPath: string,
+  resolveCommand: (name: string) => Promise<string | null>,
+): Promise<BindTransport> {
+  for (const tool of SOCKET_CLIENTS) {
+    if (tool === "socat" && !SOCAT_SAFE_PATH.test(socketPath)) continue;
+    const executable = await resolveCommand(tool).catch(() => null);
+    if (executable !== null) return { tool, executable };
+  }
+  return { tool: "launcher" };
 }
-
-export type HyprctlExecute = (
-  file: string,
-  args: ReadonlyArray<string>,
-) => Promise<{ readonly stdout: string } | undefined>;
-
-export const executeHyprctl: HyprctlExecute = (file, args) =>
-  NodeUtil.promisify(NodeChildProcess.execFile)(file, [...args], {
-    timeout: 5_000,
-    maxBuffer: 1024 * 1024,
-  });
 
 export function createHyprlandSessionBinds(input: {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly launcher: ReadonlyArray<string>;
+  /** The command socket the keys write to while it listens. */
+  readonly socketPath: string;
+  /** The absolute path of a command on the PATH, or null. */
+  readonly resolveCommand: (name: string) => Promise<string | null>;
   readonly execute: HyprctlExecute;
   readonly onError?: (cause: unknown) => void;
 }): {
-  readonly setSessionActive: (active: boolean) => Promise<void>;
+  /** Whether this process runs under Hyprland, the only place the binds go. */
+  readonly enabled: boolean;
+  /** `socketListening: false` keeps the keys on the launcher for this session. */
+  readonly setSessionActive: (active: boolean, socketListening?: boolean) => Promise<void>;
   readonly dispose: () => Promise<void>;
 } {
-  const enabled = Boolean(input.env.HYPRLAND_INSTANCE_SIGNATURE?.trim());
+  const enabled = isHyprlandSession(input.env);
   let bound = false;
   /** What sat on the session combos before this session bound them. */
   let saved: ReadonlyArray<SavedBind> = [];
@@ -196,7 +253,14 @@ export function createHyprlandSessionBinds(input: {
     return queue;
   };
 
-  const bind = async () => {
+  const reportRejections = (rejections: ReadonlyArray<string>) => {
+    if (rejections.length > 0) input.onError?.(new Error(rejections.join("; ")));
+  };
+
+  const bind = async (socketListening: boolean) => {
+    const transport: BindTransport = socketListening
+      ? await resolveBindTransport(input.socketPath, input.resolveCommand)
+      : { tool: "launcher" };
     try {
       const output = await input.execute("hyprctl", ["-j", "binds"]);
       saved = parseSessionComboBinds(output?.stdout ?? "");
@@ -205,20 +269,25 @@ export function createHyprlandSessionBinds(input: {
       saved = [];
       input.onError?.(cause);
     }
-    await runKeywordCommands(input.execute, bindCommands(input.launcher, saved));
+    reportRejections(
+      await runKeywordCommands(
+        input.execute,
+        bindCommands({ transport, launcher: input.launcher, socketPath: input.socketPath }, saved),
+      ),
+    );
   };
 
   const unbind = async () => {
     const restore = saved;
     saved = [];
-    await runKeywordCommands(input.execute, unbindCommands(restore));
+    reportRejections(await runKeywordCommands(input.execute, unbindCommands(restore)));
   };
 
-  const setSessionActive = (active: boolean): Promise<void> => {
+  const setSessionActive = (active: boolean, socketListening = true): Promise<void> => {
     if (!enabled || active === bound) return queue;
     bound = active;
-    return enqueue(active ? bind : unbind);
+    return enqueue(active ? () => bind(socketListening) : unbind);
   };
 
-  return { setSessionActive, dispose: () => setSessionActive(false) };
+  return { enabled, setSessionActive, dispose: () => setSessionActive(false) };
 }

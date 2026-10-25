@@ -14,7 +14,9 @@ import {
   WS_METHODS,
   WsRpcGroupMesura,
 } from "@t3tools/contracts";
+import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 
 import { DictationJobs } from "./dictation/DictationJobs.ts";
@@ -25,14 +27,36 @@ import * as FileManagerHost from "./fileManager/FileManagerHost.ts";
 import { HostStatsService } from "./hostStats/HostStatsService.ts";
 import * as GitHubIssueCli from "./issues/GitHubIssueCli.ts";
 import { listIssues, readIssueDetail, resolveIssueReference } from "./issues/readIssues.ts";
+import * as ThreadSearchBroker from "./mcp/ThreadSearchBroker.ts";
 import { RpcInstrumentation } from "./observability/RpcInstrumentation.ts";
 import * as ThreadSearchEvidence from "./orchestration-v2/ThreadSearchEvidence.ts";
 import { ProjectIconDiscovery } from "./project/ProjectIconDiscovery.ts";
 import * as ReviewService from "./review/ReviewService.ts";
+import * as StartThreadSearchChat from "./textGeneration/StartThreadSearchChat.ts";
 import { makeReasonThreadSearch } from "./textGeneration/ThreadSearchReasoning.ts";
 import { AccountLimitsService } from "./usage/AccountLimitsService.ts";
 import * as WorkspaceFileWatcher from "./workspace/WorkspaceFileWatcher.ts";
 import { projectFileFailureContext } from "./ws.ts";
+
+/**
+ * The fork's services that every WebSocket connection shares, built once at
+ * server scope (server.ts) and handed to each connection's handler layer by
+ * `captureMesuraServerScope` (ws.ts).
+ */
+export const layerMesuraServerScope = Layer.mergeAll(
+  ThreadSearchBroker.layer,
+  StartThreadSearchChat.layer,
+);
+
+/** The server-scope instances, as a layer to provide to one connection's handlers. */
+export const captureMesuraServerScope = Effect.gen(function* () {
+  const broker = yield* ThreadSearchBroker.ThreadSearchBroker;
+  const starter = yield* StartThreadSearchChat.StartThreadSearchChat;
+  return Layer.mergeAll(
+    Layer.succeed(ThreadSearchBroker.ThreadSearchBroker, broker),
+    Layer.succeed(StartThreadSearchChat.StartThreadSearchChat, starter),
+  );
+});
 
 // Same order as ws.ts: instrumentation wraps authorization.
 const ServerWsRpcGroupMesura = WsRpcGroupMesura.middleware(RpcInstrumentation);
@@ -41,6 +65,11 @@ export const layerWsRpcMesura = ServerWsRpcGroupMesura.toLayer(
   Effect.gen(function* () {
     const threadSearchEvidence = yield* ThreadSearchEvidence.ThreadSearchEvidence;
     const reasonThreadSearch = yield* makeReasonThreadSearch;
+    const startThreadSearchChat = yield* StartThreadSearchChat.StartThreadSearchChat;
+    const threadSearchBroker = yield* ThreadSearchBroker.ThreadSearchBroker;
+    // This layer is built once per WebSocket. Every connection's RPC protocol
+    // numbers its client 0, so the broker tells connections apart by this id.
+    const connectionIdentity = yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
     const projectIconDiscovery = yield* ProjectIconDiscovery;
     const editorSessionManager = yield* EditorSessionManager.EditorSessionManager;
     const workspaceFileWatcher = yield* WorkspaceFileWatcher.WorkspaceFileWatcher;
@@ -76,6 +105,15 @@ export const layerWsRpcMesura = ServerWsRpcGroupMesura.toLayer(
           ),
         ),
       [THREAD_SEARCH_WS_METHODS.reasonThreadSearch]: (input) => reasonThreadSearch(input),
+
+      // Search conversations (ADR-010). A client keeps the tool connection open
+      // to answer the `find_threads` calls the broker forwards; a response is
+      // accepted only from the connection the request went to.
+      [THREAD_SEARCH_WS_METHODS.startThreadSearchChat]: () => startThreadSearchChat.start(),
+      [THREAD_SEARCH_WS_METHODS.threadSearchToolConnect]: () =>
+        Stream.unwrap(threadSearchBroker.connect(connectionIdentity)),
+      [THREAD_SEARCH_WS_METHODS.threadSearchToolRespond]: (input) =>
+        threadSearchBroker.respond(connectionIdentity, input),
 
       [WS_METHODS.serverGetAccountLimits]: (_input) => accountLimits.readSummary(),
 

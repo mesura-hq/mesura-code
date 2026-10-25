@@ -1,3 +1,4 @@
+import { useConversationOwnsShortcuts } from "../searches/conversationShortcutOwner";
 import { type RuntimeRequestId, type ScopedThreadRef } from "@t3tools/contracts";
 import { memo, useEffect, useEffectEvent, useRef, useState } from "react";
 import { useStableCallback } from "~/hooks/useStableCallback";
@@ -145,6 +146,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   };
 
   const selectOptionFromShortcut = useEffectEvent(handleOptionSelection);
+  const ownsShortcuts = useConversationOwnsShortcuts();
 
   useEffect(() => {
     if (!activeQuestion || responseDisabled || isCollapsed) return;
@@ -160,6 +162,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       ) {
         return;
       }
+      if (!ownsShortcuts()) return;
       const digit = Number.parseInt(event.key, 10);
       if (Number.isNaN(digit) || digit < 1 || digit > 9) return;
       const optionIndex = digit - 1;
@@ -171,7 +174,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [activeQuestion, isCollapsed, responseDisabled]);
+  }, [activeQuestion, isCollapsed, ownsShortcuts, responseDisabled]);
 
   if (!activeQuestion) {
     return null;

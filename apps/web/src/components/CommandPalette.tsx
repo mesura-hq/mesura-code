@@ -7,16 +7,17 @@ import {
   ProjectIconFileDialogHost,
 } from "./projects/ProjectIconFileDialog";
 import { openTranscriptionsList, TranscriptionsListHost } from "./dictation/TranscriptionsList";
-import { ProjectScopePicker } from "./projects/ProjectScopePicker";
-import { AgentThreadSearchSessionProvider } from "./threads/AgentThreadSearchSession";
-import { ThreadSearchPicker } from "./threads/ThreadSearchPicker";
-import type { ThreadSearchBackHandler } from "./threads/AgentThreadSearch";
 import {
   keepFocusInFileManager,
   openFileManager,
 } from "./files/mesuraFileManager/fileManagerToggle";
 import { restorePaletteOrigin } from "../keys/keyEngine";
-import { useCommandHandlers } from "../commands/commandRegistry";
+import { runRegisteredCommand, useCommandHandlers } from "../commands/commandRegistry";
+import {
+  onSidebarRequestClosesPalette,
+  serveSidebarFocusRequest,
+} from "./sidebar/SidebarCommandHost";
+import { activeComposerHandle } from "./searches/conversationShortcutOwner";
 import { requestSidebarDockPin } from "./sidebar/sidebarDockController";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { parseIssueSearch, someEnvironmentHasIssues } from "./issues/issues.logic";
@@ -32,7 +33,6 @@ import {
   MessagesSquareIcon,
   ServerIcon,
 } from "lucide-react";
-import type { RefObject } from "react";
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 
@@ -288,8 +288,6 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { theme, themeHalves, resolvedTheme, appearanceMode, setAppearanceMode } = useTheme();
   const composerHandleRef = useRef<ChatComposerHandle | null>(null);
-  const overlayBackHandlerRef = useRef<ThreadSearchBackHandler | null>(null);
-  const reopenThreadSearch = () => dispatch({ _tag: "OpenMode", mode: "threads" });
   const routeTarget = useThreadRouteTarget();
   const routeThreadRef = routeTarget?.kind === "server" ? routeTarget.threadRef : null;
   const terminalOpen = useTerminalUiStateStore((state) =>
@@ -309,7 +307,6 @@ export function CommandPalette({ children }: { children: ReactNode }) {
       if (event.isComposing || event.key !== "Escape") return;
       event.preventDefault();
       event.stopPropagation();
-      if (overlayBackHandlerRef.current?.()) return;
       dispatch({ _tag: "BackToCommand" });
     };
     window.addEventListener("keydown", onEscapeKeyDown, true);
@@ -325,7 +322,8 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           terminalOpen,
           previewFocus: isPreviewFocused(),
           previewOpen,
-          modelPickerOpen: composerHandleRef.current?.isModelPickerOpen() ?? false,
+          modelPickerOpen:
+            activeComposerHandle(composerHandleRef)?.current?.isModelPickerOpen() ?? false,
           usagePageOpen,
         },
       });
@@ -401,8 +399,6 @@ export function CommandPalette({ children }: { children: ReactNode }) {
         ["commandPalette.toggle", "command"],
         ["filePicker.toggle", "files"],
         ["projectSearch.toggle", "content"],
-        ["projectScope.toggle", "projects"],
-        ["threadSearch.toggle", "threads"],
       ].map(([command, mode]) => [command, () => toggleMode(mode as SearchOverlayMode)]),
     ),
   );
@@ -426,9 +422,11 @@ export function CommandPalette({ children }: { children: ReactNode }) {
       }),
     [openAddProject, openNewThreadIn, setOpen],
   );
+  // Fork: a sidebar focus shortcut pressed over the palette closes it first.
+  useEffect(() => onSidebarRequestClosesPalette(() => setOpen(false)), [setOpen]);
 
   return (
-    <AgentThreadSearchSessionProvider reopen={reopenThreadSearch}>
+    <>
       <ComposerHandleContext value={composerHandleRef}>
         <CommandDialog
           open={state.open}
@@ -446,11 +444,9 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           </div>
           <CommandPaletteDialog
             mode={state.mode}
-            overlayBackHandlerRef={overlayBackHandlerRef}
             openIntent={state.openIntent}
             setOpen={setOpen}
             openChildSearch={openChildSearch}
-            openThreadSearch={reopenThreadSearch}
             initialContext={state.restoredSearch}
             clearOpenIntent={clearOpenIntent}
           />
@@ -459,14 +455,12 @@ export function CommandPalette({ children }: { children: ReactNode }) {
       <TranscriptionsListHost />
       <ProjectIconFileDialogHost />
       <ProjectIconDiscoveryDialogHost />
-    </AgentThreadSearchSessionProvider>
+    </>
   );
 }
 
 function CommandPaletteDialog(props: {
-  readonly openThreadSearch: () => void;
   readonly mode: SearchOverlayMode;
-  readonly overlayBackHandlerRef: RefObject<ThreadSearchBackHandler | null>;
   readonly openIntent: CommandPaletteOpenIntent | null;
   readonly setOpen: (open: boolean) => void;
   readonly openChildSearch: (
@@ -512,9 +506,12 @@ function CommandPaletteDialog(props: {
             return;
           // Fork: a row that opened the file manager hands it the keyboard.
           if (keepFocusInFileManager()) return;
+          // Fork: a row that asked for the sidebar Search or project filter hands it the keyboard.
+          if (serveSidebarFocusRequest()) return;
           // Fork: Vim mode returns to the chat, or to the composer's mode, it left.
           if (restorePaletteOrigin()) return;
-          composerHandleRef?.current?.focusAtEnd();
+          // Fork: over an open agent search popup, its composer takes the keyboard back.
+          activeComposerHandle(composerHandleRef)?.current?.focusAtEnd();
         });
         return false;
       }}
@@ -526,16 +523,11 @@ function CommandPaletteDialog(props: {
         <ProjectFilePicker setOpen={props.setOpen} />
       ) : props.mode === "content" ? (
         <ProjectContentSearchDialog onOpenChange={props.setOpen} />
-      ) : props.mode === "projects" ? (
-        <ProjectScopePicker setOpen={props.setOpen} />
-      ) : props.mode === "threads" ? (
-        <ThreadSearchPicker backHandlerRef={props.overlayBackHandlerRef} setOpen={props.setOpen} />
       ) : (
         <OpenCommandPaletteDialog
           openIntent={props.openIntent}
           setOpen={props.setOpen}
           openChildSearch={props.openChildSearch}
-          openThreadSearch={props.openThreadSearch}
           initialContext={props.initialContext}
           clearOpenIntent={props.clearOpenIntent}
         />
@@ -545,7 +537,6 @@ function CommandPaletteDialog(props: {
 }
 
 function OpenCommandPaletteDialog(props: {
-  readonly openThreadSearch: () => void;
   readonly openIntent: CommandPaletteOpenIntent | null;
   readonly setOpen: (open: boolean) => void;
   readonly openChildSearch: (
@@ -1616,10 +1607,9 @@ function OpenCommandPaletteDialog(props: {
     searchTerms: ["search threads", "find thread", "go to thread", "thread search", "all projects"],
     title: "Search threads",
     icon: <MessagesSquareIcon className={ITEM_ICON_CLASS} />,
-    keepOpen: true,
     shortcutCommand: "threadSearch.toggle",
     run: async () => {
-      props.openThreadSearch();
+      runRegisteredCommand("threadSearch.toggle");
     },
   });
 

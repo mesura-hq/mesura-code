@@ -16,6 +16,7 @@ import {
   type PaneDirection,
   type PaneId,
 } from "./paneFocus";
+import { closeAgentSearchPopupForWorkspace } from "../components/searches/agentSearchPopupStore";
 
 /**
  * Directional pane navigation, claimed at the window before any pane sees it.
@@ -120,6 +121,7 @@ export function createPaneNavigationHandler(input: {
       if (target === null) return;
       event.preventDefault();
       event.stopImmediatePropagation();
+      closeAgentSearchPopupForWorkspace();
       focusPane(target);
       return;
     }
@@ -141,7 +143,9 @@ export function createPaneNavigationHandler(input: {
     event.preventDefault();
     event.stopImmediatePropagation();
     const target = neighbourOf(from, winningDirection);
-    if (target !== null) focusPane(target);
+    if (target === null) return;
+    closeAgentSearchPopupForWorkspace();
+    focusPane(target);
   };
 }
 

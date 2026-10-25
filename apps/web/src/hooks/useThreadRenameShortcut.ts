@@ -1,3 +1,4 @@
+import { useConversationOwnsShortcuts } from "../components/searches/conversationShortcutOwner";
 import type { ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import { useEffect } from "react";
 
@@ -22,19 +23,20 @@ export function useThreadRenameShortcut(input: {
   readonly onStartRename: () => void;
 }): void {
   const { keybindings, enabled, onStartRename } = input;
+  const ownsShortcuts = useConversationOwnsShortcuts();
   useEffect(() => {
     if (!enabled) return;
     const handler = (event: KeyboardEvent) => {
       const command = resolveShortcutCommand(event, keybindings, {
         context: { terminalFocus: getTerminalFocusOwner() !== null },
       });
-      if (command !== "thread.rename" || isCommandPaletteOpen()) return;
+      if (command !== "thread.rename" || isCommandPaletteOpen() || !ownsShortcuts()) return;
       event.preventDefault();
       event.stopPropagation();
       if (!event.repeat) onStartRename();
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [enabled, keybindings, onStartRename]);
+  }, [enabled, keybindings, onStartRename, ownsShortcuts]);
   useCommandHandlers({ "thread.rename": enabled ? onStartRename : undefined });
 }

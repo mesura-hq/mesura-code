@@ -11,6 +11,7 @@ import {
   ProviderInstanceId,
   ProviderSessionId,
   ThreadId,
+  THREAD_SEARCH_PROJECT_ID,
   type ProviderThreadId,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -456,6 +457,10 @@ export const layerWithOptions = (
                 >(["orchestration", "worktree", "pull-requests"]);
                 if (browserToolsAvailable) capabilities.add("preview");
                 if (deviceToolsAvailable) capabilities.add("device");
+                // Mesura: only a search conversation may call find_threads (ADR-010).
+                const thread = yield* Effect.option(projectionStore.getThread(threadId));
+                if (Option.isSome(thread) && thread.value.projectId === THREAD_SEARCH_PROJECT_ID)
+                  capabilities.add("thread-search");
                 const existing = yield* mcpSessions.read(threadId);
                 if (existing !== undefined) {
                   // Reserve before the async resolve so a release cannot

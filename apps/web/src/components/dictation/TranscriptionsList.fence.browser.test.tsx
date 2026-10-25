@@ -1,5 +1,5 @@
 /**
- * Entry point: AppRoot → CommandPalette, through `threadSearchPicker.testMount.tsx`.
+ * Entry point: AppRoot → CommandPalette, through `test/commandPaletteFence.testMount.tsx`.
  * The user opens the palette with Ctrl+O and picks the Transcriptions action;
  * the list it opens is the real `TranscriptionsList`. The fixture replaces data
  * sources only: environments, entities, settings, the RPC command boundary, and
@@ -29,16 +29,16 @@ vi.mock("~/state/server", async (original) =>
 vi.mock("@t3tools/client-runtime/state/session", async (original) => {
   const { appRootFence, makeFenceSession, mockRuntimeSession } =
     await import("../../test/appRootFenceMocks");
-  appRootFence.sessions.set("thread-search-laptop", makeFenceSession());
-  appRootFence.sessions.set("thread-search-vigilia", makeFenceSession());
+  appRootFence.sessions.set("palette-fence-laptop", makeFenceSession());
+  appRootFence.sessions.set("palette-fence-vigilia", makeFenceSession());
   return mockRuntimeSession(original);
 });
 
 vi.mock("~/state/entities", async (original) =>
-  (await import("../threads/threadSearchPicker.testFixtures")).mockEntities(await original()),
+  (await import("../../test/commandPaletteFence.testFixtures")).mockEntities(await original()),
 );
 vi.mock("~/state/environments", async (original) => {
-  const mocked = (await import("../threads/threadSearchPicker.testFixtures")).mockEnvironments(
+  const mocked = (await import("../../test/commandPaletteFence.testFixtures")).mockEnvironments(
     await original<typeof import("~/state/environments")>(),
   );
   return {
@@ -52,16 +52,13 @@ vi.mock("~/state/environments", async (original) => {
   };
 });
 vi.mock("~/state/queries", async (original) =>
-  (await import("../threads/threadSearchPicker.testFixtures")).mockQueries(await original()),
-);
-vi.mock("~/state/orchestration", async (original) =>
-  (await import("../threads/threadSearchPicker.testFixtures")).mockOrchestration(await original()),
+  (await import("../../test/commandPaletteFence.testFixtures")).mockQueries(await original()),
 );
 vi.mock("~/state/use-atom-command", async () =>
-  (await import("../threads/threadSearchPicker.testFixtures")).mockUseAtomCommand(),
+  (await import("../../test/commandPaletteFence.testFixtures")).mockUseAtomCommand(),
 );
 vi.mock("~/hooks/useSettings", async (original) =>
-  (await import("../threads/threadSearchPicker.testFixtures")).mockSettings(await original()),
+  (await import("../../test/commandPaletteFence.testFixtures")).mockSettings(await original()),
 );
 vi.mock("~/state/dictation", async (original) => ({
   ...(await original<typeof import("~/state/dictation")>()),
@@ -75,10 +72,10 @@ import { EnvironmentId } from "@t3tools/contracts";
 
 import {
   LAPTOP_ENVIRONMENT_ID,
-  resetThreadSearchFixture,
-  threadSearchFixture,
+  resetCommandPaletteFence,
+  commandPaletteFence,
   VIGILIA_ENVIRONMENT_ID,
-} from "../threads/threadSearchPicker.testFixtures";
+} from "../../test/commandPaletteFence.testFixtures";
 import {
   buttonIn,
   click,
@@ -88,7 +85,7 @@ import {
   paletteElement,
   settle,
   type MountedApp,
-} from "../threads/threadSearchPicker.testMount";
+} from "../../test/commandPaletteFence.testMount";
 import { closeTranscriptionsList, resolveTranscriptionsEnvironment } from "./TranscriptionsList";
 
 const TEST_NOW = Date.UTC(2026, 9, 24, 12);
@@ -141,7 +138,7 @@ async function setupBrowserFixture0() {
   // oxlint-disable-next-line t3code/no-frame-waits-in-browser-tests -- only Date is fixed for retention; native dialog timers and animation frames remain real
   const clock = fakeTimers({ now: TEST_NOW, toFake: ["Date"] });
 
-  resetThreadSearchFixture();
+  resetCommandPaletteFence();
   dictationFixture.jobs = dictationJobs();
   dictationFixture.environmentIds = [];
   dictationFixture.primaryEnvironmentId = undefined;
@@ -267,7 +264,7 @@ describe("transcriptions list (criterion 5)", () => {
 
     await openTranscriptions();
     await click(buttonIn(transcriptionRows()[1]!, /retry/i));
-    expect(threadSearchFixture.commandCalls).toContainEqual({
+    expect(commandPaletteFence.commandCalls).toContainEqual({
       label: RETRY_COMMAND_LABEL,
       value: { environmentId: LAPTOP_ENVIRONMENT_ID, input: { jobId: "job-recent-failed" } },
     });
@@ -289,7 +286,7 @@ describe("transcriptions environment (review P1-1)", () => {
     expect(transcriptionsList()).not.toBeNull();
     expect(dictationFixture.environmentIds.at(-1)).toBe(VIGILIA_ENVIRONMENT_ID);
     await click(buttonIn(transcriptionRows()[1]!, /retry/i));
-    expect(threadSearchFixture.commandCalls).toContainEqual({
+    expect(commandPaletteFence.commandCalls).toContainEqual({
       label: RETRY_COMMAND_LABEL,
       value: { environmentId: VIGILIA_ENVIRONMENT_ID, input: { jobId: "job-recent-failed" } },
     });
