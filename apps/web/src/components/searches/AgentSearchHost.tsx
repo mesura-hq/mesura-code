@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 
 import { useFileManagerStore } from "~/components/files/mesuraFileManager/fileManagerStore";
 import { useFileTreeStore } from "~/components/files/mesuraTree/fileTreeStore";
+import { useRightPanelStore } from "~/rightPanelStore";
 import { newMessageId } from "~/lib/utils";
 import { useQuietThreadShell, useQuietThreadShells } from "~/state/entities";
 import { threadEnvironment } from "~/state/threads";
@@ -21,7 +22,7 @@ import {
   type SearchRun,
 } from "./agentSearchPopup.logic";
 import {
-  closeAgentSearchPopupForFilePane,
+  closeAgentSearchPopupForWorkspace,
   dispatchAgentSearchPopup,
   takeSearchFirstMessage,
   useAgentSearchPopupStore,
@@ -42,7 +43,7 @@ export function AgentSearchHost() {
       <SearchLifecycle />
       <ClosePopupOnNavigation />
       <CloseSearchToastsOnOpen />
-      <ClosePopupForFilePanes />
+      <ClosePopupForWorkspace />
       <ThreadSearchToolRuntime />
       {[...firstMessages.entries()].map(([key, { search }]) => (
         <FirstMessageSender key={key} search={search} />
@@ -161,23 +162,31 @@ function ClosePopupOnNavigation() {
 }
 
 /**
- * Opening the file manager or a deferred move to the file tree closes the popup first (a direct
- * move to a mounted tree calls `closeAgentSearchPopupForFilePane` itself). The file panes act on
- * the project's files, which a search conversation has none of, and a file manager stacked over
- * the popup would fight it for Escape and for focus return.
+ * A move into the workspace behind the popup closes it first: opening the file manager, a
+ * deferred move to the file tree, or any user action on a right panel. A direct move to a mounted
+ * tree and the pane chords call `closeAgentSearchPopupForWorkspace` themselves. The workspace
+ * acts on the project, which a search conversation has none of, and a surface stacked under the
+ * modal popup would take the keyboard where nobody can see it.
  */
-function ClosePopupForFilePanes() {
+function ClosePopupForWorkspace() {
   useEffect(() => {
-    const closePopup = closeAgentSearchPopupForFilePane;
+    const closePopup = closeAgentSearchPopupForWorkspace;
     const offManager = useFileManagerStore.subscribe((state, previous) => {
       if (state.open && !previous.open) closePopup();
     });
     const offTree = useFileTreeStore.subscribe((state, previous) => {
       if (state.pendingFocus && !previous.pendingFocus) closePopup();
     });
+    // Every user action on a right panel (a launcher row, a surface tab) counts here.
+    const offPanels = useRightPanelStore.subscribe((state, previous) => {
+      if (state.userActionRevisionByThreadKey !== previous.userActionRevisionByThreadKey) {
+        closePopup();
+      }
+    });
     return () => {
       offManager();
       offTree();
+      offPanels();
     };
   }, []);
   return null;

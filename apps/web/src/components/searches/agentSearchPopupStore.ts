@@ -31,10 +31,11 @@ export function dispatchAgentSearchPopup(action: AgentSearchPopupAction): void {
 }
 
 /**
- * Closes the popup before a file pane takes the keyboard, as a focus chord over the open palette
- * closes the palette. The search keeps running and the sparkle reopens it.
+ * Closes the popup before the workspace behind it takes the keyboard (a file pane, a right-panel
+ * surface, a pane chord), as a focus chord over the open palette closes the palette. The search
+ * keeps running and the sparkle reopens it.
  */
-export function closeAgentSearchPopupForFilePane(): void {
+export function closeAgentSearchPopupForWorkspace(): void {
   if (useAgentSearchPopupStore.getState().open) dispatchAgentSearchPopup({ type: "close" });
 }
 

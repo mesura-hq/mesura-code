@@ -311,6 +311,7 @@ vi.mock("@legendapp/list/react", async () => (await fenceMocks()).mockLegendList
 
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
+  EnvironmentId,
   ProjectId,
   RunId,
   RuntimeRequestId,
@@ -328,6 +329,7 @@ import { installKeyEngine } from "./keys/keyEngine";
 import { readProjects } from "./state/entities";
 import { readKeyEngineSnapshot } from "./keys/keyEngineStore";
 import { useProjectScopeStore } from "./projectScopeStore";
+import { useRightPanelStore } from "./rightPanelStore";
 import {
   addFenceThread,
   fenceEnvironmentId as environmentId,
@@ -1247,6 +1249,37 @@ describe("agent search popup: closing and completion", () => {
     } finally {
       useFileTreeStore.getState().clearPendingFocus();
     }
+  });
+
+  it("agent search popup spec: a user action on a right panel closes the popup first", async () => {
+    await using _fixture = await setup();
+    await mountApp();
+    await startSearchWithTab();
+    await vi.waitFor(() => expect(popup()).not.toBeNull());
+    const ref = scopeThreadRef(
+      EnvironmentId.make(FENCE_ENVIRONMENT_ID),
+      ThreadId.make("main-thread"),
+    );
+    try {
+      await act(async () => useRightPanelStore.getState().open(ref, "files"));
+      await vi.waitFor(() => expect(popup(), "the panel action closed the popup").toBeNull());
+    } finally {
+      await act(async () => useRightPanelStore.getState().close(ref));
+    }
+  });
+
+  it("agent search popup spec: a pane chord from the popup's composer closes the popup first", async () => {
+    await using _fixture = await setup();
+    await mountApp();
+    await startSearchWithTab();
+    const popupEditor = await vi.waitFor(() => {
+      const found = requirePopup().querySelector<HTMLElement>('[data-testid="composer-editor"]');
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    await act(async () => popupEditor.focus());
+    await press({ key: "h", code: "KeyH", ctrlKey: true });
+    await vi.waitFor(() => expect(popup(), "the pane chord closed the popup").toBeNull());
   });
 
   it("agent search popup spec: the palette closed over the open popup leaves the main composer alone", async () => {
