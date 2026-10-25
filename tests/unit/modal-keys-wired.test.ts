@@ -543,10 +543,23 @@ it("modal keys seam guard: the command palette registers its overlay toggles", (
     '["commandPalette.toggle", "command"]',
     '["filePicker.toggle", "files"]',
     '["projectSearch.toggle", "content"]',
-    '["projectScope.toggle", "projects"]',
-    '["threadSearch.toggle", "threads"]',
     "toggleMode(mode as SearchOverlayMode)",
   ]);
+});
+
+// The thread search and the project filter left the palette for the sidebar's
+// own Search field and project filter; Vim <leader>ft and <leader>fp still
+// reach them through these registry handlers.
+it("modal keys seam guard: the sidebar registers the thread search and project filter commands", () => {
+  assertCallCarries(
+    "apps/web/src/components/sidebar/SidebarCommandHost.tsx",
+    "useCommandHandlers",
+    [
+      '"threadSearch.toggle": () => run("threadSearch.toggle")',
+      '"projectScope.toggle": () => run("projectScope.toggle")',
+      '"projectScope.toggleAll": () => run("projectScope.toggleAll")',
+    ],
+  );
 });
 
 it("modal keys seam guard: closing the palette returns to where Vim mode left", () => {

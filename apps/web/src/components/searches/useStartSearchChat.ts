@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { createEnvironmentRpcCommand } from "@t3tools/client-runtime/state/runtime";
-import { THREAD_SEARCH_WS_METHODS } from "@t3tools/contracts";
+import { type EnvironmentId, THREAD_SEARCH_WS_METHODS, type ThreadId } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
 
 import { connectionAtomRuntime } from "~/connection/runtime";
@@ -59,19 +59,35 @@ export function useStartSearchChat(): {
       });
       return false;
     }
-    startInFlight = true;
-    try {
-      const result = await create({ environmentId: host.environmentId, input: {} });
-      if (result._tag !== "Success") return false;
-      const search = scopeThreadRef(host.environmentId, result.value.threadId);
-      queueSearchFirstMessage(search, text);
-      dispatchAgentSearchPopup({ type: "open", search });
-      return true;
-    } finally {
-      startInFlight = false;
-    }
+    const environmentId = host.environmentId;
+    return startSearchConversation(environmentId, text, async () => {
+      const result = await create({ environmentId, input: {} });
+      return result._tag === "Success" ? result.value.threadId : null;
+    });
   };
   return { start, available };
+}
+
+/**
+ * Starts one search conversation and opens it. Outside the hook: the React Compiler does not
+ * compile `try`/`finally` without `catch`, and nothing here needs memoizing.
+ */
+async function startSearchConversation(
+  environmentId: EnvironmentId,
+  text: string,
+  createThread: () => Promise<ThreadId | null>,
+): Promise<boolean> {
+  startInFlight = true;
+  try {
+    const threadId = await createThread();
+    if (threadId === null) return false;
+    const search = scopeThreadRef(environmentId, threadId);
+    queueSearchFirstMessage(search, text);
+    dispatchAgentSearchPopup({ type: "open", search });
+    return true;
+  } finally {
+    startInFlight = false;
+  }
 }
 
 /** The sidebar Search's key handler for the agent search; see `routeAgentSearchFieldKey`. */
