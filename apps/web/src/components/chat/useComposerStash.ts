@@ -1,4 +1,5 @@
 import type { ChatComposerProps } from "./ChatComposer";
+import { useConversationOwnsShortcuts } from "../searches/conversationShortcutOwner";
 import {
   type ComposerContextRecord,
   type EnvironmentId,
@@ -128,6 +129,7 @@ export function useComposerStash(input: {
     importContextRecords,
     expandMobileComposer,
   } = input;
+  const ownsShortcuts = useConversationOwnsShortcuts();
   const getComposerDraft = useComposerDraftStore((store) => store.getComposerDraft);
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
   const addComposerDraftImages = useComposerDraftStore((store) => store.addImages);
@@ -703,7 +705,7 @@ export function useComposerStash(input: {
           modelPickerOpen: isComposerModelPickerOpen,
         },
       });
-      if (command !== "composer.stash") return;
+      if (command !== "composer.stash" || !ownsShortcuts()) return;
       // Always claim the shortcut so the browser save dialog never opens,
       // even when the composer is in a state that can't stash.
       event.preventDefault();
@@ -726,6 +728,7 @@ export function useComposerStash(input: {
     activePendingProgress,
     isComposerModelPickerOpen,
     keybindings,
+    ownsShortcuts,
     pendingUserInputs.length,
     projectSelectionRequired,
     stashCurrentPromptStable,

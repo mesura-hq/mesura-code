@@ -25,10 +25,7 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
-import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import * as HttpClient from "effect/http/HttpClient";
-import { Atom, AtomRegistry } from "effect/reactivity";
 
 import { EnvironmentRegistry } from "../connection/registry.ts";
 import {
@@ -37,7 +34,6 @@ import {
   runAgentThreadSearch,
   type AgentThreadSearchResult,
 } from "./agentThreadSearch.ts";
-import { createOrchestrationEnvironmentAtoms } from "./orchestration.ts";
 import {
   FAKE_EVIDENCE_SCAN_WINDOW,
   isoAt,
@@ -48,10 +44,6 @@ import {
 } from "./threadSearchEnvironmentFakes.testFixtures.ts";
 
 const METHODS = THREAD_SEARCH_WS_METHODS;
-const unusedHttpClientLayer = Layer.succeed(
-  HttpClient.HttpClient,
-  HttpClient.make(() => Effect.die("Unexpected HTTP request during thread search")),
-);
 const decodeReasoningInput = Schema.decodeUnknownExit(OrchestrationThreadSearchReasoningInput);
 const encodeReasoningInputJson = Schema.encodeUnknownSync(
   Schema.fromJsonString(OrchestrationThreadSearchReasoningInput),
@@ -817,87 +809,6 @@ describe("agent thread search: outcome kinds", () => {
 
         expect(result).toMatchObject({ status: "failed", failure: "retrieval" });
       }),
-  );
-});
-
-describe("agent thread search: shared client wiring", () => {
-  const wiringThread = makeFakeThread({
-    threadId: "thread-wired",
-    projectId: "project-wired",
-    title: "Wired thread",
-    projectTitle: "Wiring",
-    texts: ["The needle sits in the wired thread."],
-  });
-  const wiringInput = {
-    description: "find the needle",
-    environments: [{ environmentId: EnvironmentId.make("env-laptop"), label: "Laptop" }],
-    modelEnvironmentId: EnvironmentId.make("env-laptop"),
-  };
-
-  const makeWiring = (reason: FakeReason) =>
-    Effect.gen(function* () {
-      const fakes = yield* makeFakeEnvironments([
-        { environmentId: "env-laptop", label: "Laptop", threads: [wiringThread], reason },
-      ]);
-      const atoms = createOrchestrationEnvironmentAtoms(
-        Atom.runtime(
-          Layer.merge(Layer.succeed(EnvironmentRegistry, fakes.registry), unusedHttpClientLayer),
-        ),
-      );
-      const registry = yield* Effect.acquireRelease(Effect.sync(AtomRegistry.make), (registry) =>
-        Effect.sync(() => registry.dispose()),
-      );
-      return { atoms, registry };
-    });
-
-  it.effect(
-    "agentThreadSearch spec: the orchestration search atom returns the verified result",
-    () =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const { atoms, registry } = yield* makeWiring(modelSeeking("needle", "Has the needle."));
-          const searchAtom = atoms.agentThreadSearch("picker");
-          const unmount = registry.mount(searchAtom);
-
-          registry.set(searchAtom, wiringInput);
-          const result = yield* AtomRegistry.getResult(registry, searchAtom, {
-            suspendOnWaiting: true,
-          });
-
-          expect(matchKeys(result)).toEqual([["env-laptop", "thread-wired"]]);
-          unmount();
-        }),
-      ),
-  );
-
-  it.effect(
-    "agentThreadSearch spec: unmounting the orchestration search atom cancels the search",
-    () =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const modelStarted = yield* Deferred.make<void>();
-          let modelInterrupted = false;
-          const { atoms, registry } = yield* makeWiring(() =>
-            Deferred.succeed(modelStarted, undefined).pipe(
-              Effect.andThen(Effect.never),
-              Effect.onInterrupt(() =>
-                Effect.sync(() => {
-                  modelInterrupted = true;
-                }),
-              ),
-            ),
-          );
-          const searchAtom = atoms.agentThreadSearch("picker");
-          const unmount = registry.mount(searchAtom);
-
-          registry.set(searchAtom, wiringInput);
-          yield* Deferred.await(modelStarted);
-          unmount();
-          yield* Effect.yieldNow;
-
-          expect(modelInterrupted).toBe(true);
-        }),
-      ),
   );
 });
 

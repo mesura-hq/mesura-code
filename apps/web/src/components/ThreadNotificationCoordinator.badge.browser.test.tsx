@@ -1,5 +1,5 @@
 import { RegistryContext } from "@effect/atom-react";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, THREAD_SEARCH_PROJECT_ID } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { Atom, AtomRegistry } from "effect/reactivity";
@@ -94,6 +94,7 @@ class TestNotification extends EventTarget {
 
 const thread = {
   id: "thread",
+  projectId: "project",
   title: "Test thread",
   archivedAt: null as string | null,
   hasPendingApprovals: false,
@@ -116,7 +117,7 @@ function toV2ThreadShell(input: typeof thread) {
   const latestTurn = input.latestTurn;
   return {
     id: input.id,
-    projectId: "project",
+    projectId: input.projectId,
     title: input.title,
     providerInstanceId: "codex",
     modelSelection: { instanceId: "codex", model: "gpt-5.4" },
@@ -296,4 +297,58 @@ it("keeps Input needed when the run that signalled needs_input completes", async
   );
   await app.render();
   expect(TestNotification.sent.map((entry) => entry.title)).toEqual(["Input needed"]);
+});
+
+// Phase 3 of the search unification cycle, criterion 5: a finished agent search
+// notifies like a finished thread, under its own title. The match count is not
+// on the thread shell, so these specs pin the title and leave the body free.
+const searchThread = { id: "search", projectId: THREAD_SEARCH_PROJECT_ID, title: "New search" };
+const searchCompleted = {
+  ...searchThread,
+  latestTurn: { turnId: "turn", state: "completed", completedAt: "2026-09-13T07:01:00.000Z" },
+};
+
+it("agent search notification spec: a settled search thread notifies Agent search finished", async () => {
+  await using app = setup();
+  state.shells.set("one", shell(searchThread));
+  await app.render();
+
+  state.shells.set("one", shell(searchCompleted));
+  await app.render();
+
+  expect(TestNotification.sent.map((entry) => entry.title)).toEqual(["Agent search finished"]);
+});
+
+it("agent search notification spec: a settled search thread is never announced as Thread completed in app", async () => {
+  await using app = setup();
+  state.inApp = true;
+  focused = true;
+  state.shells.set("one", shell(searchThread));
+  await app.render();
+
+  state.shells.set("one", shell(searchCompleted));
+  await app.render();
+
+  const titles = state.toast.mock.calls.map(([toast]) => (toast as { title?: string }).title);
+  expect(titles).not.toContain("Thread completed");
+  expect(TestNotification.sent.map((entry) => entry.title)).not.toContain("Thread completed");
+});
+
+it("agent search notification guard: an ordinary thread settling beside a search still notifies Thread completed", async () => {
+  await using app = setup();
+  state.shells.set("one", shell({}, searchThread));
+  await app.render();
+
+  state.shells.set(
+    "one",
+    shell(
+      {
+        latestTurn: { turnId: "turn", state: "completed", completedAt: "2026-09-13T07:01:00.000Z" },
+      },
+      searchThread,
+    ),
+  );
+  await app.render();
+
+  expect(TestNotification.sent.map((entry) => entry.title)).toEqual(["Thread completed"]);
 });

@@ -1,3 +1,4 @@
+import { useConversationOwnsShortcuts } from "../searches/conversationShortcutOwner";
 import { getClientSettings } from "../../hooks/useSettings";
 import { useFileManagerStore } from "../files/mesuraFileManager/fileManagerStore";
 import type { KeybindingCommand, ResolvedKeybindingsConfig } from "@t3tools/contracts";
@@ -46,7 +47,9 @@ export interface ChatShortcutsInput {
  * act on the current render without re-registering on every change.
  */
 export function useChatShortcuts(input: ChatShortcutsInput) {
+  const ownsShortcuts = useConversationOwnsShortcuts();
   const handleShortcut = useEffectEvent((event: KeyboardEvent) => {
+    if (!ownsShortcuts()) return;
     const { keybindings } = input;
     if (preventRepeatedTerminalCloseShortcut(event, keybindings)) {
       event.stopPropagation();
@@ -93,6 +96,7 @@ export function useChatShortcuts(input: ChatShortcutsInput) {
   });
   const dismissFind = useEffectEvent((event: KeyboardEvent) => {
     if (
+      !ownsShortcuts() ||
       event.key !== "Escape" ||
       !input.threadFindActive ||
       event.defaultPrevented ||

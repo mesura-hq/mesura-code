@@ -113,8 +113,30 @@ function reachableLastPane() {
   return pane === "chat" || isPaneReachable(pane) ? pane : "chat";
 }
 
+/**
+ * The composer the keys act on. With two mounted (the agent search popup's
+ * over the main one), the focused one, else the one in the open dialog, which
+ * sits above the rest.
+ */
 export function composerEditorElement(): HTMLElement | null {
-  return document.querySelector<HTMLElement>(COMPOSER_EDITOR_SELECTOR);
+  const editors = document.querySelectorAll<HTMLElement>(COMPOSER_EDITOR_SELECTOR);
+  if (editors.length <= 1) return editors[0] ?? null;
+  const active = deepActiveElement();
+  const all = [...editors];
+  return (
+    all.find((editor) => active !== null && editor.contains(active)) ??
+    all.find((editor) => editor.closest('[role="dialog"]') !== null) ??
+    all[0]!
+  );
+}
+
+/**
+ * A composer inside an open dialog: the agent search popup's conversation.
+ * Escape there belongs to the dialog, which closes, not to the composer's
+ * insert/normal modes (the popup is a transient layer over the app).
+ */
+export function isComposerInDialog(active: Element | null = deepActiveElement()): boolean {
+  return active?.closest(COMPOSER_EDITOR_SELECTOR)?.closest('[role="dialog"]') != null;
 }
 
 export function isComposerMenuOpen(): boolean {

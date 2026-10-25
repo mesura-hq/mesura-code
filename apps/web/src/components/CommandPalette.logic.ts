@@ -67,14 +67,7 @@ export function browseInputEndPaddingClass(input: {
   return "*:data-[slot=autocomplete-input]:pe-24!";
 }
 
-/**
- * The global search overlay hosts five mutually exclusive surfaces: the
- * command palette (⌘K), the project file picker (⌘P), project content
- * search (⇧⌘G), the project scope picker (⇧⌘F), and the thread search
- * picker (⇧⌘K). One reducer owns open/mode state so the surfaces can never
- * stack and re-triggering a mode's shortcut toggles it closed.
- */
-export type SearchOverlayMode = "command" | "files" | "content" | "threads";
+export type SearchOverlayMode = "command" | "files" | "content";
 
 export type CommandPaletteOpenIntent =
   | { readonly kind: "add-project" | "new-thread-in" | "change-theme" }
@@ -95,7 +88,6 @@ export interface CommandPaletteUiState {
 export type CommandPaletteUiAction =
   | { readonly _tag: "SetOpen"; readonly open: boolean }
   | { readonly _tag: "ToggleMode"; readonly mode: SearchOverlayMode }
-  | { readonly _tag: "OpenMode"; readonly mode: SearchOverlayMode }
   | {
       readonly _tag: "OpenSearch";
       readonly query: string;
@@ -125,8 +117,6 @@ export function reduceCommandPaletteUiState(
       return state.open && state.mode === action.mode
         ? { open: false, mode: state.mode, openIntent: null }
         : { open: true, mode: action.mode, openIntent: null };
-    case "OpenMode":
-      return { open: true, mode: action.mode, openIntent: null };
     case "OpenChildSearch":
       return { open: true, mode: action.mode, openIntent: null, parentSearch: action.context };
     case "BackToCommand":

@@ -1,3 +1,4 @@
+import { useConversationOwnsShortcuts } from "../searches/conversationShortcutOwner";
 import { pasteTextToFocusComposer, shouldRedirectInputToComposer } from "./composerFocusRedirect";
 import { readPastedComposerContext } from "../composerInlineTokenPaste";
 import { isPasteAsTextShortcut } from "@t3tools/client-runtime/text-paste";
@@ -16,6 +17,7 @@ export function usePasteToFocusComposer(
   composerRef: ComposerHandleRef,
 ) {
   const pasteAsTextShortcutUntilRef = useRef(0);
+  const ownsShortcuts = useConversationOwnsShortcuts();
   useEffect(() => {
     const keyHandler = (event: KeyboardEvent) => {
       if (
@@ -26,7 +28,7 @@ export function usePasteToFocusComposer(
       }
     };
     const handler = (event: ClipboardEvent) => {
-      if (!activeThreadId || isCommandPaletteOpen()) return;
+      if (!activeThreadId || isCommandPaletteOpen() || !ownsShortcuts()) return;
       if (getTerminalFocusOwner() !== null) return;
       if (composerRef.current?.isModelPickerOpen()) return;
       const text = pasteTextToFocusComposer(event);
@@ -49,5 +51,5 @@ export function usePasteToFocusComposer(
       window.removeEventListener("keydown", keyHandler, true);
       window.removeEventListener("paste", handler, true);
     };
-  }, [activeThreadId, composerRef]);
+  }, [activeThreadId, composerRef, ownsShortcuts]);
 }

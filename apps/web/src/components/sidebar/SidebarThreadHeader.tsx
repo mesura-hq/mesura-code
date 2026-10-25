@@ -30,6 +30,8 @@ export interface SidebarThreadHeaderProps {
   searchResultCount: number;
   activeSearchResultIndex: number;
   onClearSearch: () => void;
+  /** Mesura: sits at the right inside the Search field, before the clear X. */
+  searchFieldAccessory?: ReactNode;
 }
 
 export function SidebarThreadHeader({
@@ -50,6 +52,7 @@ export function SidebarThreadHeader({
   searchResultCount,
   activeSearchResultIndex,
   onClearSearch,
+  searchFieldAccessory,
 }: SidebarThreadHeaderProps) {
   const resultsVisible = isSearching && searchResultCount > 0;
   // Results shrink as the query narrows, so the active index can outrun the
@@ -87,6 +90,7 @@ export function SidebarThreadHeader({
           }
           className="min-w-0 flex-1"
         />
+        {searchFieldAccessory}
         {isSearching ? (
           <Button
             type="button"

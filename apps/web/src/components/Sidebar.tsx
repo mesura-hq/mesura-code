@@ -105,6 +105,9 @@ import {
 } from "../threadSelectionStore";
 import { useAcknowledgeThreadWoke, useThreadActions } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
+import { AgentSearchFieldAccessory } from "./searches/AgentSearchFieldAccessory";
+import { withoutSearchThreads } from "./searches/searchThreadExclusion";
+import { useAgentSearchFieldKeyDown } from "./searches/useStartSearchChat";
 import { useSidebarProjectGroups } from "../hooks/useSidebarProjectGroups";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { registerSettleAndAdvance } from "../settleAndAdvance";
@@ -376,7 +379,7 @@ function useSidebarThreads(input: {
     optimisticDrop,
     routeThreadRef,
   } = input;
-  const threads = useQuietThreadShells();
+  const threads = withoutSearchThreads(useQuietThreadShells());
   const routeRowThreadKey =
     routeThreadRef === null
       ? null
@@ -1207,6 +1210,7 @@ export default function Sidebar() {
     void router.navigate({ to: "/draft/$draftId", params: { draftId } });
   };
 
+  const handleAgentSearchKey = useAgentSearchFieldKeyDown();
   const clearThreadSearch = () => {
     setThreadSearchQuery("");
     setActiveSearchResultIndex(0);
@@ -1217,6 +1221,7 @@ export default function Sidebar() {
   };
   const handleThreadSearchKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+    if (handleAgentSearchKey(event, threadSearchQuery)) return;
     if (event.key === "Escape" && isSearchingThreads) {
       event.preventDefault();
       event.stopPropagation();
@@ -2801,6 +2806,7 @@ export default function Sidebar() {
                 setActiveSearchResultIndex(0);
               }}
               onSearchKeyDown={handleThreadSearchKeyDown}
+              searchFieldAccessory={<AgentSearchFieldAccessory query={threadSearchQuery} />}
               isSearching={isSearchingThreads}
               searchResultCount={threadSearchResults.length}
               activeSearchResultIndex={activeSearchResultIndex}

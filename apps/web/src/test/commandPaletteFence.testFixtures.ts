@@ -1,11 +1,10 @@
 /**
- * Shared data and mock factories for the thread-search picker suites that mount
- * the application entry point through `threadSearchPicker.testMount.tsx`.
+ * Shared data and mock factories for the suites that mount the command palette
+ * on the application entry point through `commandPaletteFence.testMount.tsx`.
  *
  * The factories replace data sources only — environment presentations, entity
- * shells, the lexical search query, the agent-search atom family, settings, and
- * the RPC command boundary. Keyboard routing, overlay modes, the picker, and
- * navigation stay real.
+ * shells, the lexical search query, settings, and the RPC command boundary.
+ * Keyboard routing, overlay modes and navigation stay real.
  *
  * `vi.mock` must be called from each test file, so this module exports the
  * factories and the mutable state they read. It must not import application
@@ -18,28 +17,20 @@ import {
   PrimaryConnectionTarget,
 } from "@t3tools/client-runtime/connection";
 import type {
-  AgentThreadSearchInput,
-  AgentThreadSearchMatch,
-  AgentThreadSearchResult,
-} from "@t3tools/client-runtime/state/agent-thread-search";
-import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/models";
-import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
-import * as Deferred from "effect/Deferred";
-import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import { AsyncResult, Atom } from "effect/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { useSyncExternalStore } from "react";
 
-import { appRootFence, makeFenceSession } from "../../test/appRootFenceMocks";
+import { appRootFence, makeFenceSession } from "./appRootFenceMocks";
 
-export const LAPTOP_ENVIRONMENT_ID = EnvironmentId.make("thread-search-laptop");
-export const VIGILIA_ENVIRONMENT_ID = EnvironmentId.make("thread-search-vigilia");
-export const MESURA_PROJECT_ID = ProjectId.make("thread-search-mesura");
-export const HQ_PROJECT_ID = ProjectId.make("thread-search-hq");
+export const LAPTOP_ENVIRONMENT_ID = EnvironmentId.make("palette-fence-laptop");
+export const VIGILIA_ENVIRONMENT_ID = EnvironmentId.make("palette-fence-vigilia");
+export const MESURA_PROJECT_ID = ProjectId.make("palette-fence-mesura");
+export const HQ_PROJECT_ID = ProjectId.make("palette-fence-hq");
 
 const NOW = "2026-09-29T12:00:00.000Z";
 
@@ -103,7 +94,7 @@ export function threadShell(input: {
   });
 }
 
-/** Two active threads the lexical picker lists, one per environment. */
+/** Two active threads, one per environment. */
 export function defaultThreadShells(): EnvironmentThreadShell[] {
   return [
     threadShell({
@@ -123,106 +114,29 @@ export function defaultThreadShells(): EnvironmentThreadShell[] {
   ];
 }
 
-export function agentMatch(input: {
-  readonly environmentId: EnvironmentId;
-  readonly environmentLabel: string;
-  readonly threadId: string;
-  readonly projectId: ProjectId;
-  readonly projectTitle: string;
-  readonly threadTitle: string;
-  readonly reason: string;
-  readonly archivedAt?: string | null;
-}): AgentThreadSearchMatch {
-  return {
-    environmentId: input.environmentId,
-    environmentLabel: input.environmentLabel,
-    threadId: ThreadId.make(input.threadId),
-    projectId: input.projectId,
-    projectTitle: input.projectTitle,
-    threadTitle: input.threadTitle,
-    archivedAt: input.archivedAt ?? null,
-    reason: input.reason,
-  };
-}
-
-export const FULL_COVERAGE = {
-  unavailableEnvironments: [],
-  budgetExhausted: false,
-  unreadEvidence: false,
-} as const;
-
-export interface AgentSearchCall {
-  readonly surface: string;
-  readonly input: AgentThreadSearchInput;
-  readonly deferred: Deferred.Deferred<AgentThreadSearchResult>;
-  interrupted: boolean;
-}
-
 type CommandResult = AsyncResult.Success<unknown, unknown> | AsyncResult.Failure<unknown, unknown>;
-
-/** The label `threadEnvironment.unarchive` dispatches under. */
-export const UNARCHIVE_COMMAND_LABEL = "environment-data:commands:thread:unarchive";
 
 export function commandSuccess(): CommandResult {
   return AsyncResult.success(undefined);
 }
 
-export function commandFailure(message: string): CommandResult {
-  return AsyncResult.failure(Cause.fail(new Error(message)));
-}
-
-export const threadSearchFixture = {
+export const commandPaletteFence = {
   environments: [] as Array<Record<string, unknown>>,
   projects: [] as EnvironmentProject[],
   threads: [] as EnvironmentThreadShell[],
-  agentCalls: [] as AgentSearchCall[],
   /** Every RPC command the application dispatched, in order. */
   commandCalls: [] as Array<{ readonly label: string; readonly value: unknown }>,
   /** Per-command replies by command label; unlisted commands succeed. */
   commandReplies: new Map<string, (value: unknown) => Promise<CommandResult>>(),
 };
 
-/**
- * Entity and environment reads re-render on `publishFixtureChange`, so a test
- * can deliver a thread shell or drop a connection after the app has mounted,
- * the way the shell stream and the connection supervisor do.
- */
-const fixtureListeners = new Set<() => void>();
-
-function publishFixtureChange(): void {
-  for (const listener of fixtureListeners) listener();
-}
-
+/** The fixture is set before mounting, so its reads never change under a mounted app. */
 function useFixtureSnapshot<T>(readSnapshot: () => T): T {
-  return useSyncExternalStore((listener) => {
-    fixtureListeners.add(listener);
-    return () => {
-      fixtureListeners.delete(listener);
-    };
-  }, readSnapshot);
+  return useSyncExternalStore(subscribeToNothing, readSnapshot);
 }
 
-/** Adds or replaces an active thread shell, as the shell stream's upsert does. */
-export function deliverThreadShell(shell: EnvironmentThreadShell): void {
-  threadSearchFixture.threads = [
-    ...threadSearchFixture.threads.filter(
-      (thread) => !(thread.environmentId === shell.environmentId && thread.id === shell.id),
-    ),
-    shell,
-  ];
-  publishFixtureChange();
-}
-
-export function setEnvironmentConnectionPhase(
-  environmentId: EnvironmentId,
-  phase: "connected" | "disconnected",
-): void {
-  threadSearchFixture.environments = threadSearchFixture.environments.map((environment) =>
-    environment.environmentId === environmentId
-      ? { ...environment, connection: { phase, error: null, traceId: null } }
-      : environment,
-  );
-  publishFixtureChange();
+function subscribeToNothing(): () => void {
+  return () => {};
 }
 
 function findThreadShell(ref: {
@@ -230,29 +144,28 @@ function findThreadShell(ref: {
   readonly threadId: string;
 }): EnvironmentThreadShell | null {
   return (
-    threadSearchFixture.threads.find(
+    commandPaletteFence.threads.find(
       (thread) => thread.environmentId === ref.environmentId && thread.id === ref.threadId,
     ) ?? null
   );
 }
 
-export function resetThreadSearchFixture(): void {
+export function resetCommandPaletteFence(): void {
   appRootFence.sessions.clear();
   for (const environmentId of [LAPTOP_ENVIRONMENT_ID, VIGILIA_ENVIRONMENT_ID]) {
     appRootFence.sessions.set(environmentId, makeFenceSession());
   }
-  threadSearchFixture.environments = [
+  commandPaletteFence.environments = [
     connectedEnvironment(LAPTOP_ENVIRONMENT_ID, "Laptop", "PrimaryConnectionTarget"),
     connectedEnvironment(VIGILIA_ENVIRONMENT_ID, "Vigilia", "BearerConnectionTarget"),
   ];
-  threadSearchFixture.projects = [
+  commandPaletteFence.projects = [
     projectShell(LAPTOP_ENVIRONMENT_ID, MESURA_PROJECT_ID, "Mesura Code"),
     projectShell(VIGILIA_ENVIRONMENT_ID, HQ_PROJECT_ID, "Mesura HQ"),
   ];
-  threadSearchFixture.threads = defaultThreadShells();
-  threadSearchFixture.agentCalls = [];
-  threadSearchFixture.commandCalls = [];
-  threadSearchFixture.commandReplies = new Map();
+  commandPaletteFence.threads = defaultThreadShells();
+  commandPaletteFence.commandCalls = [];
+  commandPaletteFence.commandReplies = new Map();
 }
 
 function connectedEnvironment(
@@ -294,8 +207,8 @@ export function mockEntities<T extends object>(actual: T): T {
     useFixtureSnapshot(() => (ref === null ? null : findThreadShell(ref)));
   return {
     ...actual,
-    useProjects: () => useFixtureSnapshot(() => threadSearchFixture.projects),
-    useThreadShells: () => useFixtureSnapshot(() => threadSearchFixture.threads),
+    useProjects: () => useFixtureSnapshot(() => commandPaletteFence.projects),
+    useThreadShells: () => useFixtureSnapshot(() => commandPaletteFence.threads),
     useThreadShell: useFixtureThreadShell,
     useQuietThreadShell: useFixtureThreadShell,
     readThreadShell: findThreadShell,
@@ -306,7 +219,7 @@ export function mockEnvironments<T extends object>(actual: T): T {
   return {
     ...actual,
     useEnvironments: () => {
-      const environments = useFixtureSnapshot(() => threadSearchFixture.environments);
+      const environments = useFixtureSnapshot(() => commandPaletteFence.environments);
       return {
         isReady: true,
         networkStatus: "online",
@@ -318,7 +231,7 @@ export function mockEnvironments<T extends object>(actual: T): T {
     },
     useEnvironmentProviders: () => new Map(),
     usePrimaryEnvironmentId: () => LAPTOP_ENVIRONMENT_ID,
-    usePrimaryEnvironment: () => threadSearchFixture.environments[0] ?? null,
+    usePrimaryEnvironment: () => commandPaletteFence.environments[0] ?? null,
   };
 }
 
@@ -335,41 +248,12 @@ export function mockQueries<T extends object>(actual: T): T {
   };
 }
 
-/**
- * The shared `orchestrationEnvironment.agentThreadSearch` family with the same
- * shape and cancellation semantics as the real one — an `Atom.fn` per surface
- * key, whose fiber is interrupted by a new write, `Atom.Reset`, or disposal —
- * but whose result each test settles by hand.
- */
-export function mockOrchestration<T extends { orchestrationEnvironment: object }>(actual: T): T {
-  const agentThreadSearch = Atom.family((surface: string) =>
-    Atom.fn((input: AgentThreadSearchInput) =>
-      Effect.gen(function* () {
-        const deferred = yield* Deferred.make<AgentThreadSearchResult>();
-        const call: AgentSearchCall = { surface, input, deferred, interrupted: false };
-        threadSearchFixture.agentCalls.push(call);
-        return yield* Deferred.await(deferred).pipe(
-          Effect.onInterrupt(() =>
-            Effect.sync(() => {
-              call.interrupted = true;
-            }),
-          ),
-        );
-      }),
-    ),
-  );
-  return {
-    ...actual,
-    orchestrationEnvironment: { ...actual.orchestrationEnvironment, agentThreadSearch },
-  };
-}
-
 export function mockUseAtomCommand() {
   return {
     useAtomCommand: (command: { readonly label?: string }) => async (value: unknown) => {
       const label = command.label ?? "unlabelled-command";
-      threadSearchFixture.commandCalls.push({ label, value });
-      const reply = threadSearchFixture.commandReplies.get(label);
+      commandPaletteFence.commandCalls.push({ label, value });
+      const reply = commandPaletteFence.commandReplies.get(label);
       return reply ? reply(value) : commandSuccess();
     },
   };

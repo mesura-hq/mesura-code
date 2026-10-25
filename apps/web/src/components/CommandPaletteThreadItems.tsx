@@ -12,6 +12,7 @@ import {
   type ProviderInstanceEntry,
 } from "../providerInstances";
 import { useThreadShells } from "../state/entities";
+import { withoutSearchThreads } from "./searches/searchThreadExclusion";
 import {
   useEnvironmentProviders,
   useEnvironments,
@@ -74,7 +75,7 @@ export function useCommandPaletteThreadItems(input: {
 }) {
   const { activeThreadId, threadSearchQuery } = input;
   const navigate = useNavigate();
-  const threads = useThreadShells();
+  const threads = withoutSearchThreads(useThreadShells());
   const sidebarThreadSortOrder = useClientSettings((settings) => settings.sidebarThreadSortOrder);
   const { projectEnvironmentLocationById } = useEnvironmentLookups();
   const providerEntryByEnvironmentAndInstanceId = useProviderEntryByEnvironmentAndInstanceId();

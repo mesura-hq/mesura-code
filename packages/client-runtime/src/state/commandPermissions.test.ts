@@ -17,6 +17,7 @@ import {
   ThreadId,
   EnvironmentId,
   ScheduledTaskId,
+  THREAD_SEARCH_WS_METHODS,
   WS_METHODS,
   type AuthSessionState,
   type PeerLinkSummary,
@@ -483,6 +484,35 @@ it.effect("requires access management to answer a link request", () =>
       );
       expect(registry.get(answer.permissionAtom(env))).toBe(true);
       yield* answer.authorize(registry, env);
+    }),
+  ),
+);
+
+// regression: reviewer-1 P2-1 — a read-only connection was offered the agent search
+// and met the server's rejection instead of the client's permission check.
+it.effect("requires the operate grant to start an agent search conversation", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const registry = yield* setup;
+      const start = createCommandPermissions(
+        runtime,
+        THREAD_SEARCH_WS_METHODS.startThreadSearchChat,
+      );
+      registry.set(
+        sessions(env),
+        AsyncResult.success({
+          ...grant(false),
+          scopes: [AuthOrchestrationReadScope],
+          permissions: [AuthOrchestrationReadScope],
+        }),
+      );
+      expect(registry.get(start.permissionAtom(env))).toBe(false);
+      expect((yield* start.authorize(registry, env).pipe(Effect.flip)).requiredPermission).toBe(
+        AuthOrchestrationOperateScope,
+      );
+      registry.set(sessions(env), AsyncResult.success(grant(true)));
+      expect(registry.get(start.permissionAtom(env))).toBe(true);
+      yield* start.authorize(registry, env);
     }),
   ),
 );

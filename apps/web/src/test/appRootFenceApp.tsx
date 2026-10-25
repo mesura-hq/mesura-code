@@ -19,6 +19,7 @@ import {
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2TurnItem,
   type OrchestrationV2ThreadProjection,
+  type OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
@@ -58,20 +59,32 @@ export function makeMessage(id: string, role: "user" | "assistant", text: string
   };
 }
 
-/** Registers a v2 shell and detail with local message turn items, and returns its id. */
+/**
+ * Registers a v2 shell and detail with local message turn items, and returns its id.
+ * `options` places it in another project or overrides shell fields such as its run status.
+ */
 export function addFenceThread(
   id: string,
   title: string,
   messages: ReadonlyArray<ReturnType<typeof makeMessage>>,
+  options: {
+    readonly projectId?: string;
+    readonly createdAt?: string;
+    readonly overrides?: Partial<OrchestrationV2ThreadShell>;
+  } = {},
 ): ThreadId {
   const threadId = ThreadId.make(id);
   const shell = makeFenceThreadShell({
     id: threadId,
     environmentId: fenceEnvironmentId,
-    projectId: ProjectId.make(FENCE_PROJECT_ID),
+    projectId: ProjectId.make(options.projectId ?? FENCE_PROJECT_ID),
     title,
-    createdAt: now,
-    overrides: { itemCount: messages.length, visibleItemCount: messages.length },
+    createdAt: options.createdAt ?? now,
+    overrides: {
+      itemCount: messages.length,
+      visibleItemCount: messages.length,
+      ...options.overrides,
+    },
   });
   const conversationMessages = messages.map((message): OrchestrationV2ConversationMessage => ({
     id: message.id,

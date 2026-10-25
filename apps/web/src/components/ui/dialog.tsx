@@ -91,15 +91,22 @@ function DialogPopup({
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean;
   bottomStickOnMobile?: boolean;
-  variant?: "default" | "media";
+  /** `workspace`: a large panel that fills the screen below `md`, where `useIsMobile` switches. */
+  variant?: "default" | "media" | "workspace";
 }) {
+  const workspace = variant === "workspace";
   return (
     <DialogPortal>
       {/* Media opens from inside other overlays (a composer chip, a popover), so it sits above them. */}
-      <DialogBackdrop className={variant === "media" ? "z-[60]" : undefined} variant={variant} />
+      <DialogBackdrop
+        className={variant === "media" ? "z-[60]" : undefined}
+        variant={variant === "media" ? "media" : "default"}
+      />
       <DialogViewport
         className={cn(
-          bottomStickOnMobile && "max-sm:grid-rows-[1fr_auto] max-sm:p-0 max-sm:pt-12",
+          workspace
+            ? "max-md:grid-rows-1 max-md:p-0"
+            : bottomStickOnMobile && "max-sm:grid-rows-[1fr_auto] max-sm:p-0 max-sm:pt-12",
           variant === "media" &&
             "z-[60] grid-rows-1 place-items-center px-4 pb-6 pt-[calc(var(--native-titlebar-height,0px)+1.5rem)] [-webkit-app-region:no-drag]",
         )}
@@ -109,7 +116,9 @@ function DialogPopup({
             variant === "media" ? DIALOG_MEDIA_POPUP_CLASS : DIALOG_POPUP_CLASS,
             "row-start-2 text-popover-foreground",
             variant === "default" && "max-h-full max-w-lg",
-            bottomStickOnMobile && DIALOG_MOBILE_SHEET_CLASS,
+            workspace
+              ? "h-[min(52rem,calc(100dvh-2rem))] max-h-full max-w-6xl overflow-hidden max-md:row-start-1 max-md:h-dvh max-md:max-w-none max-md:rounded-none max-md:border-0"
+              : bottomStickOnMobile && DIALOG_MOBILE_SHEET_CLASS,
             className,
           )}
           data-slot="dialog-popup"

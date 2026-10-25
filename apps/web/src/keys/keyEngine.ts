@@ -9,6 +9,8 @@ import { DEFAULT_KEYMAP, isEngineCommand } from "./defaultKeymap";
 import {
   composerEditorElement,
   deepActiveElement,
+  isComposerInDialog,
+  isComposerMenuOpen,
   resolveKeyScope,
   type KeyScope,
 } from "./focusScope";
@@ -268,6 +270,11 @@ function handleKey(scope: KeyScope, token: string, event: KeyboardEvent): boolea
     return stepKeymap(keymap.trieFor("normal", [getFocusedPane() ?? "panel"]), token, undefined);
   }
   if (isPaneModeActive() && handlePaneKey(token)) return true;
+  // Mesura: Escape in the agent search popup's composer closes the popup.
+  // An open composer menu still takes it first.
+  if (scope === "composer" && token === "<Esc>" && isComposerInDialog() && !isComposerMenuOpen()) {
+    return false;
+  }
 
   const surface = surfaces.get(scope);
   const mode = surface?.mode() ?? "normal";
