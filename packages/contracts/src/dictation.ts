@@ -63,6 +63,13 @@ export const DictationJob = Schema.Struct({
   durationMs: NonNegativeInt,
   createdAt: IsoDateTime,
   completedAt: Schema.optional(IsoDateTime),
+  /**
+   * The server run that published this state, and its place in that run's change sequence. A
+   * client compares them with a snapshot's to tell a stale list from one that lost the job.
+   * Absent from servers older than these fields.
+   */
+  epoch: Schema.optional(Schema.String),
+  revision: Schema.optional(NonNegativeInt),
 });
 export type DictationJob = typeof DictationJob.Type;
 
@@ -100,6 +107,9 @@ export const DictationJobEvent = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("snapshot"),
     jobs: Schema.Array(DictationJob),
+    /** The server run, and the last change this list includes. */
+    epoch: Schema.optional(Schema.String),
+    revision: Schema.optional(NonNegativeInt),
   }),
   Schema.Struct({
     type: Schema.Literal("upsert"),

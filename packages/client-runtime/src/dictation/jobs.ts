@@ -27,6 +27,36 @@ export function reduceDictationJobs(
   return [...previous, event.job].sort(newestFirst);
 }
 
+/** The newest snapshot a job list includes: the server run, and its revision in that run. */
+export interface DictationJobsCursor {
+  readonly epoch: string | null;
+  readonly revision: number | null;
+}
+
+export interface DictationJobsState {
+  readonly jobs: ReadonlyArray<DictationJob>;
+  readonly cursor: DictationJobsCursor;
+}
+
+const NO_CURSOR: DictationJobsCursor = { epoch: null, revision: null };
+
+/**
+ * The job list and the cursor of the newest snapshot folded into it. Only a snapshot moves the
+ * cursor: the server coalesces pending upserts per job, so an upsert's revision does not mean
+ * every earlier change arrived, while a snapshot covers every change up to its revision. Older
+ * servers send no stamps, and the cursor stays empty.
+ */
+export function reduceDictationJobsState(
+  previous: DictationJobsState,
+  event: DictationJobEvent,
+): DictationJobsState {
+  const jobs = reduceDictationJobs(previous.jobs, event);
+  if (event.type === "snapshot") {
+    return { jobs, cursor: { epoch: event.epoch ?? null, revision: event.revision ?? null } };
+  }
+  return { jobs, cursor: previous.cursor };
+}
+
 /** Dictation jobs and commands for one environment, shared by web and mobile. */
 export function createDictationEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
@@ -37,13 +67,16 @@ export function createDictationEnvironmentAtoms<R, E>(
     key: ({ input }: { input: { readonly jobId: string } }) => input.jobId,
   };
   return {
-    /** Every job the server keeps (the last 24 hours), newest first. */
+    /** Every job the server keeps (the last 24 hours), newest first, with its cursor. */
     jobs: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:dictation:jobs",
       tag: WS_METHODS.subscribeDictationJobs,
       transform: (stream) =>
         stream.pipe(
-          Stream.scan((): ReadonlyArray<DictationJob> => [], reduceDictationJobs),
+          Stream.scan(
+            (): DictationJobsState => ({ jobs: [], cursor: NO_CURSOR }),
+            reduceDictationJobsState,
+          ),
           // `scan` emits its seed first; the list is unknown until the snapshot.
           Stream.drop(1),
         ),

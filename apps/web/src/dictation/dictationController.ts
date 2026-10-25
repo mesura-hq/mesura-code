@@ -6,6 +6,7 @@ import {
   nextDictationMode,
   runDictationStop,
   uploadDictationRecording,
+  type DictationJobsCursor,
 } from "@t3tools/client-runtime/dictation";
 import {
   DictationJobId,
@@ -66,6 +67,7 @@ import {
   forgetOwnDictationJob,
   type OwnDictationJob,
   recordedDictationMs,
+  onDictationEnvironmentForgotten,
   recordOwnDictationJob,
   updateOwnDictationJob,
   useDictationSessionStore,
@@ -112,6 +114,28 @@ let levelTimer: ReturnType<typeof setInterval> | null = null;
 let sessionGeneration = 0;
 /** Jobs the server knows, so a mode change goes to the server instead of into the start. */
 const startedJobIds = new Set<string>();
+/** Jobs a server snapshot listed: one listed and then missing from a later list is gone. */
+const listedJobIds = new Set<string>();
+/**
+ * Where each job of this tab entered the server's change sequence: the run and the revision the
+ * start response (or the first listing) carried. A list whose cursor is from a later run, or at
+ * or past that revision, and that lacks the job, proves the server forgot it. A list behind it is
+ * only older than the job.
+ */
+const jobStamps = new Map<string, { readonly epoch: string; readonly revision: number }>();
+/**
+ * Jobs forgotten as vanished. A forgotten job that a later snapshot lists as transcribing (a start
+ * resent after a reconnect) takes the mode keys back.
+ */
+const vanishedJobIds = new Map<string, EnvironmentId>();
+/** The newest list of each environment, for a reclaim a recording deferred. */
+const latestJobLists = new Map<EnvironmentId, ReadonlyArray<DictationJob>>();
+onDictationEnvironmentForgotten((environmentId) => {
+  latestJobLists.delete(environmentId);
+  for (const [jobId, owner] of vanishedJobIds) {
+    if (owner === environmentId) vanishedJobIds.delete(jobId);
+  }
+});
 /**
  * The failed attempt of each job this tab has already handled, by the attempt's `completedAt`.
  * A retry keeps the job id but its failure carries a new `completedAt`, and that failure may be
@@ -325,6 +349,8 @@ export function cancelDictation(): void {
   sessionGeneration += 1;
   activeRecording?.discard();
   endRecording();
+  // A recording may have deferred a reappeared job; the keys are free for it now.
+  for (const [environmentId, jobs] of latestJobLists) reclaimReappearedJob(environmentId, jobs);
 }
 
 export function toggleDictationPause(): void {
@@ -496,6 +522,7 @@ async function startUploadedDictationJob(
   if (result._tag !== "Success") throw squashAtomCommandFailure(result);
   unstartedAudio.delete(jobId);
   startedJobIds.add(jobId);
+  rememberJobStamp(result.value);
   // A mode key pressed while the start was on the wire changed only the record.
   const latest = useOwnDictationJobsStore.getState().jobs[jobId]?.mode;
   if (latest !== undefined && latest !== mode) sendModeChange(environmentId, jobId, latest);
@@ -737,6 +764,59 @@ function restoreLastJob(environmentId: EnvironmentId, jobs: ReadonlyArray<Dictat
   }
 }
 
+/**
+ * The server keeps jobs in memory: a restart or the retention sweep drops a job this tab never saw
+ * finish. The last job then never clears, and the mode keys keep Alt+S and the other Alt keys from
+ * everything else (the Hosts peek). A job an earlier snapshot listed and this one does not is
+ * gone, and so is an accepted job a snapshot well after its start still lacks (a restart before
+ * the first listing). Otherwise the snapshot may only predate the job, so it stays.
+ */
+function rememberJobStamp(job: DictationJob) {
+  if (job.epoch === undefined || job.revision === undefined || jobStamps.has(job.id)) return;
+  jobStamps.set(job.id, { epoch: job.epoch, revision: job.revision });
+}
+
+function forgetVanishedLastJob(
+  environmentId: EnvironmentId,
+  jobs: ReadonlyArray<DictationJob>,
+  cursor: DictationJobsCursor,
+) {
+  latestJobLists.set(environmentId, jobs);
+  reclaimReappearedJob(environmentId, jobs);
+  const { lastJob } = useDictationSessionStore.getState();
+  if (lastJob?.environmentId !== environmentId) return;
+  if (jobs.some((job) => job.id === lastJob.jobId)) return;
+  if (listedJobIds.has(lastJob.jobId) || listProvesJobGone(jobStamps.get(lastJob.jobId), cursor)) {
+    vanishedJobIds.set(lastJob.jobId, environmentId);
+    useDictationSessionStore.setState({ lastJob: null });
+  }
+}
+
+function listProvesJobGone(
+  stamp: { readonly epoch: string; readonly revision: number } | undefined,
+  cursor: DictationJobsCursor,
+): boolean {
+  // A server older than the stamps: only a job seen listed can be judged.
+  if (stamp === undefined || cursor.epoch === null || cursor.revision === null) return false;
+  return cursor.epoch !== stamp.epoch || cursor.revision >= stamp.revision;
+}
+
+function reclaimReappearedJob(environmentId: EnvironmentId, jobs: ReadonlyArray<DictationJob>) {
+  for (const job of jobs) {
+    if (vanishedJobIds.get(job.id) !== environmentId) continue;
+    // Eligible until it finishes or is reclaimed: a recording in progress only defers it.
+    if (job.status !== "transcribing") {
+      vanishedJobIds.delete(job.id);
+      continue;
+    }
+    const { session, lastJob } = useDictationSessionStore.getState();
+    if (session === null && lastJob === null) {
+      vanishedJobIds.delete(job.id);
+      useDictationSessionStore.setState({ lastJob: { environmentId, jobId: job.id } });
+    }
+  }
+}
+
 function draftHoldsMarker(own: OwnDictationJob, jobId: string): boolean {
   return findDictationSlots(slotHostFor(own).read()).some((slot) => slot.jobId === jobId);
 }
@@ -878,8 +958,10 @@ if (typeof window !== "undefined") {
 export function deliverDictationJobs(
   environmentId: EnvironmentId,
   jobs: ReadonlyArray<DictationJob>,
+  cursor: DictationJobsCursor = { epoch: null, revision: null },
 ): void {
   restoreLastJob(environmentId, jobs);
+  forgetVanishedLastJob(environmentId, jobs, cursor);
   const ownJobs = useOwnDictationJobsStore.getState().jobs;
   // The jobs this tab watched transcribe; only their failures happen now.
   const watched = new Set(useDictationWidgetActivityStore.getState().transcribing[environmentId]);
@@ -891,6 +973,8 @@ export function deliverDictationJobs(
   );
   for (const job of jobs) {
     startedJobIds.add(job.id);
+    listedJobIds.add(job.id);
+    rememberJobStamp(job);
     const { lastJob } = useDictationSessionStore.getState();
     if (lastJob?.jobId === job.id && job.status !== "transcribing") {
       useDictationSessionStore.setState({ lastJob: null });

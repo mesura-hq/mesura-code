@@ -52,6 +52,30 @@ export function isDictationLive(): boolean {
 }
 
 /**
+ * A removed environment sends no more snapshots, so nothing else would ever clear its last job,
+ * and the mode keys would hold Alt+S for good.
+ */
+export function forgetDictationEnvironment(environmentId: EnvironmentId): void {
+  if (useDictationSessionStore.getState().lastJob?.environmentId === environmentId) {
+    useDictationSessionStore.setState({ lastJob: null });
+  }
+  for (const listener of environmentForgottenListeners) listener(environmentId);
+}
+
+const environmentForgottenListeners = new Set<(environmentId: EnvironmentId) => void>();
+
+/**
+ * The controller drops what it keeps per environment (the newest list, recoveries a recording
+ * deferred) when the environment goes; registered from there to keep this module free of it.
+ */
+export function onDictationEnvironmentForgotten(
+  listener: (environmentId: EnvironmentId) => void,
+): () => void {
+  environmentForgottenListeners.add(listener);
+  return () => environmentForgottenListeners.delete(listener);
+}
+
+/**
  * A job this device started. Ownership is per device, not per tab, and one storage key holds one
  * job, so two tabs recording at once never overwrite each other's records.
  *

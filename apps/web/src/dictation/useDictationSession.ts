@@ -61,10 +61,10 @@ export function useDictationComposer(input: {
  * the job that is still transcribing.
  */
 export function useDictationDelivery(environmentId: EnvironmentId): void {
-  const { jobs, loaded } = useDictationJobs(environmentId);
+  const { jobs, cursor, loaded } = useDictationJobs(environmentId);
   useEffect(() => {
-    if (loaded) deliverDictationJobs(environmentId, jobs);
-  }, [environmentId, jobs, loaded]);
+    if (loaded) deliverDictationJobs(environmentId, jobs, cursor);
+  }, [environmentId, jobs, cursor, loaded]);
 }
 
 /**
