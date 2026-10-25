@@ -7,6 +7,8 @@ import {
   useRightPanelStore,
 } from "~/rightPanelStore";
 
+import { closeAgentSearchPopupForFilePane } from "~/components/searches/agentSearchPopupStore";
+
 import { decideFileTreeShortcut } from "./fileTreeShortcutDecision";
 import { useFileTreeStore } from "./fileTreeStore";
 
@@ -43,6 +45,8 @@ export function runFileTreeToggle(routeThreadRef: ScopedThreadRef | null): void 
     explorerOpen: store.explorerOpen && !hiddenOnTab,
     treeFocused: isFileTreeFocused(),
   });
+  // Mesura: a move to the tree first closes the agent search popup over it.
+  if (action === "open-surface" || action === "show-and-focus") closeAgentSearchPopupForFilePane();
   switch (action) {
     case "none":
       return;

@@ -21,6 +21,7 @@ import {
   type SearchRun,
 } from "./agentSearchPopup.logic";
 import {
+  closeAgentSearchPopupForFilePane,
   dispatchAgentSearchPopup,
   takeSearchFirstMessage,
   useAgentSearchPopupStore,
@@ -160,16 +161,14 @@ function ClosePopupOnNavigation() {
 }
 
 /**
- * Opening the file manager or moving to the file tree closes the popup first, as a focus chord
- * over the open palette closes the palette. The search keeps running and the sparkle reopens it.
- * The file panes act on the project's files, which a search conversation has none of, and a
- * file manager stacked over the popup would fight it for Escape and for focus return.
+ * Opening the file manager or a deferred move to the file tree closes the popup first (a direct
+ * move to a mounted tree calls `closeAgentSearchPopupForFilePane` itself). The file panes act on
+ * the project's files, which a search conversation has none of, and a file manager stacked over
+ * the popup would fight it for Escape and for focus return.
  */
 function ClosePopupForFilePanes() {
   useEffect(() => {
-    const closePopup = () => {
-      if (useAgentSearchPopupStore.getState().open) dispatchAgentSearchPopup({ type: "close" });
-    };
+    const closePopup = closeAgentSearchPopupForFilePane;
     const offManager = useFileManagerStore.subscribe((state, previous) => {
       if (state.open && !previous.open) closePopup();
     });

@@ -30,6 +30,14 @@ export function dispatchAgentSearchPopup(action: AgentSearchPopupAction): void {
   useAgentSearchPopupStore.getState().dispatch(action);
 }
 
+/**
+ * Closes the popup before a file pane takes the keyboard, as a focus chord over the open palette
+ * closes the palette. The search keeps running and the sparkle reopens it.
+ */
+export function closeAgentSearchPopupForFilePane(): void {
+  if (useAgentSearchPopupStore.getState().open) dispatchAgentSearchPopup({ type: "close" });
+}
+
 export function queueSearchFirstMessage(search: ScopedThreadRef, text: string): void {
   useAgentSearchPopupStore.setState((state) => ({
     firstMessages: new Map(state.firstMessages).set(scopedThreadKey(search), { search, text }),
