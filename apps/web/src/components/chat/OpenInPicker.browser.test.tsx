@@ -233,6 +233,15 @@ describe("external editor setting", () => {
     expect((await pressAltO()).defaultPrevented).toBe(false);
     expect(state.run).not.toHaveBeenCalled();
     expect((await menuShortcutLabels()).some((label) => label.includes("Alt"))).toBe(false);
+    await fixture.click(fixture.byLabel("Choose editor"));
+    const editorItem = fixture.menuItems().find((item) => item.textContent?.includes("VS Code"));
+    expect(editorItem, "VS Code menu item").toBeDefined();
+    // The split button's menu picks the preferred editor; its primary button opens it.
+    await fixture.click(editorItem!);
+    expect(state.setPreferred).toHaveBeenCalledWith("vscode");
+    await fixture.click(fixture.primaryButton());
+    expect(state.run).toHaveBeenCalledTimes(1);
+    state.run.mockClear();
 
     state.openInExternalEditor = true;
     await renderPicker(editors, false, { openInCwd: "/work/project/README.md" });
