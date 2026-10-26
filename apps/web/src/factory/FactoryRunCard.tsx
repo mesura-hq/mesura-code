@@ -80,7 +80,11 @@ export const FactoryRunCard = memo(function FactoryRunCard({
           ) : (
             // The strip comes from the summary; the full trace subscribes only while open.
             <Fold summary={<FactoryTraceStrip trace={factoryRun.run.trace} />} label="Run trace">
-              <FactoryRunTraceFromStream threadRef={threadRef} runId={factoryRun.run.runId} />
+              <FactoryRunTraceFromStream
+                threadRef={threadRef}
+                runId={factoryRun.run.runId}
+                showStrip={false}
+              />
             </Fold>
           )}
         </div>

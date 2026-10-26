@@ -328,11 +328,14 @@ export const FactoryRunTrace = memo(function FactoryRunTrace({
   selectedPhase,
   onSelectPhase,
   phaseDetail,
+  showStrip = true,
 }: {
   trace: FactoryTrace;
   selectedPhase?: number | null;
   onSelectPhase?: (phase: number) => void;
   phaseDetail?: (phase: number) => ReactNode;
+  /** False where the strip already shows above, as the run card's fold summary. */
+  showStrip?: boolean;
 }) {
   const [openPhases, setOpenPhases] = useState<ReadonlySet<number>>(() => new Set());
   const controlled = onSelectPhase !== undefined;
@@ -345,7 +348,7 @@ export const FactoryRunTrace = memo(function FactoryRunTrace({
   };
   return (
     <div className="flex flex-col gap-3">
-      <FactoryTraceStrip trace={strip} />
+      {showStrip ? <FactoryTraceStrip trace={strip} /> : null}
       <ClockCells trace={trace} />
       <Legend />
       <ol className="flex flex-col gap-2.5" aria-label="Phases">
@@ -416,9 +419,11 @@ export function useFactoryTraceClock(live: boolean): number {
 export function FactoryRunTraceFromStream({
   threadRef,
   runId,
+  showStrip = true,
 }: {
   threadRef: ScopedThreadRef;
   runId: string;
+  showStrip?: boolean;
 }) {
   const stream = useFactoryRun(threadRef, runId);
   const state = stream.status === "ready" ? stream.item.state : null;
@@ -434,5 +439,5 @@ export function FactoryRunTraceFromStream({
   if (trace === null) {
     return <p className="text-xs text-muted-foreground">The run's trace could not be loaded.</p>;
   }
-  return <FactoryRunTrace trace={trace} />;
+  return <FactoryRunTrace trace={trace} showStrip={showStrip} />;
 }
