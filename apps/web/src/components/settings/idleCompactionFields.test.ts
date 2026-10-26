@@ -6,13 +6,16 @@ import { hiddenIdleCompactionFields } from "./idleCompactionFields";
 import { providerClients } from "./providerDriverMeta";
 import { deriveProviderSettingsFields } from "./ProviderSettingsForm";
 
-const fieldKeys = (driver: string, enabled: boolean) => {
+const fieldKeys = (driver: string, enabled: boolean, serverReadsSwitch = true) => {
   const definition = providerClients.get(ProviderDriverKind.make(driver));
   expect(definition).toBeDefined();
   return deriveProviderSettingsFields(
     definition!,
     undefined,
-    hiddenIdleCompactionFields({ ...DEFAULT_SERVER_SETTINGS, idleCompactionEnabled: enabled }),
+    hiddenIdleCompactionFields(
+      { ...DEFAULT_SERVER_SETTINGS, idleCompactionEnabled: enabled },
+      serverReadsSwitch,
+    ),
   ).map((field) => field.key);
 };
 
@@ -35,6 +38,10 @@ describe("hiddenIdleCompactionFields", () => {
       "idleCompaction",
       "launchArgs",
     ]);
+  });
+
+  it("keeps them on a server from before the switch, which still reads them", () => {
+    expect(fieldKeys("claudeAgent", false, false)).toEqual(fieldKeys("claudeAgent", true));
   });
 
   it("leaves other providers alone", () => {

@@ -160,6 +160,10 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       pushes while a client is active. Absent on older servers, which must not
       be sent the method. */
   pushPresence: Schema.optionalKey(Schema.Boolean),
+  /** Mesura: the server reads the `idleCompactionEnabled` switch. Older servers
+      drop the key and keep compacting by their stored mode, so clients show
+      them that mode instead of a switch that would read off. */
+  idleCompactionSwitch: Schema.optionalKey(Schema.Boolean),
   /** Server answers orchestration.subscribeCommandOutput. Absent on older servers,
       which never send command output, so clients must not subscribe. */
   commandOutputStreaming: Schema.optionalKey(Schema.Boolean),
