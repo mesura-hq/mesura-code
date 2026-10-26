@@ -655,8 +655,14 @@ it("modal keys seam guard round 2: arrows move over the sidebar rows and only En
   // both hand their keys to the row handler below.
   const rowFile = "apps/web/src/components/sidebar/SidebarThreadRow.tsx";
   const rowSource = read(rowFile);
+  // Mesura: Working section rows mount the same row outside the sortable items.
+  assert.include(
+    sidebar.text,
+    tokens('const ThreadRow = section === "working" ? StaticThreadRow : SortableThreadRow;'),
+    "Sidebar no longer picks its row component per section",
+  );
   assert.isTrue(
-    rendersElement(sidebar.text, "SortableThreadRow"),
+    rendersElement(sidebar.text, "ThreadRow"),
     "Sidebar no longer mounts its thread rows",
   );
   assert.isTrue(
