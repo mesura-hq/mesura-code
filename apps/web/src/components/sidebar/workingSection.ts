@@ -3,6 +3,8 @@
  * sortable list, so the list below keeps the developer's order and drag-to-reorder. Upstream puts
  * it above Snoozed and orders the list by return time while it is on.
  */
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+import { toSortableTimestamp } from "@t3tools/client-runtime/state/thread-sort";
 import { Schema } from "effect";
 
 import { getLocalStorageItem, writeLocalStorageValue } from "../../hooks/useLocalStorage";
@@ -47,4 +49,50 @@ export function setWorkingSectionExpanded(value: boolean | ((current: boolean) =
   const next = typeof value === "function" ? value(readWorkingSectionExpanded()) : value;
   if (!next) moveFocusOffHiddenRow();
   writeLocalStorageValue(WORKING_SECTION_EXPANDED_KEY, next, false, Schema.Boolean);
+}
+
+type WorkingEntryThread = Pick<
+  EnvironmentThreadShell,
+  "id" | "environmentId" | "createdAt" | "latestRun" | "latestUserAuthoredMessageAt"
+>;
+
+/** When the thread's latest work started: its last message or its latest run, whichever is newer. */
+function latestWorkStartedAt(thread: WorkingEntryThread): number {
+  return Math.max(
+    toSortableTimestamp(thread.createdAt) ?? 0,
+    toSortableTimestamp(thread.latestUserAuthoredMessageAt ?? undefined) ?? 0,
+    toSortableTimestamp(thread.latestRun?.requestedAt ?? undefined) ?? 0,
+  );
+}
+
+/**
+ * Orders the section by when each thread started its current working period, newest first. Upstream
+ * orders by the last message the developer sent, which places a run the agent started itself (a
+ * woken coordinator, a scheduled task) by an older message. The start is read the first time a
+ * thread shows as working and kept until it leaves, so later runs and phases never move it.
+ */
+export function createWorkingSectionOrder() {
+  const enteredAt = new Map<string, number>();
+  const keyOf = (thread: Pick<EnvironmentThreadShell, "id" | "environmentId">) =>
+    `${thread.environmentId}:${thread.id}`;
+  return <T extends WorkingEntryThread>(
+    working: readonly T[],
+    notWorking: ReadonlyArray<Pick<EnvironmentThreadShell, "id" | "environmentId">>,
+  ): T[] => {
+    for (const thread of notWorking) enteredAt.delete(keyOf(thread));
+    const startOf = (thread: T) => {
+      const key = keyOf(thread);
+      const known = enteredAt.get(key);
+      if (known !== undefined) return known;
+      const started = latestWorkStartedAt(thread);
+      enteredAt.set(key, started);
+      return started;
+    };
+    return working.toSorted(
+      (left, right) =>
+        startOf(right) - startOf(left) ||
+        left.id.localeCompare(right.id) ||
+        left.environmentId.localeCompare(right.environmentId),
+    );
+  };
 }

@@ -179,6 +179,7 @@ import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environ
 import { ProjectId, RunId, ThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 
+import { THREAD_CONTEXT_DROP_EVENT } from "./components/chat/threadContextDrag";
 import { WORKING_SECTION_EXPANDED_KEY } from "./components/sidebar/workingSection";
 import { installKeyEngine } from "./keys/keyEngine";
 import { readViewportThreadKeys } from "./lib/sidebarThreadViewport";
@@ -744,5 +745,90 @@ describe("working section: the list below", () => {
 
     await press(TOGGLE_WORKING_CHORD);
     await vi.waitFor(() => expect(section()!.dataset.workingSweepTick).toBeUndefined());
+  });
+});
+
+describe("working section: what the rows keep", () => {
+  it("working section guard: a Working row still drags into a message as a thread reference", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await mountWithThreads([workingThread("working-a", "Work A", 5)], { expanded: true });
+    const dropTarget = await vi.waitFor(() => {
+      const found = document.querySelector<HTMLElement>("[data-thread-context-drop]");
+      expect(found, "the composer's reference drop target").not.toBeNull();
+      return found!;
+    });
+    const dropped: unknown[] = [];
+    const onDrop = (event: Event) => dropped.push(...(event as CustomEvent<unknown[]>).detail);
+    dropTarget.addEventListener(THREAD_CONTEXT_DROP_EVENT, onDrop);
+    try {
+      await userEvent.dragAndDrop(rowCard("working-a"), dropTarget);
+      await settle();
+    } finally {
+      dropTarget.removeEventListener(THREAD_CONTEXT_DROP_EVENT, onDrop);
+    }
+
+    expect(dropped).toEqual([{ environmentId, threadId: ThreadId.make("working-a") }]);
+  });
+
+  it("working section spec: switching reduced motion on stops the band and switching it off restarts it", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    const reduce = { matches: false, listeners: new Set<() => void>() };
+    const realMatchMedia = window.matchMedia.bind(window);
+    vi.stubGlobal("matchMedia", (query: string) =>
+      query.includes("prefers-reduced-motion")
+        ? {
+            media: query,
+            get matches() {
+              return reduce.matches;
+            },
+            onchange: null,
+            addEventListener: (_type: string, listener: () => void) =>
+              reduce.listeners.add(listener),
+            removeEventListener: (_type: string, listener: () => void) =>
+              reduce.listeners.delete(listener),
+            addListener: (listener: () => void) => reduce.listeners.add(listener),
+            removeListener: (listener: () => void) => reduce.listeners.delete(listener),
+            dispatchEvent: () => true,
+          }
+        : realMatchMedia(query),
+    );
+    const flip = async (matches: boolean) => {
+      reduce.matches = matches;
+      await act(async () => {
+        for (const listener of reduce.listeners) listener();
+      });
+      await settle();
+    };
+    await mountWithThreads([workingThread("working-a", "Work A", 5)], { expanded: true });
+    await vi.waitFor(() => expect(section()!.dataset.workingSweepTick).toMatch(/^[ab]$/));
+
+    await flip(true);
+    expect(section()!.dataset.workingSweepTick, "no tick under reduced motion").toBeUndefined();
+
+    await flip(false);
+    await vi.waitFor(() => expect(section()!.dataset.workingSweepTick).toMatch(/^[ab]$/));
+  });
+
+  it("working section spec: a hidden tab stops the band and showing it again restarts it", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    let visibility: DocumentVisibilityState = "visible";
+    using _visibility = vi
+      .spyOn(document, "visibilityState", "get")
+      .mockImplementation(() => visibility);
+    const setVisibility = async (next: DocumentVisibilityState) => {
+      visibility = next;
+      await act(async () => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      await settle();
+    };
+    await mountWithThreads([workingThread("working-a", "Work A", 5)], { expanded: true });
+    await vi.waitFor(() => expect(section()!.dataset.workingSweepTick).toMatch(/^[ab]$/));
+
+    await setVisibility("hidden");
+    expect(section()!.dataset.workingSweepTick, "no tick in a hidden tab").toBeUndefined();
+
+    await setVisibility("visible");
+    await vi.waitFor(() => expect(section()!.dataset.workingSweepTick).toMatch(/^[ab]$/));
   });
 });

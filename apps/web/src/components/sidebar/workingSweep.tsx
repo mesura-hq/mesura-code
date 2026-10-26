@@ -1,5 +1,6 @@
 import { type RefObject, useEffect, useState } from "react";
 
+import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { WORKING_SWEEP_INTERVAL_MS } from "./workingSection";
 
 /**
@@ -22,14 +23,15 @@ export function WorkingSweepText(props: { readonly text: string }) {
  * One timer per section starts one 0.9 s crossing on every working label under `ref` every 4 s
  * by flipping an attribute, so a tick re-renders nothing. Between crossings no animation exists
  * and nothing draws: an infinite CSS loop with a still tail kept Chrome drawing 2.3 s of every
- * 4 s (prototype, 2026-10-26). Stops when `running` is false and under reduced motion.
+ * 4 s (prototype, 2026-10-26). Stops when `running` is false and while reduced motion is on.
  */
 export function useWorkingSweep(ref: RefObject<HTMLElement | null>, running: boolean): void {
+  const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
+  const sweeping = running && !reducedMotion;
   // oxlint-disable-next-line t3code/react-effect-budget -- fork: owns the section's one interval timer, cleared when the band must stop
   useEffect(() => {
     const element = ref.current;
-    if (element === null || !running) return undefined;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return undefined;
+    if (element === null || !sweeping) return undefined;
     let tick = 0;
     const flip = () => {
       tick += 1;
@@ -42,7 +44,7 @@ export function useWorkingSweep(ref: RefObject<HTMLElement | null>, running: boo
       window.clearInterval(id);
       delete element.dataset.workingSweepTick;
     };
-  }, [ref, running]);
+  }, [ref, sweeping]);
 }
 
 /** Whether `ref` is scrolled into view and its tab is visible. */

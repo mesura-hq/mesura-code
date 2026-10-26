@@ -6,7 +6,7 @@ import { ThreadJumpHintModifierSync } from "./sidebar/ThreadJumpHintModifierSync
 import { useThreadJumpTargets } from "./sidebar/threadJumpTargets";
 import { sortActiveThreadsForSidebar } from "./sidebar/activeThreadOrder";
 import { SidebarWorkingSection } from "./sidebar/SidebarWorkingSection";
-import { WORKING_SECTION_EXPANDED_KEY } from "./sidebar/workingSection";
+import { createWorkingSectionOrder, WORKING_SECTION_EXPANDED_KEY } from "./sidebar/workingSection";
 import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
 import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
 import { ThreadContextDragGhost } from "./chat/ThreadContextDragGhost";
@@ -189,7 +189,6 @@ import {
   sidebarListItemId,
   sidebarThreadKeyAtY,
   sortPinnedThreadsForSidebar,
-  sortWorkingThreadsBySend,
   useSnoozeWakeClock,
   type SidebarListItem,
   type SidebarSection,
@@ -234,7 +233,7 @@ import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
 import {
   SidebarSearchResultRow,
   SortableThreadRow,
-  StaticThreadRow,
+  UnsortableThreadRow,
   type SidebarProviderEntry,
   type SidebarSweepAction,
 } from "./sidebar/SidebarThreadRow";
@@ -303,6 +302,8 @@ const SETTLED_SHELF_EXPANDED_KEY = "t3code:sidebar:settled-expanded";
 const SNOOZED_SHELF_EXPANDED_KEY = "t3code:sidebar:snoozed-expanded";
 
 const inboxReturns = createInboxReturnTracker();
+// Mesura: module scope for the same reason as `inboxReturns` (workingSection.ts).
+const orderWorkingSection = createWorkingSectionOrder();
 
 type SidebarOptimisticDrop = {
   readonly key: string;
@@ -624,7 +625,7 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
             preferredIds: optimisticDrop.order,
             getId: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
           }),
-    workingThreads: sortWorkingThreadsBySend(working),
+    workingThreads: orderWorkingSection(working, [...pinned, ...active, ...snoozed, ...settled]),
     snoozedThreads: snoozed.toSorted(
       (left, right) =>
         firstValidTimestampMs(left.snoozedUntil ?? null) -
@@ -1769,11 +1770,15 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   useEffect(() => {
     if (
       dragState !== null &&
-      !sidebarListItems.some((item) => item.kind === "thread" && item.key === dragState.activeKey)
+      !sidebarListItems.some(
+        (item) => item.kind === "thread" && item.key === dragState.activeKey,
+      ) &&
+      // Mesura: a Working row drags as a reference from outside the list items.
+      !visibleWorkingThreads.some((thread) => threadShellKey(thread) === dragState.activeKey)
     ) {
       cancelThreadDrag();
     }
-  }, [cancelThreadDrag, dragState, sidebarListItems]);
+  }, [cancelThreadDrag, dragState, sidebarListItems, visibleWorkingThreads]);
   // Only order, section, or draft changes need layout reads and motion.
   const listMotionLayoutKey = [
     sidebarListItemsKey,
@@ -3016,7 +3021,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                         const rowVariant = isCard ? "card" : "slim";
                         // Mesura: Working rows sit outside the sortable items (workingSection.ts).
                         const ThreadRow =
-                          section === "working" ? StaticThreadRow : SortableThreadRow;
+                          section === "working" ? UnsortableThreadRow : SortableThreadRow;
                         return (
                           <ThreadRow
                             key={threadKey}

@@ -569,15 +569,15 @@ describe("editor keys and the sidebar (phase 4, criterion 2)", () => {
         Sidebar: countByName(rendered, "Sidebar"),
         // A running thread's row sits in the Working section, outside the sortable items.
         rowWrapper:
-          countByName(rendered, "SortableThreadRow") + countByName(rendered, "StaticThreadRow"),
-        StaticThreadRow: countByName(rendered, "StaticThreadRow"),
+          countByName(rendered, "SortableThreadRow") + countByName(rendered, "UnsortableThreadRow"),
+        UnsortableThreadRow: countByName(rendered, "UnsortableThreadRow"),
         SidebarThreadRow: countByName(rendered, "SidebarThreadRow"),
       },
       "renders for one background streaming tick",
     ).toEqual({
       Sidebar: 0,
       rowWrapper: 1,
-      StaticThreadRow: 1,
+      UnsortableThreadRow: 1,
       SidebarThreadRow: 1,
     });
     expect(editorHasFocus(), `focus is on ${describeFocus()}`).toBe(true);
