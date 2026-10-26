@@ -134,6 +134,8 @@ export type DirectedComposerSubmissionResult =
   | { readonly kind: "turn-dispatched"; readonly messageId: MessageId }
   /** The user changed the draft while its uploads finished; nothing was sent or consumed. */
   | { readonly kind: "draft-changed" }
+  /** `stillWanted` said no while the uploads finished; nothing was sent or consumed. */
+  | { readonly kind: "withdrawn" }
   | { readonly kind: "provider-start-failed"; readonly messageId: MessageId }
   | { readonly kind: "refused"; readonly code: "unsupported_composer_action" };
 
@@ -297,6 +299,8 @@ export async function submitDirectedDictation(input: {
   readonly messageId: MessageId;
   readonly submissionContext?: DirectedSubmissionContext | null;
   readonly sourceComposerTarget?: ComposerThreadTarget | null;
+  /** Read once more just before the draft is consumed, after the uploads. */
+  readonly stillWanted?: () => boolean;
 }): Promise<DirectedComposerSubmissionResult> {
   const threadRef =
     typeof input.composerTarget === "string"
@@ -467,6 +471,8 @@ export async function submitDirectedDictation(input: {
   ) {
     return { kind: "draft-changed" };
   }
+  // A cancel during the uploads can leave the prompt exactly as it was snapshotted.
+  if (input.stillWanted?.() === false) return { kind: "withdrawn" };
   consumeDirectedComposerDraft(input.composerTarget, input.sourceComposerTarget);
   const result = await productionExecutor.submit({
     environmentId: threadRef.environmentId,

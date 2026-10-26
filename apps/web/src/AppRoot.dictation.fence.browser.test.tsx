@@ -1593,6 +1593,41 @@ describe("dictation phase 5 fence", () => {
     expect(squash(promptOf(onScreenTarget))).toContain("y resume");
   });
 
+  it("send glyph: a hand deletion that leaves the text as the waiting send saw it still keeps it unsent", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Read the notes");
+    useComposerDraftStore
+      .getState()
+      .addFiles(onScreenTarget, [{ ...attachedFile, id: "dictation-send-glyph-same-text-file" }], {
+        appendReference: true,
+      });
+    let release: () => void = () => undefined;
+    fixture.verifyGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await mountApp();
+    await recordInMode("send");
+    const { jobId } = startedJob(0).input;
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "y resume" })]);
+    expect(turnStarts(), "the send waits on the earlier upload's check").toHaveLength(0);
+    const promptTheSendSaw = promptOf(onScreenTarget) ?? "";
+
+    // While it waits: another recording, its marker deleted by hand, and its spacing with it.
+    await recordInMode("insert");
+    await deleteMarkerByHand();
+    await act(async () => {
+      useComposerDraftStore.getState().setPrompt(onScreenTarget, promptTheSendSaw);
+    });
+    await settle();
+    expect(promptOf(onScreenTarget)).toBe(promptTheSendSaw);
+    await act(async () => release());
+    await settle();
+
+    expect(turnStarts()).toHaveLength(0);
+    expect(squash(promptOf(onScreenTarget))).toContain("y resume");
+  });
+
   it("dictation phase 5 AC4: an armed draft whose thread is not on screen sends through the directed path with its files and is cleared", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
 

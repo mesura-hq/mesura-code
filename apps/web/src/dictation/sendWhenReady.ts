@@ -221,13 +221,15 @@ async function sendArmedDraft(
     prompt: dictatedMessageText(prompt, isDictationVoiced(entry.target)),
     messageId: MessageId.make(randomUUID()),
     submissionContext: submissionContextReaders.get(key)?.() ?? null,
+    stillWanted: () => useSendWhenReadyStore.getState().drafts[key]?.armed === true,
   });
   if (result.kind === "turn-dispatched") {
     forgetDraftSendState(key);
     return false;
   }
   // Edited while its uploads finished: still armed, it goes as edited once no marker remains.
-  if (result.kind === "draft-changed") return true;
+  // Disarmed meanwhile: the look after it forgets the draft once it is empty.
+  if (result.kind === "draft-changed" || result.kind === "withdrawn") return true;
   reportUnsent(
     entry.target,
     result.kind === "refused"

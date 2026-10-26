@@ -82,7 +82,9 @@ failed marker keeps the draft armed and unsent until a retry fills it or the use
 A marker the user deletes by hand disarms the draft instead of sending it, because the text around
 the marker was written to wait for that transcript. The armed state records the marker ids seen at
 the last check, and the controller notes each marker it takes out itself (a fill, a Discard, a
-switch to save). A marker that vanished without such a note was deleted by hand.
+switch to save). A marker that vanished without such a note was deleted by hand. A send that waits
+on its uploads reads the armed state again just before it consumes the draft: a disarm during the
+uploads can leave the text exactly as the send saw it, so comparing the text does not catch it.
 
 The armed state has no banner. Every marker in an armed draft draws the send glyph as a button,
 and pressing it disarms the draft. Selecting insert (Alt+I) for the last job does the same; Escape
