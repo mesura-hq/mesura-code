@@ -65,9 +65,11 @@ export function SidebarThreadHeader({
 
   return (
     <div className="flex items-center gap-1">
+      {/* Mesura: upstream's focus state without its `redesign:` gate. `threadSearch.toggle`
+          lands here from anywhere, and an unmarked field made the command look dead. */}
       <div
         ref={searchFieldRef}
-        className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+        className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-within:bg-sidebar-row-hover focus-within:text-sidebar-foreground focus-within:ring-1 focus-within:ring-inset focus-within:ring-ring/70"
       >
         <SearchIcon className="size-4 shrink-0 text-(--sidebar-icon-color)" />
         <SidebarInput

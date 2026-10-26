@@ -6,12 +6,17 @@ import { create } from "zustand";
 import { isCommandPaletteOpen, openCommandPalette } from "../../commandPaletteBus";
 import { useCommandHandlers } from "../../commands/commandRegistry";
 import { resolveShortcutCommand } from "../../keybindings";
+import { captureComposerFocusReturn } from "../../keys/composer/composerSurface";
+import { focusPane, getFocusedPane, getLastFocusedPane, type PaneId } from "../../lib/paneFocus";
 import { isPreviewFocused } from "../../lib/previewFocus";
 import { isTerminalFocused } from "../../lib/terminalFocus";
 import { useProjectScopeStore } from "../../projectScopeStore";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { useThreadSelectionStore } from "../../threadSelectionStore";
-import { closeAgentSearchPopupForWorkspace } from "../searches/agentSearchPopupStore";
+import {
+  closeAgentSearchPopupForWorkspace,
+  useAgentSearchPopupStore,
+} from "../searches/agentSearchPopupStore";
 import { toastManager } from "../ui/toast";
 import { useSidebar } from "../ui/sidebar";
 import { useNavigateToMainApp } from "./mainAppLocation";
@@ -28,6 +33,10 @@ import { useNavigateToMainApp } from "./mainAppLocation";
  * main app, and leaves the request for the sidebar to serve once it mounts.
  * An open command palette is closed first: it makes the rest of the page
  * inert, and its final focus serves the request.
+ *
+ * The Search field is also a way out: `threadSearch.toggle` again, or Escape
+ * on the empty field, hands the keyboard back to where the command took it
+ * from and hides the sidebar again if the command had to show it.
  */
 type SidebarFocusTarget = "search" | "projectFilter";
 
@@ -35,7 +44,26 @@ const useSidebarFocusRequestStore = create<{ target: SidebarFocusTarget | null }
   target: null,
 }));
 
-let serveFocusTarget: ((target: SidebarFocusTarget) => void) | null = null;
+/** The mounted sidebar's half, registered by `useSidebarCommandTarget`. */
+let mountedTarget: {
+  readonly serve: (target: SidebarFocusTarget) => void;
+  readonly searchInput: () => HTMLInputElement | null;
+} | null = null;
+
+/**
+ * Where `threadSearch.toggle` took the keyboard from. Captured before the
+ * Search field takes focus, and forgotten when focus leaves the field any
+ * other way, so a later Escape never returns to a stale place.
+ */
+interface SearchFocusOrigin {
+  readonly element: Element | null;
+  readonly pane: PaneId;
+  /** Restores the composer's caret and Vim NORMAL mode, which a plain focus() loses. */
+  readonly restoreComposer: (() => boolean) | null;
+  /** The command showed the sidebar, so leaving the field hides it again. */
+  readonly revealedSidebar: boolean;
+}
+let searchFocusOrigin: SearchFocusOrigin | null = null;
 /** Set when a request leaves Settings for the threads; the chat's next mount focus consumes it. */
 let returningFromSettings = false;
 /** Display names by project scope key, kept by the mounted sidebar for the toggle's toast. */
@@ -70,10 +98,61 @@ export function sidebarHoldsRequestedFocus(): boolean {
 export function serveSidebarFocusRequest(): boolean {
   const { target } = useSidebarFocusRequestStore.getState();
   if (target === null) return false;
-  if (serveFocusTarget === null) return true;
+  if (mountedTarget === null) return true;
   useSidebarFocusRequestStore.setState({ target: null });
-  serveFocusTarget(target);
+  mountedTarget.serve(target);
   return true;
+}
+
+function isSidebarSearchFocused(): boolean {
+  const input = mountedTarget?.searchInput() ?? null;
+  return input !== null && input === document.activeElement;
+}
+
+// The origin is read and written only here. Inside the component the React
+// Compiler took a module variable for a constant: `const origin =
+// searchFocusOrigin` read the value after the following `= null`.
+function rememberSearchFocusOrigin(revealedSidebar: boolean): void {
+  searchFocusOrigin = captureSearchFocusOrigin(revealedSidebar);
+}
+
+function takeSearchFocusOrigin(): SearchFocusOrigin | null {
+  const origin = searchFocusOrigin;
+  searchFocusOrigin = null;
+  return origin;
+}
+
+function forgetSearchFocusOrigin(): void {
+  searchFocusOrigin = null;
+}
+
+function captureSearchFocusOrigin(revealedSidebar: boolean): SearchFocusOrigin {
+  const element = document.activeElement;
+  return {
+    element,
+    pane: getFocusedPane() ?? getLastFocusedPane(),
+    restoreComposer:
+      element instanceof HTMLElement
+        ? captureComposerFocusReturn(element, () => element.focus({ preventScroll: true }))
+        : null,
+    revealedSidebar,
+  };
+}
+
+/**
+ * The element the command came from when it is still there, else its pane:
+ * the palette's input and a Settings control are gone by now, and Vim's chat
+ * buffer holds the keys on <body>, which only `focusPane` can hand back.
+ */
+function returnFocusToOrigin(origin: SearchFocusOrigin | null): void {
+  if (origin?.restoreComposer?.()) return;
+  const element = origin?.element;
+  if (element instanceof HTMLElement && element !== document.body && element.isConnected) {
+    element.focus({ preventScroll: true });
+    return;
+  }
+  (document.activeElement as HTMLElement | null)?.blur?.();
+  if (origin) focusPane(origin.pane);
 }
 
 function toggleAllProjects(): void {
@@ -113,6 +192,23 @@ export function SidebarCommandHost(props: { readonly surface: "threads" | "setti
   const { isMobile, open, openMobile, setOpen, setOpenMobile } = useSidebar();
   const navigateToMainApp = useNavigateToMainApp();
 
+  const sidebarHidden = isMobile ? !openMobile : !open;
+
+  const leaveSearch = () => {
+    const origin = takeSearchFocusOrigin();
+    if (isMobile) {
+      // The drawer is modal, so nothing behind it can take focus while it
+      // closes, and focusing the composer would raise the software keyboard
+      // over the thread the drawer just uncovered. Closing it is the way back.
+      (document.activeElement as HTMLElement | null)?.blur?.();
+      setOpenMobile(false);
+      return;
+    }
+    // Before hiding: a collapsing sidebar that still holds focus moves it to its trigger.
+    returnFocusToOrigin(origin);
+    if (origin?.revealedSidebar) setOpen(false);
+  };
+
   const run = (command: SidebarCommand) => {
     if (command === "projectScope.toggleAll") {
       toggleAllProjects();
@@ -122,6 +218,13 @@ export function SidebarCommandHost(props: { readonly surface: "threads" | "setti
       openCommandPalette();
       return;
     }
+    if (command === "threadSearch.toggle") {
+      if (isSidebarSearchFocused()) {
+        leaveSearch();
+        return;
+      }
+      rememberSearchFocusOrigin(sidebarHidden);
+    }
     // The sidebar is workspace too: a focus request over the agent search popup closes it first.
     closeAgentSearchPopupForWorkspace();
     useSidebarFocusRequestStore.setState({ target: FOCUS_TARGET_BY_COMMAND[command] });
@@ -130,7 +233,7 @@ export function SidebarCommandHost(props: { readonly surface: "threads" | "setti
       returningFromSettings = true;
       void navigateToMainApp();
     }
-    if (isMobile ? !openMobile : !open) (isMobile ? setOpenMobile : setOpen)(true);
+    if (sidebarHidden) (isMobile ? setOpenMobile : setOpen)(true);
   };
 
   useCommandHandlers({
@@ -142,6 +245,19 @@ export function SidebarCommandHost(props: { readonly surface: "threads" | "setti
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
+      // Escape on a query clears it (the sidebar's own handler); on the empty field it leaves.
+      if (
+        event.key === "Escape" &&
+        !event.isComposing &&
+        isSidebarSearchFocused() &&
+        mountedTarget?.searchInput()?.value.trim() === "" &&
+        !useAgentSearchPopupStore.getState().open
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        leaveSearch();
+        return;
+      }
       const command = resolveShortcutCommand(event, keybindings, {
         context: { terminalFocus: isTerminalFocused(), previewFocus: isPreviewFocused() },
       });
@@ -150,8 +266,18 @@ export function SidebarCommandHost(props: { readonly surface: "threads" | "setti
       event.stopPropagation();
       if (!event.repeat) run(command);
     };
+    // Switching windows blurs the field too, and the way back outlives that.
+    const onFocusOut = (event: FocusEvent) => {
+      if (event.target === mountedTarget?.searchInput() && document.hasFocus()) {
+        forgetSearchFocusOrigin();
+      }
+    };
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    document.addEventListener("focusout", onFocusOut);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("focusout", onFocusOut);
+    };
   });
 
   return null;
@@ -177,13 +303,16 @@ export function useSidebarCommandTarget(input: {
   }, [projectScopeItems]);
 
   useEffect(() => {
-    const serve = (focusTarget: SidebarFocusTarget) => {
-      if (focusTarget === "search") searchInputRef.current?.focus();
-      else openProjectFilter();
+    const target = {
+      serve: (focusTarget: SidebarFocusTarget) => {
+        if (focusTarget === "search") searchInputRef.current?.focus();
+        else openProjectFilter();
+      },
+      searchInput: () => searchInputRef.current,
     };
-    serveFocusTarget = serve;
+    mountedTarget = target;
     return () => {
-      if (serveFocusTarget === serve) serveFocusTarget = null;
+      if (mountedTarget === target) mountedTarget = null;
     };
   });
 
