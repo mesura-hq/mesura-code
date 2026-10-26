@@ -302,7 +302,9 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.test_web != 'false' }}
     runs-on: blacksmith-8vcpu-ubuntu-2404
-    timeout-minutes: 10
+    # Mesura: the fork's browser fences on top of upstream's suite pass 10 minutes on this runner
+    # (sync to 210b2e7c6a: cancelled at 10m18s with no failure).
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v6
