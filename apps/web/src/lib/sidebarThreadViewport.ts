@@ -111,9 +111,15 @@ const sameKeys = (left: readonly string[] | null, right: readonly string[] | nul
 export function useViewportThreadKeys(active: boolean): readonly string[] | null {
   const [keys, setKeys] = useState<readonly string[] | null>(null);
   // No dependency list on purpose: every commit can move the rows, and the
-  // rows on screen come from measuring the committed DOM.
+  // rows on screen come from measuring the committed DOM. It compares with
+  // this render's `keys` and sets nothing when they match. A functional
+  // update here queued a no-op update on every commit, and the sidebar, which
+  // does not bail out of its own updates, committed again each time until
+  // React stopped it with "Maximum update depth exceeded".
   useLayoutEffect(() => {
-    if (active) refreshViewportThreadKeys(setKeys);
+    if (!active) return;
+    const next = readViewportThreadKeys();
+    if (!sameKeys(keys, next)) setKeys(next);
   });
   useLayoutEffect(() => {
     if (!active) return;
