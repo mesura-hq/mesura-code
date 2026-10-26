@@ -254,6 +254,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.editorSessionClose]: "editor",
   [WS_METHODS.factoryReadSnapshot]: "factory",
   [WS_METHODS.subscribeFactoryRun]: "factory",
+  [WS_METHODS.factoryReadRunUsage]: "factory",
   [WS_METHODS.fileManagerHost]: "file-manager",
   [WS_METHODS.fileManagerQuery]: "file-manager",
   [WS_METHODS.fileManagerMutate]: "file-manager",
