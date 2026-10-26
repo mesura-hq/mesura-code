@@ -66,33 +66,36 @@ function latestWorkStartedAt(thread: WorkingEntryThread): number {
 }
 
 /**
- * Orders the section by when each thread started its current working period, newest first. Upstream
- * orders by the last message the developer sent, which places a run the agent started itself (a
- * woken coordinator, a scheduled task) by an older message. The start is read the first time a
- * thread shows as working and kept until it leaves, so later runs and phases never move it.
+ * Newest working period first. Upstream's last-message order misplaces runs the agent starts itself.
+ * `observe` takes every thread before the project filter and keeps each start until the thread
+ * stops, so later runs and phases never move it.
  */
 export function createWorkingSectionOrder() {
   const enteredAt = new Map<string, number>();
   const keyOf = (thread: Pick<EnvironmentThreadShell, "id" | "environmentId">) =>
     `${thread.environmentId}:${thread.id}`;
-  return <T extends WorkingEntryThread>(
-    working: readonly T[],
-    notWorking: ReadonlyArray<Pick<EnvironmentThreadShell, "id" | "environmentId">>,
-  ): T[] => {
-    for (const thread of notWorking) enteredAt.delete(keyOf(thread));
-    const startOf = (thread: T) => {
-      const key = keyOf(thread);
-      const known = enteredAt.get(key);
-      if (known !== undefined) return known;
-      const started = latestWorkStartedAt(thread);
-      enteredAt.set(key, started);
-      return started;
-    };
-    return working.toSorted(
-      (left, right) =>
-        startOf(right) - startOf(left) ||
-        left.id.localeCompare(right.id) ||
-        left.environmentId.localeCompare(right.environmentId),
-    );
+  return {
+    observe<T extends WorkingEntryThread>(
+      threads: readonly T[],
+      isWorking: (thread: T) => boolean,
+    ): <W extends WorkingEntryThread>(working: readonly W[]) => W[] {
+      const present = new Set<string>();
+      for (const thread of threads) {
+        const key = keyOf(thread);
+        present.add(key);
+        if (!isWorking(thread)) enteredAt.delete(key);
+        else if (!enteredAt.has(key)) enteredAt.set(key, latestWorkStartedAt(thread));
+      }
+      for (const key of enteredAt.keys()) if (!present.has(key)) enteredAt.delete(key);
+      const startOf = (thread: WorkingEntryThread) =>
+        enteredAt.get(keyOf(thread)) ?? latestWorkStartedAt(thread);
+      return (working) =>
+        working.toSorted(
+          (left, right) =>
+            startOf(right) - startOf(left) ||
+            left.id.localeCompare(right.id) ||
+            left.environmentId.localeCompare(right.environmentId),
+        );
+    },
   };
 }

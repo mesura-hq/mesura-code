@@ -303,7 +303,7 @@ const SNOOZED_SHELF_EXPANDED_KEY = "t3code:sidebar:snoozed-expanded";
 
 const inboxReturns = createInboxReturnTracker();
 // Mesura: module scope for the same reason as `inboxReturns` (workingSection.ts).
-const orderWorkingSection = createWorkingSectionOrder();
+const workingSectionOrder = createWorkingSectionOrder();
 
 type SidebarOptimisticDrop = {
   readonly key: string;
@@ -548,6 +548,7 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
   const preciseNow = new Date().toISOString();
   const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys, delegatedUnderParent);
   const inboxObservation = inboxReturns.observe(workingShelfEnabled ? threads : null);
+  const orderWorkingThreads = workingSectionOrder.observe(threads, inboxObservation.isWorking);
   const pinned: EnvironmentThreadShell[] = [];
   const active: EnvironmentThreadShell[] = [];
   const working: EnvironmentThreadShell[] = [];
@@ -625,7 +626,7 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
             preferredIds: optimisticDrop.order,
             getId: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
           }),
-    workingThreads: orderWorkingSection(working, [...pinned, ...active, ...snoozed, ...settled]),
+    workingThreads: orderWorkingThreads(working),
     snoozedThreads: snoozed.toSorted(
       (left, right) =>
         firstValidTimestampMs(left.snoozedUntil ?? null) -
