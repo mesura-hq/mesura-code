@@ -15,6 +15,8 @@ import {
   type FactoryRunSummary,
 } from "@t3tools/contracts";
 import * as Exit from "effect/Exit";
+
+import { deriveFactoryRunTrace, encodeFactoryTraceStrip } from "./factoryRunTrace.ts";
 import * as Schema from "effect/Schema";
 
 /** The fold keeps this many warnings; `warningCount` counts every one. */
@@ -111,6 +113,7 @@ function emptyPhase(index: number, title: string, acceptance: ReadonlyArray<stri
     closedAt: null,
     dispatches: [],
     checks: [],
+    evidence: [],
     verdicts: [],
     findings: [],
     deviations: [],
@@ -172,6 +175,57 @@ function addTokens(
   const next = { ...total };
   for (const [key, count] of Object.entries(tokens ?? {})) next[key] = (next[key] ?? 0) + count;
   return next;
+}
+
+type FactoryRunDispatch = FactoryRunPhase["dispatches"][number];
+
+function finishMatched(
+  before: FactoryRunState,
+  after: FactoryRunState,
+  event: Extract<FactoryRunEvent, { type: "dispatch.finished" }>,
+): boolean {
+  const earlier = before.phases.find((candidate) => candidate.index === event.phase);
+  const later = after.phases.find((candidate) => candidate.index === event.phase);
+  return later !== undefined && earlier !== undefined && earlier.dispatches !== later.dispatches;
+}
+
+/** The session's latest finished turn before this one, in any phase. */
+function previousSessionTurn(
+  state: FactoryRunState,
+  sessionId: string,
+): FactoryRunDispatch | undefined {
+  let latest: FactoryRunDispatch | undefined;
+  for (const phase of state.phases) {
+    for (const dispatch of phase.dispatches) {
+      if (dispatch.sessionId !== sessionId || dispatch.finishedAt === null) continue;
+      if (latest === undefined || dispatch.finishedAt >= latest.finishedAt!) latest = dispatch;
+    }
+  }
+  return latest;
+}
+
+/**
+ * A turn's own spend from the running total its session reported: the step
+ * from the session's previous turn. A total lower than the previous one is a
+ * fresh session total and stands as reported.
+ */
+function turnCost(reported: number | undefined, previous: number | null | undefined) {
+  if (reported === undefined) return null;
+  if (previous == null || reported < previous) return reported;
+  return reported - previous;
+}
+
+function turnTokens(
+  reported: Readonly<Record<string, number>> | undefined,
+  previous: Readonly<Record<string, number>> | null | undefined,
+): Record<string, number> | null {
+  if (reported === undefined) return null;
+  if (previous == null) return { ...reported };
+  const restarted = Object.entries(reported).some(([key, count]) => count < (previous[key] ?? 0));
+  if (restarted) return { ...reported };
+  return Object.fromEntries(
+    Object.entries(reported).map(([key, count]) => [key, count - (previous[key] ?? 0)]),
+  );
 }
 
 /**
@@ -256,11 +310,16 @@ function applyEvent(state: FactoryRunState, event: FactoryRunEvent): FactoryRunS
             stopReason: null,
             costUsd: null,
             tokens: null,
+            reportedCostUsd: null,
+            reportedTokens: null,
             reportFile: null,
           },
         ],
       }));
     case "dispatch.finished": {
+      const previous = previousSessionTurn(state, event.sessionId);
+      const costUsd = turnCost(event.costUsd, previous?.reportedCostUsd);
+      const tokens = turnTokens(event.tokens, previous?.reportedTokens);
       const next = updatePhase(state, event.phase, (phase) => {
         const index = phase.dispatches.findLastIndex(
           (dispatch) =>
@@ -275,19 +334,30 @@ function applyEvent(state: FactoryRunState, event: FactoryRunEvent): FactoryRunS
           sessionId: event.sessionId,
           finishedAt: event.at,
           stopReason: event.stopReason,
-          costUsd: event.costUsd ?? null,
-          tokens: event.tokens ?? null,
+          costUsd,
+          tokens,
+          reportedCostUsd: event.costUsd ?? null,
+          reportedTokens: event.tokens ?? null,
           reportFile: event.reportFile,
         };
         return { ...phase, dispatches };
       });
+      // A finish that matched no running dispatch changes nothing and adds no spend.
+      if (!finishMatched(state, next, event)) return next;
       return {
         ...next,
         cost: {
-          usd: next.cost.usd + (event.costUsd ?? 0),
-          tokens: addTokens(next.cost.tokens, event.tokens),
+          usd: next.cost.usd + (costUsd ?? 0),
+          tokens: addTokens(next.cost.tokens, tokens ?? undefined),
         },
       };
+    }
+    case "evidence.recorded": {
+      const { v: _v, at, type: _type, phase: phaseIndex, ...evidence } = event;
+      return updatePhase(state, phaseIndex, (phase) => ({
+        ...phase,
+        evidence: [...phase.evidence, { ...evidence, at }],
+      }));
     }
     case "checks.recorded":
       return updatePhase(state, event.phase, (phase) => ({
@@ -515,10 +585,35 @@ function unboundedSummary(state: FactoryRunState): FactoryRunSummary {
     question: state.stops.findLast((stop) => stop.answeredAt === null)?.question ?? null,
     coverage: factoryRunCoverage(deriveFactoryRunVerification(state)),
     degradedPhases: state.phases.filter((candidate) => candidate.status === "degraded").length,
+    ...summaryTrace(state),
+  };
+}
+
+/** The card's trace: drawn to the last event, so the summary depends on the record alone. */
+function summaryTrace(state: FactoryRunState): Pick<FactoryRunSummary, "trace"> {
+  const trace = deriveFactoryRunTrace(state, 0);
+  if (trace === null) return {};
+  const whole = (ms: number) => Math.max(0, Math.round(ms));
+  return {
+    trace: {
+      strip: encodeFactoryTraceStrip(trace),
+      wallMs: whole(trace.totals.wallMs),
+      agentMs: whole(trace.totals.agentMs),
+      waitingMs: whole(trace.totals.waitingMs),
+    },
   };
 }
 
 export type FactoryCriterionResult = "PASS" | "FAIL" | "NOT_EXERCISED";
+
+/** A capture that proves a criterion, its path resolved against the run directory. */
+export interface FactoryCriterionEvidence {
+  readonly kind: "image" | "video";
+  readonly path: string;
+  readonly caption: string;
+  readonly source: "live" | "test";
+  readonly viewport: "desktop" | "phone" | null;
+}
 
 /** One acceptance criterion of a phase with the result its latest verdict gave it. */
 export interface FactoryCriterionOutcome {
@@ -527,6 +622,16 @@ export interface FactoryCriterionOutcome {
   /** Null while no verdict named the criterion. */
   readonly result: FactoryCriterionResult | null;
   readonly authoredTestsOnly: boolean;
+  /** Any verdict marked its outcome as something on screen, so a capture is expected. */
+  readonly visual: boolean;
+  /** Every capture recorded for it, in record order. */
+  readonly evidence: ReadonlyArray<FactoryCriterionEvidence>;
+}
+
+/** `path` when absolute, else joined to the run directory. */
+export function resolveFactoryRunPath(runDir: string, path: string): string {
+  if (path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path)) return path;
+  return `${runDir.replace(/\/+$/, "")}/${path.replace(/^\.\//, "")}`;
 }
 
 export interface FactoryPhaseVerification {
@@ -562,6 +667,18 @@ export function deriveFactoryRunVerification(
           name: phase.acceptance[n - 1] ?? recorded?.name ?? `Criterion ${n}`,
           result: recorded?.result ?? null,
           authoredTestsOnly: recorded?.authoredTestsOnly === true,
+          visual: phase.verdicts.some((verdict) =>
+            verdict.criteria.some((criterion) => criterion.n === n && criterion.visual === true),
+          ),
+          evidence: phase.evidence
+            .filter((entry) => entry.criterion === n)
+            .map((entry) => ({
+              kind: entry.kind,
+              path: resolveFactoryRunPath(state.runDir, entry.path),
+              caption: entry.caption,
+              source: entry.source,
+              viewport: entry.viewport ?? null,
+            })),
         };
       });
     return {

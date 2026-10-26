@@ -78,8 +78,18 @@ export interface FactoryReportSteps {
   readonly lines: ReadonlyArray<FactoryReportStepLine>;
 }
 
+/** What a reader needs to see the work hold for themselves. */
+export interface FactoryReportTryIt {
+  readonly branch: string | null;
+  readonly repo: string | null;
+  readonly commits: ReadonlyArray<{ readonly hash: string; readonly subject: string }>;
+  /** The last harden checks of every phase, once each, with the directory they ran in. */
+  readonly commands: ReadonlyArray<{ readonly command: string; readonly cwd: string | null }>;
+}
+
 export interface FactoryReportView {
   readonly title: string;
+  readonly tryIt: FactoryReportTryIt;
   readonly clock: {
     readonly elapsedMs: number;
     readonly machineMs: number;
@@ -285,6 +295,36 @@ function phaseSteps(state: FactoryRunState, index: number): ReadonlyArray<Factor
     .map(({ text, error }) => ({ text, error }));
 }
 
+/**
+ * The branch, the phase commits and the commands that prove the run, from the
+ * record. The gate's format, lint, typecheck and unused-export runs are the
+ * repository's own and are left to its docs; the suites are what this run added.
+ */
+export function deriveFactoryReportTryIt(state: FactoryRunState): FactoryReportTryIt {
+  const seen = new Set<string>();
+  const commands: Array<{ command: string; cwd: string | null }> = [];
+  for (const phase of state.phases) {
+    const harden = phase.checks.findLast((check) => check.stage === "harden");
+    for (const result of harden?.results ?? []) {
+      if (/mesura-checks\.ts/.test(result.command)) continue;
+      const key = `${result.cwd ?? ""}\u0000${result.command}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      commands.push({ command: result.command, cwd: result.cwd ?? null });
+    }
+  }
+  return {
+    branch: state.frame?.branch ?? null,
+    repo: state.frame?.repo ?? null,
+    commits: state.phases.flatMap((phase) =>
+      phase.commit !== null && "hash" in phase.commit
+        ? [{ hash: phase.commit.hash, subject: phase.commit.subject }]
+        : [],
+    ),
+    commands,
+  };
+}
+
 /** The whole report: its frame from the run state, its prose from `report.md`. */
 export function deriveFactoryReportView(input: {
   readonly report: FactoryDocument;
@@ -298,6 +338,7 @@ export function deriveFactoryReportView(input: {
   const cost = factoryCostText(state.cost);
   return {
     ...readProse(report),
+    tryIt: deriveFactoryReportTryIt(state),
     clock: {
       elapsedMs,
       machineMs,
