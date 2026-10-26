@@ -5,9 +5,14 @@ import { act, render as renderBrowser, type Screen } from "../../../test/render"
 import { Profiler, createElement } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-vi.mock("~/hooks/useSettings", () => ({
-  useEnvironmentIdentificationMode: () => "none",
-}));
+vi.mock("~/hooks/useSettings", async () => {
+  const { DEFAULT_CLIENT_SETTINGS } = await import("@t3tools/contracts/settings");
+  return {
+    useEnvironmentIdentificationMode: () => "none",
+    useClientSettings: (select: (value: typeof DEFAULT_CLIENT_SETTINGS) => unknown) =>
+      select(DEFAULT_CLIENT_SETTINGS),
+  };
+});
 vi.mock("../SidebarStageBackdrop", () => ({
   StageBackdropButtonArt: () => null,
   useSidebarStageBackdropVariant: () => null,

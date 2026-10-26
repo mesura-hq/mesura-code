@@ -154,6 +154,7 @@ import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environ
 import { ProjectId, ThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 
+import { startMainAppLocationTracking } from "./components/sidebar/mainAppLocation";
 import { installKeyEngine } from "./keys/keyEngine";
 import { useProjectScopeStore } from "./projectScopeStore";
 import {
@@ -175,6 +176,7 @@ const OPEN_THREAD_ID = "search-fence-open";
 
 let root: Screen | undefined;
 let router: FenceRouter | undefined;
+let stopLocationTracking: (() => void) | undefined;
 let container: HTMLDivElement;
 
 async function setupBrowserFixture0() {
@@ -189,6 +191,8 @@ async function setupBrowserFixture0() {
 
   return {
     async [Symbol.asyncDispose]() {
+      stopLocationTracking?.();
+      stopLocationTracking = undefined;
       await act(async () => root?.[Symbol.asyncDispose]());
       root = undefined;
       router = undefined;
@@ -266,6 +270,8 @@ async function mountWithThreads(
   ({ root, router } = await renderFenceApp(container, openThreadId, {
     vimMode: options.vimMode ?? false,
   }));
+  // `appInit` starts this in the app: it is where closing the Settings modal returns to.
+  stopLocationTracking = startMainAppLocationTracking(router);
   await settle();
   // The composer takes focus on mount and claims some chords for itself; a
   // chord under test starts from the page, as the sidebar fences do.
@@ -653,7 +659,7 @@ describe("search unification regression: the commands on Settings and with the l
       await router!.navigate({ to: "/settings" });
     });
     await settle();
-    expect(sidebarSearchField(), "Settings shows its own navigation").toBeNull();
+    expect(document.querySelector("[data-app-modal]"), "the Settings modal").not.toBeNull();
     document.querySelector<HTMLElement>('[data-testid="settings-control"]')?.focus();
 
     await press(THREAD_SEARCH_CHORD);
@@ -794,7 +800,7 @@ describe("search unification regression: the chat keeps its own focus after a se
       expect(
         (document.activeElement as HTMLElement | null)?.getAttribute("aria-label"),
         `focus is on ${describeFocus()}`,
-      ).toBe("Message"),
+      ).toBe("Message Rename target thread"),
     );
   });
 });

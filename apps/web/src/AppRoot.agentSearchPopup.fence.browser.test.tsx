@@ -754,7 +754,7 @@ describe("agent search popup: layout on desktop and phone", () => {
         ]),
       ),
     );
-    const composer = dialog.querySelector<HTMLElement>('[aria-label="Message"]');
+    const composer = dialog.querySelector<HTMLElement>('[data-testid="composer-editor"]');
     expect(composer, "the search conversation's composer in the popup").not.toBeNull();
     const history = dialog.querySelector<HTMLElement>('[aria-label="Earlier searches"]')!;
     expect(history.getBoundingClientRect().left).toBeGreaterThanOrEqual(

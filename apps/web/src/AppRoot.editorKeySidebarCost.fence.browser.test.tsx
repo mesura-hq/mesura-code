@@ -409,6 +409,11 @@ function describeFocus(): string {
   return `<${active.tagName.toLowerCase()} class="${active.className}"> ${label ?? ""}`;
 }
 
+/** Upstream's Working shelf, on by default, lists running threads and starts collapsed. */
+function expandWorkingShelf(): void {
+  window.localStorage.setItem("t3code:sidebar:working-expanded", "true");
+}
+
 /**
  * Mounts the app on the first of `THREAD_COUNT` threads, opens the source
  * file from the Files tree with `Space p f`, `j`, Enter, and clicks its text.
@@ -441,6 +446,7 @@ async function mountWithEditorFocused({
   }
   sidebarLists.threads = [...fixture.threads.values()];
   sidebarLists.projects = [fixture.project];
+  if (backgroundStreaming) expandWorkingShelf();
   ({ root } = await renderFenceApp(container, threads[0]!, { vimMode: true }));
   await expect.element(page.getByTestId("sidebar-row-card").first()).toBeInTheDocument();
   await settle();
@@ -843,18 +849,20 @@ describe("the first key after opening a file (phase 4, criterion 2)", () => {
   });
 });
 
-/** The status label in a row's top slot, found by its live-region text. The phone's sidebar
- * sheet is portaled to the body, so the search covers the document. */
+/** The status label in a row's top slot: the span holding the label as its own text. The phone's
+ * sidebar sheet is portaled to the body, so the search covers the document. */
 function rowStatusLabel(rowTitle: string, label: string): HTMLElement {
   const row = [...document.querySelectorAll<HTMLElement>('[data-testid="sidebar-row-card"]')].find(
     (candidate) => candidate.textContent?.includes(rowTitle),
   );
   expect(row, `a card row for ${rowTitle}`).toBeDefined();
-  const live = [...row!.querySelectorAll<HTMLElement>('[role="status"]')].find(
-    (candidate) => candidate.textContent === label,
+  const slot = [...row!.querySelectorAll<HTMLElement>("span")].find((candidate) =>
+    [...candidate.childNodes].some(
+      (node) => node.nodeType === Node.TEXT_NODE && node.textContent === label,
+    ),
   );
-  expect(live, `${rowTitle} shows ${label}; row reads ${row!.textContent}`).toBeDefined();
-  return live!.parentElement!;
+  expect(slot, `${rowTitle} shows ${label}; row reads ${row!.textContent}`).toBeDefined();
+  return slot!;
 }
 
 /** The opacity a reader sees: the product of every ancestor's, up to the row's list item. */
@@ -916,6 +924,7 @@ describe("thread attention: Working and Waiting rows at phone width", () => {
     );
     sidebarLists.threads = [...fixture.threads.values()];
     sidebarLists.projects = [fixture.project];
+    expandWorkingShelf();
     ({ root } = await renderFenceApp(container, openId!, { vimMode: false }));
     await settle();
     // At phone width the sidebar is a sheet; the toggle chord opens it, as a keyboard would.

@@ -124,11 +124,11 @@ async function setup() {
     await act(async () => element.click());
   }
 
-  async function pressOpenFavorite(mac = false) {
+  // Mesura moves editor.openFavorite to alt+o; mod+o opens the command palette.
+  async function pressOpenFavorite() {
     const event = new KeyboardEvent("keydown", {
       key: "o",
-      ctrlKey: !mac,
-      metaKey: mac,
+      altKey: true,
       bubbles: true,
       cancelable: true,
     });

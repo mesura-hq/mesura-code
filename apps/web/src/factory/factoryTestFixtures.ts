@@ -207,15 +207,24 @@ export function factoryThreadFixtureReads(fixture: FactoryThreadFixture) {
       fixture.threadListeners.delete(listener);
     };
   };
+  const useThreadProjection = useFactoryFixtureThreadProjection.bind(null, fixture, subscribe);
+  const useThreadVisibleTurnItems = useFactoryFixtureVisibleTurnItems.bind(
+    null,
+    fixture,
+    subscribe,
+  );
   return {
     useThreadShell: useFactoryFixtureThreadShell.bind(null, fixture, subscribe),
     readThreadShell: () => fixture.thread,
-    useThreadProjection: useFactoryFixtureThreadProjection.bind(null, fixture, subscribe),
+    useThreadProjection,
+    // ChatView reads the quiet thread structure; a full projection is assignable to it.
+    useQuietThreadProjection: useThreadProjection,
+    useQuietThreadVisibleTurnItems: useThreadVisibleTurnItems,
     readThread: () =>
       fixture.thread === null
         ? null
         : makeFactoryThreadProjection(fixture.thread, fixture.turnItems),
     useThreadStatus: () => "live",
-    useThreadVisibleTurnItems: useFactoryFixtureVisibleTurnItems.bind(null, fixture, subscribe),
+    useThreadVisibleTurnItems,
   };
 }

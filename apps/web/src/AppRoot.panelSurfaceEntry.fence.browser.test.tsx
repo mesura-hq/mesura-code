@@ -248,6 +248,7 @@ vi.mock("./state/device", async (original) => ({
 // Diff worker startup is outside the panel keyboard behavior this fence owns.
 vi.mock("./components/DiffWorkerPoolProvider", () => ({
   DiffWorkerPoolProvider: ({ children }: { children?: ReactNode }) => children,
+  useDiffWorkerPool: () => undefined,
 }));
 const assetBoundary = vi.hoisted(() => {
   const imageUrl = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="navy"/></svg>')}`;

@@ -231,7 +231,7 @@ export function mockEnvironments<T extends object>(actual: T): T {
 export function mockQueries<T extends object>(actual: T): T {
   return {
     ...actual,
-    useThreadSearch: () => ({ matches: [], isPending: false }),
+    useThreadSearch: () => ({ matches: [], query: "", isPending: false }),
     useProjectPathSearch: () => ({
       entries: [],
       isPending: false,
