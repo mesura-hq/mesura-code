@@ -233,51 +233,50 @@ const spendOf = (buckets: ReadonlyArray<UsageBucket>, provider: FactoryRunQuotaP
  * dispatched no turn to is left out; a provider whose readings are missing
  * still shows the run's spend.
  */
-export const readFactoryRunUsageOf = (
+export const readFactoryRunUsageOf = Effect.fn("FactoryRunUsage.read")(function* (
   state: FactoryRunState,
   usage: Option.Option<UsageService.UsageService["Service"]>,
   codexHome: string = defaultCodexHome(),
-) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const readAt = DateTime.formatIso(yield* DateTime.now);
-    if (state.startedAt === null) {
-      return {
-        runId: state.runId,
-        providers: [],
-        machineSpend: "unavailable",
-        readAt,
-      } satisfies FactoryRunUsage;
-    }
-    const startMs = Date.parse(state.startedAt);
-    const endMs = Date.parse(state.finishedAt ?? state.lastEventAt ?? state.startedAt);
-    const buckets = yield* machineBuckets(usage, startMs, Math.max(endMs, startMs + 1));
-    const providers = yield* Effect.forEach(
-      PROVIDERS.filter((provider) => factoryRunTurnsOf(state, provider).length > 0),
-      (provider) =>
-        Effect.forEach(factoryRunTurnsOf(state, provider), (dispatch) =>
-          provider === "claude"
-            ? claudeTurnSamples(fs, path, state.runDir, dispatch)
-            : codexTurnSamples(fs, path, codexHome, dispatch),
-        ).pipe(
-          Effect.map((samples) =>
-            factoryRunUsageProvider({
-              provider,
-              samples: samples.flat(),
-              runSpendUsd: runSpendUsd(state, provider, buckets),
-              machineSpendUsd: buckets === null ? null : spendOf(buckets, provider),
-            }),
-          ),
-        ),
-    );
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const readAt = DateTime.formatIso(yield* DateTime.now);
+  if (state.startedAt === null) {
     return {
       runId: state.runId,
-      providers,
-      machineSpend: buckets === null ? "unavailable" : "read",
+      providers: [],
+      machineSpend: "unavailable",
       readAt,
     } satisfies FactoryRunUsage;
-  });
+  }
+  const startMs = Date.parse(state.startedAt);
+  const endMs = Date.parse(state.finishedAt ?? state.lastEventAt ?? state.startedAt);
+  const buckets = yield* machineBuckets(usage, startMs, Math.max(endMs, startMs + 1));
+  const providers = yield* Effect.forEach(
+    PROVIDERS.filter((provider) => factoryRunTurnsOf(state, provider).length > 0),
+    (provider) =>
+      Effect.forEach(factoryRunTurnsOf(state, provider), (dispatch) =>
+        provider === "claude"
+          ? claudeTurnSamples(fs, path, state.runDir, dispatch)
+          : codexTurnSamples(fs, path, codexHome, dispatch),
+      ).pipe(
+        Effect.map((samples) =>
+          factoryRunUsageProvider({
+            provider,
+            samples: samples.flat(),
+            runSpendUsd: runSpendUsd(state, provider, buckets),
+            machineSpendUsd: buckets === null ? null : spendOf(buckets, provider),
+          }),
+        ),
+      ),
+  );
+  return {
+    runId: state.runId,
+    providers,
+    machineSpend: buckets === null ? "unavailable" : "read",
+    readAt,
+  } satisfies FactoryRunUsage;
+});
 
 /** The `factory.readRunUsage` handler: the run's state from the tracker, then its usage. */
 export const makeReadFactoryRunUsage = Effect.gen(function* () {

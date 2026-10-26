@@ -69,7 +69,7 @@ function ProviderRow({ usage }: { usage: FactoryRunUsageProvider }) {
           )}
         </div>
       )}
-      <p className="text-[11px] text-muted-foreground tabular-nums">
+      <p className="text-search-label text-muted-foreground tabular-nums">
         {target === undefined
           ? "The run's outputs carry no reading of this plan."
           : `account moved +${percentText(target.movedPercent)} during the run, every session included${target.resets > 0 ? ` (${target.resets} reset)` : ""}`}
@@ -128,7 +128,7 @@ export const FactoryRunUsageBlock = memo(function FactoryRunUsageBlock({
       {usage.providers.map((provider) => (
         <ProviderRow key={provider.provider} usage={provider} />
       ))}
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-search-label text-muted-foreground">
         {usage.machineSpend === "unavailable"
           ? "This machine's usage could not be read, so the run's share is not estimated."
           : "The run's share counts its role turns, not the coordinator thread. It is an upper bound: spend on other machines in the same time is not seen here."}{" "}

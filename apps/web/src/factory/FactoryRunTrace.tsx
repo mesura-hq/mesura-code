@@ -14,15 +14,7 @@ import {
   type FactoryTraceTurn,
 } from "@t3tools/shared/factoryRunTrace";
 import { ChevronRightIcon } from "lucide-react";
-import {
-  Fragment,
-  memo,
-  useEffect,
-  useMemo,
-  useState,
-  type CSSProperties,
-  type ReactNode,
-} from "react";
+import { Fragment, memo, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 
 import { Spinner } from "../components/ui/spinner";
 import { cn } from "~/lib/utils";
@@ -34,8 +26,15 @@ const ROLE_FILL: Record<FactoryRunRole, string> = {
   reviewer: "bg-violet-500/85",
 };
 
-const WAITING_FILL =
-  "bg-[repeating-linear-gradient(45deg,var(--warning)_0_4px,transparent_4px_8px)] opacity-70";
+// Hatched, so waiting reads apart from work in any theme; a gradient has no utility token.
+const WAITING_FILL = "opacity-70";
+const WAITING_HATCH: CSSProperties = {
+  backgroundImage: "repeating-linear-gradient(45deg, var(--warning) 0 4px, transparent 4px 8px)",
+};
+
+/** A fill's style: only waiting carries one, its hatch. */
+const fillStyle = (fill: string): CSSProperties | undefined =>
+  fill === WAITING_FILL ? WAITING_HATCH : undefined;
 const COORDINATOR_FILL = "bg-foreground/12";
 
 const STRIP_FILL: Record<Exclude<FactoryTraceStripKind, "idle">, string> = {
@@ -84,20 +83,20 @@ export const FactoryTraceStrip = memo(function FactoryTraceStrip({
 }: {
   trace: NonNullable<FactoryRunSummary["trace"]>;
 }) {
-  const segments = useMemo(() => decodeFactoryTraceStrip(trace.strip), [trace.strip]);
+  const segments = decodeFactoryTraceStrip(trace.strip);
   return (
     <div className="flex flex-col gap-1">
       <Track className="h-2.5">
-        {segments.map((segment) => (
-          <div
-            key={segment.start}
-            className={cn(
-              "absolute inset-y-0",
-              STRIP_FILL[segment.kind as Exclude<FactoryTraceStripKind, "idle">],
-            )}
-            style={placed(segment.start, segment.width)}
-          />
-        ))}
+        {segments.map((segment) => {
+          const fill = STRIP_FILL[segment.kind as Exclude<FactoryTraceStripKind, "idle">];
+          return (
+            <div
+              key={segment.start}
+              className={cn("absolute inset-y-0", fill)}
+              style={{ ...placed(segment.start, segment.width), ...fillStyle(fill) }}
+            />
+          );
+        })}
       </Track>
       <p className="flex flex-wrap gap-x-3 text-xs text-muted-foreground tabular-nums">
         <span>{factoryTraceDurationText(trace.wallMs)}</span>
@@ -125,7 +124,7 @@ function Legend() {
     <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
       {swatches.map((swatch) => (
         <span key={swatch.label} className="flex items-center gap-1.5">
-          <i className={cn("size-2.5 rounded-[2px]", swatch.fill)} />
+          <i className={cn("size-2.5 rounded-xs", swatch.fill)} style={fillStyle(swatch.fill)} />
           {swatch.label}
         </span>
       ))}
@@ -146,7 +145,7 @@ function ClockCells({ trace }: { trace: FactoryTrace }) {
     <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
       {cells.map((cell) => (
         <div key={cell.label} className="rounded-lg border border-border/70 px-2.5 py-1.5">
-          <dt className="text-[11px] text-muted-foreground">{cell.label}</dt>
+          <dt className="text-search-label text-muted-foreground">{cell.label}</dt>
           <dd className="text-sm font-medium text-foreground tabular-nums">
             {factoryTraceDurationText(cell.ms)}
           </dd>
@@ -177,7 +176,7 @@ function StopLane({
       <Track>
         <div
           className={cn("absolute inset-y-0", WAITING_FILL)}
-          style={spanOf(stop.startMs, end, trace.startMs, length)}
+          style={{ ...spanOf(stop.startMs, end, trace.startMs, length), ...WAITING_HATCH }}
         />
       </Track>
     </li>
@@ -196,7 +195,7 @@ function PhaseTurns({ phase, endMs }: { phase: FactoryTracePhase; endMs: number 
       {phase.turns.map((turn) => (
         <li key={turn.key} className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-0.5">
           <span className="flex min-w-0 items-center gap-1.5 text-xs">
-            <i className={cn("size-2 shrink-0 rounded-[2px]", ROLE_FILL[turn.role])} />
+            <i className={cn("size-2 shrink-0 rounded-xs", ROLE_FILL[turn.role])} />
             <span className="shrink-0 text-foreground">
               {turn.node === null ? turn.role : factoryNodeDisplayName(turn.node)}
             </span>
@@ -211,7 +210,7 @@ function PhaseTurns({ phase, endMs }: { phase: FactoryTracePhase; endMs: number 
           </span>
           <Track className="col-span-2 h-1.5">
             <div
-              className={cn("absolute inset-y-0 rounded-[2px]", ROLE_FILL[turn.role])}
+              className={cn("absolute inset-y-0 rounded-xs", ROLE_FILL[turn.role])}
               style={spanOf(turn.startMs, turn.endMs ?? endMs, origin, length)}
             />
           </Track>
@@ -281,7 +280,7 @@ function PhaseLane({
           {phase.turns.map((turn) => (
             <div
               key={turn.key}
-              className={cn("absolute inset-y-0 rounded-[2px]", ROLE_FILL[turn.role])}
+              className={cn("absolute inset-y-0 rounded-xs", ROLE_FILL[turn.role])}
               style={spanOf(turn.startMs, turn.endMs ?? trace.endMs, trace.startMs, length)}
             />
           ))}
@@ -305,7 +304,7 @@ function RoleTotals({ trace }: { trace: FactoryTrace }) {
         .map((row) => (
           <div key={row.role} className="flex items-center justify-between gap-3 text-xs">
             <span className="flex items-center gap-1.5">
-              <i className={cn("size-2 rounded-[2px]", ROLE_FILL[row.role])} />
+              <i className={cn("size-2 rounded-xs", ROLE_FILL[row.role])} />
               {row.role}
               <span className="text-muted-foreground">· {row.turns} turns</span>
             </span>
@@ -338,15 +337,12 @@ export const FactoryRunTrace = memo(function FactoryRunTrace({
   const [openPhases, setOpenPhases] = useState<ReadonlySet<number>>(() => new Set());
   const controlled = onSelectPhase !== undefined;
   const length = Math.max(1, trace.endMs - trace.startMs);
-  const strip = useMemo(
-    () => ({
-      strip: encodeFactoryTraceStrip(trace),
-      wallMs: trace.totals.wallMs,
-      agentMs: trace.totals.agentMs,
-      waitingMs: trace.totals.waitingMs,
-    }),
-    [trace],
-  );
+  const strip = {
+    strip: encodeFactoryTraceStrip(trace),
+    wallMs: trace.totals.wallMs,
+    agentMs: trace.totals.agentMs,
+    waitingMs: trace.totals.waitingMs,
+  };
   return (
     <div className="flex flex-col gap-3">
       <FactoryTraceStrip trace={strip} />
@@ -392,7 +388,7 @@ export const FactoryRunTrace = memo(function FactoryRunTrace({
             <StopLane key={stop.startMs} stop={stop} trace={trace} length={length} />
           ))}
       </ol>
-      <div className="flex justify-between text-[10.5px] text-muted-foreground tabular-nums">
+      <div className="flex justify-between text-caption-plus text-muted-foreground tabular-nums">
         <span>0</span>
         <span>{factoryTraceDurationText(length / 2)}</span>
         <span>{factoryTraceDurationText(length)}</span>
@@ -427,10 +423,7 @@ export function FactoryRunTraceFromStream({
   const stream = useFactoryRun(threadRef, runId);
   const state = stream.status === "ready" ? stream.item.state : null;
   const nowMs = useFactoryTraceClock(state !== null && state.finishedAt === null);
-  const trace = useMemo(
-    () => (state === null ? null : deriveFactoryRunTrace(state, nowMs)),
-    [state, nowMs],
-  );
+  const trace = state === null ? null : deriveFactoryRunTrace(state, nowMs);
   if (stream.status === "loading") {
     return (
       <div className="flex justify-center py-3">

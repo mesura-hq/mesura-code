@@ -1,6 +1,6 @@
 import type { FactoryRunState, FactoryRunStreamItem, ScopedThreadRef } from "@t3tools/contracts";
 import { deriveFactoryRunTrace } from "@t3tools/shared/factoryRunTrace";
-import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
+import { memo, useEffect, useState, type ReactNode } from "react";
 
 import { Spinner } from "../components/ui/spinner";
 import { cn } from "~/lib/utils";
@@ -192,7 +192,7 @@ function FactoryRunContent({
   const [selectedPhase, setSelectedPhase] = useState<number | null>(null);
   const view = useFactoryRunViewModel(item, selectedPhase);
   const nowMs = useFactoryTraceClock(view.live);
-  const trace = useMemo(() => deriveFactoryRunTrace(item.state, nowMs), [item.state, nowMs]);
+  const trace = deriveFactoryRunTrace(item.state, nowMs);
   // The selected phase's spine, role sessions and record open under its lane.
   const phaseDetail = () => (
     <>

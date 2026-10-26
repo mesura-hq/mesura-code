@@ -135,7 +135,7 @@ export function readCodexQuotaLine(line: string): ReadonlyArray<FactoryQuotaSamp
 export function factoryQuotaMovement(
   samples: ReadonlyArray<FactoryQuotaSample>,
 ): Omit<FactoryRunUsageWindow, "window"> | null {
-  const ordered = samples.toSorted((left, right) => left.observedAtMs - right.observedAtMs);
+  const ordered = [...samples].sort((left, right) => left.observedAtMs - right.observedAtMs);
   const first = ordered[0];
   const last = ordered.at(-1);
   if (first === undefined || last === undefined) return null;
@@ -173,7 +173,7 @@ function preferredWindow(windows: ReadonlyArray<FactoryRunUsageWindow>) {
     const match = windows.find((window) => window.window === name);
     if (match !== undefined) return match;
   }
-  return windows.toSorted((left, right) => right.movedPercent - left.movedPercent)[0];
+  return [...windows].sort((left, right) => right.movedPercent - left.movedPercent)[0];
 }
 
 /**

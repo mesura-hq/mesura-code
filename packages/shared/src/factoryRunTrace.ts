@@ -288,9 +288,7 @@ export function encodeFactoryTraceStrip(trace: FactoryTrace): string {
 }
 
 /** Runs of one kind across the strip, as fractions of its width, for drawing. */
-export function decodeFactoryTraceStrip(
-  strip: string,
-): ReadonlyArray<{
+export function decodeFactoryTraceStrip(strip: string): ReadonlyArray<{
   readonly kind: FactoryTraceStripKind;
   readonly start: number;
   readonly width: number;

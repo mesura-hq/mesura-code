@@ -73,7 +73,7 @@ function EvidenceThumb({
         framed
         onImageExpand={onOpen}
       />
-      <figcaption className="line-clamp-2 text-[11px] leading-snug text-muted-foreground">
+      <figcaption className="line-clamp-2 text-search-label leading-snug text-muted-foreground">
         {evidence.source === "live" ? "Live" : "Test"}
         {evidence.viewport === null ? null : ` · ${evidence.viewport}`} — {evidence.caption}
       </figcaption>
@@ -108,7 +108,7 @@ function CriterionRow({
         </span>
       </div>
       {criterion.authoredTestsOnly || missingCapture ? (
-        <div className="flex flex-wrap gap-1.5 pl-4 text-[11px]">
+        <div className="flex flex-wrap gap-1.5 pl-4 text-search-label">
           {criterion.authoredTestsOnly ? (
             <span className="rounded-sm border border-border/70 px-1 text-muted-foreground">
               authored tests only
@@ -124,9 +124,9 @@ function CriterionRow({
       ) : null}
       {criterion.evidence.length === 0 || threadRef === null ? null : (
         <div className="flex gap-2 overflow-x-auto pb-1 pl-4">
-          {criterion.evidence.map((evidence, index) => (
+          {criterion.evidence.map((evidence) => (
             <EvidenceThumb
-              key={`${evidence.path}:${index}`}
+              key={`${evidence.path}\u0000${evidence.caption}`}
               evidence={evidence}
               threadRef={threadRef}
               onOpen={onOpenEvidence}
@@ -205,7 +205,7 @@ function TryIt({ tryIt }: { tryIt: FactoryReportTryIt }) {
             {tryIt.branch === null ? "Commits" : `Branch ${tryIt.branch}`}
             <span className="text-muted-foreground"> · {tryIt.commits.length} commits</span>
           </p>
-          <ul className="flex flex-col gap-0.5 font-mono text-[11px] text-muted-foreground">
+          <ul className="flex flex-col gap-0.5 font-mono text-search-label text-muted-foreground">
             {tryIt.commits.map((commit) => (
               <li key={commit.hash} className="truncate">
                 {commit.hash.slice(0, 10)} {commit.subject}
@@ -219,7 +219,7 @@ function TryIt({ tryIt }: { tryIt: FactoryReportTryIt }) {
       ) : (
         <div className="flex flex-col gap-1">
           <p className="font-medium text-foreground">Run the suites again</p>
-          <pre className="overflow-x-auto rounded-md bg-muted/60 p-2 font-mono text-[11px] leading-relaxed text-foreground/85">
+          <pre className="overflow-x-auto rounded-md bg-muted/60 p-2 font-mono text-search-label leading-relaxed text-foreground/85">
             {tryIt.commands
               .map((entry) =>
                 entry.cwd === null ? entry.command : `(cd ${entry.cwd} && ${entry.command})`,
