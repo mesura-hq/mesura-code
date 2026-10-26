@@ -2,6 +2,7 @@ import type {
   DictationJobId,
   DictationMode,
   DictationTarget,
+  DictationThreadTarget,
   EnvironmentId,
 } from "@t3tools/contracts";
 import { create } from "zustand";
@@ -23,6 +24,11 @@ export interface DictationRecordingSession {
   readonly level: number;
   /** When `level` was read; the strip shows the time recorded up to here. */
   readonly sampledAt: number;
+  /**
+   * The thread the recording belongs to, fixed when it started; `null` for a new-thread draft,
+   * whose recording goes to the composer that holds dictation when it stops.
+   */
+  readonly thread: DictationThreadTarget | null;
 }
 
 /** The last stopped job, which the mode keys keep steering until it leaves `transcribing`. */

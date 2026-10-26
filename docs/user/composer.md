@@ -190,6 +190,12 @@ Select the microphone beside Send to start recording. The strip above the compos
 elapsed time, a live waveform, and pause, restart, cancel and stop. Stop and transcribe ends the
 recording; the composer stays editable the whole time.
 
+A recording belongs to the chat you started it in. If you open another chat while you speak, the
+text still goes to the first chat, and Send mode sends it there. While it records, that chat's row in
+the sidebar shows a sound wave: select the wave to stop and deliver the recording in its current
+mode. The wave stays, in grey, until the text arrives. A recording started in a new thread goes to
+the chat where you stop it.
+
 The mode button cycles through three modes:
 
 - **Copy** copies the text to the clipboard and leaves the draft alone.
@@ -220,7 +226,7 @@ microphone, and the marker, modes and send-when-ready work as on the desktop.
 ### Dictate from another app on Hyprland
 
 With Mesura Code running, `mesura-code --dictation toggle` starts a recording, and running it again
-stops it. The transcript goes to the last chat you had open. To use it from any app, add a bind to
+stops it. The transcript goes to the chat you had open when the recording started. To use it from any app, add a bind to
 your Hyprland config, for example:
 
 ```

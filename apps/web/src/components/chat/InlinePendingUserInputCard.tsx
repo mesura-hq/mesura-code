@@ -165,6 +165,7 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
         );
       },
       question: { requestKey: key, questionId: question.id },
+      thread: { kind: "thread", environmentId, threadId },
     });
   };
 
