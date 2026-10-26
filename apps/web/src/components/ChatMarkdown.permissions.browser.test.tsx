@@ -131,7 +131,13 @@ vi.mock(import("@t3tools/client-runtime/change-request-links"), async (original)
 
 vi.mock(import("../hooks/useSettings"), async (original) => ({
   ...(await original()),
-  ensureClientSettingsHydrated: state.hydrate,
+  // Hydration resolves only once settings are ready: browser history re-awaits it while
+  // isClientSettingsHydrated() is false, so a resolved stub with no flag spins forever.
+  ensureClientSettingsHydrated: () =>
+    state.hydrate().then(() => {
+      state.hydrated = true;
+    }),
+  isClientSettingsHydrated: () => state.hydrated,
   useClientSettingsHydrated: () => state.hydrated,
   getClientSettings: () => ({ ...DEFAULT_CLIENT_SETTINGS, browserLinkTarget: state.preference }),
   useClientSettings: ((select?: (settings: typeof DEFAULT_CLIENT_SETTINGS) => unknown) =>

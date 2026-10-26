@@ -573,9 +573,15 @@ const countOf = (source: string, fragment: string) => source.split(tokens(fragme
 
 it("modal keys seam guard round 2: the sidebar numbers and jumps to the threads on screen", () => {
   const file = "apps/web/src/components/Sidebar.tsx";
+  // The show delay runs in the modifier leaf, so a quick chord re-renders only that leaf.
+  assert.include(
+    read("apps/web/src/components/sidebar/ThreadJumpHintModifierSync.tsx"),
+    tokens("const showJumpHints = useThreadJumpHintsVisible(shouldShowJumpHintsNow);"),
+    "the jump hints no longer wait for their show delay",
+  );
   assert.include(
     read(file),
-    tokens("const showJumpHints = useThreadJumpHintsVisible(jumpModifierHeld);"),
+    tokens("onChange={setShowJumpHints}"),
     "the jump targets no longer use the visibility state for jump hints",
   );
   // The labels and the number keys come from one list of the rows on screen
