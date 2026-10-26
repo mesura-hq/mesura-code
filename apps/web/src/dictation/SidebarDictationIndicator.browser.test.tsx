@@ -41,6 +41,7 @@ import {
 } from "./dictationController";
 import { createFakeMedia } from "./dictationMedia.testFixtures";
 import { useDictationSessionStore } from "./dictationSessionStore";
+import { useDictationWidgetActivityStore } from "./dictationWidgetState";
 import { setDictationMediaBackend } from "./recorder";
 import { sendWhenReadyKey, useSendWhenReadyStore } from "./sendWhenReady";
 import { SidebarDictationIndicator } from "./SidebarDictationIndicator";
@@ -79,6 +80,7 @@ async function setup(mode: DictationMode) {
       useComposerDraftStore.getState().clearComposerContent(recordingThread);
       useComposerDraftStore.getState().clearComposerContent(otherThread);
       useSendWhenReadyStore.setState({ drafts: {}, questions: {} });
+      useDictationWidgetActivityStore.setState({ transcribing: {}, unlisted: {} });
       setDictationMediaBackend(null);
     },
   };

@@ -78,6 +78,7 @@ import { dictationTargetLabel } from "./dictationTargetLabel";
 import {
   recordDictationDelivery,
   recordDictationFailure,
+  setDictationJobUnlisted,
   setTranscribingDictationJobs,
   useDictationWidgetActivityStore,
 } from "./dictationWidgetState";
@@ -557,6 +558,7 @@ function failToStart(jobId: DictationJobId, host: DictationSlotHost, cause: unkn
   const { lastJob } = useDictationSessionStore.getState();
   if (lastJob?.jobId === jobId) useDictationSessionStore.setState({ lastJob: null });
   const own = useOwnDictationJobsStore.getState().jobs[jobId];
+  if (own) setDictationJobUnlisted(own.environmentId, jobId, false);
   if (own) announceFailed(jobId, own);
   reportError("Dictation could not be sent for transcription", cause);
   if (useOwnDictationJobsStore.getState().jobs[jobId]?.mode === "clipboard") {
@@ -642,7 +644,9 @@ export async function stopDictation(): Promise<void> {
     mode: session.mode,
     createdAt: now,
     ...(composer.question ? { question: composer.question } : {}),
+    ...(composer.thread ? { thread: composer.thread } : {}),
   });
+  setDictationJobUnlisted(environmentId, jobId, true);
   lastJobRestored = true;
   useDictationSessionStore.setState({ lastJob: { environmentId, jobId } });
 
@@ -749,6 +753,7 @@ export function retryDictationJob(jobId: string): void {
     }
     const id = DictationJobId.make(jobId);
     updateOwnDictationJob(jobId, { notStarted: undefined });
+    setDictationJobUnlisted(own.environmentId, jobId, true);
     void startDictationJob(id, own, kept.audio, kept.durationMs).catch((cause: unknown) =>
       failToStart(id, slotHostFor(own), cause),
     );
@@ -870,6 +875,13 @@ function forgetVanishedLastJob(
   cursor: DictationJobsCursor,
 ) {
   latestJobLists.set(environmentId, jobs);
+  // A job is listed now, or a list proves the server lost it before it was ever listed.
+  const unlisted = useDictationWidgetActivityStore.getState().unlisted[environmentId] ?? [];
+  for (const jobId of unlisted) {
+    if (jobs.some((job) => job.id === jobId) || listProvesJobGone(jobStamps.get(jobId), cursor)) {
+      setDictationJobUnlisted(environmentId, jobId, false);
+    }
+  }
   reclaimReappearedJob(environmentId, jobs);
   const { lastJob } = useDictationSessionStore.getState();
   if (lastJob?.environmentId !== environmentId) return;

@@ -1,7 +1,6 @@
 import type { DictationTarget, ScopedThreadRef } from "@t3tools/contracts";
 
 import {
-  type DictationLastJob,
   type DictationRecordingSession,
   type OwnDictationJob,
   useDictationSessionStore,
@@ -26,9 +25,10 @@ function isThread(target: DictationTarget, thread: ScopedThreadRef) {
 
 interface DictationActivitySources {
   readonly session: DictationRecordingSession | null;
-  readonly lastJob: DictationLastJob | null;
   /** This device's jobs the server lists as transcribing in the thread's environment. */
   readonly transcribing: ReadonlyArray<string> | undefined;
+  /** This tab's stopped jobs in that environment that no server list has shown yet. */
+  readonly unlisted: ReadonlyArray<string> | undefined;
   readonly jobs: Readonly<Record<string, OwnDictationJob>>;
 }
 
@@ -36,22 +36,19 @@ function recordsInto(session: DictationRecordingSession | null, thread: ScopedTh
   return session?.thread != null && isThread(session.thread, thread);
 }
 
-/** The jobs still on their way include the last stopped one, uploading before the server lists it. */
 function threadDictationActivity(
   sources: DictationActivitySources,
   thread: ScopedThreadRef,
 ): ThreadDictationActivity {
   if (recordsInto(sources.session, thread)) return "recording";
-  const pending = new Set(sources.transcribing);
-  if (sources.lastJob?.environmentId === thread.environmentId) pending.add(sources.lastJob.jobId);
-  for (const jobId of pending) {
+  for (const jobId of [...(sources.transcribing ?? []), ...(sources.unlisted ?? [])]) {
     const own = sources.jobs[jobId];
     if (
       own &&
       !own.handled &&
       own.mode !== "clipboard" &&
       own.notStarted === undefined &&
-      isThread(own.target, thread)
+      isThread(own.thread ?? own.target, thread)
     ) {
       return "transcribing";
     }
@@ -60,12 +57,12 @@ function threadDictationActivity(
 }
 
 export function readThreadDictationActivity(thread: ScopedThreadRef): ThreadDictationActivity {
-  const { session, lastJob } = useDictationSessionStore.getState();
+  const activity = useDictationWidgetActivityStore.getState();
   return threadDictationActivity(
     {
-      session,
-      lastJob,
-      transcribing: useDictationWidgetActivityStore.getState().transcribing[thread.environmentId],
+      session: useDictationSessionStore.getState().session,
+      transcribing: activity.transcribing[thread.environmentId],
+      unlisted: activity.unlisted[thread.environmentId],
       jobs: useOwnDictationJobsStore.getState().jobs,
     },
     thread,
@@ -78,12 +75,12 @@ export function readThreadDictationActivity(thread: ScopedThreadRef): ThreadDict
  */
 export function useThreadDictationActivity(thread: ScopedThreadRef): ThreadDictationActivity {
   const recording = useDictationSessionStore((state) => recordsInto(state.session, thread));
-  const lastJob = useDictationSessionStore((state) => state.lastJob);
   const transcribing = useDictationWidgetActivityStore(
     (state) => state.transcribing[thread.environmentId],
   );
+  const unlisted = useDictationWidgetActivityStore((state) => state.unlisted[thread.environmentId]);
   const jobs = useOwnDictationJobsStore((state) => state.jobs);
   return recording
     ? "recording"
-    : threadDictationActivity({ session: null, lastJob, transcribing, jobs }, thread);
+    : threadDictationActivity({ session: null, transcribing, unlisted, jobs }, thread);
 }

@@ -74,6 +74,7 @@ import {
 import { setDictationMediaBackend } from "./recorder";
 import { sendWhenReadyKey, useSendWhenReadyStore, withDictatedPrefix } from "./sendWhenReady";
 import { readThreadDictationActivity } from "./threadDictationActivity";
+import { useDictationWidgetActivityStore } from "./dictationWidgetState";
 
 const JOB_CREATED_AT = Date.UTC(2026, 9, 3, 12);
 
@@ -117,6 +118,7 @@ async function setupBrowserFixture0() {
       useComposerDraftStore.getState().clearComposerContent(draftTarget);
       useComposerDraftStore.getState().clearComposerContent(otherDraftTarget);
       useSendWhenReadyStore.setState({ drafts: {}, questions: {} });
+      useDictationWidgetActivityStore.setState({ transcribing: {}, unlisted: {} });
       setDictationMediaBackend(null);
       Reflect.deleteProperty(navigator, "clipboard");
       vi.restoreAllMocks();
@@ -843,6 +845,68 @@ describe("the thread a recording belongs to", () => {
 
     deliverDictationJobs(environmentId, [completed(jobId, "inject", "listo")]);
     await settle();
+    expect(readThreadDictationActivity(draftTarget)).toBeNull();
+  });
+
+  it("stays transcribing on the thread of a question card the recording stopped in", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    await startDictation();
+    selectDictationMode("inject");
+    extraRegistrations.push(
+      registerDictationComposer({
+        environmentId,
+        target: { kind: "draft", draftId: "activity-question-draft" },
+        draftTarget: DraftId.make("activity-question-draft"),
+        insertSlot: () => true,
+        question: { requestKey: "activity-request", questionId: "question-1" },
+        thread: { kind: "thread", environmentId, threadId },
+      }),
+    );
+    expect(readThreadDictationActivity(draftTarget)).toBe("recording");
+    await stopDictation();
+
+    expect(readThreadDictationActivity(draftTarget)).toBe("transcribing");
+  });
+
+  it("keeps every stopped job transcribing until the server lists it, not only the last one", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    let openGate = () => undefined as void;
+    fixture.startGate = new Promise<void>((resolve) => {
+      openGate = resolve;
+    });
+
+    await startDictation();
+    selectDictationMode("inject");
+    const firstStop = stopDictation();
+    await vi.waitFor(() => expect(callsNamed("start")).toHaveLength(1));
+    const firstJobId = lastJobId();
+    unregister();
+    showThreadComposer(otherThreadId);
+    await startDictation();
+    selectDictationMode("inject");
+    const secondStop = stopDictation();
+    await vi.waitFor(() => expect(callsNamed("start")).toHaveLength(2));
+
+    expect(readThreadDictationActivity(draftTarget)).toBe("transcribing");
+    expect(readThreadDictationActivity(otherRef)).toBe("transcribing");
+    openGate();
+    await Promise.all([firstStop, secondStop]);
+    expect(readThreadDictationActivity(draftTarget)).toBe("transcribing");
+
+    deliverDictationJobs(environmentId, [completed(firstJobId, "inject", "primero")]);
+    await settle();
+    expect(readThreadDictationActivity(draftTarget)).toBeNull();
+    expect(readThreadDictationActivity(otherRef)).toBe("transcribing");
+  });
+
+  it("is idle again for a stopped job a later server run never listed", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    await recordAndStop("inject");
+    await vi.waitFor(() => expect(callsNamed("start")).toHaveLength(1));
+    expect(readThreadDictationActivity(draftTarget)).toBe("transcribing");
+    deliverDictationJobs(environmentId, [], { epoch: "server-run-2", revision: 1 });
     expect(readThreadDictationActivity(draftTarget)).toBeNull();
   });
 

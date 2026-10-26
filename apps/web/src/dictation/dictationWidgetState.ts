@@ -44,12 +44,19 @@ export interface DictationDelivery {
 interface DictationWidgetActivity {
   /** This device's jobs the server reports as transcribing, per environment. */
   readonly transcribing: Readonly<Record<string, ReadonlyArray<string>>>;
+  /**
+   * Jobs this tab stopped that no server list has shown yet (uploading, or started and not yet
+   * listed), per environment. Every one counts, not only the last: a second stop can come before
+   * the server lists the first job.
+   */
+  readonly unlisted: Readonly<Record<string, ReadonlyArray<string>>>;
   readonly delivered: DictationDelivery | null;
   readonly failed: DictationFailure | null;
 }
 
 export const useDictationWidgetActivityStore = create<DictationWidgetActivity>(() => ({
   transcribing: {},
+  unlisted: {},
   delivered: null,
   failed: null,
 }));
@@ -64,6 +71,21 @@ export function setTranscribingDictationJobs(
   }
   useDictationWidgetActivityStore.setState((state) => ({
     transcribing: { ...state.transcribing, [environmentId]: jobIds },
+  }));
+}
+
+export function setDictationJobUnlisted(
+  environmentId: string,
+  jobId: string,
+  unlisted: boolean,
+): void {
+  const current = useDictationWidgetActivityStore.getState().unlisted[environmentId] ?? [];
+  if (current.includes(jobId) === unlisted) return;
+  useDictationWidgetActivityStore.setState((state) => ({
+    unlisted: {
+      ...state.unlisted,
+      [environmentId]: unlisted ? [...current, jobId] : current.filter((id) => id !== jobId),
+    },
   }));
 }
 

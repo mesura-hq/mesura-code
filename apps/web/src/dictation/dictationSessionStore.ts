@@ -109,6 +109,8 @@ export interface OwnDictationJob {
   readonly notStarted?: string | undefined;
   /** Set when the recording stopped in a question card: the marker is in that answer. */
   readonly question?: DictationQuestionAnswer;
+  /** The server thread the marker belongs to, which a question card's draft target does not name. */
+  readonly thread?: DictationThreadTarget;
 }
 
 /** An open question card's typed answer, which takes the marker of a recording stopped in it. */
