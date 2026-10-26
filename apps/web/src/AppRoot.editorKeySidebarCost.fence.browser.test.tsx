@@ -862,7 +862,8 @@ function rowStatusLabel(rowTitle: string, label: string): HTMLElement {
     ),
   );
   expect(slot, `${rowTitle} shows ${label}; row reads ${row!.textContent}`).toBeDefined();
-  return slot!;
+  // A working label's text sits in the Working section's band (workingSweep.tsx).
+  return slot!.closest<HTMLElement>("[data-working-sweep]")?.parentElement ?? slot!;
 }
 
 /** The opacity a reader sees: the product of every ancestor's, up to the row's list item. */
@@ -878,7 +879,7 @@ function effectiveOpacity(element: HTMLElement): number {
 // Phase 3 of the thread attention cycle: no witness could produce a live Working row, so this
 // mounts the real sidebar at Pixel 7 size with one running and one waiting thread.
 describe("thread attention: Working and Waiting rows at phone width", () => {
-  it("sidebar attention row spec: Working keeps its timer, has no icon and looks like Waiting at Pixel 7", async () => {
+  it("sidebar attention row spec: Working keeps its timer, has no icon and reads azure apart from Waiting at Pixel 7", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
     await page.viewport(412, 915);
 
@@ -951,7 +952,9 @@ describe("thread attention: Working and Waiting rows at phone width", () => {
         opacity: effectiveOpacity(element),
       };
     };
-    expect(look(working)).toEqual(look(waiting));
-    expect(look(working).opacity, "quiet, not full strength").toBeLessThan(1);
+    // The developer's working-state prototype (2026-10-26) gave Working its azure label.
+    expect(look(working).color, "Working reads apart from Waiting").not.toBe(look(waiting).color);
+    expect(look(working).opacity, "Working at full strength").toBe(1);
+    expect(look(waiting).opacity, "Waiting stays quiet").toBeLessThan(1);
   });
 });

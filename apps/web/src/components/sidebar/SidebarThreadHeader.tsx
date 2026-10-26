@@ -77,6 +77,8 @@ export function SidebarThreadHeader({
           onKeyDown={onSearchKeyDown}
           placeholder="Search"
           aria-label="Search threads"
+          // Mesura: Down from the empty field enters the thread list (sidebarThreadViewport.ts).
+          data-mesura-thread-search=""
           role="combobox"
           aria-autocomplete="list"
           aria-expanded={resultsVisible}

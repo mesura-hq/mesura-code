@@ -12,6 +12,7 @@ import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
 import { presentThreadShell } from "./models.ts";
+import { isThreadWorking } from "./threadInbox.ts";
 import { v2ThreadShell } from "./orchestrationV2TestFixtures.ts";
 
 const environmentId = EnvironmentId.make("environment-thread-attention");
@@ -55,6 +56,19 @@ describe("thread attention: what holds a completed run at Waiting", () => {
 
   it("thread attention: a running Factory run holds a completed run at idle", () => {
     expect(runtimeStatusOf({ ...completedRun, factoryRun: runningFactoryRun })).toBe("idle");
+  });
+
+  it("thread attention: a coordinator idle while its Factory run goes on counts as working", () => {
+    const coordinator = presentThreadShell(environmentId, {
+      ...completedRun,
+      factoryRun: runningFactoryRun,
+    });
+    expect(isThreadWorking(coordinator)).toBe(true);
+    const finished = presentThreadShell(environmentId, {
+      ...completedRun,
+      factoryRun: { ...runningFactoryRun, status: "done" },
+    });
+    expect(isThreadWorking(finished)).toBe(false);
   });
 
   it("thread attention: the end of the last pending command releases the run to completed", () => {

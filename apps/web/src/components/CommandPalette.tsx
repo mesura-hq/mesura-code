@@ -95,6 +95,7 @@ import {
   FolderGit2Icon,
   FolderIcon,
   FolderPlusIcon,
+  ListCollapseIcon,
   MessageSquareDashedIcon,
   LinkIcon,
   MessageSquareIcon,
@@ -615,6 +616,7 @@ function OpenCommandPaletteDialog(props: {
   const routeThreadRef =
     paletteRouteTarget?.kind === "server" ? paletteRouteTarget.threadRef : null;
   const isMobileViewport = useIsMobile();
+  const workingSectionEnabled = useClientSettings((s) => s.sidebarWorkingShelfEnabled);
   const projects = useProjects();
   const referenceThreadRef =
     pathname === "/pull-requests"
@@ -1757,6 +1759,20 @@ function OpenCommandPaletteDialog(props: {
       shortcutCommand: "hosts.peek",
       run: async () => {
         requestSidebarDockPin("hosts");
+      },
+    });
+
+  // Fork: the sidebar's Working section under Search (sidebar/workingSection.ts).
+  if (workingSectionEnabled)
+    actionItems.push({
+      kind: "action",
+      value: "action:toggle-working-section",
+      searchTerms: ["working", "working threads", "busy", "running", "collapse", "expand"],
+      title: "Toggle Working section",
+      icon: <ListCollapseIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "sidebar.toggleWorking",
+      run: async () => {
+        runRegisteredCommand("sidebar.toggleWorking");
       },
     });
 

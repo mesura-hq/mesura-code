@@ -89,9 +89,11 @@ import {
 import {
   resolveSidebarThreadAttention,
   sidebarThreadAttentionLook,
+  sidebarThreadAttentionSweeps,
   threadHasOpenPullRequest,
 } from "../sidebarThreadAttention";
 import { resolveLocalCheckoutBranchMismatch } from "../BranchToolbar.logic";
+import { WorkingSweepText } from "./workingSweep";
 import {
   ThreadPullRequestBadgeControl,
   ThreadPullRequestsMiniList,
@@ -482,6 +484,14 @@ export const SortableThreadRow = memo(function SortableThreadRow(
     rowProps.thread;
   // Keyed by variant so a card/slim switch remounts the row.
   return <SidebarThreadRow key={rowProps.variant} {...rowProps} thread={thread} sortable={bag} />;
+});
+/** Mesura: a row outside the sortable list, for the Working section (SidebarWorkingSection.tsx). */
+export const StaticThreadRow = memo(function StaticThreadRow(
+  props: Omit<SidebarThreadRowProps, "sortable">,
+) {
+  const thread =
+    useThreadShell(scopeThreadRef(props.thread.environmentId, props.thread.id)) ?? props.thread;
+  return <SidebarThreadRow key={props.variant} {...props} thread={thread} />;
 });
 export type SidebarSweepAction = "settle" | "unsettle" | "unsnooze";
 const dropVerbBadge: Record<SidebarDropVerb, ReactNode> = {
@@ -1352,7 +1362,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                           {/* Not a live region: a collapsed sidebar is inert, so
                             BackgroundThreadAnnouncer and the open thread's
                             timeline speak status changes instead. */}
-                          {topStatus.label}
+                          {sidebarThreadAttentionSweeps(topStatus.kind) ? (
+                            <WorkingSweepText text={topStatus.label} />
+                          ) : (
+                            topStatus.label
+                          )}
                           {topStatus.kind === "working" ? (
                             <span aria-hidden>
                               <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />

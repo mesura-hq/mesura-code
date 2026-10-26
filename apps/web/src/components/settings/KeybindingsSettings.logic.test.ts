@@ -87,6 +87,16 @@ describe("KeybindingsSettings.logic", () => {
     );
   });
 
+  // Mesura: the Working section's toggle is a rebindable Navigation row on Alt+Z.
+  it("lists the Working section toggle under Navigation with its Alt+Z default", () => {
+    const rows = filterKeybindingRows(buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS), "working");
+    expect(rows).toContainEqual(
+      expect.objectContaining({ command: "sidebar.toggleWorking", key: "alt+z", conflicts: [] }),
+    );
+    const navigation = groupKeybindingRows(rows).find((group) => group.id === "navigation");
+    expect(navigation?.rows.map((row) => row.command)).toContain("sidebar.toggleWorking");
+  });
+
   // Mesura: the tenth thread jump lists after the ninth, in the rows and the choices.
   it("lists the thread jumps in number order, the tenth after the ninth", () => {
     const jumpCommands = [

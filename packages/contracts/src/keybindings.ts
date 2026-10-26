@@ -178,6 +178,9 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "usage.peek",
   // Held like usage.peek, and opens the sidebar's Hosts dock instead.
   "hosts.peek",
+  // Collapses or expands the sidebar's Working section. The rename warning below applies to this
+  // id too.
+  "sidebar.toggleWorking",
   "chat.new",
   "chat.newLocal",
   "chat.newWithoutProject",
