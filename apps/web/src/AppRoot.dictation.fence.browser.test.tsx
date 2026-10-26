@@ -53,6 +53,7 @@ import {
 import * as Schema from "effect/Schema";
 import { findDictationSlots, formatDictationSlot } from "@t3tools/shared/dictationSlots";
 import type { Editor } from "@tiptap/core";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { AllSelection, NodeSelection, TextSelection } from "@tiptap/pm/state";
 import type { OrchestrationV2ThreadProjection } from "@t3tools/contracts";
 import type { AppRouter } from "./router";
@@ -1249,15 +1250,18 @@ function sendGlyphShown(): boolean {
   return buttonLabelled(CANCEL_SEND) !== undefined;
 }
 
-/** Selects a marker (the first, or `jobId`'s) as a node and deletes it with Backspace. */
+/**
+ * Selects a marker (the first, or `jobId`'s) as a node and deletes it with Backspace, both in one
+ * task. The marker drop focuses the editor after the marker one frame later; a frame between the
+ * selection and the key (CI's runner) moved the caret, and Backspace deleted the space instead.
+ */
 async function deleteMarkerByHand(jobId?: string) {
   const editor = tiptapEditor();
+  const isTheMarker = (node: ProseMirrorNode) =>
+    node.isAtom && node.attrs.kind === "dictation" && (!jobId || node.attrs.contextId === jobId);
   let markerPosition: number | undefined;
   editor.state.doc.descendants((node, position) => {
-    const isMarker = node.isAtom && node.attrs.kind === "dictation";
-    if (markerPosition === undefined && isMarker && (!jobId || node.attrs.contextId === jobId)) {
-      markerPosition = position;
-    }
+    if (markerPosition === undefined && isTheMarker(node)) markerPosition = position;
   });
   expect(markerPosition, "the draft holds a marker").toBeDefined();
   await act(async () => {
@@ -1265,8 +1269,20 @@ async function deleteMarkerByHand(jobId?: string) {
     editor.view.dispatch(
       editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, markerPosition!)),
     );
+    editor.view.dom.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Backspace",
+        code: "Backspace",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
   });
-  await userEvent.keyboard("{Backspace}");
+  let markerLeft = true;
+  editor.state.doc.descendants((node) => {
+    if (isTheMarker(node)) markerLeft = false;
+  });
+  expect(markerLeft, "Backspace deleted the selected marker").toBe(true);
   await settle();
 }
 
