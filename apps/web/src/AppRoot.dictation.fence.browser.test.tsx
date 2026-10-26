@@ -437,8 +437,16 @@ async function mountApp(
     path: "/elsewhere",
     component: () => <p>Elsewhere</p>,
   });
+  // Another thread, whose composer takes the screen.
+  const other = createRoute({
+    getParentRoute: () => route,
+    path: "/other",
+    component: () => (
+      <ChatView environmentId={environmentId} threadId={offScreenThreadId} routeKind="server" />
+    ),
+  });
   router = createRouter({
-    routeTree: route.addChildren([index, elsewhere]),
+    routeTree: route.addChildren([index, elsewhere, other]),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
   await router.load();
@@ -492,6 +500,29 @@ async function navigateAwayFromThread() {
   });
   await settle();
   expect(container.querySelector('[data-testid="composer-editor"]')).toBeNull();
+}
+
+/** Opens the other thread: its composer mounts and takes the screen. */
+async function navigateToOtherThread() {
+  publishFenceThreadProjection(
+    makeFenceThreadProjection(
+      makeFenceThreadShell({
+        id: offScreenThreadId,
+        environmentId,
+        projectId: ProjectId.make(FENCE_PROJECT_ID),
+        title: "Other thread",
+        createdAt: now,
+      }),
+    ),
+    environmentId,
+  );
+  await act(async () => {
+    await router!.navigate({ to: "/other" as never });
+  });
+  await settle();
+  await vi.waitFor(() =>
+    expect(container.querySelector('[data-testid="composer-editor"]')).not.toBeNull(),
+  );
 }
 
 /** Lets promise chains (getUserMedia, Blob reads, upload, start) settle inside React's act. */
@@ -2284,5 +2315,89 @@ describe("dictation phase 8 guards", () => {
 
     await stopRecordingFromStrip();
     expect(document.querySelector(".mesura-dictation-strip")).toBeNull();
+  });
+});
+
+// A recording belongs to the thread whose composer owned dictation when it started. Thread B's
+// composer is the other route's ChatView; thread A is the index route's.
+describe("dictation stays on its thread fence", () => {
+  it("dictation stays on its thread AC1: a recording started in thread A and stopped from thread B's strip fills thread A's draft", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Draft A");
+    useComposerDraftStore.getState().setPrompt(offScreenTarget, "Draft B");
+    await mountApp();
+    await startRecordingFromMicrophone();
+    await pressKey(ALT_I);
+    await navigateToOtherThread();
+    await stopRecordingFromStrip();
+
+    const started = startedJob(0).input;
+    expect(started.target).toEqual({ kind: "thread", environmentId, threadId });
+    expect(slotsIn(promptOf(onScreenTarget)).map((slot) => slot.jobId)).toEqual([started.jobId]);
+    expect(promptOf(offScreenTarget)).toBe("Draft B");
+
+    await pushJobs([job(started.jobId, { status: "completed", mode: "inject", text: "hola" })]);
+    expect(squash(promptOf(onScreenTarget))).toBe("Draft A hola");
+    expect(promptOf(offScreenTarget)).toBe("Draft B");
+    expect(turnStarts()).toHaveLength(0);
+  });
+
+  it("dictation stays on its thread AC1: the toggle key stops it into thread A after a page with no thread and thread B", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Draft A");
+    await mountApp();
+    await startRecordingFromMicrophone();
+    await pressKey(ALT_I);
+    await navigateAwayFromThread();
+    await navigateToOtherThread();
+    await pressKey(TOGGLE);
+
+    const started = startedJob(0).input;
+    expect(started.target).toEqual({ kind: "thread", environmentId, threadId });
+    expect(slotsIn(promptOf(onScreenTarget))).toHaveLength(1);
+    expect(slotsIn(promptOf(offScreenTarget))).toHaveLength(0);
+  });
+
+  it("dictation stays on its thread AC2: a send-mode stop on thread B's screen sends in thread A", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Draft A");
+    useComposerDraftStore.getState().setPrompt(offScreenTarget, "Draft B");
+    await mountApp();
+    await startRecordingFromMicrophone();
+    await navigateToOtherThread();
+    await stopRecordingFromStrip();
+    const { jobId, mode } = startedJob(0).input;
+    expect(mode).toBe("submit");
+
+    await pushJobs([job(jobId, { status: "completed", mode: "submit", text: "y envíalo" })]);
+    const turns = turnStarts();
+    expect(turns).toHaveLength(1);
+    expect(turns[0]!.input.threadId).toBe(threadId);
+    expect(squash(turns[0]!.input.message.text)).toBe("[voiced] Draft A y envíalo");
+    expect(promptOf(offScreenTarget)).toBe("Draft B");
+  });
+
+  it("dictation stays on its thread AC2: Send pressed on thread A's pending marker sends in A while thread B is on screen", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    useComposerDraftStore.getState().setPrompt(onScreenTarget, "Draft A");
+    useComposerDraftStore.getState().setPrompt(offScreenTarget, "Draft B");
+    await mountApp();
+    await recordInMode("insert");
+    const { jobId } = startedJob(0).input;
+    await pushJobs([job(jobId, { status: "transcribing", mode: "inject" })]);
+    await click(requireButton("Submit message"));
+    expect(sendWhenReadyBannerShown()).toBe(true);
+    await navigateToOtherThread();
+
+    await pushJobs([job(jobId, { status: "completed", mode: "inject", text: "hola mundo" })]);
+    const turns = turnStarts();
+    expect(turns).toHaveLength(1);
+    expect(turns[0]!.input.threadId).toBe(threadId);
+    expect(squash(turns[0]!.input.message.text)).toBe("[voiced] Draft A hola mundo");
+    expect(promptOf(offScreenTarget)).toBe("Draft B");
   });
 });

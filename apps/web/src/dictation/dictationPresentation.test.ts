@@ -17,6 +17,7 @@ const session: DictationRecordingSession = {
   runningSince: 10_000,
   level: 0.4,
   sampledAt: 15_400,
+  thread: null,
 };
 
 it("reads a running recording as recording and a paused one as paused", () => {

@@ -44,6 +44,7 @@ vi.mock("@t3tools/client-runtime/state/attachments", async (importOriginal) => (
 import { toastManager } from "~/components/ui/toast";
 import {
   COMPOSER_DRAFT_STORAGE_KEY,
+  DraftId,
   partializeComposerDraftStoreState,
   persistComposerDrafts,
   resolveComposerDraftKey,
@@ -52,6 +53,7 @@ import {
 import { dictationEnvironment } from "~/state/dictation";
 import {
   cancelDictation,
+  currentDictationTarget,
   deliverDictationJobs,
   registerDictationComposer,
   restartDictation,
@@ -70,15 +72,21 @@ import {
   useOwnDictationJobsStore,
 } from "./dictationSessionStore";
 import { setDictationMediaBackend } from "./recorder";
-import { withDictatedPrefix } from "./sendWhenReady";
+import { sendWhenReadyKey, useSendWhenReadyStore, withDictatedPrefix } from "./sendWhenReady";
+import { readThreadDictationActivity } from "./threadDictationActivity";
+import { useDictationWidgetActivityStore } from "./dictationWidgetState";
 
 const JOB_CREATED_AT = Date.UTC(2026, 9, 3, 12);
 
 const environmentId = EnvironmentId.make("dictation-controller-environment");
 const threadId = ThreadId.make("dictation-controller-thread");
 const draftTarget = scopeThreadRef(environmentId, threadId);
+const otherThreadId = ThreadId.make("dictation-controller-other-thread");
+const otherDraftTarget = scopeThreadRef(environmentId, otherThreadId);
 let media: ReturnType<typeof createFakeMedia>;
 let unregister: () => void;
+/** Composers a test registered beside the fixture's own, released when the test ends. */
+const extraRegistrations: Array<() => void> = [];
 let writeText: ReturnType<typeof vi.fn<(text: string) => Promise<void>>>;
 
 async function setupBrowserFixture0() {
@@ -104,9 +112,13 @@ async function setupBrowserFixture0() {
   return {
     async [Symbol.asyncDispose]() {
       cancelDictation();
+      for (const release of extraRegistrations.splice(0)) release();
       unregister();
       useDictationSessionStore.setState({ session: null, lastJob: null });
       useComposerDraftStore.getState().clearComposerContent(draftTarget);
+      useComposerDraftStore.getState().clearComposerContent(otherDraftTarget);
+      useSendWhenReadyStore.setState({ drafts: {}, questions: {} });
+      useDictationWidgetActivityStore.setState({ transcribing: {}, unlisted: {} });
       setDictationMediaBackend(null);
       Reflect.deleteProperty(navigator, "clipboard");
       vi.restoreAllMocks();
@@ -114,8 +126,25 @@ async function setupBrowserFixture0() {
   };
 }
 
-const prompt = () => useComposerDraftStore.getState().getComposerDraft(draftTarget)?.prompt ?? "";
+const promptOf = (target: typeof draftTarget) =>
+  useComposerDraftStore.getState().getComposerDraft(target)?.prompt ?? "";
+const prompt = () => promptOf(draftTarget);
 const markers = () => findDictationSlots(prompt()).map((slot) => slot.jobId);
+
+/** Mounts a thread's composer, as navigating to that thread does. */
+function showThreadComposer(
+  id: ThreadId,
+  insertSlot: ((slot: string) => boolean) | null = null,
+): () => void {
+  const release = registerDictationComposer({
+    environmentId,
+    target: { kind: "thread", environmentId, threadId: id },
+    draftTarget: scopeThreadRef(environmentId, id),
+    insertSlot,
+  });
+  extraRegistrations.push(release);
+  return release;
+}
 const callsNamed = (name: string) =>
   fixture.calls.filter((call) => call.name === name).map((call) => call.value);
 const lastJobId = () => useDictationSessionStore.getState().lastJob!.jobId;
@@ -661,5 +690,235 @@ describe("a last job the server no longer knows", () => {
       revision: 1,
     });
     expect(isDictationLive()).toBe(true);
+  });
+});
+
+describe("a recording stays on the thread it started in", () => {
+  it("drops its marker into the starting thread's draft after another thread's composer took dictation", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    useComposerDraftStore.getState().setPrompt(otherDraftTarget, "Other");
+    const insertIntoOther = vi.fn((_slot: string) => true);
+
+    await startDictation();
+    selectDictationMode("inject");
+    // Navigating to the other thread: the first composer unmounts, the other one mounts.
+    unregister();
+    showThreadComposer(otherThreadId, insertIntoOther);
+    expect(currentDictationTarget()).toEqual({ kind: "thread", environmentId, threadId });
+    await stopDictation();
+    const jobId = lastJobId();
+
+    expect(markers()).toEqual([jobId]);
+    expect(promptOf(otherDraftTarget)).toBe("Other");
+    expect(insertIntoOther).not.toHaveBeenCalled();
+    expect(callsNamed("start")[0]).toMatchObject({
+      input: { target: { kind: "thread", environmentId, threadId } },
+    });
+    deliverDictationJobs(environmentId, [completed(jobId, "inject", "hola")]);
+    await settle();
+    expect(prompt()).toBe("Draft hola");
+    expect(promptOf(otherDraftTarget)).toBe("Other");
+  });
+
+  it("drops its marker at the starting thread's caret when that thread is shown again", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    const insertIntoReturned = vi.fn((_slot: string) => true);
+
+    await startDictation();
+    unregister();
+    const releaseOther = showThreadComposer(otherThreadId);
+    releaseOther();
+    showThreadComposer(threadId, insertIntoReturned);
+    await stopDictation();
+
+    expect(insertIntoReturned).toHaveBeenCalledExactlyOnceWith(
+      expect.stringContaining(lastJobId()),
+    );
+    expect(promptOf(otherDraftTarget)).toBe("");
+  });
+
+  it("arms the starting thread's draft in send mode, not the draft of the thread on screen", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    await startDictation();
+    unregister();
+    showThreadComposer(otherThreadId);
+    await stopDictation();
+
+    const drafts = useSendWhenReadyStore.getState().drafts;
+    expect(drafts[sendWhenReadyKey(draftTarget)]?.armed).toBe(true);
+    expect(drafts[sendWhenReadyKey(otherDraftTarget)]?.armed ?? false).toBe(false);
+    expect(markers()).toEqual([lastJobId()]);
+  });
+
+  it("does not move into another thread's question card", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    const insertIntoQuestion = vi.fn((_slot: string) => true);
+
+    await startDictation();
+    selectDictationMode("inject");
+    unregister();
+    showThreadComposer(otherThreadId);
+    extraRegistrations.push(
+      registerDictationComposer({
+        environmentId,
+        target: { kind: "draft", draftId: "other-thread-question-draft" },
+        draftTarget: DraftId.make("other-thread-question-draft"),
+        insertSlot: insertIntoQuestion,
+        question: { requestKey: "other-thread-request", questionId: "question-1" },
+        thread: { kind: "thread", environmentId, threadId: otherThreadId },
+      }),
+    );
+    await stopDictation();
+
+    expect(insertIntoQuestion).not.toHaveBeenCalled();
+    expect(markers()).toEqual([lastJobId()]);
+  });
+
+  it("takes a question card of its own thread while that card has focus", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    const insertIntoQuestion = vi.fn((_slot: string) => true);
+
+    await startDictation();
+    extraRegistrations.push(
+      registerDictationComposer({
+        environmentId,
+        target: { kind: "draft", draftId: "own-thread-question-draft" },
+        draftTarget: DraftId.make("own-thread-question-draft"),
+        insertSlot: insertIntoQuestion,
+        question: { requestKey: "own-thread-request", questionId: "question-1" },
+        thread: { kind: "thread", environmentId, threadId },
+      }),
+    );
+    await stopDictation();
+
+    expect(insertIntoQuestion).toHaveBeenCalledOnce();
+    expect(markers()).toEqual([]);
+  });
+
+  it("keeps following the composer when it started in a new-thread draft, as before", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    const newThreadDraft = DraftId.make("dictation-controller-new-thread");
+    unregister();
+    const releaseDraft = registerDictationComposer({
+      environmentId,
+      target: { kind: "draft", draftId: newThreadDraft },
+      draftTarget: newThreadDraft,
+      insertSlot: null,
+    });
+    extraRegistrations.push(releaseDraft);
+
+    await startDictation();
+    releaseDraft();
+    showThreadComposer(otherThreadId);
+    await stopDictation();
+
+    expect(findDictationSlots(promptOf(otherDraftTarget)).map((slot) => slot.jobId)).toEqual([
+      lastJobId(),
+    ]);
+    useComposerDraftStore.getState().clearComposerContent(newThreadDraft);
+  });
+});
+
+describe("the thread a recording belongs to", () => {
+  const otherRef = otherDraftTarget;
+
+  it("is recording while the recording runs and transcribing until its job completes, on that thread only", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    expect(readThreadDictationActivity(draftTarget)).toBeNull();
+
+    await startDictation();
+    selectDictationMode("inject");
+    unregister();
+    showThreadComposer(otherThreadId);
+    expect(readThreadDictationActivity(draftTarget)).toBe("recording");
+    expect(readThreadDictationActivity(otherRef)).toBeNull();
+
+    await stopDictation();
+    const jobId = lastJobId();
+    expect(readThreadDictationActivity(draftTarget)).toBe("transcribing");
+    deliverDictationJobs(environmentId, [
+      { ...completed(jobId, "inject", ""), status: "transcribing", text: undefined },
+    ]);
+    expect(readThreadDictationActivity(draftTarget)).toBe("transcribing");
+    expect(readThreadDictationActivity(otherRef)).toBeNull();
+
+    deliverDictationJobs(environmentId, [completed(jobId, "inject", "listo")]);
+    await settle();
+    expect(readThreadDictationActivity(draftTarget)).toBeNull();
+  });
+
+  it("stays transcribing on the thread of a question card the recording stopped in", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    await startDictation();
+    selectDictationMode("inject");
+    extraRegistrations.push(
+      registerDictationComposer({
+        environmentId,
+        target: { kind: "draft", draftId: "activity-question-draft" },
+        draftTarget: DraftId.make("activity-question-draft"),
+        insertSlot: () => true,
+        question: { requestKey: "activity-request", questionId: "question-1" },
+        thread: { kind: "thread", environmentId, threadId },
+      }),
+    );
+    expect(readThreadDictationActivity(draftTarget)).toBe("recording");
+    await stopDictation();
+
+    expect(readThreadDictationActivity(draftTarget)).toBe("transcribing");
+  });
+
+  it("keeps every stopped job transcribing until the server lists it, not only the last one", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    let openGate = () => undefined as void;
+    fixture.startGate = new Promise<void>((resolve) => {
+      openGate = resolve;
+    });
+
+    await startDictation();
+    selectDictationMode("inject");
+    const firstStop = stopDictation();
+    await vi.waitFor(() => expect(callsNamed("start")).toHaveLength(1));
+    const firstJobId = lastJobId();
+    unregister();
+    showThreadComposer(otherThreadId);
+    await startDictation();
+    selectDictationMode("inject");
+    const secondStop = stopDictation();
+    await vi.waitFor(() => expect(callsNamed("start")).toHaveLength(2));
+
+    expect(readThreadDictationActivity(draftTarget)).toBe("transcribing");
+    expect(readThreadDictationActivity(otherRef)).toBe("transcribing");
+    openGate();
+    await Promise.all([firstStop, secondStop]);
+    expect(readThreadDictationActivity(draftTarget)).toBe("transcribing");
+
+    deliverDictationJobs(environmentId, [completed(firstJobId, "inject", "primero")]);
+    await settle();
+    expect(readThreadDictationActivity(draftTarget)).toBeNull();
+    expect(readThreadDictationActivity(otherRef)).toBe("transcribing");
+  });
+
+  it("is idle again for a stopped job a later server run never listed", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    await recordAndStop("inject");
+    await vi.waitFor(() => expect(callsNamed("start")).toHaveLength(1));
+    expect(readThreadDictationActivity(draftTarget)).toBe("transcribing");
+    deliverDictationJobs(environmentId, [], { epoch: "server-run-2", revision: 1 });
+    expect(readThreadDictationActivity(draftTarget)).toBeNull();
+  });
+
+  it("is idle again once the recording is cancelled, or stopped into save mode", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+
+    await startDictation();
+    expect(readThreadDictationActivity(draftTarget)).toBe("recording");
+    cancelDictation();
+    expect(readThreadDictationActivity(draftTarget)).toBeNull();
+
+    await recordAndStop("clipboard");
+    expect(readThreadDictationActivity(draftTarget)).toBeNull();
   });
 });

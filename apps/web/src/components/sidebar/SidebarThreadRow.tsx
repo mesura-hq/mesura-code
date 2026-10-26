@@ -115,6 +115,7 @@ import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } f
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { MiddleTruncate } from "../ui/middle-truncate";
 import { useThreadHasUnsentDraft } from "../../composerDraftStore";
+import { SidebarDictationIndicator } from "../../dictation/SidebarDictationIndicator";
 
 // The fields thread rows show. Provider status pushes refresh `checkedAt`,
 // status and auth on every provider; leaving those out keeps each
@@ -1103,6 +1104,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               {props.project ? <ProjectFavicon project={props.project} className="size-4" /> : null}
             </span>
             {draftIndicator}
+            <SidebarDictationIndicator threadRef={threadRef} />
             {title}
             {pinIndicator}
             {terminalStatusIcon}
@@ -1406,6 +1408,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               {props.sweepAction !== null ? dragDestination : null}
             </div>
             <div className="mt-1 flex min-w-0">
+              <SidebarDictationIndicator threadRef={threadRef} className="me-1.5" />
               {title}
               {isRegeneratingTitle ? (
                 <span role="status" className="sr-only">
