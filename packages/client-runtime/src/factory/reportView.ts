@@ -297,8 +297,8 @@ function phaseSteps(state: FactoryRunState, index: number): ReadonlyArray<Factor
 
 /**
  * The branch, the phase commits and the commands that prove the run, from the
- * record. The gate's format, lint, typecheck and unused-export runs are the
- * repository's own and are left to its docs; the suites are what this run added.
+ * record: every command of each phase's last harden check, deterministic
+ * checks included, with the directory it ran in, once each.
  */
 export function deriveFactoryReportTryIt(state: FactoryRunState): FactoryReportTryIt {
   const seen = new Set<string>();
@@ -306,7 +306,6 @@ export function deriveFactoryReportTryIt(state: FactoryRunState): FactoryReportT
   for (const phase of state.phases) {
     const harden = phase.checks.findLast((check) => check.stage === "harden");
     for (const result of harden?.results ?? []) {
-      if (/mesura-checks\.ts/.test(result.command)) continue;
       const key = `${result.cwd ?? ""}\u0000${result.command}`;
       if (seen.has(key)) continue;
       seen.add(key);

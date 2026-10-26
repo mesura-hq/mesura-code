@@ -72,6 +72,7 @@ function EvidenceThumb({
         maxHeightRem={6}
         framed
         onImageExpand={onOpen}
+        onVideoExpand={onOpen}
       />
       <figcaption className="line-clamp-2 text-search-label leading-snug text-muted-foreground">
         {evidence.source === "live" ? "Live" : "Test"}

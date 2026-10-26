@@ -12,6 +12,7 @@ import eventsJsonl from "../../../shared/src/fixtures/factory-events.v1.jsonl?ra
 import reportMarkdown from "../../../shared/src/fixtures/invoice-csv-export.report.md?raw";
 import {
   deriveFactoryReportCard,
+  deriveFactoryReportTryIt,
   deriveFactoryReportView,
   FACTORY_REPORT_HEADINGS,
 } from "./reportView.ts";
@@ -472,5 +473,43 @@ describe("phase11 report view review regressions", () => {
     });
 
     expect(card.degraded).toBe("1 degraded phase");
+  });
+});
+
+describe("report view check it yourself", () => {
+  const line = (event: Record<string, unknown>) => JSON.stringify({ v: 1, ...event });
+
+  it("keeps every command of the last harden check, deterministic checks included, with its directory", () => {
+    const state = foldFactoryRunTestLines([
+      line({
+        at: "2026-10-24T07:00:00.000Z",
+        type: "run.started",
+        runId: "checks",
+        request: "Checks",
+        phases: [{ index: 1, title: "One", acceptance: ["It works."] }],
+      }),
+      line({
+        at: "2026-10-24T07:10:00.000Z",
+        type: "checks.recorded",
+        phase: 1,
+        stage: "harden",
+        results: [{ command: "node scripts/mesura-checks.ts fmt 1111111111", exit: 1 }],
+      }),
+      line({
+        at: "2026-10-24T07:20:00.000Z",
+        type: "checks.recorded",
+        phase: 1,
+        stage: "harden",
+        results: [
+          { command: "node scripts/mesura-checks.ts fmt 749bfacda7", exit: 0, cwd: "/srv/repo" },
+          { command: "node scripts/mesura-checks.ts lint 749bfacda7", exit: 0, cwd: "/srv/repo" },
+        ],
+      }),
+    ]);
+
+    expect(deriveFactoryReportTryIt(state).commands).toEqual([
+      { command: "node scripts/mesura-checks.ts fmt 749bfacda7", cwd: "/srv/repo" },
+      { command: "node scripts/mesura-checks.ts lint 749bfacda7", cwd: "/srv/repo" },
+    ]);
   });
 });

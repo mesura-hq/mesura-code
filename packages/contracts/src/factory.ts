@@ -635,14 +635,20 @@ export const FactoryRunUsageProvider = Schema.Struct({
   /** Everything this machine spent on the provider over the run, at list price. */
   machineSpendUsd: Schema.NullOr(Schema.Number),
   /**
-   * The run's share of one window: its movement split by the run's part of this
-   * machine's spend. An upper bound: spend on other machines is not seen here.
+   * The run's share of one window: the window's movement between its first and
+   * last reading, split by the run's part of this machine's spend between the
+   * same two instants. An estimate that leans high: spend on other machines is
+   * not seen here.
    */
   estimate: Schema.NullOr(
     Schema.Struct({
       window: Schema.String,
       percent: Schema.Number,
       runShareOfSpend: Schema.Number,
+      /** The run's spend between the window's first and last reading. */
+      runSpendUsd: Schema.Number,
+      /** This machine's spend on the provider between the same two readings. */
+      machineSpendUsd: Schema.Number,
     }),
   ),
 });

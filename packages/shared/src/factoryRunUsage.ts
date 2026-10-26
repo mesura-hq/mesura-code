@@ -5,9 +5,10 @@
  * the account's used percent per window, and that percent already counts
  * against whatever the plan is today. Nothing here knows a plan budget, a
  * dollar allowance or a conversion rate. The run's share is the account's
- * movement during the run, split by the run's part of the spend this machine
- * saw in the same window. Spend on other machines is invisible here, so the
- * share is an upper bound of the run's true share.
+ * movement between its first and last reading, split by the run's part of the
+ * spend this machine saw between the same two instants. It is an estimate:
+ * a turn's spend is taken as spread evenly over the turn, the readings are
+ * rounded, and spend on other machines is invisible here, which makes it lean high.
  */
 import type {
   FactoryRunQuotaProvider,
@@ -168,54 +169,110 @@ export function factoryQuotaMovement(
 /** The window an estimate is stated against: the weekly one when the provider reports it. */
 const ESTIMATE_WINDOW_PREFERENCE = ["seven_day", "five_hour"];
 
-function preferredWindow(windows: ReadonlyArray<FactoryRunUsageWindow>) {
-  for (const name of ESTIMATE_WINDOW_PREFERENCE) {
-    const match = windows.find((window) => window.window === name);
-    if (match !== undefined) return match;
-  }
-  return [...windows].sort((left, right) => right.movedPercent - left.movedPercent)[0];
-}
-
-/**
- * One provider's line of the run's usage: the account windows' movement, the
- * run's and the machine's spend over the run, and the run's estimated share
- * of the preferred window when both spends are known.
- */
-export function factoryRunUsageProvider(input: {
-  readonly provider: FactoryRunQuotaProvider;
-  readonly samples: ReadonlyArray<FactoryQuotaSample>;
-  readonly runSpendUsd: number | null;
-  readonly machineSpendUsd: number | null;
-}): FactoryRunUsageProvider {
+/** Every window one provider's readings describe, with how far the account moved in it. */
+export function factoryQuotaWindows(
+  provider: FactoryRunQuotaProvider,
+  samples: ReadonlyArray<FactoryQuotaSample>,
+): ReadonlyArray<FactoryRunUsageWindow> {
   const byWindow = new Map<string, FactoryQuotaSample[]>();
-  for (const sample of input.samples) {
-    if (sample.provider !== input.provider) continue;
+  for (const sample of samples) {
+    if (sample.provider !== provider) continue;
     const list = byWindow.get(sample.window) ?? [];
     list.push(sample);
     byWindow.set(sample.window, list);
   }
-  const windows = [...byWindow.entries()].flatMap(([window, samples]) => {
-    const movement = factoryQuotaMovement(samples);
+  return [...byWindow.entries()].flatMap(([window, list]) => {
+    const movement = factoryQuotaMovement(list);
     return movement === null ? [] : [{ window, ...movement }];
   });
-  const target = preferredWindow(windows);
-  const { runSpendUsd, machineSpendUsd } = input;
-  const estimate =
+}
+
+/**
+ * The window an estimate can be stated against: the preferred one among those
+ * with two readings at different instants, which bound the span both spends
+ * are measured over.
+ */
+export function factoryEstimateWindow(
+  windows: ReadonlyArray<FactoryRunUsageWindow>,
+): FactoryRunUsageWindow | undefined {
+  const usable = windows.filter(
+    (window) => window.samples >= 2 && Date.parse(window.lastAt) > Date.parse(window.firstAt),
+  );
+  for (const name of ESTIMATE_WINDOW_PREFERENCE) {
+    const match = usable.find((window) => window.window === name);
+    if (match !== undefined) return match;
+  }
+  return [...usable].sort((left, right) => right.movedPercent - left.movedPercent)[0];
+}
+
+/** One finished role turn's own spend at list price. */
+export interface FactoryTurnSpend {
+  readonly startMs: number;
+  readonly endMs: number;
+  readonly spendUsd: number;
+}
+
+/** The run's spend between two instants, each turn's spend spread evenly over the turn. */
+export function factoryRunSpendBetween(
+  turns: ReadonlyArray<FactoryTurnSpend>,
+  fromMs: number,
+  toMs: number,
+): number {
+  return turns.reduce((total, turn) => {
+    if (turn.endMs <= turn.startMs) {
+      return turn.startMs >= fromMs && turn.startMs <= toMs ? total + turn.spendUsd : total;
+    }
+    const overlap = Math.min(turn.endMs, toMs) - Math.max(turn.startMs, fromMs);
+    return overlap <= 0 ? total : total + (turn.spendUsd * overlap) / (turn.endMs - turn.startMs);
+  }, 0);
+}
+
+/**
+ * One provider's line of the run's usage: the account windows' movement, the
+ * run's and the machine's spend over the run, and the run's estimated share of
+ * the estimate window. The share compares the two spends between that
+ * window's first and last reading, the span its movement covers, so
+ * `machineSpendInSpanUsd` must be read over exactly that span.
+ */
+export function factoryRunUsageProvider(input: {
+  readonly provider: FactoryRunQuotaProvider;
+  readonly windows: ReadonlyArray<FactoryRunUsageWindow>;
+  readonly turns: ReadonlyArray<FactoryTurnSpend>;
+  readonly machineSpendUsd: number | null;
+  readonly machineSpendInSpanUsd: number | null;
+}): FactoryRunUsageProvider {
+  const { provider, windows, turns, machineSpendUsd, machineSpendInSpanUsd } = input;
+  const runSpendUsd =
+    turns.length === 0 ? null : turns.reduce((total, turn) => total + turn.spendUsd, 0);
+  const target = factoryEstimateWindow(windows);
+  if (
     target === undefined ||
-    target.samples < 2 ||
     runSpendUsd === null ||
-    machineSpendUsd === null ||
-    machineSpendUsd <= 0
-      ? null
-      : {
-          window: target.window,
-          // The run cannot have used more than the account moved.
-          percent:
-            Math.round(target.movedPercent * Math.min(1, runSpendUsd / machineSpendUsd) * 100) /
-            100,
-          runShareOfSpend: Math.min(1, runSpendUsd / machineSpendUsd),
-        };
-  return { provider: input.provider, windows, runSpendUsd, machineSpendUsd, estimate };
+    machineSpendInSpanUsd === null ||
+    machineSpendInSpanUsd <= 0
+  ) {
+    return { provider, windows, runSpendUsd, machineSpendUsd, estimate: null };
+  }
+  const runSpendInSpanUsd = factoryRunSpendBetween(
+    turns,
+    Date.parse(target.firstAt),
+    Date.parse(target.lastAt),
+  );
+  // The run cannot have used more than the account moved.
+  const runShareOfSpend = Math.min(1, runSpendInSpanUsd / machineSpendInSpanUsd);
+  return {
+    provider,
+    windows,
+    runSpendUsd,
+    machineSpendUsd,
+    estimate: {
+      window: target.window,
+      percent: Math.round(target.movedPercent * runShareOfSpend * 100) / 100,
+      runShareOfSpend,
+      runSpendUsd: runSpendInSpanUsd,
+      machineSpendUsd: machineSpendInSpanUsd,
+    },
+  };
 }
 
 /** The harness a provider's role turns run on. */

@@ -4,8 +4,9 @@
  * The run's role turns already left the provider's own readings on disk:
  * every `claude -p` output carries `rate_limit_event` lines, and every Codex
  * session rollout carries `rate_limits`. This reads them for the run's turns,
- * reads this machine's spend over the run from the usage service, and lets
- * `@t3tools/shared/factoryRunUsage` turn both into the run's share. Nothing
+ * reads this machine's spend over the run and over the readings' span from the
+ * usage service, and lets `@t3tools/shared/factoryRunUsage` turn both into the
+ * run's share. Nothing
  * is recorded by the skill for it, so runs recorded before it existed work too.
  *
  * @module FactoryRunUsage
@@ -22,11 +23,14 @@ import {
   UsageDay,
 } from "@t3tools/contracts";
 import {
+  factoryEstimateWindow,
+  factoryQuotaWindows,
   factoryRunTurnsOf,
   factoryRunUsageProvider,
   readClaudeQuotaLine,
   readCodexQuotaLine,
   type FactoryQuotaSample,
+  type FactoryTurnSpend,
 } from "@t3tools/shared/factoryRunUsage";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -89,78 +93,178 @@ const isoOf = (ms: number) => DateTime.formatIso(DateTime.makeUnsafe(ms));
 /** `YYYY-MM-DD` in UTC. */
 const dayOf = (ms: number) => UsageDay.make(isoOf(ms).slice(0, 10));
 
-/**
- * Codex files a rollout under the local day it started; a day either side of
- * the turn's UTC day covers every zone.
- */
-const dayDirectories = (path: Path.Path, home: string, aroundMs: number) =>
-  [-1, 0, 1].map((offset) => {
-    const [yyyy, mm, dd] = dayOf(aroundMs + offset * USAGE_WINDOW_MS).split("-");
-    return path.join(home, "sessions", yyyy!, mm!, dd!);
-  });
+/** The `sessions/YYYY/MM/DD` directory of a UTC day offset from `ms`. */
+const dayDirectory = (path: Path.Path, home: string, ms: number) => {
+  const [yyyy, mm, dd] = dayOf(ms).split("-");
+  return path.join(home, "sessions", yyyy!, mm!, dd!);
+};
 
-/** A Codex turn's readings, from the session rollout named by its session id. */
-function codexTurnSamples(
+/** The rollouts in one day directory that belong to the session. */
+const rolloutsIn = (
+  fs: FileSystem.FileSystem,
+  path: Path.Path,
+  directory: string,
+  sessionId: string,
+) =>
+  fs.readDirectory(directory).pipe(
+    Effect.map((names) =>
+      names
+        .filter((name) => name.endsWith(`-${sessionId}.jsonl`))
+        .map((name) => path.join(directory, name)),
+    ),
+    Effect.orElseSucceed((): ReadonlyArray<string> => []),
+  );
+
+/** Every `sessions/YYYY/MM/DD` directory up to `untilDay`, newest first. */
+const dayDirectoriesUntil = (
+  fs: FileSystem.FileSystem,
+  path: Path.Path,
+  home: string,
+  untilDay: string,
+) => {
+  const root = path.join(home, "sessions");
+  const names = (directory: string) =>
+    fs.readDirectory(directory).pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
+  return names(root).pipe(
+    Effect.flatMap((years) =>
+      Effect.forEach(years, (yyyy) =>
+        names(path.join(root, yyyy)).pipe(
+          Effect.flatMap((months) =>
+            Effect.forEach(months, (mm) =>
+              names(path.join(root, yyyy, mm)).pipe(
+                Effect.map((days) => days.map((dd) => `${yyyy}-${mm}-${dd}`)),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+    Effect.map((found) =>
+      found
+        .flat(2)
+        .filter((day) => day <= untilDay)
+        .sort((left, right) => right.localeCompare(left))
+        .map((day) => path.join(root, ...day.split("-"))),
+    ),
+  );
+};
+
+/**
+ * A Codex session's rollout. Codex files it under the local day the session
+ * started and appends every resumed turn to that file, so a session resumed
+ * days later, or begun before the run, is still in its first day's directory.
+ * The days around its first turn in the run are looked at first, then every
+ * earlier day, newest first.
+ */
+function findCodexRollouts(
   fs: FileSystem.FileSystem,
   path: Path.Path,
   codexHome: string,
-  dispatch: FactoryRunDispatch,
+  sessionId: string,
+  firstTurnMs: number,
 ) {
-  const sessionId = dispatch.sessionId;
-  if (sessionId === null) return Effect.succeed<ReadonlyArray<FactoryQuotaSample>>([]);
-  const startMs = Date.parse(dispatch.startedAt);
-  const endMs =
-    dispatch.finishedAt === null ? Number.POSITIVE_INFINITY : Date.parse(dispatch.finishedAt);
-  return Effect.forEach(dayDirectories(path, codexHome, startMs), (directory) =>
-    fs.readDirectory(directory).pipe(
-      Effect.map((names) =>
-        names
-          .filter((name) => name.endsWith(`-${sessionId}.jsonl`))
-          .map((name) => path.join(directory, name)),
-      ),
-      Effect.orElseSucceed((): ReadonlyArray<string> => []),
-    ),
-  ).pipe(
+  const near = [-1, 0, 1].map((offset) =>
+    dayDirectory(path, codexHome, firstTurnMs + offset * USAGE_WINDOW_MS),
+  );
+  return Effect.forEach(near, (directory) => rolloutsIn(fs, path, directory, sessionId)).pipe(
     Effect.map((found) => [...new Set(found.flat())]),
-    Effect.flatMap((files) => Effect.forEach(files, (file) => readLines(fs, file))),
-    Effect.map((files) =>
-      files
-        .flat()
-        .flatMap((line) => readCodexQuotaLine(line))
-        // A resumed session's rollout holds every turn; keep this turn's readings.
-        .filter((sample) => sample.observedAtMs >= startMs && sample.observedAtMs <= endMs),
+    Effect.flatMap((found) =>
+      found.length > 0
+        ? Effect.succeed<ReadonlyArray<string>>(found)
+        : dayDirectoriesUntil(fs, path, codexHome, dayOf(firstTurnMs)).pipe(
+            Effect.flatMap((directories) => firstRollouts(fs, path, directories, sessionId)),
+          ),
     ),
   );
 }
 
-/** The run's spend on a provider at list price: Claude reports dollars, Codex is priced below. */
-function runSpendUsd(
+/** The session's rollouts in the first of `directories` that holds any. */
+const firstRollouts = (
+  fs: FileSystem.FileSystem,
+  path: Path.Path,
+  directories: ReadonlyArray<string>,
+  sessionId: string,
+): Effect.Effect<ReadonlyArray<string>> => {
+  const [directory, ...rest] = directories;
+  if (directory === undefined) return Effect.succeed([]);
+  return rolloutsIn(fs, path, directory, sessionId).pipe(
+    Effect.flatMap((found) =>
+      found.length > 0 ? Effect.succeed(found) : firstRollouts(fs, path, rest, sessionId),
+    ),
+  );
+};
+
+/**
+ * The readings of the run's Codex turns. Each session's rollout is found and
+ * read once, then its readings are kept for the time its turns ran: the
+ * rollout also holds the session's turns outside this run.
+ */
+function codexSamples(
+  fs: FileSystem.FileSystem,
+  path: Path.Path,
+  codexHome: string,
+  dispatches: ReadonlyArray<FactoryRunDispatch>,
+) {
+  const sessions = new Map<string, FactoryRunDispatch[]>();
+  for (const dispatch of dispatches) {
+    if (dispatch.sessionId === null) continue;
+    sessions.set(dispatch.sessionId, [...(sessions.get(dispatch.sessionId) ?? []), dispatch]);
+  }
+  return Effect.forEach([...sessions.entries()], ([sessionId, turns]) => {
+    const intervals = turns.map((turn) => ({
+      startMs: Date.parse(turn.startedAt),
+      endMs: turn.finishedAt === null ? Number.POSITIVE_INFINITY : Date.parse(turn.finishedAt),
+    }));
+    const firstTurnMs = Math.min(...intervals.map((interval) => interval.startMs));
+    return findCodexRollouts(fs, path, codexHome, sessionId, firstTurnMs).pipe(
+      Effect.flatMap((files) => Effect.forEach(files, (file) => readLines(fs, file))),
+      Effect.map((files) =>
+        files
+          .flat()
+          .flatMap((line) => readCodexQuotaLine(line))
+          .filter((sample) =>
+            intervals.some(
+              (interval) =>
+                sample.observedAtMs >= interval.startMs && sample.observedAtMs <= interval.endMs,
+            ),
+          ),
+      ),
+    );
+  }).pipe(Effect.map((found): ReadonlyArray<FactoryQuotaSample> => found.flat()));
+}
+
+/**
+ * The run's finished turns on a provider with their own spend at list price:
+ * Claude reports dollars, Codex is priced at the rates the machine's own
+ * buckets for the same model imply, so the run and the machine are measured
+ * in one price basis. A turn with nothing priceable is left out.
+ */
+function turnSpends(
   state: FactoryRunState,
   provider: FactoryRunQuotaProvider,
   buckets: ReadonlyArray<UsageBucket> | null,
+): ReadonlyArray<FactoryTurnSpend> {
+  return factoryRunTurnsOf(state, provider).flatMap((turn) => {
+    if (turn.finishedAt === null) return [];
+    const spendUsd = turnSpendUsd(turn, provider, buckets);
+    if (spendUsd === null) return [];
+    return [{ startMs: Date.parse(turn.startedAt), endMs: Date.parse(turn.finishedAt), spendUsd }];
+  });
+}
+
+function turnSpendUsd(
+  turn: FactoryRunDispatch,
+  provider: FactoryRunQuotaProvider,
+  buckets: ReadonlyArray<UsageBucket> | null,
 ): number | null {
-  const turns = factoryRunTurnsOf(state, provider);
-  if (turns.length === 0) return null;
-  if (provider === "claude") {
-    const priced = turns.filter((turn) => turn.costUsd !== null);
-    return priced.length === 0 ? null : priced.reduce((sum, turn) => sum + turn.costUsd!, 0);
-  }
-  if (buckets === null) return null;
-  // Price Codex turns at the rates the machine's own buckets for the same model imply,
-  // so the run and the machine are measured in one price basis.
-  let total = 0;
-  let priced = false;
-  for (const turn of turns) {
-    if (turn.tokens === null) continue;
-    const rates = bucketRates(buckets, provider, turn.model);
-    if (rates === null) continue;
-    const input = turn.tokens.input_tokens ?? 0;
-    const cached = Math.min(input, turn.tokens.cached_input_tokens ?? 0);
-    const output = turn.tokens.output_tokens ?? 0;
-    total += (input - cached) * rates.input + cached * rates.cacheRead + output * rates.output;
-    priced = true;
-  }
-  return priced ? total : null;
+  if (provider === "claude") return turn.costUsd;
+  if (buckets === null || turn.tokens === null) return null;
+  const rates = bucketRates(buckets, provider, turn.model);
+  if (rates === null) return null;
+  const input = turn.tokens.input_tokens ?? 0;
+  const cached = Math.min(input, turn.tokens.cached_input_tokens ?? 0);
+  const output = turn.tokens.output_tokens ?? 0;
+  return (input - cached) * rates.input + cached * rates.cacheRead + output * rates.output;
 }
 
 /** Dollars per token by category, from the machine's buckets for one model. */
@@ -254,21 +358,29 @@ export const readFactoryRunUsageOf = Effect.fn("FactoryRunUsage.read")(function*
   const buckets = yield* machineBuckets(usage, startMs, Math.max(endMs, startMs + 1));
   const providers = yield* Effect.forEach(
     PROVIDERS.filter((provider) => factoryRunTurnsOf(state, provider).length > 0),
-    (provider) =>
-      Effect.forEach(factoryRunTurnsOf(state, provider), (dispatch) =>
+    Effect.fnUntraced(function* (provider) {
+      const dispatches = factoryRunTurnsOf(state, provider);
+      const samples =
         provider === "claude"
-          ? claudeTurnSamples(fs, path, state.runDir, dispatch)
-          : codexTurnSamples(fs, path, codexHome, dispatch),
-      ).pipe(
-        Effect.map((samples) =>
-          factoryRunUsageProvider({
-            provider,
-            samples: samples.flat(),
-            runSpendUsd: runSpendUsd(state, provider, buckets),
-            machineSpendUsd: buckets === null ? null : spendOf(buckets, provider),
-          }),
-        ),
-      ),
+          ? (yield* Effect.forEach(dispatches, (dispatch) =>
+              claudeTurnSamples(fs, path, state.runDir, dispatch),
+            )).flat()
+          : yield* codexSamples(fs, path, codexHome, dispatches);
+      const windows = factoryQuotaWindows(provider, samples);
+      const target = factoryEstimateWindow(windows);
+      // The machine's spend over exactly the span the estimate window's readings cover.
+      const spanBuckets =
+        buckets === null || target === undefined
+          ? null
+          : yield* machineBuckets(usage, Date.parse(target.firstAt), Date.parse(target.lastAt));
+      return factoryRunUsageProvider({
+        provider,
+        windows,
+        turns: turnSpends(state, provider, buckets),
+        machineSpendUsd: buckets === null ? null : spendOf(buckets, provider),
+        machineSpendInSpanUsd: spanBuckets === null ? null : spendOf(spanBuckets, provider),
+      });
+    }),
   );
   return {
     runId: state.runId,

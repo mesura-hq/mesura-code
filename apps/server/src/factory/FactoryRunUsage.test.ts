@@ -118,37 +118,54 @@ const bucket = (provider: "claude" | "codex", model: string, costUsd: number): U
     sessions: 1,
   }) as UsageBucket;
 
-const usageStub = (buckets: ReadonlyArray<UsageBucket>) =>
+type SummaryInput = Parameters<UsageService.UsageService["Service"]["readSummary"]>[0];
+
+const usageStub = (
+  buckets: ReadonlyArray<UsageBucket> | ((input: SummaryInput) => ReadonlyArray<UsageBucket>),
+) =>
   ({
-    readSummary: () => Effect.succeed({ buckets } as unknown as UsageSummary),
+    readSummary: (input: SummaryInput) =>
+      Effect.succeed({
+        buckets: typeof buckets === "function" ? buckets(input) : buckets,
+      } as unknown as UsageSummary),
     refreshRates: Effect.die("not used"),
   }) as unknown as UsageService.UsageService["Service"];
 
-const setUp = Effect.gen(function* () {
-  const fs = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-factory-run-usage-" });
-  const runDir = path.join(root, "usage-run");
-  yield* fs.makeDirectory(path.join(runDir, "phase-1"), { recursive: true });
-  yield* fs.writeFileString(
-    path.join(runDir, "phase-1/implementer-1.jsonl"),
-    [claudeReading(0.06, 0.16), '{"type":"assistant"}', claudeReading(0.09, 0.18)].join("\n"),
-  );
-  const codexHome = path.join(root, "codex");
-  const day = path.join(codexHome, "sessions/2026/10/24");
-  yield* fs.makeDirectory(day, { recursive: true });
-  yield* fs.writeFileString(
-    path.join(day, `rollout-2026-10-24T07-03-00-${CODEX_SESSION}.jsonl`),
-    [
-      codexReading("2026-10-24T07:03:30.000Z", 12),
-      codexReading("2026-10-24T07:07:30.000Z", 13),
-      // A later turn of the same session is outside this one.
-      codexReading("2026-10-24T09:00:00.000Z", 20),
-    ].join("\n"),
-  );
-  const state = RUN_EVENTS.reduce(foldFactoryRunLine, emptyFactoryRunState(runDir));
-  return { state, codexHome };
-});
+/** The day directory the Codex session's rollout is filed under: the day the session began. */
+const setUpWith = (codexDay: string) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-factory-run-usage-" });
+    const runDir = path.join(root, "usage-run");
+    yield* fs.makeDirectory(path.join(runDir, "phase-1"), { recursive: true });
+    yield* fs.writeFileString(
+      path.join(runDir, "phase-1/implementer-1.jsonl"),
+      [claudeReading(0.06, 0.16), '{"type":"assistant"}', claudeReading(0.09, 0.18)].join("\n"),
+    );
+    const codexHome = path.join(root, "codex");
+    const day = path.join(codexHome, "sessions", ...codexDay.split("-"));
+    yield* fs.makeDirectory(day, { recursive: true });
+    // Another session's rollout on a later day, which the search must pass over.
+    const later = path.join(codexHome, "sessions/2026/10/25");
+    yield* fs.makeDirectory(later, { recursive: true });
+    yield* fs.writeFileString(path.join(later, "rollout-2026-10-25T01-00-00-other.jsonl"), "");
+    yield* fs.writeFileString(
+      path.join(day, `rollout-${codexDay}T07-03-00-${CODEX_SESSION}.jsonl`),
+      [
+        // An earlier turn of the same session, before the run.
+        codexReading(`${codexDay}T07:00:00.000Z`, 5),
+        codexReading("2026-10-24T07:03:30.000Z", 12),
+        codexReading("2026-10-24T07:07:30.000Z", 13),
+        // A later turn of the same session is outside this one.
+        codexReading("2026-10-24T09:00:00.000Z", 20),
+      ].join("\n"),
+    );
+    const state = RUN_EVENTS.reduce(foldFactoryRunLine, emptyFactoryRunState(runDir));
+    return { state, codexHome };
+  });
+
+const setUp = setUpWith("2026-10-24");
 
 describe("factory run usage", () => {
   it.effect(
@@ -178,6 +195,8 @@ describe("factory run usage", () => {
           window: "seven_day",
           percent: 0.5,
           runShareOfSpend: 0.25,
+          runSpendUsd: 20,
+          machineSpendUsd: 80,
         });
 
         const codex = usage.providers.find((provider) => provider.provider === "codex")!;
@@ -188,6 +207,42 @@ describe("factory run usage", () => {
         expect(codex.runSpendUsd).toBeCloseTo(0.2 + 0.18 + 0.3, 6);
         expect(codex.machineSpendUsd).toBe(9);
       }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("compares the run's spend with the machine's over the span the readings cover", () =>
+    Effect.gen(function* () {
+      const { state, codexHome } = yield* setUp;
+      const queried: Array<string> = [];
+      const usage = yield* readFactoryRunUsageOf(
+        state,
+        Option.some(
+          usageStub((input) => {
+            queried.push(`${input.sinceTime} ${input.untilTime}`);
+            // The whole run includes $960 spent after the last reading.
+            const whole = input.sinceTime === "2026-10-24T06:43:00.000Z";
+            return [bucket("claude", "claude-opus-5-5", whole ? 1_000 : 40)];
+          }),
+        ),
+        codexHome,
+      );
+
+      const claude = usage.providers.find((provider) => provider.provider === "claude")!;
+      expect(queried).toContain("2026-10-24T06:44:00.000Z 2026-10-24T06:52:00.000Z");
+      expect(claude.machineSpendUsd).toBe(1_000);
+      expect(claude.estimate).toMatchObject({ runSpendUsd: 20, machineSpendUsd: 40, percent: 1 });
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("reads a resumed Codex session from the day the session began", () =>
+    Effect.gen(function* () {
+      const { state, codexHome } = yield* setUpWith("2026-10-20");
+      const usage = yield* readFactoryRunUsageOf(state, Option.none(), codexHome);
+
+      const codex = usage.providers.find((provider) => provider.provider === "codex")!;
+      expect(codex.windows).toMatchObject([
+        { window: "seven_day", firstPercent: 12, lastPercent: 13, movedPercent: 1, samples: 2 },
+      ]);
+    }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.effect("still answers the movement when the machine's usage cannot be read", () =>

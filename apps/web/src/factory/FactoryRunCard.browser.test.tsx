@@ -191,6 +191,20 @@ vi.mock("../state/factory", async () => {
     },
   };
 });
+// A video capture's signed URL; every other asset resolves as it does in the app.
+vi.mock("../assets/assetUrls", async (original) => {
+  const actual = await original<typeof import("../assets/assetUrls")>();
+  return {
+    ...actual,
+    useAssetUrlState: (...args: Parameters<typeof actual.useAssetUrlState>) => {
+      const [, resource] = args;
+      const state = actual.useAssetUrlState(...args);
+      return resource?._tag === "media-file" && resource.path.endsWith(".webm")
+        ? { _tag: "Success", url: `https://assets.test/${resource.path}` }
+        : state;
+    },
+  };
+});
 // Mermaid draws in a browser only; the stub records each source it was handed.
 vi.mock("mermaid", () => ({
   default: {
@@ -1168,7 +1182,13 @@ it("report card shows each criterion's captures, marks an on-screen criterion wi
         ],
         runSpendUsd: 57.6,
         machineSpendUsd: 128,
-        estimate: { window: "seven_day", percent: 3.6, runShareOfSpend: 0.45 },
+        estimate: {
+          window: "seven_day",
+          percent: 3.6,
+          runShareOfSpend: 0.45,
+          runSpendUsd: 54,
+          machineSpendUsd: 120,
+        },
       },
     ],
     machineSpend: "read",
@@ -1179,7 +1199,8 @@ it("report card shows each criterion's captures, marks an on-screen criterion wi
 
   expect(row.textContent).toContain("Share of your plans");
   expect(row.textContent).toMatch(/this run ≈ 3\.6%/);
-  expect(row.textContent).toMatch(/account moved \+8% during the run/);
+  expect(row.textContent).toMatch(/account moved \+8% between the run's first and last reading/);
+  expect(row.textContent).toContain("in that span the run spent $54 of the $120");
 
   for (const fold of buttonsMatching(row, /^[12]\. .*passed/)) await click(fold);
   await settle();
@@ -1190,4 +1211,35 @@ it("report card shows each criterion's captures, marks an on-screen criterion wi
 
   expect(row.textContent).toContain("Check it yourself");
   expect(row.textContent).toContain("(cd apps/web && pnpm test)");
+});
+
+it("report card opens a video capture in the app's media viewer", async () => {
+  await using _browserFixture0 = await setupBrowserFixture0();
+
+  showReport();
+  const lines = eventsJsonl.split("\n").filter((line) => line.trim().length > 0);
+  lines.push(
+    JSON.stringify({
+      v: 1,
+      at: "2026-09-28T13:50:00.000Z",
+      type: "evidence.recorded",
+      phase: 1,
+      criterion: 1,
+      kind: "video",
+      path: "evidence/01-export.webm",
+      caption: "The export downloading.",
+      source: "live",
+      viewport: "phone",
+    }),
+  );
+  fixture.factoryRunItem = { state: foldFactoryRunTestLines(lines), roles: [] };
+  await mountApp();
+  const row = await reportRow();
+  for (const fold of buttonsMatching(row, /^1\. .*passed/)) await click(fold);
+  await settle();
+
+  const play = row.querySelector('button[aria-label="Play The export downloading."]');
+  expect(play).not.toBeNull();
+  await click(play!);
+  expect(document.querySelector('[aria-label="Close video preview"]')).not.toBeNull();
 });

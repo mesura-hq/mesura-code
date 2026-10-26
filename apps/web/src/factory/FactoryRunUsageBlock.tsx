@@ -23,6 +23,18 @@ const windowName = (window: string) => WINDOW_NAMES[window] ?? `${window} limit`
 const percentText = (percent: number) =>
   `${percent < 10 ? percent.toFixed(1).replace(/\.0$/, "") : Math.round(percent)}%`;
 
+/**
+ * The spends the share compares: over the readings' span when there is an
+ * estimate, otherwise over the whole run.
+ */
+function spendText(usage: FactoryRunUsageProvider) {
+  if (usage.estimate !== null) {
+    return ` · in that span the run spent ${factoryTraceUsdText(usage.estimate.runSpendUsd)} of the ${factoryTraceUsdText(usage.estimate.machineSpendUsd)} this machine spent, at list price`;
+  }
+  if (usage.runSpendUsd === null) return null;
+  return ` · run ${factoryTraceUsdText(usage.runSpendUsd)}${usage.machineSpendUsd === null ? "" : ` of ${factoryTraceUsdText(usage.machineSpendUsd)} this machine spent`} at list price`;
+}
+
 /** Bars span 0 to this many points, so one run reads at a glance. */
 const BAR_SCALE_PERCENT = 10;
 
@@ -72,10 +84,8 @@ function ProviderRow({ usage }: { usage: FactoryRunUsageProvider }) {
       <p className="text-search-label text-muted-foreground tabular-nums">
         {target === undefined
           ? "The run's outputs carry no reading of this plan."
-          : `account moved +${percentText(target.movedPercent)} during the run, every session included${target.resets > 0 ? ` (${target.resets} reset)` : ""}`}
-        {usage.runSpendUsd === null
-          ? null
-          : ` · run ${factoryTraceUsdText(usage.runSpendUsd)}${usage.machineSpendUsd === null ? "" : ` of ${factoryTraceUsdText(usage.machineSpendUsd)} this machine spent`} at list price`}
+          : `account moved +${percentText(target.movedPercent)} between the run's first and last reading, every session included${target.resets > 0 ? ` (${target.resets} reset)` : ""}`}
+        {spendText(usage)}
       </p>
     </div>
   );
@@ -84,8 +94,9 @@ function ProviderRow({ usage }: { usage: FactoryRunUsageProvider }) {
 /**
  * What the run used of each plan, as the providers measured it. The account's
  * movement is measured; the run's share is that movement split by the run's
- * part of this machine's spend, so it is an estimate and an upper bound: what
- * other machines spent on the same account in that time is not seen here.
+ * part of this machine's spend between the same two readings, so it is an
+ * estimate that leans high: what other machines spent on the same account in
+ * that time is not seen here.
  */
 export const FactoryRunUsageBlock = memo(function FactoryRunUsageBlock({
   threadRef,
@@ -131,7 +142,7 @@ export const FactoryRunUsageBlock = memo(function FactoryRunUsageBlock({
       <p className="text-search-label text-muted-foreground">
         {usage.machineSpend === "unavailable"
           ? "This machine's usage could not be read, so the run's share is not estimated."
-          : "The run's share counts its role turns, not the coordinator thread. It is an upper bound: spend on other machines in the same time is not seen here."}{" "}
+          : "The run's share counts its role turns, not the coordinator thread, and takes each turn's spend as even over the turn. It leans high: spend on other machines in the same time is not seen here."}{" "}
         Bars span 0–{BAR_SCALE_PERCENT}% of the window; the light part is the whole account.
       </p>
     </section>

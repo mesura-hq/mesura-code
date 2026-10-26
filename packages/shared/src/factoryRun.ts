@@ -189,19 +189,27 @@ function finishMatched(
   return later !== undefined && earlier !== undefined && earlier.dispatches !== later.dispatches;
 }
 
-/** The session's latest finished turn before this one, in any phase. */
-function previousSessionTurn(
+/**
+ * The running total the session last reported for one metric, in any phase.
+ * A finished turn that omitted the metric keeps the baseline before it.
+ */
+function previousSessionReading<A>(
   state: FactoryRunState,
   sessionId: string,
-): FactoryRunDispatch | undefined {
-  let latest: FactoryRunDispatch | undefined;
+  reading: (dispatch: FactoryRunDispatch) => A | null,
+): A | null {
+  let latest: { at: string; value: A } | null = null;
   for (const phase of state.phases) {
     for (const dispatch of phase.dispatches) {
       if (dispatch.sessionId !== sessionId || dispatch.finishedAt === null) continue;
-      if (latest === undefined || dispatch.finishedAt >= latest.finishedAt!) latest = dispatch;
+      const value = reading(dispatch);
+      if (value === null) continue;
+      if (latest === null || dispatch.finishedAt >= latest.at) {
+        latest = { at: dispatch.finishedAt, value };
+      }
     }
   }
-  return latest;
+  return latest?.value ?? null;
 }
 
 /**
@@ -209,18 +217,18 @@ function previousSessionTurn(
  * from the session's previous turn. A total lower than the previous one is a
  * fresh session total and stands as reported.
  */
-function turnCost(reported: number | undefined, previous: number | null | undefined) {
+function turnCost(reported: number | undefined, previous: number | null) {
   if (reported === undefined) return null;
-  if (previous == null || reported < previous) return reported;
+  if (previous === null || reported < previous) return reported;
   return reported - previous;
 }
 
 function turnTokens(
   reported: Readonly<Record<string, number>> | undefined,
-  previous: Readonly<Record<string, number>> | null | undefined,
+  previous: Readonly<Record<string, number>> | null,
 ): Record<string, number> | null {
   if (reported === undefined) return null;
-  if (previous == null) return { ...reported };
+  if (previous === null) return { ...reported };
   const restarted = Object.entries(reported).some(([key, count]) => count < (previous[key] ?? 0));
   if (restarted) return { ...reported };
   return Object.fromEntries(
@@ -317,9 +325,14 @@ function applyEvent(state: FactoryRunState, event: FactoryRunEvent): FactoryRunS
         ],
       }));
     case "dispatch.finished": {
-      const previous = previousSessionTurn(state, event.sessionId);
-      const costUsd = turnCost(event.costUsd, previous?.reportedCostUsd);
-      const tokens = turnTokens(event.tokens, previous?.reportedTokens);
+      const costUsd = turnCost(
+        event.costUsd,
+        previousSessionReading(state, event.sessionId, (dispatch) => dispatch.reportedCostUsd),
+      );
+      const tokens = turnTokens(
+        event.tokens,
+        previousSessionReading(state, event.sessionId, (dispatch) => dispatch.reportedTokens),
+      );
       const next = updatePhase(state, event.phase, (phase) => {
         const index = phase.dispatches.findLastIndex(
           (dispatch) =>
