@@ -36,6 +36,7 @@ import {
 } from "../../lib/attachmentUploadQueue";
 import { DictationStartButton } from "../../dictation/DictationControls";
 import { registerDictationComposer } from "../../dictation/dictationController";
+import { MaterialDictationModeIcon } from "../../dictation/MaterialDictationModeIcon";
 import {
   armQuestionSendWhenReady,
   disarmQuestionSendWhenReady,
@@ -43,7 +44,6 @@ import {
 } from "../../dictation/sendWhenReady";
 import { countPendingDictationSlots } from "@t3tools/shared/dictationSlots";
 import { insertDictationSlotAt } from "../../dictation/dictationSlotEdits";
-import { SendWhenReadyNotice } from "../../dictation/SendWhenReadyBanner";
 import { completeQuestionDraftAnswers } from "../../pendingUserInputResponse";
 import { cn } from "../../lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -191,12 +191,13 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
     focusAnswerField(question?.id)?.scrollIntoView?.({ block: "nearest" });
     context.onQuestionFocused?.();
   }, [context, request, completeDrafts, focusAnswerField]);
-  const sendWhenReadyArmed = useQuestionSendWhenReadyArmed(key);
   const pendingTranscriptions = request.questions.reduce(
     (count, question) =>
       count + countPendingDictationSlots(answers[question.id]?.customAnswer ?? ""),
     0,
   );
+  // Armed by send mode or by Submit: the answers go by themselves once the transcripts land.
+  const submitsWhenReady = useQuestionSendWhenReadyArmed(key) && pendingTranscriptions > 0;
   const submit = async () => {
     if (responding || context.unavailable) return;
     // A transcription still pending in an answer: submit once it lands.
@@ -299,14 +300,6 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
           />
         ))}
       </div>
-      {sendWhenReadyArmed && pendingTranscriptions > 0 ? (
-        <div className="border-t border-border px-4 py-2 sm:px-5">
-          <SendWhenReadyNotice
-            pendingCount={pendingTranscriptions}
-            onCancel={() => disarmQuestionSendWhenReady(key)}
-          />
-        </div>
-      ) : null}
       <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-muted/20 px-4 py-3 sm:px-5">
         <div className="text-xs text-muted-foreground" aria-live="polite">
           {context.unavailable
@@ -318,14 +311,27 @@ export const InlinePendingUserInputCard = memo(function InlinePendingUserInputCa
             </p>
           ) : null}
         </div>
-        <button
-          type="button"
-          disabled={responding || context.unavailable || blockedUploads}
-          onClick={() => void submit()}
-          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
-        >
-          {responding ? "Sending…" : error?.kind === "respond" ? "Retry" : "Submit"}
-        </button>
+        {submitsWhenReady ? (
+          <button
+            type="button"
+            aria-label="Don't submit when the transcription lands"
+            onClick={() => disarmQuestionSendWhenReady(key)}
+            className="inline-flex items-center gap-2 rounded-md border border-primary/45 bg-primary/10 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/15"
+          >
+            <MaterialDictationModeIcon mode="submit" className="size-3.5" />
+            Submits when ready
+            <XIcon className="size-3.5 opacity-70" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            disabled={responding || context.unavailable || blockedUploads}
+            onClick={() => void submit()}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+          >
+            {responding ? "Sending…" : error?.kind === "respond" ? "Retry" : "Submit"}
+          </button>
+        )}
       </footer>
     </section>
   );

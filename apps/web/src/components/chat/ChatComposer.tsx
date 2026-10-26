@@ -5,7 +5,6 @@ import { useMesuraComposerFocus } from "./useMesuraComposerFocus";
 import { useCommandHandlers } from "../../commands/commandRegistry";
 import { countPendingDictationSlots } from "@t3tools/shared/dictationSlots";
 import { armSendWhenReady } from "../../dictation/sendWhenReady";
-import { SendWhenReadyBanner } from "../../dictation/SendWhenReadyBanner";
 import { ContextWindowMeter, ContextWindowMeterPlaceholder } from "./ContextWindowMeter";
 import { cancelComposerNormalResume } from "~/keys/composer/composerSurface";
 import { useComposerTypingGuard } from "./useComposerTypingGuard";
@@ -3658,10 +3657,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         : null}
       <ComposerBanner.Dock>
         <ComposerBanner.Column>
-          <SendWhenReadyBanner
-            target={composerDraftTarget}
-            pendingCount={countPendingDictationSlots(prompt)}
-          />
           <ComposerBannerStack
             key={activeThreadId}
             className="relative z-0"

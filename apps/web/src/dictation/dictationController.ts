@@ -62,6 +62,9 @@ import {
   disarmQuestionSendWhenReady,
   disarmSendWhenReady,
   markDictationFilled,
+  noteDictationMarkerTakenOut,
+  sendWhenReadyKey,
+  useSendWhenReadyStore,
 } from "./sendWhenReady";
 import {
   type DictationQuestionAnswer,
@@ -340,10 +343,54 @@ function draftSlotHost(draftTarget: ComposerThreadTarget): DictationSlotHost {
 }
 
 function slotHostFor(owner: Pick<OwnDictationJob, "target" | "question">): DictationSlotHost {
-  return owner.question
+  const host = owner.question
     ? questionSlotHost(owner.question)
     : draftSlotHost(toComposerThreadTarget(owner.target));
+  // A marker dictation takes out is not one the user deleted, which would disarm the send.
+  return {
+    ...host,
+    fill: (jobId, transcript) => {
+      const outcome = host.fill(jobId, transcript);
+      if (outcome !== "missing") noteDictationMarkerTakenOut(jobId);
+      return outcome;
+    },
+    remove: (jobId) => {
+      noteDictationMarkerTakenOut(jobId);
+      host.remove(jobId);
+    },
+  };
 }
+
+/**
+ * Turns the send-mode jobs whose markers wait in a draft or answer that no longer sends by itself
+ * to insert, so the record, the marker and the mode keys say what will happen. Their transcripts
+ * still land.
+ */
+function turnPendingSendJobsToInsert(inScope: (own: OwnDictationJob) => boolean) {
+  for (const [jobId, own] of Object.entries(useOwnDictationJobsStore.getState().jobs)) {
+    if (own.mode !== "submit" || own.handled || !inScope(own)) continue;
+    if (!draftHoldsMarker(own, jobId)) continue;
+    updateOwnDictationJob(jobId, { mode: "inject" });
+    if (startedJobIds.has(jobId)) {
+      sendModeChange(own.environmentId, DictationJobId.make(jobId), "inject");
+    }
+  }
+}
+
+// Whatever disarms a draft or answer (its send glyph, insert, a marker deleted by hand), a
+// send-mode job never keeps waiting in one that will not send.
+useSendWhenReadyStore.subscribe((next, previous) => {
+  for (const [key, entry] of Object.entries(previous.drafts)) {
+    if (!entry.armed || next.drafts[key]?.armed) continue;
+    turnPendingSendJobsToInsert(
+      (own) => !own.question && sendWhenReadyKey(toComposerThreadTarget(own.target)) === key,
+    );
+  }
+  for (const requestKey of Object.keys(previous.questions)) {
+    if (requestKey in next.questions) continue;
+    turnPendingSendJobsToInsert((own) => own.question?.requestKey === requestKey);
+  }
+});
 
 export function toComposerThreadTarget(
   target: Exclude<DictationTarget, null>,
@@ -703,7 +750,11 @@ export function selectDictationMode(mode: DictationMode): void {
   }
   if (!lastJob) return;
   const own = useOwnDictationJobsStore.getState().jobs[lastJob.jobId];
-  if (!own || own.mode === mode) return;
+  if (!own) return;
+  // Insert is the keyboard's way out of send-when-ready, whoever armed the draft. Disarming turns
+  // a send-mode job there, this one included, to insert, so read it again.
+  if (mode === "inject") slotHostFor(own).disarmSend();
+  if (useOwnDictationJobsStore.getState().jobs[lastJob.jobId]?.mode === mode) return;
   updateOwnDictationJob(lastJob.jobId, { mode });
   const host = slotHostFor(own);
   if (own.mode === "clipboard") {

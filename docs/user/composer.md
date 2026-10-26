@@ -211,9 +211,11 @@ chat you are not looking at. If you delete a marker, its text stays in the Trans
 failed marker offers **Retry** and **Discard**.
 
 A message in Send mode goes out once its last marker is filled. Pressing Send while a marker is
-still waiting does the same, and a banner says the message will send when the text lands. Choose
-**Don't send** to keep the text without sending. A message with dictated text starts with one
-`[voiced]` tag.
+still waiting does the same. While a message waits to send, its markers show the send arrow. Tap
+the arrow, or press Alt+I while the transcription is in progress, to keep the text without
+sending. Deleting a marker also keeps the message unsent. On a question card, the Submit button
+reads **Submits when ready** while the answers wait; press it to keep them unsent. A message with
+dictated text starts with one `[voiced]` tag.
 
 **Transcriptions** in the command palette lists recent dictation on the server, to copy or retry.
 The server keeps it for a day, and a server restart clears it.

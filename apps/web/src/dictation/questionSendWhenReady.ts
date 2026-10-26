@@ -1,7 +1,6 @@
 import { runAtomCommand } from "@t3tools/client-runtime/state/runtime";
 import { derivePendingThreadRequests } from "@t3tools/client-runtime/state/thread-requests";
 import type { EnvironmentId, RuntimeRequestId, ThreadId } from "@t3tools/contracts";
-import { countPendingDictationSlots } from "@t3tools/shared/dictationSlots";
 import { useEffect } from "react";
 
 import { toastManager } from "~/components/ui/toast";
@@ -17,13 +16,20 @@ import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { readThread } from "~/state/entities";
 import { environmentServerConfigsAtom } from "~/state/server";
 import { threadEnvironment } from "~/state/threads";
-import { disarmQuestionSendWhenReady, useSendWhenReadyStore } from "./sendWhenReady";
+import {
+  dictationMarkerDeletedByHand,
+  dictationMarkerIds,
+  disarmQuestionSendWhenReady,
+  trackQuestionMarkers,
+  useSendWhenReadyStore,
+} from "./sendWhenReady";
 
 /**
  * Send-when-ready for question cards: a request armed by send mode, or by Submit pressed while a
  * transcription was pending, is answered once none of its answers holds a marker, whether or not
  * its card is on screen. While the thread is shown, the answer goes through that thread's own
- * respond, so the card shows it sending; otherwise it is sent from here.
+ * respond, so the card shows it sending; otherwise it is sent from here. A marker the user
+ * deletes by hand disarms the request, as it does a draft.
  */
 
 type QuestionResponder = (
@@ -147,7 +153,7 @@ function findOpenRequest(ids: NonNullable<ReturnType<typeof parseRequestKey>>) {
 
 function checkArmedQuestions() {
   const { requests } = usePendingUserInputDraftStore.getState();
-  for (const key of Object.keys(useSendWhenReadyStore.getState().questions)) {
+  for (const [key, armed] of Object.entries(useSendWhenReadyStore.getState().questions)) {
     if (submitting.has(key)) continue;
     const ids = parseRequestKey(key);
     const request = ids ? findOpenRequest(ids) : null;
@@ -157,10 +163,17 @@ function checkArmedQuestions() {
       continue;
     }
     const answers = requests[key]?.answers ?? {};
-    const pending = request.questions.some(
-      (question) => countPendingDictationSlots(answers[question.id]?.customAnswer ?? "") > 0,
+    const markers = dictationMarkerIds(
+      request.questions.map((question) => answers[question.id]?.customAnswer ?? "").join("\n"),
     );
-    if (pending) continue;
+    if (dictationMarkerDeletedByHand(armed.markers, markers)) {
+      disarmQuestionSendWhenReady(key);
+      continue;
+    }
+    if (markers.length > 0) {
+      trackQuestionMarkers(key, markers);
+      continue;
+    }
     disarmQuestionSendWhenReady(key);
     submitting.add(key);
     void submitArmedQuestion(key, ids, request).finally(() => submitting.delete(key));
