@@ -112,7 +112,7 @@ export type SidebarThreadAttentionIcon = "approval" | "input" | "failed" | "done
 export interface SidebarThreadAttentionLook {
   readonly className: string;
   readonly icon: SidebarThreadAttentionIcon;
-  /** The 2 px left edge a loud row carries in its label's color; empty for the rest. */
+  /** The 2 px left edge Approval and Failed rows carry in their label's color; empty for the rest. */
   readonly rowEdgeClassName: string;
 }
 
@@ -123,7 +123,8 @@ const QUIET_LOOK: SidebarThreadAttentionLook = {
 };
 
 // The prototype's emphasis levels on the sidebar's own hues. Limited, Woke and Done keep the look
-// they had before the label moved here; Limited therefore carries no edge.
+// they had before the label moved here; Limited therefore carries no edge. Needs input is loud
+// but carries no edge either: its label and icon are enough (developer, 2026-10-26).
 const LOOK_BY_KIND: Readonly<Record<SidebarThreadAttentionKind, SidebarThreadAttentionLook>> = {
   approval: {
     className: "font-semibold text-warning-foreground",
@@ -133,7 +134,7 @@ const LOOK_BY_KIND: Readonly<Record<SidebarThreadAttentionKind, SidebarThreadAtt
   input: {
     className: "font-semibold text-needs-input",
     icon: "input",
-    rowEdgeClassName: "shadow-[inset_2px_0_0_var(--color-needs-input)]",
+    rowEdgeClassName: "",
   },
   failed: {
     className: "font-semibold text-error",

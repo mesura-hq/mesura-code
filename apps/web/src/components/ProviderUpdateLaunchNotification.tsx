@@ -2,6 +2,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { DownloadIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { useClientSettings } from "~/hooks/useSettings";
 import { useStableCallback } from "~/hooks/useStableCallback";
 import { useEnvironments } from "~/state/environments";
 import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
@@ -26,7 +27,10 @@ function useHasLocalSecondaryEnvironment(): boolean {
 
 export function ProviderUpdateLaunchNotification() {
   const hasLocalSecondary = useHasLocalSecondaryEnvironment();
+  // Mesura: the toast is opt-in; Settings → Providers still offers available updates.
+  const providerUpdatePopup = useClientSettings((settings) => settings.providerUpdatePopup);
 
+  if (!providerUpdatePopup) return null;
   return hasLocalSecondary ? (
     <ProviderUpdateEnvironmentsNotification />
   ) : (

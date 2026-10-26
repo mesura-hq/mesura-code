@@ -501,6 +501,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.enableProviderUpdateChecks !== DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks
       ? ["Provider update checks"]
       : []),
+    ...(settings.providerUpdatePopup !== DEFAULT_UNIFIED_SETTINGS.providerUpdatePopup
+      ? ["Provider update pop-up"]
+      : []),
     ...(settings.continueThreadsAfterServerUpdate !==
     DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate
       ? ["Continue threads after restarts"]
@@ -601,6 +604,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       modalEditing: DEFAULT_UNIFIED_SETTINGS.modalEditing,
       vimMode: DEFAULT_UNIFIED_SETTINGS.vimMode,
       openInExternalEditor: DEFAULT_UNIFIED_SETTINGS.openInExternalEditor,
+      providerUpdatePopup: DEFAULT_UNIFIED_SETTINGS.providerUpdatePopup,
       neovimConfigDirectory: DEFAULT_UNIFIED_SETTINGS.neovimConfigDirectory,
       ...THREAD_ORDER_DEFAULT_SETTINGS_PATCH,
       persistComposerContextStrip: DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip,
@@ -747,6 +751,34 @@ function OpenInExternalEditorRow() {
           checked={settings.openInExternalEditor}
           onCheckedChange={(checked) => updateSettings({ openInExternalEditor: Boolean(checked) })}
           aria-label="Open threads in an external editor"
+        />
+      }
+    />
+  );
+}
+
+function ProviderUpdatePopupRow() {
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
+  return (
+    <SettingsRow
+      {...searchableSetting("provider-update-popup")}
+      description="Open an Updates Available pop-up when a provider CLI has a newer version. When off, available updates still show in Settings → Providers."
+      resetAction={
+        settings.providerUpdatePopup !== DEFAULT_UNIFIED_SETTINGS.providerUpdatePopup ? (
+          <SettingResetButton
+            label="provider update pop-up"
+            onClick={() =>
+              updateSettings({ providerUpdatePopup: DEFAULT_UNIFIED_SETTINGS.providerUpdatePopup })
+            }
+          />
+        ) : null
+      }
+      control={
+        <Switch
+          checked={settings.providerUpdatePopup}
+          onCheckedChange={(checked) => updateSettings({ providerUpdatePopup: Boolean(checked) })}
+          aria-label="Show a pop-up when provider updates are available"
         />
       }
     />
@@ -1710,6 +1742,8 @@ export function GeneralSettingsPanel() {
             />
           }
         />
+
+        <ProviderUpdatePopupRow />
 
         <SettingsRow
           {...searchableSetting("continue-threads-after-server-update")}
