@@ -344,8 +344,15 @@ jobs:
             node apps/web/node_modules/playwright/cli.js install-deps chromium
           fi
 
-      - name: Test
-        run: vp run --filter @t3tools/web test
+      # Mesura: one project at a time. Run together, the fork's browser fences and the unit pool
+      # starve upstream's worker-backed attachment previews, whose waits then time out on this runner.
+      - name: Test unit
+        working-directory: apps/web
+        run: vp test run --passWithNoTests --project unit
+
+      - name: Test browser
+        working-directory: apps/web
+        run: vp test run --passWithNoTests --project browser
 
   # apps/server sets `fileParallelism: false`, so its test files run strictly
   # one at a time. Sharding spreads them over separate runners instead of
