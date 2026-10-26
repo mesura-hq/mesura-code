@@ -31,6 +31,8 @@ import * as ThreadSearchBroker from "./mcp/ThreadSearchBroker.ts";
 import { RpcInstrumentation } from "./observability/RpcInstrumentation.ts";
 import * as ThreadSearchEvidence from "./orchestration-v2/ThreadSearchEvidence.ts";
 import { ProjectIconDiscovery } from "./project/ProjectIconDiscovery.ts";
+import { ClientPresence } from "./push/ClientPresence.ts";
+import { PushSubscriptions } from "./push/PushSubscriptions.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as StartThreadSearchChat from "./textGeneration/StartThreadSearchChat.ts";
 import { makeReasonThreadSearch } from "./textGeneration/ThreadSearchReasoning.ts";
@@ -77,6 +79,8 @@ export const layerWsRpcMesura = ServerWsRpcGroupMesura.toLayer(
     const factorySnapshots = yield* FactorySnapshotStore.FactorySnapshotStore;
     const factoryRunTracker = yield* FactoryRunTracker.FactoryRunTracker;
     const dictationJobs = yield* DictationJobs;
+    const pushSubscriptions = yield* PushSubscriptions;
+    const clientPresence = yield* ClientPresence;
     const hostStats = yield* HostStatsService;
     const accountLimits = yield* AccountLimitsService;
     const review = yield* ReviewService.ReviewService;
@@ -132,6 +136,17 @@ export const layerWsRpcMesura = ServerWsRpcGroupMesura.toLayer(
         dictationJobs.cancel(input.jobId).pipe(Effect.map((applied) => ({ applied }))),
       [WS_METHODS.dictationSetMode]: (input) => dictationJobs.setMode(input.jobId, input.mode),
       [WS_METHODS.subscribeDictationJobs]: () => dictationJobs.stream,
+
+      // Web Push. A device names itself by its own endpoint.
+      [WS_METHODS.pushPublicKey]: () => pushSubscriptions.publicKey,
+      [WS_METHODS.pushSubscribe]: (input) => pushSubscriptions.subscribe(input),
+      [WS_METHODS.pushUnsubscribe]: (input) => pushSubscriptions.unsubscribe(input.endpoint),
+      [WS_METHODS.pushStatus]: (input) => pushSubscriptions.status(input.endpoint),
+      [WS_METHODS.pushSendTest]: (input) => pushSubscriptions.sendTest(input.endpoint),
+      // The report holds while the call is open; this layer's own scope ends
+      // at connect (ws.ts), so the call's end is the only close signal.
+      [WS_METHODS.pushPresence]: (input) =>
+        clientPresence.holdReport(connectionIdentity, input.active),
 
       [WS_METHODS.projectIconsPreview]: (input) => projectIconDiscovery.preview(input.projectIds),
       [WS_METHODS.projectIconsDiscover]: (input) => projectIconDiscovery.discover(input),

@@ -8,11 +8,12 @@ import {
   unlockNotificationAudio,
 } from "../../threadNotifications";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { PushNotificationSettings } from "./PushNotificationSettings";
 import { SettingsRow } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
-export function NotificationSettings() {
+function ThreadNotificationSettings() {
   const mode = useScopedSettings((settings) => settings.notificationMode);
   const updateSettings = useUpdateScopedSettings();
   const [permissionMessage, setPermissionMessage] = useState<string | null>(null);
@@ -78,5 +79,15 @@ export function NotificationSettings() {
         </Select>
       }
     />
+  );
+}
+
+// Mesura: push to this device sits beside the page notifications it complements.
+export function NotificationSettings() {
+  return (
+    <>
+      <ThreadNotificationSettings />
+      <PushNotificationSettings />
+    </>
   );
 }

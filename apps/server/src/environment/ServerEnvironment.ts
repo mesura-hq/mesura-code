@@ -269,6 +269,8 @@ export const make = Effect.gen(function* () {
       ...(desktopAppUpdate ? { desktopAppUpdate: true } : {}),
       // Mesura: the hosts dock.
       hostStats: true,
+      // Mesura: phone pushes wait while a client reports presence.
+      pushPresence: true,
       serverBrowser: true,
       threadLinkPreview: true,
       peerLinks: true,

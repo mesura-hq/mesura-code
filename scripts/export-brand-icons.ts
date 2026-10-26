@@ -37,6 +37,8 @@ export interface VariantOutputs {
   readonly macos: string;
   readonly universal: string;
   readonly appleTouch: string;
+  readonly webIcon192: string;
+  readonly webIcon512: string;
   readonly favicon16: string;
   readonly favicon32: string;
   readonly faviconIco: string;
@@ -129,6 +131,8 @@ export const ICON_VARIANTS = [
       macos: BRAND_ASSET_PATHS.developmentDesktopIconPng,
       universal: BRAND_ASSET_PATHS.developmentUniversalIconPng,
       appleTouch: BRAND_ASSET_PATHS.developmentWebAppleTouchIconPng,
+      webIcon192: BRAND_ASSET_PATHS.developmentWebIcon192Png,
+      webIcon512: BRAND_ASSET_PATHS.developmentWebIcon512Png,
       favicon16: BRAND_ASSET_PATHS.developmentWebFavicon16Png,
       favicon32: BRAND_ASSET_PATHS.developmentWebFavicon32Png,
       faviconIco: BRAND_ASSET_PATHS.developmentWebFaviconIco,
@@ -145,6 +149,8 @@ export const ICON_VARIANTS = [
       macos: BRAND_ASSET_PATHS.nightlyMacIconPng,
       universal: BRAND_ASSET_PATHS.nightlyLinuxIconPng,
       appleTouch: BRAND_ASSET_PATHS.nightlyWebAppleTouchIconPng,
+      webIcon192: BRAND_ASSET_PATHS.nightlyWebIcon192Png,
+      webIcon512: BRAND_ASSET_PATHS.nightlyWebIcon512Png,
       favicon16: BRAND_ASSET_PATHS.nightlyWebFavicon16Png,
       favicon32: BRAND_ASSET_PATHS.nightlyWebFavicon32Png,
       faviconIco: BRAND_ASSET_PATHS.nightlyWebFaviconIco,
@@ -161,6 +167,8 @@ export const ICON_VARIANTS = [
       macos: BRAND_ASSET_PATHS.productionMacIconPng,
       universal: BRAND_ASSET_PATHS.productionUniversalIconPng,
       appleTouch: BRAND_ASSET_PATHS.productionWebAppleTouchIconPng,
+      webIcon192: BRAND_ASSET_PATHS.productionWebIcon192Png,
+      webIcon512: BRAND_ASSET_PATHS.productionWebIcon512Png,
       favicon16: BRAND_ASSET_PATHS.productionWebFavicon16Png,
       favicon32: BRAND_ASSET_PATHS.productionWebFavicon32Png,
       faviconIco: BRAND_ASSET_PATHS.productionWebFaviconIco,
@@ -251,6 +259,8 @@ export async function renderBrandIconVariant(
     [variant.outputs.ios, ios],
     [variant.outputs.universal, ios],
     [variant.outputs.appleTouch, await render(180)],
+    [variant.outputs.webIcon192, await render(192)],
+    [variant.outputs.webIcon512, await render(512)],
     [variant.outputs.favicon16, await render(16)],
     [variant.outputs.favicon32, await render(32)],
     [variant.outputs.faviconIco, ico],

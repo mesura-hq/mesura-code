@@ -18,7 +18,11 @@ import { AppRoot } from "./AppRoot";
 import { clearChunkReloadGuard, reloadOnceForChunkLoadError } from "./lib/chunkReloadGuard";
 import { installKeyEngine } from "./keys/keyEngine";
 import { installNativeFocus } from "./keys/nativeFocus";
+import { installPageInputObserver } from "./pushNotifications/pageInput";
 
+// Mesura: the presence report sees every key, so it listens before the key
+// engine, which consumes Vim keys (`pushNotifications/pageInput.ts`).
+installPageInputObserver();
 // Mesura: before any component registers a key listener, so the modal key
 // engine runs first in the capture phase. Inert until Vim mode is on.
 installKeyEngine();
