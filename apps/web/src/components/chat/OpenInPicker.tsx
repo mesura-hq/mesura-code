@@ -17,6 +17,7 @@ import {
   useRemoteOpenState,
 } from "../../remoteOpen";
 import { useEnvironment } from "../../state/environments";
+import { useClientSettings } from "../../hooks/useSettings";
 import { ChevronDownIcon, FolderClosedIcon, SquareArrowOutUpRightIcon } from "lucide-react";
 
 import { Group, GroupSeparator } from "../ui/group";
@@ -232,6 +233,9 @@ export const OpenInPicker = memo(function OpenInPicker({
   const canOperateHost = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const isHostEditorDenied = remote.mode === "local-exec" && !canOperateHost;
   const canOpenEditor = remote.mode !== "remote-unavailable" && !isHostEditorDenied;
+  // Mesura: every picker's favorite-editor shortcut follows the external-editor setting; its menu does not.
+  const openInExternalEditor = useClientSettings((settings) => settings.openInExternalEditor);
+  const shortcutArmed = enableShortcut && openInExternalEditor;
   const [menuOpen, setMenuOpen] = useComposerMenuState(isHostEditorDenied);
   const remoteCapableEditors = useRemoteCapableEditors();
   const [remoteHintSeen, markRemoteHintSeen] = useRemoteOpenHint();
@@ -282,7 +286,7 @@ export const OpenInPicker = memo(function OpenInPicker({
   );
 
   useEffect(() => {
-    if (!enableShortcut || !canOpenEditor) return;
+    if (!shortcutArmed || !canOpenEditor) return;
     const handler = (e: globalThis.KeyboardEvent) => {
       if (e.defaultPrevented || !isOpenFavoriteEditorShortcut(e, keybindings)) return;
       if (!openInCwd) return;
@@ -300,18 +304,18 @@ export const OpenInPicker = memo(function OpenInPicker({
     return () => window.removeEventListener("keydown", handler, true);
   }, [
     canOpenEditor,
-    enableShortcut,
     environmentId,
     keybindings,
     openInCwd,
     openInEditor,
     preferredEditor,
     remote.mode,
+    shortcutArmed,
   ]);
   // Mesura: the command palette and leader keys reach the favorite editor through the registry.
   useCommandHandlers({
     "editor.openFavorite":
-      enableShortcut && canOpenEditor
+      shortcutArmed && canOpenEditor
         ? () => {
             if (openInCwd && preferredEditor) void openInEditor(preferredEditor);
           }
