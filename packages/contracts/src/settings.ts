@@ -504,6 +504,13 @@ export const ClientSettingsSchema = Schema.Struct({
    * a stored false stays off. See docs/mesura/adr-009-modal-keys.md.
    */
   vimMode: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /**
+   * Mesura: shows upstream's "Open in <editor>" picker in the thread details
+   * panel and arms its favorite-editor shortcut. Off by default, because this
+   * fork's developer edits inside Mesura Code and never opens an external
+   * editor from a thread.
+   */
+  openInExternalEditor: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // Opt-in TeX typesetting in rendered Markdown. Off keeps math parsing and
   // KaTeX out of the render path entirely.
   mathRenderingEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
@@ -1849,6 +1856,7 @@ export const ClientSettingsPatch = Schema.Struct({
   wordWrap: Schema.optionalKey(Schema.Boolean),
   modalEditing: Schema.optionalKey(Schema.Boolean),
   vimMode: Schema.optionalKey(Schema.Boolean),
+  openInExternalEditor: Schema.optionalKey(Schema.Boolean),
   mathRenderingEnabled: Schema.optionalKey(Schema.Boolean),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;

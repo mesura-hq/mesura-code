@@ -5,6 +5,7 @@ import type { EnvironmentThreadState } from "@t3tools/client-runtime/state/threa
 import type {
   AuthEnvironmentScope,
   AuthSessionState,
+  ClientSettings,
   EnvironmentId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -42,6 +43,8 @@ export const appRootFence = {
   queryAtoms: new WeakSet<object>(),
   openThreadId: "",
   vimMode: false,
+  /** Client settings a fence sets on top of the defaults and `vimMode`; it resets them itself. */
+  clientSettings: {} as Partial<ClientSettings>,
   empty: [] as never[],
   threadListeners: new Set<() => void>(),
   /** The ranges the key surfaces last painted, by highlight name. */
@@ -447,7 +450,11 @@ export async function mockSettings(
 ) {
   const { DEFAULT_SERVER_SETTINGS } = await import("@t3tools/contracts");
   const { DEFAULT_CLIENT_SETTINGS } = await import("@t3tools/contracts/settings");
-  const clientSettings = () => ({ ...DEFAULT_CLIENT_SETTINGS, vimMode: appRootFence.vimMode });
+  const clientSettings = () => ({
+    ...DEFAULT_CLIENT_SETTINGS,
+    vimMode: appRootFence.vimMode,
+    ...appRootFence.clientSettings,
+  });
   return {
     ...(await importOriginal()),
     useEnvironmentSettings: () => ({ ...clientSettings(), ...DEFAULT_SERVER_SETTINGS }),
