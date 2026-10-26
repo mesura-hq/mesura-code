@@ -1616,6 +1616,7 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
             <button
               ref={rowRef}
               id={props.resultId}
+              data-search-result-key={scopedThreadKey(threadRef)}
               type="button"
               role="option"
               tabIndex={-1}

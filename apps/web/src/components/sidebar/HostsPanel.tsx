@@ -5,7 +5,7 @@ import {
 } from "@t3tools/client-runtime/host-stats";
 import type { HostStatsLevel } from "@t3tools/client-runtime/host-stats/levels";
 import { ServerIcon } from "lucide-react";
-import { memo, useEffect, useId, useMemo, useRef, useState, type ReactElement } from "react";
+import { memo, useEffect, useId, useMemo, useState, type ReactElement } from "react";
 
 import { cn } from "../../lib/utils";
 import { useHostStatsSources } from "../../state/hostStats";
@@ -27,7 +27,6 @@ import {
   hostStatusLine,
   sparklineMax,
   sparklineReading,
-  type HostStatsAgeClock,
   type HostsDockRowId,
 } from "@t3tools/client-runtime/host-stats/view";
 import type { SidebarDockController } from "./sidebarDockController";
@@ -54,22 +53,22 @@ function levelBarClass(level: HostStatsLevel | null): string {
  */
 function useHostStatsNow(open: boolean): number {
   const [nowLocal, setNowLocal] = useState(() => Date.now());
-  const clockRef = useRef<HostStatsAgeClock | null>(null);
-  if (clockRef.current === null) {
-    clockRef.current = createHostStatsAgeClock({
+  const [clock] = useState(() =>
+    createHostStatsAgeClock({
       intervalMs: HOST_STATS_AGE_REFRESH_MS,
-      now: Date.now,
+      // Read `Date.now` per call: a captured reference misses a later-installed fake clock.
+      now: () => Date.now(),
       schedule: (callback, delayMs) => setTimeout(callback, delayMs),
       cancel: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
       onTick: setNowLocal,
-    });
-  }
+    }),
+  );
   // oxlint-disable-next-line t3code/react-effect-budget -- fork: starts or stops the external age clock as the dock opens and closes
   useEffect(() => {
-    clockRef.current?.setOpen(open);
-  }, [open]);
+    clock.setOpen(open);
+  }, [clock, open]);
   // oxlint-disable-next-line t3code/react-effect-budget -- fork: disposes the external age clock on unmount
-  useEffect(() => () => clockRef.current?.dispose(), []);
+  useEffect(() => () => clock.dispose(), [clock]);
   return nowLocal;
 }
 

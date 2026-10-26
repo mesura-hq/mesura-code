@@ -5,13 +5,14 @@ import { useTerminalFocus } from "../../hooks/useTerminalFocus";
 import { isModelPickerOpen } from "../../modelPickerVisibility";
 import { useShortcutModifierState } from "../../shortcutModifierState";
 import { shouldShowThreadJumpHintsForModifiers } from "../../keybindings";
+import { useThreadJumpHintsVisible } from "../Sidebar.logic";
 import { useEffect } from "react";
 
 /**
  * Follows the held modifiers for the sidebar's thread jump hints, and renders nothing. Its own
  * component so a modifier press re-renders only this: held in `Sidebar`, every Control key event
- * re-rendered every thread row (dnd-kit defeats the row memo). `onChange` is the delayed
- * visibility controller, so a modifier held past its delay shows hints and a chord shows none.
+ * re-rendered every thread row (dnd-kit defeats the row memo). The show delay runs here too, so
+ * `onChange` hears only a real change: a modifier held past the delay, never a quick chord.
  */
 export function ThreadJumpHintModifierSync(props: {
   readonly keybindings: ResolvedKeybindingsConfig;
@@ -38,9 +39,10 @@ export function ThreadJumpHintModifierSync(props: {
       },
     },
   );
-  // oxlint-disable-next-line t3code/react-effect-budget -- fork: reports the derived hint state to the parent's delayed visibility controller after commit
+  const showJumpHints = useThreadJumpHintsVisible(shouldShowJumpHintsNow);
+  // oxlint-disable-next-line t3code/react-effect-budget -- fork: reports the delayed hint visibility to the parent after commit
   useEffect(() => {
-    onChange(shouldShowJumpHintsNow);
-  }, [shouldShowJumpHintsNow, onChange]);
+    onChange(showJumpHints);
+  }, [showJumpHints, onChange]);
   return null;
 }

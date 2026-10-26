@@ -5,7 +5,7 @@
  * take `activeSidebarDockAtom` drops its hover, chord and pin, so nothing reopens on its own.
  */
 import { useAtomValue } from "@effect/atom-react";
-import { useNavigate } from "@tanstack/react-router";
+import { useLocation, useNavigate } from "@tanstack/react-router";
 import { Atom } from "effect/reactivity";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
@@ -26,6 +26,7 @@ import {
   type UsagePeekKeyboardLifecycle,
   type UsagePeekState,
 } from "./AccountLimitsPanel.logic";
+import { isAppModalPage, useCloseAppModal } from "./mainAppLocation";
 import { createTouchLongPress, type TouchLongPressHandlers } from "./touchLongPress";
 
 export type SidebarDockId = "usage" | "hosts";
@@ -58,14 +59,16 @@ export function requestSidebarDockPin(dock: SidebarDockId): void {
 }
 
 /**
- * Carries out a palette request for this dock. The dock exists only on the wide thread list, so
- * the controller first navigates there and expands a collapsed sidebar, then pins once the dock
- * can show. A mobile-width request is dropped rather than held.
+ * Carries out a palette request for this dock. The dock shows only on the wide thread list, so the
+ * controller first leaves for it (closing a Settings or Usage modal, which covers the sidebar) and
+ * expands a collapsed sidebar, then pins once the dock can show. A mobile request is dropped.
  */
 function useSidebarDockRequest(dock: SidebarDockId, enabled: boolean): void {
   const request = useAtomValue(sidebarDockRequestAtom);
   const { isMobile, open: sidebarOpen, setOpen: setSidebarOpen } = useSidebar();
   const navigate = useNavigate();
+  const closeAppModal = useCloseAppModal();
+  const modalOpen = useLocation({ select: (location) => isAppModalPage(location.pathname) });
   // oxlint-disable-next-line t3code/react-effect-budget -- fork: carries out a palette request from the external atom once the dock can show
   useEffect(() => {
     if (request !== dock) return;
@@ -74,6 +77,10 @@ function useSidebarDockRequest(dock: SidebarDockId, enabled: boolean): void {
       return;
     }
     if (!sidebarOpen) setSidebarOpen(true);
+    if (modalOpen) {
+      void closeAppModal();
+      return;
+    }
     if (!enabled) {
       void navigate({ to: "/" });
       return;
@@ -81,7 +88,17 @@ function useSidebarDockRequest(dock: SidebarDockId, enabled: boolean): void {
     appAtomRegistry.set(sidebarDockRequestAtom, null);
     appAtomRegistry.set(pinnedSidebarDockAtom, dock);
     appAtomRegistry.set(activeSidebarDockAtom, dock);
-  }, [dock, enabled, isMobile, navigate, request, setSidebarOpen, sidebarOpen]);
+  }, [
+    closeAppModal,
+    dock,
+    enabled,
+    isMobile,
+    modalOpen,
+    navigate,
+    request,
+    setSidebarOpen,
+    sidebarOpen,
+  ]);
 }
 
 interface PointerTypeEvent {

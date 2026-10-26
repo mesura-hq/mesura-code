@@ -180,15 +180,19 @@ function WorkspaceImagePreview(props: {
   }
 
   return assetUrl._tag === "Success" && imageUrl !== null ? (
-    <MediaActions source={actionsSource}>
-      <div
-        className="flex min-h-0 flex-1 flex-col overflow-hidden"
-        data-pane-entry="2"
-        ref={previewFocusTargetRef}
-      >
-        <PreviewImage key={imageUrl} src={imageUrl} name={props.alt} />
-      </div>
-    </MediaActions>
+    // The entry sits outside MediaActions: its trigger takes tabIndex 0, and a focusable
+    // entry takes focus itself instead of the image's scroll region.
+    <div
+      className="flex min-h-0 flex-1 flex-col overflow-hidden"
+      data-pane-entry="2"
+      ref={previewFocusTargetRef}
+    >
+      <MediaActions source={actionsSource}>
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <PreviewImage key={imageUrl} src={imageUrl} name={props.alt} />
+        </div>
+      </MediaActions>
+    </div>
   ) : (
     <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
       <Spinner size="lg" />

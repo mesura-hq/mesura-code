@@ -190,7 +190,6 @@ import {
   sortPinnedThreadsForSidebar,
   sortWorkingThreadsBySend,
   useSnoozeWakeClock,
-  useThreadJumpHintsVisible,
   type SidebarListItem,
   type SidebarSection,
   resolveSidebarRowThreadId,
@@ -1258,9 +1257,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const settledThreadKeysRef = useRef(settledThreadKeys);
   const snoozedThreadKeysRef = useRef(snoozedThreadKeys);
 
-  // Mesura: ThreadJumpHintModifierSync follows the modifiers, so a key press re-renders it alone.
-  const [jumpModifierHeld, setJumpModifierHeld] = useState(false);
-  const showJumpHints = useThreadJumpHintsVisible(jumpModifierHeld);
+  // Mesura: ThreadJumpHintModifierSync follows the modifiers and the show delay, so a quick
+  // chord re-renders it alone; Sidebar re-renders only when the hints appear or hide.
+  const [showJumpHints, setShowJumpHints] = useState(false);
   useThreadRowArrowKeys();
 
   const navigateToThread = (threadRef: ScopedThreadRef) => {
@@ -2763,7 +2762,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       <ThreadJumpHintModifierSync
         keybindings={keybindings}
         terminalOpen={routeTerminalOpen}
-        onChange={setJumpModifierHeld}
+        onChange={setShowJumpHints}
       />
       <ThreadContextDragGhost />
       <SidebarChromeHeader isElectron={isElectron} />
