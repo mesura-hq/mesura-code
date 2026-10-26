@@ -486,6 +486,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     scope: "environment-defaults",
   },
   {
+    id: "provider-update-popup",
+    title: "Provider update pop-up",
+    to: "/settings/general",
+    searchTerms: ["updates available toast popup notification provider cli install launch"],
+  },
+  {
     id: "continue-threads-after-server-update",
     title: "Continue threads after restarts",
     to: "/settings/general",

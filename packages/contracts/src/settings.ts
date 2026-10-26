@@ -511,6 +511,14 @@ export const ClientSettingsSchema = Schema.Struct({
    * editor from a thread.
    */
   openInExternalEditor: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /**
+   * Mesura: opens upstream's "Updates Available" toast at launch when a
+   * provider CLI has a newer version. Off by default, because the prompt kept
+   * interrupting this fork's developer. Gates only that toast: the version
+   * checks (enableProviderUpdateChecks) keep running, Settings → Providers keeps
+   * offering the update, and the sidebar pill keeps reporting a running update.
+   */
+  providerUpdatePopup: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // Opt-in TeX typesetting in rendered Markdown. Off keeps math parsing and
   // KaTeX out of the render path entirely.
   mathRenderingEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
@@ -1857,6 +1865,7 @@ export const ClientSettingsPatch = Schema.Struct({
   modalEditing: Schema.optionalKey(Schema.Boolean),
   vimMode: Schema.optionalKey(Schema.Boolean),
   openInExternalEditor: Schema.optionalKey(Schema.Boolean),
+  providerUpdatePopup: Schema.optionalKey(Schema.Boolean),
   mathRenderingEnabled: Schema.optionalKey(Schema.Boolean),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;
