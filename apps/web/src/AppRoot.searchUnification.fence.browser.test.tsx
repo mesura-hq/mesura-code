@@ -605,6 +605,39 @@ describe("search unification: the Search field hands the keyboard back", () => {
     );
   });
 
+  it("search unification spec: the composer gets its caret back the moment it gets focus back", async () => {
+    await using _browserFixture0 = await setupBrowserFixture0();
+    await mountWithThreads(crossProjectThreads());
+    await focusComposer();
+    await userEvent.keyboard("hello world");
+    await settle();
+    // The caret moves inside the text the way a pointer puts it there; the editor follows selectionchange.
+    await act(async () => {
+      const text = window.getSelection()?.anchorNode;
+      expect(text?.textContent).toBe("hello world");
+      window.getSelection()?.collapse(text!, 8);
+    });
+    await settle();
+    const before = window.getSelection();
+    const caret = { node: before?.anchorNode, offset: before?.anchorOffset };
+    expect(caret.offset, "the caret sits inside the text").toBe(8);
+    await press(THREAD_SEARCH_CHORD);
+    await expectSearchFocused();
+
+    // Read in the same task as the key: a bare DOM focus leaves the native
+    // caret at the start until the editor resyncs its selection a moment later.
+    const after = await act(async () => {
+      (document.activeElement ?? document.body).dispatchEvent(
+        new KeyboardEvent("keydown", { ...THREAD_SEARCH_CHORD, bubbles: true, cancelable: true }),
+      );
+      const selection = window.getSelection();
+      return { node: selection?.anchorNode, offset: selection?.anchorOffset };
+    });
+
+    expect(document.activeElement, `focus is on ${describeFocus()}`).toBe(composerEditor());
+    expect(after).toEqual(caret);
+  });
+
   it("search unification spec: Escape over a query clears it first and leaves on the next press", async () => {
     await using _browserFixture0 = await setupBrowserFixture0();
     await mountWithThreads(crossProjectThreads());

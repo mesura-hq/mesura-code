@@ -131,10 +131,7 @@ function captureSearchFocusOrigin(revealedSidebar: boolean): SearchFocusOrigin {
   return {
     element,
     pane: getFocusedPane() ?? getLastFocusedPane(),
-    restoreComposer:
-      element instanceof HTMLElement
-        ? captureComposerFocusReturn(element, () => element.focus({ preventScroll: true }))
-        : null,
+    restoreComposer: captureComposerFocusReturn(element),
     revealedSidebar,
   };
 }

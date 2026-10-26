@@ -458,10 +458,14 @@ export function restoreComposerNormalFocus(offset: number): boolean {
   return true;
 }
 
-/** Captures a modal's composer origin before blur clears its NORMAL session. */
+/**
+ * Captures a modal's composer origin before blur clears its NORMAL session.
+ * `focusAt` defaults to the active composer's own focus path, which writes the
+ * caret as it focuses; a bare DOM focus leaves it at the start for a moment.
+ */
 export function captureComposerFocusReturn(
   origin: Element | null,
-  focusAt: (cursor: number) => void,
+  focusAt: (cursor: number) => void = (cursor) => adapter?.setCursor(cursor),
 ): (() => boolean) | null {
   const editor = composerEditorElement();
   if (adapter === null || editor === null || !editor.contains(origin)) return null;
